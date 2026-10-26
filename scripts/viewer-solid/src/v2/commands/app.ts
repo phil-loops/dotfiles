@@ -2,8 +2,9 @@
 // v2 doesn't have yet (v1's pages, reached through the menu until Phase 3 builds the palette).
 import { model } from "../model";
 import { command } from "../registry";
-import { leave, navigate, SURFACES } from "../router";
+import { forestPath, leave, navigate, reviewPath, SURFACES } from "../router";
 import { undoLast } from "../runner";
+import { view } from "../store";
 import {
   armed,
   launching,
@@ -62,6 +63,33 @@ const PLACES = [
 for (const p of PLACES) {
   command({ id: `place.${p.id}`, title: `Go to ${p.title}`, scope: "global", budget: "local", keys: p.key ? [p.key] : [], local: () => leave(p.path) });
 }
+
+// what the space menu finds by name: a result is one of these plus the branch or forest id ("<repo>:<name>")
+command({
+  id: "find.branch",
+  title: "Open a branch you found",
+  scope: "global",
+  budget: "local",
+  quiet: true,
+  local: (_t, e, id) => {
+    const [repo, name] = (id as string).split(/:(.*)/);
+    navigate(reviewPath(repo, name), e);
+  },
+});
+command({
+  id: "find.forest",
+  title: "Open a forest you found",
+  scope: "global",
+  budget: "local",
+  quiet: true,
+  local: (_t, e, id) => {
+    const p = view("project", id as string);
+    if (!p) throw new Error("that forest is gone");
+    setCursor(undefined);
+    setCursorIdx(0);
+    navigate(forestPath(p.repo, p.name), e);
+  },
+});
 
 const move = (by: number) => () => {
   const rows = model.rows();
