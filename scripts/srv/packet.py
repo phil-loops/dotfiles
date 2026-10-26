@@ -182,23 +182,37 @@ def landing_title(snap, branch, subjects):
 
 def body(branch):
     """The body the compare form opens with: the hand-written stack-pr-body, else the drafted one,
-    with the forest's merge order as it stands at this click under it."""
+    with what this PR waits on as of the click under it."""
     snap = repostate.snapshot()
     words = (snap.branch_key(branch, "pr-body") or drafted(branch)).strip()
-    sync._pr_state_map()   # a cold PR cache would list open PRs by their job instead of their #number
+    sync._pr_state_map()   # a cold PR cache would name open PRs by their job instead of their #number
     _, forest, node = _forest_of(branch)
-    order = merge_order(forest_facts(snap.project(branch), (forest or {}).get("nodes", []), node)["plan"])
-    return "\n\n----\n".join(x for x in (words, order) if x) + "\n"
+    deps = waits_on(node, (forest or {}).get("nodes", []))
+    return "\n\n----\n".join(x for x in (words, deps) if x) + "\n"
 
 
-def merge_order(plan):
-    """A forest's plan as the "Part of a stack" list: a step with a PR is its bare #number (GitHub
-    renders the title and merged state), the rest their one-line job; "" for a lone branch."""
-    if not plan:
+def waits_on(node, nodes):
+    """The PRs this one must merge after — its stacked parent, its fan-in and its `after` edges — as
+    lines that stay true once written; a dependency already merged no longer constrains, so it's left out."""
+    if not node:
         return ""
-    rows = [f"  {i}. " + ("[this branch]" if s.get("me") else f"#{s['pr']}" if s.get("pr") else s.get("job") or s.get("title") or s["branch"])
-            for i, s in enumerate(plan, 1)]
-    return "\n".join(["Part of a stack, in merge order:", *rows])
+    by_branch = {n["branch"]: n for n in nodes}
+
+    def ref(b):
+        n = by_branch.get(b)
+        if not n or n["status"] == "landed":
+            return None
+        pr = (n.get("pr") or {}).get("number")
+        return f"#{pr}" if pr else n.get("description") or b
+
+    lines = []
+    for label, branches in (("stacked on", [(node.get("stackedOn") or {}).get("branch")]),
+                            ("pulls in", node.get("requires") or []),
+                            ("merges after", node.get("after") or [])):
+        refs = [r for r in map(ref, filter(None, branches)) if r]
+        if refs:
+            lines.append(f"{label} {', '.join(refs)}")
+    return "\n".join(lines)
 
 
 def packet_on(branch):
