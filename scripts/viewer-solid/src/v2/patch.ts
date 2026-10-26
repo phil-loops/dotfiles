@@ -1,7 +1,7 @@
 // Pure patch logic, shared by the store and its tests.
 import type { Entities, EntityType, Patch, Versions } from "./types";
 
-export const emptyEntities = (): Entities => ({ repo: {}, project: {}, branch: {}, pr: {}, landed: {}, conv: {}, thread: {}, draft: {}, viewed: {}, todo: {} });
+export const emptyEntities = (): Entities => ({ repo: {}, project: {}, branch: {}, pr: {}, landed: {}, conv: {}, thread: {}, draft: {}, viewed: {}, todo: {}, warm: {} });
 
 export const TYPES = Object.keys(emptyEntities()) as EntityType[];
 

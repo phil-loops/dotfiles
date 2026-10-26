@@ -191,6 +191,12 @@ export interface Draft {
   items: Item[];
 }
 
+/** Per repo: whether sync's first PR read has landed (before it, a missing PR is unknown, not absent). */
+export interface Warm {
+  id: string;
+  prs: boolean;
+}
+
 export interface Entities {
   repo: Record<string, Repo>;
   project: Record<string, Project>;
@@ -202,6 +208,7 @@ export interface Entities {
   draft: Record<string, Draft>;
   viewed: Record<string, Viewed>;
   todo: Record<string, TodoItem>;
+  warm: Record<string, Warm>;
 }
 
 /** The change blocks Phil has viewed on a branch (srv/viewed.py; keys from review/diff.ts blocksOf). */

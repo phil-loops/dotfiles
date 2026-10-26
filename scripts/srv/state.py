@@ -20,7 +20,7 @@
 # Domains own entity types and move on their own clocks:
 #   git     repo, project, branch  refs + config + gate jobs; rebuilt when the stat-gated repostate
 #                                  fingerprint or a gate job moves, so a quiet repo costs no spawn
-#   remote  pr, landed             sync's PR state cache (+ open-PR detail / the sandbox fixture) and
+#   remote  pr, landed, warm       sync's PR state cache (+ open-PR detail / the sandbox fixture) and
 #                                  the merge ledger; in-memory reads, rebuilt every tick
 #   review  conv, thread, draft,   open PRs' review threads (packet's background GraphQL read, or
 #                                  the fake GitHub) mapped onto the local tips, the second reader's
@@ -235,8 +235,9 @@ def _git_entities(name, snap, jobs):
 
 def _remote_entities(name, git_ents):
     branches = {b["name"]: b for b in git_ents["branch"].values() if b["repo"] == name}
-    prs, _src = outbox._pr_map()
-    ents = {"pr": {}, "landed": {}}
+    prs, src = outbox._pr_map()
+    # until sync's first PR read lands, an absent PR means "not known yet", not "none"
+    ents = {"pr": {}, "landed": {}, "warm": {name: {"id": name, "prs": src != "warming"}}}
     for head, pr in prs.items():
         b = branches.get(head)
         if not b or not pr or pr.get("state") == "CLOSED":
@@ -334,7 +335,7 @@ def refresh():
             _commit("git", _merge(built.values(), ("repo", "project", "branch")), fp)
         git = _D["git"].ents
         remote = _each_repo(lambda n: _remote_entities(n, git))
-        _commit("remote", _merge(remote.values(), ("pr", "landed")), None)
+        _commit("remote", _merge(remote.values(), ("pr", "landed", "warm")), None)
         review = _each_repo(lambda n: {**reviewdesk.entities(n), **viewed.entities(n)})
         _commit("review", _merge(review.values(), REVIEW_TYPES), None)
         tfp = todo.fingerprint()

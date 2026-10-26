@@ -10,7 +10,7 @@ import { keyOf } from "../registry";
 import { bind, runOf } from "../runner";
 import { pushRoute } from "../commands/branch";
 import { leaf } from "../ship";
-import { list, view } from "../store";
+import { list, view, world } from "../store";
 import { getJSON } from "../sync";
 import type { Thread } from "../types";
 import { armed, now } from "../ui";
@@ -159,7 +159,7 @@ export default function Outgoing() {
             {" "}· {v()?.pr ? `onto #${v()!.pr!.number}` : "first push"} · <code>{short(b()!.tip)}</code> · gates {logged() ? (b()!.gates === "green" ? "✓" : b()!.gates) : recorded()}
           </span>
           <PushStatus count={unpushed().length} />
-          <Show when={!v()?.pr && v()?.st.action === "pr"}>
+          <Show when={!v()?.pr && v()?.st.action === "pr" && world.entities.warm[b()?.repo ?? ""]?.prs}>
             <div class="mt-2">
               <button class="rv-btn rv-btn-gold" onClick={bind("review.finish", pg.id())}>
                 open the PR ↗ <kbd>{keyOf("review.finish")}</kbd>
