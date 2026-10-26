@@ -765,3 +765,49 @@ def address(req, d):
     with _FLOCK:
         _save_items([*_items(), item])
     _send(req, 200, {"ok": True, "key": item["key"], "newTip": ans.data.get("newTip")})
+
+
+# ── a note on one commit's line: Phil's feedback, handed to Claude ──────
+
+def note_prompt(branch, sha, subject, pushed, path, side, line, start, code, body):
+    """What a Claude session is handed for Phil's note on a line of one commit: where it is, the
+    code there, and how the fix lands — folded into that commit while it's local, a follow-up
+    once origin has it (pushed history stays additive)."""
+    short = sha[:7]
+    where = f"`{path}:{start}-{line}`" if start else f"`{path}:{line}`"
+    out = [f"Phil left a note on commit {short} (\"{subject}\") of branch `{branch}`, at {where}"
+           f"{' (the old side)' if side == 'LEFT' else ''}:", ""]
+    if code:
+        out += ["```", code, "```", ""]
+    out += [f"> {ln}" if ln else ">" for ln in body.splitlines()]
+    out.append("")
+    if pushed:
+        out.append(f"{short} is already on origin, so land the fix as a new follow-up commit on the branch tip, "
+                   "its subject a bare lowercase blurb (no `type(scope):`, at most 40 characters).")
+    else:
+        out.append(f"{short} isn't on origin yet, so fold the fix into it: `git commit --fixup={short}`, then "
+                   f"`git -c sequence.editor=: rebase --autosquash -i {short}^`. Then rebase any branch stacked "
+                   "on this one onto the new tip (forests.md, Restacking).")
+    out += ["", "Don't push. If the note is wrong or needs no change, say so here instead of committing."]
+    return "\n".join(out)
+
+
+@_guarded
+def note(req, d):
+    """Hand Phil's note on a line of commit `sha` to a fresh Claude in the branch's worktree (the
+    prompt typed, never sent)."""
+    branch, sha, body = d.get("branch") or "", d.get("sha") or "", (d.get("body") or "").strip()
+    path, side = d.get("path") or "", "LEFT" if d.get("side") == "LEFT" else "RIGHT"
+    line, start = int(d.get("line") or 0), int(d.get("startLine") or 0) or None
+    if not (branch and sha and path and line and body):
+        raise ghreview.Refused("a note needs a commit, a line and some words")
+    msg = ctx.run(["git", "log", "-1", "--format=%H%x1f%s", sha])
+    if msg.returncode != 0 or "\x1f" not in msg.stdout:
+        raise ghreview.Refused(f"no commit {sha[:7]}")
+    full, subject = msg.stdout.strip().split("\x1f", 1)
+    pushed = ctx.run(["git", "merge-base", "--is-ancestor", full, f"refs/remotes/origin/{branch}"]).returncode == 0
+    shown = ctx.run(["git", "show", f"{full}{'^' if side == 'LEFT' else ''}:{path}"])
+    lines = shown.stdout.splitlines() if shown.returncode == 0 else []
+    code = "\n".join(lines[(start or line) - 1:line])
+    _launch_claude(branch, note_prompt(branch, full, subject, pushed, path, side, line, start, code, body))
+    _send(req, 200, {"ok": True, "pushed": pushed})

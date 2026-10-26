@@ -98,7 +98,7 @@ def _log(line):
     reqlog.append(_LOG_FILE, msg)
 
 
-_REVIEW_POSTS = {"/review-draft": reviewdesk.draft, "/review-apply": reviewdesk.apply, "/review-address": reviewdesk.address}
+_REVIEW_POSTS = {"/review-draft": reviewdesk.draft, "/review-apply": reviewdesk.apply, "/review-address": reviewdesk.address, "/review-note": reviewdesk.note}
 
 
 def run(args, timeout=None):
