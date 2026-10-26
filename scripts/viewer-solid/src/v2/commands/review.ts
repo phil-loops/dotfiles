@@ -557,9 +557,13 @@ command({
 const lineComposer = (): Composer | null => {
   const r = pg.range();
   if (!r) return null;
-  return { kind: "line", key: `c|${r.path}|${r.side}|${r.line}|${r.startLine ?? ""}`, path: r.path, side: r.side, line: r.line, startLine: r.startLine };
+  // on one commit's diff the box is a note for Claude about that commit, not a GitHub comment
+  const sha = pg.commitScope() ?? undefined;
+  return { kind: "line", key: `${sha ? `n|${sha}` : "c"}|${r.path}|${r.side}|${r.line}|${r.startLine ?? ""}`, path: r.path, side: r.side, line: r.line, startLine: r.startLine, sha };
 };
 const canWrite = () => !!pg.conv() && !pg.scoped();   // one commit's view is read-only: its lines aren't the tip's
+const canNote = () => canWrite() || pg.scoped();
+const noting = () => { const c = pg.composer(); return c?.kind === "line" && !!c.sha; };
 
 command({
   id: "review.comment",
@@ -568,7 +572,7 @@ command({
   scope: "line",
   budget: "local",
   keys: ["c"],
-  available: canWrite,
+  available: canNote,
   local: () => pg.setComposer(lineComposer()),
 });
 command({
@@ -578,7 +582,7 @@ command({
   scope: "review",
   budget: "local",
   quiet: true,
-  available: canWrite,
+  available: canNote,
   local: (key, e) => {
     if (!key) return;
     const h = pg.here();
@@ -593,6 +597,29 @@ const unpushedNamed = (body: string): string[] => {
   const un = pg.conv()?.unpushed ?? [];
   return [...new Set((body.match(/\b[0-9a-f]{7,40}\b/g) ?? []).flatMap((w) => un.filter((s) => s.startsWith(w))))];
 };
+
+/** The composer's note on a commit's line, handed to a fresh Claude in the branch's worktree. */
+function handNote(): Write | null {
+  const c = pg.composer();
+  if (c?.kind !== "line" || !c.sha) return null;
+  const body = pg.text(c.key).trim();
+  if (!body) throw new Error("write something first");
+  pg.setText(c.key, "");
+  pg.setComposer(null);
+  pg.setMark(undefined);
+  return {
+    ops: [],
+    path: repoPath("/review-note"),
+    body: { branch: name(), sha: c.sha, path: c.path, side: c.side, line: c.line, startLine: c.startLine, body },
+    settled: () => true,
+    said: "claude window ready — send it there",
+    failed: "couldn't start the Claude session",
+    rollback: () => {
+      pg.setText(c.key, body);
+      pg.setComposer(c);
+    },
+  };
+}
 
 /** The composer's words as a new ledger item; send: on to the pending review, else a draft. */
 function addItem(send: boolean): Write | null {
@@ -639,7 +666,7 @@ command({
   scope: "review",
   budget: "slow-io",
   available: () => !!pg.composer(),
-  write: () => addItem(true),
+  write: () => (noting() ? handNote() : addItem(true)),
 });
 command({
   id: "review.compose.draft",
@@ -647,7 +674,7 @@ command({
   hint: ["⌘⇧↵"],
   scope: "review",
   budget: "config-write",
-  available: () => !!pg.composer(),
+  available: () => !!pg.composer() && !noting(),
   write: () => addItem(false),
 });
 command({
@@ -670,7 +697,7 @@ command({
   scope: "review",
   budget: "local",
   quiet: true,
-  available: () => !!pg.composer(),
+  available: () => !!pg.composer() && !noting(),
   local: () => {
     const c = pg.composer()!;
     let lines: string[] = [];

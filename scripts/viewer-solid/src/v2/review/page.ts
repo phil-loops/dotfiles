@@ -51,7 +51,7 @@ interface NodePayload {
 }
 
 export type Composer =
-  | { kind: "line"; key: string; path: string; side: "RIGHT" | "LEFT"; line: number; startLine: number | null }
+  | { kind: "line"; key: string; path: string; side: "RIGHT" | "LEFT"; line: number; startLine: number | null; /** a note for Claude on this commit's line, not a GitHub comment */ sha?: string }
   | { kind: "reply"; key: string; threadId: string };
 
 /** A ledger item GitHub doesn't show yet (drafts, waiting, sending, lost): the page draws these; a

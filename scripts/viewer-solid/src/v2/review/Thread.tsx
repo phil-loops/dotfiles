@@ -255,6 +255,7 @@ export function ComposerView() {
     ta.setSelectionRange(ta.value.length, ta.value.length);
   });
   const text = () => (pg.composer() ? pg.text(c().key) : "");
+  const note = () => { const x = pg.composer(); return x?.kind === "line" ? x.sha : undefined; };
   const reviewing = () => (pg.conv()?.pending?.count ?? 0) > 0;
   const waits = createMemo(() => (c()?.kind === "reply" ? unpushedIn(text()) : []));
   const onKey = (e: KeyboardEvent) => {
@@ -285,22 +286,33 @@ export function ComposerView() {
           ref={ta}
           class="rv-textarea"
           rows={Math.min(14, Math.max(3, text().split("\n").length + 1))}
-          placeholder={c().kind === "reply" ? "Reply…" : "Leave a comment"}
+          placeholder={c().kind === "reply" ? "Reply…" : note() ? `A note for Claude — it fixes ${note()!.slice(0, 7)}` : "Leave a comment"}
           value={text()}
           onInput={(e) => pg.setText(c().key, e.currentTarget.value)}
           onKeyDown={onKey}
         />
         <div class="rv-c-actions">
-          <button class="rv-quietbtn" onClick={bind("review.compose.suggest")}>suggestion ^G</button>
+          <Show when={!note()}>
+            <button class="rv-quietbtn" onClick={bind("review.compose.suggest")}>suggestion ^G</button>
+          </Show>
           <Show when={waits().length}>
             <span class="text-gold-leaf">names {waits().map(short).join(", ")} — it stays a draft until that's on origin</span>
           </Show>
           <span class="flex-1" />
           <button class="rv-quietbtn" onClick={bind("review.compose.cancel")}>Cancel esc</button>
-          <button class="rv-btn" onClick={bind("review.compose.draft")}>Save draft <kbd>⌘⇧↵</kbd></button>
-          <button class="rv-btn rv-btn-gold" onClick={bind("review.compose.send")} title="into your pending review on GitHub — private until you submit it there">
-            {c().kind === "reply" ? "Reply in your review" : reviewing() ? "Add review comment" : "Start a review"} <kbd>⌘↵</kbd>
-          </button>
+          <Show
+            when={!note()}
+            fallback={
+              <button class="rv-btn rv-btn-gold" onClick={bind("review.compose.send")} title="opens a Claude session in the branch's worktree with the note typed in — you send it">
+                Hand to Claude <kbd>⌘↵</kbd>
+              </button>
+            }
+          >
+            <button class="rv-btn" onClick={bind("review.compose.draft")}>Save draft <kbd>⌘⇧↵</kbd></button>
+            <button class="rv-btn rv-btn-gold" onClick={bind("review.compose.send")} title="into your pending review on GitHub — private until you submit it there">
+              {c().kind === "reply" ? "Reply in your review" : reviewing() ? "Add review comment" : "Start a review"} <kbd>⌘↵</kbd>
+            </button>
+          </Show>
         </div>
       </div>
     </Show>
