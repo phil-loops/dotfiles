@@ -91,7 +91,7 @@ if os.environ["CONTEXT"] == "1":
     if not f["project"] or len(f["plan"]) < 2:
         raise SystemExit
     def ref(s):
-        return "#%s %s" % (s["pr"], s["job"]) if s.get("pr") else s["job"]
+        return "#%s" % s["pr"] if s.get("pr") else s["job"]
     me = next(s["n"] for s in f["plan"] if s.get("me"))
     landed = [s for s in f["plan"] if s.get("landed")]
     before = [s for s in f["plan"] if s["n"] < me and not s.get("landed")]
