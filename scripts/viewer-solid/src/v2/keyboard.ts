@@ -14,7 +14,11 @@ export function installKeys(): void {
   document.addEventListener("keydown", (e) => {
     if (menuOpen()) return; // the menu owns the keyboard while it's open
     const t = e.target as HTMLElement | null;
-    if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+    if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) {
+      // esc leaves a field, so the page's keys work again without reaching for the mouse
+      if (e.key === "Escape" && !e.defaultPrevented) t.blur();
+      return;
+    }
     const key = keyName(e);
     if (!key) return;
     const fed = keymap.feed(key, liveScopes());
