@@ -32,6 +32,12 @@ function Branch(props: { v: BranchView }) {
     if (props.v.st.ship === "approved" && props.v.st.waiting[0]) out.push(`waiting on ${props.v.st.waiting[0].label}`);
     return out;
   });
+  /** the keys for the row under the cursor: ↵ does its next step, l always opens it */
+  const caption = () => {
+    const act = props.v.st.action;
+    const go = act === "push" ? "push" : act === "pr" ? "open the PR" : "open";
+    return [`${keyOf("row.primary")} ${go}`, act === "push" || act === "pr" ? `${keyOf("branch.open")} open` : "", `${keyOf("forest.words")} words`].filter(Boolean).join(" · ");
+  };
   return (
     <li
       data-row={bkey(b().id)}
@@ -45,6 +51,9 @@ function Branch(props: { v: BranchView }) {
         <span class="min-w-0 flex-1 truncate font-display text-[17px]" classList={{ "text-gold-leaf": on(), "text-ink": !on() }} title={b().name}>
           {leaf(b().name)}
         </span>
+        <Show when={on()}>
+          <span class="shrink-0 whitespace-nowrap text-[11px] text-ink-faint">{caption()}</span>
+        </Show>
         <span class="shrink-0 whitespace-nowrap text-ink-dim">
           {SHIP[props.v.st.ship].glyph} {SHIP[props.v.st.ship].word}
         </span>

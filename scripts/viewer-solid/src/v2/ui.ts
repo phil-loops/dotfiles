@@ -10,6 +10,9 @@ export const [sheetOpen, setSheetOpen] = createSignal(false);
 export const [showArchive, setShowArchive] = createSignal(false);
 export const [pendingKeys, setPendingKeys] = createSignal("");
 export const [dashDays, setDashDays] = createSignal(30);
+/** closed forests shown in the archive fold (display only — their state stays until Phil archives them):
+ *  the ones closed when the page loaded, and each new one once its "canopy closed" moment is over */
+export const [shelved, setShelved] = createSignal<ReadonlySet<string>>(new Set());
 
 export const [expanded, setExpanded] = createSignal<ReadonlySet<string>>(new Set());
 export const [readyOnly, setReadyOnly] = createSignal(false);

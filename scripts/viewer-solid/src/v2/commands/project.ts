@@ -251,6 +251,35 @@ command({
     setWordsOpen((s) => toggleIn(s, k));
   },
 });
+/** The forest page's branches that wait on Phil (push, open the PR, merge), in merge order. */
+const readyHere = () => (model.pageProject() ? model.forests().get(model.pageProject()!)?.ready ?? [] : []);
+command({
+  id: "forest.next.ready",
+  label: "next ready",
+  title: "Go to the next branch ready for you",
+  scope: "forest",
+  budget: "local",
+  keys: ["space n"],
+  available: () => forestFace() === "branches" && readyHere().length > 0,
+  local: () => {
+    const rs = readyHere();
+    const at = rs.findIndex((v) => bkey(v.b.id) === model.selected());
+    setCursor(bkey(rs[(at + 1) % rs.length].b.id));
+  },
+});
+command({
+  id: "forest.words.all",
+  label: "all words",
+  title: "Show or hide every branch's commits in full",
+  scope: "forest",
+  budget: "local",
+  keys: ["space e"],
+  available: () => forestFace() === "branches" && !!model.pageProject(),
+  local: () => {
+    const ids = (model.forests().get(model.pageProject()!)?.branches ?? []).map((v) => v.b.id);
+    setWordsOpen((s) => (ids.every((id) => s.has(id)) ? new Set([...s].filter((x) => !ids.includes(x))) : new Set([...s, ...ids])));
+  },
+});
 command({
   id: "forest.leave",
   label: "back",
@@ -292,7 +321,7 @@ command({
   title: "Launch the whole forest",
   scope: "project",
   budget: "local",
-  keys: ["L"],
+  keys: ["L", "space l"],
   v1: ["launch"],
   available: (id) => !!id && (model.forests().get(id)?.unopened.length ?? 0) > 0,
   local: (id) => {
