@@ -38,8 +38,17 @@ function fence(lang: string, body: string[], opts: MdOpts): string {
   return `<pre class="md-pre"><code>${esc(body.join("\n"))}</code></pre>`;
 }
 
+/** Bots (linear-code) post HTML: their links and paragraphs become markdown, and the rest is escaped as usual. */
+function fromHtml(s: string): string {
+  if (!/^\s*<p>/i.test(s)) return s;
+  return s
+    .replace(/<a\s+href="(https?:\/\/[^"]+)"[^>]*>([^<]*)<\/a>/gi, "[$2]($1)")
+    .replace(/<\/p>\s*<p>/gi, "\n\n")
+    .replace(/<\/?p>|<br\s*\/?>/gi, "\n");
+}
+
 export function renderMarkdown(src: string, opts: MdOpts = {}): string {
-  const lines = src.replace(/\r\n?/g, "\n").replace(/<!--[\s\S]*?-->/g, "").split("\n");
+  const lines = fromHtml(src.replace(/\r\n?/g, "\n").replace(/<!--[\s\S]*?-->/g, "")).split("\n");
   const out: string[] = [];
   let para: string[] = [];
   const flush = () => {

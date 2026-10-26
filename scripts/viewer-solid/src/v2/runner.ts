@@ -6,13 +6,12 @@
 // the change) and settledMs (input → the server's answer) for free, by being registered.
 import { createSignal } from "solid-js";
 import { BUDGETS, PAINT_MS } from "./budgets";
-import { commands, getCommand, type Inverse, type Via, type Write } from "./registry";
+import { commands, getCommand, glyph, type Inverse, type Via, type Write } from "./registry";
 import { addOps, dropOps, onChange } from "./store";
 import { post, type Sent } from "./sync";
 import { emit, nextPaint } from "./telemetry";
 import { targetFor } from "./model";
 import { setMenuOpen } from "./ui";
-import { noteKeyUse } from "./hints";
 
 const [note, setNote] = createSignal<string | null>(null);
 export { note };
@@ -57,13 +56,13 @@ function echo(id: string, via: Via, ok: boolean): void {
   setFired({ id, ok, at });
   clearTimeout(firedTimer);
   firedTimer = window.setTimeout(() => setFired((f) => (f?.at === at ? null : f)), ok ? 600 : 1400);
+  if (!ok) say(`${glyph(getCommand(id)?.keys?.[0] ?? "")} · nothing here`);
 }
 
 /** Run a registered command. Never awaited by callers — the UI has already moved. */
 export function dispatch(id: string, via: Via, opts: RunOpts = {}): void {
   const cmd = getCommand(id);
   if (!cmd) return;
-  if (via === "key") noteKeyUse(id);
   if (via === "menu" || via === "palette") setMenuOpen(false);
   const named = opts.from ?? id;
   if (cmd.route) {

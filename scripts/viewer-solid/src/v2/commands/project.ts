@@ -267,7 +267,7 @@ command({
   title: "Show only what's ready for you",
   scope: "forests",
   budget: "local",
-  keys: ["F"],
+  keys: ["space r"],
   v1: ["nav:outbox"],
   local: () => {
     setArmed(undefined);
@@ -281,7 +281,7 @@ command({
   title: "Show or hide the archive",
   scope: "forests",
   budget: "local",
-  keys: ["A"],
+  keys: ["space a"],
   available: () => !readyOnly(),
   local: () => setShowArchive((v) => !v),
 });

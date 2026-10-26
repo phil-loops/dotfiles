@@ -38,7 +38,7 @@
 
 /* ── the review page ─────────────────────────────────────────────────────────
    GitHub's Files changed, in vellum: a calm reading column, gold only where you act. */
-.rv { --rv-tree: 248px; --rv-num: 44px; }
+.rv { --rv-tree: 280px; --rv-num: 44px; }
 .rv kbd { font-family: var(--font-mono); font-size: 10.5px; color: var(--color-ink-faint); margin-left: 4px; }
 .rv-head { position: sticky; top: 0; z-index: 5; background: var(--color-vellum-night); padding: 0 16px; border-bottom: 1px solid var(--color-vellum-edge); }
 .rv-title { display: flex; align-items: baseline; gap: 4px; }
@@ -46,7 +46,7 @@
 .rv-tabs { display: flex; align-items: center; gap: 4px; }
 .rv-tabs > button:not(.rv-toggle) { padding: 6px 12px 7px; border-bottom: 2px solid transparent; color: var(--color-ink-dim); }
 .rv-tabs > .rv-tab-on { border-bottom-color: var(--color-gold-leaf) !important; color: var(--color-ink) !important; }
-.rv-count { display: inline-block; min-width: 18px; padding: 0 5px; margin-left: 4px; border-radius: 9px; background: var(--color-vellum-edge); font-size: 11px; text-align: center; color: var(--color-ink-dim); }
+.rv-count { margin-left: 4px; font-size: 11px; color: var(--color-ink-faint); }
 .rv-meta { font-size: 12px; color: var(--color-ink-faint); margin-right: 10px; }
 .rv-toggle { font-size: 12px; color: var(--color-ink-dim); padding: 4px 8px; border: 1px solid var(--color-rule); margin-left: 6px; }
 .rv-toggle:hover, .rv-quietbtn:hover { color: var(--color-ink); }
@@ -54,13 +54,14 @@
 .rv-finish-on { border-color: var(--color-gold-deep); color: var(--color-gold-leaf); background: var(--color-gold-wash); }
 
 .rv-body { display: grid; grid-template-columns: var(--rv-tree) minmax(0, 1fr); align-items: start; }
-.rv-tree { position: sticky; top: var(--rv-head-h, 102px); max-height: calc(100vh - var(--rv-head-h, 102px) - 38px); overflow: auto; padding: 12px 8px 12px 16px; font-size: 12px; }
+.rv-tree { position: sticky; top: var(--rv-head-h, 102px); max-height: calc(100vh - var(--rv-head-h, 102px) - 12px); overflow: auto; padding: 12px 8px 12px 16px; font-size: 12px; }
 .rv-filter { width: 100%; margin-bottom: 8px; padding: 4px 8px; background: var(--color-vellum-raise); border: 1px solid var(--color-gold-deep); outline: none; }
 .rv-dir { color: var(--color-ink-faint); padding: 6px 0 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
 .rv-tfile { display: flex; align-items: center; gap: 6px; padding: 2px 4px; border-left: 2px solid transparent; }
 .rv-tfile-on { border-left-color: var(--color-gold-leaf); background: var(--color-gold-wash); }
 .rv-tfile-done .rv-tname { color: var(--color-ink-faint); }
-.rv-tname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rv-tname { flex: 1; min-width: 0; display: flex; white-space: nowrap; text-align: left; }
+.rv-thead { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .rv-pm { font-size: 11px; white-space: nowrap; }
 .rv-check { color: var(--color-ink-faint); width: 14px; }
 .rv-check:hover { color: var(--color-gold-leaf); }
@@ -175,7 +176,7 @@
 .rv-radio-on b { color: var(--color-gold-leaf); }
 .rv-radio-off { opacity: 0.45; cursor: not-allowed; }
 .rv-radio-dot { color: var(--color-gold-leaf); }
-.rv-words { position: fixed; z-index: 14; top: 64px; right: 0; bottom: 36px; width: min(440px, 92vw); padding: 14px 18px; overflow: auto; background: var(--color-vellum-raise); border-left: 1px solid var(--color-rule); box-shadow: -18px 0 50px rgba(0, 0, 0, 0.4); }
+.rv-words { position: fixed; z-index: 14; top: 44px; right: 0; bottom: 0; width: min(440px, 92vw); padding: 14px 18px; overflow: auto; background: var(--color-vellum-raise); border-left: 1px solid var(--color-rule); box-shadow: -18px 0 50px rgba(0, 0, 0, 0.4); }
 .rv-words-k { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--color-ink-faint); margin-top: 12px; }
 .rv-words-commit { font-size: 12px; padding: 2px 0; }
 .rv-scrim { position: fixed; inset: 0; z-index: 16; display: flex; justify-content: center; align-items: flex-start; padding-top: 12vh; background: rgba(20, 17, 10, 0.7); }
@@ -204,7 +205,7 @@
 .rv-hmeta { display: block; font-size: 10.5px; color: var(--color-ink-faint); }
 .rv-commit-head { padding: 8px 12px; margin-bottom: 10px; border: 1px solid var(--color-vellum-edge); background: var(--color-vellum-raise); font-size: 12.5px; }
 .rv-count-gold { color: var(--color-gold-leaf); }
-.rv-tabkey { font-family: var(--font-mono, monospace); font-size: 10.5px; color: var(--color-ink-faint); opacity: 0.8; }
+.rv-tabkey { display: inline-block; min-width: 15px; margin-right: 6px; padding: 0 3px; border: 1px solid var(--color-rule); border-radius: 3px; font-family: var(--font-mono, monospace); font-size: 10px; line-height: 14px; text-align: center; color: var(--color-ink-faint); }
 /* a key label lights gold for a moment when its key runs the command, then fades back */
 .rv-hintkey { transition: color 0.6s ease-out, text-shadow 0.6s ease-out; }
 .rv-hintkey.rv-fired { color: var(--color-gold-leaf); text-shadow: 0 0 6px rgba(212, 170, 80, 0.35); transition: none; }

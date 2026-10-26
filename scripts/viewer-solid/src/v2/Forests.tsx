@@ -7,7 +7,7 @@ import { bkey, model, pkey, type BranchView, type ForestView } from "./model";
 import { boot, catchIt, flip, settle } from "./motion";
 import { keyOf } from "./registry";
 import { bind } from "./runner";
-import { fmtMorning, leaf, nextMorning, phaseAt, SHIP, windowLine } from "./ship";
+import { fmtMorning, leaf, phaseAt, SHIP, windowLine } from "./ship";
 import { view, world } from "./store";
 import { page } from "./review/page";
 import type { Project } from "./types";
@@ -123,13 +123,13 @@ function ForestRow(props: { f: ForestView; grip: boolean }) {
   const isClosing = () => closing().has(p().id);
   const open = () => expanded().has(p().id) || readyOnly();
   const hint = () =>
-    p().state === "archive" ? `${keyOf("row.primary")} restore` : props.f.closed ? `${keyOf("row.primary")} archive` : !props.f.branches.length ? "" : readyOnly() ? "" : `${keyOf("row.primary")} its page`;
+    p().state === "archive" ? `${keyOf("row.primary")} restore` : props.f.closed ? `${keyOf("row.primary")} archive` : !props.f.branches.length ? "" : readyOnly() ? "" : `${keyOf("row.primary")} page`;
   const meta = () => {
     const f = props.f;
     if (p().state === "archive" || !f.branches.length) return "";
     const parts = [`${f.branches.length} branch${f.branches.length === 1 ? "" : "es"}`];
     if (f.ready.length) parts.push(`${f.ready.length} ready`);
-    if (f.unopened.length > 1) parts.push(`L launches ${f.unopened.length}`);
+    if (f.unopened.length > 1) parts.push(`${keyOf("forest.launch")} launch ${f.unopened.length}`);
     if (p().ticket) parts.push(p().ticket!);
     return parts.join(" · ");
   };
@@ -153,7 +153,7 @@ function ForestRow(props: { f: ForestView; grip: boolean }) {
         ⋮
       </span>
       <span
-        class="w-[200px] shrink-0 truncate font-display text-[17px]"
+        class="w-[var(--fw)] shrink-0 truncate font-display text-[17px]"
         classList={{ "text-gold-leaf": on(), "text-ink": !on() && !props.f.closed, "text-ink-faint": !on() && props.f.closed }}
       >
         {p().name}
@@ -250,9 +250,6 @@ function WindowLine() {
     <Show when={text() || due()}>
       <p data-window={phaseAt(now()).phase} class="m-0 mb-6 px-4 pl-11 font-display text-[15px] italic" classList={{ "text-ember": late(), "text-gold-leaf": !late() }}>
         {text()}
-        <Show when={late() && text()}>
-          <span class="font-mono text-[12px] not-italic text-ink-faint"> · {keyOf("hold.morning")} holds a forest for {fmtMorning(nextMorning(now()))}</span>
-        </Show>
         <Show when={due()}>
           <span class="text-gold-leaf">
             {text() ? " · " : ""}☀ {due()} held overnight {due() === 1 ? "is" : "are"} due
@@ -266,6 +263,8 @@ function WindowLine() {
 export default function Forests() {
   let root: HTMLDivElement | undefined;
   const p = () => model.projects();
+  // the name column is as wide as the longest name shown (to a cap), so names don't cut while descriptions have room
+  const nameWidth = () => Math.min(26, Math.max(14, ...[...p().focus, ...p().workbench, ...(showArchive() ? p().archive : [])].map((x) => x.name.length + 2)));
   const readyCount = () => [...model.forests().values()].filter((f) => f.p.state !== "archive").reduce((n, f) => n + f.ready.length, 0);
   flip(() => root, () => model.rows());
   watchClosings();
@@ -273,12 +272,12 @@ export default function Forests() {
   boot();
   return (
     <Show when={world.ready} fallback={<p class="px-4 pl-11 text-ink-faint">reading the forests…</p>}>
-      <div ref={root} data-paint="forests" class="relative mx-auto max-w-[980px]">
+      <div ref={root} data-paint="forests" class="relative mx-auto max-w-[980px]" style={{ "--fw": `${nameWidth()}ch` }}>
         <WindowLine />
         <Show when={readyOnly()}>
           <p class="m-0 mb-5 px-4 pl-11 text-ink-dim">
             <span class="text-gold-leaf">ready</span> · {readyCount() || "nothing"} ·{" "}
-            <button class="text-ink-faint hover:text-ink-dim" onClick={bind("ready.toggle")}>{keyOf("ready.toggle")} all</button>
+            <button class="text-ink-faint hover:text-ink-dim" onClick={bind("ready.toggle")}>show all</button>
           </p>
         </Show>
         <Section title="Focus" rows={p().focus} empty="empty" />
