@@ -425,6 +425,10 @@ threading.Thread(target=_refresher, daemon=True).start()
 
 _HOME = {"at": 0.0, "on": False}
 
+# The built app's signature (the server sets it to its asset_sig): sent in hello and again when a
+# rebuild moves it, so an open tab running an older bundle reloads itself instead of going stale.
+ASSET = lambda: ""   # noqa: E731
+
 
 def v2_home():
     """`git config stack.viewer-v2-home true` (in the server's repo, or globally) makes `/` serve
@@ -469,7 +473,8 @@ def events(req, u, keepalive=lambda: None):
             raw = q.get(d, [""])[0]
             cursor[d] = int(raw) if raw.isdigit() else _D[d].version
         current = {d: _D[d].version for d in DOMAINS}
-        _sse(req, "hello", {"epoch": EPOCH, "versions": current})
+        asset = ASSET()
+        _sse(req, "hello", {"epoch": EPOCH, "versions": current, "asset": asset})
         stale = q.get("epoch", [EPOCH])[0] != EPOCH
         last_ping = time.monotonic()
         while True:
@@ -485,6 +490,9 @@ def events(req, u, keepalive=lambda: None):
                 if all(cursor[d] == _D[d].version for d in DOMAINS):
                     _COND.wait(15)
             keepalive()
+            if time.monotonic() - last_ping > 15 and ASSET() != asset:
+                asset = ASSET()
+                _sse(req, "asset", {"asset": asset})
             if time.monotonic() - last_ping > 15:
                 req.wfile.write(b": ping\n\n")
                 req.wfile.flush()

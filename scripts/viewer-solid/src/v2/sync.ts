@@ -64,6 +64,24 @@ export async function post(path: string, body: unknown, via?: string): Promise<S
   }
 }
 
+// ── a newer build ─────────────────────────────────────────────────────────
+
+const LOADED = (window as unknown as { __CANOPY_ASSET__?: string }).__CANOPY_ASSET__ ?? "";
+let reloadPending = false;
+
+/** A rebuild moved the app's signature: this tab runs an older bundle. Reload at a quiet moment —
+ *  never while a field has focus (drafts are kept in localStorage anyway); a hidden tab at once. */
+function checkBuild(asset: string | undefined): void {
+  if (!asset || !LOADED || asset === LOADED || reloadPending) return;
+  reloadPending = true;
+  const quiet = () => {
+    const a = document.activeElement as HTMLElement | null;
+    return document.hidden || !(a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA" || a.isContentEditable));
+  };
+  const tryNow = () => (quiet() ? location.reload() : window.setTimeout(tryNow, 2000));
+  tryNow();
+}
+
 // ── the live store ─────────────────────────────────────────────────────────
 
 let es: EventSource | null = null;
@@ -80,10 +98,12 @@ async function load(): Promise<void> {
 function open(): void {
   const v = world.versions;
   es = new EventSource(`/v2/events?epoch=${encodeURIComponent(world.epoch)}&git=${v.git}&remote=${v.remote}&review=${v.review}&todo=${v.todo}`);
-  es.addEventListener("hello", () => {
+  es.addEventListener("hello", (e) => {
     backoff = 500;
     setConn("live");
+    checkBuild(JSON.parse((e as MessageEvent).data).asset);
   });
+  es.addEventListener("asset", (e) => checkBuild(JSON.parse((e as MessageEvent).data).asset));
   es.addEventListener("patch", (e) => {
     const res = applyPatch(JSON.parse((e as MessageEvent).data) as Patch);
     count(res === "ok" ? "patch" : `patch-${res}`);
