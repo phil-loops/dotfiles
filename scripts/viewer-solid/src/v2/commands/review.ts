@@ -122,7 +122,10 @@ command({
   budget: "local",
   keys: ["p"],
   available: (id) => pg.tab() === "commits" && !!pushRoute(id),
-  route: (id) => (pg.tab() === "commits" ? pushRoute(id) : null),
+  route: (id) => {
+    const next = pg.tab() === "commits" ? pushRoute(id) : null;
+    return next && id ? { id: next, target: id } : null;
+  },
 });
 command({ id: "review.tab.files", label: "files", title: "Show the files tab", scope: "review", budget: "local", keys: ["3"], local: () => pg.setTab("files") });
 command({ id: "review.tab.conversation", label: "conversation", title: "Show the conversation tab", scope: "review", budget: "local", keys: ["1"], local: () => pg.setTab("conversation") });
@@ -891,10 +894,21 @@ command({
 command({
   id: "review.finish",
   label: "github",
-  title: "Go to GitHub to submit your review",
+  title: "Go to GitHub — submit your review, or open the PR once it's pushed",
   scope: "review",
   budget: "local",
   keys: ["g h"],
+  route: (id) => {
+    if (canWrite()) return "review.github";
+    return id && model.branchView(id)?.st.action === "pr" ? { id: "branch.pr", target: id } : null;
+  },
+});
+command({
+  id: "review.github",
+  title: "Go to GitHub to submit your review",
+  scope: "review",
+  budget: "local",
+  quiet: true,
   available: canWrite,
   local: () => void window.open(`${pg.conv()!.url}/files`, "_blank", "noopener"),
 });

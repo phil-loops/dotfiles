@@ -159,6 +159,13 @@ export default function Outgoing() {
             {" "}· {v()?.pr ? `onto #${v()!.pr!.number}` : "first push"} · <code>{short(b()!.tip)}</code> · gates {logged() ? (b()!.gates === "green" ? "✓" : b()!.gates) : recorded()}
           </span>
           <PushStatus count={unpushed().length} />
+          <Show when={!v()?.pr && v()?.st.action === "pr"}>
+            <div class="mt-2">
+              <button class="rv-btn rv-btn-gold" onClick={bind("review.finish", pg.id())}>
+                open the PR ↗ <kbd>{keyOf("review.finish")}</kbd>
+              </button>
+            </div>
+          </Show>
         </Show>
       </div>
 
