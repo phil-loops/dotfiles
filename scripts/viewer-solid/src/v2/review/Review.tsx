@@ -85,6 +85,12 @@ export default function Review() {
 
 function Header() {
   const c = () => pg.conv();
+  /** what the header says with no conversation yet: a known PR still loading, GitHub not read yet, or none */
+  const noPr = () => {
+    const pr = view("pr", pg.id());
+    if (pr) return `#${pr.number} · loading its conversation…`;
+    return world.entities.warm[pg.target()?.repo ?? ""]?.prs ? "no PR" : "reading GitHub…";
+  };
   const t = () => pg.target();
   const pending = () => c()?.pending?.count ?? 0;
   const drafts = () => pg.items().filter((i) => i.state === "draft").length;
@@ -141,7 +147,7 @@ function Header() {
           </Show>
         </Show>
         <Show when={!c() && world.ready}>
-          <span class="text-ink-faint">no PR</span>
+          <span class="text-ink-faint">{noPr()}</span>
         </Show>
       </div>
       <nav class="rv-tabs">
