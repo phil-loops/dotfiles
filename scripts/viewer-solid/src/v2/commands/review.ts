@@ -23,6 +23,8 @@ const name = () => pg.target()?.name ?? "";
 const viewer = () => pg.conv()?.viewer || "you";
 const thread = (id: string | undefined) => (id ? (view("thread", id) as Thread | undefined) : undefined);
 const onFiles = () => pg.tab() === "files" && !pg.overlay();
+/** the tabs j/k walk: the diff, and the conversation's timeline */
+const onStops = () => (pg.tab() === "files" || pg.tab() === "conversation") && !pg.overlay();
 
 // ── moving ──
 
@@ -45,7 +47,7 @@ const seek = (dir: 1 | -1, ok: (k: string) => boolean) => () => {
 };
 
 const nav = (id: string, title: string, keys: string[], local: () => void, label?: string, pair?: string) =>
-  command({ id, title, label, pair, scope: "review", budget: "local", keys, quiet: true, available: onFiles, local });
+  command({ id, title, label, pair, scope: "review", budget: "local", keys, quiet: true, available: onStops, local });
 
 nav("review.down", "Next line", ["j", "down"], () => {
   pg.setMark(undefined);
@@ -55,12 +57,12 @@ nav("review.up", "Previous line", ["k", "up"], () => {
   pg.setMark(undefined);
   goTo(idx() - 1);
 }, "line");
-command({ id: "review.thread.next", label: "thread", pair: "review.thread.prev", title: "Next conversation", scope: "review", budget: "local", keys: ["n"], available: onFiles, local: seek(1, (k) => k.startsWith("t|")) });
-command({ id: "review.thread.prev", label: "thread", title: "Previous conversation", scope: "review", budget: "local", keys: ["N"], available: onFiles, local: seek(-1, (k) => k.startsWith("t|")) });
-command({ id: "review.file.next", label: "file", pair: "review.file.prev", title: "Next file", scope: "review", budget: "local", keys: ["]"], available: onFiles, local: seek(1, (k) => k.startsWith("f|")) });
-command({ id: "review.file.prev", label: "file", title: "Previous file", scope: "review", budget: "local", keys: ["["], available: onFiles, local: seek(-1, (k) => k.startsWith("f|")) });
-nav("review.top", "First line", ["g g"], () => goTo(0), "ends", "review.bottom");
-nav("review.bottom", "Last line", ["G", "g e"], () => goTo(pg.stops().length - 1), "ends");
+command({ id: "review.thread.next", label: "thread", pair: "review.thread.prev", title: "Go to the next conversation", scope: "review", budget: "local", keys: ["n"], available: onStops, local: seek(1, (k) => k.startsWith("t|")) });
+command({ id: "review.thread.prev", label: "thread", title: "Go to the previous conversation", scope: "review", budget: "local", keys: ["N"], available: onStops, local: seek(-1, (k) => k.startsWith("t|")) });
+command({ id: "review.file.next", label: "file", pair: "review.file.prev", title: "Go to the next file", scope: "review", budget: "local", keys: ["]"], available: onFiles, local: seek(1, (k) => k.startsWith("f|")) });
+command({ id: "review.file.prev", label: "file", title: "Go to the previous file", scope: "review", budget: "local", keys: ["["], available: onFiles, local: seek(-1, (k) => k.startsWith("f|")) });
+nav("review.top", "Go to the first line", ["g g"], () => goTo(0), "ends", "review.bottom");
+nav("review.bottom", "Go to the last line", ["G", "g e"], () => goTo(pg.stops().length - 1), "ends");
 command({
   id: "review.cursor.set",
   title: "Put the cursor here",
@@ -110,8 +112,8 @@ command({
 // ── the page ──
 
 const TABS = ["conversation", "commits", "files"] as const;
-command({ id: "review.tab", label: "tab", title: "Next tab — Conversation, Commits, Files changed", scope: "review", budget: "local", keys: ["tab"], local: () => pg.setTab(TABS[(TABS.indexOf(pg.tab()) + 1) % TABS.length]) });
-command({ id: "review.tab.commits", label: "commits", title: "Commits", scope: "review", budget: "local", keys: ["2"], local: () => pg.setTab("commits") });
+command({ id: "review.tab", label: "tab", title: "Cycle the tabs", scope: "review", budget: "local", keys: ["tab"], local: () => pg.setTab(TABS[(TABS.indexOf(pg.tab()) + 1) % TABS.length]) });
+command({ id: "review.tab.commits", label: "commits", title: "Show the commits tab", scope: "review", budget: "local", keys: ["2"], local: () => pg.setTab("commits") });
 command({
   id: "review.push",
   label: "push",
@@ -126,12 +128,12 @@ command({
     return armed() === id ? "branch.push.confirm" : "branch.push.arm";
   },
 });
-command({ id: "review.tab.files", label: "files", title: "Files changed", scope: "review", budget: "local", keys: ["3"], local: () => pg.setTab("files") });
-command({ id: "review.tab.conversation", label: "conversation", title: "Conversation", scope: "review", budget: "local", keys: ["1"], local: () => pg.setTab("conversation") });
-command({ id: "review.split", label: "split", title: "Split ↔ unified diff", scope: "review", budget: "local", keys: ["space s"], local: () => pg.setSplit(!pg.split()) });
-command({ id: "review.outdated", label: "outdated", title: "Show outdated conversations", scope: "review", budget: "local", keys: ["space o"], local: () => pg.setShowOutdated(!pg.showOutdated()) });
-command({ id: "review.words", label: "words", title: "The words (description, outline, landing title)", scope: "review", budget: "local", keys: ["e"], local: () => pg.setOverlay(pg.overlay() === "words" ? null : "words") });
-command({ id: "review.map", label: "map", title: "The forest map", scope: "review", budget: "local", keys: ["space m"], local: () => pg.setOverlay(pg.overlay() === "map" ? null : "map") });
+command({ id: "review.tab.files", label: "files", title: "Show the files tab", scope: "review", budget: "local", keys: ["3"], local: () => pg.setTab("files") });
+command({ id: "review.tab.conversation", label: "conversation", title: "Show the conversation tab", scope: "review", budget: "local", keys: ["1"], local: () => pg.setTab("conversation") });
+command({ id: "review.split", label: "split", title: "Switch between split and unified diff", scope: "review", budget: "local", keys: ["space s"], local: () => pg.setSplit(!pg.split()) });
+command({ id: "review.outdated", label: "outdated", title: "Show or hide outdated conversations", scope: "review", budget: "local", keys: ["space o"], local: () => pg.setShowOutdated(!pg.showOutdated()) });
+command({ id: "review.words", label: "words", title: "Edit the words: description, outline, PR title", scope: "review", budget: "local", keys: ["e"], local: () => pg.setOverlay(pg.overlay() === "words" ? null : "words") });
+command({ id: "review.map", label: "map", title: "Show the forest map", scope: "review", budget: "local", keys: ["space m"], local: () => pg.setOverlay(pg.overlay() === "map" ? null : "map") });
 command({
   id: "review.map.go",
   title: "Open a branch from the map",
@@ -157,7 +159,7 @@ const step = (by: number) => () => {
 command({
   id: "review.history",
   label: "commits",
-  title: "Commits — the branch's history, one commit at a time",
+  title: "Step through the commits one at a time",
   scope: "review",
   budget: "local",
   keys: ["space h"],
@@ -198,17 +200,17 @@ command({
   available: () => pg.scoped(),
   local: () => pg.setHistoryFocus("diff"),
 });
-command({ id: "history.exit", label: "back", title: "Back to what a push sends", scope: "history", budget: "local", keys: ["esc"], local: () => void pg.showCommit(null) });
+command({ id: "history.exit", label: "back", title: "Go back to what a push sends", scope: "history", budget: "local", keys: ["esc"], local: () => void pg.showCommit(null) });
 command({
   id: "commit.back",
   label: "list",
-  title: "Back to the commit list",
+  title: "Go back to the commit list",
   scope: "commit",
   budget: "local",
   keys: ["h", "left"],
   local: () => pg.setHistoryFocus("list"),
 });
-command({ id: "commit.exit", label: "list", title: "Back to the commit list", scope: "commit", budget: "local", keys: ["esc"], local: () => pg.setHistoryFocus("list") });
+command({ id: "commit.exit", label: "list", title: "Go back to the commit list", scope: "commit", budget: "local", keys: ["esc"], local: () => pg.setHistoryFocus("list") });
 
 // ── the outgoing change, commit by commit (inline diffs on the Commits tab) ──
 
@@ -406,7 +408,7 @@ command({
 command({
   id: "review.leave",
   label: "back",
-  title: "Back to its forest",
+  title: "Go back to its forest",
   scope: "review",
   budget: "local",
   keys: ["h"],
@@ -466,7 +468,7 @@ command({
 /** Open what the cursor is on in the warm Helix, at its line. */
 function openHere(): Write | null {
   const h = pg.here();
-  if (!h || h.kind === "file") return null;
+  if (!h || h.kind === "file" || h.kind === "card") return null;
   const line = h.kind === "line" ? sideLine(h.row).line : h.kind === "gap" ? null : thread(h.id)?.local?.line ?? null;
   return { ops: [], path: repoPath("/open"), body: { branch: name(), path: h.path, line }, settled: () => true, failed: "couldn't open it in Helix" };
 }
@@ -893,7 +895,7 @@ command({
 command({
   id: "review.finish",
   label: "github",
-  title: "Open on GitHub to submit your review",
+  title: "Go to GitHub to submit your review",
   scope: "review",
   budget: "local",
   keys: ["g h"],

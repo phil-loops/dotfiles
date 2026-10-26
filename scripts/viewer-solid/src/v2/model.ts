@@ -201,12 +201,12 @@ export function liveScopes(): string[] {
     out.push("global");
     return out;
   }
-  if (surface().id === "review" && page.tab() !== "conversation" && !page.overlay()) {
+  if (surface().id === "review" && !page.overlay()) {
     // on Commits, j/k move through the list until l opens a commit's diff, then through its lines
-    if (page.historyOpen() && page.historyFocus() === "list") out.push("history");
+    if (page.tab() === "commits" && page.historyOpen() && page.historyFocus() === "list") out.push("history");
     else {
       const h = page.here();
-      if (h && h.kind !== "file") out.push(h.kind);
+      if (h && h.kind !== "file" && h.kind !== "card") out.push(h.kind);
       if (page.historyOpen()) out.push("commit");
     }
   }

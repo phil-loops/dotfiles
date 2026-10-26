@@ -1,9 +1,19 @@
 // `space`: every command in reach, filterable. Enter runs the highlighted one.
 import { createMemo, createSignal, For, onMount, Show } from "solid-js";
 import { liveScopes, targetFor } from "./model";
-import { commands } from "./registry";
+import { commands, glyph } from "./registry";
 import { bind, dispatch } from "./runner";
 import { menuOpen, setMenuOpen } from "./ui";
+
+/** The palette's sections, in this order; within one, what the cursor is on comes first. */
+const GROUPS = ["move", "view", "review", "words & push", "go"] as const;
+function groupOf(id: string): (typeof GROUPS)[number] {
+  if (/^(nav|place)\.|^help\.|^branch\.(pr|open)$|^forest\.page$|^review\.(definition|open|finish)$/.test(id)) return "go";
+  if (/^(cursor|focus|history|commit)\.|^review\.(down|up|top|bottom|thread\.(next|prev)|file\.(next|prev)|leave|back)$|^forest\.(expand|collapse|leave)$|^todo\.(up|down)$/.test(id)) return "move";
+  if (/^review\.(tab|split|outdated|map|filter|types|history)|^(forest\.face|ready\.toggle|archive\.toggle|dashboard\.range|todo\.open)$/.test(id)) return "view";
+  if (/words|^story\.|push|^forest\.launch$|^project\.|^hold\.|^todo\.|^undo$/.test(id)) return "words & push";
+  return "review";
+}
 
 export default function Menu() {
   return (
@@ -27,7 +37,7 @@ function MenuBody() {
         scopes.includes(c.scope) &&
         (!c.available || c.available(targetFor(c.scope))) &&
         (c.title + " " + c.id).toLowerCase().includes(needle),
-    ).sort((a, b) => scopes.indexOf(a.scope) - scopes.indexOf(b.scope)); // what the selection can do comes first
+    ).sort((a, b) => GROUPS.indexOf(groupOf(a.id)) - GROUPS.indexOf(groupOf(b.id)) || scopes.indexOf(a.scope) - scopes.indexOf(b.scope));
   });
   const via = () => (q() ? "palette" : "menu");
   const run = (id: string, e: Event) => dispatch(id, via(), { event: e });
@@ -66,6 +76,9 @@ function MenuBody() {
           <For each={items()} fallback={<li class="px-3 py-2 text-ink-faint">no match</li>}>
             {(c, n) => (
               <li>
+                <Show when={n() === 0 || groupOf(items()[n() - 1].id) !== groupOf(c.id)}>
+                  <div class="px-3 pb-0.5 pt-2 text-[10.5px] uppercase tracking-[0.12em] text-ink-faint">{groupOf(c.id)}</div>
+                </Show>
                 <button
                   class="flex w-full justify-between px-3 py-1.5"
                   classList={{ "bg-gold-wash text-gold-leaf": n() === i(), "text-ink-dim": n() !== i() }}
@@ -73,7 +86,7 @@ function MenuBody() {
                   onMouseEnter={() => setI(n())}
                 >
                   <span>{c.title}</span>
-                  <span class="text-ink-faint">{c.keys?.join(" · ")}</span>
+                  <span class="font-mono text-ink-faint">{c.keys?.map(glyph).join(" · ")}</span>
                 </button>
               </li>
             )}
