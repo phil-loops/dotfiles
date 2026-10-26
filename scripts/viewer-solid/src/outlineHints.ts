@@ -137,3 +137,13 @@ export function bodyHints(body: string, template = ""): Hint[] {
   const own = (template && body.includes(template.trim()) ? body.replace(template.trim(), "") : body).trim();
   return own.length > LONG_BODY ? [{ id: "prose", tone: "note", text: `${own.length} chars above the template — yours are a line or three` }] : [];
 }
+
+/** A PR body as Phil's own lines and the repo template under them (from its first `---` rule on). */
+export function splitTemplate(body: string): { own: string; template: string } {
+  const m = /^---[ \t]*$/m.exec(body);
+  if (!m) return { own: body.trim(), template: "" };
+  return { own: body.slice(0, m.index).trim(), template: body.slice(m.index).trim() };
+}
+
+/** Rejoin what splitTemplate split, so editing the own lines keeps the template. */
+export const joinTemplate = (own: string, template: string): string => [own.trim(), template].filter(Boolean).join("\n\n");

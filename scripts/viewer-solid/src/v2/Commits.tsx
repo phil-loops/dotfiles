@@ -1,10 +1,10 @@
-// A branch's history as it'll be pushed, editable where it can be: every commit's sha, author,
-// date and pushed/local; an unpushed one's subject and body are fields with v1's live hints and
-// their one-click fixes (scope, length, bare follow-ups, a baked forest plan). Edits are drafts
+// A branch's words, read first and edited in place: what it lands as (title + why, the repo
+// template folded away), then its commits one line each — a body opens when you click into its
+// commit. Every hint sits in one line on top, once, with its one-click fix. Edits are drafts
 // until one save (words.save, ⌘↵ in a field) rewrites them all; u undoes it. Pushed commits are
 // read-only, with the reason.
 import { createEffect, createResource, For, onCleanup, Show } from "solid-js";
-import { SUBJECT_LIMIT, wordsLength, type Hint } from "../outlineHints";
+import { joinTemplate, splitTemplate, SUBJECT_LIMIT, type Hint } from "../outlineHints";
 import { atRepo } from "./model";
 import { keyOf } from "./registry";
 import { bind, dispatch } from "./runner";
@@ -47,24 +47,21 @@ export default function Commits(props: { branchId: string; readOnly?: boolean; l
   const edit = (c: Commit, w: { subject: string; body: string }) => editTo(props.branchId, c, w);
   const pending = () => (o() ? changed(props.branchId).length + (prChange(props.branchId) ? 1 : 0) : 0);
   const pr = () => (o(), drafts(), prValue(props.branchId));
-  const hintChips = (hs: Hint[], sha: string) => (
-    <Show when={hs.length}>
-      <div class="mt-1 flex flex-wrap gap-1.5">
-        <For each={hs}>
-          {(h) => (
-            <span class={`inline-flex items-baseline gap-1.5 border border-dashed px-1.5 text-[10.5px] ${TONE[h.tone]}`}>
-              {h.text}
-              <Show when={h.fix}>
-                <button class="rv-quietbtn" onClick={bind("words.fix", `${props.branchId} ${sha} ${h.id}`)}>
-                  {h.fix!.label}
-                </button>
-              </Show>
-            </span>
-          )}
-        </For>
-      </div>
-    </Show>
-  );
+  /** every hint on the branch's words, once each: the title's, then each commit's — an opening
+   *  commit that is the title says nothing the title didn't */
+  const issues = () => {
+    drafts();
+    const out: { where: string; key: string; h: Hint }[] = [];
+    for (const h of props.landing ? prHints(props.branchId) : []) out.push({ where: h.id === "plan" || h.id === "prose" ? "body" : "title", key: PR, h });
+    if (props.landingOnly || props.readOnly) return out;
+    for (const c of o()?.commits ?? []) {
+      const sameAsTitle = props.landing && value(c).subject.trim() === pr().subject.trim();
+      for (const h of hintsOf(props.branchId, c)) {
+        if (!(sameAsTitle && TITLE_HINTS.has(h.id))) out.push({ where: c.short.slice(0, 7), key: c.sha, h });
+      }
+    }
+    return out;
+  };
   const orphans = () => [...(mine()?.keys() ?? [])].filter((sha) => o() && !o()!.commits.some((c) => c.sha === sha)).length;
   const saveKey = (e: KeyboardEvent) => {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -73,12 +70,32 @@ export default function Commits(props: { branchId: string; readOnly?: boolean; l
     }
   };
 
+  const prParts = () => splitTemplate(pr().body);
+  const editOwn = (own: string) => editPr(props.branchId, { ...pr(), body: joinTemplate(own, prParts().template) });
+
   return (
     <Show when={o()} fallback={<p class="m-0 text-ink-faint">{o.loading ? "reading the commits…" : "couldn't read the commits"}</p>}>
       <Show when={orphans()}>
         <p class="m-0 mb-2 text-[12px] text-ink-faint">
           {orphans()} edit{orphans() === 1 ? "" : "s"} dropped · branch moved
         </p>
+      </Show>
+      <Show when={issues().length}>
+        <div class="mb-3 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px]">
+          <For each={issues()}>
+            {(x) => (
+              <span class={TONE[x.h.tone]}>
+                <span class="text-ink-faint">{x.where}</span> {short(x.h)}
+                <Show when={x.h.fix}>
+                  {" "}
+                  <button class="rv-quietbtn" onClick={bind("words.fix", `${props.branchId} ${x.key} ${x.h.id}`)}>
+                    {x.h.fix!.label}
+                  </button>
+                </Show>
+              </span>
+            )}
+          </For>
+        </div>
       </Show>
       <Show when={props.landing}>
         <div class="mb-4">
@@ -87,97 +104,91 @@ export default function Commits(props: { branchId: string; readOnly?: boolean; l
             when={!o()!.pr?.exists}
             fallback={
               <>
-                <div class="text-ink">{o()!.pr!.title ?? "—"}</div>
-                <Show when={o()!.pr!.body}>
-                  <pre class="m-0 mt-1 whitespace-pre-wrap font-mono text-[12px] text-ink-dim">{o()!.pr!.body}</pre>
+                <div class="px-2 text-ink">{o()!.pr!.title ?? "—"}</div>
+                <Show when={splitTemplate(o()!.pr!.body ?? "").own}>
+                  <p class="m-0 mt-1 whitespace-pre-wrap px-2 text-[12px] text-ink-dim">{splitTemplate(o()!.pr!.body ?? "").own}</p>
                 </Show>
-                <p class="m-0 mt-1 text-[11px] text-ink-faint">#{o()!.pr!.number} is open — its title and body are GitHub's now</p>
+                <p class="m-0 mt-1 px-2 text-[11px] text-ink-faint">#{o()!.pr!.number} is open — GitHub owns its words</p>
               </>
             }
           >
-            <input
-              class="w-full border border-rule bg-vellum-night px-2 py-1 font-mono text-[12.5px] text-ink focus:border-gold-deep focus:outline-none"
+            <textarea
+              class={`${FIELD} block resize-none text-[12.5px] text-ink [field-sizing:content]`}
+              rows={1}
               value={pr().subject}
-              onInput={(e) => editPr(props.branchId, { ...pr(), subject: e.currentTarget.value })}
-              onKeyDown={saveKey}
+              onInput={(e) => editPr(props.branchId, { ...pr(), subject: e.currentTarget.value.replace(/\n/g, " ") })}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.metaKey && !e.ctrlKey) e.preventDefault();
+                saveKey(e);
+              }}
               aria-label="PR title"
             />
             <textarea
-              class="mt-1 w-full resize-y border border-rule bg-vellum-night px-2 py-1 font-mono text-[12px] text-ink-dim focus:border-gold-deep focus:outline-none"
-              rows={Math.min(12, Math.max(3, pr().body.split("\n").length + 1))}
-              value={pr().body}
-              placeholder="why"
-              onInput={(e) => editPr(props.branchId, { ...pr(), body: e.currentTarget.value })}
+              class={`${FIELD} block resize-none text-[12px] text-ink-dim placeholder:text-ink-faint [field-sizing:content]`}
+              rows={1}
+              value={prParts().own}
+              placeholder="why — a line or three"
+              onInput={(e) => editOwn(e.currentTarget.value)}
               onKeyDown={saveKey}
               aria-label="PR body"
             />
-            {hintChips((drafts(), prHints(props.branchId)), PR)}
+            <Show when={prParts().template}>
+              <div class="px-2 text-[11px] text-ink-faint">＋ the repo's PR template</div>
+            </Show>
           </Show>
         </div>
-        <Show when={!props.landingOnly}>
+      </Show>
+      <Show when={!props.landingOnly}>
+        <Show when={props.landing}>
           <div class="rv-words-k">commits</div>
         </Show>
-      </Show>
-      <Show when={!props.landingOnly && o()!.commits.length} fallback={<Show when={!props.landingOnly}><p class="m-0 text-ink-faint">no commits</p></Show>}>
-        <ol class="m-0 list-none p-0">
-          <For each={o()!.commits}>
-            {(c) => {
-              const w = () => value(c);
-              const hints = () => (drafts(), hintsOf(props.branchId, c));
-              return (
-                <li class="mb-4">
-                  <For each={addresses(w().body)}>{(a) => <div class="mb-0.5 text-[11px] text-gold-leaf">addresses {a}</div>}</For>
-                  <div class="flex items-baseline gap-2 text-[11px] text-ink-faint">
-                    <code class={c.pushed ? "text-ink-faint" : "text-gold-leaf"}>{c.short.slice(0, 7)}</code>
-                    <span>
-                      {c.author} · {c.date} · {c.pushed ? "pushed" : "local"}
-                    </span>
-                    <Show when={mine()?.has(c.sha) && changed(props.branchId).some((x) => x.sha === c.sha)}>
-                      <span class="text-gold-leaf">· edited</span>
-                    </Show>
-                  </div>
-                  <Show
-                    when={!c.locked && !props.readOnly}
-                    fallback={
-                      <>
-                        <div class="mt-0.5 text-ink">{c.subject}</div>
-                        <Show when={c.body}>
-                          <pre class="m-0 mt-1 whitespace-pre-wrap font-mono text-[12px] text-ink-dim">{c.body}</pre>
-                        </Show>
-                        <Show when={c.locked && !props.readOnly}>
-                          <p class="m-0 mt-1 text-[11px] text-ink-faint">{c.locked}</p>
-                        </Show>
-                      </>
-                    }
-                  >
-                    <div class="relative mt-1">
-                      <input
-                        class="w-full border border-rule bg-vellum-night px-2 py-1 font-mono text-[12.5px] text-ink focus:border-gold-deep focus:outline-none"
-                        value={w().subject}
-                        onInput={(e) => edit(c, { ...w(), subject: e.currentTarget.value })}
-                        onKeyDown={saveKey}
-                        aria-label={`subject of ${c.short.slice(0, 7)}`}
-                      />
-                      <span class="pointer-events-none absolute right-2 top-1.5 text-[10px]" classList={{ "text-ember": wordsLength(w().subject) > SUBJECT_LIMIT, "text-ink-faint": wordsLength(w().subject) <= SUBJECT_LIMIT }}>
-                        {wordsLength(w().subject)}
-                      </span>
+        <Show when={o()!.commits.length} fallback={<p class="m-0 text-ink-faint">no commits</p>}>
+          <ol class="m-0 list-none p-0">
+            <For each={o()!.commits}>
+              {(c) => {
+                const w = () => value(c);
+                const editable = () => !c.locked && !props.readOnly;
+                const edited = () => !!mine()?.has(c.sha) && changed(props.branchId).some((x) => x.sha === c.sha);
+                return (
+                  <li class="group">
+                    <For each={addresses(w().body)}>{(a) => <div class="pl-16 text-[11px] text-gold-leaf">addresses {a}</div>}</For>
+                    <div class="flex items-baseline gap-2">
+                      <code class="shrink-0 text-[11px]" classList={{ "text-ink-faint": c.pushed, "text-gold-leaf": !c.pushed }} title={`${c.date} · ${c.pushed ? "pushed" : "local"}${c.locked ? ` · ${c.locked}` : ""}`}>
+                        {c.short.slice(0, 7)}
+                      </code>
+                      <Show when={editable()} fallback={<span class="min-w-0 flex-1 truncate px-2 py-0.5 text-ink-dim">{c.subject}</span>}>
+                        <input
+                          class={`${FIELD} min-w-0 flex-1 py-0.5 text-[12.5px] text-ink-dim focus:text-ink`}
+                          value={w().subject}
+                          onInput={(e) => edit(c, { ...w(), subject: e.currentTarget.value })}
+                          onKeyDown={saveKey}
+                          aria-label={`subject of ${c.short.slice(0, 7)}`}
+                        />
+                      </Show>
+                      <Show when={edited()}>
+                        <span class="text-[10.5px] text-gold-leaf">edited</span>
+                      </Show>
+                      <Show when={w().body.trim()}>
+                        <span class="text-[10.5px] text-ink-faint group-focus-within:hidden" title="has a body — click the subject to see it">¶</span>
+                      </Show>
                     </div>
-                    <textarea
-                      class="mt-1 w-full resize-y border border-rule bg-vellum-night px-2 py-1 font-mono text-[12px] text-ink-dim focus:border-gold-deep focus:outline-none"
-                      rows={Math.min(14, Math.max(2, w().body.split("\n").length + 1))}
-                      value={w().body}
-                      placeholder="why"
-                      onInput={(e) => edit(c, { ...w(), body: e.currentTarget.value })}
-                      onKeyDown={saveKey}
-                      aria-label={`body of ${c.short.slice(0, 7)}`}
-                    />
-                    {hintChips(hints(), c.sha)}
-                  </Show>
-                </li>
-              );
-            }}
-          </For>
-        </ol>
+                    <Show when={editable()}>
+                      <textarea
+                        class={`${FIELD} mb-2 ml-14 !w-[calc(100%-3.5rem)] hidden resize-y text-[12px] text-ink-dim group-focus-within:block`}
+                        rows={Math.min(14, Math.max(2, w().body.split("\n").length + 1))}
+                        value={w().body}
+                        placeholder="why"
+                        onInput={(e) => edit(c, { ...w(), body: e.currentTarget.value })}
+                        onKeyDown={saveKey}
+                        aria-label={`body of ${c.short.slice(0, 7)}`}
+                      />
+                    </Show>
+                  </li>
+                );
+              }}
+            </For>
+          </ol>
+        </Show>
       </Show>
       <Show when={pending() && !props.readOnly}>
         <div class="sticky bottom-0 flex items-center gap-3 border-t border-rule bg-vellum-raise py-2">
@@ -189,4 +200,25 @@ export default function Commits(props: { branchId: string; readOnly?: boolean; l
       </Show>
     </Show>
   );
+}
+
+const FIELD = "w-full border border-transparent bg-transparent px-2 py-1 font-mono hover:border-rule focus:border-gold-deep focus:bg-vellum-night focus:outline-none";
+
+/** hints the PR title already carries when the opening commit's subject is the title */
+const TITLE_HINTS = new Set(["empty", "wip", "long", "scope", "type"]);
+
+/** A hint as the issues line says it: a few words, the fix button doing the rest. */
+function short(h: Hint): string {
+  const n = /^(\d+) chars/.exec(h.text)?.[1];
+  const words: Record<string, string> = {
+    long: `long (${n}/${SUBJECT_LIMIT})`,
+    plan: "forest block",
+    wip: "placeholder",
+    empty: "empty",
+    scope: "scope",
+    type: "no type:",
+    bare: "prefix on a follow-up",
+    prose: "long body",
+  };
+  return words[h.id] ?? h.text;
 }

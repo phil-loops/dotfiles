@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { bare, bodyHints, hasPlan, hintsFor, prefixOf, stripPlan, withScope } from "./outlineHints.ts";
+import { bare, bodyHints, hasPlan, hintsFor, joinTemplate, prefixOf, splitTemplate, stripPlan, withScope } from "./outlineHints.ts";
 
 const ids = (h: { id: string }[]) => h.map((x) => x.id);
 
@@ -67,4 +67,13 @@ test("a PR body: the plan block is flagged, long prose noted, the template not c
   assert.deepEqual(bodyHints("👋 fare thee well\n\n" + tpl, tpl), []);
   assert.deepEqual(bodyHints("why\n\nPart of a stack, in merge order:\n  1. #1\n\n" + tpl, tpl).map((h) => h.id), ["plan"]);
   assert.deepEqual(bodyHints("x".repeat(300) + "\n\n" + tpl, tpl).map((h) => h.id), ["prose"]);
+});
+
+test("a PR body splits into Phil's lines and the template from its first rule, and rejoins", () => {
+  const tpl = "---\n👮 Traffic Cop\n\n- [ ] Tested in staging";
+  assert.deepEqual(splitTemplate(`why it matters\n\n${tpl}`), { own: "why it matters", template: tpl });
+  assert.deepEqual(splitTemplate(`\n${tpl}`), { own: "", template: tpl });
+  assert.deepEqual(splitTemplate("just a why"), { own: "just a why", template: "" });
+  assert.equal(joinTemplate("new why", tpl), `new why\n\n${tpl}`);
+  assert.equal(joinTemplate("", tpl), tpl);
 });
