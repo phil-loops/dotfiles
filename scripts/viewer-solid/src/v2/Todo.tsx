@@ -63,10 +63,9 @@ export default function Todo() {
     <Show when={world.ready} fallback={<p class="px-4 pl-11 text-ink-faint">reading the tracker…</p>}>
       <div data-paint="todo" class="relative mx-auto max-w-[1080px]">
         <p class="m-0 mb-6 px-4 pl-11 text-ink-dim">
-          {open()} open · {keyOf("todo.open")} opens one, {keyOf("todo.start")} starts, {keyOf("todo.done")} done, {keyOf("todo.drop")} drops,{" "}
-          {keyOf("todo.up")}/{keyOf("todo.down")} reorder · <code class="text-ink-faint">/next</code> ranks the rest
+          {open()} open · <code class="text-ink-faint">/next</code> ranks
         </p>
-        <For each={model.todos()} fallback={<p class="px-4 pl-11 text-ink-faint">nothing tracked — canopy-todo add "…"</p>}>
+        <For each={model.todos()} fallback={<p class="px-4 pl-11 text-ink-faint">nothing tracked</p>}>
           {(s) => (
             <section class="mb-7">
               <h2 class="m-0 mb-1 px-4 pl-11 text-[11px] font-normal uppercase tracking-[0.14em]" classList={{ "text-gold-leaf": s.section === "decide", "text-ink-faint": s.section !== "decide" }}>

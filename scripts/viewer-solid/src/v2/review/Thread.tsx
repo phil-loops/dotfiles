@@ -69,12 +69,12 @@ export function ThreadView(props: { id: string; selected: (k: string | undefined
           </Show>
           <Show when={t().fixedBy?.length}>
             <span class="rv-chip rv-chip-gold" title="a commit declares it addresses this thread (its Addresses: trailer)">
-              addressed by {t().fixedBy.map((f) => f.short).join(", ")} — {t().fixedBy[0].subject}
+              fixed in {t().fixedBy.map((f) => f.short).join(", ")}
             </span>
           </Show>
           <Show when={by() && !t().outdated && !t().fixedBy?.length}>
             <span class="rv-chip rv-chip-gold" title="a local commit since the PR head changed these lines">
-              addressed by {by() ? short(by()!) : "a local change"}?
+              changed in {by() ? short(by()!) : "a local commit"}?
             </span>
           </Show>
           <Show when={t().applying}>
@@ -150,10 +150,7 @@ function NoteView(props: { t: Thread }) {
         <span class="rv-note-mark">second reader</span>
         <span class={`rv-verdict-${n().verdict}`}>{VERDICT[n().verdict]}</span>
         <Show when={places()}>
-          <span>· same issue in {places()} place{places() === 1 ? "" : "s"}</span>
-        </Show>
-        <Show when={n().draftReply}>
-          <span class="text-ink-faint">· {keyOf("review.note.insert")} inserts its reply</span>
+          <span>· {places()} more like it</span>
         </Show>
         <span class="text-ink-faint">{open() ? "▾" : "▸"}</span>
       </button>
@@ -217,9 +214,9 @@ export function PendingView(props: { item: Item; selected: (k: string | undefine
         <span class="rv-author">{pg.conv()?.viewer || "you"}</span>
         <span class="rv-chip rv-chip-gold">
           {it().waitingFix
-            ? "waits for a commit that addresses it"
+            ? "waits for its fix"
             : it().state === "waiting"
-              ? `waits for ${it().waitsFor.map(short).join(", ")} to reach origin`
+              ? `waits for push`
               : SAYS[it().state]}
         </span>
         <Show when={it().kind === "comment" && it().startLine}>

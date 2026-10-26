@@ -58,7 +58,7 @@ export default function Review() {
               <FileTree />
               <div class="rv-files" data-paint={loaded() ? "review" : undefined} onPointerMove={notePointer}>
                 <Show when={loaded()} fallback={<p class="rv-quiet">{pg.loadErr() ? `couldn't read the diff — ${pg.loadErr()}` : "reading the diff…"}</p>}>
-                  <Show when={pg.files().length} fallback={<p class="rv-quiet">nothing changes on this branch</p>}>
+                  <Show when={pg.files().length} fallback={<p class="rv-quiet">no changes</p>}>
                     <For each={pg.files()}>{(f) => <FileBlock file={f} selected={selected} />}</For>
                     <Elsewhere selected={selected} />
                   </Show>
@@ -113,7 +113,7 @@ function Header() {
         <Show when={c()}>
           <Show when={drafts()}>
             <button class="rv-quietbtn mr-3" onClick={bind("review.send.all")}>
-              {drafts()} draft{drafts() === 1 ? "" : "s"} only here · <kbd>{keyOf("review.send.all")}</kbd> sends
+              {drafts()} draft{drafts() === 1 ? "" : "s"} · <kbd>{keyOf("review.send.all")}</kbd> send
             </button>
           </Show>
           <button class="rv-finish" classList={{ "rv-finish-on": pending() > 0 }} onClick={bind("review.finish")} title="your pending review is private until you submit it on GitHub">
@@ -140,7 +140,7 @@ function Header() {
           </Show>
         </Show>
         <Show when={!c() && world.ready}>
-          <span class="text-ink-faint">no open PR — the diff, without conversations</span>
+          <span class="text-ink-faint">no PR</span>
         </Show>
       </div>
       <nav class="rv-tabs">
@@ -181,10 +181,10 @@ function History() {
   return (
     <div class="rv-history" classList={{ "rv-history-focus": focused() }}>
       <div class="mb-1 text-[10.5px] text-ink-faint">
-        {focused() ? `j/k steps · ${keyOf("history.enter")} reads it · esc what a push sends` : `${keyOf("commit.back")} back to the list`}
+        {focused() ? "" : `${keyOf("commit.back")} list`}
       </div>
       <button class="rv-hrow" classList={{ "rv-hrow-on": on(null) }} onClick={bind("history.select", "")}>
-        What a push sends
+        to push
       </button>
       <For each={rows()} fallback={<p class="rv-quiet">{pg.history() ? "no commits of its own" : "reading the commits…"}</p>}>
         {(c) => (
@@ -208,7 +208,7 @@ function CommitHead() {
     <div class="rv-commit-head">
       <code class="text-gold-leaf">{pg.commitScope()?.slice(0, 7)}</code> <span class="text-ink">{c()?.subject}</span>
       <span class="text-ink-faint">
-        {" "}· {c()?.author} · {c()?.date} · {c()?.pushed === false ? "local" : "pushed"} · read-only · {keyOf("history.exit")} all changes
+        {" "}· {c()?.author} · {c()?.date} · {c()?.pushed === false ? "local" : "pushed"} · read-only
       </span>
       <Show when={c()?.body}>
         <pre class="m-0 mt-1 whitespace-pre-wrap font-mono text-[12px] text-ink-dim">{c()!.body}</pre>
@@ -313,7 +313,7 @@ function FileBlock(props: { file: FileDiff; selected: (k: string | undefined) =>
           <button class="rv-quietbtn" onClick={bind("review.outdated")}>{hiddenOutdated()} outdated · {keyOf("review.outdated")}</button>
         </Show>
         <span class="rv-viewed">
-          {fv()?.viewed ? "Viewed" : fv()?.seen ? `${fv()!.seen} of ${fv()!.blocks.length} changes viewed` : ""}
+          {fv()?.viewed ? "viewed" : fv()?.seen ? `${fv()!.seen}/${fv()!.blocks.length} viewed` : ""}
         </span>
       </div>
       <Show when={!fv()?.viewed}>
@@ -468,7 +468,7 @@ function Elsewhere(props: { selected: (k: string | undefined) => boolean }) {
     <Show when={pg.elsewhere().length}>
       <section class="rv-file">
         <div class="rv-fhead">
-          <span class="rv-fpath text-ink-dim">conversations on files this branch no longer changes</span>
+          <span class="rv-fpath text-ink-dim">threads on files it no longer changes</span>
         </div>
         <For each={pg.elsewhere()}>{(t) => <ThreadView id={t.id} selected={props.selected} aside />}</For>
       </section>

@@ -55,21 +55,21 @@ function PushStatus(props: { count: number; pushable: boolean }) {
         fallback={
           <Show when={props.count}>
             <button class="rv-btn rv-btn-gold" disabled={!props.pushable} onClick={bind("review.push", id())}>
-              {armed() === id() ? `${keyOf("review.push")} again sends ${props.count} commit${props.count === 1 ? "" : "s"} to origin` : `Push ${props.count} commit${props.count === 1 ? "" : "s"}`}{" "}
+              {armed() === id() ? `${keyOf("review.push")} again to push` : `push ${props.count}`}{" "}
               <kbd>{keyOf("review.push")}</kbd>
             </button>
             <Show when={!props.pushable}>
-              <span class="ml-3 text-ink-faint">{v()?.b.gates !== "green" ? "waits for the gates to go green on this tip" : "nothing to push yet"}</span>
+              <span class="ml-3 text-ink-faint">{v()?.b.gates !== "green" ? "gates not green" : "nothing to push"}</span>
             </Show>
           </Show>
         }
       >
         <Switch>
           <Match when={run()!.state === "sending"}>
-            <span class="text-gold-leaf animate-breathe">◌ pushing {sent()} commit{sent() === 1 ? "" : "s"} to origin · {secs()}</span>
+            <span class="text-gold-leaf animate-breathe">◌ pushing · {secs()}</span>
           </Match>
           <Match when={run()!.state === "landing"}>
-            <span class="text-patina">✓ on origin</span> <span class="text-ink-faint">· the page is catching up · {secs()}</span>
+            <span class="text-patina">✓ pushed</span> <span class="text-ink-faint">· {secs()}</span>
           </Match>
           <Match when={run()!.state === "done"}>
             <span class="text-patina">✓ {sent()} commit{sent() === 1 ? "" : "s"} on </span>
@@ -132,21 +132,21 @@ export default function Outgoing() {
   return (
     <div class="rv-outgoing">
       <div class="rv-commit-head">
-        <Show when={b()} fallback={<span class="text-ink-faint">this branch isn't local</span>}>
+        <Show when={b()} fallback={<span class="text-ink-faint">not local</span>}>
           <span class="text-ink">
             {unpushed().length
-              ? `${unpushed().length} commit${unpushed().length === 1 ? "" : "s"} leave${unpushed().length === 1 ? "s" : ""} for origin/${leaf(b()!.name)}`
-              : "nothing to push — origin has every commit"}
+              ? `${unpushed().length} to push`
+              : "nothing to push"}
           </span>
           <span class="text-ink-faint">
-            {" "}· {v()?.pr ? `follow-ups onto #${v()!.pr!.number}` : "a first push — then the PR"} · tip <code>{short(b()!.tip)}</code> · gates {b()!.gates} on it
+            {" "}· {v()?.pr ? `onto #${v()!.pr!.number}` : "first push"} · <code>{short(b()!.tip)}</code> · gates {b()!.gates === "green" ? "✓" : b()!.gates}
           </span>
           <PushStatus count={unpushed().length} pushable={pushable()} />
         </Show>
       </div>
 
-      <div class="rv-words-k">gates on this tip</div>
-      <Show when={rows().length} fallback={<p class="rv-quiet">{progress.loading ? "reading the gates…" : "no gates run for this tip yet"}</p>}>
+      <div class="rv-words-k">gates</div>
+      <Show when={rows().length} fallback={<p class="rv-quiet">{progress.loading ? "reading the gates…" : "not run"}</p>}>
         <ol class="m-0 mb-4 list-none p-0">
           <For each={rows()}>
             {(g) => (
@@ -155,7 +155,7 @@ export default function Outgoing() {
                   {MARK[g.state]}
                 </span>
                 <span class="w-24 text-ink">{g.name}</span>
-                <span class="w-24 text-ink-faint">{g.state === "stopped" ? "stopped, no result" : g.state}</span>
+                <span class="w-24 text-ink-faint">{g.state === "stopped" ? "stopped" : g.state}</span>
                 <span class="w-16 text-right text-ink-faint">{secs(g.ms)}</span>
                 <span class="min-w-0 flex-1 truncate text-ink-faint">{g.summary}</span>
               </li>
@@ -169,11 +169,11 @@ export default function Outgoing() {
       </Show>
 
       <Show when={riding().length || unpushed().some((c) => addressedBy(c.sha).some(unanswered))}>
-        <div class="rv-words-k">replies that ride the push</div>
+        <div class="rv-words-k">replies</div>
         <For each={unpushed().flatMap((c) => addressedBy(c.sha).filter(unanswered).map((t) => ({ c, t })))}>
           {({ c, t }) => (
             <div class="mb-1 text-[12.5px]">
-              <span class="text-ink-faint">{t.comments[0]?.author} on {t.path.split("/").pop()}:{t.local?.line ?? t.line} — addressed by {c.sha.slice(0, 7)}, nothing drafted · </span>
+              <span class="text-ink-faint">{t.comments[0]?.author} on {t.path.split("/").pop()}:{t.local?.line ?? t.line} · </span>
               <button class="rv-quietbtn" onClick={bind("review.address.reply", t.id)}>
                 draft "done in {c.sha.slice(0, 7)}"
               </button>
@@ -184,13 +184,13 @@ export default function Outgoing() {
           {(it) => (
             <div class="mb-1 text-[12.5px]">
               <span class="text-ink">{withFix(it)}</span>
-              <span class="text-ink-faint"> · {it.waitingFix ? "waits for a commit that addresses it" : it.err ? it.err : "into your pending review once the push lands"}</span>
+              <span class="text-ink-faint"> · {it.waitingFix ? "waits for its fix" : it.err ? it.err : "after the push"}</span>
             </div>
           )}
         </For>
       </Show>
       <Show when={story().length}>
-        <div class="rv-words-k mt-4">the change, commit by commit</div>
+        <div class="rv-words-k mt-4">commits</div>
         <For each={story()}>
           {(c) => {
             const files = () => filesOf(c.sha);
@@ -207,19 +207,19 @@ export default function Outgoing() {
                     {(t) => <div class="mt-1 text-[12px] text-gold-leaf">addresses {t.comments[0]?.author} on {t.path.split("/").pop()}:{t.local?.line ?? t.line}</div>}
                   </For>
                 </div>
-                <Show when={diffs().has(c.sha)} fallback={<p class="rv-quiet">reading its diff…</p>}>
+                <Show when={diffs().has(c.sha)} fallback={<p class="rv-quiet">…</p>}>
                   <Show
                     when={!isFolded(c.sha, changed())}
                     fallback={
                       <button class="rv-hrow" onClick={bind("inline.fold", `${c.sha} ${changed()}`)}>
                         {files().length} file{files().length === 1 ? "" : "s"} · <span class="text-add">+{files().reduce((n, f) => n + f.add, 0)}</span>{" "}
-                        <span class="text-del">−{files().reduce((n, f) => n + f.del, 0)}</span> · folded (over {FOLD_OVER} lines) — show it
+                        <span class="text-del">−{files().reduce((n, f) => n + f.del, 0)}</span> · show
                       </button>
                     }
                   >
                     <Show when={changed() > FOLD_OVER}>
                       <button class="rv-quietbtn mb-1" onClick={bind("inline.fold", `${c.sha} ${changed()}`)}>
-                        fold it
+                        fold
                       </button>
                     </Show>
                     <For each={files()}>{(f) => <InlineDiff sha={c.sha} file={f} stable={stable(c.sha, f.path)} />}</For>

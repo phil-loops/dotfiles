@@ -31,7 +31,7 @@ export default function App() {
         <span class="font-display text-[22px] text-gold-leaf">canopy</span>
         <span class="text-ink-faint">{surface().title.toLowerCase()}</span>
         <span class="flex-1" />
-        <span class="text-ink-faint">space · commands &nbsp; ? · keys</span>
+        <span class="text-ink-faint">space menu · ? keys</span>
         <span
           class="inline-block h-[7px] w-[7px] rounded-full"
           classList={{ "bg-patina": world.conn === "live", "bg-ink-faint": world.conn === "connecting", "bg-ember": world.conn === "down" }}

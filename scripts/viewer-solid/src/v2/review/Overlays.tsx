@@ -18,7 +18,7 @@ export function Words() {
   return (
     <aside class="rv-words" role="dialog" aria-label="The words">
       <div class="rv-sheet-head">
-        The words <span class="text-ink-faint">· {keyOf("review.words")} closes</span>
+        words
       </div>
       <div class="rv-words-k">description</div>
       <p class="font-display text-[16px] italic">{desc() || "—"}</p>
@@ -74,12 +74,12 @@ export function MapOverlay() {
     <div class="rv-scrim">
       <div class="rv-map" ref={box} tabIndex={0} onKeyDown={onKey} role="dialog" aria-label="The forest">
         <div class="rv-sheet-head">
-          The forest <span class="text-ink-faint">· j/k · ↵ opens · esc ·</span>{" "}
+          forest{" "}
           <button class="rv-quietbtn" onClick={bind("review.leave", pg.id())}>
-            p its page
+            p page
           </button>
         </div>
-        <For each={rows()} fallback={<p class="text-ink-faint">nothing else to review</p>}>
+        <For each={rows()} fallback={<p class="text-ink-faint">nothing else</p>}>
           {(r, n) => (
             <button
               class="rv-map-row"
@@ -146,19 +146,19 @@ export function AddressSheet() {
           fallback={
             <>
               <button class="rv-map-row" onClick={bind("review.address.claude", id())}>
-                <span class="text-gold-leaf">↵ c</span> Hand it to Claude — drafted into a new session in the branch, you send it
+                <span class="text-gold-leaf">↵ c</span> claude
               </button>
               <button class="rv-map-row" onClick={bind("review.address.helix", id())}>
-                <span class="text-gold-leaf">o</span> Fix it yourself in Helix — then E here picks the commit
+                <span class="text-gold-leaf">o</span> helix
               </button>
               <button class="rv-map-row" onClick={bind("review.address.pick.list", id())}>
-                <span class="text-gold-leaf">p</span> Pick the commit that fixes it
+                <span class="text-gold-leaf">p</span> pick its commit
               </button>
             </>
           }
         >
           <Show when={o()} fallback={<p class="text-ink-faint">{o.loading ? "reading the commits…" : "couldn't read the commits"}</p>}>
-            <For each={candidates()} fallback={<p class="text-ink-faint">no unpushed commit to pick — commit the fix first (esc)</p>}>
+            <For each={candidates()} fallback={<p class="text-ink-faint">no unpushed commits</p>}>
               {(c, i) => (
                 <button class="rv-map-row" onClick={bind("review.address.pick", `${id()} ${c.sha}`)}>
                   <span class="text-gold-leaf">{i() + 1}</span> <code class="text-gold-leaf">{c.short.slice(0, 7)}</code> {c.subject}

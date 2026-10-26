@@ -63,7 +63,7 @@ function MenuBody() {
           class="w-full border-0 border-b border-rule bg-transparent px-4 py-3 outline-none placeholder:text-ink-faint"
         />
         <ul class="m-0 max-h-[50vh] list-none overflow-auto p-1">
-          <For each={items()} fallback={<li class="px-3 py-2 text-ink-faint">no command matches</li>}>
+          <For each={items()} fallback={<li class="px-3 py-2 text-ink-faint">no match</li>}>
             {(c, n) => (
               <li>
                 <button

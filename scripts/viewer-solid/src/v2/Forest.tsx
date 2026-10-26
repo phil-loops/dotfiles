@@ -26,9 +26,9 @@ function Branch(props: { v: BranchView }) {
     const pr = props.v.pr;
     if (pr) out.push(`#${pr.number}${pr.draft ? " draft" : ""}${pr.approvals ? ` · ${pr.approvals} approval${pr.approvals === 1 ? "" : "s"}` : ""}`);
     else if (b().commits) out.push(b().gates === "red" && b().redGates.length ? `red: ${b().redGates.join(", ")}` : GATES[b().gates]);
-    if (b().pushed === "ahead") out.push(`${b().ahead} ahead of origin`);
+    if (b().pushed === "ahead") out.push(`${b().ahead} to push`);
     const n = openThreads(props.v);
-    if (n) out.push(`${n} open conversation${n === 1 ? "" : "s"}`);
+    if (n) out.push(`${n} open`);
     if (props.v.st.ship === "approved" && props.v.st.waiting[0]) out.push(`waiting on ${props.v.st.waiting[0].label}`);
     return out;
   });
@@ -83,13 +83,13 @@ export default function Forest() {
   const counts = () => {
     const bs = f()?.branches ?? [];
     const by = (s: string) => bs.filter((v) => v.st.ship === s).length;
-    return [`${bs.length} branch${bs.length === 1 ? "" : "es"}`, by("landed") && `${by("landed")} landed`, f()?.ready.length && `${f()!.ready.length} ready for you`]
+    return [`${bs.length} branch${bs.length === 1 ? "" : "es"}`, by("landed") && `${by("landed")} landed`, f()?.ready.length && `${f()!.ready.length} ready`]
       .filter(Boolean)
       .join(" · ");
   };
   return (
     <Show when={world.ready} fallback={<p class="px-4 pl-11 text-ink-faint">reading the forest…</p>}>
-      <Show when={p()} fallback={<p class="px-4 pl-11 text-ink-faint">no such forest — {keyOf("forest.leave")} goes back to Forests</p>}>
+      <Show when={p()} fallback={<p class="px-4 pl-11 text-ink-faint">no such forest</p>}>
         <div data-paint="forest" class="relative mx-auto max-w-[980px]">
           <header class="mb-6 px-4 pl-11">
             <h1 class="m-0 font-display text-[26px] font-normal text-ink">
@@ -102,7 +102,7 @@ export default function Forest() {
               <p class="m-0 mt-1 text-ink-dim">{p()!.summary}</p>
             </Show>
             <p class="m-0 mt-2 text-[12px] text-ink-faint">
-              {p()!.state} · {counts()} · {keyOf("forest.face")} {forestFace() === "story" ? "its branches" : "the story"} · {keyOf("forest.words")} the words · {keyOf("branch.open")} opens · {keyOf("forest.leave")} back
+              {p()!.state} · {counts()}
             </p>
           </header>
           <Show

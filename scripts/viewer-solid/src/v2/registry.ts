@@ -35,6 +35,10 @@ export interface Command {
   scope: Scope;
   budget: BudgetClass;
   keys?: string[];
+  /** one word for the hint line ("line", "reply"); the title's first clause when absent */
+  label?: string;
+  /** its opposite (next ↔ previous): the hint line shows the two as one, "j/k line" */
+  pair?: string;
   /** keys a component handles itself (the comment box's ⌘↵): shown in the ? sheet, never bound */
   hint?: string[];
   /** v1 telemetry ids this replaces, so the dashboard can put the two side by side */
