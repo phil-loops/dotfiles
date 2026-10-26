@@ -3,11 +3,15 @@ import { createKeymap, keyName } from "./keys";
 import { liveScopes } from "./model";
 import { commands } from "./registry";
 import { dispatch } from "./runner";
-import { menuOpen, setPendingKeys } from "./ui";
+import { menuOpen, setPendingKeys, setShiftHeld } from "./ui";
 
 export function installKeys(): void {
   const keymap = createKeymap(commands().filter((c) => c.keys?.length).map((c) => ({ id: c.id, keys: c.keys!, scope: c.scope })));
   let pendingTimer: number | undefined;
+  // ⇧ alone shows its layer in the hint line; any other key (or leaving the window) ends it
+  document.addEventListener("keydown", (e) => setShiftHeld(e.key === "Shift"), true);
+  document.addEventListener("keyup", (e) => e.key === "Shift" && setShiftHeld(false), true);
+  window.addEventListener("blur", () => setShiftHeld(false));
   document.addEventListener("keydown", (e) => {
     if (menuOpen()) return; // the menu owns the keyboard while it's open
     const t = e.target as HTMLElement | null;

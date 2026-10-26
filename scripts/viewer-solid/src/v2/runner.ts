@@ -41,6 +41,22 @@ export interface RunOpts {
   arg?: unknown;
   /** set when `u` runs an inverse, so it doesn't stack an inverse of its own */
   undoing?: boolean;
+  /** the command the key named, when a route sent it on to another (the push key → arm/confirm) */
+  from?: string;
+}
+
+// ── what a key just did: the on-screen key labels light for a moment ──
+
+/** The command a key just ran (ok) or that had nothing to do (not ok), for ~half a second. */
+const [fired, setFired] = createSignal<{ id: string; ok: boolean; at: number } | null>(null);
+export { fired };
+let firedTimer: number | undefined;
+function echo(id: string, via: Via, ok: boolean): void {
+  if (via !== "key") return;
+  const at = Date.now();
+  setFired({ id, ok, at });
+  clearTimeout(firedTimer);
+  firedTimer = window.setTimeout(() => setFired((f) => (f?.at === at ? null : f)), ok ? 600 : 1400);
 }
 
 /** Run a registered command. Never awaited by callers — the UI has already moved. */
@@ -49,25 +65,29 @@ export function dispatch(id: string, via: Via, opts: RunOpts = {}): void {
   if (!cmd) return;
   if (via === "key") noteKeyUse(id);
   if (via === "menu" || via === "palette") setMenuOpen(false);
+  const named = opts.from ?? id;
   if (cmd.route) {
     const next = cmd.route(opts.target ?? targetFor(cmd.scope));
-    if (next && next !== id) dispatch(next, via, opts);
+    if (next && next !== id) dispatch(next, via, { ...opts, from: named });
+    else echo(named, via, false);
     return;
   }
   const t0 = opts.event?.timeStamp ?? performance.now();
   const target = opts.target ?? targetFor(cmd.scope);
-  if (cmd.available && !cmd.available(target)) return;
+  if (cmd.available && !cmd.available(target)) return echo(named, via, false);
   const base = { type: "cmd", id, budget: cmd.budget, via, ...(target ? { target } : {}) };
   const feedback = nextPaint(t0);
 
   if (cmd.local) {
     try {
       cmd.local(target, opts.event, opts.arg);
+      echo(named, via, true);
       void feedback.then((feedbackMs) => emit({ ...base, outcome: "ok", feedbackMs, settledMs: null }));
     } catch (e) {
       // a local command throws to refuse ("nothing to undo"); the message is the quiet line
       const err = e instanceof Error ? e.message : String(e);
       say(err);
+      echo(named, via, false);
       void feedback.then((feedbackMs) => emit({ ...base, outcome: "refused", err: err.slice(0, 48), feedbackMs, settledMs: null }));
     }
     return;
@@ -82,6 +102,7 @@ export function dispatch(id: string, via: Via, opts: RunOpts = {}): void {
     void feedback.then((feedbackMs) => emit({ ...base, outcome: "refused", err: err.slice(0, 48), feedbackMs, settledMs: null }));
     return;
   }
+  echo(named, via, !!w);
   if (!w) return;
   const runKey = `${id}|${target ?? ""}`;
   const started = Date.now();
