@@ -50,6 +50,27 @@ command({
   },
 });
 command({
+  id: "branch.gates.skip",
+  title: "Skip a red gate for this code and re-run the rest",
+  scope: "branch",
+  budget: "local",
+  quiet: true,
+  write: (target): Write | null => {
+    const [id, list] = target.split(" ");
+    const v = bv(id);
+    const skip = (list ?? "").split(",").filter(Boolean);
+    if (!v || !skip.length) return null;
+    return {
+      ops: [{ type: "branch", id, fields: { gates: "running" } }],
+      path: atRepo(v.b.repo, "/gates"),
+      body: { branch: v.b.name, detach: true, skip },
+      settled: () => world.entities.branch[id]?.gates !== v.b.gates,
+      said: `skipping ${skip.join(", ")} for this code — the rest re-run`,
+      failed: "the gates didn't start",
+    };
+  },
+});
+command({
   id: "branch.gates.wait",
   title: "The gates are running",
   scope: "branch",

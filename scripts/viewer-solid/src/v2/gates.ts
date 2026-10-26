@@ -9,6 +9,8 @@ export interface GateEvent {
   ok?: boolean;
   ms?: number;
   ts?: number;
+  /** a waived gate: green by decision, not by passing (skipped by Phil, or unsatisfiable) */
+  warn?: string;
 }
 export interface Progress {
   running: boolean;
@@ -19,7 +21,7 @@ export interface Progress {
 }
 export interface GateRow {
   name: string;
-  state: "queued" | "running" | "green" | "red" | "stopped";
+  state: "queued" | "running" | "green" | "waived" | "red" | "stopped";
   /** how long it ran, or has been running (ms) */
   ms: number | null;
   summary?: string;
@@ -33,6 +35,7 @@ export function gateRows(p: Progress | null | undefined, now: number): GateRow[]
   const summaries = new Map(((result?.gates ?? []) as { name: string; summary?: string }[]).map((g) => [g.name, g.summary]));
   return plan.map((name) => {
     const done = ev.find((e) => e.event === "done" && e.gate === name);
+    if (done?.warn) return { name, state: "waived", ms: done.ms ?? null, summary: done.warn };
     if (done) return { name, state: done.ok ? "green" : "red", ms: done.ms ?? null, summary: summaries.get(name) || undefined };
     const start = ev.find((e) => e.event === "start" && e.gate === name);
     if (start) return { name, state: p?.running ? "running" : "stopped", ms: start.ts ? Math.max(0, (now - start.ts) * 1000) : null };

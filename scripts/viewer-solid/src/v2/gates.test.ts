@@ -20,3 +20,8 @@ test("a finished run carries each gate's summary", () => {
   assert.deepEqual(rows.map((r) => `${r.name}:${r.state}`), ["env:green", "typecheck:red", "tests:green"]);
   assert.equal(rows[1].summary, "3 errors");
 });
+
+test("a waived gate reads as waived with its reason, not as a pass", () => {
+  const rows = gateRows({ running: false, events: [{ event: "plan", gates: ["tests"] }, { event: "done", gate: "tests", ok: true, ms: 0, warn: "tests skipped by you" }] }, 0);
+  assert.deepEqual(rows, [{ name: "tests", state: "waived", ms: 0, summary: "tests skipped by you" }]);
+});
