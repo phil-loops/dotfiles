@@ -198,7 +198,7 @@ export const page = createRoot(() => {
   );
   createEffect(
     on(tab, (t) => {
-      if (t === "commits") void loadHistory();
+      if (t === "commits") void loadHistory(true);
       else if (commitScope() != null) void showCommit(null);
       setHistoryFocus("list");
     }),
@@ -218,20 +218,29 @@ export const page = createRoot(() => {
   };
 
   const scoped = () => commitScope() != null;
-  const files = createMemo<FileDiff[]>(() => {
-    const src = scoped() ? (commitFiles()?.sha === commitScope() ? commitFiles()!.files : []) : (payload()?.data.files ?? []);
-    return src.map((f) => ({ ...parsePatch(f.path, f.patch || ""), add: f.add, del: f.del }));
-  });
+  const parse = (fs: NodeFile[]): FileDiff[] => fs.map((f) => ({ ...parsePatch(f.path, f.patch || ""), add: f.add, del: f.del }));
+  /** the whole branch's files, whichever commit the diff is showing — what the header counts */
+  const branchFiles = createMemo(() => parse(payload()?.data.files ?? []));
+  const files = createMemo<FileDiff[]>(() => (scoped() ? parse(commitFiles()?.sha === commitScope() ? commitFiles()!.files : []) : branchFiles()));
 
   /** The branch's own commits, newest first (GET /commits): the history list. */
   /** the history's freshness: the tip, and what origin has — a push changes the second, not the first */
   const historyKey = () => `${keyOf()}|${branch()?.pushed ?? ""}|${branch()?.ahead ?? ""}`;
-  async function loadHistory(): Promise<void> {
+  /** `pick`: opening the tab with nothing to push shows the newest commit rather than an empty push pane */
+  async function loadHistory(pick = false): Promise<void> {
     const t = target();
     const key = historyKey();
-    if (!t || history()?.key === key) return;
+    const choose = () => {
+      const rows = history()?.rows ?? [];
+      if (pick && tab() === "commits" && commitScope() == null && rows.length && branch()?.pushed !== "local" && rows.every((r) => r.pushed !== false)) void showCommit(rows[0].sha);
+    };
+    if (!t) return;
+    if (history()?.key === key) return choose();
     const rows = await getJSON<HistoryCommit[]>(atRepoPath(t.repo, `/commits?branch=${encodeURIComponent(t.name)}`)).catch(() => null);
-    if (rows && historyKey() === key) setHistory({ key, rows: rows.filter((r) => r.own) });
+    if (rows && historyKey() === key) {
+      setHistory({ key, rows: rows.filter((r) => r.own) });
+      choose();
+    }
   }
   // a push (or a fetch) changes what origin has without moving the tip: the list's pushed marks follow
   createEffect(on(historyKey, () => tab() === "commits" && void loadHistory(), { defer: true }));
@@ -256,6 +265,11 @@ export const page = createRoot(() => {
 
   const serverViewed = createMemo(() => new Set(view("viewed", id())?.keys ?? []));
   const isSeen = (key: string) => viewedOverride().get(key) ?? serverViewed().has(key);
+  /** files of the whole branch with every change viewed — the header's count while one commit is showing too */
+  const branchViewed = createMemo(() => branchFiles().filter((f) => {
+    const bs = blocksOf(f);
+    return bs.length > 0 && bs.every((x) => isSeen(x.key));
+  }).length);
   // an override the server now agrees with has done its job; dropping it lets later changes through
   createEffect(
     on(serverViewed, (srv) => {
@@ -376,7 +390,7 @@ export const page = createRoot(() => {
     fileOf, isOpen, atRow, isSeen, serverViewed, payload, loadErr, warm,
     tab, setTab, split, setSplit, showOutdated, setShowOutdated, cursor, setCursor, mark, setMark,
     unfold, setUnfold, composer, setComposer, text, setText,
-    historyOpen, historyFocus, setHistoryFocus, commitScope, history, loadHistory, showCommit, scoped,
+    historyOpen, historyFocus, setHistoryFocus, commitScope, history, loadHistory, showCommit, scoped, branchFiles, branchViewed,
     overlay, setOverlay, addressing, setAddressing, addressPicking, setAddressPicking, viewedOverride, setViewedOverride, filter, setFilter, filtering, setFiltering,
   };
 });

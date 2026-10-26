@@ -201,7 +201,8 @@
 .rv-hrow:hover { background: var(--color-vellum-raise); }
 .rv-hrow-on { border-left-color: var(--color-gold-leaf); color: var(--color-ink); background: var(--color-gold-wash); }
 .rv-history:not(.rv-history-focus) .rv-hrow-on { border-left-color: var(--color-gold-deep); }
-.rv-hsub { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rv-hsub { display: block; overflow-wrap: anywhere; }
+.rv-body-commits { --rv-tree: 360px; }
 .rv-hmeta { display: block; font-size: 10.5px; color: var(--color-ink-faint); }
 .rv-commit-head { padding: 8px 12px; margin-bottom: 10px; border: 1px solid var(--color-vellum-edge); background: var(--color-vellum-raise); font-size: 12.5px; }
 .rv-count-gold { color: var(--color-gold-leaf); }
