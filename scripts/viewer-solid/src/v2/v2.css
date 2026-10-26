@@ -205,3 +205,6 @@
 .rv-commit-head { padding: 8px 12px; margin-bottom: 10px; border: 1px solid var(--color-vellum-edge); background: var(--color-vellum-raise); font-size: 12.5px; }
 .rv-count-gold { color: var(--color-gold-leaf); }
 .rv-tabkey { font-family: var(--font-mono, monospace); font-size: 10.5px; color: var(--color-ink-faint); opacity: 0.8; }
+/* a key label lights gold for a moment when its key runs the command, then fades back */
+.rv-hintkey { transition: color 0.6s ease-out, text-shadow 0.6s ease-out; }
+.rv-hintkey.rv-fired { color: var(--color-gold-leaf); text-shadow: 0 0 6px rgba(212, 170, 80, 0.35); transition: none; }

@@ -9,6 +9,8 @@ export const [menuOpen, setMenuOpen] = createSignal(false);
 export const [sheetOpen, setSheetOpen] = createSignal(false);
 export const [showArchive, setShowArchive] = createSignal(false);
 export const [pendingKeys, setPendingKeys] = createSignal("");
+/** ⇧ is down: the hint line shows the capitals' layer until it's let go */
+export const [shiftHeld, setShiftHeld] = createSignal(false);
 export const [dashDays, setDashDays] = createSignal(30);
 
 export const [expanded, setExpanded] = createSignal<ReadonlySet<string>>(new Set());

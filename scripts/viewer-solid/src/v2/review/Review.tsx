@@ -2,6 +2,7 @@
 // boxes, the diff (unified or split) with conversations folded in at their lines — and the
 // Conversation. Everything it does is a registered command (commands/review.ts); this file draws.
 import { createEffect, createMemo, createSelector, For, Match, on, onCleanup, Show, Switch } from "solid-js";
+import Key from "../Key";
 import { keyOf } from "../registry";
 import { bind } from "../runner";
 import { view, world } from "../store";
@@ -116,7 +117,7 @@ function Header() {
             </button>
           </Show>
           <button class="rv-finish" classList={{ "rv-finish-on": pending() > 0 }} onClick={bind("review.finish")} title="your pending review is private until you submit it on GitHub">
-            {pending() ? `${pending()} pending · open on GitHub to submit` : "Open on GitHub"} <kbd>{keyOf("review.finish")}</kbd>
+            {pending() ? `${pending()} pending · open on GitHub to submit` : "Open on GitHub"} <kbd><Key id="review.finish" /></kbd>
           </button>
         </Show>
       </div>
@@ -144,25 +145,25 @@ function Header() {
       </div>
       <nav class="rv-tabs">
         <button classList={{ "rv-tab-on": pg.tab() === "conversation" }} onClick={bind("review.tab.conversation")}>
-          Conversation <span class="rv-tabkey">{keyOf("review.tab.conversation")}</span> <span class="rv-count">{(c()?.comments.length ?? 0) + (c()?.reviews.filter((r) => r.body).length ?? 0) + pg.threads().length}</span>
+          Conversation <Key id="review.tab.conversation" class="rv-tabkey" /> <span class="rv-count">{(c()?.comments.length ?? 0) + (c()?.reviews.filter((r) => r.body).length ?? 0) + pg.threads().length}</span>
         </button>
         <button classList={{ "rv-tab-on": pg.tab() === "commits" }} onClick={bind("review.tab.commits")}>
-          Commits <span class="rv-tabkey">{keyOf("review.tab.commits")}</span> <span class="rv-count">{view("branch", pg.id())?.commits ?? ""}</span>
+          Commits <Key id="review.tab.commits" class="rv-tabkey" /> <span class="rv-count">{view("branch", pg.id())?.commits ?? ""}</span>
           <Show when={(view("branch", pg.id())?.ahead ?? 0) > 0 || view("branch", pg.id())?.pushed === "local"}>
             <span class="rv-count rv-count-gold">{view("branch", pg.id())?.pushed === "local" ? "local" : `${view("branch", pg.id())!.ahead} to push`}</span>
           </Show>
         </button>
         <button classList={{ "rv-tab-on": pg.tab() === "files" }} onClick={bind("review.tab.files")}>
-          Files changed <span class="rv-tabkey">{keyOf("review.tab.files")}</span> <span class="rv-count">{pg.files().length}</span>
+          Files changed <Key id="review.tab.files" class="rv-tabkey" /> <span class="rv-count">{pg.files().length}</span>
         </button>
 
-        <span class="rv-tabkey self-center">{keyOf("review.tab")} cycles</span>
+        <span class="rv-tabkey self-center"><Key id="review.tab" /> cycles</span>
         <span class="flex-1" />
         <span class="rv-meta">
           {openThreads()} open · viewed {viewedCount()}/{pg.files().length}
         </span>
-        <button class="rv-toggle" onClick={bind("review.split")}>{pg.split() ? "split" : "unified"} <kbd>{keyOf("review.split")}</kbd></button>
-        <button class="rv-toggle" onClick={bind("review.outdated")}>{pg.showOutdated() ? "hide" : "show"} outdated <kbd>{keyOf("review.outdated")}</kbd></button>
+        <button class="rv-toggle" onClick={bind("review.split")}>{pg.split() ? "split" : "unified"} <kbd><Key id="review.split" /></kbd></button>
+        <button class="rv-toggle" onClick={bind("review.outdated")}>{pg.showOutdated() ? "hide" : "show"} outdated <kbd><Key id="review.outdated" /></kbd></button>
       </nav>
     </header>
   );
