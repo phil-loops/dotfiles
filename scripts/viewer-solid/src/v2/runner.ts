@@ -170,9 +170,9 @@ export function undoLast(): boolean {
 }
 
 /** The click handler for anything clickable: it dispatches a registered command. */
-export const bind = (id: string, target?: string, via: Via = "click") => (e: MouseEvent) => {
+export const bind = (id: string, target?: string, via: Via = "click", arg?: unknown) => (e: MouseEvent) => {
   e.stopPropagation();
-  dispatch(id, via, { target, event: e });
+  dispatch(id, via, { target, event: e, arg });
 };
 
 /** Once per page load: what exists to be used, and the budgets it's held to — the dashboard
