@@ -246,7 +246,7 @@ def fetch_pr_state():
     One batched `gh pr list` → {headRefName: {number,state,draft,url,review}}.
     GitHub is the source of truth for "merged?" (a squash-merge is invisible to
     local git by sha, which is why `landed()` is only a fragile fallback). Returns
-    {} on any gh failure so the forest still renders. Checks rollup is omitted on
+    None on any gh failure, so a GitHub 504 never reads as "no PRs". Checks rollup is omitted on
     purpose: statusCheckRollup makes gh fetch per-PR check runs (~15s for 300 PRs
     vs ~3s without) — fetch it lazily per open node instead."""
     limit = 500  # gh returns most-recent first, so the cap only drops OLDEST (inactive) PRs
@@ -256,9 +256,13 @@ def fetch_pr_state():
              "headRefName,number,state,isDraft,url,reviewDecision"],
             capture_output=True, text=True, timeout=30,
         )
-        prs = json.loads(r.stdout or "[]") if r.returncode == 0 else []
-    except Exception:
-        return {}
+        if r.returncode != 0:
+            print(f"stack-forest: pr-state gh failed: {r.stderr.strip()}", file=sys.stderr)
+            return None
+        prs = json.loads(r.stdout or "[]")
+    except Exception as e:
+        print(f"stack-forest: pr-state gh failed: {e!r}", file=sys.stderr)
+        return None
     if len(prs) >= limit:
         print(f"stack-forest: pr-state hit the {limit}-PR cap - the oldest PRs beyond it lose "
               "merged/draft badges and fall back to a slower local check; bump `limit`.",
@@ -286,7 +290,10 @@ def fetch_pr_state():
 # browser fetches this separately and overlays authoritative merged/draft/review
 # badges when it resolves (~3s). GitHub is the source of truth for "merged?".
 if not node_mode and target == "--pr-state":
-    print(json.dumps(fetch_pr_state()))
+    prs = fetch_pr_state()
+    if prs is None:
+        sys.exit(1)
+    print(json.dumps(prs))
     sys.exit(0)
 
 
