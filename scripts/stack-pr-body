@@ -13,6 +13,8 @@
 #   stack-pr-body <branch>           → Phil's voice: the opening commit's short why (1–3 lines, plan
 #                                      stripped), or nothing — for above the Traffic Cop template
 #   stack-pr-body <branch> --plan    → purpose + commit outline + merge-order furniture (opt-in)
+#   stack-pr-body <branch> --context → where this PR sits in the project: what already landed,
+#                                      this PR, and what's coming — for pasting above Traffic Cop
 #   stack-pr-body <branch> --full    → the full document (title, where-it-fits, stored change
 #                                      summary, merge order, mermaid map)
 #   stack-pr-body <branch> --link    → also link the fork's assembled integration (opt-in: that
@@ -25,7 +27,7 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PA
 
 here="${0:A:h}"
 branch="${1:-}"
-[[ -n "$branch" ]] || { echo "usage: stack-pr-body <branch> [--plan] [--full] [--link] [--packet]" >&2; exit 2; }
+[[ -n "$branch" ]] || { echo "usage: stack-pr-body <branch> [--plan] [--context] [--full] [--link] [--packet]" >&2; exit 2; }
 shift
 [[ " $* " == *" --packet "* ]] && exec python3 "$here/review_packet.py" "$branch"
 if (( $# == 0 )); then   # the default: his voice, not furniture (2026-10-25)
@@ -40,10 +42,11 @@ if why and len(why) <= 280 and len(lines) <= 3: print(why)'
   exit 0
 fi
 
-full=0 link=0
+full=0 link=0 context=0
 for arg in "$@"; do
   case "$arg" in
     --plan) ;;
+    --context) context=1 ;;
     --full) full=1 ;;
     --link) link=1 ;;
     *) echo "unknown flag: $arg" >&2; exit 2 ;;
@@ -59,7 +62,7 @@ else
   change=""
 fi
 
-BRANCH="$branch" FACTS="$facts" CHANGE="$change" FULL="$full" python3 - <<'PY'
+BRANCH="$branch" FACTS="$facts" CHANGE="$change" FULL="$full" CONTEXT="$context" python3 - <<'PY'
 import json, os, re, subprocess
 
 f = json.loads(os.environ["FACTS"])
@@ -83,6 +86,29 @@ def own_subjects(branch):
         shas = [sha for sha in shas if sha not in carried]
     return [re.sub(r"^(\w+)\([^)]*\)(!?):", r"\1\2:", git("log", "-1", "--format=%s", sha).strip())
             for sha in shas]
+
+if os.environ["CONTEXT"] == "1":
+    if not f["project"] or len(f["plan"]) < 2:
+        raise SystemExit
+    def ref(s):
+        return "#%s %s" % (s["pr"], s["job"]) if s.get("pr") else s["job"]
+    me = next(s["n"] for s in f["plan"] if s.get("me"))
+    landed = [s for s in f["plan"] if s.get("landed")]
+    before = [s for s in f["plan"] if s["n"] < me and not s.get("landed")]
+    after = [s for s in f["plan"] if s["n"] > me and not s.get("landed")]
+    out.append("**Where this fits** — %s of %s" % (f["position"], f["total"]))
+    if landed:
+        out.append("\nAlready merged:")
+        out += ["- %s" % ref(s) for s in landed]
+    if before:
+        out.append("\nIn review:")
+        out += ["- %s" % ref(s) for s in before]
+    out.append("\n**This PR:** %s" % (f["purpose"] or f["job"]))
+    if after:
+        out.append("\nComing up:")
+        out += ["- %s" % ref(s) for s in after]
+    print("\n".join(out))
+    raise SystemExit
 
 outline = own_subjects(os.environ["BRANCH"])
 
