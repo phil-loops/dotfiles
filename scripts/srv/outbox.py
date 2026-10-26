@@ -5,7 +5,7 @@
 #   GET  /outbox[?project=<p>]           the desk; ?project narrows to one forest (the launch sheet polls it)
 #   POST /<repo>/outbox-hold {branch|branches|project, until}   stamp branch.<b>.stack-hold-until (""/null clears)
 #   POST /<repo>/outbox-title {branch, title}          stamp branch.<b>.stack-pr-title (""/null clears)
-#   POST /<repo>/outbox-label {branch, on}             branch.<b>.stack-pr-label: off drops the review label from the compare link
+#   POST /<repo>/outbox-label {branch, on}             branch.<b>.stack-pr-label: on adds the review label to the compare link
 #
 # Never pushes, never opens a PR, never calls gh on the request path: PR facts come from
 # sync's SWR state map plus an open-PR detail cache refreshed in the background here, and
@@ -298,7 +298,7 @@ def _forest(snap, project, prs, slug, graph):
                 "parent": parent, "tip": tip, "description": snap.description(b),
                 "requires": snap.branch_key_all(b, "requires"), "after": snap.branch_key_all(b, "after"),
                 "pr": pr, "holdUntil": snap.branch_key(b, "hold-until"),
-                "label": snap.branch_key(b, "pr-label") != "off"}
+                "label": snap.branch_key(b, "pr-label") == "on"}
         if pr and pr.get("state") == "MERGED":
             node.update(status="landed", subjects=[], commits=0, pushed="synced", ahead=0, gates="green", redGates=[],
                         title=pr.get("title") or node["description"] or b, titleSource="pr")
@@ -453,11 +453,11 @@ def label(req, raw):
     branch = d.get("branch", "")
     if not branch or not repostate.snapshot().exists(branch):
         return req._send(400, json.dumps({"ok": False, "err": "no such branch"}))
-    if d.get("on", True):
-        stackcfg.unset_key(branch, "pr-label")
+    if d.get("on", False):
+        stackcfg.set_key(branch, "pr-label", "on")
     else:
-        stackcfg.set_key(branch, "pr-label", "off")
-    req._send(200, json.dumps({"ok": True, "branch": branch, "on": bool(d.get("on", True))}))
+        stackcfg.unset_key(branch, "pr-label")
+    req._send(200, json.dumps({"ok": True, "branch": branch, "on": bool(d.get("on", False))}))
 
 
 def title(req, raw):

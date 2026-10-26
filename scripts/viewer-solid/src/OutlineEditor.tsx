@@ -132,8 +132,8 @@ export function OutlineEditor(props: {
   const savedHand = () => packet()?.hand ?? EMPTY_HAND;
   const handVal = () => draft.packet ?? savedHand();
   const packetDirty = () => draft.packet !== undefined && !sameHand(draft.packet, savedHand());
-  const labelVal = () => draft.prLabel ?? packet()?.label ?? true;
-  const labelDirty = () => draft.prLabel !== undefined && draft.prLabel !== (packet()?.label ?? true);
+  const labelVal = () => draft.prLabel ?? packet()?.label ?? false;
+  const labelDirty = () => draft.prLabel !== undefined && draft.prLabel !== (packet()?.label ?? false);
   const dirtyRows = () => rows().filter(rowDirty);
   const dirtyCount = () => dirtyRows().length + (descDirty() ? 1 : 0) + (titleDirty() ? 1 : 0) + (bodyDirty() ? 1 : 0)
     + (packetDirty() ? 1 : 0) + (labelDirty() ? 1 : 0);
@@ -196,7 +196,7 @@ export function OutlineEditor(props: {
       if (titleDirty()) body.prTitle = titleFollows() ? "" : titleVal();
       if (bodyDirty()) body.prBody = bodyFollows() ? "" : bodyVal();
       if (packetDirty()) body.packet = handJson(handVal());
-      if (labelDirty()) body.prLabel = labelVal() ? "" : "off";
+      if (labelDirty()) body.prLabel = labelVal() ? "on" : "";
       const { body: r } = await postStatus<SaveResult>("/outline", body);
       if (!r.ok) {
         setBanner({ tone: r.moved ? "moved" : "err", text: r.err || "save refused" });

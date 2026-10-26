@@ -625,7 +625,7 @@ class H(BaseHTTPRequestHandler):
             return outbox.hold(self, raw)
         if self.path == "/outbox-title":  # the landing PR title: branch.<b>.stack-pr-title
             return outbox.title(self, raw)
-        if self.path == "/outbox-label":  # the compare link's review label on/off: branch.<b>.stack-pr-label
+        if self.path == "/outbox-label":  # the compare link's review label, opt-in: branch.<b>.stack-pr-label
             return outbox.label(self, raw)
         if self.path == "/open-pr":  # push-less exit: open the PR (view) or compare form (author) in a browser
             return push.open_pr(self, raw)
