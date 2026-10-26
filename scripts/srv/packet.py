@@ -181,12 +181,22 @@ def landing_title(snap, branch, subjects):
 
 
 def body(branch):
-    """The landing body: a hand-written stack-pr-body wins verbatim; else the drafted one."""
+    """The landing body: a hand-written stack-pr-body's prose with today's merge order under it;
+    else the drafted one."""
     snap = repostate.snapshot()
     saved = snap.branch_key(branch, "pr-body")
     if saved:
-        return saved
+        prose = rp.strip_plan(saved).rstrip().removesuffix("----").rstrip()
+        return "\n\n----\n".join(x for x in (prose, merge_order(branch)) if x) + "\n"
     return drafted(branch)
+
+
+def merge_order(branch):
+    """The forest's "Part of a stack" block as it stands right now (stack-pr-body --plan), or ""
+    for a lone branch — rebuilt on every read so a PR opened a week later lists what merged since."""
+    out = ctx.run([os.path.join(ctx.SCRIPTS, "stack-pr-body"), branch, "--plan"]).stdout
+    i = out.find("Part of a stack")
+    return out[i:].strip() if i >= 0 else ""
 
 
 def packet_on(branch):
@@ -213,6 +223,8 @@ def drafted(branch, f=None):
         return rp.render(rp.build(f), f["template"])
     parts = [casual_why(f), (f["template"] or "").strip()]
     text = "\n\n".join(x for x in parts if x)
+    plan = merge_order(f["branch"])
+    text = "\n\n----\n".join(x for x in (text, plan) if x)
     return text + "\n" if text else ""
 
 
