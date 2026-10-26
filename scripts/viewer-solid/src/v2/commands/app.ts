@@ -18,8 +18,8 @@ import {
   sheetOpen,
 } from "../ui";
 
-command({ id: "menu.open", label: "menu", title: "Command menu", scope: "global", budget: "local", keys: ["space ?", ":"], quiet: true, local: () => setMenuOpen(true) });
-command({ id: "help.keys", label: "keys", title: "Keys", scope: "global", budget: "local", keys: ["?"], local: () => setSheetOpen((v) => !v) });
+command({ id: "menu.open", label: "menu", title: "Open the command menu", scope: "global", budget: "local", keys: ["space ?", ":"], quiet: true, local: () => setMenuOpen(true) });
+command({ id: "help.keys", label: "keys", title: "Show every key", scope: "global", budget: "local", keys: ["?"], local: () => setSheetOpen((v) => !v) });
 command({
   id: "overlay.close",
   label: "back",
@@ -38,8 +38,8 @@ command({
   },
 });
 
-// `g d` is Helix's go-to-definition on the review page, so the dashboard is `g D`
-const NAV_KEY: Record<string, string> = { forests: "g f", dashboard: "g D", todo: "g o" };
+// `g d` is Helix's go-to-definition on the review page, so the dashboard is `g s` (its stats)
+const NAV_KEY: Record<string, string> = { forests: "g f", dashboard: "g s", todo: "g o" };
 for (const s of SURFACES.filter((x) => !x.arg)) {
   command({
     id: `nav.${s.id}`,
@@ -57,10 +57,10 @@ const PLACES = [
   { id: "wiki", title: "Wiki", path: "/wiki", key: "g i" },
   { id: "tutor", title: "Tutor", path: "/tutor", key: "g t" },
   { id: "machine", title: "Machine", path: "/machine", key: "g m" },
-  { id: "v1", title: "the v1 home", path: "/forests", key: "g v" },
+  { id: "v1", title: "the v1 home", path: "/forests", key: "" },
 ];
 for (const p of PLACES) {
-  command({ id: `place.${p.id}`, title: `Open ${p.title}`, scope: "global", budget: "local", keys: [p.key], local: () => leave(p.path) });
+  command({ id: `place.${p.id}`, title: `Go to ${p.title}`, scope: "global", budget: "local", keys: p.key ? [p.key] : [], local: () => leave(p.path) });
 }
 
 const move = (by: number) => () => {

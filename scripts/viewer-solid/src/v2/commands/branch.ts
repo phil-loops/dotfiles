@@ -67,7 +67,7 @@ function advance(after: BranchView): void {
 command({
   id: "branch.pr",
   label: "pr",
-  title: "Open the PR (the prefilled compare form if there's none yet)",
+  title: "Go to the PR (the prefilled compare form if there's none yet)",
   scope: "branch",
   budget: "local",
   keys: ["g h"],

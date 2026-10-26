@@ -143,7 +143,7 @@ const hasBranches = (id: string | undefined) => !!id && !!model.forests().get(id
 command({
   id: "forest.expand",
   label: "open",
-  title: "Open the forest's branches",
+  title: "Show the forest's branches",
   scope: "project",
   budget: "local",
   keys: ["l", "right"],
@@ -153,7 +153,7 @@ command({
 command({
   id: "forest.collapse",
   label: "fold",
-  title: "Fold the forest's branches away",
+  title: "Hide the forest's branches",
   scope: "project",
   budget: "local",
   keys: ["h", "left"],
@@ -228,7 +228,7 @@ command({
 command({
   id: "forest.face",
   label: "story",
-  title: "The feature's story ↔ its branches",
+  title: "Switch between the story and the branches",
   scope: "forest",
   budget: "local",
   keys: ["tab"],
@@ -254,7 +254,7 @@ command({
 command({
   id: "forest.leave",
   label: "back",
-  title: "Back to Forests",
+  title: "Go back to Forests",
   scope: "forest",
   budget: "local",
   keys: ["h", "left"],

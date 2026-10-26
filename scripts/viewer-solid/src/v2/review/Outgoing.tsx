@@ -131,11 +131,12 @@ export default function Outgoing() {
   /** with no run log left, the verdict git config recorded for this tree */
   const recorded = () => {
     const g = b()?.gates;
-    if (g === "green") return "green (recorded) · no run log";
-    if (g === "red") return `red (recorded): ${b()!.redGates.join(", ") || "gates"} · no run log`;
-    if (g === "stale") return "stale · the tree changed since the last run";
+    if (g === "green") return "✓ (recorded, no run log)";
+    if (g === "red") return `red: ${b()!.redGates.join(", ") || "gates"} (recorded, no run log)`;
+    if (g === "stale") return "stale — the tree changed since the last run";
     return "not run";
   };
+  const logged = () => rows().length > 0 || progress.loading;
   const pushable = () => !!v() && canPush(v()!.b, v()!.pr);
 
   return (
@@ -148,14 +149,16 @@ export default function Outgoing() {
               : "nothing to push"}
           </span>
           <span class="text-ink-faint">
-            {" "}· {v()?.pr ? `onto #${v()!.pr!.number}` : "first push"} · <code>{short(b()!.tip)}</code> · gates {b()!.gates === "green" ? "✓" : b()!.gates}
+            {" "}· {v()?.pr ? `onto #${v()!.pr!.number}` : "first push"} · <code>{short(b()!.tip)}</code> · gates {logged() ? (b()!.gates === "green" ? "✓" : b()!.gates) : recorded()}
           </span>
           <PushStatus count={unpushed().length} pushable={pushable()} />
         </Show>
       </div>
 
-      <div class="rv-words-k">gates</div>
-      <Show when={rows().length} fallback={<p class="rv-quiet">{progress.loading ? "reading the gates…" : recorded()}</p>}>
+      <Show when={logged()}>
+        <div class="rv-words-k">gates</div>
+      </Show>
+      <Show when={rows().length} fallback={<Show when={progress.loading}><p class="rv-quiet">reading the gates…</p></Show>}>
         <ol class="m-0 mb-4 list-none p-0">
           <For each={rows()}>
             {(g) => (

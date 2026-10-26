@@ -162,7 +162,8 @@
 .md-sg-empty { padding: 2px 8px; color: var(--color-ink-faint); }
 
 .rv-conv { max-width: 920px; padding: 16px 16px 120px 32px; display: grid; gap: 10px; }
-.rv-card { border: 1px solid var(--color-vellum-edge); background: var(--color-vellum-raise); padding: 10px 14px; }
+.rv-card { border: 1px solid var(--color-vellum-edge); border-left-width: 2px; background: var(--color-vellum-raise); padding: 10px 14px; }
+.rv-card.rv-on { border-left-color: var(--color-gold-leaf) !important; background-color: var(--color-vellum-raise); }
 .rv-card-review { border-left: 2px solid var(--color-rule); }
 .rv-tl-thread { display: flex; gap: 10px; align-items: baseline; padding: 6px 14px; border-left: 2px solid var(--color-rule); font-size: 12px; text-align: left; }
 .rv-tl-thread:hover { background: var(--color-gold-wash); }

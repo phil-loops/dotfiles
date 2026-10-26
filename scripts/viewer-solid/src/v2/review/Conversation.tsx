@@ -1,16 +1,13 @@
 // The Conversation tab: the PR's body, then its timeline — reviews, top-level comments and the
 // conversations on the diff — oldest first, the second reader's "nobody flagged" list, and the way
 // to GitHub, where Phil submits his pending review.
-import { createMemo, For, Match, Show, Switch } from "solid-js";
+import { createSelector, For, Match, Show, Switch } from "solid-js";
 import { keyOf } from "../registry";
 import { bind } from "../runner";
 import { world } from "../store";
-import type { Comment, Review, Thread } from "../types";
-import { renderMarkdown, plain } from "./markdown";
+import { renderMarkdown } from "./markdown";
 import { page as pg } from "./page";
-import { ago } from "./Thread";
-
-type Item = { at: string; kind: "review"; r: Review } | { at: string; kind: "comment"; c: Comment } | { at: string; kind: "thread"; t: Thread };
+import { ago, ThreadView } from "./Thread";
 
 const STATE: Record<string, string> = {
   APPROVED: "approved these changes",
@@ -21,32 +18,31 @@ const STATE: Record<string, string> = {
 
 export default function Conversation() {
   const c = () => pg.conv();
-  const items = createMemo<Item[]>(() => {
-    const cv = c();
-    if (!cv) return [];
-    const out: Item[] = [
-      ...cv.reviews.filter((r) => r.body || r.state !== "COMMENTED").map((r) => ({ at: r.at, kind: "review" as const, r })),
-      ...cv.comments.map((x) => ({ at: x.at, kind: "comment" as const, c: x })),
-      ...pg.threads().map((t) => ({ at: t.comments[0]?.at ?? "", kind: "thread" as const, t })),
-    ];
-    return out.sort((a, b) => (a.at || "~").localeCompare(b.at || "~"));
+  const selected = createSelector(() => pg.here()?.key);
+  /** a card the cursor can rest on: j/k walk them, a click puts the cursor there */
+  const card = (key: string) => ({
+    "data-stop": key,
+    get classList() {
+      return { "rv-on": selected(key) };
+    },
+    onClick: bind("review.cursor.set", key),
   });
   return (
     <div class="rv-conv" data-paint={world.ready ? "review" : undefined}>
       <Show when={c()} fallback={<p class="rv-quiet">no PR</p>}>
-        <article class="rv-card">
+        <article class="rv-card" {...card("c|body")}>
           <div class="rv-c-head">
             <span class="rv-author">{c()!.author}</span>
             <span class="text-ink-faint">opened #{c()!.number} · {c()!.headRef} → {c()!.base}</span>
           </div>
           <div class="md" innerHTML={renderMarkdown(c()!.body || "_No description._")} />
         </article>
-        <For each={items()}>
+        <For each={pg.timeline()}>
           {(it) => (
             <Switch>
               <Match when={it.kind === "review" && it}>
                 {(x) => (
-                  <article class="rv-card rv-card-review">
+                  <article class="rv-card rv-card-review" {...card(pg.cardKey(it))}>
                     <div class="rv-c-head">
                       <span class="rv-author">{x().r.author}</span>
                       <span class={x().r.state === "APPROVED" ? "text-patina" : x().r.state === "CHANGES_REQUESTED" ? "text-ember" : "text-ink-dim"}>
@@ -62,7 +58,7 @@ export default function Conversation() {
               </Match>
               <Match when={it.kind === "comment" && it}>
                 {(x) => (
-                  <article class="rv-card">
+                  <article class="rv-card" {...card(pg.cardKey(it))}>
                     <div class="rv-c-head">
                       <span class="rv-author">{x().c.author}</span>
                       <span class="text-ink-faint">{ago(x().c.at)}</span>
@@ -72,24 +68,7 @@ export default function Conversation() {
                 )}
               </Match>
               <Match when={it.kind === "thread" && it}>
-                {(x) => (
-                  <button class="rv-tl-thread" classList={{ "rv-thread-done": x().t.resolved || x().t.outdated }} onClick={bind("review.thread.show", x().t.id)}>
-                    <span class="rv-author">{x().t.comments[0]?.author}</span>
-                    <span class="rv-where">
-                      {x().t.path}:{x().t.local?.line ?? x().t.originalLine}
-                    </span>
-                    <span class="rv-summary">{plain(x().t.comments[0]?.body ?? "", 100)}</span>
-                    <Show when={x().t.resolved}>
-                      <span class="rv-chip rv-chip-ok">resolved</span>
-                    </Show>
-                    <Show when={x().t.outdated}>
-                      <span class="rv-chip">outdated</span>
-                    </Show>
-                    <Show when={x().t.comments.length > 1}>
-                      <span class="rv-chip">{x().t.comments.length - 1} more</span>
-                    </Show>
-                  </button>
-                )}
+                {(x) => <ThreadView id={x().t.id} selected={selected} aside />}
               </Match>
             </Switch>
           )}

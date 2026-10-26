@@ -40,7 +40,7 @@ command({
 command({
   id: "todo.start",
   label: "start",
-  title: "Start it (doing)",
+  title: "Start the item",
   scope: "item",
   budget: "config-write",
   keys: ["I"],
@@ -50,7 +50,7 @@ command({
 command({
   id: "todo.done",
   label: "done",
-  title: "Mark it done",
+  title: "Mark the item done",
   scope: "item",
   budget: "config-write",
   keys: ["D"],
@@ -60,7 +60,7 @@ command({
 command({
   id: "todo.drop",
   label: "drop",
-  title: "Drop it",
+  title: "Drop the item",
   scope: "item",
   budget: "config-write",
   keys: ["X"],

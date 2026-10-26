@@ -5,7 +5,7 @@ import { createEffect, createMemo, createRoot, createSignal, on } from "solid-js
 import { routeArg, surface } from "../router";
 import { list, view, world } from "../store";
 import { ask, getJSON, getText } from "../sync";
-import type { Conv, Draft, Item, Thread } from "../types";
+import type { Comment, Conv, Draft, Item, Review, Thread } from "../types";
 import { blocksOf, expand, parsePatch, rowAnchors, splitRows, unifiedRows, type Block, type FileDiff, type Gap, type Row } from "./diff";
 
 const store = {
@@ -81,7 +81,11 @@ export type Stop =
   | { key: string; kind: "line"; path: string; row: Row }
   | { key: string; kind: "thread"; path: string; id: string }
   | { key: string; kind: "pending"; path: string; id: string }
-  | { key: string; kind: "gap"; path: string; at: number };
+  | { key: string; kind: "gap"; path: string; at: number }
+  | { key: string; kind: "card"; path: string; id: string };
+
+/** One entry in the Conversation tab's timeline. */
+export type TimelineItem = { at: string; kind: "review"; r: Review } | { at: string; kind: "comment"; c: Comment } | { at: string; kind: "thread"; t: Thread };
 
 const rowCache = new WeakMap<FileDiff, { u?: Row[]; s?: Row[] }>();
 /** A file's rows, built once per parsed diff: a thread or draft patch never rebuilds the diff's DOM. */
@@ -330,8 +334,33 @@ export const page = createRoot(() => {
     return { threads: as.flatMap((a) => fv.threadsAt.get(a) ?? []), pending: as.flatMap((a) => fv.pendingAt.get(a) ?? []) };
   };
 
+  /** The Conversation tab after the PR's body: reviews, comments and threads, oldest first. */
+  const timeline = createMemo<TimelineItem[]>(() => {
+    const cv = conv();
+    if (!cv) return [];
+    const out: TimelineItem[] = [
+      ...cv.reviews.filter((r) => r.body || r.state !== "COMMENTED").map((r) => ({ at: r.at, kind: "review" as const, r })),
+      ...cv.comments.map((x) => ({ at: x.at, kind: "comment" as const, c: x })),
+      ...threads().map((t) => ({ at: t.comments[0]?.at ?? "", kind: "thread" as const, t })),
+    ];
+    return out.sort((a, b) => (a.at || "~").localeCompare(b.at || "~"));
+  });
+  /** a timeline card's cursor key */
+  const cardKey = (it: TimelineItem) => (it.kind === "thread" ? `t|${it.t.id}` : it.kind === "review" ? `c|r${it.r.at}|${it.r.author}` : `c|c${it.c.at}|${it.c.author}`);
+
   const stops = createMemo<Stop[]>(() => {
     const out: Stop[] = [];
+    if (tab() === "conversation") {
+      if (conv()) out.push({ key: "c|body", kind: "card", path: "", id: "body" });
+      for (const it of timeline()) {
+        if (it.kind !== "thread") out.push({ key: cardKey(it), kind: "card", path: "", id: cardKey(it) });
+        else {
+          out.push({ key: `t|${it.t.id}`, kind: "thread", path: it.t.path, id: it.t.id });
+          if (isOpen(it.t)) for (const r of repliesTo(it.t.id)) out.push({ key: `p|${r.key}`, kind: "pending", path: it.t.path, id: r.key });
+        }
+      }
+      return out;
+    }
     for (const fv of views()) {
       const path = fv.file.path;
       out.push({ key: `f|${path}`, kind: "file", path });
@@ -386,7 +415,7 @@ export const page = createRoot(() => {
   };
 
   return {
-    target, id, conv, draft, branch, tip, base, files, views, reveal, threads, items, repliesTo, elsewhere, stops, stopIndex, here, range,
+    target, id, conv, draft, branch, tip, base, files, views, reveal, threads, items, repliesTo, elsewhere, timeline, cardKey, stops, stopIndex, here, range,
     fileOf, isOpen, atRow, isSeen, serverViewed, payload, loadErr, warm,
     tab, setTab, split, setSplit, showOutdated, setShowOutdated, cursor, setCursor, mark, setMark,
     unfold, setUnfold, composer, setComposer, text, setText,
