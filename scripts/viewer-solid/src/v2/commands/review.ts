@@ -8,7 +8,7 @@ import { command, type Write } from "../registry";
 import { view, world } from "../store";
 import type { Item, Thread } from "../types";
 import { armed, setCursor, setMenuOpen, setSheetOpen, menuOpen, sheetOpen } from "../ui";
-import { canPush } from "../ship";
+import { pushRoute } from "./branch";
 import { revealAt, toggleFold } from "../review/inline";
 import { shown } from "../words";
 import { bkey, model } from "../model";
@@ -121,12 +121,8 @@ command({
   scope: "review",
   budget: "local",
   keys: ["p"],
-  available: (id) => pg.tab() === "commits" && !!id && !!model.branchView(id) && canPush(model.branchView(id)!.b, model.branchView(id)!.pr),
-  route: (id) => {
-    const v = id ? model.branchView(id) : undefined;
-    if (pg.tab() !== "commits" || !v || !canPush(v.b, v.pr)) return null;
-    return armed() === id ? "branch.push.confirm" : "branch.push.arm";
-  },
+  available: (id) => pg.tab() === "commits" && !!pushRoute(id),
+  route: (id) => (pg.tab() === "commits" ? pushRoute(id) : null),
 });
 command({ id: "review.tab.files", label: "files", title: "Show the files tab", scope: "review", budget: "local", keys: ["3"], local: () => pg.setTab("files") });
 command({ id: "review.tab.conversation", label: "conversation", title: "Show the conversation tab", scope: "review", budget: "local", keys: ["1"], local: () => pg.setTab("conversation") });

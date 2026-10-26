@@ -4,7 +4,7 @@
 import { atRepo, bkey, compareUrl, model, type BranchView } from "../model";
 import { command, type Write } from "../registry";
 import { navigate, reviewPath } from "../router";
-import { canPush, fmtMorning, leaf, nextMorning } from "../ship";
+import { canPush, fmtMorning, leaf, nextMorning, pushableButGates } from "../ship";
 import { view, world } from "../store";
 import { armed, launching, now, setArmed, setCursor, setOpened, toggleIn } from "../ui";
 
@@ -17,10 +17,46 @@ command({
   scope: "branch",
   budget: "local",
   keys: ["p"],
-  route: (id) => {
+  route: (id) => pushRoute(id),
+});
+
+/** What `p` does: arm, then send — or, when only the gates stand in the way, run them. */
+export function pushRoute(id: string | undefined): string | null {
+  const v = bv(id);
+  if (!v) return null;
+  if (canPush(v.b, v.pr)) return armed() === id ? "branch.push.confirm" : "branch.push.arm";
+  if (!pushableButGates(v.b, v.pr)) return null;
+  return v.b.gates === "running" ? "branch.gates.wait" : "branch.gates.run";
+}
+command({
+  id: "branch.gates.run",
+  label: "gates",
+  title: "Run the push gates",
+  scope: "branch",
+  budget: "local",
+  quiet: true,
+  available: (id) => !!bv(id) && bv(id)!.b.gates !== "running",
+  write: (id): Write | null => {
     const v = bv(id);
-    if (!v || !canPush(v.b, v.pr)) return null;
-    return armed() === id ? "branch.push.confirm" : "branch.push.arm";
+    if (!v) return null;
+    return {
+      ops: [{ type: "branch", id, fields: { gates: "running" } }],
+      path: atRepo(v.b.repo, "/gates"),
+      body: { branch: v.b.name, detach: true },
+      settled: () => world.entities.branch[id]?.gates !== v.b.gates,
+      said: "running the gates — p pushes once they're green",
+      failed: "the gates didn't start",
+    };
+  },
+});
+command({
+  id: "branch.gates.wait",
+  title: "The gates are running",
+  scope: "branch",
+  budget: "local",
+  quiet: true,
+  local: () => {
+    throw new Error("the gates are running — p pushes once they're green");
   },
 });
 command({
