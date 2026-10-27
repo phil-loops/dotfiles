@@ -10,6 +10,7 @@ import Review from "./review/Review";
 import Todo from "./Todo";
 import Machine from "./Machine";
 import Wiki from "./Wiki";
+import Tutor from "./Tutor";
 import { surface } from "./router";
 import { bind, note } from "./runner";
 import { view, world } from "./store";
@@ -62,6 +63,9 @@ export default function App() {
           </Match>
           <Match when={surface().id === "wiki"}>
             <Wiki />
+          </Match>
+          <Match when={surface().id === "tutor"}>
+            <Tutor />
           </Match>
         </Switch>
       </main>

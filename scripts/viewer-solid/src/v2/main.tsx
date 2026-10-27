@@ -8,6 +8,7 @@ import "./commands/todo";
 import "./commands/words";
 import "./commands/machine";
 import "./commands/wiki";
+import "./commands/tutor";
 import "./commands/sync";
 import App from "./App";
 import { installKeys } from "./keyboard";
