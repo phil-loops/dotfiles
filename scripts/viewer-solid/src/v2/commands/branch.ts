@@ -3,10 +3,10 @@
 // work for the morning (POST /outbox-hold). Nothing here pushes, opens or merges on its own.
 import { atRepo, bkey, compareUrl, model, type BranchView } from "../model";
 import { command, type Write } from "../registry";
-import { navigate, reviewPath } from "../router";
+import { navigate, reviewPath, surface } from "../router";
 import { canPush, fmtMorning, leaf, nextMorning, pushableButGates } from "../ship";
 import { view, world } from "../store";
-import { armed, launching, now, setArmed, setCursor, setOpened, toggleIn } from "../ui";
+import { armed, forestFace, launching, now, setArmed, setCursor, setDescribing, setOpened, toggleIn } from "../ui";
 
 const bv = (id: string | undefined) => (id ? model.branchView(id) : undefined);
 
@@ -164,6 +164,44 @@ command({
   keys: ["l", "right"],
   available: (id) => !!bv(id),
   local: (id, e) => navigate(reviewPath(bv(id)!.b.repo, bv(id)!.b.name), e),
+});
+
+// ── its description: the branch's one human line ──
+
+/** The description as the server stores it: one line, runs of space folded (srv/outline.py). */
+export const oneLine = (s: string) => s.split(/\s+/).filter(Boolean).join(" ");
+
+command({
+  id: "branch.describe",
+  title: "Save the branch's description",
+  scope: "global",
+  budget: "config-write",
+  quiet: true,
+  write: (id, arg): Write | null => {
+    const b = view("branch", id);
+    const next = oneLine(String(arg ?? ""));
+    if (!b || next === b.description) return null;
+    const before = b.description;
+    return {
+      ops: [{ type: "branch", id, fields: { description: next } }],
+      path: atRepo(b.repo, "/outline"),
+      body: { branch: b.name, edits: [], description: next },
+      settled: () => world.entities.branch[id]?.description === next,
+      said: "description saved · u undoes",
+      failed: "couldn't save the description",
+      inverse: { id: "branch.describe", target: id, arg: before },
+    };
+  },
+});
+command({
+  id: "branch.describe.edit",
+  label: "describe",
+  title: "Edit the branch's description in place",
+  scope: "branch",
+  budget: "local",
+  keys: ["i"],
+  available: (id) => surface().id === "forest" && forestFace() === "branches" && !!bv(id),
+  local: (id) => setDescribing(id),
 });
 
 // ── holding work for the morning ──
