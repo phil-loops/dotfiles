@@ -1,4 +1,4 @@
-// viewer-verify — headless smoke-test of the blessed forest viewer in a REAL browser.
+// viewer-verify — headless smoke-test of the forest viewer in a REAL browser.
 //
 // Why this exists: the Claude browser extension isn't connected and raw `chrome --screenshot`
 // HANGS on this app (the /events SSE never lets the page reach idle). Playwright (already a dep
@@ -17,7 +17,7 @@ const { chromium } = require("playwright");
 const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const args = process.argv.slice(2);
 const BASE = (args[0]?.startsWith("http") ? args.shift() : null) || process.env.VIEWER_BASE || "http://127.0.0.1:62497";
-const paths = args.length ? args : ["/", "/forests", "/watching"];
+const paths = args.length ? args : ["/v2", "/v2/machine"];
 
 const browser = await chromium.launch({ executablePath: CHROME, headless: true });
 const page = await browser.newPage({ viewport: { width: 1500, height: 950 } });
