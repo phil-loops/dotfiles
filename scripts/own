@@ -235,7 +235,7 @@ case "${1:-list}" in
       print -u2 "✘ own: [$lane]${sl:+ (slice:$sl)} is held by another LIVE session${a:+ (${a}s ago)}."
       print -u2 "   BLOCKED — editing $rel would step on their work."
       print -u2 "   → patch it:  git worktree add --detach /tmp/wt HEAD && edit there"
-      print -u2 "                git -C /tmp/wt diff > ~/.dotfiles/patches/<name>.patch && git apply --3way <patch>"
+      print -u2 "                git -C /tmp/wt diff > ~/.dotfiles/patches/<name>.patch && patch-land <patch>"
       print -u2 "   → hand off:  own request $lane      (they release, then you claim)"
       print -u2 "   → override:  own force $lane        (10m, this session only — then retry)"
       exit 2
