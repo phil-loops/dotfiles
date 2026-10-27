@@ -8,7 +8,7 @@
 # is in mail-map.html. That split is what keeps the wiki restructurable — moving a page
 # is `git mv`, not surgery on markup.
 #
-# /chat is proxied rather than called from the browser: the blessing viewer accepts a
+# /chat is proxied rather than called from the browser: the viewer accepts a
 # localhost Origin but sends no Access-Control-Allow-Origin, so a page on another port
 # can POST and still not read the reply. Proxying makes it same-origin, with zero
 # viewer changes.
