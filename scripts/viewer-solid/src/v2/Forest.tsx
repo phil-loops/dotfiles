@@ -7,10 +7,10 @@ import { bkey, model, type BranchView } from "./model";
 import { keyOf } from "./registry";
 import { bind } from "./runner";
 import { leaf, SHIP } from "./ship";
-import Commits from "./Commits";
+import Commits, { DescriptionField } from "./Commits";
 import Story from "./Story";
 import { list, view, world } from "./store";
-import { forestFace, wordsOpen } from "./ui";
+import { describing, forestFace, setDescribing, wordsOpen } from "./ui";
 
 const GATES: Record<string, string> = { green: "gates green", red: "gates red", running: "gates running", stale: "gates stale", none: "not gated" };
 
@@ -37,7 +37,7 @@ function Branch(props: { v: BranchView }) {
   const caption = () => {
     const act = props.v.st.action;
     const go = act === "push" ? "push" : act === "pr" ? "open the PR" : "open";
-    return [`${keyOf("row.primary")} ${go}`, act === "push" || act === "pr" ? `${keyOf("branch.open")} open` : "", `${keyOf("forest.words")} words`].filter(Boolean).join(" · ");
+    return [`${keyOf("row.primary")} ${go}`, act === "push" || act === "pr" ? `${keyOf("branch.open")} open` : "", `${keyOf("forest.words")} words`, `${keyOf("branch.describe.edit")} describe`].filter(Boolean).join(" · ");
   };
   return (
     <li
@@ -60,9 +60,16 @@ function Branch(props: { v: BranchView }) {
         </span>
       </div>
       <div class="ml-8 mt-1">
-        <p class="m-0 text-ink-dim" classList={{ "text-ink-faint italic": !b().description }}>
-          {b().description || "no description"}
-        </p>
+        <Show
+          when={describing() === b().id}
+          fallback={
+            <p class="m-0 text-ink-dim" classList={{ "text-ink-faint italic": !b().description }}>
+              {b().description || "no description"}
+            </p>
+          }
+        >
+          <DescriptionField branchId={b().id} inline onDone={() => setDescribing(undefined)} />
+        </Show>
         <Show
           when={wordsOpen().has(b().id)}
           fallback={

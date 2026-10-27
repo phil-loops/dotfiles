@@ -3,7 +3,8 @@
 // commit. Every hint sits in one line on top, once, with its one-click fix. Edits are drafts
 // until one save (words.save, ⌘↵ in a field) rewrites them all; u undoes it. Pushed commits are
 // read-only, with the reason.
-import { createEffect, createResource, For, onCleanup, Show, type JSX } from "solid-js";
+import { createEffect, createResource, createSignal, For, on, onCleanup, Show, type JSX } from "solid-js";
+import { oneLine } from "./commands/branch";
 import { joinTemplate, splitTemplate, SUBJECT_LIMIT, type Hint } from "./outlineHints";
 import { atRepo } from "./model";
 import { keyOf } from "./registry";
@@ -156,6 +157,10 @@ export default function Commits(props: { branchId: string; readOnly?: boolean; l
       </Show>
       <Show when={props.landing}>
         <div class="mb-4">
+          <div class="rv-words-k">description</div>
+          <DescriptionField branchId={props.branchId} />
+        </div>
+        <div class="mb-4">
           <div class="rv-words-k">lands as</div>
           <Show
             when={!o()!.pr?.exists}
@@ -268,6 +273,47 @@ export default function Commits(props: { branchId: string; readOnly?: boolean; l
         <SaveBar branchId={props.branchId} pending={pending()} />
       </Show>
     </Show>
+  );
+}
+
+/** The branch's description, edited where it's read: ↵ or leaving the field saves it (u undoes),
+ *  esc puts it back. Its length shows, and an "and" — the split-point test — warns, never blocks. */
+export function DescriptionField(props: { branchId: string; inline?: boolean; onDone?: () => void }) {
+  const saved = () => view("branch", props.branchId)?.description ?? "";
+  const [text, setText] = createSignal(saved());
+  createEffect(on(saved, (s) => setText(s), { defer: true }));
+  const save = (e: Event) => {
+    if (oneLine(text()) !== saved()) dispatch("branch.describe", e instanceof KeyboardEvent ? "key" : "click", { target: props.branchId, arg: text(), event: e });
+    props.onDone?.();
+  };
+  const split = () => / and /i.test(text());
+  return (
+    <div>
+      <input
+        ref={(el) => props.inline && queueMicrotask(() => el.focus())}
+        class={`${FIELD} text-[12.5px] text-ink`}
+        value={text()}
+        placeholder="one verb-first line"
+        onInput={(e) => setText(e.currentTarget.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            save(e);
+          } else if (e.key === "Escape") {
+            setText(saved());
+            e.currentTarget.value = saved();
+          }
+        }}
+        onBlur={save}
+        aria-label="branch description"
+      />
+      <div class="flex gap-3 px-2 text-[11px] text-ink-faint">
+        <span>{oneLine(text()).length}</span>
+        <Show when={split()}>
+          <span class="text-gold-leaf" title="every “and” joining two behaviors is a split point — another branch">“and” · a split point?</span>
+        </Show>
+      </div>
+    </div>
   );
 }
 

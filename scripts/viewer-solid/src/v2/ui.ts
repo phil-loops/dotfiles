@@ -31,6 +31,8 @@ export const setForestFace = (f: "branches" | "story") => {
 };
 /** branches on a forest page showing their whole commit messages (and landed chapters their why) */
 export const [wordsOpen, setWordsOpen] = createSignal<ReadonlySet<string>>(new Set());
+/** the forest-page branch whose description is being edited in its row */
+export const [describing, setDescribing] = createSignal<string | undefined>();
 /** tracker items showing their body */
 export const [todoOpen, setTodoOpen] = createSignal<ReadonlySet<string>>(new Set());
 export const [opened, setOpened] = createSignal<ReadonlySet<string>>(new Set());
