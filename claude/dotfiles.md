@@ -17,9 +17,9 @@ A file is "live" if it's dirty in `git status`, has a recent mtime, or changed b
 
 1. **Author in a throwaway worktree at HEAD** — `git worktree add --detach /tmp/wt HEAD`, edit there.
 2. **Capture a patch artifact** — `git -C /tmp/wt diff > ~/.dotfiles/patches/<name>.patch` (durable, reviewable, hand-off-able).
-3. **Land with `git apply --3way`** — merges non-overlapping hunks, conflicts loudly on overlap, never silent-clobbers; `git apply --check` tests read-only first.
+3. **Land with `patch-land <patch> -m "<subject>"`** — `git apply --3way`, commits exactly the paths it touches, deletes the patch; refuses if those paths are dirty, and a conflict leaves tree and patch untouched.
 
-Apply when the file goes quiet, or hand the `.patch` to the session that owns the file. Standard for any contested file.
+Land when the file goes quiet, or hand the `.patch` to the session that owns the file. A patch left in `patches/` means *not landed yet* — `patch-land --sweep` says where each stands, `--prune` retires the ones already in.
 
 ## Messaging between sessions
 
