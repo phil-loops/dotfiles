@@ -17,7 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # resolve the srv/ package regardless of cwd
-from srv import ctx as srvctx, restack, sync, picker, review, integrate, reviews, push, usage, preview
+from srv import ctx as srvctx, restack, sync, picker, review, chat, integrate, reviews, push, usage, preview
 
 ROOT, SCRIPTS, CWD = sys.argv[1], sys.argv[2], sys.argv[3]
 from srv import stage   # own line: the big srv import above is contested across sessions
@@ -565,6 +565,8 @@ class H(BaseHTTPRequestHandler):
             return outbox.hold(self, raw)
         if self.path == "/restack":          # restack one project (background, scratch worktree)
             return restack.restack(self, raw)
+        if self.path == "/chat":             # a read-only chat turn (the mail-map's Q&A proxies here) → SSE replay+live
+            return chat.start(self, raw)
         if self.path == "/tutor":            # a Socratic turn → headless read-only claude, streamed (SSE)
             return tutor.start(self, raw)
         if self.path == "/lsp/hover":        # on-demand types for a diff token (read-only, starts tsgo on first ask)
