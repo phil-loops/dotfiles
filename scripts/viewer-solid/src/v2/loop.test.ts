@@ -14,7 +14,7 @@ const pr = (over: Partial<Pr> = {}): Pr => ({
   id: "r:b", repo: "r", branch: "f/b", project: "r:f", number: 7, url: "u", state: "OPEN", review: null, draft: false,
   base: null, approvals: null, mergeState: null, mergeable: null, approvedAt: null, title: null, ...over,
 });
-const at = (b: Branch, p?: Pr, words = []) => {
+const at = (b: Branch, p?: Pr, words: [] | null = []) => {
   const steps = loopSteps(b, p, stand(b, p, undefined, NOW), words);
   const now = steps.filter((s) => s.id !== "words").find((s) => s.state === "now");
   return now ? `${now.id}${now.note ? ` ${now.note}` : ""}` : "done";
@@ -42,4 +42,9 @@ test("words flag without blocking, and stop mattering once the PR exists", () =>
   assert.deepEqual(words(br({ gates: "green" })), { id: "words", state: "now", flag: true, note: "scope" });
   assert.equal(at(br({ gates: "green" }), undefined), "push 1 local");
   assert.equal(words(br({ pushed: "synced" }), pr()).state, "done");
+});
+
+test("unread words leave the step out instead of passing it", () => {
+  const b = br({ gates: "green" });
+  assert.deepEqual(loopSteps(b, undefined, stand(b, undefined, undefined, NOW), null).map((s) => s.id), ["gates", "push", "pr", "review", "merged"]);
 });

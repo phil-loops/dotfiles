@@ -6,13 +6,12 @@ import { checkIntegration, integratable, verdict } from "./integrate";
 import { bkey, model, type BranchView } from "./model";
 import { keyOf } from "./registry";
 import { bind } from "./runner";
-import { leaf, SHIP } from "./ship";
+import LoopStrip from "./LoopStrip";
+import { leaf } from "./ship";
 import Commits, { DescriptionField } from "./Commits";
 import Story from "./Story";
 import { list, view, world } from "./store";
 import { describing, forestFace, setDescribing, wordsOpen } from "./ui";
-
-const GATES: Record<string, string> = { green: "gates green", red: "gates red", running: "gates running", stale: "gates stale", none: "not gated" };
 
 function openThreads(v: BranchView): number {
   return list("thread").filter((t) => t.repo === v.b.repo && t.branch === v.b.name && !t.resolved && !t.outdated).length;
@@ -25,12 +24,9 @@ function Branch(props: { v: BranchView }) {
   const facts = createMemo(() => {
     const out: string[] = [];
     const pr = props.v.pr;
-    if (pr) out.push(`#${pr.number}${pr.draft ? " draft" : ""}${pr.approvals ? ` · ${pr.approvals} approval${pr.approvals === 1 ? "" : "s"}` : ""}`);
-    else if (b().commits) out.push(b().gates === "red" && b().redGates.length ? `red: ${b().redGates.join(", ")}` : GATES[b().gates]);
-    if (b().pushed === "ahead") out.push(`${b().ahead} to push`);
+    if (pr) out.push(`#${pr.number}${pr.approvals ? ` · ${pr.approvals} approval${pr.approvals === 1 ? "" : "s"}` : ""}`);
     const n = openThreads(props.v);
     if (n) out.push(`${n} open`);
-    if (props.v.st.ship === "approved" && props.v.st.waiting[0]) out.push(`waiting on ${props.v.st.waiting[0].label}`);
     return out;
   });
   /** the keys for the row under the cursor: ↵ does its next step, l always opens it */
@@ -55,9 +51,6 @@ function Branch(props: { v: BranchView }) {
         <Show when={on()}>
           <span class="shrink-0 whitespace-nowrap text-[11px] text-ink-faint">{caption()}</span>
         </Show>
-        <span class="shrink-0 whitespace-nowrap text-ink-dim">
-          {SHIP[props.v.st.ship].glyph} {SHIP[props.v.st.ship].word}
-        </span>
       </div>
       <div class="ml-8 mt-1">
         <Show
@@ -84,11 +77,12 @@ function Branch(props: { v: BranchView }) {
             <Commits branchId={b().id} readOnly />
           </div>
         </Show>
-        <Show when={facts().length}>
-          <p class="m-0 mt-1.5 text-[11px]" classList={{ "text-del": !props.v.pr && b().gates === "red", "text-ink-faint": !!props.v.pr || b().gates !== "red" }}>
-            {facts().join(" · ")}
-          </p>
-        </Show>
+        <div class="mt-1.5 flex flex-wrap items-baseline gap-x-3">
+          <LoopStrip branchId={b().id} class="text-[11px]" />
+          <Show when={facts().length}>
+            <span class="text-[11px] text-ink-faint">{facts().join(" · ")}</span>
+          </Show>
+        </div>
       </div>
     </li>
   );

@@ -16,7 +16,7 @@ import { CommitWords } from "../Commits";
 import Commits from "../Commits";
 import { prValue } from "../words";
 import { AddressSheet, MapOverlay } from "./Overlays";
-import LoopStrip from "./Loop";
+import LoopStrip from "../LoopStrip";
 import ShipLine from "./Ship";
 import TypesPop from "./TypesPop";
 import { notePointer } from "./types";
@@ -132,7 +132,9 @@ function Header() {
           </Show>
         </Show>
       </div>
-      <LoopStrip />
+      <Show when={!pg.integration()}>
+        <LoopStrip branchId={pg.id()} words />
+      </Show>
       <div class="rv-sub">
         <ShipLine />
         <Show when={c()}>
