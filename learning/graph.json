@@ -21,7 +21,8 @@
     "one-runner-per-tick"
    ],
    "analogs": [
-    "frozen-bookmark-pins-retention"
+    "frozen-bookmark-pins-retention",
+    "crash-recovery-is-visibility"
    ],
    "code": [],
    "topics": [
@@ -36,7 +37,10 @@
    "builds_on": [
     "dead-holder-blocks-forever"
    ],
-   "analogs": [],
+   "analogs": [
+    "sqs-in-flight-invisible",
+    "crash-recovery-is-visibility"
+   ],
    "code": [],
    "topics": [
     "croon-job-locks"
@@ -51,7 +55,8 @@
     "lock-ttl"
    ],
    "analogs": [
-    "claim-lease-sweep"
+    "claim-lease-sweep",
+    "visibility-heartbeat"
    ],
    "code": [],
    "topics": [
@@ -66,7 +71,9 @@
    "builds_on": [
     "lease-renewal"
    ],
-   "analogs": [],
+   "analogs": [
+    "crash-recovery-is-visibility"
+   ],
    "code": [],
    "topics": [
     "croon-job-locks"
@@ -82,7 +89,8 @@
    ],
    "analogs": [
     "optimistic-concurrency",
-    "correlation-tag"
+    "correlation-tag",
+    "idempotency-key-minted-before-retry-boundary"
    ],
    "code": [],
    "topics": [
@@ -112,7 +120,10 @@
     "ownership-token"
    ],
    "analogs": [
-    "cursor-redelivery"
+    "cursor-redelivery",
+    "sqs-at-least-once",
+    "visibility-is-not-a-job-timeout",
+    "timeout-doesnt-cancel-remote"
    ],
    "code": [],
    "topics": [
@@ -445,7 +456,9 @@
    "kind": "principle",
    "builds_on": [],
    "analogs": [
-    "lease-renewal"
+    "lease-renewal",
+    "sqs-in-flight-invisible",
+    "visibility-heartbeat"
    ],
    "code": [],
    "topics": [
@@ -676,9 +689,19 @@
    "kind": "principle",
    "builds_on": [],
    "analogs": [
-    "ownership-token"
+    "ownership-token",
+    "idempotency-key-minted-before-retry-boundary"
    ],
-   "code": [],
+   "code": [
+    {
+     "path": "lib/ses-email-tags.ts",
+     "ref": "origin/main",
+     "lines": [
+      1,
+      33
+     ]
+    }
+   ],
    "topics": [
     "ses-metric-projection"
    ],
@@ -691,22 +714,42 @@
    "builds_on": [
     "correlation-tag"
    ],
-   "analogs": [],
-   "code": [],
+   "analogs": [
+    "idempotency-key-minted-before-retry-boundary"
+   ],
+   "code": [
+    {
+     "path": "jobs/mail-send.ts",
+     "ref": "origin/main",
+     "lines": [
+      194,
+      270
+     ]
+    }
+   ],
    "topics": [
     "ses-metric-projection"
    ],
    "created": "2026-10-21"
   },
   "raw-ledger-replay": {
-   "name": "Keep raw events to replay",
+   "name": "Raw ledger enables replay",
    "statement": "Keeping the raw events lets you fix a counting bug and recompute; counters alone are their own only copy.",
    "kind": "principle",
    "builds_on": [],
    "analogs": [
     "counts-not-rates"
    ],
-   "code": [],
+   "code": [
+    {
+     "path": "lib/ses-event.ts",
+     "ref": "origin/main",
+     "lines": [
+      75,
+      120
+     ]
+    }
+   ],
    "topics": [
     "ses-metric-projection"
    ],
@@ -716,7 +759,9 @@
    "name": "Readers are decoupled",
    "statement": "Each reader of the ledger is its own program, so adding or removing one never touches ingest and one failing doesn't half-finish the others.",
    "kind": "principle",
-   "builds_on": [],
+   "builds_on": [
+    "raw-ledger-replay"
+   ],
    "analogs": [],
    "code": [],
    "topics": [
@@ -725,12 +770,15 @@
    "created": "2026-10-21"
   },
   "cursor-redelivery": {
-   "name": "A crashed tick re-reads",
+   "name": "Crash before bookmark re-reads",
    "statement": "A reader that applies effects but dies before saving its bookmark re-reads the same events next tick.",
    "kind": "principle",
-   "builds_on": [],
+   "builds_on": [
+    "readers-decoupled"
+   ],
    "analogs": [
-    "lock-guards-holders-not-execution"
+    "lock-guards-holders-not-execution",
+    "sqs-at-least-once"
    ],
    "code": [],
    "topics": [
@@ -756,7 +804,7 @@
    "created": "2026-10-21"
   },
   "bookmark-lives-with-effects": {
-   "name": "The bookmark lives with the effects",
+   "name": "Bookmark lives with the effects",
    "statement": "With no cross-database transaction, the bookmark lives in the database the reader writes to; reading twice is harmless.",
    "kind": "principle",
    "builds_on": [
@@ -770,7 +818,7 @@
    "created": "2026-10-21"
   },
   "commit-order-not-stamp-order": {
-   "name": "Commit order isn't stamp order",
+   "name": "Commit order is not stamp order",
    "statement": "Rows stamped when their insert begins can commit out of order, so a reader can skip past a slow insert forever.",
    "kind": "principle",
    "builds_on": [
@@ -779,7 +827,16 @@
    "analogs": [
     "fold-needs-grouped-input"
    ],
-   "code": [],
+   "code": [
+    {
+     "path": "packages/mail-pg/src/ses-event.ts",
+     "ref": "origin/main",
+     "lines": [
+      122,
+      174
+     ]
+    }
+   ],
    "topics": [
     "ses-metric-projection"
    ],
@@ -793,28 +850,48 @@
     "commit-order-not-stamp-order"
    ],
    "analogs": [],
-   "code": [],
+   "code": [
+    {
+     "path": "packages/mail-pg/src/ses-event-projection-checkpoint.ts",
+     "ref": "origin/main",
+     "lines": [
+      8,
+      24
+     ]
+    }
+   ],
    "topics": [
     "ses-metric-projection"
    ],
    "created": "2026-10-21"
   },
   "retention-slowest-reader": {
-   "name": "The slowest reader sets retention",
+   "name": "Keep from the slowest reader",
    "statement": "Cleanup keeps everything from the oldest reader bookmark onward.",
    "kind": "principle",
-   "builds_on": [],
+   "builds_on": [
+    "cursor-redelivery"
+   ],
    "analogs": [
     "load-bearing-waypoint"
    ],
-   "code": [],
+   "code": [
+    {
+     "path": "packages/mail-pg/src/partitions.ts",
+     "ref": "origin/main",
+     "lines": [
+      122,
+      160
+     ]
+    }
+   ],
    "topics": [
     "ses-metric-projection"
    ],
    "created": "2026-10-21"
   },
   "frozen-bookmark-pins-retention": {
-   "name": "A frozen bookmark pins retention",
+   "name": "A frozen bookmark pins the ledger",
    "statement": "A deleted reader's leftover bookmark pins the ledger forever.",
    "kind": "principle",
    "builds_on": [
@@ -830,14 +907,23 @@
    "created": "2026-10-21"
   },
   "no-bookmark-row-means-unborn": {
-   "name": "No bookmark row means not born yet",
+   "name": "No row means not born yet",
    "statement": "A reader has no bookmark row until its first tick, so a missing row means the reader hasn't run yet.",
    "kind": "convention",
    "builds_on": [
     "retention-slowest-reader"
    ],
    "analogs": [],
-   "code": [],
+   "code": [
+    {
+     "path": "models/ses-event.ts",
+     "ref": "origin/main",
+     "lines": [
+      10,
+      36
+     ]
+    }
+   ],
    "topics": [
     "ses-metric-projection"
    ],
@@ -851,11 +937,286 @@
     "no-bookmark-row-means-unborn"
    ],
    "analogs": [],
-   "code": [],
+   "code": [
+    {
+     "path": "models/ses-event.ts",
+     "ref": "origin/main",
+     "lines": [
+      10,
+      36
+     ]
+    },
+    {
+     "path": "models/email-metric-counter-writer.ts",
+     "ref": "origin/main",
+     "lines": [
+      14,
+      14
+     ]
+    }
+   ],
    "topics": [
     "ses-metric-projection"
    ],
    "created": "2026-10-21"
+  },
+  "sqs-in-flight-invisible": {
+   "name": "Received = hidden, not removed",
+   "statement": "ReceiveMessage hides a message for the visibility timeout; only DeleteMessage removes it, otherwise it becomes visible again when the timeout lapses.",
+   "kind": "convention",
+   "builds_on": [],
+   "analogs": [
+    "claim-lease-sweep",
+    "lock-ttl"
+   ],
+   "code": [
+    {
+     "path": "lib/sqs/enqueue.ts",
+     "ref": "main",
+     "lines": "138-149,183-191"
+    },
+    {
+     "path": "monotoad:projects/terraform/shared/sqs/main.tf",
+     "ref": "origin/main",
+     "lines": "13-26"
+    }
+   ],
+   "topics": [
+    "sqs-visibility-timeout"
+   ],
+   "created": "2026-10-22"
+  },
+  "sqs-at-least-once": {
+   "name": "SQS is at-least-once",
+   "statement": "A consumer can finish the work and die (or time out) before DeleteMessage, so any message can be processed more than once; the queue cannot tell 'done but not deleted' from 'never done'.",
+   "kind": "principle",
+   "builds_on": [
+    "sqs-in-flight-invisible"
+   ],
+   "analogs": [
+    "cursor-redelivery",
+    "lock-guards-holders-not-execution"
+   ],
+   "code": [
+    {
+     "path": "lib/job-queue/process.ts",
+     "ref": "main",
+     "lines": "92-111"
+    }
+   ],
+   "topics": [
+    "sqs-visibility-timeout"
+   ],
+   "created": "2026-10-22"
+  },
+  "throw-waits-out-visibility": {
+   "name": "A thrown job waits out its visibility",
+   "statement": "A handler that throws (or returns {retry: true}) is not retried immediately: the message is simply not deleted, and it reappears only when its current visibility lapses — up to 30s after the last receive or extension.",
+   "kind": "principle",
+   "builds_on": [
+    "sqs-in-flight-invisible"
+   ],
+   "analogs": [],
+   "code": [
+    {
+     "path": "lib/job-queue/process.ts",
+     "ref": "main",
+     "lines": "92-123"
+    }
+   ],
+   "topics": [
+    "sqs-visibility-timeout"
+   ],
+   "created": "2026-10-22"
+  },
+  "crash-recovery-is-visibility": {
+   "name": "Crash recovery time = visibility timeout",
+   "statement": "When a worker dies mid-job its extension timer dies with it, so the message reappears at most one visibility timeout (30s) after the last receive or extension — the timeout, not the 20s extension interval, sets recovery time.",
+   "kind": "principle",
+   "builds_on": [
+    "sqs-in-flight-invisible"
+   ],
+   "analogs": [
+    "lock-ttl",
+    "ttl-vs-renewal-interval",
+    "dead-holder-blocks-forever"
+   ],
+   "code": [
+    {
+     "path": "lib/job-queue/poll.ts",
+     "ref": "main",
+     "lines": "93-105"
+    }
+   ],
+   "topics": [
+    "sqs-visibility-timeout"
+   ],
+   "created": "2026-10-22"
+  },
+  "visibility-heartbeat": {
+   "name": "Visibility extension is lease renewal",
+   "statement": "Loops calls ChangeMessageVisibility every 20s to push the deadline back to 30s from now, so a live handler of any length keeps its message with 10s of margin per beat; the timer is cleared before delete.",
+   "kind": "principle",
+   "builds_on": [
+    "crash-recovery-is-visibility"
+   ],
+   "analogs": [
+    "lease-renewal",
+    "claim-lease-sweep"
+   ],
+   "code": [
+    {
+     "path": "lib/job-queue/poll.ts",
+     "ref": "main",
+     "lines": "9,93-105,116-126"
+    },
+    {
+     "path": "lib/sqs/enqueue.ts",
+     "ref": "main",
+     "lines": "168-181"
+    },
+    {
+     "path": "lib/job-queue/process.ts",
+     "ref": "main",
+     "lines": "103-105"
+    }
+   ],
+   "topics": [
+    "sqs-visibility-timeout"
+   ],
+   "created": "2026-10-22"
+  },
+  "visibility-is-not-a-job-timeout": {
+   "name": "Visibility timeout is not a job timeout",
+   "statement": "When visibility lapses nothing stops the running handler; the message is handed to a second consumer while the first is still working, so the two run concurrently.",
+   "kind": "principle",
+   "builds_on": [
+    "visibility-heartbeat"
+   ],
+   "analogs": [
+    "lock-guards-holders-not-execution",
+    "timeout-doesnt-cancel-remote"
+   ],
+   "code": [
+    {
+     "path": "lib/job-queue/poll.ts",
+     "ref": "main",
+     "lines": "116-126"
+    }
+   ],
+   "topics": [
+    "sqs-visibility-timeout"
+   ],
+   "created": "2026-10-22"
+  },
+  "receive-count-redrive": {
+   "name": "Receive count drives the DLQ",
+   "statement": "Every receive bumps a message's receive count; once it exceeds the redrive policy's maxReceiveCount (3 for loops queues) SQS moves it to dlq-<queue> instead of delivering it again — thrown and {retry: true} attempts both count.",
+   "kind": "convention",
+   "builds_on": [
+    "throw-waits-out-visibility"
+   ],
+   "analogs": [],
+   "code": [
+    {
+     "path": "monotoad:projects/terraform/shared/sqs/main.tf",
+     "ref": "origin/main",
+     "lines": "22-25,49-55"
+    },
+    {
+     "path": "monotoad:projects/terraform/shared/sqs/variables.tf",
+     "ref": "origin/main",
+     "lines": "20-23"
+    },
+    {
+     "path": "monotoad:projects/terraform/production/loops/main.tf",
+     "ref": "origin/main",
+     "lines": "55-69"
+    }
+   ],
+   "topics": [
+    "sqs-visibility-timeout"
+   ],
+   "created": "2026-10-22"
+  },
+  "timeout-doesnt-cancel-remote": {
+   "name": "Your timeout doesn't cancel their write",
+   "statement": "Giving up on a request on your side (a Promise.race timeout) doesn't stop the server from committing it, so 'it threw' does not mean 'it didn't happen'.",
+   "kind": "principle",
+   "builds_on": [
+    "sqs-at-least-once"
+   ],
+   "analogs": [
+    "lock-guards-holders-not-execution",
+    "visibility-is-not-a-job-timeout"
+   ],
+   "code": [
+    {
+     "path": "lib/svixIntegration/svixDispatchLib.ts",
+     "ref": "main",
+     "lines": "20,51-66"
+    }
+   ],
+   "topics": [
+    "sqs-visibility-timeout"
+   ],
+   "created": "2026-10-22"
+  },
+  "idempotency-key-minted-before-retry-boundary": {
+   "name": "Mint the idempotency key outside the retry loop",
+   "statement": "A dedupe key only dedupes retries that reuse it, so it must be minted before the outermost retry boundary — at enqueue, carried in the message — not per call (svix mints a fresh key per message.create).",
+   "kind": "principle",
+   "builds_on": [
+    "sqs-at-least-once",
+    "timeout-doesnt-cancel-remote"
+   ],
+   "analogs": [
+    "ownership-token",
+    "correlation-tag",
+    "durable-row-before-send"
+   ],
+   "code": [
+    {
+     "path": "node_modules/svix/dist/index.mjs",
+     "ref": "svix@2.6.2",
+     "lines": "216,242-254"
+    },
+    {
+     "path": "lib/svixIntegration/svixDispatchLib.ts",
+     "ref": "main",
+     "lines": "458-475"
+    },
+    {
+     "path": "jobs/svix-dispatch.ts",
+     "ref": "pin-svix-idempotency-key-across-retries",
+     "lines": "9-33"
+    }
+   ],
+   "topics": [
+    "sqs-visibility-timeout"
+   ],
+   "created": "2026-10-22"
+  },
+  "nested-retry-layers": {
+   "name": "Retry layers nest",
+   "statement": "svix's client retries (3 attempts, 50ms/100ms) run inside one SQS delivery, which retries every ~30s up to 3 receives; each layer dedupes only within the scope where its key was minted, and an inner timeout must fit the server's own idempotency lock.",
+   "kind": "principle",
+   "builds_on": [
+    "idempotency-key-minted-before-retry-boundary",
+    "receive-count-redrive"
+   ],
+   "analogs": [],
+   "code": [
+    {
+     "path": "node_modules/svix/dist/index.mjs",
+     "ref": "svix@2.6.2",
+     "lines": "242-254"
+    }
+   ],
+   "topics": [
+    "sqs-visibility-timeout"
+   ],
+   "created": "2026-10-22"
   }
  },
  "topics": {
@@ -1066,17 +1427,17 @@
   },
   "ses-metric-projection": {
    "title": "Mail send → SES feedback → metric projection",
-   "source": "nalanj's PR #11092 (remove shadow projection)",
+   "source": "PR #11092",
    "stages": [
     {
-     "name": "Correlate",
+     "name": "Tie the event to the send",
      "concepts": [
       "correlation-tag",
       "durable-row-before-send"
      ]
     },
     {
-     "name": "The ledger",
+     "name": "Ledger over counters",
      "concepts": [
       "raw-ledger-replay",
       "readers-decoupled"
@@ -1109,6 +1470,49 @@
    ],
    "created": "2026-10-21",
    "updated": "2026-10-21"
+  },
+  "sqs-visibility-timeout": {
+   "title": "SQS visibility timeout and redelivery (loops job queue)",
+   "source": "lib/job-queue/{poll,process}.ts + monotoad shared/sqs; motivated by LOO-6248 svixDispatch duplicate webhook; plan: ~/.dotfiles/learning/plans/sqs-visibility-timeout.md",
+   "stages": [
+    {
+     "name": "In flight, not gone",
+     "concepts": [
+      "sqs-in-flight-invisible",
+      "sqs-at-least-once"
+     ]
+    },
+    {
+     "name": "Success, throw, crash",
+     "concepts": [
+      "throw-waits-out-visibility",
+      "crash-recovery-is-visibility"
+     ]
+    },
+    {
+     "name": "Keeping a long job's message",
+     "concepts": [
+      "visibility-heartbeat",
+      "visibility-is-not-a-job-timeout"
+     ]
+    },
+    {
+     "name": "Receive count and the DLQ",
+     "concepts": [
+      "receive-count-redrive"
+     ]
+    },
+    {
+     "name": "Making redelivery harmless",
+     "concepts": [
+      "timeout-doesnt-cancel-remote",
+      "idempotency-key-minted-before-retry-boundary",
+      "nested-retry-layers"
+     ]
+    }
+   ],
+   "created": "2026-10-22",
+   "updated": "2026-10-22"
   }
  },
  "evidence": [
@@ -1848,6 +2252,17 @@
    "at": "2026-10-21",
    "topic": "ses-metric-projection",
    "session": "seed:learning-track"
+  },
+  {
+   "id": "3ddc7c21e2",
+   "concept": "bookmark-name-contract",
+   "level": "predict",
+   "credit": "scaffolded",
+   "outcome": "hit",
+   "note": "located the failure at the drop job's 'no row' answer; my step-by-step walk had already laid that step out",
+   "at": "2026-10-21",
+   "topic": "ses-metric-projection",
+   "session": ""
   }
  ],
  "questions": [
