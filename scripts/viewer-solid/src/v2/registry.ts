@@ -27,6 +27,12 @@ export interface Write {
   inverse?: Inverse | ((answer: Record<string, unknown>) => Inverse | undefined);
   /** undo a local (non-store) part of the optimistic change when the server refuses */
   rollback?: () => void;
+  /** the server's answer, whatever it was — for a caller chaining steps on it (the sync motion) */
+  answered?: (ok: boolean, body: Record<string, unknown>) => void;
+  /** the caller says what happened itself: no quiet line on success or refusal */
+  silent?: boolean;
+  /** post at once, beside the queue — a long run (the delta tests) mustn't hold up every write behind it */
+  alone?: boolean;
 }
 
 export interface Command {
