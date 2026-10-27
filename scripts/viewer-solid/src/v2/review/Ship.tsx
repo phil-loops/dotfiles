@@ -49,6 +49,7 @@ export default function ShipLine() {
     return st === "sending" || st === "landing" || st === "failed" ? st : null;
   };
   const acts = () => route() === "branch.gates.run" || route() === "branch.push.arm" || route() === "branch.push.confirm";
+  const waiting = () => route() === "branch.gates.wait";
   const label = () => {
     if (live() === "sending") return "pushing…";
     if (live() === "landing") return "✓ pushed";
@@ -104,7 +105,7 @@ export default function ShipLine() {
         }>
           <span class="text-gold-leaf animate-breathe">{doing()}</span>
         </Show>
-        <Show when={acts() && !live()}>
+        <Show when={(acts() || waiting()) && !live()}>
           <Show when={running()} fallback={<Gates red={red()} waived={waived()} gates={b()!.gates} skipped={skipped()} />}>
             <span class="text-gold-leaf">◌ {running()!.name} {secs(running()!.ms)}</span>
           </Show>
