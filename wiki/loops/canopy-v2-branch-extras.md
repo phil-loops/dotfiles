@@ -57,8 +57,9 @@ restacked truth: sync/prep stop treating the divergence as something to fix.
 - A frozen branch shows `❄ origin frozen` in the ship line; `p` doesn't arm (nothing to push by
   design) and `s` skips the divergence step. Unfreeze is one command, undoable with `u`.
 
-## Open questions for Phil
+## Decided (Phil, 2026-10-27)
 
-1. Diff base key — `space d` + which-key, or cycle with one key?
-2. Force — fold into `p` when eligible (above), or keep it a separate, menu-only command?
-3. Freeze — still used? It was last set in v1's era; if nothing sets it, drop it instead of porting.
+1. Diff base: `space d` + which-key (`p` / `m` / `o`), as in §1.
+2. Force: folded into `p` when eligible, as in §3.
+3. Freeze: **dropped**, not ported — no branch has it set. Remove `/frozen-origin`, the
+   `frozen-origin` config reads in srv/sync.py and srv/prep.py, and §4 above is void.

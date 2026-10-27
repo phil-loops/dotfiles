@@ -1,6 +1,6 @@
 +++
 title = "Pick diff bases and edit the branch description on the v2 branch page"
-kind = "decide"
+kind = "build"
 state = "open"
 area = "v1-retire"
 size = "S"
@@ -10,6 +10,8 @@ updated = "2026-10-27"
 +++
 
 ## Next steps
-Phil 2026-10-27: diff bases, the description editor, force-origin and freeze need a fleshed-out design before building — not a straight port. Design first.
-
-v1 is gone (2026-10-27, fd75d07 and before): there is nothing to port from or fall back to — these four get designed and built fresh in v2. Last-blessed is not one of the bases any more (bless was removed; v2's `viewed` marks are the review-progress signal). What survives server-side to build on: `/node?branch=&base=` (any explicit base), `/outline` (saves the description with the outline), `POST /force-origin` and `POST /frozen-origin` (kept for this item; no v2 caller yet).
+Design: wiki/loops/canopy-v2-branch-extras.md (decided 2026-10-27: space d diff base; force folded into p when eligible; freeze dropped).
+1. Diff base (space d, ?base=, files-tab header).
+2. Description field in the words tab + space e inline on forest rows.
+3. Force-origin folded into p with the guard list.
+4. Remove freeze (endpoint + sync/prep reads).
