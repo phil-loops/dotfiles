@@ -70,7 +70,7 @@ _pulse = {"sig": "", "asset": "", "world": "", "procs": ""}  # model+asset+remot
 _pulse_subs = srvctx.PULSE_SUBS    # open /events streams — pulse() only runs while this is > 0
 _pulse_subs_lock = threading.Lock()
 _pulse_wake = threading.Event()
-_index_cache = {}  # page -> (asset_sig, assembled html): v1's index.html, v2's v2/index.html
+_index_cache = {}  # (asset_sig, assembled html) of dist/v2/index.html
 LOG = os.environ.get("STACK_REVIEW_LOG", "1") not in ("", "0")   # default-on; STACK_REVIEW_LOG=0 silences
 _log_lock = threading.Lock()
 # Durable sink beside stderr: the servedir log dies with the server (mktemp, reaped on bounce),
@@ -185,9 +185,9 @@ srvctx.init(run=run, ROOT=ROOT, SCRIPTS=SCRIPTS, CWD=CWD, MAIN_WT=MAIN_WT, repos
 
 def asset_sig():
     # fingerprint the built Solid app (dist/) so a fresh `npm run build` reloads open tabs.
-    # dist/index.html names hashed asset files, so its mtime alone moves on a rebuild; we
+    # dist/v2/index.html names hashed asset files, so its mtime alone moves on a rebuild; we
     # hash the assets dir too to be safe.
-    parts = [os.path.join(DIST, "index.html"), os.path.join(DIST, "v2", "index.html"), keymap.PATH]   # saving your keys reloads tabs too
+    parts = [os.path.join(DIST, "v2", "index.html"), keymap.PATH]   # saving your keys reloads tabs too
     adir = os.path.join(DIST, "assets")
     try:
         parts += [os.path.join(adir, f) for f in sorted(os.listdir(adir))]
@@ -315,21 +315,19 @@ class H(BaseHTTPRequestHandler):
         finally:
             srvctx.clear_repo()
 
-    def _send_app_shell(self, page="index.html"):
-        # The built Solid app (scripts/viewer-solid/dist/index.html), served for the shell AND
-        # every client route: path-based routing (History API) means a deep-link/refresh to
-        # /forests/x hits the server, which must return index.html (SPA fallback) so the client
-        # can route it. API routes (/branch-url, /review-requests, /node, …) don't match those
-        # prefixes, so they still fall through to their own handlers.
+    def _send_app_shell(self):
+        # The built Solid app (scripts/viewer-solid/dist/v2/index.html), served for every /v2/…
+        # client route: path-based routing (History API) means a deep-link/refresh hits the
+        # server, which must return index.html (SPA fallback) so the client can route it.
         # Cached in-process, re-read only when asset_sig moves (a fresh `npm run build`).
-        # Same-origin with this server, so the app's /model, /node, /bless… are plain
-        # relative fetches — no dev proxy.
+        # Same-origin with this server, so the app's /state, /node… are plain relative fetches.
         sig = asset_sig()
+        page = "v2"
         with _render_lock:
             hit = _index_cache.get(page)
             if hit is None or hit[0] != sig:
                 try:
-                    html = open(os.path.join(DIST, page), "rb").read()
+                    html = open(os.path.join(DIST, "v2", "index.html"), "rb").read()
                 except OSError:
                     self._send(503, "viewer not built — run `npm run build` in scripts/viewer-solid", "text/plain")
                     return
@@ -341,22 +339,21 @@ class H(BaseHTTPRequestHandler):
             body = hit[1]
         self._send(200, body, "text/html; charset=utf-8")
 
+    def _redirect(self, to):
+        self.send_response(302)
+        self.send_header("Location", to)
+        self.send_header("Content-Length", "0")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+
     def _dispatch_get(self, u):
         if u.path == "/v2" or (u.path.startswith("/v2/") and u.path != "/v2/events"):
-            return self._send_app_shell("v2/index.html")   # canopy v2, built beside v1 until it replaces it
+            return self._send_app_shell()
         if u.path == "/outbox" and "text/html" not in self.headers.get("Accept", ""):
             return outbox.get(self, u)   # the shipping desk's data; a browser navigation gets the page
         if (u.path in ("/", "/index.html", "/work", "/forests", "/watching", "/wiki", "/machine", "/tutor", "/outbox")
                 or u.path.startswith(("/forests/", "/branch/", "/review/", "/push/", "/wiki/", "/tutor/", "/outbox/"))):
-            to = v1redirect.target(u)
-            if to:
-                self.send_response(302)
-                self.send_header("Location", to)
-                self.send_header("Content-Length", "0")
-                self.send_header("Cache-Control", "no-store")
-                self.end_headers()
-                return
-            self._send_app_shell()
+            return self._redirect(v1redirect.target(u))   # v1's page URLs (and /) → their v2 page
         elif u.path.startswith("/assets/"):
             # hashed, immutable build assets (JS/CSS). basename-only + a fixed dir, so the
             # path can't escape dist/assets. Cache hard — the filename changes on rebuild.
@@ -502,10 +499,10 @@ class H(BaseHTTPRequestHandler):
         elif u.path == "/preview-wait":   return preview.wait(self)   # warming page: boots + hands off to the preview
         elif "text/html" in self.headers.get("Accept", ""):
             # A browser NAVIGATION that matched no route above is a human on a page URL that
-            # moved, was mistyped, or predates a rename (/forest/x before /forests/x) — hand
-            # them the app and let the client router fall home, rather than a bare `{}` in the
-            # face. fetch/XHR doesn't ask for text/html, so API 404s stay honest JSON.
-            self._send_app_shell()
+            # moved, was mistyped, or predates a rename (/forest/x before /forests/x) — send
+            # them home rather than a bare `{}` in the face. fetch/XHR doesn't ask for
+            # text/html, so API 404s stay honest JSON.
+            self._redirect(v1redirect.HOME)
         else:
             self._send(404, "{}")
 

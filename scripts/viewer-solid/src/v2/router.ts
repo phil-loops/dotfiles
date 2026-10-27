@@ -71,13 +71,6 @@ export const integrationRef = (project: string) => `refs/stack/${project}-integr
 /** The forest a review page's ref integrates, or undefined for a real branch. */
 export const integrationOf = (name: string): string | undefined => /^refs\/stack\/(.+)-integration$/.exec(name)?.[1];
 
-/** Leave v2 for a page it doesn't have yet (v1's branch page, Work, Wiki…): recorded as a
- *  navigation to "v1:<path>" — the page unloads, so there is no paint to time. */
-export function leave(path: string): void {
-  emit({ type: "nav", from: surface().id, to: `v1:${path.split("?")[0]}`, paintMs: null });
-  location.assign(path);
-}
-
 /** Measure the entry paint (from the navigation's start) and follow back/forward. */
 export function startRouter(): void {
   measure("", surface().id, 0);

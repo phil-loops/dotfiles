@@ -265,9 +265,3 @@ export const atRepo = (repo: string, path: string) => (repos().includes(repo) ? 
 export const compareUrl = (v: BranchView) =>
   atRepo(v.b.repo, `/packet-compare?branch=${encodeURIComponent(v.b.name)}&base=${encodeURIComponent(v.base)}`);
 
-/** v1's branch page (the v2 review page is reviewPath in router.ts). */
-export const branchPage = (b: Branch) => {
-  const project = view("project", b.project)?.name ?? "";
-  const repo = repos().includes(b.repo) && b.repo !== "loops" ? `${b.repo}/` : "";
-  return `/forests/${repo}${encodeURIComponent(project)}/${b.name}`;
-};

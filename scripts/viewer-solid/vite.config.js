@@ -15,20 +15,17 @@ const API = `http://127.0.0.1:${PORT}`;
 // fallback, which answers 200 + index.html, so dev-mode saves "succeed" without reaching
 // the backend (that's how /ticket silently no-opped under `npm run dev`).
 const ROUTES = [
-  "/model", "/node", "/projects", "/prs", "/myprs", "/commits", "/file", "/sig",
-  "/head", "/sync", "/syncs", "/events", "/restack-status",
-  "/bless", "/restack", "/restack-all", "/check-origin", "/prepare", "/open",
-  "/chat", "/integrate", "/purpose", "/squash", "/prep", "/restack-resolve", "/restack-abort", "/heartbeat",
-  "/preview", "/preview-kill", "/preview-restart", "/preview-reap", "/previews", "/preview-log",
-  "/ticket", "/focus", "/merge-subjects",
-  "/plan-steps", "/plan-template", "/plan-preview",
-  "/commit-diff", "/commit-dirty", "/dirty-resolve", "/diverged-detail",
-  "/forest-health", "/forest-branches", "/forest-purposes", "/gates-progress",
-  "/fix-upstream", "/integrate-here", "/reseat-children",
-  "/prep-route", "/prep-push", "/preview-wait", "/push-preview", "/processes",
-  "/outline", "/outline-undo", "/outline-reseat",
-  "/chat-popout",
-  "/state", "/v2/events", "/track", "/telemetry/summary", "/project-state",
+  "/commit-diff", "/commits", "/delta-tests", "/dirty-resolve", "/diverged-detail", "/events",
+  "/file", "/fix-upstream", "/focus", "/footprint", "/gates", "/gates-progress", "/integrate",
+  "/landed-why", "/learning-evidence", "/learning-question", "/learning-state", "/lsp/definition",
+  "/lsp/hover", "/lsp/prepare", "/lsp/src", "/node", "/open", "/outbox-hold", "/outline",
+  "/outline-undo", "/packet-compare", "/prep-push", "/prep-route", "/preview-kill", "/preview-log",
+  "/preview-main", "/preview-reap", "/preview-restart", "/preview-swap", "/preview-wait",
+  "/previews", "/project-state", "/push-origin", "/reconcile", "/reseat-children", "/restack",
+  "/revert-commit", "/review-address", "/review-apply", "/review-draft", "/review-note",
+  "/stack-up", "/state", "/sync", "/telemetry/summary", "/todo-item", "/track", "/tutor",
+  "/tutor-import", "/tutor-src", "/tutor-stop", "/tutor-terminal", "/v2/events", "/viewed",
+  "/wiki-pages", "/wiki-src", "/heartbeat",
 ];
 
 // Dev-only keep-alive: the Python backend self-reaps after 15min without an /events
@@ -68,12 +65,11 @@ export default defineConfig({
   plugins: [solid(), tailwindcss(), keepBackendAlive()],
   build: {
     rollupOptions: {
-      // two apps, one dist: v1 at /, v2 at /v2 (dist/v2/index.html), sharing dist/assets
-      input: { index: "index.html", v2: "v2/index.html" },
+      // the app is served at /v2 (dist/v2/index.html); its hashed assets in dist/assets
+      input: { v2: "v2/index.html" },
       output: {
         // vendor in its own hashed chunk: app edits stop re-downloading the ~400kB of
         // solid/tanstack/deps (the single 511kB index chunk churned its hash every build).
-        // Solid is its own chunk so v2, which needs nothing else, never loads v1's vendor.
         manualChunks: (id) =>
           id.includes("node_modules/solid-js") ? "solid" : id.includes("node_modules") ? "vendor" : undefined,
       },
