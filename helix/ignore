@@ -1,0 +1,7 @@
+# Global file-picker / global-search ignore (gitignore syntax). A bare `hx` from ~ has no
+# workspace, so space-/ walks all of $HOME — Claude transcripts, Library, and the OrbStack
+# NFS mount (which hangs the walk and spews "nfs server not responding").
+.claude/
+OrbStack/
+Library/
+.Trash/
