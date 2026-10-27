@@ -13,6 +13,8 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+// v1 pages: the live viewer 302s v1 URLs to v2 unless the load says ?v1
+const onV1 = (u) => u + (u.includes("?") ? "&" : "?") + "v1";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const arg = (n, d) => { const i = process.argv.indexOf("--" + n); return i === -1 ? d : process.argv[i + 1]; };
@@ -82,7 +84,7 @@ const snap = async (name) => {
 
 const gridCols = () => page.evaluate(() => getComputedStyle(document.querySelector(".shell")).gridTemplateColumns);
 
-await page.goto(BASE + "/forests/admin-user-memberships/admin-user-membership-queries", { waitUntil: "domcontentloaded", timeout: 20000 });
+await page.goto(onV1(BASE + "/forests/admin-user-memberships/admin-user-membership-queries"), { waitUntil: "domcontentloaded", timeout: 20000 });
 await page.waitForSelector(".entry", { timeout: 20000 });
 await page.waitForSelector(".uncommitted-rail", { timeout: 15000 });
 await freeze();

@@ -57,7 +57,7 @@ const PLACES = [
   { id: "work", title: "Work", path: "/work", key: "g w" },
   { id: "wiki", title: "Wiki", path: "/wiki", key: "g i" },
   { id: "tutor", title: "Tutor", path: "/tutor", key: "g t" },
-  { id: "v1", title: "the v1 home", path: "/forests", key: "" },
+  { id: "v1", title: "the v1 home", path: "/forests?v1", key: "" },
 ];
 for (const p of PLACES) {
   command({ id: `place.${p.id}`, title: `Go to ${p.title}`, scope: "global", budget: "local", keys: p.key ? [p.key] : [], local: () => leave(p.path) });

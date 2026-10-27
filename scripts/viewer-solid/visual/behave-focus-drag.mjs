@@ -11,6 +11,8 @@
 // firing, and the unpin mid-state. Server reconciliation is deliberately out of scope
 // (the fixture is stateless; the lane reverting on refetch here is expected).
 import puppeteer from "puppeteer-core";
+// v1 pages: the live viewer 302s v1 URLs to v2 unless the load says ?v1
+const onV1 = (u) => u + (u.includes("?") ? "&" : "?") + "v1";
 
 const arg = (n, d) => {
   const i = process.argv.indexOf("--" + n);
@@ -52,7 +54,7 @@ const fail = (msg) => {
 };
 const ok = (msg) => console.log(`✓ ${msg}`);
 
-await page.goto(BASE + "/forests", { waitUntil: "domcontentloaded", timeout: 20000 });
+await page.goto(onV1(BASE + "/forests"), { waitUntil: "domcontentloaded", timeout: 20000 });
 await page.waitForSelector(".focus-lane", { timeout: 15000 });
 await sleep(1500);
 

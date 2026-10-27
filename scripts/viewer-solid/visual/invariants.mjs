@@ -12,6 +12,8 @@ import puppeteer from "puppeteer-core";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+// v1 pages: the live viewer 302s v1 URLs to v2 unless the load says ?v1
+const onV1 = (u) => u + (u.includes("?") ? "&" : "?") + "v1";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const arg = (n, d) => {
@@ -31,7 +33,7 @@ for (const s of surfaces) {
   const page = await browser.newPage();
   await page.setViewport({ width: 1440, height: 900 });
   try {
-    await page.goto(BASE + s.path, { waitUntil: "domcontentloaded", timeout: 20000 });
+    await page.goto(onV1(BASE + s.path), { waitUntil: "domcontentloaded", timeout: 20000 });
     if (s.waitFor) await page.waitForSelector(s.waitFor, { timeout: 15000 });
     for (const sel of s.clicks ?? []) {
       await page.waitForSelector(sel, { timeout: 10000 });
