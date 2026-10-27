@@ -40,12 +40,6 @@ def _save(st):
     os.replace(tmp, path)
 
 
-def badge(project):
-    """The forest's last ambient-sync outcome, for /projects — only the ones that need Phil."""
-    ent = _load().get("projects", {}).get(project)
-    return ent if ent and ent.get("state") in ("conflict", "stuck", "refused") else None
-
-
 def _git(*args):
     return ctx.run(["git", *args])
 

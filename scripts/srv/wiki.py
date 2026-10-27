@@ -19,7 +19,6 @@
 # folds in here once its content files go quiet (they're live in another session today).
 import json
 import os
-import re
 import sys
 from urllib.parse import parse_qs
 
@@ -37,9 +36,6 @@ WIKI_ROOT = os.environ.get("STACK_WIKI", os.path.join(HOME, ".dotfiles", "wiki")
 # mail-map's original home, still authoritative for loops until those pages move.
 LEGACY = {"loops": os.path.join(HOME, ".dotfiles", "mail-map")}
 
-# `[label](src:…)` that CITE_RE will NOT match — an anchor with a space in it. Caught
-# explicitly because the failure is otherwise invisible: it renders as plain text.
-MALFORMED_RE = re.compile(r"\]\(src:([^)]*\s[^)]*)\)")
 
 
 def _repo_name():
@@ -116,18 +112,6 @@ def _load():
     return pages, problems
 
 
-def _live_projects():
-    """Forest names this repo still knows about. Empty on any git trouble — the caller
-    only uses it to *raise* a hint, so failing closed keeps a hiccup from crying wolf."""
-    try:
-        proc = ctx.run(["git", "config", "--get-regexp", r"^stack-project\..*\.branch$"])
-    except Exception:
-        return None
-    if proc.returncode != 0:
-        return None
-    return {line.split(".", 2)[1] for line in proc.stdout.splitlines() if line.startswith("stack-project.")}
-
-
 def _repo_ref():
     # mail_map resolves citations against a fixed REPO/REF pair chosen at import. The
     # viewer serves one repo per port, so pinning it per request is enough — and it
@@ -172,78 +156,3 @@ def src(req, u):
     except mail_map.Problem as exc:
         return req._send(200, json.dumps({"err": str(exc)}))
 
-
-def lint(req, u):
-    """Deterministic checks, kind-aware.
-
-    A design page is exempt from the citation demands — it describes code that hasn't
-    been written, so `uncited` and `broken-citation` would fire on every line of an
-    honest plan. It still owes a word budget and live wikilinks: those are the
-    anti-additive part, and a plan that sprawls is exactly what needs splitting.
-    """
-    _repo_ref()
-    try:
-        found, problems = _load()
-    except OSError as exc:
-        return req._send(200, json.dumps({"err": str(exc)}))
-
-    out = [{"kind": "frontmatter", "msg": m} for m in problems]
-    slugs = {p["slug"] for p in found}
-    seen_anchors = {}
-    live = _live_projects()   # one git call for the whole pass, not one per page
-
-    for page in found:
-        design = page["kind"] == "design"
-        if page["words"] > mail_map.WORD_BUDGET:
-            out.append({"kind": "over-budget", "slug": page["slug"],
-                        "msg": f"{page['words']} words, budget is {mail_map.WORD_BUDGET} — split it or cut"})
-        # A citation whose anchor holds a space doesn't match CITE_RE, so it renders as
-        # literal text and every other check skips it — silent, and it cost an hour once.
-        for bad in MALFORMED_RE.findall(page["body"]):
-            out.append({"kind": "malformed-citation", "slug": page["slug"],
-                        "msg": f"src:{bad.strip()} — an anchor can't contain spaces; "
-                               "use path#symbol, path#/pattern/ (no spaces), or path#L1-L2@hash"})
-        cites = mail_map.citations(page["body"])
-        if not cites and not design:
-            out.append({"kind": "uncited", "slug": page["slug"],
-                        "msg": "makes claims with no citation"})
-        for _, anchor in cites:
-            try:
-                mail_map.resolve(anchor)
-            except mail_map.Problem as exc:
-                if not design:
-                    out.append({"kind": "broken-citation", "slug": page["slug"], "msg": str(exc)})
-            owner = seen_anchors.setdefault(anchor, page["slug"])
-            if owner != page["slug"] and not design:
-                out.append({"kind": "duplicate-citation", "slug": page["slug"],
-                            "msg": f"cites {anchor}, already explained on {owner} — link instead"})
-        for target in mail_map.WIKILINK_RE.findall(page["body"]):
-            if target not in slugs:
-                out.append({"kind": "dead-link", "slug": page["slug"],
-                            "msg": f"[[{target}]] is not a page"})
-        if page["ask"] and not design:
-            try:
-                mail_map._read(page["ask"])
-            except mail_map.Problem as exc:
-                out.append({"kind": "broken-ask", "slug": page["slug"], "msg": str(exc)})
-        # The conversion prompt. Resolving citations can't be the signal — a plan may
-        # legitimately cite code that already exists on the write side. The forest
-        # vanishing from config is the honest one: restack contracts a project's keys
-        # once its last branch merges, so an orphaned `project:` means the work landed.
-        if design and live is not None and page["project"] not in live:
-            out.append({"kind": "convertible", "slug": page["slug"],
-                        "msg": f"no forest named {page['project']} — the work landed or was dropped; "
-                               "cite the real code and drop `project:`, or retire the page"})
-
-    for i, a in enumerate(found):
-        sa = mail_map._shingles(a["body"])
-        for b in found[i + 1:]:
-            sb = mail_map._shingles(b["body"])
-            if not sa or not sb:
-                continue
-            overlap = len(sa & sb) / min(len(sa), len(sb))
-            if overlap > 0.12:
-                out.append({"kind": "duplicate-prose", "slug": a["slug"],
-                            "msg": f"↔ {b['slug']}: {overlap:.0%} of the shorter page is shared wording"})
-
-    return req._send(200, json.dumps({"problems": out}))

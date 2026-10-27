@@ -1,20 +1,17 @@
 # srv/review.py — the review surface: the forest model, per-node file list + diffs,
-# commit log, branch purpose, blessing, and the squash/prep-for-push actions.
+# commit log, blessing, and the squash/prep-for-push actions.
 #   GET  /model?branch=X    the forest model JSON (stack-forest), cached on model_sig
 #   GET  /node?branch=X     a node's file list (stack-forest --node)
-#   GET  /purpose?branch=X  branch purpose/thesis (read; ?generate=1 opts into token spend)
 #   GET  /file?branch&path  a file's contents on a ref (git show)
 #   GET  /commits?branch=X  branch history: own commits (own:true) + ancestors (own:false)
 #   GET  /commit-diff?sha=X one commit's changed files + patches (git show)
 #   POST /bless {branch,file}    mark file(s) reviewed (stack-bless)
-#   POST /purpose {branch,text}  save a thesis as the branch description
 #   POST /squash {branch}        collapse parent..branch into unstaged working-tree changes
 #   POST /prep {branch}          prep-for-push: squash unpushed → one, then oxfmt
 import os
 import subprocess
 import json
 import time
-import tempfile
 import re
 import hashlib
 import threading
@@ -345,42 +342,6 @@ def _node_build(branch, base):
             r.stdout if r.returncode == 0 else json.dumps({"branch": branch, "files": []}))
 
 
-def pr_body(req, u):
-    # draft a GitHub PR description that frames the branch in its forest (what + where-it-fits).
-    # Spends tokens (stack-pr-body → claude) — only ever hit from an explicit "draft PR" click.
-    branch = parse_qs(u.query).get("branch", [""])[0]
-    r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-pr-body"), branch])
-    req._send(200 if r.returncode == 0 else 500,
-              r.stdout if r.returncode == 0 else "_(draft failed — see server log)_",
-              "text/plain; charset=utf-8")
-
-
-def purpose_get(req, u):
-    q = parse_qs(u.query)
-    args = [os.path.join(ctx.SCRIPTS, "stack-purpose")]
-    if q.get("generate", ["0"])[0] == "1":   # opt-in token spend, only on ask
-        args.append("--generate")
-    args.append(q.get("branch", [""])[0])
-    r = ctx.run(args)
-    req._send(200 if r.returncode == 0 else 500,
-              r.stdout if r.returncode == 0 else json.dumps({"thesis": "", "enables": "", "source": "none"}))
-
-
-def forest_purposes(req, u):
-    # one shot for the Forests-row hover card: every member branch + its one-line purpose
-    # (git branch description), so "what's going on in here" reads at a glance without N fetches.
-    project = parse_qs(u.query).get("project", [""])[0]
-    members = ctx.run(["git", "config", "--get-all", f"stack-project.{project}.branch"]).stdout.splitlines()
-    out, seen = [], set()
-    for b in (m.strip() for m in members):
-        if not b or b in seen:
-            continue
-        seen.add(b)
-        thesis = ctx.run(["git", "config", f"branch.{b}.description"]).stdout.strip()
-        out.append({"branch": b, "thesis": thesis})
-    req._send(200, json.dumps(out))
-
-
 def file(req, u):
     q = parse_qs(u.query)
     branch, path = q.get("branch", [""])[0], q.get("path", [""])[0]
@@ -547,179 +508,6 @@ def frozen_origin_set(req, raw):
     req._send(200 if ok else 500, "{}")
 
 
-def purpose_set(req, raw):
-    d = json.loads(raw or "{}")
-    r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-purpose"), "--set", d.get("text", ""), d.get("branch", "")])
-    req._send(200 if r.returncode == 0 else 500, r.stdout if r.returncode == 0 else "{}")
-
-
-def notes_get(req, u):
-    # per-branch test/repro notes (the stack-notes sidecar) — how to recreate the verified state
-    branch = parse_qs(u.query).get("branch", [""])[0]
-    r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-notes"), "--json", branch])
-    req._send(200 if r.returncode == 0 else 500,
-              r.stdout if r.returncode == 0 else json.dumps({"branch": branch, "markdown": "", "mtime": 0}))
-
-
-def notes_set(req, raw):
-    # ctx.run has no stdin path, so the note body travels via a temp file (--set-file; empty deletes)
-    d = json.loads(raw or "{}")
-    with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as f:
-        f.write(d.get("markdown", ""))
-        tmp = f.name
-    try:
-        r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-notes"), "--set-file", tmp, d.get("branch", "")])
-    finally:
-        os.unlink(tmp)
-    req._send(200 if r.returncode == 0 else 500, json.dumps({"ok": r.returncode == 0}))
-
-
-def _plan_defaults():
-    try:
-        return json.loads(ctx.run(["python3", os.path.join(ctx.SCRIPTS, "stack_facts.py"), "plan-defaults"]).stdout)
-    except Exception:
-        return {"template": "", "step": ""}
-
-
-def _proj_cfg_raw(project, key):
-    # raw read — a template's leading indent + internal newlines are load-bearing (git config appends
-    # one trailing newline of its own; drop only that). Mirrors stack_facts._proj_cfg.
-    r = ctx.run(["git", "config", f"stack-project.{project}.{key}"])
-    if r.returncode != 0:
-        return ""
-    return r.stdout[:-1] if r.stdout.endswith("\n") else r.stdout
-
-
-def plan_template_get(req, u):
-    # GET /plan-template?project=X → the per-project body template + step line (edited once, carried
-    # to every child), plus the built-in defaults the editor prefills / falls back to.
-    project = parse_qs(u.query).get("project", [""])[0]
-    if not project:
-        return req._send(400, json.dumps({"error": "no project"}))
-    req._send(200, json.dumps({
-        "project": project,
-        "template": _proj_cfg_raw(project, "plan-template"),
-        "step": _proj_cfg_raw(project, "plan-step"),
-        "defaults": _plan_defaults(),
-    }))
-
-
-def plan_template_set(req, raw):
-    # POST /plan-template {project, template, step} → persist the template. Empty or default-equal
-    # values are UNSET, so config stays clean and render falls back to the built-in default.
-    d = json.loads(raw or "{}")
-    project = (d.get("project") or "").strip()
-    if not project:
-        return req._send(400, json.dumps({"error": "no project"}))
-    defaults = _plan_defaults()
-    for key, field in (("plan-template", "template"), ("plan-step", "step")):
-        val = d.get(field)
-        cfgkey = f"stack-project.{project}.{key}"
-        if not val or val == defaults.get(field):
-            ctx.run(["git", "config", "--unset", cfgkey])
-        else:
-            ctx.run(["git", "config", cfgkey, val])
-    req._send(200, json.dumps({"ok": True}))
-
-
-def plan_preview(req, u):
-    # GET /plan-preview?branch=X → the rendered plan block for that branch, so the template editor
-    # shows the live effect with the volatile facts (#PR, [this branch], position) filled in.
-    branch = parse_qs(u.query).get("branch", [""])[0]
-    if not branch:
-        return req._send(400, json.dumps({"error": "no branch"}))
-    r = ctx.run(["python3", os.path.join(ctx.SCRIPTS, "stack_facts.py"), "plan", branch])
-    req._send(200, json.dumps({"plan": r.stdout.rstrip("\n")}))
-
-
-def plan_steps(req, u):
-    # GET /plan-steps?branch=X → the forest's steps in merge order, structured for per-step editing:
-    # each carries its branch, effective one-line story (job), the raw stored `.story` override (if
-    # any), whether it already landed, and which one is [this branch]. Feeds the plan-step editor —
-    # editing a line writes that step's OWN branch, so the story is durable past this branch's merge.
-    branch = parse_qs(u.query).get("branch", [""])[0]
-    if not branch:
-        return req._send(400, json.dumps({"error": "no branch"}))
-    r = ctx.run(["python3", os.path.join(ctx.SCRIPTS, "stack_facts.py"), "steps", branch])
-    try:
-        f = json.loads(r.stdout)
-    except Exception:
-        return req._send(500, json.dumps({"steps": []}))
-    steps = [{"n": s.get("n"), "branch": s.get("branch"), "job": s.get("job"),
-              "story": s.get("story", ""), "description": s.get("description", ""),
-              "subject": s.get("subject", ""), "pr": s.get("pr"),
-              "landed": s.get("landed", False), "me": s.get("me", False)}
-             for s in f.get("plan", [])]
-    req._send(200, json.dumps({"branch": branch, "project": f.get("project"), "steps": steps}))
-
-
-def step_evidence(req, u):
-    # GET /step-evidence?branch=X → what this branch actually DOES, as facts: its own commit
-    # subjects and the shape of its diff against its parent. The story editor starts every line
-    # blank, so this is the material you read to write one — the derived gloss is a hint, not a
-    # draft to nudge. Fetched per row, on demand: two git spawns a branch, never the whole forest.
-    branch = parse_qs(u.query).get("branch", [""])[0]
-    if not branch:
-        return req._send(400, json.dumps({"error": "no branch"}))
-    main = ctx.run(["git", "config", "stack.main-branch"]).stdout.strip() or "main"
-    parent = (ctx.run(["git", "config", f"branch.{branch}.stack-parent"]).stdout.strip()
-              or ctx.run(["git", "config", f"stack-branch.{branch}.parent"]).stdout.strip() or main)
-    # the diff base is stack-forest's trunk_base rule: the parent, except a local-trunk parent
-    # resolves to the REMOTE trunk. A stale local main folds everybody else's merged commits
-    # into the range — the "garbage diff", a one-commit branch reading as 21 commits.
-    base = parent
-    if parent == main:
-        base = f"origin/{main}" if ctx.run(["git", "rev-parse", "--verify", "--quiet", f"origin/{main}"]).stdout.strip() else main
-    subjects = [s for s in ctx.run(["git", "log", "--format=%s", "--no-merges", f"{base}..{branch}"]).stdout.splitlines() if s]
-    stat = ctx.run(["git", "diff", "--numstat", "-w", f"{base}...{branch}"]).stdout.splitlines()
-    files, adds, dels = [], 0, 0
-    for line in stat:
-        cols = line.split("\t")
-        if len(cols) != 3:
-            continue
-        files.append(cols[2])
-        adds += int(cols[0]) if cols[0].isdigit() else 0
-        dels += int(cols[1]) if cols[1].isdigit() else 0
-    req._send(200, json.dumps({
-        "branch": branch, "parent": parent, "base": base, "subjects": subjects[:12],
-        "files": files[:12], "fileCount": len(files), "adds": adds, "dels": dels,
-    }))
-
-
-
-
-def ticket_set(req, raw):
-    # Tie a forest — or one node of it — to its Linear ticket. Commit scopes and the merge
-    # story then read type(loo-####): instead of the project name. Body carries
-    # {project, ticket} ({branch} resolves to its project); blank ticket unsets.
-    #
-    # `scope: "branch"` writes the NODE's own ticket (branch.<b>.stack-ticket) instead, for a
-    # forest whose branches each answer a sub-issue of the project's epic. The node ticket
-    # wins where it is set; every other node keeps inheriting the project's.
-    d = json.loads(raw or "{}")
-    ticket = (d.get("ticket") or "").strip().upper()
-    if ticket and not re.fullmatch(r"[A-Za-z]+-\d+", ticket):
-        return req._send(400, json.dumps({"ok": False, "error": "ticket must look like LOO-1234"}))
-    if d.get("scope") == "branch":
-        branch = (d.get("branch") or "").strip()
-        if not branch:
-            return req._send(400, json.dumps({"ok": False, "error": "no branch for ticket"}))
-        if ticket:
-            stackcfg.set_key(branch, "ticket", ticket)
-        else:
-            stackcfg.unset_key(branch, "ticket")
-        return req._send(200, json.dumps({"ok": True, "branch": branch, "ticket": ticket.lower()}))
-    proj = d.get("project", "") or (picker._project_of(d["branch"]) if d.get("branch") else "")
-    if not proj:
-        return req._send(400, json.dumps({"ok": False, "error": "no project for ticket"}))
-    key = f"stack-project.{proj}.ticket"
-    if ticket:
-        ctx.run(["git", "config", key, ticket])
-    else:
-        ctx.run(["git", "config", "--unset", key])
-    req._send(200, json.dumps({"ok": True, "project": proj, "ticket": ticket.lower()}))
-
-
 def _focus_git(repo, *args):
     # Focus rank lives in each project's OWN repo config; the lane can span repos, so target the
     # entry's repo explicitly rather than the request's cwd (unknown repo → default cwd).
@@ -782,32 +570,6 @@ def project_state(req, raw):
     req._send(200, json.dumps({"ok": True, "project": proj, "state": state}))
 
 
-def archived_list(req, u):
-    # GET /archived — every archived project across the registry, newest activity first
-    out = []
-    for repo, path in (ctx.REPOS or {"": ctx.CWD}).items():
-        cfg = ctx.run(["git", "-C", path, "config", "--get-regexp", r"^stack-project\..*\.(archived|branch)$"]).stdout.splitlines()
-        archived, members = set(), {}
-        for ln in cfg:
-            k, _, v = ln.partition(" ")
-            name = k[len("stack-project."):k.rfind(".")]
-            if k.endswith(".archived") and v == "true":
-                archived.add(name)
-            elif k.endswith(".branch"):
-                members.setdefault(name, []).append(v)
-        if not archived:
-            continue
-        heads = {}
-        for ln in ctx.run(["git", "-C", path, "for-each-ref", "--format=%(refname:short) %(committerdate:unix)", "refs/heads"]).stdout.splitlines():
-            b, _, t = ln.rpartition(" ")
-            heads[b] = int(t) if t.isdigit() else 0
-        for name in archived:
-            bs = [b for b in members.get(name, []) if b in heads]
-            out.append({"project": name, "repo": repo, "branches": len(bs),
-                        "lastCommit": max((heads[b] for b in bs), default=0)})
-    out.sort(key=lambda r: -r["lastCommit"])
-    req._send(200, json.dumps(out))
-
 def _scratch_worktree_for(branch):
     # stack-open's scratch worktrees are DETACHED and record their branch in a stack-open-branch
     # marker; match it so open-in-nvim edits can be committed/discarded from the uncommitted rail.
@@ -840,41 +602,6 @@ def _worktree_for_branch(branch):
         elif line.startswith("branch refs/heads/") and line[18:] == branch:
             return wt_path
     return _scratch_worktree_for(branch)
-
-
-def _dirty_paths_of(wt):
-    st = ctx.run(["git", "-C", wt, "status", "--porcelain"]).stdout.splitlines()
-    return {l[3:].split(" -> ", 1)[-1].strip().strip('"') for l in st if len(l) > 3}
-
-
-def commit_dirty(req, raw):
-    # {branch, message, path?} — path narrows the commit to ONE dirty file (the rail's
-    # per-file accept); membership in the worktree's actual dirt is the path guard.
-    d = json.loads(raw or "{}")
-    branch = d.get("branch", "")
-    message = (d.get("message") or "").strip()
-    path = (d.get("path") or "").strip()
-    if not branch or not message:
-        req._send(400, json.dumps({"ok": False, "err": "branch and message required"}))
-        return
-    wt = _worktree_for_branch(branch)
-    if not wt:
-        req._send(400, json.dumps({"ok": False, "err": f"{branch!r} is not checked out in any worktree"}))
-        return
-    if path and path not in _dirty_paths_of(wt):
-        req._send(400, json.dumps({"ok": False, "err": f"{path!r} isn't a dirty path in that worktree"}))
-        return
-    add_r = ctx.run(["git", "-C", wt, "add", "-A", *(["--", path] if path else [])])
-    if add_r.returncode != 0:
-        req._send(500, json.dumps({"ok": False, "err": add_r.stderr or "git add failed"}))
-        return
-    commit_r = ctx.run(["git", "-C", wt, "commit", "-m", message,
-                        "--trailer", "Via: /commit-dirty (stack-review-server)",
-                        *(["--", path] if path else [])])
-    if commit_r.returncode != 0:
-        req._send(500, json.dumps({"ok": False, "err": commit_r.stderr or "git commit failed"}))
-        return
-    req._send(200, json.dumps({"ok": True}))
 
 
 def _replay_without(drop, tip):
@@ -936,42 +663,6 @@ def revert_commit(req, raw):
     if ctx.run(["git", "rev-parse", f"refs/heads/{branch}"]).stdout.strip() != head:
         ctx.run(["git", "update-ref", "-m", f"revert {full[:10]}", f"refs/heads/{branch}", head, tip])
     req._send(200, json.dumps({"ok": True, "dropped": False, "sha": head}))
-
-
-def discard_dirty(req, raw):
-    # {branch, path} — the rail's per-file reject: a tracked file restores to HEAD, an
-    # untracked one is deleted. Destructive by design (the UI arms it); path must be a
-    # member of the worktree's actual dirt and resolve inside the worktree.
-    d = json.loads(raw or "{}")
-    branch = d.get("branch", "")
-    path = (d.get("path") or "").strip()
-    if not branch or not path:
-        req._send(400, json.dumps({"ok": False, "err": "branch and path required"}))
-        return
-    wt = _worktree_for_branch(branch)
-    if not wt:
-        req._send(400, json.dumps({"ok": False, "err": f"{branch!r} is not checked out in any worktree"}))
-        return
-    if path not in _dirty_paths_of(wt):
-        req._send(400, json.dumps({"ok": False, "err": f"{path!r} isn't a dirty path in that worktree"}))
-        return
-    tracked = ctx.run(["git", "-C", wt, "ls-files", "--error-unmatch", "--", path]).returncode == 0
-    if tracked:
-        r = ctx.run(["git", "-C", wt, "restore", "--staged", "--worktree", "--", path])
-        if r.returncode != 0:
-            req._send(500, json.dumps({"ok": False, "err": r.stderr or "restore failed"}))
-            return
-    else:
-        fp = os.path.realpath(os.path.join(wt, path))
-        if not fp.startswith(os.path.realpath(wt) + os.sep):
-            req._send(400, json.dumps({"ok": False, "err": "path escapes the worktree"}))
-            return
-        try:
-            os.remove(fp)
-        except OSError as e:
-            req._send(500, json.dumps({"ok": False, "err": str(e)}))
-            return
-    req._send(200, json.dumps({"ok": True, "discarded": path, "was": "tracked" if tracked else "untracked"}))
 
 
 def squash(req, raw):

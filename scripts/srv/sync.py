@@ -1,6 +1,5 @@
 # srv/sync.py — fork-staleness (the "N behind" badge) + the unpublished-root sync.
 #   GET  /sync?branch=X    one branch's staleness vs origin/main
-#   GET  /syncs?branch=…   batch staleness for many branches in one round-trip
 #   POST /sync {branch}    rebase an unpublished root onto fresh origin/main
 import hashlib
 import json
@@ -266,16 +265,6 @@ def get_one(req, u):
     req._send(200, json.dumps(state_cached(parse_qs(u.query).get("branch", [""])[0], with_patches=True)))
 
 
-def get_many(req, u):
-    # BATCH fork-staleness: all branches in ONE round-trip, so the graph/rail badges
-    # don't fan out N per-node /sync requests into the browser's ~6-connection-per-
-    # origin limit (which serializes them into a load waterfall).
-    bs = [b for b in parse_qs(u.query).get("branch", []) if b]
-    with ThreadPoolExecutor(max_workers=8) as ex:   # state() shells git (GIL released) → real parallelism
-        states = dict(zip(bs, ex.map(state, bs)))
-    req._send(200, json.dumps(states))
-
-
 _TRUNK_FETCH_AT = 0.0
 _TRUNK_FETCH_LOCK = threading.Lock()
 
@@ -358,20 +347,6 @@ def _fetch_trunk(main):
     if ok:
         _FRESH["okAt"] = time.time()
     _FRESH["failing"] = not ok
-
-
-def _freshen_trunk(main):
-    # Keep origin/<main> loosely fresh so a PR that merged upstream surfaces as a ghost on
-    # a plain page load, without a manual "↻ check origin". Throttled + backgrounded: at
-    # most one fetch per 45s, never blocks the health response (this load sees whatever's
-    # already fetched; the next one sees the merge).
-    global _TRUNK_FETCH_AT
-    now = time.time()
-    with _TRUNK_FETCH_LOCK:
-        if now - _TRUNK_FETCH_AT < 45:
-            return
-        _TRUNK_FETCH_AT = now
-    threading.Thread(target=_fetch_trunk, args=(main,), daemon=True).start()
 
 
 _PULSE_FRESHEN_AT = [0.0]
@@ -475,95 +450,6 @@ def _upstream_state(branch, main):
 # forest with no new commits re-reads instantly, and any moved branch / advanced main busts its own
 # key — it can never go stale wrongly. Tiny (one bool per distinct sha pair); cleared if it ever grows.
 _MERGED_CACHE = {}
-_MERGED_LOCK = threading.Lock()
-
-
-def _merged_prless(branch, trunk):
-    """Cached rebase-classify exit-20 (already-merged) for a PR-less branch vs the remote trunk."""
-    key = tuple(ctx.run(["git", "rev-parse", branch, trunk]).stdout.split())
-    if len(key) == 2:
-        with _MERGED_LOCK:
-            if key in _MERGED_CACHE:
-                return _MERGED_CACHE[key]
-    merged = ctx.run(
-        [os.path.join(ctx.SCRIPTS, "rebase-classify"), branch, trunk]).returncode == 20
-    if len(key) == 2:
-        with _MERGED_LOCK:
-            if len(_MERGED_CACHE) > 2000:
-                _MERGED_CACHE.clear()
-            _MERGED_CACHE[key] = merged
-    return merged
-
-
-def _node_health(branch, pr=None):
-    """Forest-STRUCTURAL health (vs. state()'s fork-staleness):
-      drifted — the node's configured parent is NOT a git ancestor, so it sits off the parent's
-                tip and its parent...node diff balloons to ≈ main...node (the misleading 'looks
-                like the main diff' case).
-      merged  — the node's work already landed. AUTHORITATIVE from GitHub when the branch has a
-                PR (`pr.state == MERGED`); falls back to rebase-classify exit 20 (local patch-id
-                trial vs the REMOTE trunk) only for PR-less branches. GitHub is the source of
-                truth — a squash-merge is invisible to local git by sha, so the local check is
-                just the fallback.
-      pr      — the live GitHub PR {number,state,draft,url,review} or None.
-    Read-only page-load signals; the fix for both is a restack (contracts ghosts, rebases drift)."""
-    if not branch:
-        return {"branch": "", "drifted": False, "merged": False, "parent": "", "pr": None}
-    from . import repostate
-    snap = repostate.snapshot()
-    main = snap.main()
-    parent = snap.parent(branch)
-    trunk = _trunk(main)
-    # Both spellings of the trunk are root parents. A root branch is never "off-parent" — it's
-    # just behind, which is what a restack is for. Testing the literal "main" alone badged every
-    # origin/main-rooted branch as drifted the moment main advanced past it.
-    drifted = parent not in (main, trunk) and ctx.run(
-        ["git", "merge-base", "--is-ancestor", parent, branch]).returncode != 0
-    if pr is not None:
-        merged = pr.get("state") == "MERGED"
-    else:
-        merged = _merged_prless(branch, trunk)
-    # contractable = droppable RIGHT NOW: every remaining commit is patch-identical to trunk
-    # (rebase-classify exit 20), or the branch is wholly contained in trunk (_landed — the
-    # already-restacked case exit 20 misses). A merged PR with a real follow-on commit is
-    # neither, so it reads merged=True and NOT contractable — the restack walk keeps it, and the
-    # badge keys its verb off this, not merged. A merged node whose local branch is GONE
-    # (dangling stack-branch.* keys keep it rendering) has no commits to lose — contract is
-    # pure config cleanup, so it's always droppable.
-    exists = ctx.run(["git", "rev-parse", "--verify", "-q", f"refs/heads/{branch}"]).returncode == 0
-    contractable = (not exists or bool(_merged_prless(branch, trunk)) or _landed(branch, trunk)) if merged else False
-    return {"branch": branch, "drifted": bool(drifted), "merged": bool(merged),
-            "contractable": contractable, "parent": parent,
-            "pr": pr, **_upstream_state(branch, main)}
-
-
-def health_many(req, u):
-    # BATCH forest-structural health for the model's nodes, parallel like get_many — the viewer
-    # overlays drifted/ghost badges + a "fix all" (restack) when anything's off.
-    bs = [b for b in parse_qs(u.query).get("branch", []) if b]
-    _freshen_trunk(ctx.run(["git", "config", "stack.main-branch"]).stdout.strip() or "main")
-    # Authoritative PR state from GitHub, served from a stale-while-revalidate cache (see
-    # _pr_state_map) so a forest open doesn't block ~5s on gh every time; GitHub is the source of
-    # truth for "merged?", rebase-classify is only the PR-less fallback.
-    pr_map = _pr_state_map()
-    with ThreadPoolExecutor(max_workers=8) as ex:
-        out = dict(zip(bs, ex.map(lambda b: _node_health(b, pr_map.get(b)), bs)))
-    req._send(200, json.dumps(out))
-
-
-def pr_poke(req, raw):
-    # A merge-watcher (prwatch) just saw one of our PRs land. Both freshness layers here are
-    # lazy — the PR map serves a ≤120s-stale SWR entry and the trunk fetch is throttled +
-    # backgrounded — so the page load the merge notification sends the user to would still
-    # show the pre-merge world. Skip the throttles ONCE, synchronously: fetch origin/<main>
-    # and re-pull the gh PR map now, so the very next /forest-health already shows the ghost.
-    main = ctx.run(["git", "config", "stack.main-branch"]).stdout.strip() or "main"
-    global _TRUNK_FETCH_AT
-    with _TRUNK_FETCH_LOCK:
-        _TRUNK_FETCH_AT = time.time()
-    _fetch_trunk(main)
-    _refresh_pr_state()
-    req._send(200, json.dumps({"ok": True}))
 
 
 def fix_upstream(req, raw):
@@ -697,16 +583,6 @@ def _already_merged(branch):
     a forward rebase replays nothing. Non-destructive probe; origin/main assumed fetched."""
     rc = ctx.run([os.path.join(ctx.SCRIPTS, "rebase-classify"), branch, "origin/main"]).returncode
     return rc == 20
-
-
-def _landed(branch, trunk="origin/main"):
-    """Every commit on BRANCH is already in TRUNK — dropping it can't lose work. rebase-classify
-    misses this: a branch restacked onto the main that carries its own squash-merge holds zero
-    unique commits, and its `up-to-date` verdict (exit 0) wins over `already-merged` (exit 20),
-    so the exit-20 probes above call it unmerged and nothing will ever drop it. Weaker than
-    exit 20 as evidence of a MERGE (a never-committed branch also passes), so it only ever
-    widens a droppability gate that merged-ness has already opened — never merged-ness itself."""
-    return ctx.run(["git", "merge-base", "--is-ancestor", branch, trunk]).returncode == 0
 
 
 def _rebase_onto(branch, onto, cut):

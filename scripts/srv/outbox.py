@@ -2,10 +2,7 @@
 # what a push-or-open decision needs (own commits, pushed?, gates verdict for this tree, the title
 # that will land, the PR and what an approved one is waiting on, a hold-for-morning stamp).
 #
-#   GET  /outbox[?project=<p>]           the desk; ?project narrows to one forest (the launch sheet polls it)
 #   POST /<repo>/outbox-hold {branch|branches|project, until}   stamp branch.<b>.stack-hold-until (""/null clears)
-#   POST /<repo>/outbox-title {branch, title}          stamp branch.<b>.stack-pr-title (""/null clears)
-#   POST /<repo>/outbox-label {branch, on}             branch.<b>.stack-pr-label: on adds the review label to the compare link
 #
 # Never pushes, never opens a PR, never calls gh on the request path: PR facts come from
 # sync's SWR state map plus an open-PR detail cache refreshed in the background here, and
@@ -20,7 +17,6 @@ import subprocess
 import threading
 import time
 from datetime import datetime, timezone
-from urllib.parse import parse_qs
 
 from . import ctx, push, repostate, stackcfg, sync
 from . import packet   # own line: packet imports this module back
@@ -28,9 +24,6 @@ from . import packet   # own line: packet imports this module back
 FIXTURE_ENV = "STACK_OUTBOX_PR_FIXTURE"
 TRUNKS = ("main", "master", "origin/main")
 
-# Measured 2026-10-21 over Phil's 2026 PRs (wiki/loops/viewer-redesign-evidence): opened at or after
-# 15:00 PT → 18.8h median to merge, before → 3.2h; a 4-node forest drained serially ~164h.
-WINDOW = {"cliffHourPT": 15, "slowH": 18.8, "fastH": 3.2, "serialForestH": 164, "morningHourPT": 9}
 
 
 def _fixture():
@@ -361,61 +354,6 @@ def _forest(snap, project, prs, slug, graph):
             "unopened": len(unopened), "focus": int(focus) if focus.isdigit() else None, "nodes": nodes}
 
 
-def _projects(snap):
-    names, seen = [], set()
-    for k in snap.cfg:
-        if k.startswith("stack-project.") and k.endswith(".branch"):
-            p = k[len("stack-project."):-len(".branch")]
-            if p not in seen:
-                seen.add(p)
-                names.append(p)
-    return [p for p in names
-            if snap.get(f"stack-project.{p}.archived") != "true" and snap.get(f"stack-project.{p}.shelved") != "true"]
-
-
-def _repo_forests(name, only):
-    snap = repostate.snapshot()
-    prs, source = _pr_map()
-    slug = _slug(snap)
-    _rank_mod()
-    _trees(snap)
-    trunk = "origin/main" if snap.remote(snap.main()) else snap.main()
-    graph = _graph(snap, trunk)
-    forests = []
-    for p in [only] if only else _projects(snap):
-        f = _forest(snap, p, prs, slug, graph)
-        if f:
-            f["repo"] = name
-            forests.append(f)
-    return forests, source
-
-
-def get(req, u):
-    t0 = time.perf_counter()
-    q = parse_qs(u.query)
-    only = q.get("project", [""])[0]
-    want_repo = q.get("repo", [""])[0]
-    repos = ctx.REPOS or {os.path.basename(ctx.CWD): ctx.CWD}
-    forests, source = [], "gh"
-    for name, path in repos.items():
-        if want_repo and name != want_repo:
-            continue
-        ctx.set_repo(path)
-        try:
-            fs, src = _repo_forests(name, only)
-            forests += fs
-            source = "warming" if "warming" in (source, src) else src
-        except Exception as e:
-            ctx.log(f"outbox: {name} failed: {e!r}")
-        finally:
-            ctx.clear_repo()
-    req._send(200, json.dumps({
-        "forests": forests, "window": WINDOW, "prSource": source,
-        "generatedAt": datetime.now(timezone.utc).isoformat(),
-        "ms": round((time.perf_counter() - t0) * 1000),
-    }))
-
-
 def _members(snap, d):
     if d.get("branches"):
         return [b for b in d["branches"] if snap.exists(b)]
@@ -446,29 +384,3 @@ def hold(req, raw):
             stackcfg.unset_key(b, "hold-until")
     req._send(200, json.dumps({"ok": True, "branches": targets, "until": until}))
 
-
-def label(req, raw):
-    """POST {branch, on} — whether the compare link asks for the ai-code-review label."""
-    d = json.loads(raw or "{}")
-    branch = d.get("branch", "")
-    if not branch or not repostate.snapshot().exists(branch):
-        return req._send(400, json.dumps({"ok": False, "err": "no such branch"}))
-    if d.get("on", False):
-        stackcfg.set_key(branch, "pr-label", "on")
-    else:
-        stackcfg.unset_key(branch, "pr-label")
-    req._send(200, json.dumps({"ok": True, "branch": branch, "on": bool(d.get("on", False))}))
-
-
-def title(req, raw):
-    """POST {branch, title} — the PR title that will land (branch.<b>.stack-pr-title)."""
-    d = json.loads(raw or "{}")
-    branch = d.get("branch", "")
-    if not branch or not repostate.snapshot().exists(branch):
-        return req._send(400, json.dumps({"ok": False, "err": "no such branch"}))
-    text = " ".join((d.get("title") or "").split())
-    if text:
-        stackcfg.set_key(branch, "pr-title", text)
-    else:
-        stackcfg.unset_key(branch, "pr-title")
-    req._send(200, json.dumps({"ok": True, "branch": branch, "title": text}))
