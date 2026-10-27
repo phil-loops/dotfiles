@@ -10,6 +10,11 @@
   learn transfers --topic <id>     concept→analog pairs where a transfer situation is available
   learn gaps --topic <id>          prerequisites never shown unaided
   learn concept <id>               one concept with its mastery and every evidence row
+  learn retest [--system <id>] [--claim]
+                                   the one re-test worth a minute now (top due, not tested today) as JSON;
+                                   --claim records today's offer and exits 3 if one was already made today
+  learn nudge                      SessionStart hook: in an interactive session, when something is due and
+                                   no re-test was offered today, tell Claude to offer one at a natural pause
   learn standard <id>              one standard with its mastery, coverage and every evidence row
   learn map '<json>'               add/update a topic map  {"topic": {id,title,source}, "stages": [...]}
   learn system '<json>'            add/update a system  {id, title, summary,
@@ -32,8 +37,10 @@
 
 JSON arguments may be '-' to read stdin. See scripts/learning.py for the model.
 """
+import datetime
 import json
 import os
+import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
@@ -49,6 +56,55 @@ def _opt(args, name):
     return ""
 
 
+OFFERED = os.environ.get("LEARNING_OFFERED") or os.path.expanduser("~/.cache/learning/offered")
+
+
+def _offered_today():
+    try:
+        with open(OFFERED, encoding="utf-8") as fh:
+            return fh.read().strip() == datetime.date.today().isoformat()
+    except OSError:
+        return False
+
+
+def _mark_offered():
+    os.makedirs(os.path.dirname(OFFERED), exist_ok=True)
+    with open(OFFERED, "w", encoding="utf-8") as fh:
+        fh.write(datetime.date.today().isoformat() + "\n")
+
+
+def _headless():
+    """A `claude -p` run (the viewer's tutor and chat turns, scripts) has nobody to offer a re-test to."""
+    helper = os.path.join(os.path.dirname(os.path.realpath(__file__)), "claude-session-pid")
+    try:
+        pid = subprocess.run([helper], capture_output=True, text=True, timeout=5).stdout.split("\t")[0].strip()
+        if not pid:
+            return True
+        args = subprocess.run(["ps", "-o", "args=", "-p", pid], capture_output=True, text=True, timeout=5).stdout.split()
+    except (OSError, subprocess.SubprocessError):
+        return True
+    return "-p" in args or "--print" in args
+
+
+def nudge():
+    """Never fails and never blocks a session: any problem means no nudge."""
+    try:
+        if _offered_today() or _headless():
+            return 0
+        brief = learning.retest(learning.load())
+        if not brief["due"]:
+            return 0
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": (
+            f"Learning: {brief['due']} concepts are due for a re-test (top: {brief['name']} — {brief['reason']}, "
+            f"{brief['overdue']} days overdue). Once, at a natural pause after Phil's current task is done — never "
+            "before or in the middle of it — run `learn retest --claim`; exit 3 means another session already "
+            "offered today, so drop it. Otherwise offer in one line: \"one-minute re-test on <name>? (/retest)\". "
+            "If he declines, drop it for the session.")}}))
+    except Exception:
+        pass
+    return 0
+
+
 def _json(arg):
     return json.loads(sys.stdin.read() if arg == "-" else arg)
 
@@ -60,6 +116,9 @@ def main(argv):
     cmd, args = argv[0], argv[1:]
     topic, session, concept = _opt(args, "--topic"), _opt(args, "--session"), _opt(args, "--concept")
     system = _opt(args, "--system")
+    claim = "--claim" in args
+    if cmd == "nudge":
+        return nudge()
     try:
         if cmd == "state":
             g = learning.load()
@@ -80,6 +139,14 @@ def main(argv):
             st = learning.state(g)
             print(json.dumps({**st["concepts"][cid],
                               "evidence": [r for r in g["evidence"] if r["concept"] == cid]}, indent=1))
+        elif cmd == "retest":
+            if claim and _offered_today():
+                print("a re-test was already offered today", file=sys.stderr)
+                return 3
+            brief = learning.retest(learning.load(), system=learning.slug(system) if system else None)
+            if claim and brief["due"]:
+                _mark_offered()
+            print(json.dumps(brief, indent=1))
         elif cmd == "standard":
             g = learning.load()
             stid = learning.slug(args[0])
