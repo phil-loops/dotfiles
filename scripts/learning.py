@@ -515,9 +515,10 @@ def gaps(g, topic, today=None):
     return out
 
 
-def retest(g, today=None, system=None):
-    """The one re-test worth a minute right now: the top due concept not already tested today (within a
-    system when given), with what a single situation needs — the open miss and its contrast, the
+def retest(g, today=None, system=None, everything=False):
+    """The one re-test worth a minute right now: the top due concept not already tested today — within the
+    given system, else within any system (mastery is measured there; a concept on no system's standards
+    waits for --all), with what a single situation needs — the open miss and its contrast, the
     learner's own sentence, code to build it from, held analogs to pose it through."""
     st = state(g, today)
     tested_today = {r["concept"] for r in g["evidence"] if r["at"] == st["today"]}
@@ -526,6 +527,8 @@ def retest(g, today=None, system=None):
         if system not in st["systems"]:
             raise Invalid(f"no system {system}")
         scope = {i for stid in st["systems"][system]["standards"] for i in st["standards"].get(stid, {}).get("concepts", [])}
+    elif st["systems"] and not everything:
+        scope = {i for s in st["standards"].values() for i in s["concepts"]}
     due = [i for i in st["due"] if i not in tested_today and (scope is None or i in scope)]
     if not due:
         return {"due": 0}

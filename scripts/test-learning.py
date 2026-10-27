@@ -225,7 +225,9 @@ class Retest(unittest.TestCase):
         g = system_graph()
         ev(g, "bookmark-atomic", credit="handed", at="2026-10-01")       # due, but not in the locking system
         self.assertEqual(learning.retest(g, today="2026-10-10", system="locking"), {"due": 0})
-        self.assertEqual(learning.retest(g, today="2026-10-10")["concept"], "bookmark-atomic")
+        self.assertEqual(learning.retest(g, today="2026-10-10"), {"due": 0})            # on no system: waits
+        self.assertEqual(learning.retest(g, today="2026-10-10", everything=True)["concept"], "bookmark-atomic")
+        self.assertEqual(learning.retest(graph(), today="2026-10-10"), {"due": 0})     # no systems at all: nothing due yet
         with self.assertRaises(learning.Invalid):
             learning.retest(g, system="nope")
 
@@ -327,7 +329,7 @@ class CLI(unittest.TestCase):
             self.assertEqual((std["concepts"], std["evidence"][0]["source"]), (["a", "d"], "chat"))
             self.assertIn("### Active system: Sys [sys]", run("state", "--system", "sys"))
             env["LEARNING_OFFERED"] = os.path.join(d, "offered")
-            self.assertEqual(json.loads(run("retest", "--claim"))["concept"], "b")   # a was tested today
+            self.assertEqual(json.loads(run("retest", "--all", "--claim"))["concept"], "b")   # a was tested today; b is on no system
             r = subprocess.run([sys.executable, learn, "retest", "--claim"], env=env, capture_output=True, text=True)
             self.assertEqual(r.returncode, 3)
             nudge = subprocess.run([sys.executable, learn, "nudge"], env=env, input="{}", capture_output=True, text=True)
