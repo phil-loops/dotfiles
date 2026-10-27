@@ -121,9 +121,9 @@ command({
   scope: "review",
   budget: "local",
   keys: ["p"],
-  available: (id) => pg.tab() === "commits" && !!pushRoute(id),
+  available: (id) => !!pushRoute(id),
   route: (id) => {
-    const next = pg.tab() === "commits" ? pushRoute(id) : null;
+    const next = pushRoute(id);
     return next && id ? { id: next, target: id } : null;
   },
 });
