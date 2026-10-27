@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { planSteps, prepOf, rebaseOf, syncNeeds, testsOf, type SyncFacts } from "./syncing.ts";
+import { planSteps, prepOf, rebaseOf, sealed, syncNeeds, testsOf, type SyncFacts } from "./syncing.ts";
 import type { Branch } from "./types.ts";
 
 const br = (over: Partial<Branch> = {}): Branch => ({
@@ -59,4 +59,10 @@ test("the tests are advice: a failure keeps its whole summary", () => {
   assert.equal(red.state, "fail");
   assert.match(red.note, /it breaks\nat line 3$/);
   assert.equal(testsOf({ err: "network" }).note, "couldn't run");
+});
+
+test("only a seal sends you to the words", () => {
+  assert.equal(sealed({ routed: ["sealed 3 unpushed commits into one (voiced)"] }), true);
+  assert.equal(sealed({ routed: ["2 voiced commits — pushed as they are, no seal"] }), false);
+  assert.equal(sealed({}), false);
 });

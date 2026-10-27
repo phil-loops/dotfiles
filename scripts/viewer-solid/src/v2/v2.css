@@ -59,6 +59,9 @@
 .rv-step-note[data-state="fail"] { color: var(--color-ember); }
 .rv-dirt { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; }
 .rv-dirt code { font-family: var(--font-mono); font-size: 11px; color: var(--color-ink); }
+.rv-dirt-file { background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline dotted var(--color-ink-faint); text-underline-offset: 3px; }
+.rv-dirt-file[data-open="true"] { text-decoration-style: solid; }
+.rv-dirt-diff { flex-basis: 100%; max-height: 360px; overflow: auto; border: 1px solid var(--color-rule); border-radius: 4px; }
 .rv-dirt-acts { flex-basis: 100%; display: flex; gap: 8px; }
 .rv-tabs { display: flex; align-items: center; gap: 4px; }
 .rv-tabs > button:not(.rv-toggle) { padding: 6px 12px 7px; border-bottom: 2px solid transparent; color: var(--color-ink-dim); }

@@ -12,9 +12,11 @@ import { model } from "../model";
 import { keyOf } from "../registry";
 import { bind, runOf } from "../runner";
 import { forceScopeOf, pushRoute, readForceScope, type Guard } from "../commands/branch";
-import { inspecting, motionOf } from "../commands/sync";
+import { dirtOpen, inspecting, motionOf } from "../commands/sync";
 import Key from "../Key";
-import { PHASE_WORD, syncNeeds, type PrepRoute, type SyncFacts } from "../syncing";
+import { PHASE_WORD, syncNeeds, type DirtRow, type PrepRoute, type SyncFacts } from "../syncing";
+import { parsePatch, unifiedRows } from "./diff";
+import { highlight, langOf } from "./highlight";
 import { view, world } from "../store";
 import { getJSON } from "../sync";
 import { armed, now } from "../ui";
@@ -156,7 +158,7 @@ export default function ShipLine() {
         </Show>
       </span>
       <Show when={motion()}>
-        <Strip id={id()} files={motion()!.dirt?.files ?? []} />
+        <Strip id={id()} rows={motion()!.dirt?.rows ?? []} files={motion()!.dirt?.files ?? []} />
       </Show>
       <Show when={!motion() && scope()}>
         <GuardStrip guards={scope()!.guards} />
@@ -171,8 +173,10 @@ export default function ShipLine() {
 const ICON = { ok: "✓", fail: "✗", run: "⟳", skip: "↷", idle: "·" } as const;
 
 /** The sync's steps: every one visible, a failing step's reason in full, the dirt decision inline. */
-function Strip(props: { id: string; files: string[] }) {
+function Strip(props: { id: string; files: string[]; rows: DirtRow[] }) {
   const m = () => motionOf(props.id);
+  const open = () => (dirtOpen()?.startsWith(`${props.id}|`) ? dirtOpen()!.slice(props.id.length + 1) : null);
+  const rowOf = (f: string) => props.rows.find((r) => r.path === f);
   return (
     <div class="rv-strip">
       <div class="rv-strip-row">
@@ -200,7 +204,18 @@ function Strip(props: { id: string; files: string[] }) {
       </For>
       <Show when={m()?.phase === "dirt"}>
         <div class="rv-dirt">
-          <For each={props.files}>{(f) => <code>{f}</code>}</For>
+          <For each={props.files}>
+            {(f) => (
+              <Show when={rowOf(f)?.patch} fallback={<code>{f}</code>}>
+                <button class="rv-dirt-file" data-open={open() === f} title="show its uncommitted change" onClick={bind("review.sync.dirt.show", `${props.id}|${f}`)}>
+                  <code>{f}</code>
+                </button>
+              </Show>
+            )}
+          </For>
+          <Show when={rowOf(open() ?? "")} keyed>
+            {(r) => <DirtDiff row={r} />}
+          </Show>
           <div class="rv-dirt-acts">
             <button class="rv-btn rv-btn-gold" onClick={bind("review.sync.fold", props.id)} title="stage and commit everything in the holding worktree; the commit-shape step folds it into the outgoing commit">
               fold into the commit
@@ -214,6 +229,32 @@ function Strip(props: { id: string; files: string[] }) {
           </div>
         </div>
       </Show>
+    </div>
+  );
+}
+
+/** One dirty file's uncommitted change, read-only — what fold or stash would act on. */
+function DirtDiff(props: { row: DirtRow }) {
+  const file = parsePatch(props.row.path, props.row.patch);
+  const lang = langOf(props.row.path);
+  return (
+    <div class="rv-dirt-diff rv-diff">
+      <For each={unifiedRows(file)}>
+        {(r) => {
+          const l = (r.right ?? r.left)!;
+          return (
+            <div class="rv-row">
+              <span />
+              <span class="rv-num">{r.left?.old ?? ""}</span>
+              <span class="rv-num">{r.right?.new ?? ""}</span>
+              <span class={`rv-sign rv-${l.kind}`}>{l.kind === "add" ? "+" : l.kind === "del" ? "−" : " "}</span>
+              <span class={`rv-line rv-${l.kind}`}>
+                <span class="rv-code" innerHTML={highlight(l.text, lang) || " "} />
+              </span>
+            </div>
+          );
+        }}
+      </For>
     </div>
   );
 }
