@@ -16,8 +16,9 @@ export interface Step {
 
 const ORDER: Exclude<StepId, "words">[] = ["gates", "push", "pr", "review", "merged"];
 
-/** Each step's state; `words` are the title and body hints, which flag but never block. */
-export function loopSteps(b: Branch, pr: Pr | undefined, st: Stand, words: Hint[]): Step[] {
+/** Each step's state; `words` are the title and body hints, which flag but never block — null
+ *  while they're unread, which leaves the step out rather than claim it's clean. */
+export function loopSteps(b: Branch, pr: Pr | undefined, st: Stand, words: Hint[] | null): Step[] {
   const merged = st.ship === "landed";
   const done: Record<Exclude<StepId, "words">, boolean> = {
     gates: b.gates === "green" || (st.ship !== "local" && b.pushed !== "ahead"),
@@ -30,6 +31,7 @@ export function loopSteps(b: Branch, pr: Pr | undefined, st: Stand, words: Hint[
   const steps: Step[] = ORDER.map((id) => ({ id, state: done[id] ? "done" : id === now ? "now" : "later" }));
   const at = steps.find((s) => s.state === "now");
   if (at) at.note = noteFor(at.id, b, pr, st);
+  if (words === null) return steps;
   const wrong = words.filter((h) => h.tone !== "note");
   const wordsStep: Step = pr
     ? { id: "words", state: "done" }
