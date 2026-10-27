@@ -2,7 +2,7 @@
 // v2 doesn't have yet (v1's pages, reached through the menu until Phase 3 builds the palette).
 import { model } from "../model";
 import { command } from "../registry";
-import { forestPath, leave, navigate, reviewPath, SURFACES } from "../router";
+import { forestPath, navigate, reviewPath, SURFACES } from "../router";
 import { undoLast } from "../runner";
 import { view } from "../store";
 import {
@@ -52,15 +52,6 @@ for (const s of SURFACES.filter((x) => !x.arg || x.bare)) {
     ...(NAV_V1[s.id] ? { v1: NAV_V1[s.id] } : {}),
     local: (_t, e) => navigate(s.path, e),
   });
-}
-
-// v1's pages, until v2 has its own: the rail is gone, so the menu is how you reach them
-const PLACES = [
-  { id: "work", title: "Work", path: "/work", key: "g w" },
-  { id: "v1", title: "the v1 home", path: "/forests?v1", key: "" },
-];
-for (const p of PLACES) {
-  command({ id: `place.${p.id}`, title: `Go to ${p.title}`, scope: "global", budget: "local", keys: p.key ? [p.key] : [], local: () => leave(p.path) });
 }
 
 // what the space menu finds by name: a result is one of these plus the branch or forest id ("<repo>:<name>")

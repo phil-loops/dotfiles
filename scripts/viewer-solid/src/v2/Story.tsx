@@ -3,7 +3,7 @@
 // what's left. One plain line each; e opens a chapter's why (a landed PR's squash message on main,
 // a live branch's commit messages), l a live chapter's review page.
 import { createResource, For, Show } from "solid-js";
-import { bare, stripPlan } from "../outlineHints";
+import { bare, stripPlan } from "./outlineHints";
 import Commits from "./Commits";
 import { atRepo, bkey, dkey, model, type BranchView } from "./model";
 import { bind } from "./runner";

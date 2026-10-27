@@ -2,7 +2,7 @@
 // message, author, date and whether a remote holds it — and the edits waiting to be saved.
 // Shared by the review page's words (e) and the forest page.
 import { createSignal } from "solid-js";
-import { bodyHints, hintsFor, type Hint, type Words } from "../outlineHints";
+import { bodyHints, hintsFor, type Hint, type Words } from "./outlineHints";
 
 export interface Commit {
   sha: string;

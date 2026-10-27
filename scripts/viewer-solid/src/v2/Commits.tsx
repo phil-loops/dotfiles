@@ -4,7 +4,7 @@
 // until one save (words.save, ⌘↵ in a field) rewrites them all; u undoes it. Pushed commits are
 // read-only, with the reason.
 import { createEffect, createResource, For, onCleanup, Show, type JSX } from "solid-js";
-import { joinTemplate, splitTemplate, SUBJECT_LIMIT, type Hint } from "../outlineHints";
+import { joinTemplate, splitTemplate, SUBJECT_LIMIT, type Hint } from "./outlineHints";
 import { atRepo } from "./model";
 import { keyOf } from "./registry";
 import { bind, dispatch } from "./runner";
