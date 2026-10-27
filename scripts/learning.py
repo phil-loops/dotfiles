@@ -5,6 +5,12 @@ statement; it `builds_on` the concepts it needs and lists `analogs` — the same
 topic, which is what lets the tutor go problem-first where an analog is solid. A **topic** (a PR, a
 subsystem) is a path through the graph: ordered stages of concept ids.
 
+A **system** (ses-projection, job-queue) is what mastery is measured against: an ordered list of
+**standards**, each a can-do sentence ("predict when an undeleted message next becomes visible")
+over the concepts it draws on. A concept may serve several standards in several systems. A
+standard's own depth comes from evidence rows tagged with it, by the same rule as a concept's; its
+coverage is how many of its concepts are shown.
+
 Depth comes only from **evidence**, never from a verdict typed by hand:
 
     level    predict < explain < transfer < critique
@@ -25,6 +31,9 @@ and on a transfer `via` (the analog it went through). A concept may hold the lea
 (`statement_learner`). Per topic the graph derives an **opener** (due neighbors — the session's
 first situation, cold), **gaps** (prerequisites never shown unaided) and **transfers** (analogs
 held at explain or deeper, where a transfer situation can be posed).
+
+Rows carry a `source`: absent for a tutor session, `chat` for one captured from an ordinary session
+that explained a system — same credits, honestly assigned, so what was told counts as handed.
 
 Stored at ~/.dotfiles/learning/graph.json (versioned). Every write regenerates the "Current state"
 section of the learner's memory track, so Claude sessions that only read memory still see it.
@@ -49,6 +58,7 @@ OUTCOMES = ["hit", "miss"]
 KINDS = ["principle", "convention"]
 CONFIDENCES = ["low", "medium", "high"]
 RUNGS = ["predict", "invent"]
+SOURCES = ["chat"]
 BASE_SPACING_DAYS = 4
 MAX_SPACING_DAYS = 120
 
@@ -62,7 +72,8 @@ def _today():
 
 
 def _empty():
-    return {"version": 1, "concepts": {}, "topics": {}, "evidence": [], "questions": [], "calibration": []}
+    return {"version": 1, "concepts": {}, "topics": {}, "systems": {}, "standards": {}, "evidence": [],
+            "questions": [], "calibration": []}
 
 
 def load(path=None):
@@ -173,6 +184,35 @@ def upsert_topic(g, t):
     return tid
 
 
+def upsert_system(g, s):
+    """A system and its standards, in order; each standard's concepts are upserted (and replaced when given)."""
+    sid = slug(s.get("id") or s.get("title") or "system")
+    cur = g["systems"].setdefault(sid, {"title": "", "summary": "", "standards": [], "created": _today()})
+    for key in ("title", "summary"):
+        if _clean(s.get(key)):
+            cur[key] = _clean(s[key])
+    order = list(cur["standards"])
+    for st in s.get("standards") or []:
+        stid = slug(st.get("id") or st.get("can_do") or "")
+        if not stid or stid == "concept":
+            raise Invalid("a standard needs an id")
+        other = g["standards"].get(stid)
+        if other and other["system"] != sid:
+            raise Invalid(f"standard {stid} belongs to {other['system']}")
+        std = g["standards"].setdefault(stid, {"can_do": "", "system": sid, "concepts": [], "created": _today()})
+        if _clean(st.get("can_do")):
+            std["can_do"] = _clean(st["can_do"])
+        if not std["can_do"]:
+            raise Invalid(f"standard {stid} needs a can_do sentence")
+        if st.get("concepts") is not None:
+            std["concepts"] = _uniq([upsert_concept(g, c) for c in st["concepts"]])
+        if stid not in order:
+            order.append(stid)
+    cur["standards"] = order
+    cur["updated"] = _today()
+    return sid
+
+
 def restate(g, cid, text):
     """The learner's own sentence for a concept — written at a summit, shown before the tutor's on a re-test."""
     cid = slug(cid)
@@ -188,29 +228,34 @@ def restate(g, cid, text):
 
 def _extras(e):
     """Optional evidence fields; absent keys stay absent so old rows and new rows read the same way."""
-    confidence, rung = e.get("confidence") or "", e.get("rung") or ""
+    confidence, rung, source = e.get("confidence") or "", e.get("rung") or "", e.get("source") or ""
     if confidence not in CONFIDENCES + [""]:
         raise Invalid(f"bad confidence {confidence!r} — one of {CONFIDENCES}")
     if rung not in RUNGS + [""]:
         raise Invalid(f"bad rung {rung!r} — one of {RUNGS}")
+    if source not in SOURCES + [""]:
+        raise Invalid(f"bad source {source!r} — one of {SOURCES}, or absent for a tutor session")
     out = {"confidence": confidence, "rung": rung, "contrast": _clean(e.get("contrast")),
-           "via": slug(e["via"]) if e.get("via") else ""}
+           "via": slug(e["via"]) if e.get("via") else "", "source": source}
     return {k: v for k, v in out.items() if v}
 
 
 def add_evidence(g, e, session="", topic=""):
-    cid = slug(e.get("concept") or "")
-    if not cid or cid == "concept":
-        raise Invalid("evidence needs a concept")
+    cid = slug(e["concept"]) if e.get("concept") else ""
+    stid = slug(e["standard"]) if e.get("standard") else ""
+    if not cid and not stid:
+        raise Invalid("evidence needs a concept or a standard")
+    if stid and stid not in g["standards"]:
+        raise Invalid(f"no standard {stid}")
     level, credit, outcome = e.get("level"), e.get("credit", "unaided"), e.get("outcome", "hit")
     if level not in LEVELS or credit not in CREDITS or outcome not in OUTCOMES:
         raise Invalid(f"bad evidence {level}/{credit}/{outcome} — levels {LEVELS}, credits {CREDITS}, outcomes {OUTCOMES}")
     extras = _extras(e)
     if level == "transfer" and outcome == "hit" and credit == "unaided" and not extras.get("via"):
         raise Invalid("an unaided transfer hit names the analog it transferred through: via")
-    if cid not in g["concepts"]:
+    if cid and cid not in g["concepts"]:
         upsert_concept(g, {"id": cid, "name": e.get("name")}, topic=topic or None)
-    row = {"id": uuid.uuid4().hex[:10], "concept": cid, "level": level, "credit": credit, "outcome": outcome,
+    row = {"id": uuid.uuid4().hex[:10], "concept": cid, **({"standard": stid} if stid else {}), "level": level, "credit": credit, "outcome": outcome,
            "note": _clean(e.get("note")), "at": e.get("at") or _today(),
            "topic": slug(topic) if topic else "", "session": session, **extras}
     g["evidence"].append(row)
@@ -225,10 +270,11 @@ def edit_evidence(g, eid, fields):
                     row[k] = _clean(fields[k]) if k == "note" else fields[k]
             if row["level"] not in LEVELS or row["credit"] not in CREDITS or row["outcome"] not in OUTCOMES:
                 raise Invalid("bad evidence fields")
-            for k in ("confidence", "rung", "contrast", "via"):
+            extra = ("confidence", "rung", "contrast", "via", "source")
+            for k in extra:
                 if k in fields:
                     row.pop(k, None)
-            row.update(_extras({k: fields[k] for k in ("confidence", "rung", "contrast", "via") if k in fields}))
+            row.update(_extras({k: fields[k] for k in extra if k in fields}))
             row["edited"] = _today()
             return row
     raise Invalid(f"no evidence {eid}")
@@ -259,6 +305,29 @@ def set_question(g, qid, status):
     raise Invalid(f"no question {qid}")
 
 
+def capture(g, data, session=""):
+    """What an ordinary session that explained a system collected, in one write: concepts met (attached to
+    a standard when one is named), evidence rows (source chat) and the learner's questions."""
+    topic = slug(data["topic"]) if data.get("topic") else ""
+    applied = []
+    for c in data.get("concepts") or []:
+        cid = upsert_concept(g, c, topic=topic or None)
+        stid = slug(c["standard"]) if isinstance(c, dict) and c.get("standard") else ""
+        if stid:
+            if stid not in g["standards"]:
+                raise Invalid(f"no standard {stid}")
+            g["standards"][stid]["concepts"] = _uniq(g["standards"][stid]["concepts"] + [cid])
+        applied.append(f"concept {cid}")
+    for e in data.get("evidence") or []:
+        add_evidence(g, {**e, "source": "chat"}, session=session, topic=topic)
+        applied.append(f"evidence {e.get('standard') or e.get('concept')}")
+    for q in data.get("questions") or []:
+        q = {"text": q} if isinstance(q, str) else q
+        add_question(g, q.get("text"), concept=q.get("concept", ""), topic=topic)
+        applied.append("question")
+    return applied
+
+
 def add_calibration(g, note):
     note = _clean(note)
     if note and note not in [c["note"] for c in g["calibration"]]:
@@ -276,8 +345,17 @@ def mastery(g, cid, today=None):
     hit is not retention. An open miss keeps the concept due; a high-confidence miss outranks every
     other due item, because a confidently wrong prediction, once corrected, is the best-remembered
     thing in a session (hypercorrection) — as long as it is actually re-tested."""
+    return _mastery([r for r in g["evidence"] if r["concept"] == cid], today)
+
+
+def standard_mastery(g, stid, today=None):
+    """A standard's own depth, by the concept rule over the rows tagged with it."""
+    return _mastery([r for r in g["evidence"] if r.get("standard") == stid], today)
+
+
+def _mastery(rows, today=None):
     today = today or _today()
-    rows = sorted((r for r in g["evidence"] if r["concept"] == cid), key=lambda r: r["at"])
+    rows = sorted(rows, key=lambda r: r["at"])
     depth = assisted = 0
     last_unaided = ""
     unaided = []           # (date, level) of every unaided hit
@@ -355,9 +433,27 @@ def state(g, today=None):
             "held": sum(1 for m in ms if m["held"] >= 2),
             "shown": sum(1 for m in ms if m["depth"] >= 2),
             "total": len(ids)}}
+    standards = {}
+    for stid, s in g["standards"].items():
+        ms = [concepts[i]["mastery"] for i in s["concepts"] if i in concepts]
+        standards[stid] = {**s, "id": stid, "mastery": standard_mastery(g, stid, today), "coverage": {
+            "held": sum(1 for m in ms if m["held"]),
+            "shown": sum(1 for m in ms if m["depth"]),
+            "total": len(s["concepts"])}}
+    systems = {}
+    for sid, s in g["systems"].items():
+        ms = [standards[i]["mastery"] for i in s["standards"] if i in standards]
+        systems[sid] = {**s, "id": sid, "progress": {
+            "held": sum(1 for m in ms if m["held"]),
+            "met": sum(1 for m in ms if m["depth"]),
+            "total": len(s["standards"])}}
+    standards_due = sorted((s for s in standards.values() if s["mastery"]["due"]),
+                           key=lambda s: (_priority(s["mastery"]), s["mastery"]["last"]))
     return {"concepts": concepts, "topics": topics, "due": [c["id"] for c in due],
+            "systems": systems, "standards": standards, "standards_due": [s["id"] for s in standards_due],
             "questions": g["questions"], "calibration": g["calibration"], "evidence": g["evidence"],
-            "levels": LEVELS, "credits": CREDITS, "confidences": CONFIDENCES, "rungs": RUNGS, "today": today}
+            "levels": LEVELS, "credits": CREDITS, "confidences": CONFIDENCES, "rungs": RUNGS, "sources": SOURCES,
+            "today": today}
 
 
 def _topic_ids(g, topic):
@@ -441,12 +537,52 @@ def _concept_line(i, c):
     return s
 
 
-def digest(g, topic=None, today=None):
-    """Compact text for a tutor's prompt: the whole graph at a glance, the active topic in full."""
+def _standard_label(s):
+    m = s["mastery"]
+    label = _depth_label(m) if m["evidence"] else "not yet assessed"
+    if m["open_miss"]:
+        label += f" · OPEN MISS: {m['open_miss']}"
+    cov = s["coverage"]
+    return f"{label} · concepts {cov['held']} held / {cov['shown']} shown / {cov['total']}"
+
+
+def system_digest(st, sid):
+    s = st["systems"][sid]
+    p = s["progress"]
+    out = [f"### Active system: {s['title']} [{sid}] — {p['held']} held / {p['met']} met / {p['total']} standards",
+           s["summary"], ""]
+    for stid in s["standards"]:
+        std = st["standards"].get(stid)
+        if not std:
+            continue
+        out.append(f"- **{stid}** — {std['can_do']} · {_standard_label(std)}")
+        for i in std["concepts"]:
+            c = st["concepts"].get(i)
+            if c:
+                out.append("  " + _concept_line(i, c))
+    due = [i for i in st["standards_due"] if st["standards"][i]["system"] == sid]
+    if due:
+        out += ["", "**Standards due** (aim the next situation here):",
+                *[f"- {i}: {st['standards'][i]['mastery']['reason']}" for i in due]]
+    unassessed = [i for i in s["standards"] if i in st["standards"] and not st["standards"][i]["mastery"]["evidence"]]
+    if unassessed:
+        out += ["", "**Never assessed** (no standard-tagged row yet): " + ", ".join(unassessed)]
+    return out + [""]
+
+
+def digest(g, topic=None, today=None, system=None):
+    """Compact text for a tutor's prompt: the whole graph at a glance, the active topic or system in full."""
     st = state(g, today)
     out = ["## The learner's concept graph (~/.dotfiles/learning/graph.json)",
            "Depth = highest level shown UNAIDED: predict < explain < transfer < critique. "
            "“held” = shown unaided on two separate days; “once” = one session only, not yet retention.", ""]
+    if st["systems"]:
+        out.append("### Systems (mastery target: each standard held)")
+        out += [f"- {s['title']} [{sid}] — {s['progress']['held']} held / {s['progress']['met']} met / "
+                f"{s['progress']['total']} standards" for sid, s in st["systems"].items()]
+        out.append("")
+    if system and system in st["systems"]:
+        out += system_digest(st, system)
     if topic and topic in st["topics"]:
         t = st["topics"][topic]
         out.append(f"### Active topic: {t['title']} [{topic}] — {t['source']}")
@@ -508,6 +644,10 @@ def memory_state(g):
     lines = [STATE_HEADING,
              "_Generated from `~/.dotfiles/learning/graph.json` on every write — edit the graph "
              "(viewer Tutor tab, or `learn`), not this section._", ""]
+    for sid, s in st["systems"].items():
+        p = s["progress"]
+        lines.append(f"- system **{s['title']}** — {p['held']} held, {p['met']} met, of {p['total']} standards "
+                     f"(`learn state --system {sid}`)")
     for tid, t in st["topics"].items():
         p = t["progress"]
         lines.append(f"- **{t['title']}** — {p['held']} held, {p['shown']} shown once, of {p['total']} (at explain or deeper)")

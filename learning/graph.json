@@ -6,7 +6,9 @@
    "statement": "N copies of a scheduler share one schedule, so something must pick exactly one runner per tick.",
    "kind": "principle",
    "builds_on": [],
-   "analogs": [],
+   "analogs": [
+    "dispatch-coalescing"
+   ],
    "code": [],
    "topics": [
     "croon-job-locks"
@@ -123,7 +125,8 @@
     "cursor-redelivery",
     "sqs-at-least-once",
     "visibility-is-not-a-job-timeout",
-    "timeout-doesnt-cancel-remote"
+    "timeout-doesnt-cancel-remote",
+    "pg-is-the-correctness-layer"
    ],
    "code": [],
    "topics": [
@@ -1062,7 +1065,8 @@
    ],
    "analogs": [
     "lease-renewal",
-    "claim-lease-sweep"
+    "claim-lease-sweep",
+    "projection-worker-lease"
    ],
    "code": [
     {
@@ -1217,6 +1221,102 @@
     "sqs-visibility-timeout"
    ],
    "created": "2026-10-22"
+  },
+  "projection-shards": {
+   "name": "projection shards",
+   "statement": "Events hash by ses_message_id into 64 fixed shards, each with its own bookmark, so shards project independently.",
+   "kind": "principle",
+   "builds_on": [
+    "counts-and-bookmark-atomic"
+   ],
+   "analogs": [],
+   "code": [
+    {
+     "path": "packages/mail-pg/src/ses-event.ts",
+     "lines": "6-7"
+    }
+   ],
+   "topics": [],
+   "created": "2026-10-27"
+  },
+  "projection-groups": {
+   "name": "projection groups",
+   "statement": "A group is one worker's share of the shards (shard % groupCount); bookmarks belong to shards, so changing groupCount moves work without losing progress.",
+   "kind": "principle",
+   "builds_on": [
+    "projection-shards"
+   ],
+   "analogs": [],
+   "code": [
+    {
+     "path": "models/email-send-metric-projection-group.ts"
+    }
+   ],
+   "topics": [],
+   "created": "2026-10-27"
+  },
+  "projection-worker-lease": {
+   "name": "projection worker lease",
+   "statement": "A worker holds a Valkey group lock plus one of two global slots, renewed by heartbeat; busy or full means exit and wait for the next hint.",
+   "kind": "principle",
+   "builds_on": [
+    "lease-renewal",
+    "ownership-token",
+    "projection-groups"
+   ],
+   "analogs": [
+    "visibility-heartbeat"
+   ],
+   "code": [
+    {
+     "path": "lib/email-send-metric-projection-coordination.ts"
+    },
+    {
+     "path": "models/email-send-metric-projection-worker.ts"
+    }
+   ],
+   "topics": [],
+   "created": "2026-10-27"
+  },
+  "dispatch-coalescing": {
+   "name": "dispatch coalescing",
+   "statement": "At most one queued hint per group: the producer takes an expiring reservation before enqueueing and the worker releases it on success, because a hint carries no data and its copies are pure waste.",
+   "kind": "principle",
+   "builds_on": [
+    "projection-groups",
+    "ownership-token"
+   ],
+   "analogs": [
+    "one-runner-per-tick"
+   ],
+   "code": [
+    {
+     "path": "models/email-send-metric-projection-job.ts",
+     "ref": "PR #11236"
+    }
+   ],
+   "topics": [],
+   "created": "2026-10-27"
+  },
+  "pg-is-the-correctness-layer": {
+   "name": "Postgres is the correctness layer",
+   "statement": "Postgres bookmarks and per-shard advisory locks keep the counts right; every Valkey lock above them only avoids wasted or competing work, so losing one costs effort, not correctness.",
+   "kind": "principle",
+   "builds_on": [
+    "counts-and-bookmark-atomic",
+    "projection-shards"
+   ],
+   "analogs": [
+    "lock-guards-holders-not-execution"
+   ],
+   "code": [
+    {
+     "path": "packages/mail-pg/src/ses-event-projection-checkpoint.ts",
+     "lines": "150"
+    }
+   ],
+   "topics": [],
+   "created": "2026-10-27"
   }
  },
  "topics": {
@@ -2263,6 +2363,79 @@
    "at": "2026-10-21",
    "topic": "ses-metric-projection",
    "session": ""
+  },
+  {
+   "id": "9287130283",
+   "concept": "dispatch-coalescing",
+   "level": "explain",
+   "credit": "handed",
+   "outcome": "hit",
+   "note": "asked twice what problem #11236 solves; told via the 12-copies-in-a-backed-up-queue scenario",
+   "at": "2026-10-27",
+   "topic": "",
+   "session": "chat:2026-10-27-pr11236",
+   "source": "chat"
+  },
+  {
+   "id": "e8848c73fc",
+   "concept": "projection-groups",
+   "level": "explain",
+   "credit": "handed",
+   "outcome": "hit",
+   "note": "asked what a group means; told shard % groupCount",
+   "at": "2026-10-27",
+   "topic": "",
+   "session": "chat:2026-10-27-pr11236",
+   "source": "chat"
+  },
+  {
+   "id": "7e321f00db",
+   "concept": "projection-shards",
+   "level": "explain",
+   "credit": "handed",
+   "outcome": "hit",
+   "note": "told the 64 hashed shards with their own bookmarks",
+   "at": "2026-10-27",
+   "topic": "",
+   "session": "chat:2026-10-27-pr11236",
+   "source": "chat"
+  },
+  {
+   "id": "0c69f159ce",
+   "concept": "projection-worker-lease",
+   "level": "explain",
+   "credit": "handed",
+   "outcome": "hit",
+   "note": "told the group lock, two slots and heartbeat in the end-to-end walk",
+   "at": "2026-10-27",
+   "topic": "",
+   "session": "chat:2026-10-27-pr11236",
+   "source": "chat"
+  },
+  {
+   "id": "fa888be0e5",
+   "concept": "pg-is-the-correctness-layer",
+   "level": "explain",
+   "credit": "handed",
+   "outcome": "hit",
+   "note": "told: Valkey locks only save work, PG bookmarks and shard locks guarantee counts",
+   "at": "2026-10-27",
+   "topic": "",
+   "session": "chat:2026-10-27-pr11236",
+   "source": "chat"
+  },
+  {
+   "id": "644d3feee7",
+   "concept": "",
+   "standard": "sesp-judge",
+   "level": "critique",
+   "credit": "scaffolded",
+   "outcome": "hit",
+   "note": "after the full walkthrough, raised 'this is kinda complicated' unprompted; which layers were redundant was my analysis",
+   "at": "2026-10-27",
+   "topic": "",
+   "session": "chat:2026-10-27-pr11236",
+   "source": "chat"
   }
  ],
  "questions": [
@@ -2304,5 +2477,163 @@
    "note": "Strong analogs: locks/leases, OCC/tokens, transactions, scheduling. Weak: JS generators, the mail metrics pipeline — go worked-run first there.",
    "at": "2026-10-21"
   }
- ]
+ ],
+ "systems": {
+  "ses-projection": {
+   "title": "SES event projection",
+   "summary": "SES delivery events land raw in mail Postgres; readers project them into per-send counters behind a durable bookmark. The sharded version splits the stream into 64 shards worked by leased queue workers (PRs #11092, #11227, #11232, #11234, #11236).",
+   "standards": [
+    "sesp-attribute",
+    "sesp-ledger",
+    "sesp-effects-once",
+    "sesp-ordering",
+    "sesp-retention",
+    "sesp-parallel",
+    "sesp-coordination",
+    "sesp-judge"
+   ],
+   "created": "2026-10-27",
+   "updated": "2026-10-27"
+  },
+  "job-queue": {
+   "title": "Job queue (SQS)",
+   "summary": "Background jobs are SQS messages polled by workers (lib/job-queue): delivery is at-least-once, a long job keeps its message by a visibility heartbeat, and 3 receives redrive it to a DLQ. Plan: ~/.dotfiles/learning/plans/sqs-visibility-timeout.md",
+   "standards": [
+    "jq-at-least-once",
+    "jq-next-visible",
+    "jq-holding-vs-running",
+    "jq-dlq",
+    "jq-idempotent-consumer"
+   ],
+   "created": "2026-10-27",
+   "updated": "2026-10-27"
+  }
+ },
+ "standards": {
+  "sesp-attribute": {
+   "can_do": "Explain how an SES event finds the send it belongs to, and what breaks if the send row is written late",
+   "system": "ses-projection",
+   "concepts": [
+    "correlation-tag",
+    "durable-row-before-send"
+   ],
+   "created": "2026-10-27"
+  },
+  "sesp-ledger": {
+   "can_do": "Explain why raw events are kept and counters derived by readers, instead of counting at ingest",
+   "system": "ses-projection",
+   "concepts": [
+    "raw-ledger-replay",
+    "readers-decoupled"
+   ],
+   "created": "2026-10-27"
+  },
+  "sesp-effects-once": {
+   "can_do": "Predict what a crash between applying counts and saving the bookmark does, and explain why they commit together",
+   "system": "ses-projection",
+   "concepts": [
+    "cursor-redelivery",
+    "counts-and-bookmark-atomic",
+    "bookmark-lives-with-effects"
+   ],
+   "created": "2026-10-27"
+  },
+  "sesp-ordering": {
+   "can_do": "Predict which events a reader can skip or re-read, given commit order and the safety lag",
+   "system": "ses-projection",
+   "concepts": [
+    "commit-order-not-stamp-order",
+    "safety-lag"
+   ],
+   "created": "2026-10-27"
+  },
+  "sesp-retention": {
+   "can_do": "Predict what blocks raw-event cleanup, and what adding or deleting a reader does to it",
+   "system": "ses-projection",
+   "concepts": [
+    "retention-slowest-reader",
+    "frozen-bookmark-pins-retention",
+    "no-bookmark-row-means-unborn",
+    "bookmark-name-contract"
+   ],
+   "created": "2026-10-27"
+  },
+  "sesp-parallel": {
+   "can_do": "Explain how shards and groups let projection run in parallel and regroup without losing progress",
+   "system": "ses-projection",
+   "concepts": [
+    "projection-shards",
+    "projection-groups"
+   ],
+   "created": "2026-10-27"
+  },
+  "sesp-coordination": {
+   "can_do": "Predict what happens when two workers, a stale queue hint or a lapsed lease meet the same group, and name the layer that keeps the counts right",
+   "system": "ses-projection",
+   "concepts": [
+    "projection-worker-lease",
+    "dispatch-coalescing",
+    "pg-is-the-correctness-layer",
+    "lock-guards-holders-not-execution"
+   ],
+   "created": "2026-10-27"
+  },
+  "sesp-judge": {
+   "can_do": "Judge a coordination change to projection: what it guarantees, what it only saves, and what simpler design would get the same",
+   "system": "ses-projection",
+   "concepts": [
+    "pg-is-the-correctness-layer",
+    "dispatch-coalescing",
+    "projection-worker-lease"
+   ],
+   "created": "2026-10-27"
+  },
+  "jq-at-least-once": {
+   "can_do": "Explain why every SQS message can be processed more than once",
+   "system": "job-queue",
+   "concepts": [
+    "sqs-in-flight-invisible",
+    "sqs-at-least-once"
+   ],
+   "created": "2026-10-27"
+  },
+  "jq-next-visible": {
+   "can_do": "Predict when an undeleted message next becomes visible after a success, throw, retry or crash",
+   "system": "job-queue",
+   "concepts": [
+    "throw-waits-out-visibility",
+    "crash-recovery-is-visibility",
+    "ttl-vs-renewal-interval"
+   ],
+   "created": "2026-10-27"
+  },
+  "jq-holding-vs-running": {
+   "can_do": "Distinguish holding a message from controlling its execution, and size a heartbeat to the timeout",
+   "system": "job-queue",
+   "concepts": [
+    "visibility-heartbeat",
+    "visibility-is-not-a-job-timeout",
+    "lock-guards-holders-not-execution"
+   ],
+   "created": "2026-10-27"
+  },
+  "jq-dlq": {
+   "can_do": "Trace a repeatedly failing message to the dead-letter queue and set the retry budget",
+   "system": "job-queue",
+   "concepts": [
+    "receive-count-redrive"
+   ],
+   "created": "2026-10-27"
+  },
+  "jq-idempotent-consumer": {
+   "can_do": "Design a consumer so redelivery and retries cannot duplicate a side effect",
+   "system": "job-queue",
+   "concepts": [
+    "timeout-doesnt-cancel-remote",
+    "idempotency-key-minted-before-retry-boundary",
+    "nested-retry-layers"
+   ],
+   "created": "2026-10-27"
+  }
+ }
 }
