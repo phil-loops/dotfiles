@@ -90,10 +90,6 @@ def _route(branch):
              dirty=h["dirty"], dirtyWorktree=h.get("dirtyWorktree", ""))
 
     if up.get("diverged") and h.get("published"):
-        if up.get("frozenOrigin"):
-            return send("frozen-origin",
-                 "origin deliberately frozen — the open PR is the review artifact; "
-                 "squash-merge reconciles it, nothing to push")
         vehicle = f"{branch}-additive"
         if ctx.run(["git", "rev-parse", "--verify", "--quiet",
                     f"refs/heads/{vehicle}"]).returncode == 0:

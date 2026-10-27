@@ -16,7 +16,7 @@ import hashlib
 import threading
 from urllib.parse import parse_qs
 
-from . import ctx, memo, repostate, shellout, stackcfg, picker, watch
+from . import ctx, memo, repostate, shellout, picker, watch
 
 # (repo, branch) -> {"sig", "branches", "out"} — validated per-FOREST (only its own ref
 # tips + config), so an unrelated worktree's commit no longer busts every
@@ -475,23 +475,6 @@ def commit_diff(req, u):
 
 
 # --- POST ---
-
-def frozen_origin_set(req, raw):
-    # mark/unmark a branch's origin as deliberately frozen (stack-branch.<b>.frozen-origin):
-    # the pushed PR stays the review artifact while local carries the restacked truth.
-    d = json.loads(raw or "{}")
-    b = d.get("branch", "")
-    if not b:
-        req._send(400, "{}")
-        return
-    if d.get("value"):
-        stackcfg.set_key(b, "frozen-origin", "1")
-        ok = True
-    else:
-        stackcfg.unset_key(b, "frozen-origin")
-        ok = True   # unsetting a key that was never set is not a failure (git exits 5)
-    req._send(200 if ok else 500, "{}")
-
 
 def _focus_git(repo, *args):
     # Focus rank lives in each project's OWN repo config; the lane can span repos, so target the
