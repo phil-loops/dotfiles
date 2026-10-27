@@ -1,6 +1,7 @@
 # srv/v1redirect.py — a v1 URL with a v2 page answers 302 to it, so every link still pointing at v1
 # (bookmarks, old tabs, a producer not yet moved) lands on v2. Pages v2 doesn't have (/work, /wiki,
-# /tutor, /push, /outbox/launch, a forest's ~integration) keep serving v1.
+# /tutor, /push, /outbox/launch) keep serving v1. A forest's ~integration is its integration ref on
+# the v2 review page.
 #
 #   `git config stack.viewer-v1-redirect false` (server repo or global) turns every redirect off;
 #   `?v1` on any URL bypasses it for that load, so v1 stays reachable while it still exists.
@@ -35,7 +36,9 @@ def v2_path(path):
         if not rest:
             return "/v2"
         project, node = rest[0], rest[1:]
-        if node and node[0].startswith("~"):   # ~integration and friends: no ref can contain "~"
+        if node == ["~integration"]:
+            return f"/v2/b/{repo}/refs/stack/{project}-integration"
+        if node and node[0].startswith("~"):   # no ref can contain "~"
             return None
         return f"/v2/b/{repo}/{'/'.join(node)}" if node else f"/v2/p/{repo}/{project}"
     if head == "branch" and rest:

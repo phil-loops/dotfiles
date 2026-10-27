@@ -76,8 +76,15 @@ export default function App() {
 /** Where you are, as the ladder `h` climbs: canopy › forest › branch. */
 function Crumbs() {
   const branch = () => (surface().id === "review" ? view("branch", page.id() ?? "") : undefined);
+  const whole = () => (surface().id === "review" ? page.integration() : undefined);
   const forest = () =>
-    surface().id === "forest" ? view("project", model.pageProject() ?? "") : branch() ? view("project", branch()!.project) : undefined;
+    surface().id === "forest"
+      ? view("project", model.pageProject() ?? "")
+      : branch()
+        ? view("project", branch()!.project)
+        : whole()
+          ? view("project", whole()!)
+          : undefined;
   const sep = () => <span class="text-ink-faint/60">›</span>;
   return (
     <nav class="flex min-w-0 items-baseline gap-2" aria-label="where you are">
@@ -88,12 +95,12 @@ function Crumbs() {
         <Match when={surface().id === "forests"}>{null}</Match>
         <Match when={forest()}>
           {sep()}
-          <Show when={branch()} fallback={<span class="truncate text-ink-dim">{forest()!.name}</span>}>
+          <Show when={branch() || whole()} fallback={<span class="truncate text-ink-dim">{forest()!.name}</span>}>
             <button class="truncate hover:text-ink-dim" onClick={bind("review.leave")}>
               {forest()!.name}
             </button>
             {sep()}
-            <span class="truncate text-ink-dim">{branch()!.name}</span>
+            <span class="truncate text-ink-dim">{branch()?.name ?? "✦ the whole forest"}</span>
           </Show>
         </Match>
         <Match when={true}>
