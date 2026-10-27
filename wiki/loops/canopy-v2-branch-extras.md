@@ -63,3 +63,20 @@ restacked truth: sync/prep stop treating the divergence as something to fix.
 2. Force: folded into `p` when eligible, as in §3.
 3. Freeze: **dropped**, not ported — no branch has it set. Remove `/frozen-origin`, the
    `frozen-origin` config reads in srv/sync.py and srv/prep.py, and §4 above is void.
+
+## Built (2026-10-27)
+
+- **Diff base:** `space d` then `p` / `m` / `o` (outgoing only once pushed); the files tab header's
+  `vs parent` word cycles it. `?base=main|outgoing` rides the address, and /node gets `main` or
+  `origin/<branch>`. A new branch reads its own address, so leaving resets to parent.
+- **Description:** the words tab's first field; ↵ or leaving it saves (`/outline {description}`,
+  optimistic), esc puts it back, `u` writes the previous line back. Length shows; an "and" warns.
+  On the forest page the key is **`i`**, not `space e`: `space e` already shows every branch's
+  commits there, and editing the row under the cursor is a one-key action (keys rule 2). `i` joins
+  `review.note.insert` and `tutor.write` as one move, "start writing".
+- **Force:** `/diverged-detail` needs a tracking upstream, which forest branches don't carry, so a
+  new read-only `GET /force-scope?branch=` answers with the same `force_scope(branch, origin/<b>)`
+  that `/force-origin` re-checks. Diverged and in scope, `p` arms then sends; when only the gates
+  guard fails, `p` runs the gates. The guards sit under the ship line ✓/✗ and in the button's hover.
+- **Freeze:** removed: `/frozen-origin`, `frozen_origin_set`, and the `frozen-origin` reads in
+  sync and prep.
