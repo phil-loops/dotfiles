@@ -804,6 +804,15 @@ def diverged_detail(req, u):
         "forceScope": force_scope(branch, up)}))
 
 
+def force_scope_get(req, u):
+    # GET /force-scope?branch=X — the guard sheet /force-origin re-checks, against origin/<branch>
+    # as it does (forest branches carry no upstream). Asks GitHub once: human-paced, never polled.
+    branch = (parse_qs(u.query).get("branch", [""]) or [""])[0]
+    if not branch or ctx.run(["git", "rev-parse", "--verify", "-q", f"refs/remotes/origin/{branch}"]).returncode != 0:
+        return req._send(404, json.dumps({"ok": False, "err": "not on origin"}))
+    req._send(200, json.dumps({"ok": True, "forceScope": force_scope(branch, f"origin/{branch}")}))
+
+
 def force_scope(branch, upstream):
     """The scoped-force guard sheet: force-with-lease is offered ONLY while origin's copy is
     still private review surface — no PR at all, or a draft nobody has reviewed or commented on. Recomputed fresh

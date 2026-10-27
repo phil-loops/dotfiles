@@ -16,7 +16,7 @@ const API = `http://127.0.0.1:${PORT}`;
 // the backend (that's how /ticket silently no-opped under `npm run dev`).
 const ROUTES = [
   "/commit-diff", "/commits", "/delta-tests", "/dirty-resolve", "/diverged-detail", "/events",
-  "/file", "/fix-upstream", "/focus", "/footprint", "/gates", "/gates-progress", "/integrate",
+  "/file", "/fix-upstream", "/focus", "/footprint", "/force-origin", "/force-scope", "/gates", "/gates-progress", "/integrate",
   "/landed-why", "/learning-evidence", "/learning-question", "/learning-state", "/lsp/definition",
   "/lsp/hover", "/lsp/prepare", "/lsp/src", "/node", "/open", "/outbox-hold", "/outline",
   "/outline-undo", "/packet-compare", "/prep-push", "/prep-route", "/preview-kill", "/preview-log",

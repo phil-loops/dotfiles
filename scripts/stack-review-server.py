@@ -373,6 +373,8 @@ class H(BaseHTTPRequestHandler):
             return push.gates_progress(self, u)
         elif u.path == "/diverged-detail":  # what a ⇄ divergence IS: per-side commits (patch-id twins) + net tip diff
             return sync.diverged_detail(self, u)
+        elif u.path == "/force-scope":  # read-only: may /force-origin replace origin's copy (the guards it re-checks)
+            return sync.force_scope_get(self, u)
         elif u.path == "/prep-route":  # what "prep to push" would do next (read-only verdict + delegate)
             return prep.route(self, u)
         elif u.path == "/events":   # SSE: one push stream per tab, replaces the /heartbeat + /sig + /?_hot polls

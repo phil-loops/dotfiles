@@ -1,6 +1,7 @@
 // Where the branch stands on its way to main, as one line under the title on every tab, offering
 // only the next step: run the gates (and why — the red ones, with skip), wait for them, push (and
-// the push as it happens), or open the PR — and nothing once there's nothing to do. Gates show only
+// the push as it happens) — or, diverged from origin, replace origin's copy inside the force scope,
+// its guards ✓/✗ beneath — or open the PR, and nothing once there's nothing to do. Gates show only
 // while something waits to be pushed: a word until they need you, the gate in flight while running,
 // the red ones by name. Beside it, ⟲ sync when the branch needs one (dirt, drift, behind main, an
 // unvoiced tail), and under it the sync's steps while one runs — each failing step with its reason
@@ -10,7 +11,7 @@ import { gateRows, type GateRow, type Progress } from "../gates";
 import { model } from "../model";
 import { keyOf } from "../registry";
 import { bind, runOf } from "../runner";
-import { pushRoute } from "../commands/branch";
+import { forceScopeOf, pushRoute, readForceScope, type Guard } from "../commands/branch";
 import { inspecting, motionOf } from "../commands/sync";
 import Key from "../Key";
 import { PHASE_WORD, syncNeeds, type PrepRoute, type SyncFacts } from "../syncing";
@@ -42,19 +43,40 @@ export default function ShipLine() {
   const route = () => pushRoute(id());
   const warm = () => !!world.entities.warm[b()?.repo ?? ""]?.prs;
 
-  const push = () => runOf("branch.push.confirm", id());
+  // diverged from origin: the force scope says whether p may replace origin's copy (read once per tip)
+  createEffect(() => {
+    if (b()?.diverged) readForceScope(id());
+  });
+  const scope = () => (b()?.diverged ? forceScopeOf(id()) : undefined);
+  const forcing = () => route() === "branch.force.arm" || route() === "branch.force.confirm";
+  /** diverged and out of scope on more than the gates: no key, the failing guard and the additive way */
+  const refused = () => {
+    const s = scope();
+    return s && !s.eligible && !s.guards.every((g) => g.ok || g.k === "gates") ? s.guards.find((g) => !g.ok) : undefined;
+  };
+  const sheet = () => scope()?.guards.map((g) => `${g.ok ? "✓" : "✗"} ${g.label}`).join("\n");
+
+  /** the latest push or force this page load */
+  const push = () => {
+    const p = runOf("branch.push.confirm", id());
+    const f = runOf("branch.force.confirm", id());
+    return !f || (p && p.t0 > f.t0) ? p : f;
+  };
+  const forced = () => push() === runOf("branch.force.confirm", id());
   /** a push in flight, or one that failed: the button carries it until the next step takes over */
   const live = () => {
     const st = push()?.state;
     return st === "sending" || st === "landing" || st === "failed" ? st : null;
   };
-  const acts = () => route() === "branch.gates.run" || route() === "branch.push.arm" || route() === "branch.push.confirm";
+  const acts = () => route() === "branch.gates.run" || route() === "branch.push.arm" || route() === "branch.push.confirm" || forcing();
   const waiting = () => route() === "branch.gates.wait";
   const label = () => {
-    if (live() === "sending") return "pushing…";
-    if (live() === "landing") return "✓ pushed";
-    if (live() === "failed") return "retry the push";
+    if (live() === "sending") return forced() ? "replacing origin…" : "pushing…";
+    if (live() === "landing") return forced() ? "✓ replaced" : "✓ pushed";
+    if (live() === "failed") return forced() ? "retry the force" : "retry the push";
     if (route() === "branch.gates.run") return b()!.gates === "red" ? "re-run the gates" : "run the gates";
+    if (route() === "branch.force.confirm") return `${keyOf("review.push")} again · force-with-lease over origin's ${scope()!.lease.slice(0, 7)}`;
+    if (route() === "branch.force.arm") return "diverged · replace origin?";
     if (armed() === id()) return `${keyOf("review.push")} again to push`;
     return `push ${b()!.pushed === "local" ? b()!.commits : b()!.ahead}`;
   };
@@ -115,11 +137,17 @@ export default function ShipLine() {
             class="rv-btn rv-btn-gold"
             classList={{ "animate-breathe": live() === "sending", "text-ember": live() === "failed" }}
             disabled={live() === "sending" || live() === "landing"}
-            title={live() === "failed" ? push()!.err : undefined}
+            title={live() === "failed" ? push()!.err : forcing() ? sheet() : undefined}
             onClick={bind("review.push", id())}
           >
             {label()} <Show when={!live() || live() === "failed"}><kbd>{keyOf("review.push")}</kbd></Show>
           </button>
+        </Show>
+        <Show when={!live() && refused()}>
+          <span class="text-ember" title={sheet()}>
+            diverged · ✗ {refused()!.label}
+          </span>
+          <span class="text-ink-faint">· sync carries it on top</span>
         </Show>
         <Show when={!acts() && !live() && !v()?.pr && v()?.st.action === "pr" && warm()}>
           <button class="rv-btn rv-btn-gold" onClick={bind("review.finish", id())}>
@@ -129,6 +157,9 @@ export default function ShipLine() {
       </span>
       <Show when={motion()}>
         <Strip id={id()} files={motion()!.dirt?.files ?? []} />
+      </Show>
+      <Show when={!motion() && scope()}>
+        <GuardStrip guards={scope()!.guards} />
       </Show>
       <Show when={inspecting() === id()}>
         <Divergence repo={b()!.repo} name={b()!.name} />
@@ -183,6 +214,25 @@ function Strip(props: { id: string; files: string[] }) {
           </div>
         </div>
       </Show>
+    </div>
+  );
+}
+
+/** The force scope's guards as steps: each ✓ or ✗, so a refusal reads as the guard that failed. */
+function GuardStrip(props: { guards: Guard[] }) {
+  return (
+    <div class="rv-strip">
+      <div class="rv-strip-row">
+        <span class="text-ink-faint">replace origin</span>
+        <For each={props.guards}>
+          {(g) => (
+            <span class="rv-step" data-state={g.ok ? "ok" : "fail"}>
+              <i>{g.ok ? ICON.ok : ICON.fail}</i>
+              {g.label}
+            </span>
+          )}
+        </For>
+      </div>
     </div>
   );
 }

@@ -1,11 +1,13 @@
 // A branch's way to main: push it (POST /push-origin — two keypresses, never by itself), open its
 // PR (the compare form, prefilled by /packet-compare, in Phil's browser), open its page, and hold
 // work for the morning (POST /outbox-hold). Nothing here pushes, opens or merges on its own.
+import { createSignal } from "solid-js";
 import { atRepo, bkey, compareUrl, model, type BranchView } from "../model";
 import { command, type Write } from "../registry";
 import { navigate, reviewPath, surface } from "../router";
 import { canPush, fmtMorning, leaf, nextMorning, pushableButGates } from "../ship";
 import { view, world } from "../store";
+import { getJSON } from "../sync";
 import { armed, forestFace, launching, now, setArmed, setCursor, setDescribing, setOpened, toggleIn } from "../ui";
 
 const bv = (id: string | undefined) => (id ? model.branchView(id) : undefined);
@@ -20,10 +22,18 @@ command({
   route: (id) => pushRoute(id),
 });
 
-/** What `p` does: arm, then send — or, when only the gates stand in the way, run them. */
+/** What `p` does: arm, then send — or, when only the gates stand in the way, run them. A branch
+ *  diverged from origin can't push; inside the force scope `p` arms a force-with-lease instead. */
 export function pushRoute(id: string | undefined): string | null {
   const v = bv(id);
   if (!v) return null;
+  if (v.b.diverged) {
+    const s = forceScopeOf(id);
+    if (!s || v.b.pending) return null;
+    if (s.eligible) return armed() === id ? "branch.force.confirm" : "branch.force.arm";
+    if (!s.guards.every((g) => g.ok || g.k === "gates")) return null;
+    return v.b.gates === "running" ? "branch.gates.wait" : "branch.gates.run";
+  }
   if (canPush(v.b, v.pr)) return armed() === id ? "branch.push.confirm" : "branch.push.arm";
   if (!pushableButGates(v.b, v.pr)) return null;
   return v.b.gates === "running" ? "branch.gates.wait" : "branch.gates.run";
@@ -108,6 +118,82 @@ command({
       settled: () => world.entities.branch[id]?.pushed === "synced",
       said: v.pr ? `pushed ${v.b.ahead} follow-up${v.b.ahead === 1 ? "" : "s"} onto #${v.pr.number}` : undefined,
       failed: `${leaf(v.b.name)} didn't push`,
+    };
+  },
+});
+
+// ── the one sanctioned force: replace origin's copy while nobody else has read it ──
+
+export interface Guard {
+  k: string;
+  label: string;
+  ok: boolean;
+}
+/** GET /force-scope (srv/sync.py force_scope): no PR, or a draft no one else has
+ *  touched, and gates green on this tree. /force-origin checks it all again; this only says. */
+export interface ForceScope {
+  eligible: boolean;
+  guards: Guard[];
+  lease: string;
+  prNumber: number | null;
+  prUrl: string | null;
+}
+
+const scopeKey = (id: string) => {
+  const b = view("branch", id);
+  return b ? `${b.tip}|${b.ahead}|${b.gates}` : "";
+};
+const [scopes, setScopes] = createSignal<ReadonlyMap<string, { key: string; scope?: ForceScope | null }>>(new Map());
+const putScope = (id: string, key: string, scope?: ForceScope | null) => setScopes((m) => new Map(m).set(id, { key, scope }));
+/** The force scope read for this tip — undefined until read, null when it couldn't be. */
+export function forceScopeOf(id: string | undefined): ForceScope | null | undefined {
+  const s = id ? scopes().get(id) : undefined;
+  return s && s.key === scopeKey(id!) ? s.scope : undefined;
+}
+/** Read the scope once per tip (it asks GitHub, so never on a poll). */
+export function readForceScope(id: string): void {
+  const b = view("branch", id);
+  const key = scopeKey(id);
+  if (!b || scopes().get(id)?.key === key) return;
+  putScope(id, key);
+  void getJSON<{ forceScope?: ForceScope }>(atRepo(b.repo, `/force-scope?branch=${encodeURIComponent(b.name)}`))
+    .then((d) => putScope(id, key, d.forceScope ?? null))
+    .catch(() => putScope(id, key, null));
+}
+
+command({
+  id: "branch.force.arm",
+  title: "Ready a force-with-lease over origin (the next press sends it)",
+  scope: "branch",
+  budget: "local",
+  quiet: true,
+  available: (id) => !!bv(id)?.b.diverged && !!forceScopeOf(id)?.eligible,
+  local: (id) => setArmed(id),
+});
+command({
+  id: "branch.force.confirm",
+  title: "Send the readied force-with-lease",
+  scope: "branch",
+  budget: "git-write",
+  quiet: true,
+  v1: ["force-origin"],
+  available: (id) => !!id && armed() === id && !!forceScopeOf(id)?.eligible,
+  write: (id): Write | null => {
+    const v = bv(id);
+    const s = forceScopeOf(id);
+    setArmed(undefined);
+    if (!v || !s) return null;
+    const key = scopeKey(id);
+    return {
+      ops: [{ type: "branch", id, fields: { pending: "pushing" } }],
+      path: atRepo(v.b.repo, "/force-origin"),
+      body: { branch: v.b.name, lease: s.lease },
+      settled: () => !world.entities.branch[id]?.diverged,
+      said: `replaced origin's ${s.lease.slice(0, 7)}`,
+      failed: `${leaf(v.b.name)} didn't replace origin`,
+      answered: (_ok, body) => {
+        if (body.forceScope) putScope(id, key, body.forceScope as ForceScope);
+      },
     };
   },
 });
