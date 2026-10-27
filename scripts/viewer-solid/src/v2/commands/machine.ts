@@ -86,7 +86,7 @@ command({
   title: "Swap the port to the branch's parent build, or back",
   scope: "server",
   budget: "slow-io",
-  keys: ["s"],
+  keys: ["space w"],
   available: (id) => owned(id) && !!(machine.swapped()[id!] || machine.server(id)!.swapTo),
   write: (id): Write | null => {
     const s = machine.server(id);
