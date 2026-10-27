@@ -183,8 +183,9 @@ def where_lines(plan, stacked_on=None, after=None):
             elif s.get("state") == "merged":
                 lines.append(f"✓ {_ref(s)}")
             else:
-                state = "in review" if s.get("pr") else "up next" if seen_me else "not opened yet"
-                lines.append(f"○ {_ref(s)} — {state}" + ("; this PR builds on it" if s.get("ancestor") else ""))
+                state = "in review" if s.get("pr") else "" if seen_me else "not opened yet"
+                note = "; ".join(x for x in (state, "this PR builds on it" if s.get("ancestor") else "") if x)
+                lines.append(f"○ {_ref(s)}" + (f" — {note}" if note else ""))
     for a in after or []:
         ref = f"#{a['pr']}" if a.get("pr") else f"`{a['branch']}`"
         why = a.get("why") or (strip_prefix(a.get("job") or "") and "deploy order: " + strip_prefix(a.get("job") or ""))
