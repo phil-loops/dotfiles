@@ -215,10 +215,11 @@ def waits_on(node, nodes):
     return "\n".join(lines)
 
 
-def packet_on(branch):
-    """A forest that opts into the full packet body: git config stack-project.<p>.pr-body packet."""
+def body_mode(branch):
+    """The forest's opt-in body shape, git config stack-project.<p>.pr-body: "packet" (the full review
+    packet), "context" (the why plus Where this sits), else "" (the why alone)."""
     p = repostate.snapshot().project(branch)
-    return bool(p) and ctx.run(["git", "config", f"stack-project.{p}.pr-body"]).stdout.strip() == "packet"
+    return ctx.run(["git", "config", f"stack-project.{p}.pr-body"]).stdout.strip() if p else ""
 
 
 def casual_why(f):
@@ -232,12 +233,14 @@ def casual_why(f):
 def drafted(branch, f=None):
     """The body a PR opens with when Phil hasn't written one, in his voice: a short why (or none)
     above the repo's template — his hand-typed PRs on main are 0–3 casual lines, then Traffic Cop.
-    A forest that opts in (packet_on) gets the full review packet instead: Intent, merge order,
-    reading order, verified."""
+    A forest that opts in (body_mode) gets the full review packet instead ("packet": Intent, merge
+    order, reading order, verified), or just the merge order under the why ("context")."""
     f = f or facts(branch)
-    if packet_on(branch):
+    mode = body_mode(branch)
+    if mode == "packet":
         return rp.render(rp.build(f), f["template"])
-    parts = [casual_why(f), (f["template"] or "").strip()]
+    where = rp.build(f).get("where") if mode == "context" else None
+    parts = [casual_why(f), "## Where this sits\n\n" + "\n".join(where) if where else "", (f["template"] or "").strip()]
     text = "\n\n".join(x for x in parts if x)
     return text + "\n" if text else ""
 
