@@ -1,9 +1,10 @@
 // What the space menu finds besides commands: branches and forests by fuzzy name, a branch by its PR
-// number. Each result is a quiet command plus its argument, so opening one runs through the runner.
+// number, wiki pages by title, the tutor's concepts by name. Each result is a quiet command plus its argument, so opening one runs
+// through the runner.
 import type { Branch, Pr, Project } from "./types";
 
 export interface Find {
-  cmd: "find.branch" | "find.forest";
+  cmd: "find.branch" | "find.forest" | "find.wiki" | "find.concept";
   id: string;
   title: string;
   sub: string;
@@ -27,8 +28,11 @@ export function fuzzyScore(needle: string, hay: string): number {
   return score - hay.length * 0.01;
 }
 
-/** The branches and forests matching what's typed, best first; an archived forest's sink to the end. */
-export function finds(q: string, w: { branches: Branch[]; projects: Project[]; prs: Pr[] }): Find[] {
+/** The branches, forests, wiki pages and concepts matching what's typed, best first; an archived forest's sink to the end. */
+export function finds(
+  q: string,
+  w: { branches: Branch[]; projects: Project[]; prs: Pr[]; pages?: { slug: string; title: string; section: string }[]; concepts?: { id: string; name: string }[] },
+): Find[] {
   const needle = q.toLowerCase().replace(/\s+/g, "");
   if (!needle) return [];
   const projects = new Map(w.projects.map((p) => [p.id, p]));
@@ -46,6 +50,16 @@ export function finds(q: string, w: { branches: Branch[]; projects: Project[]; p
     const project = projects.get(b.project);
     const sub = [pr !== undefined ? `#${pr}` : "", project?.name ?? ""].filter(Boolean).join(" · ");
     scored.push({ f: { cmd: "find.branch", id: b.id, title: b.name, sub }, s, archived: project?.state === "archive" });
+  }
+  if (!number) {
+    for (const p of w.pages ?? []) {
+      const s = Math.max(fuzzyScore(needle, p.title.toLowerCase().replace(/\s+/g, "")), fuzzyScore(needle, p.slug));
+      if (s > -Infinity) scored.push({ f: { cmd: "find.wiki", id: p.slug, title: p.title, sub: `wiki · ${p.section}` }, s, archived: false });
+    }
+    for (const c of w.concepts ?? []) {
+      const s = fuzzyScore(needle, c.name.toLowerCase().replace(/\s+/g, ""));
+      if (s > -Infinity) scored.push({ f: { cmd: "find.concept", id: c.id, title: c.name, sub: "concept" }, s, archived: false });
+    }
   }
   return scored
     .sort((a, b) => Number(a.archived) - Number(b.archived) || b.s - a.s)

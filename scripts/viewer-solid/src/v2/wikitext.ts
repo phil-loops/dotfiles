@@ -39,6 +39,8 @@ export interface SrcReply {
 
 const CITE = /\[([^\]]+)\]\(src:([^)\s]+)\)/g;
 const WIKILINK = /\[\[([a-z0-9-]+)\]\]/g;
+/** `[label](slug)` — a plain markdown link to another page by its bare slug */
+const PAGELINK = /\[([^\]]+)\]\(([a-z0-9-]+)\)/g;
 const attr = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 /** Sections in first-appearance order: the pages arrive sorted by `order`, so the grouping inherits it. */
@@ -59,6 +61,7 @@ export function wikiHtml(body: string, titleOf: (slug: string) => string | undef
   const hold = (html: string) => `\u0001${held.push(html) - 1}\u0001`;
   const src = body
     .replace(CITE, (_m, label: string, anchor: string) => hold(`<button class="wk-cite" data-anchor="${attr(anchor)}" title="${attr(anchor)}">${inline(label)}</button>`))
-    .replace(WIKILINK, (_m, slug: string) => hold(`<a class="wk-link" href="/v2/wiki/${slug}" data-slug="${slug}">${attr(titleOf(slug) ?? slug.replace(/-/g, " "))}</a>`));
+    .replace(WIKILINK, (_m, slug: string) => hold(`<a class="wk-link" href="/v2/wiki/${slug}" data-slug="${slug}">${attr(titleOf(slug) ?? slug.replace(/-/g, " "))}</a>`))
+    .replace(PAGELINK, (_m, label: string, slug: string) => hold(`<a class="wk-link" href="/v2/wiki/${slug}" data-slug="${slug}">${inline(label)}</a>`));
   return renderMarkdown(src).replace(/\u0001(\d+)\u0001/g, (_m, i: string) => held[+i]);
 }

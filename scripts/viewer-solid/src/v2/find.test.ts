@@ -51,3 +51,20 @@ test("a branch row says its PR and forest", () => {
   assert.equal(f.title, "dep-cleanup/remove-unused-deps");
   assert.equal(f.sub, "#11130 · dep-cleanup");
 });
+
+test("a wiki page is found by its title or its slug, never by a PR number", () => {
+  const pages = [{ slug: "canopy-v2-keys", title: "Keys like Helix", section: "Canopy v2" }];
+  const found = (q: string) => finds(q, { ...world, pages }).map((f) => `${f.cmd}:${f.id}`);
+  assert.deepEqual(found("keys like"), ["find.wiki:canopy-v2-keys"]);
+  assert.deepEqual(found("v2keys"), ["find.wiki:canopy-v2-keys"]);
+  assert.deepEqual(found("11130"), ["find.branch:loops:dep-cleanup/remove-unused-deps"]);
+  assert.equal(finds("helix", { ...world, pages })[0].sub, "wiki · Canopy v2");
+});
+
+test("a concept is found by its name", () => {
+  const concepts = [{ id: "one-runner-per-tick", name: "One runner per tick" }];
+  assert.deepEqual(
+    finds("one runner", { ...world, concepts }).map((f) => `${f.cmd}:${f.id}:${f.sub}`),
+    ["find.concept:one-runner-per-tick:concept"],
+  );
+});
