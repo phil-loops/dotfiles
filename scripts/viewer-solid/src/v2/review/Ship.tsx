@@ -289,9 +289,11 @@ function Gates(props: { red: GateRow[]; waived: GateRow[]; gates: string; skippe
     <Show
       when={props.red.length}
       fallback={
-        <span class={props.gates === "green" ? "text-patina" : "text-ink-faint"} title={props.waived.map((g) => g.summary).join("\n") || undefined}>
-          {props.gates === "green" ? `gates ✓${props.waived.length ? ` (${props.waived.length} skipped)` : ""}` : props.gates === "stale" ? "gates stale" : props.gates === "running" ? "gates queued" : "gates not run"}
-        </span>
+        <Show when={props.gates === "green" && props.waived.length}>
+          <span class="text-patina" title={props.waived.map((g) => g.summary).join("\n")}>
+            {props.waived.length} skipped
+          </span>
+        </Show>
       }
     >
       <span class="text-ember">gates ✗</span>
