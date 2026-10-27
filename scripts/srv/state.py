@@ -8,9 +8,14 @@
 #     event: patch   {domain, version, upserts: {type: {id: obj}}, deletes: {type: [id]}}
 #     event: resync  {epoch, versions}                         refetch /state, then reconnect
 #
-# A branch carries its merge-order position in its forest (`order`, stack-merge-rank's) and its
-# hold-for-morning stamp; a PR carries what an approved one waits on (mergeState, mergeable) — the
-# outbox's facts, so the Forests page derives ship state and the ready filter from the store alone.
+# A branch carries its merge-order position in its forest (`order`, stack-merge-rank's), its
+# hold-for-morning stamp, and what sync would fix — v1's /sync and /forest-health facts, from the
+# refs alone: `behind` origin/main, `drifted` off its parent's tip, a footgun `upstream` and a
+# `diverged` pushed copy. Dirt and the prep route aren't here: one needs a `status` per worktree
+# and moves without any ref moving, the other walks commit bodies — the branch page reads them
+# per branch (GET /sync, /prep-route, both memoised there). A PR carries what an approved one
+# waits on (mergeState, mergeable) — the outbox's facts, so the Forests page derives ship state
+# and the ready filter from the store alone.
 #
 # Ids: repo "<repo>", project/branch/pr "<repo>:<name>" (a pr is keyed by its head branch),
 # landed "<repo>:<project>#<pr>". Archived projects are always listed (state "archive"); their
@@ -69,6 +74,8 @@ _WAKE = threading.Event()
 _SUBS = [0]
 _GRAPHS = {}   # repo path -> (tips key, Graph)
 _TREES = {}    # repo path -> (refs key, {branch: tree})
+_BEHIND = {}   # repo path -> (refs key, {branch: commits on trunk it lacks})
+_ANC = {}      # (ancestor sha, tip sha) -> bool, for parents already on trunk (outside the graph)
 _SIDECARS = {"at": 0.0}
 
 
@@ -122,6 +129,56 @@ def _trees(snap):
     trees = dict(ln.rsplit(" ", 1) for ln in out.splitlines() if " " in ln)
     _TREES[repo] = (key, trees)
     return trees
+
+
+def _behind_trunk(snap, trunk, branches):
+    """{branch: commits on trunk it lacks} — v1's /sync `behind`, for every member in ONE spawn
+    (for-each-ref's ahead-behind), recomputed only when a ref moves."""
+    repo = ctx.repo_cwd()
+    key = (_refs_key(snap), trunk)
+    hit = _BEHIND.get(repo)
+    if hit and hit[0] == key:
+        return hit[1]
+    out = {}
+    if branches:
+        r = ctx.run(["git", "for-each-ref", f"--format=%(refname) %(ahead-behind:{trunk})",
+                     *[f"refs/heads/{b}" for b in sorted(branches)]])
+        for ln in r.stdout.splitlines():
+            ref, _, ab = ln.rpartition(" ")
+            ref = ref.rpartition(" ")[0]
+            if ref.startswith("refs/heads/") and ab.isdigit():
+                out[ref[11:]] = int(ab)
+    _BEHIND[repo] = (key, out)
+    return out
+
+
+def _is_ancestor(graph, a, b):
+    """Is commit a an ancestor of b? Answered from the graph when a is off trunk; otherwise one
+    cached `merge-base --is-ancestor` per sha pair."""
+    if not a or not b:
+        return False
+    if a in graph.commits:
+        return a == b or a in graph.ancestors(b)
+    key = (a, b)
+    if key not in _ANC:
+        if len(_ANC) > 4000:
+            _ANC.clear()
+        _ANC[key] = ctx.run(["git", "merge-base", "--is-ancestor", a, b]).returncode == 0
+    return _ANC[key]
+
+
+def _upstream(snap, graph, b, main, tip, remote):
+    """v1's _upstream_state from the snapshot: (upstream, tracks the trunk, diverged from the
+    pushed copy). An upstream's own ahead/behind rides in for-each-ref's track; a --no-track
+    branch is measured against origin/<branch> through the graph."""
+    up, track = snap.track(b)
+    if up:
+        rem = snap.get(f"branch.{b}.remote")
+        bad = (up[len(rem) + 1:] if rem and up.startswith(rem + "/") else up) == main
+        return up, bad, not bad and "ahead" in track and "behind" in track
+    if not remote or not tip or remote == tip or remote not in graph.commits or tip not in graph.commits:
+        return "", False, False
+    return "", False, remote not in graph.ancestors(tip) and tip not in graph.ancestors(remote)
 
 
 def _adopt_sidecars():
@@ -192,6 +249,7 @@ def _git_entities(name, snap, jobs):
     trees = _trees(snap)
     ents = {"repo": {name: {"id": name, "name": name, "main": main, "trunk": snap.sha.get(f"refs/remotes/{trunk}", snap.local(main))}},
             "project": {}, "branch": {}}
+    behind = _behind_trunk(snap, trunk, member)
     sizes = collections.Counter(member.values())
     order = {}
     for p in set(member.values()):
@@ -206,6 +264,8 @@ def _git_entities(name, snap, jobs):
         ahead = len(graph.own(tip, remote)) if remote and tip else 0
         tree = trees.get(b, "")
         gates, red = _gates(snap, b, tree, jobs)
+        up, up_bad, diverged = _upstream(snap, graph, b, main, tip, remote)
+        rooted = parent in _TRUNKS or parent == trunk or not snap.exists(parent)
         ents["branch"][f"{name}:{b}"] = {
             "id": f"{name}:{b}", "repo": name, "name": b, "project": f"{name}:{p}",
             "parent": parent, "parentId": f"{name}:{parent}" if parent in member else None,
@@ -214,6 +274,9 @@ def _git_entities(name, snap, jobs):
             "pushed": "synced" if remote and not ahead else "ahead" if remote else "local", "ahead": ahead,
             "gates": gates, "redGates": red,
             "order": order.get(b, 999), "holdUntil": snap.branch_key(b, "hold-until") or None,
+            "behind": behind.get(b, 0),
+            "drifted": bool(tip) and not rooted and not _is_ancestor(graph, snap.local(parent), tip),
+            "upstream": up, "upstreamBad": up_bad, "diverged": diverged,
         }
     for p in names:
         members = [b for b, q in member.items() if q == p]
