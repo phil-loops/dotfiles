@@ -1,0 +1,159 @@
+#!/usr/bin/env python3
+"""patch-land — land a patch from ~/.dotfiles/patches and retire it, so the directory only
+ever holds patches that still have somewhere to go.
+
+  patch-land <patch> [-m <msg>]   apply --3way, commit exactly the paths it touches, delete it
+  patch-land --sweep              say where every patches/*.patch stands
+  patch-land --sweep --prune      ...and delete the ones already done (landed/absorbed/superseded)
+
+A patch is done when it reverse-applies, when every line it adds is in today's tree, or when
+every line it adds entered main's history once (landed, then rewritten). Landing refuses, loudly, when a path it touches is dirty — the 3-way
+merge would fold another session's uncommitted work into this commit. A conflict leaves the
+working tree and the patch exactly as they were.
+"""
+import argparse
+import os
+import re
+import subprocess
+import sys
+
+ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+PATCHES = os.path.join(ROOT, "patches")
+DONE = ("landed", "absorbed", "superseded")
+
+
+def git(*args, check=False):
+    r = subprocess.run(["git", "-C", ROOT, *args], capture_output=True, text=True)
+    if check and r.returncode:
+        sys.exit(f"patch-land: git {' '.join(args)} failed\n{r.stderr.strip()}")
+    return r
+
+
+def touched(patch):
+    paths = []
+    for line in open(patch, errors="replace"):
+        m = re.match(r"^diff --git a/(\S+) b/(\S+)", line)
+        if m:
+            paths += [p for p in m.groups() if p not in paths]
+    return paths
+
+
+def added_lines(patch):
+    """{path: [substantive lines the patch adds]} — blank and punctuation-only lines say nothing."""
+    out, path = {}, None
+    for line in open(patch, errors="replace"):
+        if line.startswith("+++ "):
+            path = None if line.startswith("+++ /dev/null") else line[4:].strip().removeprefix("b/")
+        elif path and line.startswith("+"):
+            s = line[1:].strip()
+            if len(re.sub(r"[\W_]", "", s)) >= 4:
+                out.setdefault(path, []).append(s)
+    return out
+
+
+def absorbed(patch):
+    """Every substantive line the patch adds is in today's file: it landed and was edited since."""
+    adds = added_lines(patch)
+    if not adds:
+        return False
+    for path, lines in adds.items():
+        f = os.path.join(ROOT, path)
+        if not os.path.exists(f):
+            return False
+        have = {l.strip() for l in open(f, errors="replace")}
+        if any(l not in have for l in lines):
+            return False
+    return True
+
+
+def superseded(patch):
+    """Its additions all entered main's history at some point: it landed, then later work rewrote it."""
+    adds = [(p, l) for p, ls in added_lines(patch).items() for l in ls]
+    if len(adds) < 3:
+        return False
+    sample = adds[:: max(1, len(adds) // 12)][:12]
+    return all(git("log", "HEAD", "-1", "--format=%h", "-S", l, "--", p).stdout.strip() for p, l in sample)
+
+
+def state(patch):
+    """landed (reverse-applies) | absorbed (its additions all present) | superseded (they all
+    landed once) | applies | conflicts | foreign (touches nothing in this repo)."""
+    paths = touched(patch)
+    if not paths:
+        return "foreign"
+    if git("apply", "--check", "-R", patch).returncode == 0:
+        return "landed"
+    if git("apply", "--check", patch).returncode == 0:
+        return "applies"
+    if absorbed(patch):
+        return "absorbed"
+    if superseded(patch):
+        return "superseded"
+    if not any(os.path.exists(os.path.join(ROOT, p)) for p in paths):
+        return "foreign"
+    return "conflicts"
+
+
+def retire(patches):
+    rels = [os.path.relpath(p, ROOT) for p in patches]
+    tracked = [r for r in rels if git("ls-files", "--error-unmatch", r).returncode == 0]
+    for p in patches:
+        os.remove(p)
+    if tracked:
+        name = os.path.basename(tracked[0]) if len(tracked) == 1 else f"{len(tracked)} patches"
+        git("commit", "-q", "-m", f"patches: retire {name} already in the tree", "--", *tracked, check=True)
+
+
+def land(patch, msg):
+    paths = touched(patch)
+    if not paths:
+        sys.exit(f"patch-land: {patch} has no diff --git headers")
+    if state(patch) in DONE:
+        retire([patch])
+        print(f"already landed — retired {os.path.basename(patch)}")
+        return
+    dirty = git("status", "--porcelain", "--", *paths).stdout.strip()
+    if dirty:
+        sys.exit(f"patch-land: refusing — paths this patch touches are dirty:\n{dirty}\n"
+                 "commit or wait for that work, then re-run")
+    r = git("apply", "--3way", patch)
+    if r.returncode:
+        git("reset", "-q", "--", *paths)
+        git("checkout", "-q", "--", *[p for p in paths if git("ls-files", "--error-unmatch", p).returncode == 0])
+        for p in paths:
+            if git("ls-files", "--error-unmatch", p).returncode and os.path.exists(os.path.join(ROOT, p)):
+                os.remove(os.path.join(ROOT, p))
+        sys.exit(f"patch-land: {os.path.basename(patch)} conflicts — tree left as it was\n{r.stderr.strip()}")
+    git("add", "--", *[p for p in paths if os.path.exists(os.path.join(ROOT, p))], check=True)
+    git("commit", "-q", "-m", msg or os.path.basename(patch).removesuffix(".patch").replace("-", " "), "--", *paths, check=True)
+    print(git("log", "--oneline", "-1").stdout.strip())
+    retire([patch])
+    print(f"retired {os.path.basename(patch)}")
+
+
+def sweep(prune):
+    rows = sorted((state(os.path.join(PATCHES, f)), f) for f in os.listdir(PATCHES) if f.endswith(".patch"))
+    for st, f in rows:
+        print(f"  {st:<10} {f}")
+    done = [os.path.join(PATCHES, f) for st, f in rows if st in DONE]
+    if prune and done:
+        retire(done)
+        print(f"retired {len(done)} patch(es) already in the tree or its history")
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("patch", nargs="?")
+    ap.add_argument("-m", dest="msg")
+    ap.add_argument("--sweep", action="store_true")
+    ap.add_argument("--prune", action="store_true")
+    a = ap.parse_args()
+    if a.sweep:
+        return sweep(a.prune)
+    if not a.patch:
+        ap.error("a patch, or --sweep")
+    land(os.path.abspath(a.patch), a.msg)
+
+
+if __name__ == "__main__":
+    main()
