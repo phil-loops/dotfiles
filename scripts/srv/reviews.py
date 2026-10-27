@@ -13,7 +13,7 @@ import subprocess
 import tempfile
 import threading
 import time
-from urllib.parse import parse_qs, unquote
+from urllib.parse import parse_qs, quote, unquote
 
 from srv import ctx
 from . import stackcfg
@@ -214,7 +214,7 @@ def _open_pr(req, d):   # via open_url (POST /open-url) — Chrome ext: open a P
     # The ext sends repo="<owner>/<repo>" in the body (not ?repo=), so map it ourselves and pin
     # the thread to that checkout — every ctx.run / picker.open below then acts on it. do_POST's
     # finally clears the thread-local. Unknown slug → CWD (loops), today's behavior.
-    repo_name, repo_path = _resolve_repo(d.get("repo"))
+    _name, repo_path = _resolve_repo(d.get("repo"))
     ctx.set_repo(repo_path)
     num = str(d.get("number", "")).strip().lstrip("#")
     if not num.isdigit():
@@ -234,8 +234,7 @@ def _open_pr(req, d):   # via open_url (POST /open-url) — Chrome ext: open a P
             _cache.pop(ctx.repo_cwd(), None)   # force the next /review-requests to re-flag this PR as imported
             branch = r.stdout.strip()
             _refreshed[_pr_key(num)] = time.time()   # the import just fetched this head — don't re-fetch it below
-    prefix = f"{repo_name}/" if (repo_path != ctx.CWD and repo_name) else ""
-    route = _viewer_route(branch, prefix, num, local)
+    route = _viewer_route(branch)
     refreshed = False
     dh = (d.get("diffhash") or "").strip()
     if dh and not d.get("path"):   # URL-only line selection: resolve GitHub's hash to a path here
@@ -300,17 +299,10 @@ def _compare_head(spec):
     return head.split(":", 1)[-1].strip("/")
 
 
-def _viewer_route(branch, prefix="", num=None, local=True):
-    # Canonical viewer route — mirrors how the viewer opens a node: a forest member (tagged
-    # stack-branch.<b>.project) lives at /forests/<project>/<branch>, an untagged own branch is a
-    # standalone /branch/<b>, an imported PR is /review/N. The project tag is the same git config
-    # the viewer reads, so membership stays single-source. The repo prefix lands `→ viewer` on the
-    # right repo's node; loops (the CWD default) and unknown slugs stay implicit.
-    project = (ctx.run(["git", "config", f"branch.{branch}.stack-project"]).stdout.strip()
-               or ctx.run(["git", "config", f"stack-branch.{branch}.project"]).stdout.strip())
-    if project:
-        return f"/forests/{prefix}{project}/{branch}"
-    return f"/branch/{branch}" if local else f"/review/{num}"
+def _viewer_route(branch):
+    # The branch's v2 review page, in the repo this request is pinned to — every branch has one,
+    # forest member, standalone, or an imported review/pr-N alike.
+    return f"/v2/b/{quote(ctx.repo_name())}/{quote(branch, safe='/')}"
 
 
 def open_url(req, raw):   # POST /open-url {url, open?} — Chrome ext (URL-only): parse + route a GitHub URL
@@ -548,7 +540,7 @@ def _decision(num):
 
 def pr_forest(req, raw):   # POST /pr-forest — Chrome ext: forest membership + child seating for a PR
     d = json.loads(raw or "{}")
-    repo_name, repo_path = _resolve_repo(d.get("repo"))
+    _name, repo_path = _resolve_repo(d.get("repo"))
     ctx.set_repo(repo_path)
     num = str(d.get("number", "")).strip().lstrip("#")
     if not num.isdigit():
@@ -561,8 +553,7 @@ def pr_forest(req, raw):   # POST /pr-forest — Chrome ext: forest membership +
     project = (ctx.run(["git", "config", f"branch.{branch}.stack-project"]).stdout.strip()
                or ctx.run(["git", "config", f"stack-branch.{branch}.project"]).stdout.strip())
     children = [{"branch": c, "seated": _seated(branch, c)} for c in _children_of(branch)]
-    prefix = f"{repo_name}/" if (repo_path != ctx.CWD and repo_name) else ""
-    route = f"/forests/{prefix}{project}/{branch}" if project else f"/branch/{branch}"
+    route = _viewer_route(branch)
     req._send(200, json.dumps({"ok": True, "branch": branch, "project": project or None,
                                "decision": _decision(num), "route": route, "children": children}))
 

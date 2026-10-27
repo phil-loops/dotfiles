@@ -82,12 +82,10 @@ fi
 port=$("$HOME/.dotfiles/scripts/stack-review-port" "$dir" 2>/dev/null || true)
 [[ "$port" == <-> ]] || die "couldn't derive the viewer port for $root"
 
-# Same git config the viewer itself reads, so membership can't drift: a forest member lives at
-# /forests/<project>/<branch>, an untagged branch is a standalone node. Dual-read spans the
-# in-flight stack-branch.* → branch.*.stack-* namespace migration.
-project=$(git -C "$dir" config "branch.${branch}.stack-project" 2>/dev/null \
-          || git -C "$dir" config "stack-branch.${branch}.project" 2>/dev/null || true)
-if [[ -n "$project" ]]; then route="/forests/${project}/${branch}"; else route="/branch/${branch}"; fi
+# v2's review page for the branch; the <repo> segment is the main worktree's name, as the viewer
+# registry names it.
+main_wt=$(git -C "$dir" worktree list --porcelain | sed -n '1s/^worktree //p')
+route="/v2/b/${main_wt:t}/${branch}"
 url="http://127.0.0.1:${port}${route}"
 
 if (( dry )); then
