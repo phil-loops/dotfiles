@@ -20,9 +20,10 @@ answer to "how would we know it's ready".
 ## Resolve the target
 
 - **PR number/URL** → `gh pr view` + `gh pr diff` (write the diff to a file, read it whole).
-- **Viewer node URL** (`http://127.0.0.1:<port>/forests/...`) → SPA route
-  `/forests/[<repo>/]<project>/<branch...>` — branch names contain slashes; the first
-  segment is a repo only if it names a registry repo. Review the `parent...branch` diff.
+- **Viewer URL** (`http://127.0.0.1:<port>/v2/b/<repo>/<branch...>`, a branch; or
+  `/v2/p/<repo>/<project>`, a forest) — branch names contain slashes, so the branch is the
+  whole tail. An old `/forests/[<repo>/]<project>/<branch...>` link names the same branch.
+  Review the `parent...branch` diff.
 - **Bare branch** → `parent...branch` diff from stack config.
 
 ## The review — persona rules
