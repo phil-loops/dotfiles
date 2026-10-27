@@ -1,14 +1,9 @@
-# srv/checkout.py — the primary checkout and worktree prep.
-#   GET  /head      the branch the main checkout currently points at (jump-to-checkout)
-#   POST /prepare   prefetch: build a branch's worktree in the background
-import os
-import json
-
+# srv/checkout.py — the request's primary checkout.
 from . import ctx
 
 # repo -> primary worktree path. A repo's PRIMARY worktree can't move while the server
 # lives, but `git worktree list` walks every linked tree to answer (~200ms at 227
-# worktrees in loops) — and /head is polled, so it paid that on every poll.
+# worktrees in loops) — and every preview call asks.
 _main_wt_cache = {}
 
 
@@ -27,13 +22,3 @@ def _active_main_wt():
             return _main_wt_cache[repo]
     return ctx.MAIN_WT
 
-
-def head(req):
-    req._send(200, json.dumps(
-        {"branch": ctx.run(["git", "-C", _active_main_wt(), "rev-parse", "--abbrev-ref", "HEAD"]).stdout.strip()}))
-
-
-def prepare(req, raw):
-    d = json.loads(raw or "{}")
-    ctx.fire([os.path.join(ctx.SCRIPTS, "stack-open"), "--prepare", d.get("branch", "")], cwd=ctx.CWD)
-    req._send(200, '{"ok":true}')

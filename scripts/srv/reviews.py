@@ -1,8 +1,5 @@
 # srv/reviews.py — bridge GitHub "review requested of me" PRs into the local forest.
 #
-#   GET  /review-requests   open PRs awaiting your review (gh search), each flagged
-#                           `imported` if its review/pr-<N> branch already exists
-#
 # The Chrome extension's /open-url imports a PR head (stack-review-import) as a review/pr-<N>
 # branch — an ordinary local branch, so base...head diffs, open-in-nvim and bless all work.
 import hashlib
@@ -41,7 +38,6 @@ def _resolve_repo(slug):
     return hit if hit else (None, ctx.CWD)
 
 _cache = {}   # repo -> {"at", "json"} — per-repo: a monotoad tab must not serve loops' queue
-_TTL = 30   # gh search is a ~1s network round-trip and the review queue barely moves
 _cache_lock = threading.Lock()
 _refreshing = set()   # repos with a background re-search in flight
 
@@ -78,24 +74,6 @@ def _refresh_requests(repo_path):
     finally:
         _refreshing.discard(repo_path)
         ctx.clear_repo()
-
-
-def requests(req):
-    # SWR: serve the cached queue instantly; a stale entry re-searches gh in the background
-    # (the ~1s network call used to block every Home load past the TTL). Cold blocks once.
-    repo_path = ctx.repo_cwd()
-    with _cache_lock:
-        ent = _cache.get(repo_path)
-        if ent:
-            if time.time() - ent["at"] >= _TTL and repo_path not in _refreshing:
-                _refreshing.add(repo_path)
-                threading.Thread(target=_refresh_requests, args=(repo_path,), daemon=True).start()
-            req._send(200, ent["json"])
-            return
-    payload = _compute_requests()
-    with _cache_lock:
-        _cache[repo_path] = {"at": time.time(), "json": payload}
-    req._send(200, payload)
 
 
 _WARM_EVERY = 300   # the review queue moves on human timescales; gh search is a ~1s network call
@@ -395,7 +373,6 @@ def ext_mtime(req):   # GET /ext-mtime — newest source mtime (ms) so the ext c
 # ── PR → forest: which forest is this PR part of, and are its children still seated on it? ──
 #
 #   POST /pr-forest           {number, repo} → {branch, project, decision, route, children:[{branch, seated}]}
-#   POST /pr-reseat-children  {number, repo} → rebase every orphaned child back onto the PR branch
 #
 # "Seated" = the child still contains the PR branch's tip. A squash/amend/rebase of the PR
 # branch (e.g. squashing commits before review) orphans every child — they keep the OLD tip in
@@ -556,33 +533,6 @@ def pr_forest(req, raw):   # POST /pr-forest — Chrome ext: forest membership +
     route = _viewer_route(branch)
     req._send(200, json.dumps({"ok": True, "branch": branch, "project": project or None,
                                "decision": _decision(num), "route": route, "children": children}))
-
-
-def pr_reseat(req, raw):   # POST /pr-reseat-children — rebase orphaned children back onto an approved PR branch
-    d = json.loads(raw or "{}")
-    _name, repo_path = _resolve_repo(d.get("repo"))
-    ctx.set_repo(repo_path)
-    num = str(d.get("number", "")).strip().lstrip("#")
-    if not num.isdigit():
-        req._send(400, json.dumps({"ok": False, "err": "no pr number"}))
-        return
-    branch = _local_branch_for_pr(num)
-    if not branch:
-        req._send(404, json.dumps({"ok": False, "err": "no local branch for this PR"}))
-        return
-    # approval is the button's contract (and re-checked here); force is the escape hatch for
-    # a deliberate early reseat. Purely local either way — nothing is pushed.
-    if not d.get("force") and _decision(num) != "APPROVED":
-        req._send(409, json.dumps({"ok": False, "err": "PR not approved"}))
-        return
-    results = []
-    _reseat_walk(branch, results)
-    moved = [r["branch"] for r in results if r["status"] == "reseated"]
-    conflicts = [r for r in results if r["status"] == "conflict"]
-    held = [r for r in results if r["status"] == "held-pr"]
-    req._send(200 if not conflicts else 207,
-              json.dumps({"ok": not conflicts, "branch": branch, "results": results,
-                          "moved": moved, "conflicts": conflicts, "held": held}))
 
 
 def reseat(req, raw):   # POST /reseat-children {branch} — viewer: rebase drifted children back onto this branch

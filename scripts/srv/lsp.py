@@ -1016,24 +1016,6 @@ def prepare(req, raw):
     req._send(200, '{"ok":true}')
 
 
-def status(req, u=None):
-    e, lvl = _engine, mem_level()
-    s = e.server
-    alive = bool(s and s.alive())
-    trees = {side: {"sha": t.sha, "tree": t.slot, "path": t.path, "warning": t.warning or None}
-             for (repo, side), t in e.assign.items() if repo == ctx.repo_cwd()}
-    state = e.state if alive or e.state in ("preparing", "error") else "idle"
-    prog = list(s.progress.values())[-1] if alive and s.progress else None
-    req._send(200, json.dumps({
-        "state": state, "message": e.message, "branch": e.branch.get("new"), "branches": e.branch,
-        "trees": trees, "lastMove": e.last_move,
-        "startedAt": s.started_at if alive else None, "idleS": round(time.time() - e.last_req),
-        "idleKillS": IDLE_S, "oldIdleS": OLD_IDLE_S, "memLevel": lvl, "memFloor": MEM_FLOOR, "progress": prog,
-        "pid": s.proc.pid if alive else None, "rssMB": s.rss_mb() if alive else None,
-        "answers": len(e.answers),
-    }))
-
-
 def src(req, u):
     """A definition target's text at the commit the answer came from — git for tracked files,
     the tree for generated ones while it still sits at that commit, absolute paths only if served."""

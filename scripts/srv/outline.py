@@ -7,7 +7,6 @@
 #   POST /outline                 {branch, head, edits:[{sha, subject, body}], description?,
 #                                  prTitle?, prBody?} → {ok, newTip, changed, warnings, reseat}
 #   POST /outline-undo            {branch} → restores the last outline save, same reseat path
-#   GET  /outline-reseat?id=J     → the background reseat job's status
 #
 # A save rewrites every changed unpushed commit in ONE pass: a new chain built with commit-tree
 # on the identical trees, landed with a single update-ref against the head the editor loaded —
@@ -418,16 +417,6 @@ def _start_reseat(branch, old_tip, new_tip, rewritten):
                     + ", ".join(f"{r['branch']} {r['status']}" for r in job["results"]))
     threading.Thread(target=run, daemon=True).start()
     return jid
-
-
-def reseat_status(req, u):
-    jid = (parse_qs(u.query).get("id", [""]) or [""])[0]
-    with _JOBS_LOCK:
-        job = _JOBS.get(jid)
-        snap = dict(job, results=list(job["results"])) if job else None
-    if not snap:
-        return _refuse(req, 404, "no such reseat job")
-    _send(req, 200, {"ok": True, **snap})
 
 
 # ── POST /outline ──────────────────────────────────────────────────────────

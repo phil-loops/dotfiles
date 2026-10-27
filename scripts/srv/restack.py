@@ -2,16 +2,12 @@
 # stack-review-server.py. Handlers receive `req` (the BaseHTTPRequestHandler) and
 # reply via req._send(code, body). Shared state comes from srv.ctx (injected at boot).
 #
-#   GET  /restack-status   paused/running/reason for the picker badge
 #   POST /restack          restack one project (background, scratch worktree)
-#   POST /restack-resolve  hand a parked conflict to Claude, then resume
-#   POST /restack-all      restack several projects back-to-back in one job
 import os
 import json
 import time
 import shlex
 import shutil
-import signal
 import threading
 import subprocess
 from urllib.parse import parse_qs
@@ -137,13 +133,6 @@ def _drivers():
     return drivers
 
 
-def _resolvers():
-    # Live conflict-resolvers, counted from the agent registry — each registers itself at _spawn
-    # below. >1 on one conflict is the duplicate-spawn half of the tangle. Was a prompt-signature
-    # pgrep (brittle: broke on any reword); now the resolvers register, so this counts their records.
-    return sum(1 for a in agents.live() if a.get("kind") == "resolver")
-
-
 def _state_path():
     gd = _gitdir()
     return os.path.join(gd, "stack-restack-state", "state") if gd else ""
@@ -240,22 +229,6 @@ def _running_msg():
     return f"a restack is already running ({what}{et}{more})"
 
 
-def _journal_last():
-    # stack-restack appends one line per done/parked/aborted exit; the last line says what
-    # the most recent run was, so a run that ended before anyone looked stays identifiable.
-    try:
-        with open(os.path.join(_gitdir(), "stack-restack-journal")) as fh:
-            parts = fh.readlines()[-1].split()
-        entry = {"at": int(parts[0]), "project": parts[1], "result": parts[2]}
-        for kv in parts[3:]:
-            if "=" in kv:
-                k, v = kv.split("=", 1)
-                entry[k] = v
-        return entry
-    except Exception:
-        return None
-
-
 def blocked():
     # Don't start a restack while one is running or parked on a conflict — detaching
     # the scratch worktree under a live/paused rebase would corrupt it.
@@ -299,62 +272,6 @@ def _spawn(chain, wt, register_kind=None, register_branch=""):
 
 
 
-def status(req, u):
-    # stack-restack rewrites <git-common-dir>/stack-restack-state/state before and after
-    # every branch of the walk (removed on success/abort), so during a run it's the live
-    # progress feed; it only means "parked" once no driver is alive to advance it.
-    sd = _state_path()
-    want = parse_qs(u.query).get("project", [""])[0]
-    state_present, proj, cur = False, "", ""
-    done = total = 0
-    completed, pending = [], []
-    if sd and os.path.exists(sd):
-        state_present = True
-        with open(sd) as fh:
-            kv = dict(l.rstrip("\n").split("=", 1) for l in fh
-                      if "=" in l and not l.startswith("SNAP"))
-        proj, cur = kv.get("PROJECT", ""), kv.get("CURRENT", "")
-        # COMPLETED/PENDING are space-joined branch lists; CURRENT is the in-flight one
-        # (popped from PENDING, not in either list) → it's node done+1 of total. The lists
-        # also drive the forest-map kiln (per-branch set/current/pending heat-front).
-        completed = kv.get("COMPLETED", "").split()
-        pending = kv.get("PENDING", "").split()
-        done = len(completed)
-        total = done + len(pending) + (1 if cur else 0)
-    running = _running()
-    # paused == "escalated, needs a human": state left behind with no driver alive. State
-    # + a live driver is just a walk in progress — reporting that as paused made the home
-    # screen paint every healthy run as a parked conflict.
-    # Parked also means RESUMABLE: the walk stopped ON a branch a human can pick back up.
-    # If that branch (or, between nodes, every pending branch) no longer exists, the
-    # forest was reshaped out from under the state file — an orphan, not a park; reporting
-    # it paused dimmed the whole map for days (2026-08-27). Classify only, never delete:
-    # a bare status check stays read-only.
-    def _branch_exists(b):
-        return ctx.run(["git", "show-ref", "--verify", "--quiet",
-                        f"refs/heads/{b}"]).returncode == 0
-    orphaned = state_present and not running and (
-        not _branch_exists(cur) if cur else not any(_branch_exists(b) for b in pending))
-    paused = state_present and not running and not orphaned and ((not want) or proj == want)
-    reason = ""
-    if paused:
-        try:
-            with open(os.path.join(ctx.ROOT, "restack.log")) as fh:
-                for line in fh:
-                    if "claude escalated:" in line:
-                        reason = line.split("claude escalated:", 1)[1].strip()
-        except Exception:
-            pass
-    req._send(200, json.dumps({"paused": paused, "orphaned": orphaned,
-                               "project": proj, "current": cur,
-                               "running": running, "reason": reason,
-                               "done": done, "total": total,
-                               "completed": completed, "pending": pending,
-                               "drivers": _drivers(), "resolvers": _resolvers(),
-                               "queue": [{"kind": k, "project": p} for k, p in _queue_read()],
-                               "last": _journal_last()}))
-
-
 def restack(req, raw):
     d = json.loads(raw or "{}")
     project = d.get("project", "")
@@ -382,64 +299,6 @@ def restack(req, raw):
     req._send(200, json.dumps({"ok": True, "project": project, "log": logpath}))
 
 
-def resolve(req, raw):
-    # One endpoint, three intents via `mode`:
-    #   "resolve"  (default) — AI-fix the parked conflict + resume the cascade
-    #   "diagnose"           — AI-resolve + stage it for review (no resume) → conflict.json
-    #   "discard"            — drop a staged diagnose fix, restoring the parked conflict
-    d = json.loads(raw or "{}")
-    project = d.get("project", "")
-    mode = d.get("mode", "resolve")
-    if not project:
-        req._send(400, json.dumps({"ok": False, "err": "no project"}))
-        return
-    wt = worktree()
-    action = {"diagnose": "diagnose", "discard": "discard"}.get(mode, "handoff")
-    logpath = _spawn(cmd(project, wt, action=action), wt, register_kind="resolver", register_branch=project)
-    req._send(200, json.dumps({"ok": True, "project": project, "mode": mode, "log": logpath}))
-
-
-def abort(req, raw):
-    # Discard the parked rebase entirely (the human chose "give up on this conflict"):
-    # abort the in-progress rebase in whatever worktree it parked in + drop the state.
-    # Non-destructive to commits — the project's branches keep their pre-restack tips and
-    # can be restacked again later. Refuses while a restack PROCESS is actively churning.
-    if _running():
-        req._send(409, json.dumps({"ok": False, "err": "a restack is still running"}))
-        return
-    project = _clear_park()
-    req._send(200, json.dumps({"ok": True, "project": project}))
-
-
-def stop(req, raw):
-    # Stop a RUNNING restack walk — vs. abort(), which only clears a PARKED conflict. SIGTERM the
-    # drivers first; stack-restack-all traps TERM (to release its lock) and won't exit on it, so
-    # SIGKILL the survivors — untrappable. Then abort any in-progress rebase + drop state + clear
-    # the now-stale lock. Non-destructive: completed branches keep their restacked tips, the
-    # current/pending are dropped and can be restacked again later.
-    def _pids():
-        return [d["pid"] for d in _drivers() if d.get("pid")]
-
-    killed = _pids()
-    for pid in killed:
-        try:
-            os.kill(pid, signal.SIGTERM)
-        except (ProcessLookupError, PermissionError):
-            pass
-    time.sleep(0.6)
-    for pid in _pids():
-        try:
-            os.kill(pid, signal.SIGKILL)
-        except (ProcessLookupError, PermissionError):
-            pass
-    project = _clear_park()
-    try:
-        os.remove(os.path.join(_gitdir(), "stack-restack.lock"))
-    except OSError:
-        pass
-    req._send(200, json.dumps({"ok": True, "stopped": killed, "project": project}))
-
-
 def conflict(req, u):
     # Serve the structured diagnosis artifact stack-restack --diagnose writes to
     # <git-common-dir>/stack-restack-conflict.json (same dir-resolution as status()).
@@ -461,30 +320,3 @@ def conflict(req, u):
         return
     req._send(200, json.dumps({"present": True, "conflict": art}))
 
-
-def restack_all(req, raw):
-    d = json.loads(raw or "{}")
-    projects = [p for p in d.get("projects", []) if p and p not in ("whole forest", "--all")]
-    if not projects:
-        req._send(400, json.dumps({"ok": False, "err": "no projects"}))
-        return
-    if _running():
-        req._send(409, json.dumps({"ok": False, "err": _running_msg(),
-                                   "drivers": _drivers()}))
-        return
-    parked, current = _parked()
-    if parked and not d.get("abortParked"):
-        # A pre-existing park holds a worktree mid-rebase; restacking the rest needs it
-        # freed first. Surface it so the UI can offer one-click "abort & restack all".
-        req._send(409, json.dumps({"ok": False, "err": "a restack is parked on a conflict — resolve it first",
-                                   "parked": parked, "current": current}))
-        return
-    if parked:
-        _clear_park()
-    wt = worktree()
-    ctx.run(["git", "-C", wt, "checkout", "--detach"])
-    # stack-restack-all is resilient: a project that conflicts is aborted + skipped so the
-    # rest still restack, and the first problem re-parks at the end to surface its button.
-    argv = " ".join(shlex.quote(p) for p in projects)
-    logpath = _spawn(f"{shlex.quote(os.path.join(ctx.SCRIPTS, 'stack-restack-all'))} {argv}", wt)
-    req._send(200, json.dumps({"ok": True, "projects": projects, "log": logpath}))

@@ -17,138 +17,12 @@
 # for anything outside it, so it can look around the branch but never edit/run/commit. The
 # whole claude runs in its own process group; if the browser closes the stream we SIGKILL
 # the group so no headless session lingers.
-import os
 import json
 import subprocess
 import threading
 import time
 
-from . import ctx, prompts
-
-
-def popout(req, raw):   # POST /chat-popout — resume a chat's headless session in an interactive tmux claude
-    d = json.loads(raw or "{}")
-    session = (d.get("session") or "").strip()
-    branch = (d.get("branch") or "").strip()
-    target = (d.get("target") or "").strip()
-    if not session or not branch:
-        req._send(400, json.dumps({"ok": False, "err": "need a session + branch"}))
-        return
-    # Resume MUST run where the chat ran — claude sessions are scoped to their project dir,
-    # so we hand the script the exact cwd chat.start used (the worktree, else the server's repo).
-    cwd = _worktree_for(branch) or ctx.CWD
-    args = [os.path.join(ctx.SCRIPTS, "stack-claude-resume"), session, cwd, branch]
-    if target:
-        args.append(target)
-    r = ctx.run(args)
-    req._send(200 if r.returncode == 0 else 500,
-              json.dumps({"ok": r.returncode == 0, "out": r.stdout.strip(), "err": r.stderr.strip()}))
-
-READ_ONLY_TOOLS = ["Read", "Grep", "Glob"]
-def _node_diff(branch):
-    # capped parent…branch diff so the model can read a real implementation detail per node
-    parent = (ctx.run(["git", "config", f"branch.{branch}.stack-parent"]).stdout.strip()
-              or ctx.run(["git", "config", f"stack-branch.{branch}.parent"]).stdout.strip() or "main")
-    out = ctx.run(["git", "diff", f"{parent}...{branch}"]).stdout
-    return out[:3500]
-
-
-def _project_branches(project):
-    # the project's member branches (stack-project.<p>.branch multivar), order preserved, deduped
-    raw = ctx.run(["git", "config", "--get-all", f"stack-project.{project}.branch"]).stdout.split()
-    seen, out = set(), []
-    for b in raw:
-        if b and b not in seen:
-            seen.add(b)
-            out.append(b)
-    return out
-
-
-def _project_integrator(project):
-    # the fan-in branch carries every base via `requires`, so its worktree sees the whole feature —
-    # the right cwd for read-only Read/Grep. Fall back to the first member, else the main checkout.
-    branches = _project_branches(project)
-    for b in branches:
-        if (ctx.run(["git", "config", "--get-all", f"branch.{b}.stack-requires"]).stdout.strip()
-                or ctx.run(["git", "config", "--get-all", f"stack-branch.{b}.requires"]).stdout.strip()):
-            return b
-    return branches[0] if branches else ""
-
-
-# The whole-forest seed: an edge list (structure at a glance) then per-branch purpose + parent +
-# requires + capped diff. Same multi-branch gather shape as merge_subjects, reusing _node_diff.
-def _project_seed(project):
-    branches = _project_branches(project)
-    edges, blocks = [], []
-    for b in branches:
-        parent = (ctx.run(["git", "config", f"branch.{b}.stack-parent"]).stdout.strip()
-                  or ctx.run(["git", "config", f"stack-branch.{b}.parent"]).stdout.strip() or "main")
-        requires = (ctx.run(["git", "config", "--get-all", f"branch.{b}.stack-requires"]).stdout.split()
-                    or ctx.run(["git", "config", "--get-all", f"stack-branch.{b}.requires"]).stdout.split())
-        purpose = ctx.run(["git", "config", f"branch.{b}.description"]).stdout.strip()
-        req = f"; requires: {', '.join(requires)}" if requires else ""
-        edges.append(f"- {b}  (parent: {parent}{req})")
-        blocks.append(
-            f"### {b}\nPURPOSE: {purpose or '(none set)'}\nPARENT: {parent}\n"
-            + (f"REQUIRES: {', '.join(requires)}\n" if requires else "")
-            + f"DIFF (capped):\n{_node_diff(b)}"
-        )
-    return "EDGES:\n" + "\n".join(edges) + "\n\n" + "\n\n".join(blocks)
-
-
-def merge_subjects(req, raw):
-    # POST /merge-subjects {scope, items:[{key, type, purpose}]} → {key: {subject, detail}}
-    # One opt-in pass (the "polish" button) that, per node, crisps the plain purpose into a pithy
-    # commit subject AND reads the node's diff to surface one relevant/non-trivial implementation
-    # detail — so the story reads as more than a one-liner. Diffs are server-side (git here).
-    d = json.loads(raw or "{}")
-    scope = (d.get("scope") or "scope").strip()
-    items = [it for it in (d.get("items") or [])
-             if isinstance(it, dict) and it.get("key") and (it.get("purpose") or "").strip()][:16]
-    if not items:
-        req._send(200, json.dumps({}))
-        return
-    blocks = "\n\n".join(
-        f"### {i}  [{(it.get('type') or 'feat')}]\nPURPOSE: {it['purpose'].strip()}\nDIFF (truncated):\n{_node_diff(it['key'])}"
-        for i, it in enumerate(items)
-    )
-    prompt = (
-        f"For each numbered branch below (its plain purpose + a truncated diff), produce two things:\n"
-        f"- subject: a git commit subject, the text after 'type({scope}): '. Pithy, imperative, "
-        f"lower-case first word, no trailing period, under ~60 chars. PLAIN ONLY — describe the "
-        f"behavior in words; NO raw identifiers (function/method/table/column/field names, camelCase "
-        f"or snake_case tokens). 'remove the dead ClickHouse exposure queries', NOT 'remove "
-        f"hasAnyExposureForGoal'. Identifiers belong in detail, never the subject.\n"
-        f"- detail: ONE or TWO sentences naming what it does AND the most relevant non-trivial "
-        f"implementation detail you can see in the diff (a mechanism, an invariant, a gotcha, a "
-        f"perf/correctness choice). Concrete and specific. Plain register — explain in words, but "
-        f"HERE you MAY name a key field/table/function if it's load-bearing. Skip if the diff is trivial.\n"
-        f"Return ONLY a JSON object mapping each number (a string) to {{\"subject\":…, \"detail\":…}}. "
-        f"No prose, no fences.\n\n" + blocks
-    )
-    r = ctx.run(["claude", "-p", prompt, "--model", "sonnet"])
-    text = (r.stdout or "").strip()
-    out = {}
-    try:   # claude may fence the JSON or add stray text — take the outermost {...}
-        s, e = text.find("{"), text.rfind("}")
-        obj = json.loads(text[s:e + 1]) if 0 <= s < e else {}
-        for i, it in enumerate(items):
-            v = obj.get(str(i))
-            if isinstance(v, dict):
-                entry = {}
-                if isinstance(v.get("subject"), str) and v["subject"].strip():
-                    entry["subject"] = v["subject"].strip().rstrip(".")
-                if isinstance(v.get("detail"), str) and v["detail"].strip():
-                    entry["detail"] = v["detail"].strip()
-                if entry:
-                    out[it["key"]] = entry
-    except ValueError:
-        out = {}
-    req._send(200, json.dumps(out))
-# Model aliases the chat may use — resolved to current models by the claude CLI, so no dated
-# IDs to rot. Anything else from the client falls back to the default (never passed raw to --model).
-ALLOWED_MODELS = {"opus", "sonnet", "haiku"}
-DEFAULT_MODEL = "sonnet"
+from . import ctx
 
 
 def _worktree_for(branch):
@@ -162,18 +36,6 @@ def _worktree_for(branch):
         elif line.startswith("branch ") and line[7:].strip() == f"refs/heads/{branch}":
             return cur
     return None
-
-
-# The branch's combined review diff (parent…branch), computed server-side so the page doesn't
-# have to ship the whole thing. Capped — headless claude can Read individual files for the rest.
-def _branch_diff(branch):
-    parent = (ctx.run(["git", "config", f"branch.{branch}.stack-parent"]).stdout.strip()
-              or ctx.run(["git", "config", f"stack-branch.{branch}.parent"]).stdout.strip() or "main")
-    out = ctx.run(["git", "diff", f"{parent}...{branch}"]).stdout
-    cap = 80_000
-    if len(out) > cap:
-        out = out[:cap] + f"\n\n… (diff truncated at {cap} chars — use Read on individual files for the rest)"
-    return out
 
 
 # ── background chat jobs ──────────────────────────────────────────────────
@@ -333,74 +195,3 @@ def _subscribe(req, job, from_idx=0):
     except (OSError, BrokenPipeError):
         pass   # THIS subscriber dropped (tab closed) — the job keeps running for a reconnect
 
-
-def start(req, raw):
-    d = json.loads(raw or "{}")
-    branch = (d.get("branch") or "").strip()
-    project = (d.get("project") or "").strip()
-    path = (d.get("path") or "").strip()
-    question = (d.get("question") or "").strip()
-    resume = (d.get("resume") or "").strip()
-    turn = (d.get("turn") or "").strip()
-    model = (d.get("model") or "").strip()
-    if model not in ALLOWED_MODELS:
-        model = DEFAULT_MODEL
-    if not turn or not (branch or project):
-        req._send(400, json.dumps({"ok": False, "err": "need a branch or project + turn"}))
-        return
-
-    job = _JOBS.get(turn)
-    # A reconnect (no question) to a job that's gone — expired, or the server restarted. Tell the
-    # client so it falls back to --resume from the session id it already persisted.
-    if job is None and not question:
-        req.send_response(200)
-        req.send_header("Content-Type", "text/event-stream")
-        req.send_header("Cache-Control", "no-store")
-        req.end_headers()
-        try:
-            req.wfile.write(b"event: gone\ndata: {}\n\n")
-            req.wfile.flush()
-        except (OSError, BrokenPipeError):
-            pass
-        return
-
-    if job is None:
-        # Build the command OUTSIDE the lock (prompt building can do git I/O), then create under
-        # the lock with a double-check so two concurrent reconnects don't double-spawn the turn.
-        # A resumed turn already carries its context — just send the question. A fresh turn seeds
-        # the diff + ground rules: one file when a path is given, else the whole branch.
-        if resume:
-            prompt = question
-        elif project:
-            prompt = prompts.project_chat(project, _project_seed(project), question)
-        elif path:
-            prompt = prompts.file_chat(branch, path, d.get("patch", ""), question)
-        else:
-            prompt = prompts.branch_chat(branch, d.get("patch") or _branch_diff(branch), question)
-        # a project chat runs in the integrator's worktree (it carries every base via requires)
-        cwd = _worktree_for(branch or _project_integrator(project)) or ctx.CWD
-        repo_dir = ctx.repo_cwd()
-        meta = {
-            "branch": branch, "path": path, "question": question[:120],
-            "repo": next((n for n, p in ctx.REPOS.items() if p == repo_dir), ""),
-            "project": (project or ctx.run(["git", "config", "--get", f"branch.{branch}.stack-project"]).stdout.strip()
-                        or ctx.run(["git", "config", "--get", f"stack-branch.{branch}.project"]).stdout.strip()),
-        }
-        cmd = ["claude", "-p", prompt,
-               "--output-format", "stream-json",
-               "--include-partial-messages",
-               "--verbose",
-               "--model", model]
-        if resume:
-            cmd += ["--resume", resume]
-        # variadic — keep it LAST so it doesn't swallow a following flag's value
-        cmd += ["--allowedTools", *READ_ONLY_TOOLS]
-        with _JOBS_LOCK:
-            job = _JOBS.get(turn)
-            if job is None:
-                job = Job(meta)
-                _JOBS[turn] = job
-                _prune()
-                threading.Thread(target=_run_claude, args=(job, cmd, cwd), daemon=True).start()
-
-    _subscribe(req, job, 0)

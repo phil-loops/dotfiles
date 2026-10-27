@@ -17,7 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # resolve the srv/ package regardless of cwd
-from srv import ctx as srvctx, restack, sync, checkout, picker, review, chat, integrate, reviews, push, usage, rebase, processes, preview
+from srv import ctx as srvctx, restack, sync, picker, review, integrate, reviews, push, usage, preview
 
 ROOT, SCRIPTS, CWD = sys.argv[1], sys.argv[2], sys.argv[3]
 from srv import stage   # own line: the big srv import above is contested across sessions
@@ -177,9 +177,6 @@ srvctx.init(run=run, ROOT=ROOT, SCRIPTS=SCRIPTS, CWD=CWD, MAIN_WT=MAIN_WT, repos
 # restack helpers + endpoints now live in srv/restack.py (delegated below).
 
 
-# /head, /prepare, /checkout (+ _worktree_of) now live in srv/checkout.py.
-
-
 # srvctx.model_sig() now lives in srv/ctx.py (shared by /model, /projects, /sig).
 
 
@@ -233,9 +230,6 @@ def pulse():
 
 
 # fork-staleness (_sync_state) + the /sync endpoints now live in srv/sync.py.
-
-
-# picker endpoints + helpers (_ready_to_merge, recency) now live in srv/picker.py.
 
 
 class H(BaseHTTPRequestHandler):
@@ -296,8 +290,7 @@ class H(BaseHTTPRequestHandler):
     def _enter_repo(self, u):
         # repo rides as the LEADING PATH SEGMENT when it names a registry repo: an API call
         # /<repo>/model pins this thread to <repo> and dispatches on the stripped path /model.
-        # (The SPA route /forests/<repo>/<project>/<branch> starts with "forests" — not a repo —
-        # so it isn't stripped; it serves index.html and the CLIENT parses the repo from the path.)
+        # (The app's routes start with "v2" — not a repo — so they aren't stripped.)
         # No repo prefix → CWD default. Returns the urlparse with the repo prefix removed.
         parts = u.path.split("/")
         if len(parts) >= 2 and parts[1] in srvctx.REPOS:
@@ -331,8 +324,7 @@ class H(BaseHTTPRequestHandler):
                 except OSError:
                     self._send(503, "viewer not built — run `npm run build` in scripts/viewer-solid", "text/plain")
                     return
-                # Inject the registry repo names so the client router can tell a <repo> path
-                # segment from a <project> one (/forests/<repo>/<project> vs /forests/<project>).
+                # Inject the registry repo names so the client can pin an API call to its repo.
                 keys = json.dumps(keymap.load()).replace("</", "<\\/")
                 inject = f"<script>window.__VIEWER_REPOS__={json.dumps(list(REPOS))};window.__CANOPY_KEYS__={keys};window.__CANOPY_ASSET__={json.dumps(sig)}</script>".encode()
                 hit = _index_cache[page] = (sig, html.replace(b"<head>", b"<head>" + inject, 1))
@@ -349,8 +341,6 @@ class H(BaseHTTPRequestHandler):
     def _dispatch_get(self, u):
         if u.path == "/v2" or (u.path.startswith("/v2/") and u.path != "/v2/events"):
             return self._send_app_shell()
-        if u.path == "/outbox" and "text/html" not in self.headers.get("Accept", ""):
-            return outbox.get(self, u)   # the shipping desk's data; a browser navigation gets the page
         if (u.path in ("/", "/index.html", "/work", "/forests", "/watching", "/wiki", "/machine", "/tutor", "/outbox")
                 or u.path.startswith(("/forests/", "/branch/", "/review/", "/push/", "/wiki/", "/tutor/", "/outbox/"))):
             return self._redirect(v1redirect.target(u))   # v1's page URLs (and /) → their v2 page
@@ -374,25 +364,14 @@ class H(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(data)
         elif u.path == "/model":          return review.model(self, u)
-        elif u.path == "/pr-body":        return review.pr_body(self, u)
         elif u.path == "/sig":   # cheap change-detector for live polling (no stack-forest)
             # repo + pid let stack-review-serve detect a foreign-repo squatter on the
             # stable port and reclaim it (kill REPO_ID's holder, relaunch for its own repo).
             self._send(200, json.dumps({"sig": srvctx.model_sig(), "repo": REPO_ID, "pid": os.getpid()}))
-        elif u.path == "/head":  # the branch the main checkout currently points at (for "jump to checkout")
-            return checkout.head(self)
-        elif u.path == "/restack-status":  # is a handed-off restack paused for a human? drives the picker badge
-            return restack.status(self, u)
         elif u.path == "/sync":   # fork-staleness vs origin/main (single branch)
             return sync.get_one(self, u)
-        elif u.path == "/push-preview":  # read-only: outgoing-vs-origin commit + push-origin guard verdict
-            return push.preview(self, u)
         elif u.path == "/gates-progress":  # live per-gate journal of a detached /gates run
             return push.gates_progress(self, u)
-        elif u.path == "/syncs":  # batch fork-staleness in one round-trip
-            return sync.get_many(self, u)
-        elif u.path == "/forest-health":  # batch drifted/merged-ghost per node (badges + fix-all)
-            return sync.health_many(self, u)
         elif u.path == "/diverged-detail":  # what a ⇄ divergence IS: per-side commits (patch-id twins) + net tip diff
             return sync.diverged_detail(self, u)
         elif u.path == "/prep-route":  # what "prep to push" would do next (read-only verdict + delegate)
@@ -457,42 +436,22 @@ class H(BaseHTTPRequestHandler):
         elif u.path == "/state":          return state.get(self, u)   # the v2 store's snapshot: normalized entities + domain versions
         elif u.path == "/v2/events":      return state.events(self, u, keepalive=lambda: last.__setitem__(0, time.time()))   # SSE: entity patches per domain
         elif u.path == "/telemetry/summary": return telemetry.summary(self, u)   # command/surface latency vs budgets, from daily rollups
-        elif u.path == "/prs":            return picker.prs(self)
-        elif u.path == "/myprs":          return picker.myprs(self)
-        elif u.path == "/projects":       return picker.projects(self)
-        elif u.path == "/project-opened": return picker.project_opened(self)
-        elif u.path == "/branch-url":     return picker.branch_url(self, u)
-        elif u.path == "/review-requests": return reviews.requests(self)
         elif u.path == "/ext-mtime":       return reviews.ext_mtime(self)
-        elif u.path == "/forest-branches": return picker.forest_branches(self)
-        elif u.path == "/epics":          return picker.epics(self)
         # Hyphenated, not /wiki/… — /wiki/<slug> is a client route served index.html above.
-        elif u.path == "/archived":       return review.archived_list(self, u)   # the archive: projects off focus and the workbench
         elif u.path == "/wiki-pages":     return wiki.pages(self, u)   # every page for this repo, nav-ordered
         elif u.path == "/wiki-src":       return wiki.src(self, u)     # resolve one citation to its source lines
-        elif u.path == "/wiki-lint":      return wiki.lint(self, u)    # deterministic checks, kind-aware
         elif u.path == "/tutor-src":      return tutor.src(self, u)    # a pinned file for the code pane
-        elif u.path == "/lsp/status":     return lsp.status(self, u)   # the viewer's one tsgo: state, branch, load progress
         elif u.path == "/lsp/src":        return lsp.src(self, u)      # a definition target, at the commit its answer came from
         elif u.path == "/learning-state": return tutor.learning_state(self, u)   # the concept graph, depth + due derived
         elif u.path == "/tutor-terminal": return tutor.terminal(self, u)   # terminal /tutor sessions to pick up
         elif u.path == "/tutor-import":   return tutor.import_(self, u)    # one of them, as tab turns
         elif u.path == "/node":           return review.node(self, u)
         elif u.path == "/outline":        return outline.get(self, u)            # a branch's words: description, outline, landing text
-        elif u.path == "/outline-reseat": return outline.reseat_status(self, u)  # an outline save's background descendant reseat
         elif u.path == "/packet":         return packet.get(self, u)             # the review packet: the PR body as a checkable contract
         elif u.path == "/packet-compare": return packet.compare(self, u)         # 302 → GitHub's compare form, packet prefilled
-        elif u.path == "/purpose":        return review.purpose_get(self, u)
-        elif u.path == "/notes":          return review.notes_get(self, u)   # per-branch test/repro notes
-        elif u.path == "/plan-template":  return review.plan_template_get(self, u)   # per-project body template
-        elif u.path == "/plan-preview":   return review.plan_preview(self, u)        # rendered plan for a branch
-        elif u.path == "/plan-steps":     return review.plan_steps(self, u)          # structured steps for per-step story editing
-        elif u.path == "/step-evidence":  return review.step_evidence(self, u)       # a branch's commits + diff shape, to write its story from
-        elif u.path == "/forest-purposes": return review.forest_purposes(self, u)
         elif u.path == "/file":           return review.file(self, u)
         elif u.path == "/commits":        return review.commits(self, u)
         elif u.path == "/commit-diff":    return review.commit_diff(self, u)
-        elif u.path == "/processes":      return processes.list_all(self)   # unified background-process monitor
         elif u.path == "/footprint":      return footprint.get(self, u)      # machine / repo sprawl / this server's own footprint
         elif u.path == "/previews":       return preview.previews(self)   # health-probed dev servers + shared stack
         elif u.path == "/preview-log":    return preview.log(self)   # tail one preview's next-dev log
@@ -532,30 +491,14 @@ class H(BaseHTTPRequestHandler):
             return
         if self.path == "/bless":
             return review.bless(self, raw)
-        if self.path == "/next":   # read-only: next mergeable branch(es) in this branch's forest
-            return picker.whats_next(self, raw)
-        if self.path == "/trunk":   # mark/unmark a branch as its forest's trunk anchor (frozen base)
-            return picker.set_trunk(self, raw)
         if self.path == "/open-url":   # Chrome ext (URL-only): parse a raw GitHub URL → nvim or viewer route
             return reviews.open_url(self, raw)
         if self.path == "/pr-forest":   # Chrome ext: forest membership + child seating for a PR
             return reviews.pr_forest(self, raw)
-        if self.path == "/pr-reseat-children":   # Chrome ext: rebase orphaned children onto an approved PR branch
-            return reviews.pr_reseat(self, raw)
         if self.path == "/reseat-children":      # viewer: rebase drifted children back onto a rewritten branch
             return reviews.reseat(self, raw)
         if self.path == "/track":   # append one local usage event to .git/stack-usage.jsonl
             return usage.track(self, raw)
-        if self.path == "/drop-project":   # forget a forest grouping (config only; branches kept)
-            return picker.drop_project(self, raw)
-        if self.path == "/purpose":   # save a thesis as the git branch description
-            return review.purpose_set(self, raw)
-        if self.path == "/notes":   # save a branch's test/repro notes (stack-notes sidecar)
-            return review.notes_set(self, raw)
-        if self.path == "/plan-template":   # save the per-project body template (edit once, carries forward)
-            return review.plan_template_set(self, raw)
-        if self.path == "/ticket":     # tie a forest to its Linear ticket (stack-project.<p>.ticket)
-            return review.ticket_set(self, raw)
         if self.path == "/frozen-origin":  # mark/unmark deliberate origin divergence (stack-branch.<b>.frozen-origin)
             return review.frozen_origin_set(self, raw)
         if self.path == "/project-state":   # move a project between focus, the workbench and the archive
@@ -564,8 +507,6 @@ class H(BaseHTTPRequestHandler):
             return review.focus_set(self, raw)
         if self.path == "/open":   # open the file on that branch in the warm review-nvim
             return picker.open_file(self, raw)
-        if self.path == "/prepare":   # prefetch: build the branch's worktree in the background
-            return checkout.prepare(self, raw)
         if self.path == "/preview":   # spin a side-port `next dev` for this branch (no touch to :3000)
             return preview.start(self, raw)
         if self.path == "/preview-integration":   # …for the ✦<project> ghost, via its playground worktree
@@ -584,8 +525,6 @@ class H(BaseHTTPRequestHandler):
             return preview.stack_up(self, raw)
         if self.path == "/sync":   # rebase an unpublished root branch onto fresh origin/main
             return sync.post_sync(self, raw)
-        if self.path == "/pr-poke":   # merge-watcher nudge: fetch trunk + refresh PR state NOW
-            return sync.pr_poke(self, raw)
         if self.path == "/fix-upstream":   # neutralize a footgun tracking ref (unset upstream)
             return sync.fix_upstream(self, raw)
         if self.path == "/diverged-additive":   # draft the additive PR update (push-vehicle branch, never pushes)
@@ -602,12 +541,8 @@ class H(BaseHTTPRequestHandler):
             return push.dirty_resolve(self, raw)
         if self.path == "/reconcile":   # diverged-from-PR-head branch → eject Claude to reconcile (no force-push)
             return sync.post_reconcile(self, raw)
-        if self.path == "/discard-dirty":  # per-file reject: restore a tracked file to HEAD / delete an untracked one
-            return review.discard_dirty(self, raw)
         if self.path == "/revert-commit":  # history row ↶: undo one own commit with a new revert commit
             return review.revert_commit(self, raw)
-        if self.path == "/commit-dirty":  # commit all uncommitted worktree changes to the branch
-            return review.commit_dirty(self, raw)
         if self.path == "/squash":   # collapse parent..branch into one voiced commit
             return review.squash(self, raw)
         if self.path == "/prep":     # prep-for-push: squash UNPUSHED commits → one, then oxfmt
@@ -628,39 +563,8 @@ class H(BaseHTTPRequestHandler):
             return _REVIEW_POSTS[self.path](self, raw)
         if self.path == "/outbox-hold":   # hold for morning: stamp/clear branch.<b>.stack-hold-until (branch or forest)
             return outbox.hold(self, raw)
-        if self.path == "/outbox-title":  # the landing PR title: branch.<b>.stack-pr-title
-            return outbox.title(self, raw)
-        if self.path == "/outbox-label":  # the compare link's review label, opt-in: branch.<b>.stack-pr-label
-            return outbox.label(self, raw)
-        if self.path == "/open-pr":  # push-less exit: open the PR (view) or compare form (author) in a browser
-            return push.open_pr(self, raw)
         if self.path == "/restack":          # restack one project (background, scratch worktree)
             return restack.restack(self, raw)
-        if self.path == "/restack-resolve":  # parked conflict → hand to Claude, then resume
-            return restack.resolve(self, raw)
-        if self.path == "/restack-abort":    # parked conflict → give up: abort rebase + clear state
-            return restack.abort(self, raw)
-        if self.path == "/restack-stop":     # running walk → stop it: kill drivers + abort + clear
-            return restack.stop(self, raw)
-        if self.path == "/check-origin":   # fetch origin + refresh PR/behind caches; report how far main moved
-            before = run(["git", "rev-parse", "origin/main"]).stdout.strip()
-            run(["git", "fetch", "origin", "main"])
-            after = run(["git", "rev-parse", "origin/main"]).stdout.strip()
-            moved = 0
-            if before and after and before != after:
-                try:
-                    moved = int(run(["git", "rev-list", "--count", f"{before}..{after}"]).stdout.strip() or "0")
-                except ValueError:
-                    moved = 0
-            # force the SWR caches fresh so the homepage reflects merges/new-PRs immediately
-            run([os.path.join(SCRIPTS, "my-prs"), "--refresh"])
-            run([os.path.join(SCRIPTS, "stack-prs"), "--refresh"])
-            self._send(200, json.dumps({"ok": True, "moved": moved, "after": after[:9]}))
-            return
-        if self.path == "/restack-all":      # restack several projects back-to-back
-            return restack.restack_all(self, raw)
-        if self.path == "/chat":             # start OR reconnect a chat turn (server-side job) → SSE replay+live
-            return chat.start(self, raw)
         if self.path == "/tutor":            # a Socratic turn → headless read-only claude, streamed (SSE)
             return tutor.start(self, raw)
         if self.path == "/lsp/hover":        # on-demand types for a diff token (read-only, starts tsgo on first ask)
@@ -675,18 +579,8 @@ class H(BaseHTTPRequestHandler):
             return tutor.learning_evidence(self, raw)
         if self.path == "/learning-question":   # the learner's own questions, attached to concepts
             return tutor.learning_question(self, raw)
-        if self.path == "/chat-popout":      # pop a chat out → resume its session in an interactive tmux claude
-            return chat.popout(self, raw)
-        if self.path == "/rebase-stream":    # tail the ejected forward-rebase (headless claude) → SSE replay+live
-            return rebase.stream(self, raw)
-        if self.path == "/rebase-stop":      # ■ stop: kill the branch's ejected rebase job for real
-            return rebase.stop(self, raw)
-        if self.path == "/merge-subjects":   # crisp the merge-story commit subjects (one haiku pass)
-            return chat.merge_subjects(self, raw)
         if self.path == "/integrate":        # ghost "feature" node → does the whole project land on main cleanly?
             return integrate.check(self, raw)
-        if self.path == "/integrate-here":   # …and put that integration in the MAIN checkout (detached)
-            return integrate.here(self, raw)
         self._send(404, "{}")
 
 
@@ -812,14 +706,12 @@ def pack_watcher():
 
 def warm():
     # prune dead worktree registrations (each rotted entry costs stack-forest a subprocess on
-    # every /node sweep), then pre-sweep the gh PR caches so a session's first /forest-health
-    # and /syncs never block on a cold multi-second gh call.
+    # every /node sweep), then pre-sweep the gh PR caches so a session's first read never
+    # blocks on a cold multi-second gh call.
     srvctx.run(["git", "worktree", "prune"])
     try:
         sync._pr_state_map()
         sync._open_pr_heads()
-        reviews._refresh_requests(srvctx.CWD)   # Home's /review-requests: ~1.4s gh search, warm it too
-        picker.warm_projects()   # the Forests home's body: disk-snapshot hit or the ~3s fan-out, off-request
     except Exception:
         pass
 
