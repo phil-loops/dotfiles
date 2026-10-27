@@ -11,7 +11,7 @@ import { keyOf } from "./registry";
 import { bind, dispatch } from "./runner";
 import { list, view } from "./store";
 import { getJSON } from "./sync";
-import { changed, drafts, editPr, editTo, hintsOf, PR, prChange, prHints, prValue, shown, valueOf, type Commit, type Outline } from "./words";
+import { changed, drafts, editPr, editTo, githubOwns, hintsOf, PR, prChange, prHints, prValue, shown, valueOf, type Commit, type Outline } from "./words";
 
 const TONE: Record<Hint["tone"], string> = { error: "border-ember text-ember", warn: "border-gold-deep text-gold-leaf", note: "border-rule text-ink-faint" };
 
@@ -163,14 +163,14 @@ export default function Commits(props: { branchId: string; readOnly?: boolean; l
         <div class="mb-4">
           <div class="rv-words-k">lands as</div>
           <Show
-            when={!o()!.pr?.exists}
+            when={!githubOwns(o()!.pr)}
             fallback={
               <>
                 <div class="px-2 text-ink">{o()!.pr!.title ?? "—"}</div>
                 <Show when={splitTemplate(o()!.pr!.body ?? "").own}>
                   <p class="m-0 mt-1 whitespace-pre-wrap px-2 text-[12px] text-ink-dim">{splitTemplate(o()!.pr!.body ?? "").own}</p>
                 </Show>
-                <p class="m-0 mt-1 px-2 text-[11px] text-ink-faint">#{o()!.pr!.number} is open — GitHub owns its words</p>
+                <p class="m-0 mt-1 px-2 text-[11px] text-ink-faint">#{o()!.pr!.number} is {o()!.pr!.state === "MERGED" ? "merged" : "open"} — GitHub owns its words</p>
               </>
             }
           >
