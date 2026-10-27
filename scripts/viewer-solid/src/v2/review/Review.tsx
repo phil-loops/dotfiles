@@ -115,6 +115,9 @@ function Header() {
           <a class="ml-2 text-ink-faint no-underline hover:text-ink hover:underline" href={c()!.url} target="_blank" rel="noopener" title="open on GitHub">#{c()!.number}</a>
         </Show>
         <span class="flex-1" />
+        <button class="rv-quietbtn mr-3" onClick={bind("review.preview", pg.id())} title="spin up a dev server for this branch on a side port and open it once it answers — leaves :3000 and your checkout alone">
+          <Key id="review.preview" class="rv-tabkey" /> ▷ preview
+        </button>
         <Show when={c()}>
           <Show when={drafts()}>
             <button class="rv-quietbtn mr-3" onClick={bind("review.send.all")} title="send every draft to your pending review">
