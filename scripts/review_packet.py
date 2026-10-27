@@ -162,8 +162,9 @@ def read_lines(entries):
 # ── where this sits / not in this PR ───────────────────────────────────────
 
 def _ref(item):
-    title = strip_prefix(item.get("title") or item.get("job") or item.get("branch") or "")
-    return (f"#{item['pr']} {title}" if item.get("pr") else title).strip()
+    if item.get("pr"):
+        return f"#{item['pr']}"
+    return strip_prefix(item.get("title") or item.get("job") or item.get("branch") or "").strip()
 
 
 def where_lines(plan, stacked_on=None, after=None):

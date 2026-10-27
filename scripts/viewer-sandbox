@@ -247,7 +247,7 @@ prs = {
            "state": "OPEN", "author": me, "botRan": True, "threads": threads42,
            "reviews": [{"id": "PRR_sb1", "author": bot, "state": "COMMENTED", "body": "", "at": AT % 1, "url": ""}], "comments": [], "pending": None},
     "43": {"id": "PR_sb43", "number": 43, "headRef": "demo/model", "head": h43, "base": "demo/queries", "title": "feat(loo-9999): move widget rules into a model",
-           "body": "## Intent\n- Moves the widget rules out of the dashboard into `models/widget-rules.ts`.\n- The dashboard shows only widgets within budget.\n\n## Not in this PR\n- Showing widgets on the dashboard — up next\n\n## Where this sits\nStacked on: #42\n✓ #41 add the widget table\n○ #42 add the widget queries\n→ **this PR**",
+           "body": "## Intent\n- Moves the widget rules out of the dashboard into `models/widget-rules.ts`.\n- The dashboard shows only widgets within budget.\n\n## Not in this PR\n- Showing widgets on the dashboard — up next\n\n## Where this sits\nStacked on: #42\n✓ #41\n○ #42\n→ **this PR**",
            "url": "https://github.com/sandbox/repo/pull/43", "state": "OPEN", "author": me, "botRan": True, "threads": threads43,
            "reviews": [{"id": "PRR_sb2", "author": bot, "state": "COMMENTED", "body": "", "at": AT % 5, "url": ""},
                        {"id": "PRR_sb3", "author": mate, "state": "COMMENTED", "body": "One question inline.", "at": AT % 9, "url": ""}],
