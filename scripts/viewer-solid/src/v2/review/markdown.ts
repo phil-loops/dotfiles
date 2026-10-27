@@ -47,6 +47,31 @@ function fromHtml(s: string): string {
     .replace(/<\/?p>|<br\s*\/?>/gi, "\n");
 }
 
+const LIST_ITEM = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/;
+const TABLE_RULE = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$/;
+/** A table row's cells: split on pipes that aren't escaped or inside backticks. */
+function cells(row: string): string[] {
+  const out: string[] = [];
+  let cur = "";
+  let tick = false;
+  const s = row.trim().replace(/^\|/, "").replace(/\|$/, "");
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === "\\" && s[i + 1] === "|") {
+      cur += "|";
+      i++;
+    } else if (ch === "`") {
+      tick = !tick;
+      cur += ch;
+    } else if (ch === "|" && !tick) {
+      out.push(cur.trim());
+      cur = "";
+    } else cur += ch;
+  }
+  out.push(cur.trim());
+  return out;
+}
+
 export function renderMarkdown(src: string, opts: MdOpts = {}): string {
   const lines = fromHtml(src.replace(/\r\n?/g, "\n").replace(/<!--[\s\S]*?-->/g, "")).split("\n");
   const out: string[] = [];
@@ -84,25 +109,53 @@ export function renderMarkdown(src: string, opts: MdOpts = {}): string {
       out.push(`<blockquote>${renderMarkdown(quote.join("\n"), opts)}</blockquote>`);
       continue;
     }
-    const li = /^\s*([-*+]|\d+[.)])\s+(.*)$/.exec(ln);
+    if (/^\s*\|.*\|\s*$/.test(ln) && TABLE_RULE.test(lines[i + 1] ?? "")) {
+      flush();
+      const rows: string[][] = [cells(ln)];
+      for (i += 2; i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i]); i++) rows.push(cells(lines[i]));
+      i--;
+      const row = (r: string[], tag: string) => `<tr>${r.map((c) => `<${tag}>${inline(c)}</${tag}>`).join("")}</tr>`;
+      out.push(`<table class="md-table"><thead>${row(rows[0], "th")}</thead><tbody>${rows.slice(1).map((r) => row(r, "td")).join("")}</tbody></table>`);
+      continue;
+    }
+    const li = LIST_ITEM.exec(ln);
     if (li) {
       flush();
-      const ordered = /\d/.test(li[1]);
-      const items: string[] = [];
+      const base = li[1].length;
+      const ordered = /\d/.test(li[2]);
+      const items: { text: string; sub: string[] }[] = [];
       for (; i < lines.length; i++) {
-        const m = /^\s*([-*+]|\d+[.)])\s+(.*)$/.exec(lines[i]);
-        if (m) items.push(m[2]);
-        else if (lines[i].trim() && /^\s{2,}/.test(lines[i]) && items.length) items[items.length - 1] += " " + lines[i].trim();
-        else break;
+        const m = LIST_ITEM.exec(lines[i]);
+        if (m && m[1].length === base) items.push({ text: m[3], sub: [] });
+        else if (m && m[1].length > base && items.length) items[items.length - 1].sub.push(lines[i]);
+        else if (!m && lines[i].trim() && /^\s{2,}/.test(lines[i]) && items.length) {
+          const last = items[items.length - 1];
+          if (last.sub.length) last.sub.push(lines[i]);
+          else last.text += " " + lines[i].trim();
+        } else if (!lines[i].trim() && items.length) {
+          // a blank line inside a loose list: it goes on if what follows is its next item or indented under it
+          let j = i + 1;
+          while (j < lines.length && !lines[j].trim()) j++;
+          const next = lines[j] ?? "";
+          const m2 = LIST_ITEM.exec(next);
+          const indent = /^\s*/.exec(next)![0].length;
+          if (m2 && m2[1].length === base) continue;
+          if (indent > base && indent >= 2) items[items.length - 1].sub.push("");
+          else break;
+        } else break;
       }
       i--;
+      const first = parseInt(li[2], 10);
       const body = items
-        .map((t) => {
-          const task = /^\[([ xX])\]\s+(.*)$/.exec(t);
-          return task ? `<li class="md-task">${task[1] === " " ? "☐" : "☑"} ${inline(task[2])}</li>` : `<li>${inline(t)}</li>`;
+        .map(({ text, sub }) => {
+          const task = /^\[([ xX])\]\s+(.*)$/.exec(text);
+          const head = task ? `${task[1] === " " ? "☐" : "☑"} ${inline(task[2])}` : inline(text);
+          const indent = Math.min(...sub.filter((s) => s.trim()).map((s) => /^\s*/.exec(s)![0].length));
+          const nested = sub.length ? renderMarkdown(sub.map((s) => s.slice(indent)).join("\n"), opts) : "";
+          return `<li${task ? ' class="md-task"' : ""}>${head}${nested}</li>`;
         })
         .join("");
-      out.push(ordered ? `<ol>${body}</ol>` : `<ul>${body}</ul>`);
+      out.push(ordered ? `<ol${first > 1 ? ` start="${first}"` : ""}>${body}</ol>` : `<ul>${body}</ul>`);
       continue;
     }
     if (!ln.trim()) {

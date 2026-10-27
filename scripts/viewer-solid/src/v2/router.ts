@@ -12,6 +12,8 @@ export interface Surface {
   v1?: string[];
   /** the path is a prefix: what follows it is the surface's argument (the review page's branch) */
   arg?: boolean;
+  /** with `arg`: the path alone is the surface too, with no argument (the wiki's first page, the tutor's home) */
+  bare?: boolean;
 }
 
 export const BASE = "/v2";
@@ -22,14 +24,19 @@ export const SURFACES: Surface[] = [
   { id: "todo", path: `${BASE}/todo`, title: "Todo" },
   { id: "forest", path: `${BASE}/p`, title: "Forest", arg: true },
   { id: "machine", path: `${BASE}/machine`, title: "Machine", v1: ["machine"] },
+  { id: "wiki", path: `${BASE}/wiki`, title: "Wiki", v1: ["wiki"], arg: true, bare: true },
 ];
 
 const match = (pathname: string): Surface => {
   const p = pathname.replace(/\/+$/, "");
-  return SURFACES.find((s) => (s.arg ? p.startsWith(s.path + "/") : s.path === p)) ?? SURFACES[0];
+  return SURFACES.find((s) => (s.arg ? p.startsWith(s.path + "/") || (!!s.bare && s.path === p) : s.path === p)) ?? SURFACES[0];
 };
 const argOf = (pathname: string, s: Surface): string =>
   s.arg ? decodeURIComponent(pathname.replace(/\/+$/, "").slice(s.path.length + 1)) : "";
+/** A wiki page's address (the first page when no slug). */
+export const wikiPath = (slug?: string) => (slug ? `${BASE}/wiki/${encodeURIComponent(slug)}` : `${BASE}/wiki`);
+/** The tutor's home, or one of its sessions. */
+export const tutorPath = (session?: string) => (session ? `${BASE}/tutor/${encodeURIComponent(session)}` : `${BASE}/tutor`);
 
 const [surface, setSurface] = createSignal<Surface>(match(location.pathname));
 /** the surface's argument: on the review page, "<repo>/<branch>" */

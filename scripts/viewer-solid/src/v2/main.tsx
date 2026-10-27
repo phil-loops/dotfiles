@@ -7,6 +7,7 @@ import "./commands/review";
 import "./commands/todo";
 import "./commands/words";
 import "./commands/machine";
+import "./commands/wiki";
 import "./commands/sync";
 import App from "./App";
 import { installKeys } from "./keyboard";

@@ -3,6 +3,7 @@
 // Generated from the registry, so it can't drift from what the keys do.
 import { For, Show } from "solid-js";
 import { machine } from "./workstation";
+import { wiki } from "./wikiread";
 import { liveScopes, model, targetFor } from "./model";
 import { commands, glyph } from "./registry";
 import { page, sideLine } from "./review/page";
@@ -31,6 +32,8 @@ function labelOf(scope: string): string {
       const s = machine.server(model.selectedServer());
       return s ? `${s.branch || s.name} on :${s.port}` : "this server";
     }
+    case "article":
+      return wiki.page(model.selectedArticle())?.title ?? "this page";
     case "line":
       return h?.kind === "line" ? `${h.path.split("/").pop()}:${sideLine(h.row).line}` : "this line";
     case "thread":
