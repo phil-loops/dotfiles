@@ -152,7 +152,7 @@ def dirt_stamp(paths):
         return ""
 
     def one(wt):
-        st = subprocess.run(["git", "-C", wt, "status", "--porcelain"],
+        st = subprocess.run(["git", "--no-optional-locks", "-C", wt, "status", "--porcelain"],
                             capture_output=True, text=True).stdout
         stats = []
         for ln in st.splitlines():
