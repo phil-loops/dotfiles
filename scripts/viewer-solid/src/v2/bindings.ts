@@ -12,19 +12,21 @@ export interface Bound {
 export const SAME_MOVE: Record<string, string[]> = {
   "next": ["cursor.down", "review.down", "history.next"],
   "previous": ["cursor.up", "review.up", "history.prev"],
-  "back out": ["overlay.close", "review.back", "history.exit", "commit.exit", "wiki.back"],
-  "out": ["forest.collapse", "review.leave", "forest.leave", "commit.back", "machine.log.close"],
+  "back out": ["overlay.close", "review.back", "history.exit", "commit.exit", "wiki.back", "tutor.back"],
+  "out": ["forest.collapse", "review.leave", "forest.leave", "commit.back", "machine.log.close", "tutor.home"],
   "in": ["forest.expand", "branch.open", "history.enter", "machine.log"],
-  "the thing's main action": ["row.primary", "review.fold", "todo.open", "review.expand", "history.open", "machine.open", "wiki.open"],
+  "the thing's main action": ["row.primary", "review.fold", "todo.open", "review.expand", "history.open", "machine.open", "wiki.open", "tutor.concept", "tutor.open"],
   "send to GitHub": ["branch.push", "review.send", "review.push"],
   "move up the list": ["focus.up", "todo.up"],
   "move down the list": ["focus.down", "todo.down"],
-  "put it away": ["project.archive", "todo.drop", "machine.kill"],
+  "put it away": ["project.archive", "todo.drop", "machine.kill", "tutor.forget"],
   "the words": ["review.words", "forest.words", "story.why"],
   "the page's other face": ["review.tab", "forest.face", "machine.log.jobs"],
   "open on GitHub": ["branch.pr", "review.finish"],
   "preview it": ["branch.preview", "review.preview", "forest.preview"],
   "sync it": ["branch.sync", "review.sync"],
+  "the map": ["review.map", "tutor.map"],
+  "start writing": ["review.note.insert", "tutor.write"],
 };
 
 const KEY = /^(?:[CA]-)?(?:.|space|esc|ret|tab|up|down|left|right)$/u;

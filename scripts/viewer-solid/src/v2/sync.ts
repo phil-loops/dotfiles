@@ -4,6 +4,7 @@
 // request log, so a client timing joins the server's.
 import { applyPatch, hydrate, setConn, world } from "./store";
 import { ACTOR, PAGE_LOAD, count } from "./telemetry";
+import { sseFrames } from "./lesson";
 import type { Patch, Snapshot } from "./types";
 
 let seq = 0;
@@ -61,6 +62,30 @@ export async function post(path: string, body: unknown, via?: string): Promise<S
     return { ok: false, outcome: r.ok || r.status < 500 ? "refused" : "failed", err, rid, body: data };
   } catch {
     return { ok: false, outcome: "failed", err: "network", rid };
+  }
+}
+
+/** POST, then read the answer as server-sent events (a tutor turn): each frame's event and parsed
+ *  data go to `on`, which returns true at the stream's last frame — the server holds the connection
+ *  open after it. Throws when the server won't stream. */
+export async function streamPost(path: string, body: unknown, on: (event: string, data: Record<string, unknown>) => boolean | void): Promise<void> {
+  const t0 = performance.now();
+  const r = await fetch(path, { method: "POST", headers: headers(nextRid(), { "Content-Type": "application/json" }), body: JSON.stringify(body) });
+  if (!r.ok || !r.body) throw new Error(`${path} → ${r.status}`);
+  const reader = r.body.getReader();
+  const dec = new TextDecoder();
+  let buf = "";
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) return;
+      const { frames, rest } = sseFrames(buf + dec.decode(value, { stream: true }));
+      buf = rest;
+      for (const f of frames) if (on(f.event, JSON.parse(f.data) as Record<string, unknown>)) return;
+    }
+  } finally {
+    count("stream", performance.now() - t0);
+    await reader.cancel().catch(() => {});
   }
 }
 

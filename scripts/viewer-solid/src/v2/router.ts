@@ -25,6 +25,7 @@ export const SURFACES: Surface[] = [
   { id: "forest", path: `${BASE}/p`, title: "Forest", arg: true },
   { id: "machine", path: `${BASE}/machine`, title: "Machine", v1: ["machine"] },
   { id: "wiki", path: `${BASE}/wiki`, title: "Wiki", v1: ["wiki"], arg: true, bare: true },
+  { id: "tutor", path: `${BASE}/tutor`, title: "Tutor", v1: ["tutor"], arg: true, bare: true },
 ];
 
 const match = (pathname: string): Surface => {

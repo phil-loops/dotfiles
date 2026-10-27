@@ -57,7 +57,6 @@ for (const s of SURFACES.filter((x) => !x.arg || x.bare)) {
 // v1's pages, until v2 has its own: the rail is gone, so the menu is how you reach them
 const PLACES = [
   { id: "work", title: "Work", path: "/work", key: "g w" },
-  { id: "tutor", title: "Tutor", path: "/tutor", key: "g t" },
   { id: "v1", title: "the v1 home", path: "/forests?v1", key: "" },
 ];
 for (const p of PLACES) {

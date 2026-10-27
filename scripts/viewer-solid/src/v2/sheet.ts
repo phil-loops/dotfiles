@@ -8,6 +8,7 @@ export const SURFACE_SCOPES: Record<string, string[]> = {
   forest: ["branch", "row", "forest", "project"],
   machine: ["server", "machine"],
   wiki: ["article", "wiki"],
+  tutor: ["concept", "lesson", "session", "tutor"],
 };
 
 export const SCOPE_TITLES: Record<string, string> = {
@@ -31,6 +32,10 @@ export const SCOPE_TITLES: Record<string, string> = {
   server: "On a server",
   wiki: "On the wiki",
   article: "On a page in the list",
+  tutor: "On the tutor",
+  concept: "On a concept",
+  lesson: "On a session you keep",
+  session: "In a session",
 };
 
 export interface SheetCmd {

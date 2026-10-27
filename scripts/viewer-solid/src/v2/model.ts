@@ -10,6 +10,7 @@ import { cursor, cursorIdx, expanded, forestFace, now, readyOnly, shelved, showA
 import { page } from "./review/page";
 import { machine, mkey, sid } from "./workstation";
 import { wiki, wkey } from "./wikiread";
+import { tutor } from "./tutoring";
 
 export interface BranchView {
   b: Branch;
@@ -101,6 +102,7 @@ export const model = createRoot(() => {
     if (surface().id === "todo") return todos().flatMap((s) => s.items.map((t) => tkey(t.id)));
     if (surface().id === "machine") return machine.servers().map((s) => mkey(sid(s)));
     if (surface().id === "wiki") return wiki.pages().map((p) => wkey(p.slug));
+    if (surface().id === "tutor") return tutor.rows();
     if (surface().id === "forest") {
       const pid = pageProject();
       if (!pid) return [];
@@ -171,7 +173,16 @@ export const model = createRoot(() => {
     return k?.startsWith("w:") ? k.slice(2) : undefined;
   });
 
-  return { projects, forests, todos, pageProject, landedOf, rows, selected, selectedBranch, selectedProject, selectedItem, selectedServer, selectedArticle, branchView };
+  const selectedConcept = createMemo(() => {
+    const k = selected();
+    return surface().id === "tutor" && k?.startsWith("c:") ? k.slice(2) : undefined;
+  });
+  const selectedLesson = createMemo(() => {
+    const k = selected();
+    return surface().id === "tutor" && k?.startsWith("s:") ? k.slice(2) : undefined;
+  });
+
+  return { projects, forests, todos, pageProject, landedOf, rows, selected, selectedBranch, selectedProject, selectedItem, selectedServer, selectedArticle, selectedConcept, selectedLesson, branchView };
 });
 
 /** What a command of this scope acts on, from the cursor. */
@@ -191,6 +202,12 @@ export function targetFor(scope: Scope): string | undefined {
       return "machine";
     case "article":
       return model.selectedArticle();
+    case "concept":
+      return tutor.drawer() ?? model.selectedConcept();
+    case "lesson":
+      return model.selectedLesson();
+    case "session":
+      return tutor.active()?.id;
     case "review":
       return page.id() || undefined;
     case "line":
@@ -216,6 +233,11 @@ export function liveScopes(): string[] {
   if (surface().id === "todo" && model.selectedItem()) out.push("item");
   if (surface().id === "machine" && model.selectedServer()) out.push("server");
   if (surface().id === "wiki" && model.selectedArticle()) out.push("article");
+  if (surface().id === "tutor") {
+    if (tutor.drawer() || model.selectedConcept()) out.push("concept");
+    if (model.selectedLesson()) out.push("lesson");
+    if (tutor.active()) out.push("session");
+  }
   if (surface().id === "forest") {
     if (model.selectedBranch()) out.push("branch", "row");
     out.push("forest");

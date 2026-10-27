@@ -4,6 +4,7 @@
 import { For, Show } from "solid-js";
 import { machine } from "./workstation";
 import { wiki } from "./wikiread";
+import { tutor } from "./tutoring";
 import { liveScopes, model, targetFor } from "./model";
 import { commands, glyph } from "./registry";
 import { page, sideLine } from "./review/page";
@@ -34,6 +35,14 @@ function labelOf(scope: string): string {
     }
     case "article":
       return wiki.page(model.selectedArticle())?.title ?? "this page";
+    case "concept":
+      return tutor.nameOf(targetFor("concept") ?? "") || "this concept";
+    case "lesson": {
+      const s = tutor.sessions.find((x) => x.id === model.selectedLesson());
+      return s ? tutor.titleOf(s) : "this session";
+    }
+    case "session":
+      return tutor.active() ? tutor.titleOf(tutor.active()!) : "this session";
     case "line":
       return h?.kind === "line" ? `${h.path.split("/").pop()}:${sideLine(h.row).line}` : "this line";
     case "thread":
