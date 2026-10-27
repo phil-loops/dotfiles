@@ -11,7 +11,7 @@ Design: [[canopy-v2-architecture]]. Code: `srv/state.py`.
 **`GET /state`** returns `{epoch, versions, entities}`. Entities are keyed by type, then id:
 
 - `repo`; `project` (state focus/workbench/archive, rank, ticket, summary);
-- `branch` (parent, description, own commits, tip, tree, pushed, gates for this tree, its merge-order position, its hold-for-morning stamp);
+- `branch` (parent, description, own commits, tip, tree, pushed, gates for this tree, its merge-order position, its hold-for-morning stamp, and what ⟲ sync would fix from the refs alone: `behind` main, `drifted` off its parent, a footgun `upstream`, a `diverged` pushed copy — dirt and the prep route are read per branch on its page);
 - `pr` (number, url, state, review, base, approvals, merge state — what an approved PR waits on), from the caches only, never gh;
 - `landed`, the merge ledger's shipped steps.
 
