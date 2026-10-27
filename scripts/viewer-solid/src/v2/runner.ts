@@ -16,7 +16,8 @@ import { setMenuOpen } from "./ui";
 const [note, setNote] = createSignal<string | null>(null);
 export { note };
 let noteTimer: number | undefined;
-function say(text: string): void {
+/** The quiet line, for a command that says what happened itself (a motion's outcome). */
+export function say(text: string): void {
   setNote(text);
   clearTimeout(noteTimer);
   noteTimer = window.setTimeout(() => setNote(null), 4000);
@@ -109,14 +110,15 @@ export function dispatch(id: string, via: Via, opts: RunOpts = {}): void {
   setRun(runKey, { state: "sending", t0: started });
   const s = ++seq;
   addOps(w.ops.map((o) => ({ ...o, seq: s })));
-  const sent: Promise<Sent> = queue.then(() => post(w.path, w.body, via));
-  queue = sent;
+  const sent: Promise<Sent> = w.alone ? post(w.path, w.body, via) : queue.then(() => post(w.path, w.body, via));
+  if (!w.alone) queue = sent;
   void sent.then(async (r) => {
     const settledMs = Math.round((performance.now() - t0) * 10) / 10;
+    w.answered?.(r.ok, r.body ?? { err: r.err });
     if (r.ok) {
       const inv = typeof w.inverse === "function" ? w.inverse(r.body ?? {}) : w.inverse;
       if (inv && !opts.undoing) undo.push(inv);
-      if (w.said) say(w.said);
+      if (w.said && !w.silent) say(w.said);
       setRun(runKey, { state: "landing", t0: started });
       reconcile(s, w, () => setRun(runKey, { state: "done", t0: started, t1: Date.now() }));
     } else {
@@ -124,7 +126,7 @@ export function dispatch(id: string, via: Via, opts: RunOpts = {}): void {
       w.rollback?.();
       // the server's own sentence says what to do next; the short class is the fallback
       const why = typeof r.body?.err === "string" && r.body.err.length <= 140 ? r.body.err : r.err && r.err !== "refused" ? r.err.replaceAll("-", " ") : "";
-      say(`${w.failed}${why ? ` — ${why}` : ""}`);
+      if (!w.silent) say(`${w.failed}${why ? ` — ${why}` : ""}`);
       setRun(runKey, { state: "failed", t0: started, t1: Date.now(), err: `${w.failed}${why ? ` — ${why}` : ""}` });
     }
     const feedbackMs = await feedback;

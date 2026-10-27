@@ -40,6 +40,16 @@ export interface Branch {
   /** position in its forest's merge order, 1-based */
   order: number;
   holdUntil: string | null;
+  /** commits on origin/main it lacks */
+  behind: number;
+  /** its parent's tip isn't in its history — it sits off the parent */
+  drifted: boolean;
+  /** its tracking ref ("" for none, the forest norm) */
+  upstream: string;
+  /** it tracks the trunk: a Pull would merge main into it */
+  upstreamBad: boolean;
+  /** local and its pushed copy have each moved — no fast-forward either way */
+  diverged: boolean;
   /** client-only: an optimistic write in flight ("pushing") */
   pending?: string;
 }

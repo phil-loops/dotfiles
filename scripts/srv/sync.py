@@ -805,8 +805,12 @@ def post_reconcile(req, raw):
         req._send(400, json.dumps({"ok": False, "err": "no branch"}))
         return
     up = ctx.run(["git", "rev-parse", "--abbrev-ref", f"{branch}@{{upstream}}"]).stdout.strip()
+    # forest branches are cut --no-track: their pushed copy is what diverged (as _upstream_state
+    # measures it, and what /prep-push's reconcile verdict means)
+    if not up and ctx.run(["git", "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{branch}"]).returncode == 0:
+        up = f"origin/{branch}"
     if not up:
-        req._send(409, json.dumps({"ok": False, "err": "no upstream to reconcile against"}))
+        req._send(409, json.dumps({"ok": False, "err": "no upstream or pushed copy to reconcile against"}))
         return
     ahead = int(ctx.run(["git", "rev-list", "--count", f"{up}..{branch}"]).stdout.strip() or 0)
     behind = int(ctx.run(["git", "rev-list", "--count", f"{branch}..{up}"]).stdout.strip() or 0)

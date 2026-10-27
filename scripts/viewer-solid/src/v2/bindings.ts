@@ -24,6 +24,7 @@ export const SAME_MOVE: Record<string, string[]> = {
   "the page's other face": ["review.tab", "forest.face", "machine.log.jobs"],
   "open on GitHub": ["branch.pr", "review.finish"],
   "preview it": ["branch.preview", "review.preview"],
+  "sync it": ["branch.sync", "review.sync"],
 };
 
 const KEY = /^(?:[CA]-)?(?:.|space|esc|ret|tab|up|down|left|right)$/u;

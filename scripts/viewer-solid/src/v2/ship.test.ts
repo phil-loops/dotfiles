@@ -7,7 +7,8 @@ const NOW = Date.parse("2026-10-22T18:00:00Z"); // Thu 11:00 PT
 
 const br = (over: Partial<Branch> = {}): Branch => ({
   id: "r:b", repo: "r", name: "f/b", project: "r:f", parent: "main", parentId: null, description: "", subject: "s",
-  commits: 1, outline: ["s"], tip: "t", tree: "x", pushed: "local", ahead: 0, gates: "none", redGates: [], order: 1, holdUntil: null, ...over,
+  commits: 1, outline: ["s"], tip: "t", tree: "x", pushed: "local", ahead: 0, gates: "none", redGates: [], order: 1, holdUntil: null,
+  behind: 0, drifted: false, upstream: "", upstreamBad: false, diverged: false, ...over,
 });
 const pr = (over: Partial<Pr> = {}): Pr => ({
   id: "r:b", repo: "r", branch: "f/b", project: "r:f", number: 7, url: "u", state: "OPEN", review: null, draft: false,
