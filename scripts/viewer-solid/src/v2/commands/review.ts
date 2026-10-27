@@ -13,7 +13,7 @@ import { revealAt, toggleFold } from "../review/inline";
 import { shown } from "../words";
 import { bkey, model } from "../model";
 import { suggestionOf } from "../review/markdown";
-import { atRepoPath, page as pg, short, sideLine, type Composer } from "../review/page";
+import { atRepoPath, BASES, page as pg, short, sideLine, type Base, type Composer } from "../review/page";
 import { definition, dismiss, hover, pop } from "../review/types";
 
 const rid = () => Math.random().toString(36).slice(2, 12);
@@ -131,6 +131,30 @@ command({ id: "review.tab.files", label: "files", title: "Show the files tab", s
 command({ id: "review.tab.conversation", label: "conversation", title: "Show the conversation tab", scope: "review", budget: "local", keys: ["1"], local: () => pg.setTab("conversation") });
 command({ id: "review.split", label: "split", title: "Switch between split and unified diff", scope: "review", budget: "local", keys: ["space s"], local: () => pg.setSplit(!pg.split()) });
 command({ id: "review.outdated", label: "outdated", title: "Show or hide outdated conversations", scope: "review", budget: "local", keys: ["space o"], local: () => pg.setShowOutdated(!pg.showOutdated()) });
+// ── the diff's base: space d, then p / m / o ──
+
+const baseOk = (b: Base) => !pg.integration() && (b !== "outgoing" || (!!pg.branch() && pg.branch()!.pushed !== "local"));
+const pickBase = (b: Base) => () => {
+  pg.setTab("files");
+  pg.setBase(b);
+};
+command({ id: "review.base.parent", label: "parent", title: "Diff against its parent — this branch's own change, what the PR shows", scope: "review", budget: "local", keys: ["space d p"], available: () => baseOk(""), local: pickBase("") });
+command({ id: "review.base.main", label: "main", title: "Diff against main — the whole stack up to here, as it would land", scope: "review", budget: "local", keys: ["space d m"], available: () => baseOk("main"), local: pickBase("main") });
+command({ id: "review.base.outgoing", label: "outgoing", title: "Diff against origin — what the next push sends", scope: "review", budget: "local", keys: ["space d o"], available: () => baseOk("outgoing"), local: pickBase("outgoing") });
+command({
+  id: "review.base.next",
+  title: "Diff against the next base",
+  scope: "review",
+  budget: "local",
+  quiet: true,
+  available: () => !pg.integration(),
+  local: () => {
+    const ok = BASES.filter((x) => baseOk(x.base));
+    const at = ok.findIndex((x) => x.base === pg.base());
+    pg.setBase(ok[(at + 1) % ok.length].base);
+  },
+});
+
 command({
   id: "review.words",
   label: "words",

@@ -9,7 +9,7 @@ import { view, world } from "../store";
 import type { Thread } from "../types";
 import { rowAnchors, type FileDiff, type Gap, type Line, type Row } from "./diff";
 import { highlight, langOf } from "./highlight";
-import { page as pg, rowsOf, short, type FileView } from "./page";
+import { BASES, page as pg, rowsOf, short, type FileView } from "./page";
 import { ThreadView, PendingView, ComposerView } from "./Thread";
 import Conversation from "./Conversation";
 import { CommitWords } from "../Commits";
@@ -61,7 +61,7 @@ export default function Review() {
               <FileTree />
               <div class="rv-files" data-paint={loaded() ? "review" : undefined} onPointerMove={notePointer}>
                 <Show when={loaded()} fallback={<p class="rv-quiet">{pg.loadErr() ? `couldn't read the diff — ${pg.loadErr()}` : "reading the diff…"}</p>}>
-                  <Show when={pg.files().length} fallback={<p class="rv-quiet">no changes</p>}>
+                  <Show when={pg.files().length} fallback={<p class="rv-quiet">{pg.base() === "outgoing" ? "nothing to push" : "no changes"}</p>}>
                     <For each={pg.files()}>{(f) => <FileBlock file={f} selected={selected} />}</For>
                     <Elsewhere selected={selected} />
                   </Show>
@@ -165,6 +165,13 @@ function Header() {
         </button>
         <span class="flex-1" />
         <span class="rv-meta">
+          <Show when={pg.tab() === "files" && !pg.integration()}>
+            vs{" "}
+            <button class="rv-quietbtn text-gold-leaf" onClick={bind("review.base.next")} title={`the diff's base — ${keyOf("review.base.parent").replace(/ \S+$/, "")} picks`}>
+              {BASES.find((x) => x.base === pg.base())!.word}
+            </button>
+            {" · "}
+          </Show>
           {openThreads()} open · viewed {pg.branchViewed()}/{pg.branchFiles().length}
         </span>
       </nav>
