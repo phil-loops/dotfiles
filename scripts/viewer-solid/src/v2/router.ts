@@ -57,6 +57,12 @@ export function navigate(path: string, e?: Event): void {
 export const forestPath = (repo: string, project: string) => `${BASE}/p/${encodeURIComponent(repo)}/${encodeURIComponent(project)}`;
 export const reviewPath = (repo: string, branch: string) => `${BASE}/b/${encodeURIComponent(repo)}/${branch.split("/").map(encodeURIComponent).join("/")}`;
 
+/** A forest's whole diff against main, on the review page: its integration ref (refs/stack/<project>-integration)
+ *  reads like a branch there — the server's /node builds it fresh and diffs it against main. */
+export const integrationRef = (project: string) => `refs/stack/${project}-integration`;
+/** The forest a review page's ref integrates, or undefined for a real branch. */
+export const integrationOf = (name: string): string | undefined => /^refs\/stack\/(.+)-integration$/.exec(name)?.[1];
+
 /** Leave v2 for a page it doesn't have yet (v1's branch page, Work, Wiki…): recorded as a
  *  navigation to "v1:<path>" — the page unloads, so there is no paint to time. */
 export function leave(path: string): void {

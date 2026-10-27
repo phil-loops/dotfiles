@@ -1,9 +1,10 @@
 // Forests, the home: focus (hand-ordered), the workbench, and a quiet archive count. Each forest is
 // one calm row that opens inline into its branch spine, in merge order; each branch says where it
 // stands in one glyph and word and does one thing on ↵. `r` narrows it all to what's ready for you.
-import { createEffect, createMemo, createSignal, For, Show, untrack } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onCleanup, Show, untrack } from "solid-js";
 import { shiftFor } from "./drag";
 import { bkey, model, pkey, type BranchView, type ForestView } from "./model";
+import { checkIntegration, verdict } from "./integrate";
 import { boot, catchIt, flip, settle } from "./motion";
 import { keyOf } from "./registry";
 import { bind } from "./runner";
@@ -19,6 +20,17 @@ function warmSelected(): void {
     const id = model.selectedBranch();
     const b = id ? view("branch", id) : undefined;
     if (b) page.warm(b.repo, b.name, b.tip);
+  });
+}
+
+/** The cursor resting on a forest asks whether it merges (v1 asked on hovering its ✦): a second or
+ *  more of git each, so never for every row on paint — only the one you stop on. */
+function checkResting(): void {
+  createEffect(() => {
+    const k = model.selected();
+    if (!world.ready || !k?.startsWith("p:")) return;
+    const t = window.setTimeout(() => void checkIntegration(k.slice(2)), 700);
+    onCleanup(() => clearTimeout(t));
   });
 }
 
@@ -134,6 +146,9 @@ function ForestRow(props: { f: ForestView; grip: boolean }) {
     const parts = [`${f.branches.length} branch${f.branches.length === 1 ? "" : "es"}`];
     if (f.ready.length) parts.push(`${f.ready.length} ready`);
     if (f.unopened.length > 1) parts.push(`${f.unopened.length} without a PR`);
+    const m = verdict(p().id)?.state;
+    if (m === "clean") parts.push("merges clean");
+    else if (m === "conflicts") parts.push("doesn't merge");
     if (p().ticket) parts.push(p().ticket!);
     return parts.join(" · ");
   };
@@ -163,6 +178,9 @@ function ForestRow(props: { f: ForestView; grip: boolean }) {
         {p().name}
         <Show when={props.f.ready.length && !readyOnly()}>
           <span class="ml-1.5 align-middle text-[9px] text-gold-leaf" title={`${props.f.ready.length} ready for you`}>●</span>
+        </Show>
+        <Show when={verdict(p().id)?.state === "conflicts"}>
+          <span class="ml-1.5 align-middle text-[11px] text-del" title={`the branches don't merge onto main together\n${verdict(p().id)!.detail}`}>✕</span>
         </Show>
       </span>
       <Show
@@ -273,6 +291,7 @@ export default function Forests() {
   flip(() => root, () => model.rows());
   watchClosings();
   warmSelected();
+  checkResting();
   boot();
   return (
     <Show when={world.ready} fallback={<p class="px-4 pl-11 text-ink-faint">reading the forests…</p>}>

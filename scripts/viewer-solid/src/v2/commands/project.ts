@@ -1,8 +1,9 @@
 // Forests: moving one between focus, the workbench and the archive (POST /project-state),
 // ordering the focus lane (POST /focus), opening a forest into its spine, the ready filter, launch.
 import { startDrag } from "../drag";
-import { BASE, forestPath, navigate, surface } from "../router";
-import { bkey, model, pkey } from "../model";
+import { checkIntegration, integratable } from "../integrate";
+import { BASE, forestPath, integrationRef, navigate, reviewPath, surface } from "../router";
+import { atRepo, bkey, model, pkey } from "../model";
 import { command, type Write } from "../registry";
 import { list, view, world } from "../store";
 import type { ProjectState } from "../types";
@@ -67,6 +68,45 @@ command({
   budget: "config-write",
   available: (id) => exists(id) && view("project", id!)!.state === "archive",
   write: moveTo("workbench"),
+});
+
+// ── the whole forest at once: does it merge, run it, read it ──
+
+command({
+  id: "forest.integrate",
+  label: "merges?",
+  title: "Check the whole forest merges onto main",
+  scope: "project",
+  budget: "local",
+  available: integratable,
+  local: (id) => void checkIntegration(id!, true),
+});
+command({
+  id: "forest.preview",
+  label: "preview",
+  title: "Preview the whole forest — every branch merged, on a side port, opened once it answers",
+  scope: "project",
+  budget: "local",
+  keys: ["g p"],
+  v1: ["click:build this project's integration"],
+  available: integratable,
+  local: (id) => {
+    const p = view("project", id!)!;
+    window.open(`${atRepo(p.repo, "/preview-wait")}?project=${encodeURIComponent(p.name)}`, "_blank", "noopener");
+  },
+});
+command({
+  id: "forest.integration",
+  label: "whole diff",
+  title: "Read the whole forest's diff against main",
+  scope: "project",
+  budget: "local",
+  keys: ["space i"],
+  available: integratable,
+  local: (id, e) => {
+    const p = view("project", id!)!;
+    navigate(reviewPath(p.repo, integrationRef(p.name)), e);
+  },
 });
 
 // ── the focus lane's order ──
