@@ -2,6 +2,7 @@
 // they'd run here, then what works anywhere, then this page's keys that do nothing at the moment.
 // Generated from the registry, so it can't drift from what the keys do.
 import { For, Show } from "solid-js";
+import { machine } from "./workstation";
 import { liveScopes, model, targetFor } from "./model";
 import { commands, glyph } from "./registry";
 import { page, sideLine } from "./review/page";
@@ -26,6 +27,10 @@ function labelOf(scope: string): string {
       return model.selectedBranch() ? labelOf("branch") : labelOf("project");
     case "item":
       return view("todo", model.selectedItem()!)?.title ?? "this item";
+    case "server": {
+      const s = machine.server(model.selectedServer());
+      return s ? `${s.branch || s.name} on :${s.port}` : "this server";
+    }
     case "line":
       return h?.kind === "line" ? `${h.path.split("/").pop()}:${sideLine(h.row).line}` : "this line";
     case "thread":

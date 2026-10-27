@@ -6,6 +6,7 @@ export const SURFACE_SCOPES: Record<string, string[]> = {
   dashboard: ["dashboard"],
   todo: ["item", "todo"],
   forest: ["branch", "row", "forest", "project"],
+  machine: ["server", "machine"],
 };
 
 export const SCOPE_TITLES: Record<string, string> = {
@@ -25,6 +26,8 @@ export const SCOPE_TITLES: Record<string, string> = {
   todo: "On the tracker",
   item: "On an item",
   forest: "On a forest's page",
+  machine: "On the machine",
+  server: "On a server",
 };
 
 export interface SheetCmd {

@@ -10,9 +10,10 @@ import type { Branch, Entities, Pr } from "./types";
 import { menuOpen, setMenuOpen } from "./ui";
 
 /** The palette's sections, in this order; within one, what the cursor is on comes first. */
-const GROUPS = ["move", "view", "review", "words & push", "go", "forests", "branches"] as const;
+const GROUPS = ["move", "view", "review", "words & push", "machine", "go", "forests", "branches"] as const;
 type Group = (typeof GROUPS)[number];
 function groupOf(id: string): Group {
+  if (/^machine\./.test(id)) return "machine";
   if (/^(nav|place)\.|^help\.|^branch\.(pr|open)$|^forest\.page$|^review\.(definition|open|finish)$/.test(id)) return "go";
   if (/^(cursor|focus|history|commit)\.|^review\.(down|up|top|bottom|thread\.(next|prev)|file\.(next|prev)|leave|back)$|^forest\.(expand|collapse|leave)$|^todo\.(up|down)$/.test(id)) return "move";
   if (/^review\.(tab|split|outdated|map|filter|types|history)|^(forest\.face|ready\.toggle|archive\.toggle|dashboard\.range|todo\.open)$/.test(id)) return "view";

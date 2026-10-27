@@ -24,7 +24,7 @@ globalThis.setInterval = ((fn: () => void, ms: number) => every(fn, ms).unref())
 const { applyKeys, clashes, validKey } = await import("./bindings");
 
 async function registry() {
-  for (const m of ["app", "project", "branch", "review", "todo", "words"]) await import(`./commands/${m}`);
+  for (const m of ["app", "project", "branch", "review", "todo", "words", "machine"]) await import(`./commands/${m}`);
   const { commands } = await import("./registry");
   return commands().map((c) => ({ id: c.id, scope: c.scope, keys: c.keys && [...c.keys] }));
 }
