@@ -942,6 +942,15 @@ command({
   },
 });
 command({
+  id: "review.preview",
+  label: "preview",
+  title: "Preview this branch — a dev server on a side port, opened once it answers",
+  scope: "review",
+  budget: "local",
+  keys: ["g p"],
+  route: (id) => (id && model.branchView(id) ? { id: "branch.preview", target: id } : null),
+});
+command({
   id: "review.github",
   title: "Go to GitHub to submit your review",
   scope: "review",

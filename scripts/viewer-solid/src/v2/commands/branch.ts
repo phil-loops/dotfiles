@@ -141,6 +141,21 @@ command({
 });
 
 command({
+  id: "branch.preview",
+  label: "preview",
+  title: "Preview it — a dev server on a side port, opened once it answers",
+  scope: "branch",
+  budget: "local",
+  keys: ["g p"],
+  v1: ["node.preview"],
+  available: (id) => !!bv(id),
+  local: (id) => {
+    const b = bv(id)!.b;
+    window.open(`${atRepo(b.repo, "/preview-wait")}?branch=${encodeURIComponent(b.name)}`, "_blank", "noopener");
+  },
+});
+
+command({
   id: "branch.open",
   label: "open",
   title: "Open the branch",

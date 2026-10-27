@@ -23,6 +23,7 @@ export const SAME_MOVE: Record<string, string[]> = {
   "the words": ["review.words", "forest.words", "story.why"],
   "the page's other face": ["review.tab", "forest.face"],
   "open on GitHub": ["branch.pr", "review.finish"],
+  "preview it": ["branch.preview", "review.preview"],
 };
 
 const KEY = /^(?:[CA]-)?(?:.|space|esc|ret|tab|up|down|left|right)$/u;
