@@ -37,6 +37,19 @@ export interface HistoryCommit {
   pushed?: boolean;
 }
 
+/** What the files tab diffs against: the parent (the PR's own change), main (the stack up to here),
+ *  or origin's copy (the next push). Rides the address as ?base=. */
+export type Base = "" | "main" | "outgoing";
+export const BASES: { base: Base; word: string }[] = [
+  { base: "", word: "parent" },
+  { base: "main", word: "main" },
+  { base: "outgoing", word: "outgoing" },
+];
+const baseInUrl = (): Base => {
+  const b = new URLSearchParams(location.search).get("base");
+  return b === "main" || b === "outgoing" ? b : "";
+};
+
 export interface NodeFile {
   path: string;
   add: number;
@@ -121,6 +134,20 @@ export const page = createRoot(() => {
     return pid ? list("branch").filter((b) => b.project === pid).map((b) => b.tip).join(",") : tip();
   });
 
+  // the address carries it, so a link reproduces the view; a new branch reads its own (none: parent)
+  const [base, setBaseSig] = createSignal<Base>(baseInUrl());
+  createEffect(on(id, () => setBaseSig(baseInUrl()), { defer: true }));
+  const setBase = (b: Base) => {
+    setBaseSig(b);
+    const q = new URLSearchParams(location.search);
+    if (b) q.set("base", b);
+    else q.delete("base");
+    const s = q.toString();
+    window.history.replaceState(window.history.state, "", `${location.pathname}${s ? `?${s}` : ""}`);
+  };
+  /** the base as sent: outgoing is origin's copy, which a branch never pushed doesn't have */
+  const baseRef = (name: string) => (base() === "main" ? "main" : base() === "outgoing" && branch()?.pushed !== "local" ? `origin/${name}` : "");
+
   const [tab, setTab] = createSignal<"conversation" | "commits" | "files">("files");
   const [split, setSplitSig] = createSignal(store.get("v2.review.split") === "1");
   const setSplit = (v: boolean) => {
@@ -156,7 +183,7 @@ export const page = createRoot(() => {
   const [payload, setPayload] = createSignal<{ key: string; data: NodePayload } | null>(null);
   const [loadErr, setLoadErr] = createSignal<string | null>(null);
   const cache = new Map<string, NodePayload>();
-  const keyOf = createMemo(() => `${id()}@${at()}`);
+  const keyOf = createMemo(() => `${id()}@${at()}|${baseRef(target()?.name ?? "")}`);
 
   // Unchanged lines revealed around the hunks, per file: the new file read once at the tip (the
   // tip's sha, so it's exactly the file the diff's new side shows) and how many lines each gap shows.
@@ -182,8 +209,9 @@ export const page = createRoot(() => {
   async function load(key: string, repo: string, name: string): Promise<void> {
     const hit = cache.get(key);
     if (hit) return void setPayload({ key, data: hit });
+    const b = baseRef(name);
     try {
-      const data = await getJSON<NodePayload>(atRepoPath(repo, `/node?branch=${encodeURIComponent(name)}`));
+      const data = await getJSON<NodePayload>(atRepoPath(repo, `/node?branch=${encodeURIComponent(name)}${b ? `&base=${encodeURIComponent(b)}` : ""}`));
       cache.set(key, data);
       if (keyOf() === key) {
         setPayload({ key, data });
@@ -228,7 +256,7 @@ export const page = createRoot(() => {
 
   /** Prefetch a branch's diff (hover on Forests, the map overlay) so opening it paints at once. */
   const warm = (repo: string, name: string, at: string) => {
-    const key = `${repo}:${name}@${at}`;
+    const key = `${repo}:${name}@${at}|`;
     if (!cache.has(key)) void getJSON<NodePayload>(atRepoPath(repo, `/node?branch=${encodeURIComponent(name)}`)).then((d) => cache.set(key, d)).catch(() => {});
   };
 
@@ -262,7 +290,7 @@ export const page = createRoot(() => {
     const got = await getJSON<{ sha: string; files: NodeFile[] }>(atRepoPath(t.repo, `/commit-diff?sha=${encodeURIComponent(sha)}`)).catch(() => null);
     if (got && commitScope() === sha) setCommitFiles({ sha, files: got.files });
   }
-  const base = () => payload()?.data.baseSha ?? "";
+  const baseSha = () => payload()?.data.baseSha ?? "";
 
   const threads = createMemo(() => list("thread").filter((t) => t.branch === target()?.name && t.repo === target()?.repo));
   const items = createMemo(() => (draft()?.items ?? []).filter(local));
@@ -417,7 +445,7 @@ export const page = createRoot(() => {
   };
 
   return {
-    target, id, conv, draft, branch, tip, integration, base, files, views, reveal, threads, items, repliesTo, elsewhere, timeline, cardKey, stops, stopIndex, here, range,
+    target, id, conv, draft, branch, tip, integration, baseSha, base, setBase, files, views, reveal, threads, items, repliesTo, elsewhere, timeline, cardKey, stops, stopIndex, here, range,
     fileOf, isOpen, atRow, isSeen, serverViewed, payload, loadErr, warm,
     tab, setTab, split, setSplit, showOutdated, setShowOutdated, cursor, setCursor, mark, setMark,
     unfold, setUnfold, composer, setComposer, text, setText,

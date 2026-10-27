@@ -97,7 +97,7 @@ async function asking<T extends { ok: boolean; state?: string; message?: string 
   const t = page.target();
   if (!t) return null;
   const mine = ++seq;
-  const body = { branch: t.name, path: p.path, line: p.line, character: p.character, side: p.side, ...(p.side === "old" && page.base() ? { base: page.base() } : {}) };
+  const body = { branch: t.name, path: p.path, line: p.line, character: p.character, side: p.side, ...(p.side === "old" && page.baseSha() ? { base: page.baseSha() } : {}) };
   const t0 = Date.now();
   for (;;) {
     const r = await ask<T>(atRepoPath(t.repo, route), body);
