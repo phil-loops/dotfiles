@@ -41,18 +41,24 @@ while [[ "${1:-}" == --* ]]; do
   esac
 done
 
-# No arg → land on the project picker (bare /). An explicit branch/project name
-# (or `--all`) opens straight into that view via its canonical /forests/<name>
-# path — the viewer router reads PATHS, and an unrecognised query param silently
-# falls home (the SPA answers 200 for every URL, so a wrong link looks fine).
+# No arg → v2's Forests. An explicit name opens straight into its v2 page: the forest's page when
+# it names a forest, else that branch's review page when it's a branch — the viewer router reads PATHS, and an
+# unrecognised one silently falls home (the SPA answers 200 for every URL, so a wrong link looks fine).
 branch="${1:-}"
-qs=""; [[ -n "$branch" ]] && qs="forests/${branch}"
 here="${0:A:h}"
 # pin the server's git context to the repo ROOT, not raw $(pwd) — launching from
 # a subdir still scopes right, and launching outside a repo errors loudly instead
 # of silently binding to the wrong place (the empty-/model footgun).
 repo=$(git rev-parse --show-toplevel 2>/dev/null) \
   || { echo "stack-review-serve: not inside a git repo" >&2; exit 1; }
+# the <repo> segment of a v2 path: the main worktree's name, as the viewer registry names it
+repo_name=$(git worktree list --porcelain | sed -n '1s/^worktree //p'); repo_name=${repo_name:t}
+qs="v2"
+if [[ -n "$branch" && "$branch" != --all ]]; then
+  if ! git config --get-all "stack-project.${branch}.branch" >/dev/null \
+     && git show-ref --verify --quiet "refs/heads/${branch}"; then qs="v2/b/${repo_name}/${branch}"
+  else qs="v2/p/${repo_name}/${branch}"; fi
+fi
 # Repo IDENTITY for the squatter check: the git common dir, shared by every
 # worktree of the same repo (so launching from a feature worktree still matches
 # the main checkout's live server). Must mirror the server's _repo_id().

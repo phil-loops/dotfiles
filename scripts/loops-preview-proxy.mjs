@@ -29,6 +29,7 @@ const ANSI = /\x1b\[[0-9;]*[A-Za-z]/g;
 // an unregistered branch gets no link rather than a guessed URL (the viewer answers 200 to anything).
 const VIEWER_PORT = (() => { try { return Number(execFileSync(path.join(path.dirname(BADGE), "stack-review-port"), [DIR], { encoding: "utf8" }).trim()) || 0; } catch { return 0; } })();
 const projectOf = () => git("config", "--get", `branch.${branch}.stack-project`);
+const REPO = path.basename(git("worktree", "list", "--porcelain").split("\n")[0].replace(/^worktree /, ""));
 
 let upstreamUp = false, upstreamEverUp = false;
 let grafanaUp = false;
@@ -45,7 +46,7 @@ const broadcast = (event, data) => { const msg = `event: ${event}\ndata: ${JSON.
 const refreshState = async () => {
   const [u, g, v] = await Promise.all([probe(UPSTREAM), probe(3900), VIEWER_PORT ? probe(VIEWER_PORT) : false]);
   if (tick++ % 10 === 0) project = projectOf();
-  const nextViewer = v && project ? `http://localhost:${VIEWER_PORT}/forests/${project}/${branch}` : null;
+  const nextViewer = v && project ? `http://localhost:${VIEWER_PORT}/v2/b/${REPO}/${branch}` : null;
   const changed = u !== upstreamUp || g !== grafanaUp || nextViewer !== viewer;
   upstreamUp = u; if (u) upstreamEverUp = true; grafanaUp = g; viewer = nextViewer;
   if (changed) broadcast("meta", meta());
