@@ -279,7 +279,7 @@ fi
 if [[ "${1:-}" == --no-hx ]] || ! command -v tmux >/dev/null || ! command -v hx >/dev/null; then
   print
   print -r -- "editor drive: skipped"
-  skipped=$(( skipped + 7 ))
+  skipped=$(( skipped + 8 ))
 else
   print
   print -r -- "editor drive"
@@ -291,6 +291,7 @@ else
     [[ -f "$wt/$f" ]] && (( $(wc -l < "$wt/$f" 2>/dev/null || print 0) > 40 )) && { print -r -- "$f"; break }
   done)
   tmux new-window -t "$SESSION" -n review-hx "cd ${(q)wt} && hx ${(q)probe}" 2>/dev/null
+  tmux set-window-option -t "${SESSION}:review-hx" @stack-open-hx-root "${wt:A}" 2>/dev/null
   # poll for a ready editor instead of sleeping a guess: under load hx takes longer to draw,
   # and driving a half-started one is the very flake these assertions exist to catch
   for i in {1..40}; do
@@ -356,12 +357,17 @@ else
     dlast=$(( $(wc -l < "$dd/$dfile") ))
     env STACK_OPEN_TMUX="$SESSION" STACK_OPEN_TERMINAL=none STACK_OPEN_EDITOR=hx STACK_OPEN_HX_BUDGET=20 \
         STACK_OPEN_NO_GEN_SYNC=1 STACK_OPEN_DIR="$T/diff" "$SO" "$DBRANCH" "$dfile" "$dlast" >/dev/null 2>&1
-    marks=""
+    marks="" droot=""
     for i in {1..40}; do
-      marks=$(tmux capture-pane -p -t "$pane" 2>/dev/null | grep -c '▍')
+      dpane=$(tmux list-panes -s -t "$SESSION" -F '#{pane_id} #{pane_current_command} #{window_name}' 2>/dev/null | awk '$2=="hx" && $3=="review-hx"{print $1; exit}')
+      marks=$(tmux capture-pane -p -t "${dpane:-x}" 2>/dev/null | grep -c '▍')
       (( marks > 0 )) && break
       sleep 0.25
     done
+    droot=$(tmux show-window-options -t "${dpane:-x}" -v @stack-open-hx-root 2>/dev/null)
+    [[ "$dpane" != "$pane" && "$droot" == "${dd:A}" ]] \
+      && ok "an open into another worktree relaunches Helix rooted there" \
+      || no "Helix was reused across worktrees (pane $pane → ${dpane:-none}, root ${droot:-unset})"
     (( marks > 0 )) && ok "Helix marks the branch's changed lines in the gutter" \
                     || no "no change marks in the Helix gutter"
   fi
