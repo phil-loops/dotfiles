@@ -25,7 +25,7 @@ export interface Outline {
   /** the landing text: what the PR opens with (drafted until Phil saves his own) */
   draft?: { title: string; body: string; titleSaved: boolean; bodySaved: boolean; bodyPending?: boolean };
   /** an open PR's own text lives on GitHub; the draft no longer applies */
-  pr?: { exists: boolean; number?: number; url?: string; title?: string | null; body?: string | null };
+  pr?: { exists: boolean; number?: number; url?: string; state?: string; title?: string | null; body?: string | null };
 }
 
 /** The PR's place in the drafts map: its title and body are one more pair of words. */
@@ -100,11 +100,14 @@ export function prValue(branchId: string): Words {
   return drafts().get(branchId)?.get(PR) ?? prOnFile(branchId);
 }
 
+/** An open or merged PR's words live on GitHub; a closed one's don't — the next push opens a new PR. */
+export const githubOwns = (pr: Outline["pr"]): boolean => !!pr?.exists && pr.state !== "CLOSED";
+
 /** The landing-text fields a save would send (prTitle / prBody), or null when nothing changed. */
 export function prChange(branchId: string): { prTitle?: string; prBody?: string } | null {
   const o = shown.get(branchId);
   const w = drafts().get(branchId)?.get(PR);
-  if (!o?.draft || !w || o.pr?.exists) return null;
+  if (!o?.draft || !w || githubOwns(o.pr)) return null;
   const was = prOnFile(branchId);
   const out: { prTitle?: string; prBody?: string } = {};
   if (w.subject.trim() !== was.subject.trim()) out.prTitle = w.subject.trim();
@@ -114,7 +117,7 @@ export function prChange(branchId: string): { prTitle?: string; prBody?: string 
 
 export function prHints(branchId: string): Hint[] {
   const o = shown.get(branchId);
-  if (!o?.draft || o.pr?.exists) return [];
+  if (!o?.draft || githubOwns(o.pr)) return [];
   const w = prValue(branchId);
   return [...hintsFor({ subject: w.subject, body: "" }, { opening: true, ticket: o.ticket || undefined, kind: "title" }), ...bodyHints(w.body)];
 }
