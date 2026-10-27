@@ -10,8 +10,16 @@ export interface SyncFacts {
   restack: boolean;
   published: boolean;
   dirty: string[];
+  /** each dirty file's patch against HEAD (an untracked file's against nothing) */
+  dirtyRows?: DirtRow[];
   dirtyWorktree: string;
   why: string;
+}
+
+export interface DirtRow {
+  path: string;
+  code: string;
+  patch: string;
 }
 
 /** GET /prep-route — the one motion prep would make next (srv/prep.py). */
@@ -96,6 +104,9 @@ export function testsOf(body: Record<string, unknown>): { state: StepState; note
   if (body.ok) return { state: "ok", note: `${body.passed ?? "?"} ✓` };
   return { state: "fail", note: `${body.failed ?? "?"} failed (advisory — the motion went on):\n${str(body.summary)}` };
 }
+
+/** Whether the prep answer sealed the outgoing commits — their words are new and want a look. */
+export const sealed = (body: Record<string, unknown>): boolean => ((body.routed as string[] | undefined) ?? []).some((r) => r.startsWith("sealed "));
 
 const str = (x: unknown) => (typeof x === "string" ? x : "");
 

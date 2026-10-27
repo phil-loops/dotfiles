@@ -16,14 +16,15 @@ import { dispatch, say } from "../runner";
 import { view, world } from "../store";
 import { getJSON } from "../sync";
 import { leaf } from "../ship";
-import { PHASE_WORD, planSteps, prepOf, rebaseOf, rebases, testsOf, type Phase, type Step, type StepId, type StepState, type SyncFacts } from "../syncing";
+import { PHASE_WORD, planSteps, prepOf, rebaseOf, rebases, sealed, testsOf, type DirtRow, type Phase, type Step, type StepId, type StepState, type SyncFacts } from "../syncing";
 import type { Via } from "../registry";
+import { page as pg } from "../review/page";
 
 export interface Motion {
   steps: Step[];
   phase: Phase;
   /** the dirty files the motion waits on a decision about */
-  dirt?: { files: string[]; worktree: string };
+  dirt?: { files: string[]; rows: DirtRow[]; worktree: string };
   stashed: boolean;
   /** the tip when it stopped — a hand-off to Claude reads as done once the tip moves */
   tip: string;
@@ -189,7 +190,7 @@ async function start(id: string, via: Via): Promise<void> {
   put(id, { steps: planSteps({ drifted: b.drifted, facts: f }), phase: "running", stashed: false, tip: b.tip });
   if (f.dirty.length) {
     setStep(id, "dirt", "fail", `${f.dirty.length} uncommitted in ${f.dirtyWorktree || "the holding worktree"} — fold them into the commit, stash them for the run, or stop`);
-    patch(id, (m) => ({ ...m, phase: "dirt", dirt: { files: f.dirty, worktree: f.dirtyWorktree } }));
+    patch(id, (m) => ({ ...m, phase: "dirt", dirt: { files: f.dirty, rows: f.dirtyRows ?? [], worktree: f.dirtyWorktree } }));
     return say(`${leaf(b.name)}: ${f.dirty.length} uncommitted — fold, stash or stop on its page`);
   }
   await run(id, via, f, undefined);
@@ -266,6 +267,7 @@ async function run(id: string, via: Via, f: SyncFacts, dirt: string | undefined)
     return finish(id, via, "stopped");
   }
   setStep(id, "prep", "ok", shape.note);
+  if (sealed(p.body) && pg.id() === id) dispatch("review.words", via);
   if (shape.kind === "rest") {
     setStep(id, "gates", "skip");
     setStep(id, "tests", "skip");
@@ -332,6 +334,17 @@ command({
   budget: "local",
   available: deciding,
   local: (id, e) => void decide(id!, e instanceof MouseEvent ? "click" : "menu", "abort"),
+});
+/** The dirty file whose change is open under the dirt decision — "<branch id>|<path>". */
+export const [dirtOpen, setDirtOpen] = createSignal<string | null>(null);
+command({
+  id: "review.sync.dirt.show",
+  title: "Show or hide a dirty file's uncommitted change",
+  scope: "review",
+  budget: "local",
+  quiet: true,
+  available: (target) => deciding(target?.split("|")[0]),
+  local: (target) => setDirtOpen((cur) => (cur === target ? null : target!)),
 });
 command({
   id: "review.sync.dismiss",
