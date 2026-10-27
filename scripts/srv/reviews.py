@@ -1,7 +1,7 @@
 # srv/reviews.py — bridge GitHub "review requested of me" PRs into the local forest.
 #
 # The Chrome extension's /open-url imports a PR head (stack-review-import) as a review/pr-<N>
-# branch — an ordinary local branch, so base...head diffs, open-in-nvim and bless all work.
+# branch — an ordinary local branch, so base...head diffs and open-in-nvim both work.
 import hashlib
 import json
 import os
@@ -146,9 +146,8 @@ _REFRESH_TTL = 1800   # the keypress trusts the page-load fetch this long; a rel
 
 def _refresh_review_branch(num, force=False):
     # Re-sync review/pr-N to the live PR head before a precise line-open, so the line lands where
-    # GitHub shows it — a stale fetch drifts line numbers (a pushed refactor moves the line). The
-    # bless ledger is content-keyed (patch-id/blob), so re-fetch is safe; --force because a PR
-    # head can be force-pushed.
+    # GitHub shows it — a stale fetch drifts line numbers (a pushed refactor moves the line).
+    # --force because a PR head can be force-pushed.
     #
     # It is NOT cheap when already current — a no-op fetch measures ~1.2s of network, and it ran
     # on every precise ⌘⇧O. The page-load prewarm pays it instead; the TTL is what lets the

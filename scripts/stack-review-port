@@ -1,5 +1,5 @@
 #!/bin/zsh
-# stack-review-port [repo-path] — the deterministic stable port for a repo's blessing
+# stack-review-port [repo-path] — the deterministic stable port for a repo's forest
 # viewer. ONE source of truth for the formula: stack-review-serve (shell) and the :5174
 # Vite dev proxy (vite.config.ts) both shell out here, so the launcher and the proxy can
 # never drift onto different ports.

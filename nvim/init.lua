@@ -567,7 +567,6 @@ require('lazy').setup({
         require('custom.review-bindings').setup({
           get_branch = function() return cur end,
           get_base = function() return base end,
-          get_unreviewed = function() return {} end,
         })
         vim.cmd('DiffviewOpen ' .. base)
       end, { desc = '[G]it diff from [M]ain (merge-base)' })

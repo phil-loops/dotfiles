@@ -115,12 +115,12 @@ def model_sig():
 
 
 def _model_sig_spawned():
-    # cheap fingerprint of everything the model depends on: ref tips + config +
-    # blessing ledger. Changes on re-point, commit, re-parent, or bless. Shared by
-    # /model (_mcache), /projects (_pcache), and /sig — hence it lives in ctx.
+    # cheap fingerprint of everything the model depends on: ref tips + config.
+    # Changes on re-point, commit, or re-parent. Shared by /model (_mcache) and /sig —
+    # hence it lives in ctx.
     # Deliberately NOT the RepoState fingerprint. This is a change detector, polled ~1/s by
     # the pulse and every 2s by the extension, and it only has to notice that the model moved:
-    # local ref tips, the config file's mtime, the blessing ledgers. Routing it through the
+    # local ref tips and the config file's mtime. Routing it through the
     # snapshot made it correct-but-expensive — a 165ms full read (2583 refs + 3427 parsed
     # config keys) every 2s, which under load 18 blew past the 1s timeout the --ensure reuse
     # check uses and had it start a SECOND server (2026-09-09). Remote drift is the pulse's
@@ -133,7 +133,5 @@ def _model_sig_spawned():
             return os.path.getmtime(p)
         except OSError:
             return 0
-    stamp = (refs + str(mt(os.path.join(gd, "config")))
-             + str(mt(os.path.join(gd, "stack-blessed.json")))
-             + str(mt(os.path.join(gd, "stack-blessed-contrib.json"))))
+    stamp = refs + str(mt(os.path.join(gd, "config")))
     return hashlib.sha1(stamp.encode()).hexdigest()

@@ -1,6 +1,6 @@
 #!/bin/zsh
 # hx-wc <file> [msg...] — the Helix side of nvim's :wc (nvim/lua/custom/wc.lua): commit
-# JUST this file so the blessing viewer (which renders committed diffs) sees the edit
+# JUST this file so the viewer (which renders committed diffs) sees the edit
 # immediately. Helix has no user-defined typed commands, so helix/config.toml binds
 #   space-v = [":write", ":sh hx-wc %{buffer_name}"]
 # — the :write happens in Helix before we run; a custom message is the typed form

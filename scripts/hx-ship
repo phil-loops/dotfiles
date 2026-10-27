@@ -1,7 +1,7 @@
 #!/bin/zsh
 # hx-ship <file-in-the-worktree> [msg...] — the deliberate hand-off at the end of a Helix edit
 # session: commit what's dirty, start the push gates in the background, and land on this
-# branch's node in the blessing viewer, where the push button is.
+# branch's node in the viewer, where the push button is.
 #
 #   space-V = [":write", ":sh hx-ship %{buffer_name}"]     (space-v stays a silent checkpoint)
 #

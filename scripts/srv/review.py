@@ -1,11 +1,10 @@
 # srv/review.py — the review surface: the forest model, per-node file list + diffs,
-# commit log, blessing, and the squash/prep-for-push actions.
+# commit log, and the squash/prep-for-push actions.
 #   GET  /model?branch=X    the forest model JSON (stack-forest), cached on model_sig
 #   GET  /node?branch=X     a node's file list (stack-forest --node)
 #   GET  /file?branch&path  a file's contents on a ref (git show)
 #   GET  /commits?branch=X  branch history: own commits (own:true) + ancestors (own:false)
 #   GET  /commit-diff?sha=X one commit's changed files + patches (git show)
-#   POST /bless {branch,file}    mark file(s) reviewed (stack-bless)
 #   POST /squash {branch}        collapse parent..branch into unstaged working-tree changes
 #   POST /prep {branch}          prep-for-push: squash unpushed → one, then oxfmt
 import os
@@ -20,7 +19,7 @@ from urllib.parse import parse_qs
 from . import ctx, memo, repostate, shellout, stackcfg, picker, watch
 
 # (repo, branch) -> {"sig", "branches", "out"} — validated per-FOREST (only its own ref
-# tips + config/ledger mtimes), so an unrelated worktree's commit no longer busts every
+# tips + config), so an unrelated worktree's commit no longer busts every
 # forest's model, and switching between forests stays warm instead of clear()-on-miss.
 _mcache = {}
 # Capacity is a BYTE-AND-AGE budget, not a count. It was 8 entries against ~157 forests, so
@@ -73,7 +72,7 @@ def _guard_sig():
     """What the mid-build guard watches: the model's config slice ONLY.
 
     It used to be ctx.model_sig() — whole-file .git/config mtime plus all ~1,564 local ref
-    tips — so any gate verdict, bless, or `stack-open --prepare` write landing during a build
+    tips — so any gate verdict or `stack-open --prepare` write landing during a build
     set sig="" and the entry could never validate. With cold builds at 16-39s that window is
     almost always straddled, which is why four consecutive requests for one forest never
     reached a true hit (38.7s, 2.66s, 1.60s, 1.06s; a hit is ~10ms).
@@ -92,8 +91,7 @@ def _forest_sig(branches):
     names = [f"refs/heads/{b}" for b in branches] + [f"refs/heads/{main}", f"refs/remotes/origin/{main}"]
     refs = "".join(f"{r} {snap.sha.get(r, '')}\n" for r in names)
     cfg = _cfg_slice(snap)
-    ledgers = "".join(f"{k}{v}" for k, vs in snap.cfg.items() if k.startswith("#mtime:") for v in vs)
-    return hashlib.sha1((refs + cfg + ledgers + _builder_sig()).encode()).hexdigest()
+    return hashlib.sha1((refs + cfg + _builder_sig()).encode()).hexdigest()
 
 
 def _known_forest_name(name):
@@ -303,7 +301,7 @@ def node(req, u):
     if branch.startswith("refs/stack/"):   # the ghost integration ref is rebuilt per select
         return _node_uncached(req, branch, base)
     # The payload is a pure function of the branch's, its parent's, its requires' and the base's
-    # tips, their config blocks, the blessing ledgers, and the dirt of the worktree holding it —
+    # tips, their config blocks, and the dirt of the worktree holding it —
     # so that is the key. A hit costs a stat walk plus one `status` per holding worktree.
     def refs_key():
         snap = repostate.snapshot()
@@ -439,7 +437,7 @@ def _chunks(patch):   # path -> its `diff --git` chunk
 def commit_diff(req, u):
     # one commit's changed files + patches (git show <sha>), in the same FileDiff shape the
     # node view renders — so the history list can expand a commit inline. Read-only: these are
-    # historical commits, nothing to bless. Diffed against the commit's first parent.
+    # historical commits. Diffed against the commit's first parent.
     # ?from=<older sha> widens it to a contiguous slice: the combined diff from..sha inclusive.
     sha = parse_qs(u.query).get("sha", [""])[0]
     frm = parse_qs(u.query).get("from", [""])[0]
@@ -466,7 +464,7 @@ def commit_diff(req, u):
     for path, ch in (raw | shown).items() if hide_ws else shown.items():
         ch = shown.get(path, raw.get(path, ch))
         add, dele = counts.get(path, (0, 0))
-        files.append({"path": path, "status": "clean", "add": add, "del": dele,
+        files.append({"path": path, "add": add, "del": dele,
                       "wsOnly": hide_ws and path not in shown,
                       "patch": ch.rstrip("\n") + "\n"})
     out_json = json.dumps({"sha": sha, "files": files})
@@ -477,19 +475,6 @@ def commit_diff(req, u):
 
 
 # --- POST ---
-
-def bless(req, raw):
-    d = json.loads(raw or "{}")
-    args = [os.path.join(ctx.SCRIPTS, "stack-bless"), d.get("branch", "")]
-    f = d.get("file")
-    if f and f != ".":
-        args += ["--file", f]
-    if d.get("unbless"):
-        args.append("--unbless")
-    r = ctx.run(args)
-    req._send(200 if r.returncode == 0 else 500,
-              json.dumps({"ok": r.returncode == 0, "out": r.stdout, "err": r.stderr}))
-
 
 def frozen_origin_set(req, raw):
     # mark/unmark a branch's origin as deliberately frozen (stack-branch.<b>.frozen-origin):

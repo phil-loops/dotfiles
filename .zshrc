@@ -63,8 +63,7 @@ stack() {
 
     case "$cmd" in
         web)
-            # live blessing-aware browser review of a project (illuminated
-            # ledger): tree-rail, graph map, since-blessed deltas, live bless.
+            # live browser review of a project (canopy).
             # No arg: interactive → fzf-pick a project; non-interactive
             # (e.g. Claude / no TTY) → just list the local projects.
             local web_target="$1"
@@ -119,19 +118,6 @@ stack() {
         staging)
             ~/.dotfiles/scripts/staging "$@"
             ;;
-        bless)
-            # Record per-file blob hashes as reviewed (same ledger nvim uses).
-            # Defaults to the current branch when no branch arg is given.
-            local b="$1"
-            if [[ -z "$b" || "$b" == --* ]]; then b=$(git branch --show-current 2>/dev/null); else shift; fi
-            ~/.dotfiles/scripts/stack-bless "$b" "$@"
-            ;;
-        blessed)
-            # Show clean/stale/unblessed status for a stack link.
-            local b="$1"
-            if [[ -z "$b" || "$b" == --* ]]; then b=$(git branch --show-current 2>/dev/null); else shift; fi
-            ~/.dotfiles/scripts/stack-blessed-status "$b" --pretty "$@"
-            ;;
         purpose)
             # View or set a branch's purpose — git's native branch description.
             #   stack purpose [branch]              → show
@@ -152,17 +138,15 @@ stack() {
         *)
             echo "Usage: stack <command>        (loops is the Loops CLI again — no longer shadowed)"
             echo ""
-            echo "  stack web [project|branch]       live blessing review in the browser"
+            echo "  stack web [project|branch]       live forest review in the browser"
             echo "  stack list [--pick]              list registered stack-projects"
             echo "  stack integrate <project>        build virtual integration ref"
             echo "  stack restack <project> [--plan] rebase whole project onto fresh origin/main"
             echo "  stack fmt <project>              oxfmt every branch's delta + re-cascade (--check|--plan)"
             echo "  stack rm [project...]            fzf multi-select & kill project(s): branches+worktrees+config"
             echo "  stack archive|unarchive|archived hide/show finished projects"
-            echo "  stack review-branch              review branch against main with blessing"
-            echo "  stack pr-review                  review PRs assigned to you (with blessing)"
-            echo "  stack bless [branch]             bless (mark reviewed) a branch's files"
-            echo "  stack blessed [branch]           clean/stale/unblessed status for a branch"
+            echo "  stack review-branch              review branch against main in nvim"
+            echo "  stack pr-review                  review PRs assigned to you"
             echo "  stack purpose [branch] [text]    view/set a branch's purpose (git branch description)"
             echo "  stack stories [project]          write every branch's story in one \$EDITOR buffer"
             echo "  stack staging                    build/deploy status, watch, or deploy"
@@ -175,7 +159,7 @@ _stack() {
     if (( CURRENT == 2 )); then
         _values 'subcommand' \
             'review[review stack in nvim diffview]' \
-            'web[live blessing review in the browser]' \
+            'web[live forest review in the browser]' \
             'list[list registered stack-projects]' \
             'integrate[build virtual integration ref]' \
             'restack[rebase project onto fresh origin/main]' \
@@ -186,8 +170,6 @@ _stack() {
             'archived[list archived projects]' \
             'review-branch[review current branch vs main]' \
             'pr-review[review PRs assigned to you]' \
-            'bless[mark a branch reviewed]' \
-            'blessed[clean/stale/unblessed status]' \
             'purpose[view/set branch purpose]' \
             'stories[write every branch story in one $EDITOR buffer]' \
             'staging[staging build/deploy status]' \

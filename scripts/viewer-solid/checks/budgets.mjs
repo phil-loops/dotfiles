@@ -257,7 +257,7 @@ if (base) {
       await new Promise((r) => setTimeout(r, 400));
       await press("k");
       await press("v");
-      await new Promise((r) => setTimeout(r, 1200)); // u undoes the last SETTLED write: let the bless land first
+      await new Promise((r) => setTimeout(r, 1200)); // u undoes the last SETTLED write: let the view land first
       await press("u");
       await new Promise((r) => setTimeout(r, 1200));
     }

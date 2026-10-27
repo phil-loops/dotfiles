@@ -1,6 +1,6 @@
 #!/bin/zsh
 # SwiftBar plugin — loops-web: one click to launch (or reuse) the loops stack
-# blessing-ledger web viewer on :62333 and open it in Chrome. The menu-bar item
+# forest viewer and open it in Chrome. The menu-bar item
 # is green when the viewer is live, grey when it's down.
 #
 # <bitbar.title>stack web</bitbar.title>

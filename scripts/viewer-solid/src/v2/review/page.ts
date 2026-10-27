@@ -39,7 +39,6 @@ export interface HistoryCommit {
 
 export interface NodeFile {
   path: string;
-  status: string;
   add: number;
   del: number;
   patch: string;
