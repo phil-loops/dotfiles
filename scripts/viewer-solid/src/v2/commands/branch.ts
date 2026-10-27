@@ -150,14 +150,21 @@ export function forceScopeOf(id: string | undefined): ForceScope | null | undefi
   const s = id ? scopes().get(id) : undefined;
   return s && s.key === scopeKey(id!) ? s.scope : undefined;
 }
-/** Read the scope once per tip (it asks GitHub, so never on a poll). */
-export function readForceScope(id: string): void {
+/** Read the scope once per tip (it asks GitHub, so never on a poll). A run's green shows in /state
+ *  a moment before its verdict lands in git config, which is what the scope reads — so a gates ✗
+ *  under green gates is read again, a few times. */
+export function readForceScope(id: string, tries = 0): void {
   const b = view("branch", id);
   const key = scopeKey(id);
-  if (!b || scopes().get(id)?.key === key) return;
-  putScope(id, key);
+  if (!b || (!tries && scopes().get(id)?.key === key)) return;
+  if (!tries) putScope(id, key);
   void getJSON<{ forceScope?: ForceScope }>(atRepo(b.repo, `/force-scope?branch=${encodeURIComponent(b.name)}`))
-    .then((d) => putScope(id, key, d.forceScope ?? null))
+    .then((d) => {
+      if (scopeKey(id) !== key) return;
+      putScope(id, key, d.forceScope ?? null);
+      const early = b.gates === "green" && d.forceScope?.guards.some((g) => g.k === "gates" && !g.ok);
+      if (early && tries < 4) window.setTimeout(() => readForceScope(id, tries + 1), 1000 * (tries + 1));
+    })
     .catch(() => putScope(id, key, null));
 }
 
