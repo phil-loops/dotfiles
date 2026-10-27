@@ -1,4 +1,4 @@
-// `space`: every command in reach, filterable, then the branches and forests the text finds. Enter runs the highlighted one.
+// `space`: every command in reach, filterable, then the branches, forests, wiki pages and concepts the text finds. Enter runs the highlighted one.
 import { createMemo, createSignal, For, onMount, Show } from "solid-js";
 import { finds } from "./find";
 import { liveScopes, targetFor } from "./model";
@@ -8,12 +8,16 @@ import { list } from "./store";
 import { getJSON } from "./sync";
 import type { Branch, Entities, Pr } from "./types";
 import { menuOpen, setMenuOpen } from "./ui";
+import { wiki } from "./wikiread";
+import { tutor } from "./tutoring";
 
 /** The palette's sections, in this order; within one, what the cursor is on comes first. */
-const GROUPS = ["move", "view", "review", "words & push", "machine", "go", "forests", "branches"] as const;
+const GROUPS = ["move", "view", "review", "words & push", "machine", "wiki", "tutor", "go", "forests", "branches", "wiki pages", "concepts"] as const;
 type Group = (typeof GROUPS)[number];
 function groupOf(id: string): Group {
   if (/^machine\./.test(id)) return "machine";
+  if (/^wiki\./.test(id)) return "wiki";
+  if (/^tutor\./.test(id)) return "tutor";
   if (/^(nav|place)\.|^help\.|^branch\.(pr|open)$|^forest\.page$|^review\.(definition|open|finish)$/.test(id)) return "go";
   if (/^(cursor|focus|history|commit)\.|^review\.(down|up|top|bottom|thread\.(next|prev)|file\.(next|prev)|leave|back)$|^forest\.(expand|collapse|leave)$|^todo\.(up|down)$/.test(id)) return "move";
   if (/^review\.(tab|split|outdated|map|filter|types|history)|^(forest\.face|ready\.toggle|archive\.toggle|dashboard\.range|todo\.open)$/.test(id)) return "view";
@@ -51,6 +55,8 @@ function MenuBody() {
   onMount(() => {
     input.focus();
     everything().then(setAll, () => {});
+    wiki.load();
+    tutor.load();
   });
   const merged = <T extends { id: string }>(live: T[], more: Record<string, T>): T[] => {
     const have = new Set(live.map((x) => x.id));
@@ -69,12 +75,12 @@ function MenuBody() {
   });
   const items = createMemo<Row[]>(() => [
     ...cmds().map((c) => ({ id: c.id, title: c.title, side: c.keys?.map(glyph).join(" · ") ?? "", group: groupOf(c.id) })),
-    ...finds(q(), { branches: merged(list("branch"), all().branch), projects: list("project"), prs: merged(list("pr"), all().pr) }).map((f) => ({
+    ...finds(q(), { branches: merged(list("branch"), all().branch), projects: list("project"), prs: merged(list("pr"), all().pr), pages: wiki.pages(), concepts: Object.values(tutor.learn()?.concepts ?? {}) }).map((f) => ({
       id: f.cmd,
       arg: f.id,
       title: f.title,
       side: f.sub,
-      group: (f.cmd === "find.forest" ? "forests" : "branches") as Group,
+      group: ({ "find.forest": "forests", "find.wiki": "wiki pages", "find.concept": "concepts", "find.branch": "branches" } as const)[f.cmd],
     })),
   ]);
   const via = () => (q() ? "palette" : "menu");
@@ -107,7 +113,7 @@ function MenuBody() {
             setI(0);
           }}
           onKeyDown={onKey}
-          placeholder="run a command, or find a branch…"
+          placeholder="run a command, or find a branch, a page, a concept…"
           class="w-full border-0 border-b border-rule bg-transparent px-4 py-3 outline-none placeholder:text-ink-faint"
         />
         <ul class="m-0 max-h-[50vh] list-none overflow-auto p-1">

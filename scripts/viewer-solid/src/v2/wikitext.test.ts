@@ -24,6 +24,7 @@ test("a citation is a button carrying its anchor, its label still markdown", () 
 test("a wikilink names the page by its title when it's known", () => {
   assert.match(wikiHtml("see [[canopy-v2-keys]]", (s) => (s === "canopy-v2-keys" ? "Keys like Helix" : undefined)), /data-slug="canopy-v2-keys">Keys like Helix<\/a>/);
   assert.match(wikiHtml("see [[no-such]]"), />no such<\/a>/);
+  assert.match(wikiHtml("(see [Keys like Helix](canopy-v2-keys))"), /\(see <a class="wk-link" href="\/v2\/wiki\/canopy-v2-keys" data-slug="canopy-v2-keys">Keys like Helix<\/a>\)/);
 });
 
 test("an anchor can't break out of its attribute, and prose around it is still escaped", () => {

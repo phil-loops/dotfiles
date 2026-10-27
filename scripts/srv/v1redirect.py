@@ -1,7 +1,7 @@
 # srv/v1redirect.py — a v1 URL with a v2 page answers 302 to it, so every link still pointing at v1
-# (bookmarks, old tabs, a producer not yet moved) lands on v2. Pages v2 doesn't have (/work, /wiki,
-# /tutor, /push, /outbox/launch) keep serving v1. A forest's ~integration is its integration ref on
-# the v2 review page.
+# (bookmarks, old tabs, a producer not yet moved) lands on v2. Pages v2 doesn't have (/work, /push,
+# /outbox/launch, a terminal tutor session picked up by link — /tutor?import=) keep serving v1. A
+# forest's ~integration is its integration ref on the v2 review page.
 #
 #   `git config stack.viewer-v1-redirect false` (server repo or global) turns every redirect off;
 #   `?v1` on any URL bypasses it for that load, so v1 stays reachable while it still exists.
@@ -28,6 +28,8 @@ def v2_path(path):
         return "/v2"
     if segs == ["machine"]:
         return "/v2/machine"
+    if segs and segs[0] in ("wiki", "tutor") and len(segs) <= 2:
+        return "/v2/" + "/".join(segs)
     head, rest = segs[0], segs[1:]
     repo = ctx.repo_name()
     if head == "forests":
@@ -54,6 +56,6 @@ def target(u):
     if any(k == "v1" for k, _ in q) or not enabled():
         return None
     to = v2_path(u.path)
-    if to is None:
+    if to is None or (to.startswith("/v2/tutor") and any(k == "import" for k, _ in q)):
         return None
     return to + ("?" + urlencode(q) if q else "")
