@@ -1,7 +1,7 @@
 +++
 title = "Bring the sync motion and its repairs to the v2 branch page"
 kind = "build"
-state = "open"
+state = "done"
 area = "review"
 size = "S"
 why = "prep, delta tests, dirty-tree decisions, reseat, rebase and restack are the everyday make-it-pushable path, and only v1 had them (/prep-push 41, /delta-tests 35, /dirty-resolve 10 uses in 60 days)"
