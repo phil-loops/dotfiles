@@ -8,7 +8,7 @@
 #
 # Stored in git config, keyed by the branch's PATCH-ID (`git patch-id --stable`), which is
 # rebase-stable: a restack, a reword, or a new base leaves the summary valid, while an actual code
-# change invalidates it and it regenerates. Same contract as the blessing ledger.
+# change invalidates it and it regenerates.
 #
 #   stack-summary <branch>            → the summary (regenerating only if the code changed)
 #   stack-summary <branch> --refresh  → regenerate now, whatever the stored one says

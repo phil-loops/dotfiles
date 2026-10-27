@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
-"""stack-review-server — live, blessing-aware stack review over localhost.
+"""stack-review-server — canopy, the live forest viewer, over localhost.
 
-  GET  /                 the review shell (the page fetches /model)
-  GET  /model?branch=X   live model JSON  (runs `stack-model X`)
-  POST /bless {branch,file}  runs `stack-bless` (file omitted/"." → whole branch)
+  GET  /v2[/…]           the app (dist/v2/index.html); / and v1's page URLs 302 here
+  GET  /state, /v2/events  the app's store snapshot + its patch stream
   POST /heartbeat        keepalive; the server self-reaps after IDLE seconds idle
 
 Args: <servedir> <scriptsdir> <repodir>. Prints the chosen 127.0.0.1 port, then serves.
 Request logging (method path status ms) is default-on: stderr + a size-capped durable file at
 <git-common-dir>/stack-review.log (survives bounces — attribution must outlive the process).
 $STACK_REVIEW_LOG=0 silences both.
-The page is same-origin with the server, so /model and /bless are plain relative fetches.
+The page is same-origin with the server, so its API calls are plain relative fetches.
 """
 import sys, os, json, re, socket, subprocess, threading, time, hashlib, shlex
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -489,8 +488,6 @@ class H(BaseHTTPRequestHandler):
         if self.path == "/heartbeat":
             self._send(200, '{"ok":true}')
             return
-        if self.path == "/bless":
-            return review.bless(self, raw)
         if self.path == "/open-url":   # Chrome ext (URL-only): parse a raw GitHub URL → nvim or viewer route
             return reviews.open_url(self, raw)
         if self.path == "/pr-forest":   # Chrome ext: forest membership + child seating for a PR

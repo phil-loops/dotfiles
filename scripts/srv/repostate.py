@@ -9,7 +9,6 @@
 # upstream tracking, published. Anything that needs a *walk* (rev-list counts, merge-base)
 # still spawns — but memoised per snapshot, so the same walk isn't repeated within one epoch.
 import hashlib
-import os
 import threading
 import time
 
@@ -164,14 +163,13 @@ class RepoState:
 
     def inputs_fingerprint(self, branches, *extra):
         """Key material for a payload derived from these branches' refs + config blocks, the
-        trunk, and the blessing ledgers. No spawn."""
+        and the trunk. No spawn."""
         main = self.main()
         parts = [main, self.ref_any(main), *extra]
         for b in branches:
             parts += [b, self.ref_any(b)]
             parts += [f"{k}={v}" for k, vs in sorted(self.cfg.items())
                       if k.startswith((f"stack-branch.{b}.", f"branch.{b}.")) for v in vs]
-        parts += [f"{k}={v}" for k, vs in self.cfg.items() if k.startswith("#mtime:") for v in vs]
         return hashlib.sha1(repr(parts).encode()).hexdigest()
 
     def remote_tips(self, remote="origin"):
@@ -217,14 +215,6 @@ def _read():
     refs = ctx.run(["git", "for-each-ref", "--format=%(refname) %(objectname) %(upstream:short) %(upstream:track)",
                     "refs/heads", "refs/remotes"]).stdout
     cfg = ctx.run(["git", "config", "--local", "--list", "-z"]).stdout
-    # the blessing ledgers live beside the config and change on every bless — they're part of
-    # what the model view depends on, so their mtimes ride in the fingerprint
-    gd = ctx.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"]).stdout.strip()
-    for name in ("stack-blessed.json", "stack-blessed-contrib.json"):
-        try:
-            cfg += f"\0#mtime:{name}={os.path.getmtime(os.path.join(gd, name))}"
-        except OSError:
-            pass
     return refs, cfg
 
 

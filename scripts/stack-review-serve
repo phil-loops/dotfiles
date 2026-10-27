@@ -1,10 +1,9 @@
 #!/bin/zsh
-# stack-review-serve [<branch>] — launch the LIVE blessing review in the browser.
+# stack-review-serve [<branch>] — launch the LIVE forest review (canopy) in the browser.
 #
-# Starts a tiny 127.0.0.1 server that serves the shell and recomputes the model
-# (status + diffs + stale deltas) per request, so the view is never a stale
-# snapshot. Bless buttons POST back, the page re-fetches, staleness updates. The
-# server self-reaps a short while after you close the tab (heartbeat).
+# Starts a tiny 127.0.0.1 server that serves the app and recomputes what it shows
+# per request, so the view is never a stale snapshot. The server self-reaps a
+# short while after you close the tab (heartbeat).
 set -euo pipefail
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
 

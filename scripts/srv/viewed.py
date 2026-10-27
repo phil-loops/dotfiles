@@ -7,7 +7,7 @@
 A block key is computed by the page (review/diff.ts blocksOf) from a run of changed lines' own
 text, so the store only holds keys. A subject is a branch name today; it's a subject rather than a
 branch so a forest's integration ref can be reviewed as a whole beside its branches (undecided).
-Started fresh 2026-10-25: the old per-file stack-blessed.json is left to v1.
+Started fresh 2026-10-25; the old per-file stack-blessed.json ledger went with v1.
 """
 import json
 import os

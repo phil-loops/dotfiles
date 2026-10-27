@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Stack Archive - hide/show a registered stack-project in the blessed viewer
+# Stack Archive - hide/show a registered stack-project in the viewer
 # chooser (and the swiftbar menu) WITHOUT unregistering it. Non-destructive and
 # reversible: toggles the git-config flag `stack-project.<name>.archived`. The
 # branch-seed multivar (`.branch`) is left untouched, so the project comes back

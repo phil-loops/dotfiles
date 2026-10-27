@@ -47,7 +47,7 @@ def _walk(gd):
     acc = []
     for root, _dirs, _files in os.walk(os.path.join(gd, "refs")):
         acc.append((root, _mtime(root)))
-    for name in ("packed-refs", "config", "HEAD", "stack-blessed.json", "stack-blessed-contrib.json"):
+    for name in ("packed-refs", "config", "HEAD"):
         acc.append((name, _mtime(os.path.join(gd, name))))
     wts = os.path.join(gd, "worktrees")
     acc.append(("worktrees", _mtime(wts)))
@@ -83,7 +83,7 @@ def poke(repo=None):
 
 
 def generation(repo=None):
-    """A counter that moves whenever a ref, the config, a HEAD, a blessing ledger, or the
+    """A counter that moves whenever a ref, the config, a HEAD, or the
     worktree set changes. Equal generations mean none of those moved in between."""
     gd = common_dir(repo)
     return _entry(gd)["gen"] if gd else -1

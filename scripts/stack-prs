@@ -33,7 +33,7 @@
 set -euo pipefail
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
 
-# Persist the PR map alongside the blessing ledger in the repo's COMMON git dir —
+# Persist the PR map in the repo's COMMON git dir —
 # so it survives reload AND server restarts (and reboots, unlike $TMPDIR), and is
 # shared across all worktrees of the forest. Falls back to $TMPDIR outside a repo.
 gitdir=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)
