@@ -402,10 +402,6 @@ def _upstream_state(branch, main):
     # upstream is the safe state (nothing to pull-merge), so it's never flagged.
     r = ctx.run(["git", "rev-parse", "--abbrev-ref", f"{branch}@{{upstream}}"])
     up = r.stdout.strip() if r.returncode == 0 else ""
-    # deliberate divergence: origin holds the frozen PR (the review artifact), local holds
-    # the restacked truth; squash-merge reconciles. The bit calms the ⇄ warning + prep.
-    from . import repostate
-    frozen = bool(repostate.snapshot().branch_key(branch, "frozen-origin"))
     if not up:
         # Forest branches are cut --no-track, so an unset upstream is the NORM here and says
         # nothing about divergence — but the pushed copy is still what a push must fast-forward
@@ -416,14 +412,13 @@ def _upstream_state(branch, main):
         if ctx.run(["git", "rev-parse", "--verify", "--quiet",
                     f"refs/remotes/{pushed}"]).returncode != 0:
             return {"upstream": "", "upstreamBad": False, "upstreamReason": "",
-                    "diverged": False, "ahead": 0, "behind": 0, "frozenOrigin": frozen}
+                    "diverged": False, "ahead": 0, "behind": 0}
         ahead = int(ctx.run(["git", "rev-list", "--count",
                              f"{pushed}..{branch}"]).stdout.strip() or 0)
         behind = int(ctx.run(["git", "rev-list", "--count",
                               f"{branch}..{pushed}"]).stdout.strip() or 0)
         return {"upstream": "", "upstreamBad": False, "upstreamReason": "",
-                "diverged": ahead > 0 and behind > 0, "ahead": ahead, "behind": behind,
-                "frozenOrigin": frozen}
+                "diverged": ahead > 0 and behind > 0, "ahead": ahead, "behind": behind}
     remote = ctx.run(["git", "config", f"branch.{branch}.remote"]).stdout.strip()
     up_branch = up[len(remote) + 1:] if remote and up.startswith(remote + "/") else up
     bad = up_branch == main
@@ -441,7 +436,7 @@ def _upstream_state(branch, main):
     diverged = (not bad) and ahead > 0 and behind > 0
     reason = f"tracks {up} (the trunk) — a Pull would merge main into this branch" if bad else ""
     return {"upstream": up, "upstreamBad": bad, "upstreamReason": reason,
-            "diverged": diverged, "ahead": ahead, "behind": behind, "frozenOrigin": frozen}
+            "diverged": diverged, "ahead": ahead, "behind": behind}
 
 
 # rebase-classify (the PR-less merged-detection fallback) is a ~0.3s trial rebase, and health_many
