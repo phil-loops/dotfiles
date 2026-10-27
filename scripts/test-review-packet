@@ -46,7 +46,7 @@ class Where(unittest.TestCase):
     def test_groups(self):
         lines = rp.where_lines(self.plan, {"pr": 42, "branch": "q"})
         self.assertEqual(lines, ["Stacked on: #42", "", "✓ #41",
-                                 "○ #42 — in review; this PR builds on it", "→ **this PR**", "○ the ui — up next"])
+                                 "○ #42 — in review; this PR builds on it", "→ **this PR**", "○ the ui"])
 
     def test_not_in_this_pr_skips_ancestors(self):
         self.assertEqual(rp.not_lines(self.plan, ["hand one"]), ["The ui — up next", "hand one"])
