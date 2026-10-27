@@ -9,6 +9,7 @@ import type { Scope } from "./registry";
 import { cursor, cursorIdx, expanded, forestFace, now, readyOnly, shelved, showArchive } from "./ui";
 import { page } from "./review/page";
 import { machine, mkey, sid } from "./workstation";
+import { wiki, wkey } from "./wikiread";
 
 export interface BranchView {
   b: Branch;
@@ -99,6 +100,7 @@ export const model = createRoot(() => {
   const rows = createMemo(() => {
     if (surface().id === "todo") return todos().flatMap((s) => s.items.map((t) => tkey(t.id)));
     if (surface().id === "machine") return machine.servers().map((s) => mkey(sid(s)));
+    if (surface().id === "wiki") return wiki.pages().map((p) => wkey(p.slug));
     if (surface().id === "forest") {
       const pid = pageProject();
       if (!pid) return [];
@@ -164,7 +166,12 @@ export const model = createRoot(() => {
     return k?.startsWith("m:") ? k.slice(2) : undefined;
   });
 
-  return { projects, forests, todos, pageProject, landedOf, rows, selected, selectedBranch, selectedProject, selectedItem, selectedServer, branchView };
+  const selectedArticle = createMemo(() => {
+    const k = selected();
+    return k?.startsWith("w:") ? k.slice(2) : undefined;
+  });
+
+  return { projects, forests, todos, pageProject, landedOf, rows, selected, selectedBranch, selectedProject, selectedItem, selectedServer, selectedArticle, branchView };
 });
 
 /** What a command of this scope acts on, from the cursor. */
@@ -182,6 +189,8 @@ export function targetFor(scope: Scope): string | undefined {
       return model.selectedServer();
     case "machine":
       return "machine";
+    case "article":
+      return model.selectedArticle();
     case "review":
       return page.id() || undefined;
     case "line":
@@ -206,6 +215,7 @@ export function liveScopes(): string[] {
   }
   if (surface().id === "todo" && model.selectedItem()) out.push("item");
   if (surface().id === "machine" && model.selectedServer()) out.push("server");
+  if (surface().id === "wiki" && model.selectedArticle()) out.push("article");
   if (surface().id === "forest") {
     if (model.selectedBranch()) out.push("branch", "row");
     out.push("forest");

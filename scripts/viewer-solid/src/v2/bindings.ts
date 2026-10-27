@@ -12,10 +12,10 @@ export interface Bound {
 export const SAME_MOVE: Record<string, string[]> = {
   "next": ["cursor.down", "review.down", "history.next"],
   "previous": ["cursor.up", "review.up", "history.prev"],
-  "back out": ["overlay.close", "review.back", "history.exit", "commit.exit"],
+  "back out": ["overlay.close", "review.back", "history.exit", "commit.exit", "wiki.back"],
   "out": ["forest.collapse", "review.leave", "forest.leave", "commit.back", "machine.log.close"],
   "in": ["forest.expand", "branch.open", "history.enter", "machine.log"],
-  "the thing's main action": ["row.primary", "review.fold", "todo.open", "review.expand", "history.open", "machine.open"],
+  "the thing's main action": ["row.primary", "review.fold", "todo.open", "review.expand", "history.open", "machine.open", "wiki.open"],
   "send to GitHub": ["branch.push", "review.send", "review.push"],
   "move up the list": ["focus.up", "todo.up"],
   "move down the list": ["focus.down", "todo.down"],

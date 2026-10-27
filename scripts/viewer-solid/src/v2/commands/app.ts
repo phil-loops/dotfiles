@@ -40,14 +40,16 @@ command({
 });
 
 // `g d` is Helix's go-to-definition on the review page, so the dashboard is `g s` (its stats)
-const NAV_KEY: Record<string, string> = { forests: "g f", dashboard: "g s", todo: "g o", machine: "g m" };
-for (const s of SURFACES.filter((x) => !x.arg)) {
+const NAV_KEY: Record<string, string> = { forests: "g f", dashboard: "g s", todo: "g o", machine: "g m", wiki: "g i", tutor: "g t" };
+const NAV_V1: Record<string, string[]> = { wiki: ["nav.wiki"], tutor: ["nav.tutor"] };
+for (const s of SURFACES.filter((x) => !x.arg || x.bare)) {
   command({
     id: `nav.${s.id}`,
     title: `Go to ${s.title}`,
     scope: "global",
     budget: "local",
     keys: [NAV_KEY[s.id] ?? `g ${s.id[0]}`],
+    ...(NAV_V1[s.id] ? { v1: NAV_V1[s.id] } : {}),
     local: (_t, e) => navigate(s.path, e),
   });
 }
@@ -55,7 +57,6 @@ for (const s of SURFACES.filter((x) => !x.arg)) {
 // v1's pages, until v2 has its own: the rail is gone, so the menu is how you reach them
 const PLACES = [
   { id: "work", title: "Work", path: "/work", key: "g w" },
-  { id: "wiki", title: "Wiki", path: "/wiki", key: "g i" },
   { id: "tutor", title: "Tutor", path: "/tutor", key: "g t" },
   { id: "v1", title: "the v1 home", path: "/forests?v1", key: "" },
 ];
