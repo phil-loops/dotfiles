@@ -138,6 +138,7 @@ command({
   scope: "review",
   budget: "local",
   keys: ["e"],
+  available: () => !pg.integration(),
   local: () => {
     pg.setTab("commits");
     void pg.showCommit(null);
@@ -423,8 +424,9 @@ command({
   budget: "local",
   keys: ["h"],
   local: (id, e) => {
-    const p = id ? view("project", view("branch", id)?.project ?? "") : undefined;
+    const p = id ? view("project", view("branch", id)?.project ?? pg.integration() ?? "") : undefined;
     if (!p) return navigate(BASE, e);
+    if (pg.integration()) return navigate(forestPath(p.repo, p.name), e);
     setCursor(bkey(id!));
     navigate(forestPath(p.repo, p.name), e);
   },
@@ -472,6 +474,7 @@ command({
   scope: "review",
   budget: "slow-io",
   keys: ["o"],
+  available: () => !pg.integration(),
   write: () => openHere(),
 });
 
@@ -948,7 +951,7 @@ command({
   scope: "review",
   budget: "local",
   keys: ["g p"],
-  route: (id) => (id && model.branchView(id) ? { id: "branch.preview", target: id } : null),
+  route: (id) => (pg.integration() ? { id: "forest.preview", target: pg.integration()! } : id && model.branchView(id) ? { id: "branch.preview", target: id } : null),
 });
 command({
   id: "review.github",

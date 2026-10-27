@@ -2,7 +2,7 @@
 // walks — every diff row, and under it the threads and pending comments anchored there — plus the
 // folds, the composer and the overlays the review commands move. Views and commands both read it.
 import { createEffect, createMemo, createRoot, createSignal, on } from "solid-js";
-import { routeArg, surface } from "../router";
+import { integrationOf, routeArg, surface } from "../router";
 import { list, view, world } from "../store";
 import { ask, getJSON, getText } from "../sync";
 import type { Comment, Conv, Draft, Item, Review, Thread } from "../types";
@@ -110,6 +110,17 @@ export const page = createRoot(() => {
   const draft = () => view("draft", id()) as Draft | undefined;
   const branch = () => view("branch", id());
   const tip = createMemo(() => branch()?.tip ?? conv()?.tip ?? "");
+  /** the forest whose whole diff this page shows (its integration ref), else undefined for a branch */
+  const integration = createMemo(() => {
+    const t = target();
+    const project = t && integrationOf(t.name);
+    return project && view("project", `${t.repo}:${project}`) ? `${t.repo}:${project}` : undefined;
+  });
+  /** what the diff is read at: the tip, or for an integration (a ref the store doesn't carry) its forest's tips */
+  const at = createMemo(() => {
+    const pid = integration();
+    return pid ? list("branch").filter((b) => b.project === pid).map((b) => b.tip).join(",") : tip();
+  });
 
   const [tab, setTab] = createSignal<"conversation" | "commits" | "files">("files");
   const [split, setSplitSig] = createSignal(store.get("v2.review.split") === "1");
@@ -146,7 +157,7 @@ export const page = createRoot(() => {
   const [payload, setPayload] = createSignal<{ key: string; data: NodePayload } | null>(null);
   const [loadErr, setLoadErr] = createSignal<string | null>(null);
   const cache = new Map<string, NodePayload>();
-  const keyOf = createMemo(() => `${id()}@${tip()}`);
+  const keyOf = createMemo(() => `${id()}@${at()}`);
 
   // Unchanged lines revealed around the hunks, per file: the new file read once at the tip (the
   // tip's sha, so it's exactly the file the diff's new side shows) and how many lines each gap shows.
@@ -162,8 +173,9 @@ export const page = createRoot(() => {
     const t = target();
     const was: Context = contextOf(path) ?? { reveal: new Map() };
     putContext(key, path, { ...was, reveal: new Map(was.reveal).set(at, (was.reveal.get(at) ?? 0) + n) });
-    if (was.lines || !t || !tip()) return;
-    const text = await getText(atRepoPath(t.repo, `/file?branch=${commitScope() ?? tip()}&path=${encodeURIComponent(path)}`));
+    const rev = commitScope() ?? (integration() ? t?.name : tip());
+    if (was.lines || !t || !rev) return;
+    const text = await getText(atRepoPath(t.repo, `/file?branch=${encodeURIComponent(rev)}&path=${encodeURIComponent(path)}`));
     if (text == null || contextKey() !== key) return;
     putContext(key, path, { ...(contextOf(path) ?? was), lines: text.split("\n") });
   }
@@ -406,7 +418,7 @@ export const page = createRoot(() => {
   };
 
   return {
-    target, id, conv, draft, branch, tip, base, files, views, reveal, threads, items, repliesTo, elsewhere, timeline, cardKey, stops, stopIndex, here, range,
+    target, id, conv, draft, branch, tip, integration, base, files, views, reveal, threads, items, repliesTo, elsewhere, timeline, cardKey, stops, stopIndex, here, range,
     fileOf, isOpen, atRow, isSeen, serverViewed, payload, loadErr, warm,
     tab, setTab, split, setSplit, showOutdated, setShowOutdated, cursor, setCursor, mark, setMark,
     unfold, setUnfold, composer, setComposer, text, setText,

@@ -110,7 +110,7 @@ function Header() {
   return (
     <header class="rv-head" ref={trackHeight}>
       <div class="rv-title">
-        <Show when={c()} fallback={<span class="font-display text-[20px] text-ink">{view("branch", pg.id())?.description || t()?.name}</span>}>
+        <Show when={c()} fallback={<span class="font-display text-[20px] text-ink">{pg.integration() ? `✦ ${view("project", pg.integration()!)?.name} — every branch merged onto main` : view("branch", pg.id())?.description || t()?.name}</span>}>
           <span class="font-display text-[20px] text-ink">{c()!.title}</span>
           <a class="ml-2 text-ink-faint no-underline hover:text-ink hover:underline" href={c()!.url} target="_blank" rel="noopener" title="open on GitHub">#{c()!.number}</a>
         </Show>
