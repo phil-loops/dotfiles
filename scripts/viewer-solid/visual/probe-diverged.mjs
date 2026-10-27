@@ -3,6 +3,8 @@
 // (synthetic payload exercising overlap verdict, ahead/behind twins, all prFiles states),
 // then open the ⋯ menu and click "inspect divergence". Emits rects + element screenshot.
 import puppeteer from "puppeteer-core";
+// v1 pages: the live viewer 302s v1 URLs to v2 unless the load says ?v1
+const onV1 = (u) => u + (u.includes("?") ? "&" : "?") + "v1";
 
 const arg = (n, d) => {
   const i = process.argv.indexOf("--" + n);
@@ -59,7 +61,7 @@ page.on("request", (req) => {
   }
   req.continue();
 });
-await page.goto(BASE + "/forests/admin-user-memberships/" + BRANCH, { waitUntil: "domcontentloaded", timeout: 20000 });
+await page.goto(onV1(BASE + "/forests/admin-user-memberships/" + BRANCH), { waitUntil: "domcontentloaded", timeout: 20000 });
 await page.waitForSelector(".entry", { timeout: 20000 });
 await new Promise((r) => setTimeout(r, 2000));
 await page.click(".icon-btn[aria-haspopup='true']");

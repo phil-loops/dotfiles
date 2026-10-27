@@ -1,6 +1,8 @@
 // scratch probe: force ReEntry to render by seeding the last-seen anchor to epoch,
 // then emit probe-rects-style geometry lines + a full-page screenshot for pixel parity.
 import puppeteer from "puppeteer-core";
+// v1 pages: the live viewer 302s v1 URLs to v2 unless the load says ?v1
+const onV1 = (u) => u + (u.includes("?") ? "&" : "?") + "v1";
 
 const arg = (n, d) => {
   const i = process.argv.indexOf("--" + n);
@@ -15,7 +17,7 @@ const browser = await puppeteer.launch({ executablePath: BIN, headless: true });
 const page = await browser.newPage();
 await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 2 });
 await page.evaluateOnNewDocument(() => localStorage.setItem("viewerLastSeen", "1"));
-await page.goto(BASE + "/work", { waitUntil: "domcontentloaded", timeout: 20000 });
+await page.goto(onV1(BASE + "/work"), { waitUntil: "domcontentloaded", timeout: 20000 });
 await page.waitForSelector(".reentry", { timeout: 15000 });
 await new Promise((r) => setTimeout(r, 2500));
 const lines = await page.evaluate(() => {

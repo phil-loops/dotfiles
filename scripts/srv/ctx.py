@@ -58,6 +58,17 @@ def repo_cwd():
     return getattr(_local, "repo", None) or CWD
 
 
+def repo_name():
+    """The registry name of the repo this request is pinned to (the server's own by default) —
+    the <repo> segment of a v2 path."""
+    here = os.path.realpath(repo_cwd())
+    main = os.path.realpath(MAIN_WT) if here == os.path.realpath(CWD) else here
+    for name, path in (REPOS or {}).items():
+        if os.path.realpath(path) in (here, main):
+            return name
+    return os.path.basename(main)
+
+
 def repo_path(name):
     # registry resolver: a viewer-repos name -> its main worktree, or None for an unknown name
     # (callers 400 rather than silently bind to the wrong repo).

@@ -30,6 +30,7 @@ from srv import procsig   # own line: same reason
 from srv import actor, reqlog   # own line: same reason
 os.environ["STACK_VIA"] = "viewer"   # git hooks under this server attribute to it, not to whoever launched it
 from srv import pregate   # own line: same reason
+from srv import v1redirect   # own line: same reason
 from srv import tutor   # own line: same reason
 from srv import outbox   # own line: same reason
 from srv import outline   # own line: same reason
@@ -341,13 +342,20 @@ class H(BaseHTTPRequestHandler):
         self._send(200, body, "text/html; charset=utf-8")
 
     def _dispatch_get(self, u):
-        if (u.path == "/v2" or (u.path.startswith("/v2/") and u.path != "/v2/events")
-                or (u.path in ("/", "/index.html") and state.v2_home())):
+        if u.path == "/v2" or (u.path.startswith("/v2/") and u.path != "/v2/events"):
             return self._send_app_shell("v2/index.html")   # canopy v2, built beside v1 until it replaces it
         if u.path == "/outbox" and "text/html" not in self.headers.get("Accept", ""):
             return outbox.get(self, u)   # the shipping desk's data; a browser navigation gets the page
         if (u.path in ("/", "/index.html", "/work", "/forests", "/watching", "/wiki", "/machine", "/tutor", "/outbox")
                 or u.path.startswith(("/forests/", "/branch/", "/review/", "/push/", "/wiki/", "/tutor/", "/outbox/"))):
+            to = v1redirect.target(u)
+            if to:
+                self.send_response(302)
+                self.send_header("Location", to)
+                self.send_header("Content-Length", "0")
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                return
             self._send_app_shell()
         elif u.path.startswith("/assets/"):
             # hashed, immutable build assets (JS/CSS). basename-only + a fixed dir, so the

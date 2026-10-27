@@ -7,6 +7,8 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+// v1 pages: the live viewer 302s v1 URLs to v2 unless the load says ?v1
+const onV1 = (u) => u + (u.includes("?") ? "&" : "?") + "v1";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const arg = (n, d) => { const i = process.argv.indexOf("--" + n); return i === -1 ? d : process.argv[i + 1]; };
@@ -86,7 +88,7 @@ const snap = async (name) => {
 const settle = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // state 1-4: node-detail with synthetic push-preview
-await page.goto(BASE + "/forests/admin-user-memberships/" + BRANCH, { waitUntil: "domcontentloaded", timeout: 20000 });
+await page.goto(onV1(BASE + "/forests/admin-user-memberships/" + BRANCH), { waitUntil: "domcontentloaded", timeout: 20000 });
 await page.evaluate((css) => { const el = document.createElement("style"); el.textContent = css; document.head.appendChild(el); }, FREEZE_CSS);
 await page.waitForSelector(".entry", { timeout: 20000 });
 await page.waitForSelector(".nh-push-red", { timeout: 15000 });
@@ -120,7 +122,7 @@ await settle(800);
 await snap("nodehead-viewnote");
 
 // state 5: review-node with synthetic "they pushed"
-await page.goto(BASE + "/review/8633", { waitUntil: "domcontentloaded", timeout: 20000 });
+await page.goto(onV1(BASE + "/review/8633"), { waitUntil: "domcontentloaded", timeout: 20000 });
 await page.evaluate((css) => { const el = document.createElement("style"); el.textContent = css; document.head.appendChild(el); }, FREEZE_CSS);
 await page.waitForSelector(".entry", { timeout: 20000 });
 await page.waitForSelector(".nh-pushed", { timeout: 15000 });

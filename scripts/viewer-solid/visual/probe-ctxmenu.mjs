@@ -6,6 +6,8 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+// v1 pages: the live viewer 302s v1 URLs to v2 unless the load says ?v1
+const onV1 = (u) => u + (u.includes("?") ? "&" : "?") + "v1";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const arg = (n, d) => { const i = process.argv.indexOf("--" + n); return i === -1 ? d : process.argv[i + 1]; };
@@ -62,7 +64,7 @@ const snap = async (name) => {
 };
 const settle = (ms) => new Promise((r) => setTimeout(r, ms));
 
-await page.goto(BASE + "/forests", { waitUntil: "domcontentloaded", timeout: 20000 });
+await page.goto(onV1(BASE + "/forests"), { waitUntil: "domcontentloaded", timeout: 20000 });
 await page.evaluate((css) => { const el = document.createElement("style"); el.textContent = css; document.head.appendChild(el); }, FREEZE_CSS);
 await page.waitForSelector(".forest-row", { timeout: 20000 });
 await settle(2000);

@@ -8,6 +8,8 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+// v1 pages: the live viewer 302s v1 URLs to v2 unless the load says ?v1
+const onV1 = (u) => u + (u.includes("?") ? "&" : "?") + "v1";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const arg = (n, d) => { const i = process.argv.indexOf("--" + n); return i === -1 ? d : process.argv[i + 1]; };
@@ -110,7 +112,7 @@ const settle = (ms) => new Promise((r) => setTimeout(r, ms));
 const freeze = () => page.evaluate((css) => { const el = document.createElement("style"); el.textContent = css; document.head.appendChild(el); }, FREEZE_CSS);
 
 // ── node-detail: commits view (list + divider), one commit expanded ──
-await page.goto(BASE + "/forests/admin-user-memberships/" + BRANCH, { waitUntil: "domcontentloaded", timeout: 20000 });
+await page.goto(onV1(BASE + "/forests/admin-user-memberships/" + BRANCH), { waitUntil: "domcontentloaded", timeout: 20000 });
 await freeze();
 await page.waitForSelector(".entry", { timeout: 20000 });
 await settle(1500);
@@ -169,7 +171,7 @@ await snap("c1-flash");
 // ── purpose-tip: hover a map node on the forest overview ──
 // freeze AFTER the map settles: an early freeze races the fm-fade entrance fills
 // (animation:none strips the forwards fill → nodes stick at opacity 0 in some runs)
-await page.goto(BASE + "/forests/admin-user-memberships", { waitUntil: "domcontentloaded", timeout: 20000 });
+await page.goto(onV1(BASE + "/forests/admin-user-memberships"), { waitUntil: "domcontentloaded", timeout: 20000 });
 await page.waitForSelector(".fm-node:not(.fm-main)", { timeout: 20000 });
 await settle(2000);
 await freeze();
@@ -180,7 +182,7 @@ await settle(400);
 await snap("c1-purpose-tip");
 
 // ── forest-tip: hover a forest row on home (rows + landed band) ──
-await page.goto(BASE + "/forests", { waitUntil: "domcontentloaded", timeout: 20000 });
+await page.goto(onV1(BASE + "/forests"), { waitUntil: "domcontentloaded", timeout: 20000 });
 await freeze();
 await page.waitForSelector(".forest-row", { timeout: 20000 });
 await settle(1500);

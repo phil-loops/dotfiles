@@ -1,6 +1,8 @@
 // probe-full — dump EVERY computed style of the first match of each selector, as JSON.
 //   node probe-full.mjs --path /x --sel ".a,.b" > styles.json
 import puppeteer from "puppeteer-core";
+// v1 pages: the live viewer 302s v1 URLs to v2 unless the load says ?v1
+const onV1 = (u) => u + (u.includes("?") ? "&" : "?") + "v1";
 
 const arg = (n, d) => {
   const i = process.argv.indexOf("--" + n);
@@ -15,7 +17,7 @@ const BIN = process.env.CHROME_BIN
 const browser = await puppeteer.launch({ executablePath: BIN, headless: true });
 const page = await browser.newPage();
 await page.setViewport({ width: 1440, height: 900 });
-await page.goto(BASE + PATH, { waitUntil: "domcontentloaded", timeout: 20000 });
+await page.goto(onV1(BASE + PATH), { waitUntil: "domcontentloaded", timeout: 20000 });
 await new Promise((r) => setTimeout(r, 3500));
 const out = {};
 for (const sel of SELS) {

@@ -12,6 +12,8 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+// v1 pages: the live viewer 302s v1 URLs to v2 unless the load says ?v1
+const onV1 = (u) => u + (u.includes("?") ? "&" : "?") + "v1";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const arg = (name, dflt) => {
@@ -38,7 +40,7 @@ const keyOf = (url) => createHash("sha1").update(url).digest("hex").slice(0, 24)
 
 const DIST = arg("dist", join(HERE, "..", "dist"));
 const localIndex = readFileSync(join(DIST, "index.html"), "utf8");
-const servedIndex = await fetch(BASE + "/").then((r) => r.text()).catch(() => null);
+const servedIndex = await fetch(BASE + "/?v1").then((r) => r.text()).catch(() => null);
 if (servedIndex !== localIndex) {
   console.error(`✗ ${BASE} is not serving ${DIST} — dist/index.html differs from the served page.`);
   console.error("  A fixture-server for another checkout (or a stale one) owns the port; shooting it");
@@ -84,7 +86,7 @@ for (const s of surfaces) {
   });
 
   try {
-    await page.goto(BASE + s.path, { waitUntil: "domcontentloaded", timeout: 20000 });
+    await page.goto(onV1(BASE + s.path), { waitUntil: "domcontentloaded", timeout: 20000 });
     await page.evaluate((css) => {
       const el = document.createElement("style");
       el.textContent = css;
