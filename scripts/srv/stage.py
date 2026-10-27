@@ -20,4 +20,4 @@ def _worktrees():
 
 def _dirty(path):
     # tracked changes only — untracked files don't block a checkout
-    return bool(ctx.run(["git", "-C", path, "status", "--porcelain", "-uno"]).stdout.strip())
+    return bool(ctx.run(["git", "--no-optional-locks", "-C", path, "status", "--porcelain", "-uno"]).stdout.strip())

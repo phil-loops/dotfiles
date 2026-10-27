@@ -222,7 +222,7 @@ def state(branch, fresh_prs=False, with_patches=False):
         elif ln.startswith("branch ") and ln[len("branch "):].replace("refs/heads/", "", 1) == branch:
             wt_path = cur
     if wt_path:
-        st = ctx.run(["git", "-C", wt_path, "status", "--porcelain"]).stdout.splitlines()
+        st = ctx.run(["git", "--no-optional-locks", "-C", wt_path, "status", "--porcelain"]).stdout.splitlines()
         entries = [(l[:2].strip(), l[3:].split(" -> ", 1)[-1].strip().strip('"'))
                    for l in st if len(l) > 3][:20]
         dirty = [p for _, p in entries]
@@ -483,7 +483,7 @@ def _worktree_of(branch):
 
 
 def _clean(wt):
-    return not ctx.run(["git", "-C", wt, "status", "--porcelain"]).stdout.strip()
+    return not ctx.run(["git", "--no-optional-locks", "-C", wt, "status", "--porcelain"]).stdout.strip()
 
 
 def _scratch_wt():
