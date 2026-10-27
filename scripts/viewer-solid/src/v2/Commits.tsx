@@ -16,7 +16,7 @@ import { changed, drafts, editPr, editTo, githubOwns, hintsOf, PR, prChange, prH
 const TONE: Record<Hint["tone"], string> = { error: "border-ember text-ember", warn: "border-gold-deep text-gold-leaf", note: "border-rule text-ink-faint" };
 
 /** A branch's /outline, read again when its tip moves (and while the server drafts the PR body). */
-function useOutline(branchId: () => string) {
+export function useOutline(branchId: () => string) {
   const b = () => view("branch", branchId());
   const [o, { refetch }] = createResource(
     () => (b() ? `${b()!.repo}|${b()!.name}|${b()!.tip}` : null),
