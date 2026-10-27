@@ -141,9 +141,10 @@ export function bodyHints(body: string, template = ""): Hint[] {
 /** A PR body as Phil's own lines and the repo template under them (from its first `---` rule on). */
 export function splitTemplate(body: string): { own: string; template: string } {
   const m = /^---[ \t]*$/m.exec(body);
-  if (!m) return { own: body.trim(), template: "" };
-  return { own: body.slice(0, m.index).trim(), template: body.slice(m.index).trim() };
+  if (!m) return { own: body, template: "" };
+  const head = body.slice(0, m.index);
+  return { own: head.endsWith("\n\n") ? head.slice(0, -2) : head.trimEnd(), template: body.slice(m.index).trim() };
 }
 
-/** Rejoin what splitTemplate split, so editing the own lines keeps the template. */
-export const joinTemplate = (own: string, template: string): string => [own.trim(), template].filter(Boolean).join("\n\n");
+/** Rejoin what splitTemplate split, so editing the own lines keeps the template — exactly, since the editor re-splits on every keystroke. */
+export const joinTemplate = (own: string, template: string): string => (template ? (own ? `${own}\n\n${template}` : template) : own);

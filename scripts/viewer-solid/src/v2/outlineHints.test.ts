@@ -76,4 +76,5 @@ test("a PR body splits into Phil's lines and the template from its first rule, a
   assert.deepEqual(splitTemplate("just a why"), { own: "just a why", template: "" });
   assert.equal(joinTemplate("new why", tpl), `new why\n\n${tpl}`);
   assert.equal(joinTemplate("", tpl), tpl);
+  for (const typed of ["why ", "why\n", " ", "why\n\n"]) assert.equal(splitTemplate(joinTemplate(typed, tpl)).own, typed);
 });
