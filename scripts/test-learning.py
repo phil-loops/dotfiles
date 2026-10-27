@@ -134,6 +134,72 @@ class Graph(unittest.TestCase):
             learning.restate(g, "nope", "x")
 
 
+def system_graph():
+    g = graph()
+    learning.upsert_system(g, {"id": "locking", "title": "Locking", "summary": "who may run what", "standards": [
+        {"id": "predict-expiry", "can_do": "Predict when a dead holder's lock frees", "concepts": ["lock-ttl", "lease-renewal"]},
+        {"id": "judge-coordination", "can_do": "Judge whether a lock guards correctness or only saves work",
+         "concepts": [{"id": "advisory-lock", "statement": "a lock that only saves work"}]}]})
+    return g
+
+
+class Systems(unittest.TestCase):
+    def test_upsert_keeps_order_and_reuses_concepts(self):
+        g = system_graph()
+        self.assertEqual(g["systems"]["locking"]["standards"], ["predict-expiry", "judge-coordination"])
+        self.assertEqual(g["concepts"]["advisory-lock"]["statement"], "a lock that only saves work")
+        learning.upsert_system(g, {"id": "locking", "standards": [{"id": "predict-expiry"}]})   # no can_do, no concepts: kept
+        self.assertEqual(g["standards"]["predict-expiry"]["concepts"], ["lock-ttl", "lease-renewal"])
+        with self.assertRaises(learning.Invalid):
+            learning.upsert_system(g, {"id": "other", "standards": [{"id": "predict-expiry", "can_do": "x"}]})
+        with self.assertRaises(learning.Invalid):
+            learning.upsert_system(g, {"id": "locking", "standards": [{"id": "new-one"}]})
+
+    def test_standard_mastery_is_its_own_rows(self):
+        g = system_graph()
+        ev(g, "lock-ttl", at="2026-10-01")                       # concept row: coverage, not the standard's depth
+        st = learning.state(g, today="2026-10-01")["standards"]["predict-expiry"]
+        self.assertEqual((st["mastery"]["depth"], st["coverage"]), (0, {"held": 0, "shown": 1, "total": 2}))
+        learning.add_evidence(g, {"standard": "predict-expiry", "level": "predict", "at": "2026-10-01"})
+        learning.add_evidence(g, {"standard": "predict-expiry", "level": "predict", "at": "2026-10-03"})
+        st = learning.state(g, today="2026-10-03")
+        self.assertEqual(st["standards"]["predict-expiry"]["mastery"]["held"], 1)
+        self.assertEqual(st["systems"]["locking"]["progress"], {"held": 1, "met": 1, "total": 2})
+        self.assertEqual(learning.mastery(g, "lock-ttl", today="2026-10-03")["evidence"], 1)
+
+    def test_evidence_needs_a_known_standard_or_a_concept(self):
+        g = system_graph()
+        with self.assertRaises(learning.Invalid):
+            learning.add_evidence(g, {"level": "predict"})
+        with self.assertRaises(learning.Invalid):
+            learning.add_evidence(g, {"standard": "nope", "level": "predict"})
+        with self.assertRaises(learning.Invalid):
+            learning.add_evidence(g, {"concept": "lock-ttl", "level": "predict", "source": "slack"})
+
+    def test_capture_stamps_chat_and_attaches_concepts(self):
+        g = system_graph()
+        applied = learning.capture(g, {"concepts": [{"id": "fencing-token", "statement": "s", "standard": "judge-coordination"}],
+                                       "evidence": [{"concept": "fencing-token", "level": "explain", "credit": "handed"},
+                                                    {"standard": "judge-coordination", "level": "critique", "credit": "scaffolded"}],
+                                       "questions": ["what does group mean?"]}, session="s1")
+        self.assertEqual(applied, ["concept fencing-token", "evidence fencing-token", "evidence judge-coordination", "question"])
+        self.assertIn("fencing-token", g["standards"]["judge-coordination"]["concepts"])
+        self.assertEqual({r["source"] for r in g["evidence"]}, {"chat"})
+        self.assertEqual(g["evidence"][-1]["standard"], "judge-coordination")
+        with self.assertRaises(learning.Invalid):
+            learning.capture(g, {"concepts": [{"id": "x", "standard": "nope"}]})
+
+    def test_system_digest(self):
+        g = system_graph()
+        learning.add_evidence(g, {"standard": "predict-expiry", "level": "predict", "outcome": "miss",
+                                  "note": "counted from the renewal", "at": "2026-10-01"})
+        text = learning.digest(g, system="locking", today="2026-10-02")
+        self.assertIn("### Active system: Locking [locking] — 0 held / 0 met / 2 standards", text)
+        self.assertIn("OPEN MISS: counted from the renewal", text)
+        self.assertIn("**Never assessed** (no standard-tagged row yet): judge-coordination", text)
+        self.assertIn("  - lock-ttl", text)
+
+
 class Blocks(unittest.TestCase):
     def test_new_fields_and_blocks(self):
         g = graph()
@@ -224,6 +290,12 @@ class CLI(unittest.TestCase):
                                env=env, capture_output=True, text=True)
             self.assertEqual(r.returncode, 1)
             self.assertIn("confidence", r.stderr)
+            run("system", json.dumps({"id": "sys", "title": "Sys", "standards": [{"id": "s1", "can_do": "do it", "concepts": ["a"]}]}))
+            run("capture", json.dumps({"concepts": [{"id": "d", "standard": "s1"}],
+                                       "evidence": [{"standard": "s1", "level": "explain", "credit": "scaffolded"}]}), "--session", "x")
+            std = json.loads(run("standard", "s1"))
+            self.assertEqual((std["concepts"], std["evidence"][0]["source"]), (["a", "d"], "chat"))
+            self.assertIn("### Active system: Sys [sys]", run("state", "--system", "sys"))
 
 
 class Roundtrip(unittest.TestCase):

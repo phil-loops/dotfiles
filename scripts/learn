@@ -1,20 +1,30 @@
 #!/usr/bin/env python3
 """learn — read and write the learner's concept graph (~/.dotfiles/learning/graph.json).
 
-  learn state [--topic <id>]       the tutor digest: every concept's depth, what's due, open questions;
-                                   with --topic also the cold opener, prerequisite gaps, transfer situations
+  learn state [--topic <id>] [--system <id>]
+                                   the tutor digest: every concept's depth, what's due, open questions;
+                                   with --topic also the cold opener, prerequisite gaps, transfer situations;
+                                   with --system each standard's depth and coverage, and what's due there
   learn json                       the full derived state as JSON
   learn opener --topic <id>        due concepts neighboring the topic — the session's first situation
   learn transfers --topic <id>     concept→analog pairs where a transfer situation is available
   learn gaps --topic <id>          prerequisites never shown unaided
   learn concept <id>               one concept with its mastery and every evidence row
+  learn standard <id>              one standard with its mastery, coverage and every evidence row
   learn map '<json>'               add/update a topic map  {"topic": {id,title,source}, "stages": [...]}
+  learn system '<json>'            add/update a system  {id, title, summary,
+                                   standards: [{id, can_do, concepts: [<id or concept json>]}]}
   learn evidence '<json>' [--topic <id>] [--session <id>]
                                    record evidence: {concept, level, credit, outcome, note} or a list;
                                    optional confidence (low|medium|high, asked before the reveal),
                                    rung (predict|invent), contrast (on a miss: the situation that
                                    separates the misconception from the principle), via (the analog
-                                   a transfer went through — required for an unaided transfer hit)
+                                   a transfer went through — required for an unaided transfer hit),
+                                   standard (the standard the row is evidence for; concept optional then)
+  learn capture '<json>' [--session <id>]
+                                   what an ordinary session that explained a system collected:
+                                   {topic?, concepts: [{id, statement, standard?, ...}],
+                                    evidence: [...], questions: [...]} — evidence is stamped source chat
   learn restate <id> '<text>'      the learner's own sentence for a concept (at a summit)
   learn question '<text>' [--concept <id>] [--topic <id>]
   learn calibrate '<note>'
@@ -49,9 +59,13 @@ def main(argv):
         return 0
     cmd, args = argv[0], argv[1:]
     topic, session, concept = _opt(args, "--topic"), _opt(args, "--session"), _opt(args, "--concept")
+    system = _opt(args, "--system")
     try:
         if cmd == "state":
-            print(learning.digest(learning.load(), topic=topic or None))
+            g = learning.load()
+            if system and learning.slug(system) not in g["systems"]:
+                raise ValueError(f"no system {system}")
+            print(learning.digest(g, topic=topic or None, system=learning.slug(system) if system else None))
         elif cmd == "json":
             print(json.dumps(learning.state(learning.load()), indent=1))
         elif cmd in ("opener", "transfers", "gaps"):
@@ -66,6 +80,21 @@ def main(argv):
             st = learning.state(g)
             print(json.dumps({**st["concepts"][cid],
                               "evidence": [r for r in g["evidence"] if r["concept"] == cid]}, indent=1))
+        elif cmd == "standard":
+            g = learning.load()
+            stid = learning.slug(args[0])
+            if stid not in g["standards"]:
+                raise ValueError(f"no standard {stid}")
+            print(json.dumps({**learning.state(g)["standards"][stid],
+                              "evidence": [r for r in g["evidence"] if r.get("standard") == stid]}, indent=1))
+        elif cmd == "system":
+            data = _json(args[0])
+            with learning.editing() as g:
+                print(learning.upsert_system(g, data))
+        elif cmd == "capture":
+            data = _json(args[0])
+            with learning.editing() as g:
+                print("\n".join(learning.capture(g, data, session=session)))
         elif cmd == "restate":
             with learning.editing() as g:
                 print(learning.restate(g, args[0], " ".join(args[1:])))
