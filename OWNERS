@@ -10,4 +10,4 @@ stack       scripts/stack-restack scripts/stack-fmt scripts/stack-precommit-fmt 
 review      scripts/branch-review
 shell       .zshrc
 docs        CLAUDE.md OWNERS claude/
-learning    learning/ scripts/learning.py scripts/learn scripts/test-learning.py
+learning    learning/ scripts/learning.py scripts/learn scripts/test-learning.py .claude/skills/tutor/ .claude/skills/retest/
