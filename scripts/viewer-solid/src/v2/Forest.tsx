@@ -1,7 +1,8 @@
 // One forest's page (/v2/p/<repo>/<project>): every branch in merge order with what it does in full —
 // its description and commit outline — and where it stands: ship state, gates, PR, open threads.
 // `l` opens a branch's review page, `h` goes back to Forests.
-import { createMemo, For, Show } from "solid-js";
+import { createEffect, createMemo, For, Show } from "solid-js";
+import { checkIntegration, integratable, verdict } from "./integrate";
 import { bkey, model, type BranchView } from "./model";
 import { keyOf } from "./registry";
 import { bind } from "./runner";
@@ -86,6 +87,31 @@ function Branch(props: { v: BranchView }) {
   );
 }
 
+const MERGE: Record<string, { text: string; cls: string }> = {
+  checking: { text: "◌ merging…", cls: "text-ink-faint animate-breathe" },
+  clean: { text: "✓ merges clean", cls: "text-ink-faint" },
+  conflicts: { text: "✕ doesn't merge", cls: "text-del" },
+  failed: { text: "merge check couldn't run", cls: "text-ink-faint" },
+};
+
+/** Does every branch merge onto main at once — asked when the page opens and whenever a tip moves. */
+function Merges(props: { pid: string }) {
+  createEffect(() => {
+    if (world.ready) void checkIntegration(props.pid);
+  });
+  const v = () => verdict(props.pid);
+  const title = () =>
+    v()?.state === "conflicts" ? `the branches don't merge onto main together\n${v()!.detail}` : v()?.state === "clean" ? "every branch merged onto main at once, cleanly" : v()?.detail || "";
+  return (
+    <Show when={v()}>
+      {" · "}
+      <button class={MERGE[v()!.state].cls} title={title()} onClick={bind("forest.integrate", props.pid)}>
+        {MERGE[v()!.state].text}
+      </button>
+    </Show>
+  );
+}
+
 export default function Forest() {
   const p = () => (model.pageProject() ? view("project", model.pageProject()!) : undefined);
   const f = () => (model.pageProject() ? model.forests().get(model.pageProject()!) : undefined);
@@ -112,6 +138,9 @@ export default function Forest() {
             </Show>
             <p class="m-0 mt-2 text-[12px] text-ink-faint">
               {p()!.state} · {counts()}
+              <Show when={integratable(p()!.id)}>
+                <Merges pid={p()!.id} />
+              </Show>
             </p>
           </header>
           <Show

@@ -23,7 +23,7 @@ export const SAME_MOVE: Record<string, string[]> = {
   "the words": ["review.words", "forest.words", "story.why"],
   "the page's other face": ["review.tab", "forest.face", "machine.log.jobs"],
   "open on GitHub": ["branch.pr", "review.finish"],
-  "preview it": ["branch.preview", "review.preview"],
+  "preview it": ["branch.preview", "review.preview", "forest.preview"],
   "sync it": ["branch.sync", "review.sync"],
 };
 
