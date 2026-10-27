@@ -8,6 +8,7 @@ import Menu from "./Menu";
 import { page } from "./review/page";
 import Review from "./review/Review";
 import Todo from "./Todo";
+import Machine from "./Machine";
 import { surface } from "./router";
 import { bind, note } from "./runner";
 import { view, world } from "./store";
@@ -54,6 +55,9 @@ export default function App() {
           </Match>
           <Match when={surface().id === "todo"}>
             <Todo />
+          </Match>
+          <Match when={surface().id === "machine"}>
+            <Machine />
           </Match>
         </Switch>
       </main>

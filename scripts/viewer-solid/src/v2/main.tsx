@@ -6,6 +6,7 @@ import "./commands/branch";
 import "./commands/review";
 import "./commands/todo";
 import "./commands/words";
+import "./commands/machine";
 import App from "./App";
 import { installKeys } from "./keyboard";
 import { startRouter, SURFACES } from "./router";

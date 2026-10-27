@@ -6,8 +6,8 @@ import type { Op } from "./store";
 
 /** Where a command applies, narrowest last: everywhere, on a surface, on the selected row (forest
  *  or branch), on its forest, on a branch; on the review page, the page itself, the cursor's diff
- *  line, the thread or the pending comment under it; on the tracker, the page and the item under the cursor. A key binds once per scope; the narrowest live one wins. */
-export type Scope = "global" | "forests" | "dashboard" | "row" | "project" | "branch" | "review" | "line" | "thread" | "pending" | "todo" | "item" | "forest" | "gap" | "history" | "commit";
+ *  line, the thread or the pending comment under it; on the tracker, the page and the item under the cursor; on the machine, the page and the server under the cursor. A key binds once per scope; the narrowest live one wins. */
+export type Scope = "global" | "forests" | "dashboard" | "row" | "project" | "branch" | "review" | "line" | "thread" | "pending" | "todo" | "item" | "forest" | "gap" | "history" | "commit" | "machine" | "server";
 export type Via = "key" | "click" | "palette" | "menu" | "drag";
 
 export type Inverse = { id: string; target: string; arg?: unknown };

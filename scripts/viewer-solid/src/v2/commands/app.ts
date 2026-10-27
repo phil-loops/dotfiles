@@ -40,7 +40,7 @@ command({
 });
 
 // `g d` is Helix's go-to-definition on the review page, so the dashboard is `g s` (its stats)
-const NAV_KEY: Record<string, string> = { forests: "g f", dashboard: "g s", todo: "g o" };
+const NAV_KEY: Record<string, string> = { forests: "g f", dashboard: "g s", todo: "g o", machine: "g m" };
 for (const s of SURFACES.filter((x) => !x.arg)) {
   command({
     id: `nav.${s.id}`,
@@ -57,7 +57,6 @@ const PLACES = [
   { id: "work", title: "Work", path: "/work", key: "g w" },
   { id: "wiki", title: "Wiki", path: "/wiki", key: "g i" },
   { id: "tutor", title: "Tutor", path: "/tutor", key: "g t" },
-  { id: "machine", title: "Machine", path: "/machine", key: "g m" },
   { id: "v1", title: "the v1 home", path: "/forests", key: "" },
 ];
 for (const p of PLACES) {

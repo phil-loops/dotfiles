@@ -68,6 +68,9 @@ export function applyPatch(p: Patch): "ok" | "gap" | "stale" {
 
 export const setConn = (c: Conn) => setWorld("conn", c);
 
+/** Something read outside the store moved (the machine's servers): pending writes re-check whether they've landed. */
+export const nudge = () => changed();
+
 export function addOps(ops: Op[]): void {
   setOverlay("ops", (cur) => [...cur, ...ops]);
 }

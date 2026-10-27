@@ -143,6 +143,48 @@ async function start(refetch = false): Promise<void> {
   }
 }
 
+// ── the pulse's procs signal ──────────────────────────────────────────────
+
+// Previews, agents and chat turns aren't store domains: the server's pulse (/events, which v1
+// listens to whole) fingerprints them and says `procs` when one moves. Held open only while
+// something listens, dropped while the tab is hidden; coming back counts as a change.
+const procsFns = new Set<() => void>();
+let pulse: EventSource | null = null;
+const firePulse = () => procsFns.forEach((fn) => fn());
+function openPulse(): void {
+  if (pulse || !procsFns.size || document.visibilityState === "hidden") return;
+  pulse = new EventSource("/events");
+  pulse.addEventListener("procs", () => {
+    count("procs");
+    firePulse();
+  });
+}
+function closePulse(): void {
+  pulse?.close();
+  pulse = null;
+}
+let pulseWatched = false;
+
+/** Call `fn` whenever a preview, agent or chat turn moves; returns the unsubscribe. */
+export function onProcs(fn: () => void): () => void {
+  procsFns.add(fn);
+  if (!pulseWatched) {
+    pulseWatched = true;
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") closePulse();
+      else if (procsFns.size && !pulse) {
+        openPulse();
+        firePulse();
+      }
+    });
+  }
+  openPulse();
+  return () => {
+    procsFns.delete(fn);
+    if (!procsFns.size) closePulse();
+  };
+}
+
 /** Connect the store. A hidden tab drops its stream (browsers cap connections per origin) and
  *  reconnects with its versions on return, catching up from the server's patch ring. */
 export function connect(): void {

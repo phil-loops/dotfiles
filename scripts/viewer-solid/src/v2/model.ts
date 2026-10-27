@@ -8,6 +8,7 @@ import { queue } from "./tracker";
 import type { Scope } from "./registry";
 import { cursor, cursorIdx, expanded, forestFace, now, readyOnly, shelved, showArchive } from "./ui";
 import { page } from "./review/page";
+import { machine, mkey, sid } from "./workstation";
 
 export interface BranchView {
   b: Branch;
@@ -94,9 +95,10 @@ export const model = createRoot(() => {
   });
 
   /** The rows the cursor moves through, top to bottom: forests and the branches of open ones, or
-   *  on the tracker its items. */
+   *  on the tracker its items, on the machine its servers. */
   const rows = createMemo(() => {
     if (surface().id === "todo") return todos().flatMap((s) => s.items.map((t) => tkey(t.id)));
+    if (surface().id === "machine") return machine.servers().map((s) => mkey(sid(s)));
     if (surface().id === "forest") {
       const pid = pageProject();
       if (!pid) return [];
@@ -157,7 +159,12 @@ export const model = createRoot(() => {
     return k?.startsWith("t:") ? k.slice(2) : undefined;
   });
 
-  return { projects, forests, todos, pageProject, landedOf, rows, selected, selectedBranch, selectedProject, selectedItem, branchView };
+  const selectedServer = createMemo(() => {
+    const k = selected();
+    return k?.startsWith("m:") ? k.slice(2) : undefined;
+  });
+
+  return { projects, forests, todos, pageProject, landedOf, rows, selected, selectedBranch, selectedProject, selectedItem, selectedServer, branchView };
 });
 
 /** What a command of this scope acts on, from the cursor. */
@@ -171,6 +178,10 @@ export function targetFor(scope: Scope): string | undefined {
       return model.selected();
     case "item":
       return model.selectedItem();
+    case "server":
+      return model.selectedServer();
+    case "machine":
+      return "machine";
     case "review":
       return page.id() || undefined;
     case "line":
@@ -194,6 +205,7 @@ export function liveScopes(): string[] {
     if (model.selected()) out.push("row");
   }
   if (surface().id === "todo" && model.selectedItem()) out.push("item");
+  if (surface().id === "machine" && model.selectedServer()) out.push("server");
   if (surface().id === "forest") {
     if (model.selectedBranch()) out.push("branch", "row");
     out.push("forest");
