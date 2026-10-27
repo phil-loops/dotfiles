@@ -10,8 +10,9 @@
   learn transfers --topic <id>     concept→analog pairs where a transfer situation is available
   learn gaps --topic <id>          prerequisites never shown unaided
   learn concept <id>               one concept with its mastery and every evidence row
-  learn retest [--system <id>] [--claim]
-                                   the one re-test worth a minute now (top due, not tested today) as JSON;
+  learn retest [--system <id> | --all] [--claim]
+                                   the one re-test worth a minute now (top due, not tested today) as JSON,
+                                   from a system's standards unless --all;
                                    --claim records today's offer and exits 3 if one was already made today
   learn nudge                      SessionStart hook: in an interactive session, when something is due and
                                    no re-test was offered today, tell Claude to offer one at a natural pause
@@ -116,7 +117,7 @@ def main(argv):
     cmd, args = argv[0], argv[1:]
     topic, session, concept = _opt(args, "--topic"), _opt(args, "--session"), _opt(args, "--concept")
     system = _opt(args, "--system")
-    claim = "--claim" in args
+    claim, everything = "--claim" in args, "--all" in args
     if cmd == "nudge":
         return nudge()
     try:
@@ -143,7 +144,8 @@ def main(argv):
             if claim and _offered_today():
                 print("a re-test was already offered today", file=sys.stderr)
                 return 3
-            brief = learning.retest(learning.load(), system=learning.slug(system) if system else None)
+            brief = learning.retest(learning.load(), system=learning.slug(system) if system else None,
+                                    everything=everything)
             if claim and brief["due"]:
                 _mark_offered()
             print(json.dumps(brief, indent=1))
