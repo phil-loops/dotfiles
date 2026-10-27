@@ -168,24 +168,17 @@ def _ref(item):
 
 
 def where_lines(plan, stacked_on=None, after=None):
-    """plan: every step in merge order, landed first — {pr, title, state, me}."""
+    """plan: every step in merge order, landed first — {pr, title, me, ancestor}. Only what stays true
+    once published: the order and the refs, since GitHub renders each #N's live state."""
     lines = []
     if stacked_on:
         lines.append(f"Stacked on: #{stacked_on['pr']}" if stacked_on.get("pr")
                      else f"Stacked on: `{stacked_on['branch']}` — its PR opens first")
         lines.append("")
     if len(plan) > 1:
-        seen_me = False
-        for s in plan:
-            if s.get("me"):
-                seen_me = True
-                lines.append("→ **this PR**")
-            elif s.get("state") == "merged":
-                lines.append(f"✓ {_ref(s)}")
-            else:
-                state = "in review" if s.get("pr") else "" if seen_me else "not opened yet"
-                note = "; ".join(x for x in (state, "this PR builds on it" if s.get("ancestor") else "") if x)
-                lines.append(f"○ {_ref(s)}" + (f" — {note}" if note else ""))
+        for i, s in enumerate(plan, 1):
+            step = "**this PR**" if s.get("me") else _ref(s) + (" — this PR builds on it" if s.get("ancestor") else "")
+            lines.append(f"{i}. {step}")
     for a in after or []:
         ref = f"#{a['pr']}" if a.get("pr") else f"`{a['branch']}`"
         why = a.get("why") or (strip_prefix(a.get("job") or "") and "deploy order: " + strip_prefix(a.get("job") or ""))
@@ -205,7 +198,7 @@ def not_lines(plan, hand=()):
         if not job:
             continue
         job = job[0].upper() + job[1:]
-        out.append(f"{job} — #{s['pr']}" if s.get("pr") else f"{job} — up next")
+        out.append(f"{job} — #{s['pr']}" if s.get("pr") else job)
     return out + [h for h in hand if h.strip()]
 
 
@@ -274,7 +267,7 @@ def build(f):
 
 
 def _bullets(lines):
-    return "\n".join(ln if ln.startswith(("- ", "Stacked on", "Merge after", "\n")) or not ln.strip()
+    return "\n".join(ln if ln.startswith(("- ", "Stacked on", "Merge after", "\n")) or re.match(r"\d+\. ", ln) or not ln.strip()
                      else f"- {ln}" for ln in lines)
 
 
@@ -364,22 +357,16 @@ def splice(body, heading, text):
     return body[:m.start()] + repl + body[end:].lstrip("\n")
 
 
-def _refs(text, mark):
-    return {int(n) for n in re.findall(rf"{re.escape(mark)}\s+#(\d+)", text or "")}
-
-
 def staleness(published_body, fresh_where):
-    """What moved since the PR body was published: PRs merged or opened since. None when the
-    published body has no Where-this-sits section to compare (a pre-packet PR)."""
+    """PRs opened since the body was published, whose steps it could only name in words. Merges need
+    no refresh: GitHub renders each #N's state. None when there's no Where-this-sits to compare."""
     old = sections_of(published_body or "").get("Where this sits")
     if old is None:
         return None
     new = "\n".join(fresh_where)
-    merged = sorted(_refs(new, "✓") - _refs(old, "✓"))
-    opened = sorted(set(map(int, re.findall(r"#(\d+)", new))) - set(map(int, re.findall(r"#(\d+)", old))) - set(merged))
-    stale = bool(merged or opened)
-    return {"stale": stale, "mergedSince": merged, "openedSince": opened,
-            "updatedBody": splice(published_body, "Where this sits", new) if stale else ""}
+    opened = sorted({int(n) for n in re.findall(r"#(\d+)", new)} - {int(n) for n in re.findall(r"#(\d+)", old)})
+    return {"stale": bool(opened), "openedSince": opened,
+            "updatedBody": splice(published_body, "Where this sits", new) if opened else ""}
 
 
 # ── bot findings → the claim each disputes ─────────────────────────────────

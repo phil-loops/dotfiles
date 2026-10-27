@@ -13,8 +13,8 @@
 #   stack-pr-body <branch>           → Phil's voice: the opening commit's short why (1–3 lines, plan
 #                                      stripped), or nothing — for above the Traffic Cop template
 #   stack-pr-body <branch> --plan    → purpose + commit outline + merge-order furniture (opt-in)
-#   stack-pr-body <branch> --context → where this PR sits in the project: what already landed,
-#                                      this PR, and what's coming — for pasting above Traffic Cop
+#   stack-pr-body <branch> --context → where this PR sits in the project: the merge order as #N
+#                                      refs GitHub keeps live, no status words — above Traffic Cop
 #   stack-pr-body <branch> --full    → the full document (title, where-it-fits, stored change
 #                                      summary, merge order, mermaid map)
 #   stack-pr-body <branch> --link    → also link the fork's assembled integration (opt-in: that
@@ -62,8 +62,8 @@ else
   change=""
 fi
 
-BRANCH="$branch" FACTS="$facts" CHANGE="$change" FULL="$full" CONTEXT="$context" python3 - <<'PY'
-import json, os, re, subprocess
+HERE="$here" BRANCH="$branch" FACTS="$facts" CHANGE="$change" FULL="$full" CONTEXT="$context" python3 - <<'PY'
+import json, os, re, subprocess, sys
 
 f = json.loads(os.environ["FACTS"])
 full = os.environ["FULL"] == "1"
@@ -90,24 +90,10 @@ def own_subjects(branch):
 if os.environ["CONTEXT"] == "1":
     if not f["project"] or len(f["plan"]) < 2:
         raise SystemExit
-    def ref(s):
-        return "#%s" % s["pr"] if s.get("pr") else s["job"]
-    me = next(s["n"] for s in f["plan"] if s.get("me"))
-    landed = [s for s in f["plan"] if s.get("landed")]
-    before = [s for s in f["plan"] if s["n"] < me and not s.get("landed")]
-    after = [s for s in f["plan"] if s["n"] > me and not s.get("landed")]
-    out.append("**Where this fits** — %s of %s" % (f["position"], f["total"]))
-    if landed:
-        out.append("\nAlready merged:")
-        out += ["- %s" % ref(s) for s in landed]
-    if before:
-        out.append("\nIn review:")
-        out += ["- %s" % ref(s) for s in before]
-    out.append("\n**This PR:** %s" % (f["purpose"] or f["job"]))
-    if after:
-        out.append("\nComing up:")
-        out += ["- %s" % ref(s) for s in after]
-    print("\n".join(out))
+    sys.path.insert(0, os.environ["HERE"])
+    import review_packet as rp
+    plan = [{**s, "state": "merged" if s.get("landed") else s.get("state")} for s in f["plan"]]
+    print("## Where this sits\n\n" + "\n".join(rp.where_lines(plan)))
     raise SystemExit
 
 outline = own_subjects(os.environ["BRANCH"])

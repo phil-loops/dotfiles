@@ -45,22 +45,26 @@ class Where(unittest.TestCase):
 
     def test_groups(self):
         lines = rp.where_lines(self.plan, {"pr": 42, "branch": "q"})
-        self.assertEqual(lines, ["Stacked on: #42", "", "✓ #41",
-                                 "○ #42 — in review; this PR builds on it", "→ **this PR**", "○ the ui"])
+        self.assertEqual(lines, ["Stacked on: #42", "", "1. #41",
+                                 "2. #42 — this PR builds on it", "3. **this PR**", "4. the ui"])
 
     def test_not_in_this_pr_skips_ancestors(self):
-        self.assertEqual(rp.not_lines(self.plan, ["hand one"]), ["The ui — up next", "hand one"])
+        self.assertEqual(rp.not_lines(self.plan, ["hand one"]), ["The ui", "hand one"])
 
     def test_staleness_and_splice(self):
-        old = rp.render({"intent": ["A claim here."], "where": ["→ **this PR**", "○ #43 docs — in review"]}, "---\ntemplate")
-        new = ["✓ #43 docs", "→ **this PR**"]
+        old = rp.render({"intent": ["A claim here."], "where": ["1. **this PR**", "2. the docs"]}, "---\ntemplate")
+        new = ["1. **this PR**", "2. #43"]
         st = rp.staleness(old, new)
-        self.assertEqual(st["mergedSince"], [43])
-        self.assertIn("✓ #43 docs", st["updatedBody"])
+        self.assertEqual(st["openedSince"], [43])
+        self.assertIn("2. #43", st["updatedBody"])
+        self.assertNotIn("- 2.", st["updatedBody"])
         self.assertIn("A claim here.", st["updatedBody"])
         self.assertIn("template", st["updatedBody"])
         self.assertIsNone(rp.staleness("no packet here", new))
-        self.assertFalse(rp.staleness(old, ["→ **this PR**", "○ #43 docs — in review"])["stale"])
+
+    def test_a_merge_alone_is_not_stale(self):
+        old = rp.render({"where": ["1. #43", "2. **this PR**"]}, "")
+        self.assertFalse(rp.staleness(old, ["1. #43", "2. **this PR**"])["stale"])
 
 
 class Findings(unittest.TestCase):
