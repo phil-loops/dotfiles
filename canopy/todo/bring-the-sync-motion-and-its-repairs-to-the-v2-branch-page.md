@@ -4,7 +4,7 @@ kind = "build"
 state = "open"
 area = "v1-retire"
 size = "L"
-why = "prep, delta tests, dirty-tree decisions, reseat, rebase and restack are the everyday make-it-pushable path, and only v1 has them (/prep-push 41, /delta-tests 35, /dirty-resolve 10 uses in 60 days)"
+why = "prep, delta tests, dirty-tree decisions, reseat, rebase and restack are the everyday make-it-pushable path, and only v1 had them (/prep-push 41, /delta-tests 35, /dirty-resolve 10 uses in 60 days)"
 created = "2026-10-27"
 updated = "2026-10-27"
 +++
@@ -22,8 +22,7 @@ Built 2026-10-27 (sandbox-verified end to end: rebase, restack, conflict, dirt s
 - [x] Repairs in the space menu only when they apply: reseat (drifted), detach upstream (tracks the trunk), inspect divergence (diverged with an upstream).
 
 Left:
-1. Force-origin and freeze repairs — left out (not trivial: force_scope's guard sheet + a confirm flow).
+1. Force-origin and freeze repairs — left out (not trivial: force_scope's guard sheet + a confirm flow); now designed under pick-diff-bases-and-edit-the-branch-description-on-the-v2-br.
 2. v1's "words" step (focus the outline column after a seal) — v2 has `e`; nothing hands off to it yet.
 3. The dirt gate lists the files but not each one's uncommitted diff (v1 expands them; GET /sync already returns dirtyRows).
 4. Inspect divergence needs an @{upstream} (/diverged-detail does); --no-track branches diverged from origin/<branch> get sync's reconcile but no inspect.
-5. Retire v1's NodeActions sync path once v2's matches it on the dashboard.
