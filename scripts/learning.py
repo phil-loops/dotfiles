@@ -18,8 +18,10 @@ Depth comes only from **evidence**, never from a verdict typed by hand:
     outcome  hit | miss
 
 A concept's depth is the highest level shown *unaided* (a higher level implies the lower ones).
-Assisted hits above that show as "with help". It is **held** once shown unaided on two separate
-days — one session's hit is not retention. It is due for a re-test when a miss is still open (a
+Assisted hits above that show as "with help". It is **held** once shown unaided on two days at least
+BASE_SPACING_DAYS apart — one session's hit, or Monday's and Tuesday's, is not retention. Due items
+carry how many days overdue they are: an untested concept is unknown, not forgotten, and the longer
+it waits the less the old evidence says. It is due for a re-test when a miss is still open (a
 high-confidence miss first: corrected, it is the best-remembered thing in a session), when it has
 only ever been shown with help, when it was shown once and the base gap has passed, or when its
 last unaided hit is older than its spacing interval (which doubles with each further unaided hit
@@ -380,29 +382,34 @@ def _mastery(rows, today=None):
             assisted = max(assisted, lvl)
     held = 0
     for lvl in range(1, len(LEVELS) + 1):
-        if len({d for d, l in unaided if l >= lvl}) >= 2:
+        days = sorted({d for d, l in unaided if l >= lvl})
+        if days and _days(days[0], days[-1]) >= BASE_SPACING_DAYS:
             held = lvl
     # the first re-test gap is the base spacing (about a tenth of a month-long retention target);
     # doubling starts only once the concept is held
     spacing = (min(MAX_SPACING_DAYS, BASE_SPACING_DAYS * 2 ** max(0, len(unaided) - 1) * max(1, depth))
                if held else BASE_SPACING_DAYS)
     if open_miss:
-        due, reason = True, f"missed: {open_miss['note'] or open_miss['level']}"
+        due, reason, due_from = True, f"missed: {open_miss['note'] or open_miss['level']}", open_miss["at"]
     elif depth == 0 and assisted:
-        due, reason = True, "only shown with help"
+        due, reason, due_from = True, "only shown with help", rows[-1]["at"]
     elif depth and not held and _days(last_unaided, today) >= spacing:
-        due, reason = True, f"shown unaided once, {_days(last_unaided, today)} days ago — a second day makes it held"
+        due, reason = True, (f"shown unaided, last {_days(last_unaided, today)} days ago — an unaided hit "
+                             f"{BASE_SPACING_DAYS}+ days after the first makes it held")
+        due_from = (datetime.date.fromisoformat(last_unaided) + datetime.timedelta(days=spacing)).isoformat()
     elif depth and _days(last_unaided, today) > spacing:
         due, reason = True, f"last shown unaided {_days(last_unaided, today)} days ago"
+        due_from = (datetime.date.fromisoformat(last_unaided) + datetime.timedelta(days=spacing)).isoformat()
     else:
-        due, reason = False, ""
+        due, reason, due_from = False, "", ""
     return {"depth": depth, "assisted": max(assisted, depth), "level": LEVELS[depth - 1] if depth else "",
             "held": held, "held_level": LEVELS[held - 1] if held else "",
             "evidence": len(rows), "last": rows[-1]["at"] if rows else "", "due": due, "reason": reason,
             "open_miss": (open_miss["note"] or f"missed at {open_miss['level']}") if open_miss else "",
             "miss_confidence": (open_miss or {}).get("confidence", ""),
             "contrast": (open_miss or {}).get("contrast", ""),
-            "misses": misses, "corrected": corrected, "overconfident": overconfident, "spacing": spacing}
+            "misses": misses, "corrected": corrected, "overconfident": overconfident, "spacing": spacing,
+            "overdue": max(0, _days(due_from, today)) if due else 0}
 
 
 def _priority(m):
@@ -506,6 +513,33 @@ def gaps(g, topic, today=None):
                 seen.add(b)
                 out.append({"concept": b, "blocks": i})
     return out
+
+
+def retest(g, today=None, system=None):
+    """The one re-test worth a minute right now: the top due concept not already tested today (within a
+    system when given), with what a single situation needs — the open miss and its contrast, the
+    learner's own sentence, code to build it from, held analogs to pose it through."""
+    st = state(g, today)
+    tested_today = {r["concept"] for r in g["evidence"] if r["at"] == st["today"]}
+    scope = None
+    if system:
+        if system not in st["systems"]:
+            raise Invalid(f"no system {system}")
+        scope = {i for stid in st["systems"][system]["standards"] for i in st["standards"].get(stid, {}).get("concepts", [])}
+    due = [i for i in st["due"] if i not in tested_today and (scope is None or i in scope)]
+    if not due:
+        return {"due": 0}
+    c = st["concepts"][due[0]]
+    m = c["mastery"]
+    rows = [r for r in g["evidence"] if r["concept"] == c["id"]]
+    return {"due": len(due), "concept": c["id"], "name": c["name"], "kind": c["kind"], "statement": c["statement"],
+            "statement_learner": c.get("statement_learner", ""), "depth": _depth_label(m), "level": m["level"],
+            "reason": m["reason"], "overdue": m["overdue"], "open_miss": m["open_miss"],
+            "miss_confidence": m["miss_confidence"], "contrast": m["contrast"], "code": c["code"],
+            "held_analogs": [a for a in c["analogs"] if st["concepts"].get(a, {}).get("mastery", {}).get("depth", 0) >= 2],
+            "standards": [{"id": sid, "system": s["system"], "can_do": s["can_do"]}
+                          for sid, s in st["standards"].items() if c["id"] in s["concepts"]],
+            "history": [{k: r[k] for k in ("at", "level", "credit", "outcome", "note")} for r in rows[-4:]]}
 
 
 def _depth_label(m):
@@ -616,7 +650,8 @@ def digest(g, topic=None, today=None, system=None):
     for c in loose:
         out.append(_concept_line(c["id"], c))
     out += ["", "### Due for a re-test (confident misses first, then misses, help-only, once-only, overdue)",
-            *[f"- {i}: {st['concepts'][i]['mastery']['reason']}" for i in st["due"][:12]]]
+            *[f"- {i}: {st['concepts'][i]['mastery']['reason']} ({st['concepts'][i]['mastery']['overdue']} days overdue)"
+              for i in st["due"][:12]]]
     qs = [q for q in st["questions"] if q["status"] == "open"]
     if qs:
         out += ["", "### The learner's open questions", *[f"- [{q['id']}] {q['text']}" + (f" (on {q['concept']})" if q["concept"] else "") for q in qs]]

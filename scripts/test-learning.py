@@ -35,9 +35,19 @@ class Mastery(unittest.TestCase):
         self.assertEqual((m["depth"], m["held"]), (1, 0))
         ev(g, "lock-ttl", at="2026-10-01")           # same day again: still once
         self.assertEqual(learning.mastery(g, "lock-ttl", today="2026-10-01")["held"], 0)
-        ev(g, "lock-ttl", at="2026-10-03")           # a second day: held
-        m = learning.mastery(g, "lock-ttl", today="2026-10-03")
+        ev(g, "lock-ttl", at="2026-10-03")           # a second day, too soon: still not retention
+        self.assertEqual(learning.mastery(g, "lock-ttl", today="2026-10-03")["held"], 0)
+        ev(g, "lock-ttl", at="2026-10-05")           # the base gap after the first: held
+        m = learning.mastery(g, "lock-ttl", today="2026-10-05")
         self.assertEqual((m["depth"], m["held"]), (1, 1))
+
+    def test_overdue_counts_from_when_it_came_due(self):
+        g = graph()
+        ev(g, "lock-ttl", at="2026-10-01")
+        self.assertEqual(learning.mastery(g, "lock-ttl", today="2026-10-05")["overdue"], 0)
+        self.assertEqual(learning.mastery(g, "lock-ttl", today="2026-10-15")["overdue"], 10)
+        ev(g, "lease-renewal", outcome="miss", at="2026-10-01")
+        self.assertEqual(learning.mastery(g, "lease-renewal", today="2026-10-08")["overdue"], 7)
 
     def test_held_level_is_two_days_at_that_level(self):
         g = graph()
@@ -55,7 +65,7 @@ class Mastery(unittest.TestCase):
             self.assertEqual(m["spacing"], learning.BASE_SPACING_DAYS)   # depth doesn't stretch a once-only gap
         m = learning.mastery(g, "lock-ttl", today="2026-10-05")
         self.assertTrue(m["due"])
-        self.assertIn("second day", m["reason"])
+        self.assertIn("makes it held", m["reason"])
 
     def test_held_doubles_spacing(self):
         g = graph()
@@ -122,8 +132,8 @@ class Graph(unittest.TestCase):
         g = graph()
         ev(g, "lock-ttl", level="explain", at="2026-10-01")
         ev(g, "lease-renewal", level="explain", at="2026-10-01")
-        ev(g, "lease-renewal", level="explain", at="2026-10-02")
-        p = learning.state(g, today="2026-10-02")["topics"]["locks"]["progress"]
+        ev(g, "lease-renewal", level="explain", at="2026-10-05")
+        p = learning.state(g, today="2026-10-05")["topics"]["locks"]["progress"]
         self.assertEqual(p, {"held": 1, "shown": 2, "total": 2})
 
     def test_restate(self):
@@ -161,8 +171,8 @@ class Systems(unittest.TestCase):
         st = learning.state(g, today="2026-10-01")["standards"]["predict-expiry"]
         self.assertEqual((st["mastery"]["depth"], st["coverage"]), (0, {"held": 0, "shown": 1, "total": 2}))
         learning.add_evidence(g, {"standard": "predict-expiry", "level": "predict", "at": "2026-10-01"})
-        learning.add_evidence(g, {"standard": "predict-expiry", "level": "predict", "at": "2026-10-03"})
-        st = learning.state(g, today="2026-10-03")
+        learning.add_evidence(g, {"standard": "predict-expiry", "level": "predict", "at": "2026-10-05"})
+        st = learning.state(g, today="2026-10-05")
         self.assertEqual(st["standards"]["predict-expiry"]["mastery"]["held"], 1)
         self.assertEqual(st["systems"]["locking"]["progress"], {"held": 1, "met": 1, "total": 2})
         self.assertEqual(learning.mastery(g, "lock-ttl", today="2026-10-03")["evidence"], 1)
@@ -198,6 +208,26 @@ class Systems(unittest.TestCase):
         self.assertIn("OPEN MISS: counted from the renewal", text)
         self.assertIn("**Never assessed** (no standard-tagged row yet): judge-coordination", text)
         self.assertIn("  - lock-ttl", text)
+
+
+class Retest(unittest.TestCase):
+    def test_top_due_skips_what_was_tested_today(self):
+        g = system_graph()
+        ev(g, "lock-ttl", outcome="miss", note="thought it lives forever", contrast="holder dies at t=5", at="2026-10-01")
+        ev(g, "lease-renewal", at="2026-09-01")
+        b = learning.retest(g, today="2026-10-10")
+        self.assertEqual((b["concept"], b["due"], b["contrast"], b["overdue"]), ("lock-ttl", 2, "holder dies at t=5", 9))
+        self.assertEqual([s["id"] for s in b["standards"]], ["predict-expiry"])
+        ev(g, "lock-ttl", credit="scaffolded", at="2026-10-10")
+        self.assertEqual(learning.retest(g, today="2026-10-10")["concept"], "lease-renewal")
+
+    def test_system_scope(self):
+        g = system_graph()
+        ev(g, "bookmark-atomic", credit="handed", at="2026-10-01")       # due, but not in the locking system
+        self.assertEqual(learning.retest(g, today="2026-10-10", system="locking"), {"due": 0})
+        self.assertEqual(learning.retest(g, today="2026-10-10")["concept"], "bookmark-atomic")
+        with self.assertRaises(learning.Invalid):
+            learning.retest(g, system="nope")
 
 
 class Blocks(unittest.TestCase):
@@ -296,6 +326,12 @@ class CLI(unittest.TestCase):
             std = json.loads(run("standard", "s1"))
             self.assertEqual((std["concepts"], std["evidence"][0]["source"]), (["a", "d"], "chat"))
             self.assertIn("### Active system: Sys [sys]", run("state", "--system", "sys"))
+            env["LEARNING_OFFERED"] = os.path.join(d, "offered")
+            self.assertEqual(json.loads(run("retest", "--claim"))["concept"], "b")   # a was tested today
+            r = subprocess.run([sys.executable, learn, "retest", "--claim"], env=env, capture_output=True, text=True)
+            self.assertEqual(r.returncode, 3)
+            nudge = subprocess.run([sys.executable, learn, "nudge"], env=env, input="{}", capture_output=True, text=True)
+            self.assertEqual((nudge.returncode, nudge.stdout), (0, ""))   # offered today: silent
 
 
 class Roundtrip(unittest.TestCase):
