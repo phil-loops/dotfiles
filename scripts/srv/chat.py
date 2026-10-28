@@ -131,6 +131,7 @@ class Job:
         self.meta = meta or {}    # branch/path/question/repo/project — where this chat lives
         self.session_id = ""
         self.proc = None
+        self.stopped = False      # the reader asked for the kill — its exit is an ending, not a failure
         self.created = time.time()
         self.cond = threading.Condition()
 
@@ -228,7 +229,7 @@ def _run_claude(job, cmd, cwd):
             elif t == "result":
                 job.emit("done", {"ok": not ev.get("is_error"), "session_id": job.session_id})
         proc.wait()
-        if proc.returncode not in (0, None) and not job.done:
+        if proc.returncode not in (0, None) and not job.done and not job.stopped:
             err = (proc.stderr.read() or "").strip()[:400] if proc.stderr else ""
             job.emit("error", {"err": err or f"claude exited {proc.returncode}"})
     except Exception as e:   # a job thread must never die silently — surface it to subscribers
@@ -238,7 +239,7 @@ def _run_claude(job, cmd, cwd):
         # natural end OR a killed proc → guarantee one terminal frame so
         # every subscriber unblocks and the turn reads as finished.
         if not job.done:
-            job.emit("done", {"ok": True, "session_id": job.session_id})
+            job.emit("done", {"ok": True, "session_id": job.session_id, **({"stopped": True} if job.stopped else {})})
 
 
 def _subscribe(req, job, from_idx=0):
