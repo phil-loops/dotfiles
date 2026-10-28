@@ -186,6 +186,20 @@ class Systems(unittest.TestCase):
         with self.assertRaises(learning.Invalid):
             learning.add_evidence(g, {"concept": "lock-ttl", "level": "predict", "source": "slack"})
 
+    def test_evidence_keeps_the_sim_run_it_came_from(self):
+        g = system_graph()
+        run = {"scenario": "slow-insert", "kernels": {"safetyLag": False}, "result": "red",
+               "divergence": [{"event": "e2", "kind": "skipped"}]}
+        learning.add_evidence(g, {"concept": "lock-ttl", "level": "predict", "outcome": "miss", "sim": run})
+        self.assertEqual(g["evidence"][-1]["sim"], run)
+        learning.add_evidence(g, {"concept": "lock-ttl", "level": "predict", "sim": {**run, "result": None, "outcome": "red"}})
+        self.assertEqual(g["evidence"][-1]["sim"], run)
+        learning.add_evidence(g, {"concept": "lock-ttl", "level": "predict"})
+        self.assertNotIn("sim", g["evidence"][-1])
+        for bad in ({"kernels": {}, "result": "red"}, {"scenario": "s", "result": "blue"}, {"scenario": "s", "kernels": {"lock": "off"}, "result": "red"}):
+            with self.assertRaises(learning.Invalid):
+                learning.add_evidence(g, {"concept": "lock-ttl", "level": "predict", "sim": bad})
+
     def test_capture_stamps_chat_and_attaches_concepts(self):
         g = system_graph()
         applied = learning.capture(g, {"concepts": [{"id": "fencing-token", "statement": "s", "standard": "judge-coordination"}],

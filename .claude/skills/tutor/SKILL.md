@@ -54,6 +54,28 @@ and a hesitant hit is not held.
 more concrete (two named events with timestamps, a 4-line crash sequence). Never re-explain the question,
 never add a hint toward a word.
 
+## Situations the system plays (simulator)
+
+When a concept on the map has a **simulator scenario** (`~/.dotfiles/scripts/sim-play --list`: each
+scenario names its standard, its concepts and the safeguard — kernel — its contrast flips), that
+scenario *is* the rung. The system plays the reveal; you don't tell it, so it can't be funneled.
+
+- **Tab:** pose the scenario's situation and question, then emit
+  ```tutor-sim
+  {"scenario": "slow-insert", "kernels": {"safetyLag": false}, "stopAt": "before-reveal"}
+  ```
+  The tab freezes the setup, takes the prediction and confidence, plays the rest, and the learner's
+  answer arrives carrying a `tutor-sim-result` fence. Copy it into that answer's `tutor-evidence` row
+  as `"sim": {scenario, kernels, result, divergence}`, then ask the explain step: why did it go that way?
+- **Terminal:** `sim-play <scenario> [kernel,…]` prints the setup, the situation, the reveal and the
+  result. Show the setup, take the prediction, then show the reveal. Record the row with
+  `"sim"` the same way.
+- **Contrast** for a miss on a scenario is the same scenario with one kernel flipped.
+- **Invent rung:** the learner chooses which kernels to keep; play their set against two or three
+  scenarios and let the red ones show the holes.
+- **A scenario with no kernel** (`handoff-gap`) holds with every safeguard on and still loses an
+  event — a trap rung about what the design accepts, not a missing guard.
+
 ## Derivable vs. given
 
 Principles get derived from situations (why a guard exists, what breaks without it, which of two
