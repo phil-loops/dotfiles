@@ -109,7 +109,7 @@
 .rv-none { background: repeating-linear-gradient(135deg, transparent 0 6px, rgba(255, 255, 255, 0.015) 6px 12px); }
 .rv-sign.rv-add { color: var(--color-add); }
 .rv-sign.rv-del { color: var(--color-del); }
-.rv-plus { opacity: 0; color: var(--color-gold-leaf); font-weight: 600; text-align: center; }
+.rv-plus { opacity: 0; user-select: none; color: var(--color-gold-leaf); font-weight: 600; text-align: center; }
 .rv-row:hover .rv-plus, .rv-on .rv-plus { opacity: 1; }
 .rv-on { border-left-color: var(--color-gold-leaf) !important; background-color: var(--color-gold-wash); }
 .rv-row.rv-on .rv-num { color: var(--color-gold-leaf); opacity: 1; }
