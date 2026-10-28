@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { askOf, latest, questionOf, rungsOf, segments, sseFrames } from "./lesson.ts";
+import { askOf, latest, questionOf, rungsOf, segments, simResultFence, spoken, sseFrames } from "./lesson.ts";
 
 const turn = [
   "Here is the setup.",
@@ -61,4 +61,13 @@ test("server-sent frames come off whole; a partial one waits", () => {
     { event: "done", data: "{}" },
   ]);
   assert.equal(rest, "event: tok");
+});
+
+test("a sim block names the scenario and the safeguards switched off; its played result round-trips", () => {
+  const ask = 'Look.\n```tutor-sim\n{"scenario":"crash-before-bookmark","kernels":{"atomicCommit":false,"lock":true},"stopAt":"before-reveal"}\n```\nWhat happens?';
+  assert.deepEqual(segments(ask)[1], { kind: "sim", scenario: "crash-before-bookmark", off: ["atomicCommit"] });
+  const played = { scenario: "crash-before-bookmark", off: ["atomicCommit"], outcome: "red", divergence: [{ event: "e1", kind: "double" }] };
+  const answer = "twice each (confidence: sure)\n\n" + simResultFence(played);
+  assert.deepEqual(segments(answer)[1], { kind: "simResult", ...played });
+  assert.equal(spoken(answer), "twice each (confidence: sure)");
 });

@@ -5,9 +5,11 @@
 // starts one). The graph itself is written by the server, never here.
 import { createMemo, createRoot, createSignal } from "solid-js";
 import { createStore, produce } from "solid-js/store";
-import { latest, segments, type CodeSrc, type Concept, type ImportReply, type LearnState, type Pin, type Seg, type Session, type TerminalSession } from "./lesson";
+import { latest, segments, simResultFence, type CodeSrc, type Concept, type ImportReply, type LearnState, type Pin, type Seg, type Session, type TerminalSession } from "./lesson";
 import { navigate, routeArg, surface, tutorPath } from "./router";
 import { getJSON, streamPost } from "./sync";
+import { createSim, type Kernel } from "./sim";
+import { scenario } from "./simScenarios";
 
 const STORE_KEY = "tutor:sessions:v1";
 export const ckey = (id: string) => `c:${id}`;
@@ -188,13 +190,26 @@ export const tutor = createRoot(() => {
     void runTurn(id, { turn: uuid(), target: goal });
   }
 
-  /** Send an answer (or a question) into a session. */
+  /** Send an answer (or a question) into a session — a rung that froze a sim plays it now, and the
+   *  answer carries what the system did for the tutor to record. */
   function answer(id: string, text: string): boolean {
     const s = sessions[at(id)];
     if (!s || streaming() || !text.trim()) return false;
+    text += played(s.msgs[s.msgs.length - 1]?.role === "tutor" ? s.msgs[s.msgs.length - 1].text : "");
     setSessions(at(id), "msgs", produce((m) => void m.push({ role: "me", text }, { role: "tutor", text: "" })));
     void runTurn(id, { turn: uuid(), answer: text, resume: s.sessionId });
     return true;
+  }
+
+  function played(turn: string): string {
+    const sim = segments(turn).find((x) => x.kind === "sim");
+    if (sim?.kind !== "sim") return "";
+    try {
+      const r = createSim(scenario(sim.scenario), Object.fromEntries(sim.off.map((k) => [k as Kernel, false]))).runToEnd();
+      return "\n\n" + simResultFence({ scenario: sim.scenario, off: sim.off, outcome: r.outcome, divergence: r.divergence });
+    } catch {
+      return "";
+    }
   }
 
   function forget(id: string): void {
