@@ -142,9 +142,9 @@ def _gates(snap, branch, tree):
         return out
     try:
         from . import push
-        job = push._GATE_JOBS.get(push._jkey(branch)) or push._adopt_job(branch)
-        if job and job.get("tree") == tree:
-            res = next((e for e in push._journal_events(job["path"]) if e.get("event") == "result"), None)
+        run = push.gate_run(branch)
+        if run and run.meta.get("tree") == tree:
+            res = push.gate_result(run)
             gates = (res or {}).get("gates") or []
             out["names"] = [g.get("name", "") for g in gates if g.get("name") and g.get("name") != "env"]
             sq = [g for g in gates if re.search(r"squawk|migration", g.get("name", ""), re.I)]

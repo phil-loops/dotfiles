@@ -620,8 +620,8 @@ def _commit_file(tip, path, content, message):
 def _land(branch, tip, new, path):
     """Move the branch from tip to new, in its worktree when one holds it."""
     from . import push, review
-    job = push._GATE_JOBS.get(push._jkey(branch))
-    if job and push._job_running(job):
+    run = push.gate_run(branch)
+    if run and run.alive():
         raise ghreview.Refused("a gates run owns this branch's worktree — apply it after the run")
     wt = review._worktree_for_branch(branch)
     if wt:

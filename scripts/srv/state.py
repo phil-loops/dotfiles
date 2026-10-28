@@ -44,7 +44,6 @@ import collections
 import hashlib
 import json
 import os
-import tempfile
 import threading
 import time
 from urllib.parse import parse_qs
@@ -76,7 +75,6 @@ _GRAPHS = {}   # repo path -> (tips key, Graph)
 _TREES = {}    # repo path -> (refs key, {branch: tree})
 _BEHIND = {}   # repo path -> (refs key, {branch: commits on trunk it lacks})
 _ANC = {}      # (ancestor sha, tip sha) -> bool, for parents already on trunk (outside the graph)
-_SIDECARS = {"at": 0.0}
 
 
 def _refs_key(snap):
@@ -181,48 +179,24 @@ def _upstream(snap, graph, b, main, tip, remote):
     return "", False, remote not in graph.ancestors(tip) and tip not in graph.ancestors(remote)
 
 
-def _adopt_sidecars():
-    # detached gate runs a previous server process spawned are only known by their sidecar files;
-    # one scan of the temp dir every 10s, not a stat per branch per tick
-    now = time.monotonic()
-    if now - _SIDECARS["at"] < 10:
-        return
-    _SIDECARS["at"] = now
-    pre = f"stack-gates-{push._repo_id()}-"
-    try:
-        names = [e.name for e in os.scandir(tempfile.gettempdir()) if e.name.startswith(pre) and e.name.endswith(".job.json")]
-    except OSError:
-        return
-    from urllib.parse import unquote
-    for n in names:
-        b = unquote(n[len(pre):-len(".job.json")])
-        if push._jkey(b) not in push._GATE_JOBS:
-            push._adopt_job(b)
-
-
-def _jobs():
-    rid = push._repo_id()
-    return {k[1]: j for k, j in list(push._GATE_JOBS.items()) if k[0] == rid}
-
-
 def _jobs_sig(jobs):
     def mt(p):
         try:
             return os.path.getmtime(p)
         except OSError:
             return 0
-    return repr(sorted((b, j.get("tree"), push._job_running(j), mt(j.get("path", ""))) for b, j in jobs.items()))
+    return repr(sorted((b, r.meta.get("tree"), r.alive(), mt(push.journal(r))) for b, r in jobs.items()))
 
 
 def _gates(snap, b, tree, jobs):
     green = snap.branch_key(b, "gates-green-tree")
     if green and green == tree:
         return "green", []
-    job = jobs.get(b)
-    if job and job.get("tree") == tree:
-        if push._job_running(job):
+    run = jobs.get(b)
+    if run and run.meta.get("tree") == tree:
+        if run.alive():
             return "running", []
-        res = next((e for e in push._journal_events(job["path"]) if e.get("event") == "result"), None)
+        res = push.gate_result(run)
         if res:
             if res.get("ok"):
                 return "green", []
@@ -232,8 +206,7 @@ def _gates(snap, b, tree, jobs):
 
 def _git_fp(name):
     snap = repostate.snapshot()
-    _adopt_sidecars()
-    jobs = _jobs()
+    jobs = push.gate_runs()
     return snap, jobs, (snap.fingerprint, _jobs_sig(jobs))
 
 

@@ -15,7 +15,7 @@ import time
 import threading
 from urllib.parse import quote, parse_qs
 
-from . import ctx, stage, sync, repostate, shellout, stackcfg, gate_queue
+from . import ctx, stage, sync, repostate, shellout, stackcfg, gate_queue, runs
 
 
 def delta_tests(req, raw):
@@ -56,12 +56,12 @@ def delta_tests(req, raw):
     }))
 
 
-# branch → {"path": progress jsonl, "proc": Popen | "pid": int, "t0": epoch, "tree": tree sha
-# at spawn}. The dict is just a warm cache: every spawn also writes a sidecar json next to the
-# journal, so a bounced server re-adopts the still-running detached child instead of losing it.
-_GATE_JOBS = {}
+# A detached gates run is a run (srv/runs.py, kind "gates", one per repo + branch, the latest):
+# stack-gates writes its progress journal into the run's directory, each gate's output beside it,
+# so any server image — a restarted one included — reads the same run.
 _GATE_LOCK = threading.RLock()
 _REPO_IDS = {}
+GATE_RUNS_KEPT = 14 * 86_400
 
 
 def _repo_id():
@@ -75,38 +75,37 @@ def _repo_id():
     return rid
 
 
-def _jkey(branch):
-    return (_repo_id(), branch)
+def _gate_key(branch):
+    return f"{_repo_id()}/{branch}"
 
 
-def _job_file(branch):
-    # repo id + reversible encoding: the old '/'→'-' mangle collided (a/b-c vs a-b/c) and
-    # carried no repo, so a multi-repo server could adopt/harvest the WRONG run's sidecar.
-    return os.path.join(tempfile.gettempdir(), f"stack-gates-{_repo_id()}-{quote(branch, safe='')}.job.json")
+def gate_run(branch):
+    """The branch's latest gates run, live or finished — None when it was never gated here."""
+    return runs.find("gates", _gate_key(branch)) if branch else None
 
 
-def _adopt_job(branch):
-    """Re-attach to a detached gates run this server process didn't spawn (the child is
-    disowned and survives a server bounce; only the in-memory pointer died with us)."""
-    try:
-        with open(_job_file(branch)) as f:
-            j = json.load(f)
-        job = {"path": j["path"], "pid": int(j["pid"]), "t0": float(j["t0"]), "tree": j["tree"]}
-    except Exception:
-        return None
-    _GATE_JOBS[_jkey(branch)] = job
-    return job
+_LISTED = {"at": 0.0, "repo": "", "runs": []}
 
 
-def _job_running(job):
-    proc = job.get("proc")
-    if proc is not None:
-        return proc.poll() is None
-    try:
-        os.kill(job["pid"], 0)
-        return True
-    except OSError:
-        return False
+def gate_runs():
+    """{branch: its latest gates run} for this repo — the directory listing is re-read every 2s."""
+    rid = _repo_id()
+    if time.monotonic() - _LISTED["at"] > 2 or _LISTED["repo"] != rid:
+        _LISTED.update(at=time.monotonic(), repo=rid, runs=[r for r in runs.every("gates") if r.meta.get("repo") == rid])
+    return {r.meta["branch"]: r for r in _LISTED["runs"]}
+
+
+def journal(run):
+    return run.path(run.meta["journal"])
+
+
+def gate_events(run):
+    return _journal_events(journal(run))
+
+
+def gate_result(run):
+    """The run's verdict event, once it has one."""
+    return next((e for e in gate_events(run) if e.get("event") == "result"), None)
 
 
 def _tail(path, n):
@@ -153,16 +152,16 @@ def gates(req, raw):
     # detach: spawn with a progress journal and return at once — the strip tails
     # GET /gates-progress for live per-gate position instead of freezing for a tsc.
     if d.get("detach"):
-        old = _GATE_JOBS.get(_jkey(branch)) or _adopt_job(branch)
-        if old and old["tree"] == tree and _job_running(old):
+        old = gate_run(branch)
+        if old and old.meta.get("tree") == tree and old.alive():
             gate_queue.promote(_queue_file(old))
             return req._send(200, json.dumps({"ok": True, "started": True, "already": True}))
-        if old and old["tree"] == _tree(branch):
+        if old and old.meta.get("tree") == _tree(branch):
             # an orphaned run finished while no server was watching — harvest its verdict
             # instead of re-paying the typecheck for the same tree
-            result = next((e for e in _journal_events(old["path"]) if e.get("event") == "result"), None)
+            result = gate_result(old)
             if result and result.get("ok"):
-                _record_green(branch, old["tree"], result.get("gates", []))
+                _record_green(branch, old.meta["tree"], result.get("gates", []))
                 repostate.invalidate()   # the verdict landed outside a POST: unstale the snapshot now
                 return req._send(200, json.dumps({"ok": True, "cached": True, "gates": result.get("gates", [])}))
         _spawn_gates(branch, fix=d.get("fix", False), skip=skip)
@@ -186,8 +185,9 @@ def gates(req, raw):
 GATES_TURN_DIR = os.path.join(tempfile.gettempdir(), "stack-gates-turn")
 
 
-def _queue_file(job):
-    return os.path.join(GATES_TURN_DIR, os.path.basename(job["path"]) + ".queue.json")
+def _queue_file(run):
+    # stack-gates-turn names its queue request after the progress journal's basename
+    return os.path.join(GATES_TURN_DIR, run.meta["journal"] + ".queue.json")
 
 
 def _gates_cmd(branch, fix=False, background=False, tree=None, skip=()):
@@ -206,50 +206,50 @@ def _gates_cmd(branch, fix=False, background=False, tree=None, skip=()):
 def _spawn_gates(branch, fix=False, background=False, skip=()):
     with _GATE_LOCK:
         tree = _tree(branch)
-        old = _GATE_JOBS.get(_jkey(branch)) or _adopt_job(branch)
-        if old and old["tree"] == tree and _job_running(old):
+        old = gate_run(branch)
+        if old and old.meta.get("tree") == tree and old.alive():
             if not background:
                 gate_queue.promote(_queue_file(old))
             return old
         cmd = _gates_cmd(branch, fix=fix, background=background, tree=tree, skip=skip)
-        path = os.path.join(
-            tempfile.gettempdir(),
-            f"stack-gates-{_repo_id()}-{quote(branch, safe='')}-{time.time_ns()}.jsonl")
-        with open(path, "w") as f:
-            f.write(json.dumps({"event": "queued", "ts": time.time()}) + "\n")
-        proc = subprocess.Popen(cmd + ["--progress", path], cwd=ctx.repo_cwd(),
-                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                start_new_session=True)
-        job = {"path": path, "proc": proc, "t0": time.time(), "tree": tree}
-        _GATE_JOBS[_jkey(branch)] = job
-        with open(_job_file(branch), "w") as f:
-            json.dump({"path": path, "pid": proc.pid, "t0": job["t0"], "tree": tree}, f)
-        return job
+        key = _gate_key(branch)
+        # unique per run: the gate queue keys its slot request by this name, machine-wide
+        name = f"gates-{_repo_id()}-{quote(branch, safe='')}-{time.time_ns()}.jsonl"
+        path = os.path.join(runs.dir_of("gates", key), name)
+        try:
+            run = runs.start("gates", key, cmd + ["--progress", path], cwd=ctx.repo_cwd(),
+                             meta={"repo": _repo_id(), "branch": branch, "tree": tree, "journal": name},
+                             seed={name: json.dumps({"event": "queued", "ts": time.time()}) + "\n"})
+        except runs.Busy:   # a live run for an older tree: it finishes as an obsolete verdict on its own
+            return gate_run(branch)
+        _LISTED["at"] = 0.0
+        runs.prune("gates", GATE_RUNS_KEPT)
+        return run
 
 
 def gates_progress(req, u):
     qs = parse_qs(u.query)
     branch = (qs.get("branch") or [""])[0]
-    job = _GATE_JOBS.get(_jkey(branch)) or _adopt_job(branch)
-    if not job:
+    run = gate_run(branch)
+    if not run:
         return req._send(200, json.dumps({"running": False, "err": "no gates run for this branch"}))
-    events = _journal_events(job["path"])
+    events = gate_events(run)
     result = next((e for e in events if e.get("event") == "result"), None)
     if result and result.get("ok"):
         # green is recorded against the TREE the run was spawned on — a message-only reword
         # while the gates ran keeps the same tree, so the verdict carries; any content change
         # (rebase, new commit) makes a new tree and the door stays locked
-        _record_green(branch, job["tree"], result.get("gates", []))
+        _record_green(branch, run.meta["tree"], result.get("gates", []))
         repostate.invalidate()   # the verdict landed outside a POST: unstale the snapshot now
-    running = _job_running(job)
-    out = {"running": running, "elapsed": round(time.time() - job["t0"], 1), "events": events}
+    running = run.alive()
+    out = {"running": running, "elapsed": round(time.time() - run.started, 1), "events": events}
     # a gate's output so far: the one running, or ?gate= for any gate the run started
     want = (qs.get("gate") or [""])[0]
     done = {e.get("gate") for e in events if e.get("event") == "done"}
     starts = [e for e in events if e.get("event") == "start" and e.get("log")]
     pick = next((e for e in starts if e.get("gate") == want), None) if want else \
         next((e for e in reversed(starts) if e.get("gate") not in done), None)
-    if pick and pick["log"].startswith(job["path"] + "."):
+    if pick and pick["log"].startswith(journal(run) + "."):
         out["tail"] = {"gate": pick["gate"], "lines": _tail(pick["log"], 40)}
     if result:
         out["result"] = {"ok": result.get("ok"), "gates": result.get("gates", []), "note": result.get("note")}

@@ -55,13 +55,12 @@ def _candidate():
         tree = snap.tree(b)
         if not tree or push._green_tree(b) == tree:
             continue
-        job = push._GATE_JOBS.get(push._jkey(b)) or push._adopt_job(b)
-        if job and job["tree"] == tree:
-            if push._job_running(job):
+        run = push.gate_run(b)
+        if run and run.meta.get("tree") == tree:
+            if run.alive():
                 continue
             # finished for this exact tree — harvest a green, let a red stand as the memo
-            result = next((e for e in push._journal_events(job["path"])
-                           if e.get("event") == "result"), None)
+            result = push.gate_result(run)
             if result and result.get("ok"):
                 push._record_green(b, tree)
             continue
@@ -77,7 +76,7 @@ def pregate_forever():
                 continue   # nobody is looking: a speculative typecheck is pure heat
             if restack._running() or restack._queue_read():
                 continue   # trees about to move — gate after the restack, not before
-            if any(push._job_running(j) for j in list(push._GATE_JOBS.values())):
+            if any(r.alive() for r in push.gate_runs().values()):
                 continue   # one gates run machine-wide: never stack a tsc under Phil's click
             b = _candidate()
             if b:
