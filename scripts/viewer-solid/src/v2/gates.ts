@@ -18,6 +18,8 @@ export interface Progress {
   events?: GateEvent[];
   dead?: boolean;
   err?: string;
+  /** the last lines a gate has written — the running one, or the one asked for */
+  tail?: { gate: string; lines: string[] };
 }
 export interface GateRow {
   name: string;
