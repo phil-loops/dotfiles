@@ -3,6 +3,7 @@
 // reseats descendants), and u replays /outline-undo.
 import { atRepo } from "../model";
 import { command } from "../registry";
+import { say } from "../runner";
 import { view } from "../store";
 import { changed, drafts, editPr, editTo, hintsOf, PR, prChange, prHints, prOnFile, prValue, savedPr, setDrafts, setSavedPr, shown, valueOf } from "../words";
 
@@ -65,6 +66,22 @@ command({
     const fix = c && hintsOf(id, c).find((h) => h.id === hint)?.fix;
     if (!c || !fix) throw new Error("that hint has nothing to fix any more");
     editTo(id, c, fix.apply(valueOf(id, c)));
+  },
+});
+
+command({
+  id: "words.copy",
+  title: "Copy the PR title or body, for a PR form filled by hand",
+  scope: "global",
+  budget: "local",
+  quiet: true,
+  local: (t) => {
+    const [id, part] = (t ?? "").split(" ");
+    const w = prValue(id);
+    void navigator.clipboard.writeText(part === "title" ? w.subject : w.body).then(
+      () => say(`copied the PR ${part}`),
+      () => say("couldn't copy"),
+    );
   },
 });
 
