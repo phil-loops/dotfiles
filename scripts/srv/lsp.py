@@ -27,7 +27,9 @@
 #
 #   POST /lsp/hover      {branch | sha, path, line, character, side?: "new"|"old", base?: sha}
 #                          → {ok, contents, range}
-#   POST /lsp/definition (same)  → {ok, sha, side, locations: [{path, line, character, endLine}]}
+#   POST /lsp/definition (same)  → {ok, sha, side, locations: [{path, line, character, endLine, span?}]}
+#   POST /lsp/type-definition, /lsp/implementation, /lsp/references (same) → the same locations
+#   POST /lsp/symbols    {branch | sha, path} → {ok, sha, side, symbols: [{name, kind, line, endLine, depth}]}
 #        either one       → {ok: false, state: "loading" | "refused" | "error", message}
 #   POST /lsp/prepare    {branch, base?} → move the trees there in the background (no tsgo)
 #   GET  /lsp/status                    → {state, branch, trees, pid, rssMB, memLevel, …}
@@ -457,6 +459,10 @@ class Server:
                 "textDocument": {
                     "hover": {"contentFormat": ["markdown", "plaintext"]},
                     "definition": {"linkSupport": True},
+                    "typeDefinition": {"linkSupport": True},
+                    "implementation": {"linkSupport": True},
+                    "references": {},
+                    "documentSymbol": {"hierarchicalDocumentSymbolSupport": True},
                     "synchronization": {"didSave": False},
                 },
                 "window": {"workDoneProgress": True},
@@ -639,8 +645,12 @@ class Server:
                 del self.opened[other]
         if method == "textDocument/hover" and FRESH_CHECKER:
             self._touch(full)
-        return self.request(method, {"textDocument": {"uri": "file://" + full},
-                                     "position": {"line": line0, "character": character}})
+        params = {"textDocument": {"uri": "file://" + full}}
+        if method != "textDocument/documentSymbol":
+            params["position"] = {"line": line0, "character": character}
+        if method == "textDocument/references":
+            params["context"] = {"includeDeclaration": False}
+        return self.request(method, params)
 
     def _touch(self, full):
         with open(full, encoding="utf-8", errors="replace") as f:
@@ -920,7 +930,7 @@ def _ask(req, raw, method):
     try:
         d = json.loads(raw or "{}")
         branch, commit, rel = str(d.get("branch") or ""), str(d.get("sha") or ""), str(d["path"])
-        line, character = int(d["line"]), int(d["character"])
+        line, character = int(d.get("line", 1)), int(d.get("character", 0))
         side = str(d.get("side") or "new")
         base = str(d.get("base") or "")
         if not (branch or commit) or commit.startswith("-"):
@@ -975,7 +985,28 @@ def _markdown(contents):
     return contents.get("value", "")
 
 
+SYMBOL_KIND = {2: "module", 3: "namespace", 5: "class", 6: "method", 7: "property", 8: "field", 9: "constructor",
+               10: "enum", 11: "interface", 12: "function", 13: "variable", 14: "constant", 22: "enum member",
+               23: "struct", 26: "type parameter"}
+
+
+def _symbols(nodes, depth=0):
+    """documentSymbol's tree (or SymbolInformation's flat list) as rows in file order, nesting as depth."""
+    out = []
+    for n in nodes or []:
+        rng = n.get("range") or (n.get("location") or {}).get("range")
+        if not rng:
+            continue
+        sel = n.get("selectionRange") or rng
+        out.append({"name": n.get("name", ""), "kind": SYMBOL_KIND.get(n.get("kind"), "symbol"),
+                    "line": sel["start"]["line"] + 1, "endLine": rng["end"]["line"] + 1, "depth": depth})
+        out += _symbols(n.get("children"), depth + 1)
+    return out
+
+
 def _shape(root, sha, side, method, result):
+    if method == "textDocument/documentSymbol":
+        return {"ok": True, "sha": sha, "side": side, "symbols": _symbols(result)}
     if method == "textDocument/hover":
         md = _markdown((result or {}).get("contents")).strip()
         rng = (result or {}).get("range")
@@ -993,8 +1024,10 @@ def _shape(root, sha, side, method, result):
             path = os.path.relpath(path, root)
         else:
             _engine.served.add(path)
+        whole = loc.get("targetRange")
         locs.append({"path": path, "line": rng["start"]["line"] + 1,
-                     "character": rng["start"]["character"], "endLine": rng["end"]["line"] + 1})
+                     "character": rng["start"]["character"], "endLine": rng["end"]["line"] + 1,
+                     **({"span": [whole["start"]["line"] + 1, whole["end"]["line"] + 1]} if whole else {})})
     return {"ok": True, "sha": sha, "side": side, "locations": locs}
 
 
@@ -1004,6 +1037,23 @@ def hover(req, raw):
 
 def definition(req, raw):
     return _ask(req, raw, "textDocument/definition")
+
+
+def type_definition(req, raw):
+    return _ask(req, raw, "textDocument/typeDefinition")
+
+
+def implementation(req, raw):
+    return _ask(req, raw, "textDocument/implementation")
+
+
+def references(req, raw):
+    return _ask(req, raw, "textDocument/references")
+
+
+def symbols(req, raw):
+    """The file's symbols — a path, no position."""
+    return _ask(req, raw, "textDocument/documentSymbol")
 
 
 def prepare(req, raw):

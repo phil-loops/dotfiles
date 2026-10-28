@@ -570,6 +570,14 @@ class H(BaseHTTPRequestHandler):
             return lsp.hover(self, raw)
         if self.path == "/lsp/definition":
             return lsp.definition(self, raw)
+        if self.path == "/lsp/type-definition":
+            return lsp.type_definition(self, raw)
+        if self.path == "/lsp/implementation":
+            return lsp.implementation(self, raw)
+        if self.path == "/lsp/references":
+            return lsp.references(self, raw)
+        if self.path == "/lsp/symbols":
+            return lsp.symbols(self, raw)
         if self.path == "/lsp/prepare":      # move the type trees to a branch page's tip + base (no tsgo)
             return lsp.prepare(self, raw)
         if self.path == "/tutor-stop":
