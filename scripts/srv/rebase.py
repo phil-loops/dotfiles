@@ -10,9 +10,8 @@
 # pushes and never opens a PR; publishing stays Phil's, exactly like the old interactive eject.
 #
 #   rebase.start(branch, cwd, prompt)          → job key; launches once (idempotent per branch)
-import threading
 
-from srv import chat
+from srv import chat, runs
 
 # git plumbing + conflict edits. No push/PR tool — landing stays Phil's, so even a runaway
 # session can't publish. Bare "Bash" pre-approves git; headless claude never prompts, so a tool
@@ -27,7 +26,7 @@ def job_key(branch):
 
 def start(branch, cwd, prompt, model="sonnet"):
     """Launch (once) a headless claude that rebases `branch` onto origin/main in `cwd`, as a
-    chat.Job keyed by the branch so any subscriber can replay + tail it. A live job for this
+    chat turn (a run on disk) keyed by the branch so any subscriber can replay + tail it. A live job for this
     branch is reused, not re-spawned. Returns the job key to stream from."""
     key = job_key(branch)
     cmd = ["claude", "-p", prompt,
@@ -38,12 +37,11 @@ def start(branch, cwd, prompt, model="sonnet"):
            # variadic — keep it LAST so it doesn't swallow a following flag's value
            "--allowedTools", *REBASE_TOOLS]
     with chat._JOBS_LOCK:
-        job = chat._JOBS.get(key)
-        if job is not None and not job.done:
+        live = runs.find("turn", key)
+        if live and live.alive():
+            chat.attach(chat._JOBS, key, lambda m: chat.Job())
             return key
-        job = chat.Job()
-        chat._JOBS[key] = job
-        chat._prune()
-        threading.Thread(target=chat._run_claude, args=(job, cmd, cwd), daemon=True).start()
+        chat._JOBS.pop(key, None)
+        chat.launch(chat._JOBS, key, lambda m: chat.Job(), cmd, cwd, {})
     return key
 
