@@ -10,6 +10,7 @@ import "./commands/machine";
 import "./commands/wiki";
 import "./commands/tutor";
 import "./commands/sync";
+import "./commands/nav";
 import App from "./App";
 import { installKeys } from "./keyboard";
 import { startRouter, SURFACES } from "./router";
