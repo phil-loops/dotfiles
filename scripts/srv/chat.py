@@ -15,15 +15,14 @@
 #     event: error  data: {"err":"…"}
 #
 # Safety: an allowlist of read-only tools (Read/Grep/Glob) — headless claude can't prompt
-# for anything outside it, so it can look around the branch but never edit/run/commit. The
-# whole claude runs in its own process group; if the browser closes the stream we SIGKILL
-# the group so no headless session lingers.
+# for anything outside it, so it can look around the branch but never edit/run/commit. Each
+# turn is a run (srv/runs.py) in its own process group: closing the stream or restarting the
+# server leaves it running, and a reconnect replays it from disk.
 import json
-import subprocess
 import threading
 import time
 
-from . import ctx, prompts
+from . import ctx, prompts, runs
 
 
 READ_ONLY_TOOLS = ["Read", "Grep", "Glob"]
@@ -109,16 +108,18 @@ def _branch_diff(branch):
     return out
 
 
-# ── background chat jobs ──────────────────────────────────────────────────
-# A chat turn runs as a server-side JOB whose claude subprocess is decoupled from the HTTP
-# request: it buffers its whole event stream and runs to completion no matter who's connected,
-# so closing the tab (or reloading) never kills or loses an in-flight answer. A request — the
-# first one OR a reconnect — SUBSCRIBES: replay the buffer so far, then live-tail to the end.
-# Keyed by a client-supplied turn id (crypto.randomUUID), so a reload can re-attach to its turn.
+# ── turns ─────────────────────────────────────────────────────────────────
+# A turn is a run (srv/runs.py, kind "turn", keyed by the client's turn id): claude writes its
+# stream-json straight into the run's directory, so neither a closed tab nor a server restart
+# touches it. A Job is this server image's FOLLOWER of that file — it replays it from the start
+# and tails it into the SSE events the clients read. A request (the first one or a reconnect)
+# SUBSCRIBES to the follower; an image that never saw the turn rebuilds the follower from disk.
 _JOBS = {}
 _JOBS_LOCK = threading.Lock()
 JOB_TTL = 1800        # keep a finished job's buffer this long for a late reconnect (seconds)
 MAX_JOBS = 60         # bound memory; oldest FINISHED jobs evicted first (running ones never)
+RUNS_KEPT = 3 * 86_400
+STREAM, STDERR = "stream.jsonl", "stderr.log"
 
 
 class Job:
@@ -130,10 +131,14 @@ class Job:
         self.chars = 0            # answer characters streamed so far — the progress signal
         self.meta = meta or {}    # branch/path/question/repo/project — where this chat lives
         self.session_id = ""
-        self.proc = None
-        self.stopped = False      # the reader asked for the kill — its exit is an ending, not a failure
+        self.run = None
         self.created = time.time()
         self.cond = threading.Condition()
+
+    @property
+    def stopped(self):
+        """The reader asked for the kill — its exit is an ending, not a failure."""
+        return bool(self.run and self.run.marked("stopped"))
 
     def emit(self, event, obj):
         with self.cond:
@@ -151,16 +156,16 @@ class Job:
             self.cond.notify_all()
 
 
-def _prune():
-    # caller holds _JOBS_LOCK. Drop finished jobs past their TTL, then, if still over budget,
-    # evict the oldest finished ones. A running job is never evicted.
+def _prune(jobs):
+    # caller holds _JOBS_LOCK. Drop finished followers past their TTL, then, if still over budget,
+    # the oldest finished ones. A running one is never evicted; its run stays on disk either way.
     now = time.time()
-    for tid in [t for t, j in _JOBS.items() if j.done and now - j.created > JOB_TTL]:
-        del _JOBS[tid]
-    if len(_JOBS) > MAX_JOBS:
-        finished = sorted((j.created, t) for t, j in _JOBS.items() if j.done)
-        for _, tid in finished[: len(_JOBS) - MAX_JOBS]:
-            del _JOBS[tid]
+    for tid in [t for t, j in jobs.items() if j.done and now - j.created > JOB_TTL]:
+        del jobs[tid]
+    if len(jobs) > MAX_JOBS:
+        finished = sorted((j.created, t) for t, j in jobs.items() if j.done)
+        for _, tid in finished[: len(jobs) - MAX_JOBS]:
+            del jobs[tid]
 
 
 # What a tool call is ABOUT, for the one-line activity trace: the input key that best names
@@ -177,69 +182,105 @@ def _tool_arg(name, inp):
     return v[:120] + ("…" if len(v) > 120 else "")
 
 
-def _run_claude(job, cmd, cwd):
-    # The job's lifetime — runs to completion regardless of any client. Parses claude's
-    # stream-json into the same SSE events the client already understands.
+def claude_events(ev, st):
+    """One line of `claude -p --output-format stream-json` as the SSE events the clients read.
+    `st` carries what earlier lines decided (whether a text block came before, the session id)."""
+    out = []
+    t = ev.get("type")
+    if t == "system" and ev.get("subtype") == "init":
+        if ev.get("session_id"):
+            st["session"] = ev["session_id"]
+            out.append(("session", {"session_id": ev["session_id"]}))
+    elif t == "stream_event":
+        e = ev.get("event", {})
+        et = e.get("type")
+        if et == "content_block_delta":
+            delta = e.get("delta", {})
+            if delta.get("type") == "text_delta":
+                out.append(("token", {"t": delta.get("text", "")}))
+                st["text"] = True
+            elif delta.get("type") == "thinking_delta":
+                out.append(("status", {"s": "thinking"}))
+        elif et == "content_block_start" and e.get("content_block", {}).get("type") == "text":
+            # claude interleaves text→tool→text as separate blocks; their deltas carry no space
+            # across the join, so a later block glues onto the prior sentence ("…precisely.Now…")
+            if st.get("text"):
+                out.append(("token", {"t": "\n\n"}))
+            out.append(("status", {"s": "writing"}))
+    elif t == "assistant":
+        # each completed assistant message carries its tool_use blocks with FULL input (the partial
+        # stream only has empty inputs) — one activity line per call, so a watcher sees what it does
+        for block in ev.get("message", {}).get("content", []):
+            if isinstance(block, dict) and block.get("type") == "tool_use":
+                name = block.get("name", "")
+                out.append(("tool", {"name": name, "arg": _tool_arg(name, block.get("input") or {})}))
+    elif t == "result":
+        out.append(("done", {"ok": not ev.get("is_error"), "session_id": st.get("session", "")}))
+    return out
+
+
+def _follow(job, run):
+    """Replay the run's stream from the start, then tail it until the process is gone."""
+    st, off, buf = {}, 0, b""
+    job.emit("status", {"s": "starting"})
     try:
-        proc = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                text=True, start_new_session=True)
-        job.proc = proc
-        text_seen = False
-        job.emit("status", {"s": "starting"})
-        for line in proc.stdout:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                ev = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            t = ev.get("type")
-            if t == "system" and ev.get("subtype") == "init":
-                sid = ev.get("session_id", "")
-                if sid:
-                    job.emit("session", {"session_id": sid})
-            elif t == "stream_event":
-                e = ev.get("event", {})
-                et = e.get("type")
-                if et == "content_block_delta":
-                    delta = e.get("delta", {})
-                    dt = delta.get("type")
-                    if dt == "text_delta":
-                        job.emit("token", {"t": delta.get("text", "")})
-                        text_seen = True
-                    elif dt == "thinking_delta":
-                        job.emit("status", {"s": "thinking"})
-                elif et == "content_block_start":
-                    if e.get("content_block", {}).get("type") == "text":
-                        # claude interleaves text→tool→text as separate blocks; their deltas
-                        # carry no space across the join, so a later block glues onto the prior
-                        # sentence ("…precisely.Now…"). Re-paragraph at each new text block.
-                        if text_seen:
-                            job.emit("token", {"t": "\n\n"})
-                        job.emit("status", {"s": "writing"})
-            elif t == "assistant":
-                # each completed assistant message carries its tool_use blocks with FULL input
-                # (the partial stream only has empty inputs) — emit one activity line per call so
-                # a watcher sees what the session is DOING, not just its prose between tools.
-                for block in ev.get("message", {}).get("content", []):
-                    if isinstance(block, dict) and block.get("type") == "tool_use":
-                        name = block.get("name", "")
-                        job.emit("tool", {"name": name, "arg": _tool_arg(name, block.get("input") or {})})
-            elif t == "result":
-                job.emit("done", {"ok": not ev.get("is_error"), "session_id": job.session_id})
-        proc.wait()
-        if proc.returncode not in (0, None) and not job.done and not job.stopped:
-            err = (proc.stderr.read() or "").strip()[:400] if proc.stderr else ""
-            job.emit("error", {"err": err or f"claude exited {proc.returncode}"})
-    except Exception as e:   # a job thread must never die silently — surface it to subscribers
+        while True:
+            over = not run.alive()   # judged BEFORE the read, so the last read takes the tail
+            data, off = run.read(STREAM, off)
+            *lines, buf = (buf + data).split(b"\n")
+            for ln in lines:
+                try:
+                    ev = json.loads(ln)
+                except ValueError:
+                    continue
+                for event, obj in claude_events(ev, st):
+                    job.emit(event, obj)
+            if over:
+                break
+            time.sleep(0.1)
+        if job.done or job.stopped:
+            return
+        code = run.exit_code()
+        err = run.read(STDERR)[0].decode(errors="replace").strip()[-400:]
+        job.emit("error", {"err": err or (f"claude exited {code}" if code else "the turn's process died before it answered")})
+    except Exception as e:   # a follower must never die silently — surface it to subscribers
         if not job.done:
             job.emit("error", {"err": str(e)[:400]})
     finally:
-        # natural end OR a killed proc → guarantee one terminal frame so
-        # every subscriber unblocks and the turn reads as finished.
+        # a natural end OR a stop → one terminal frame, so every subscriber unblocks
         if not job.done:
             job.emit("done", {"ok": True, "session_id": job.session_id, **({"stopped": True} if job.stopped else {})})
+
+
+def _watch(job, run, jobs, key):
+    job.run = run
+    job.created = run.started
+    jobs[key] = job
+    threading.Thread(target=_follow, args=(job, run), daemon=True).start()
+    return job
+
+
+def attach(jobs, key, make):
+    """The follower of turn `key`: this image's, else one rebuilt from its run on disk, else None.
+    `make(meta)` builds the Job from the meta the turn was launched with. Caller holds _JOBS_LOCK."""
+    job = jobs.get(key)
+    if job is None:
+        run = runs.find("turn", key)
+        if run:
+            job = _watch(make(run.meta), run, jobs, key)
+    return job
+
+
+def launch(jobs, key, make, cmd, cwd, meta):
+    """Start turn `key` (a live one is joined, never doubled). Caller holds _JOBS_LOCK."""
+    try:
+        run = runs.start("turn", key, cmd, cwd, meta=meta, out=STREAM, err=STDERR)
+    except runs.Busy:
+        jobs.pop(key, None)
+        return attach(jobs, key, make)
+    _prune(jobs)
+    runs.prune("turn", RUNS_KEPT)
+    return _watch(make(meta), run, jobs, key)
 
 
 def _subscribe(req, job, from_idx=0):
@@ -283,9 +324,10 @@ def start(req, raw):
         req._send(400, json.dumps({"ok": False, "err": "need a branch or project + turn"}))
         return
 
-    job = _JOBS.get(turn)
-    # A reconnect (no question) to a job that's gone — expired, or the server restarted. Tell the
-    # client so it falls back to --resume from the session id it already persisted.
+    with _JOBS_LOCK:
+        job = attach(_JOBS, turn, lambda m: Job(m.get("job")))
+    # A reconnect (no question) to a turn with no run on disk — pruned. Tell the client so it falls
+    # back to --resume from the session id it already persisted.
     if job is None and not question:
         req.send_response(200)
         req.send_header("Content-Type", "text/event-stream")
@@ -330,11 +372,7 @@ def start(req, raw):
         # variadic — keep it LAST so it doesn't swallow a following flag's value
         cmd += ["--allowedTools", *READ_ONLY_TOOLS]
         with _JOBS_LOCK:
-            job = _JOBS.get(turn)
-            if job is None:
-                job = Job(meta)
-                _JOBS[turn] = job
-                _prune()
-                threading.Thread(target=_run_claude, args=(job, cmd, cwd), daemon=True).start()
+            job = attach(_JOBS, turn, lambda m: Job(m.get("job"))) or \
+                launch(_JOBS, turn, lambda m: Job(m.get("job")), cmd, cwd, {"job": meta})
 
     _subscribe(req, job, 0)

@@ -27,11 +27,10 @@ import os
 import re
 import subprocess
 import sys
-import threading
 import time
 from urllib.parse import parse_qs
 
-from . import ctx, chat
+from . import ctx, chat, runs
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import learning  # noqa: E402
@@ -162,30 +161,39 @@ def _system_prompt(topic):
 
 class TutorJob(chat.Job):
     """A chat Job that applies the turn's graph blocks just before `done`, so a client that
-    refetches the graph on `done` always sees this turn's evidence."""
+    refetches the graph on `done` always sees this turn's evidence. The run's `applied` marker
+    makes that once per turn: a follower replaying a finished turn re-sends the recorded result."""
 
-    def __init__(self, meta, tab, topic):
-        super().__init__(meta)
+    def __init__(self, meta):
+        super().__init__({"target": meta.get("target", "")})
         self.text = []
-        self.tab = tab
-        self.topic = topic
+        self.tab = meta.get("tab", "")
+        self.topic = meta.get("topic", "")
         self.protocol = _protocol_version()
 
     def emit(self, event, obj):
         if event == "token":
             self.text.append(obj.get("t", ""))
         if event == "done" and not self.done and not self.stopped:   # a cut-off turn's blocks are half-written
-            try:
-                with learning.editing() as g:
-                    topic, applied, errors = learning.apply_blocks(g, "".join(self.text), session=self.tab, topic=self.topic)
-            except Exception as exc:   # the turn's text still stands; say why the graph didn't move
-                topic, applied, errors = self.topic, [], [str(exc)[:300]]
-            super().emit("graph", {"topic": topic, "applied": applied, "errors": errors, "protocol": self.protocol})
+            super().emit("graph", self._graph())
         super().emit(event, obj)
+
+    def _graph(self):
+        done = self.run.marker("applied") if self.run else None
+        if done:
+            return json.loads(done)
+        try:
+            with learning.editing() as g:
+                topic, applied, errors = learning.apply_blocks(g, "".join(self.text), session=self.tab, topic=self.topic)
+        except Exception as exc:   # the turn's text still stands; say why the graph didn't move
+            topic, applied, errors = self.topic, [], [str(exc)[:300]]
+        out = {"topic": topic, "applied": applied, "errors": errors, "protocol": self.protocol}
+        if self.run:
+            self.run.mark("applied", json.dumps(out))
+        return out
 
 
 _JOBS = {}
-_JOBS_LOCK = threading.Lock()
 
 
 def start(req, raw):
@@ -202,7 +210,8 @@ def start(req, raw):
     if cwd not in _worktrees():
         return req._send(400, json.dumps({"ok": False, "err": f"not a worktree of this repo: {cwd}"}))
 
-    job = _JOBS.get(turn)
+    with chat._JOBS_LOCK:
+        job = chat.attach(_JOBS, turn, TutorJob)
     if job is None and not (target or answer):
         req.send_response(200)
         req.send_header("Content-Type", "text/event-stream")
@@ -234,28 +243,18 @@ def start(req, raw):
             if d.get("fork"):
                 cmd += ["--fork-session"]
         cmd += ["--tools", *TOOLS, "--allowedTools", *ALLOWED]
-        with _JOBS_LOCK:
-            job = _JOBS.get(turn)
-            if job is None:
-                job = TutorJob({"target": target}, tab, topic)
-                _JOBS[turn] = job
-                now = time.time()
-                for t in [t for t, j in _JOBS.items() if j.done and now - j.created > chat.JOB_TTL]:
-                    del _JOBS[t]
-                threading.Thread(target=chat._run_claude, args=(job, cmd, cwd), daemon=True).start()
+        with chat._JOBS_LOCK:
+            job = chat.attach(_JOBS, turn, TutorJob) or \
+                chat.launch(_JOBS, turn, TutorJob, cmd, cwd, {"target": target, "tab": tab, "topic": topic})
 
     chat._subscribe(req, job, 0)
 
 
 def stop(req, raw):
     turn = (json.loads(raw or "{}").get("turn") or "").strip()
-    job = _JOBS.get(turn)
-    if job and job.proc and job.proc.poll() is None:
-        job.stopped = True
-        try:
-            os.killpg(os.getpgid(job.proc.pid), 9)
-        except (ProcessLookupError, OSError):
-            pass
+    run = runs.find("turn", turn) if turn else None
+    if run and run.alive():
+        run.stop()
     req._send(200, json.dumps({"ok": True}))
 
 
