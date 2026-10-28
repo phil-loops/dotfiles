@@ -7,7 +7,8 @@ import { command, type Write } from "../registry";
 import { navigate, tutorPath } from "../router";
 import { armed, menuOpen, setArmed, setCursor, setMenuOpen, setSheetOpen, sheetOpen } from "../ui";
 import { ckey, tutor } from "../tutoring";
-import { definition, dismiss, hover, pop, type Source } from "../review/types";
+import { dismiss, goto, hover, pop, symbols, type Source } from "../review/types";
+import { nav } from "../nav";
 
 const known = (id: string | undefined) => !!tutor.concept(id);
 const kept = (id: string | undefined) => !!id && tutor.sessions.some((s) => s.id === id);
@@ -66,6 +67,7 @@ command({
       setMenuOpen(false);
       setSheetOpen(false);
     } else if (pop()) dismiss();
+    else if (nav.picker()) nav.close();
     else if (armed()) setArmed(undefined);
     else if (tutor.drawer()) tutor.setDrawer(undefined);
     else if (tutor.evidenceOpen()) tutor.setEvidenceOpen(false);
@@ -390,17 +392,8 @@ const pinSource = (): Source | null => {
   return p && !p.path.startsWith("/") && tutor.code() && !tutor.code()!.err ? { repo: "", sha: p.ref || "HEAD" } : null;
 };
 command({ id: "tutor.types", label: "type", title: "Show the type under the pointer in the code pane (hover)", scope: "tutor", budget: "local", keys: ["space k"], available: () => !!pinSource(), local: () => hover(pinSource()!) });
-command({
-  id: "tutor.definition",
-  label: "def",
-  title: "Go to the definition of the name under the pointer — the code pane follows it",
-  scope: "tutor",
-  budget: "local",
-  keys: ["g d"],
-  available: () => !!pinSource(),
-  local: () =>
-    definition((path, line, sha) => {
-      tutor.showPin({ path, ref: sha, lines: [line, line] });
-      return true;
-    }, pinSource()!),
-});
+command({ id: "tutor.definition", label: "def", title: "Go to the definition — the code pane follows it", scope: "tutor", budget: "local", keys: ["g d"], available: () => !!pinSource(), local: () => goto("definition", pinSource()!) });
+command({ id: "tutor.type-definition", label: "type def", title: "Go to the definition of its type", scope: "tutor", budget: "local", keys: ["g y"], available: () => !!pinSource(), local: () => goto("type-definition", pinSource()!) });
+command({ id: "tutor.implementation", label: "impl", title: "Go to its implementations", scope: "tutor", budget: "local", keys: ["g I"], available: () => !!pinSource(), local: () => goto("implementation", pinSource()!) });
+command({ id: "tutor.references", label: "refs", title: "List its references", scope: "tutor", budget: "local", keys: ["g r"], available: () => !!pinSource(), local: () => goto("references", pinSource()!) });
+command({ id: "tutor.symbols", label: "symbols", title: "List the pinned file's symbols", scope: "tutor", budget: "local", keys: ["space S"], available: () => !!pinSource(), local: () => symbols(pinSource()!, tutor.pin()!.path) });

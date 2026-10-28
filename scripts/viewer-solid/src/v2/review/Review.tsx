@@ -1,7 +1,7 @@
 // The review page: GitHub's pull-request review, local. Files changed — a file tree with viewed
 // boxes, the diff (unified or split) with conversations folded in at their lines — and the
 // Conversation. Everything it does is a registered command (commands/review.ts); this file draws.
-import { createEffect, createMemo, createSelector, For, Match, on, onCleanup, Show, Switch } from "solid-js";
+import { createEffect, createMemo, createSelector, For, Match, on, onCleanup, onMount, Show, Switch } from "solid-js";
 import Key from "../Key";
 import { keyOf } from "../registry";
 import { bind } from "../runner";
@@ -20,9 +20,20 @@ import LoopStrip from "../LoopStrip";
 import ShipLine from "./Ship";
 import TypesPop from "./TypesPop";
 import { notePointer } from "./types";
+import CodePane from "../CodePane";
+import Picker from "../Picker";
+import { nav } from "../nav";
+import { side } from "./side";
 
 export default function Review() {
   const selected = createSelector(() => pg.here()?.key);
+  onMount(() => {
+    const detach = nav.attach({ open: side.open, here: side.here });
+    onCleanup(() => {
+      detach();
+      side.close();
+    });
+  });
   createEffect(
     on(
       () => pg.here()?.key,
@@ -58,7 +69,7 @@ export default function Review() {
             </div>
           </Match>
           <Match when={pg.tab() === "files"}>
-            <div class="rv-body">
+            <div class="rv-body" classList={{ "rv-body-side": !!side.loc() }}>
               <FileTree />
               <div class="rv-files" data-paint={loaded() ? "review" : undefined} onPointerMove={notePointer}>
                 <Show when={loaded()} fallback={<p class="rv-quiet">{pg.loadErr() ? `couldn't read the diff — ${pg.loadErr()}` : "reading the diff…"}</p>}>
@@ -68,6 +79,25 @@ export default function Review() {
                   </Show>
                 </Show>
               </div>
+              <Show when={side.loc()}>
+                {(l) => (
+                  <aside class="rv-side">
+                    <CodePane
+                      path={l().path}
+                      refLabel={l().sha}
+                      text={side.text()}
+                      lit={[l().line, Math.max(l().line, l().end ?? l().line)]}
+                      repo={l().repo}
+                      sha={l().sha}
+                      close={
+                        <button class="shrink-0 text-ink-faint hover:text-ink" title="close (esc)" onClick={bind("review.side.close")}>
+                          ✕
+                        </button>
+                      }
+                    />
+                  </aside>
+                )}
+              </Show>
             </div>
           </Match>
         </Switch>
@@ -79,6 +109,7 @@ export default function Review() {
         <AddressSheet />
       </Show>
       <TypesPop />
+      <Picker />
     </div>
   );
 }

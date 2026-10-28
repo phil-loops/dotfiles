@@ -14,7 +14,9 @@ import { shown } from "../words";
 import { bkey, model } from "../model";
 import { suggestionOf } from "../review/markdown";
 import { atRepoPath, BASES, page as pg, short, sideLine, type Base, type Composer } from "../review/page";
-import { definition, dismiss, hover, pop } from "../review/types";
+import { dismiss, goto, hover, pop, symbols } from "../review/types";
+import { side } from "../review/side";
+import { nav as codeNav } from "../nav";
 
 const rid = () => Math.random().toString(36).slice(2, 12);
 const iso = () => new Date().toISOString().replace(/\.\d+Z$/, "Z");
@@ -468,6 +470,8 @@ command({
       setMenuOpen(false);
       setSheetOpen(false);
     } else if (pop()) dismiss();
+    else if (codeNav.picker()) codeNav.close();
+    else if (side.loc()) side.close();
     else if (pg.composer()) pg.setComposer(null);
     else if (pg.overlay()) pg.setOverlay(null);
     else if (pg.filtering()) pg.setFiltering(false);
@@ -476,21 +480,12 @@ command({
   },
 });
 command({ id: "review.types", label: "type", title: "Show the type (hover)", scope: "review", budget: "local", keys: ["space k"], available: onFiles, local: () => hover() });
-command({
-  id: "review.definition",
-  label: "def",
-  title: "Go to definition",
-  scope: "review",
-  budget: "local",
-  keys: ["g d"],
-  available: onFiles,
-  local: () =>
-    definition((path, line) => {
-      const key = pg.stops().find((s) => s.kind === "line" && s.path === path && s.row.right?.new === line)?.key;
-      if (key) pg.setCursor(key);
-      return !!key;
-    }),
-});
+command({ id: "review.definition", label: "def", title: "Go to the definition — in the diff when it's there, else beside it", scope: "review", budget: "local", keys: ["g d"], available: onFiles, local: () => goto("definition") });
+command({ id: "review.type-definition", label: "type def", title: "Go to the definition of its type", scope: "review", budget: "local", keys: ["g y"], available: onFiles, local: () => goto("type-definition") });
+command({ id: "review.implementation", label: "impl", title: "Go to its implementations", scope: "review", budget: "local", keys: ["g I"], available: onFiles, local: () => goto("implementation") });
+command({ id: "review.references", label: "refs", title: "List its references", scope: "review", budget: "local", keys: ["g r"], available: onFiles, local: () => goto("references") });
+command({ id: "review.symbols", label: "symbols", title: "List the file's symbols", scope: "review", budget: "local", keys: ["space S"], available: onFiles, local: () => symbols() });
+command({ id: "review.side.close", title: "Close the code beside the diff", scope: "review", budget: "local", quiet: true, available: () => !!side.loc(), local: () => side.close() });
 command({
   id: "review.open",
   label: "helix",
