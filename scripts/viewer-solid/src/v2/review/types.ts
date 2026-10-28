@@ -14,6 +14,8 @@ export interface Pos {
   side: "new" | "old";
   x: number;
   y: number;
+  /** where `.member` starts when the name is followed by one — a namespace's member is what g d wants */
+  member?: number;
 }
 
 /** Code outside the review page: the repo it's in ("" for the server's own) and the commit it's at. */
@@ -78,7 +80,7 @@ export function position(src?: Source): Pos | null {
       const w = wordAt(hit.el.textContent ?? "", hit.offset);
       if (w) {
         const b = hit.el.getBoundingClientRect();
-        return { path: hit.el.dataset.path!, line: +hit.el.dataset.line!, side: hit.el.dataset.side as "new" | "old", character: w.start, x: pointer.x, y: b.bottom };
+        return { path: hit.el.dataset.path!, line: +hit.el.dataset.line!, side: hit.el.dataset.side as "new" | "old", character: w.start, member: memberAt(hit.el.textContent ?? "", w.end), x: pointer.x, y: b.bottom };
       }
     }
   }
@@ -93,8 +95,10 @@ export function position(src?: Source): Pos | null {
   while ((m = NAME.exec(text)) && SKIP.has(m[0]));
   if (!m) return null;
   const b = el.getBoundingClientRect();
-  return { path: el.dataset.path!, line: +el.dataset.line!, side: el.dataset.side as "new" | "old", character: m.index, x: b.left + 40, y: b.bottom };
+  return { path: el.dataset.path!, line: +el.dataset.line!, side: el.dataset.side as "new" | "old", character: m.index, member: memberAt(text, m.index + m[0].length), x: b.left + 40, y: b.bottom };
 }
+
+const memberAt = (text: string, end: number): number | undefined => (text[end] === "." && isWord(text[end + 1]) ? end + 1 : undefined);
 
 /** the server's sentences are markdown-ish ("_Refused: …_") */
 const plainNote = (m?: string) => (m ?? "").replace(/^_+|_+$/g, "").replace(/^Refused:\s*/, "");
@@ -133,8 +137,12 @@ export function definition(jump: (path: string, line: number, sha: string) => bo
   const p = position(src);
   if (!p) return void setPop({ kind: "note", x: innerWidth / 2, y: 120, text: "nothing to look up here" });
   setPop({ kind: "wait", x: p.x, y: p.y, text: "finding the definition…" });
-  type Def = { ok: boolean; sha?: string; locations?: { path: string; line: number }[]; state?: string; message?: string };
-  void asking<Def>("/lsp/definition", p, src).then(async (r) => {
+  type Def = { ok: boolean; sha?: string; locations?: { path: string; line: number; character?: number; endLine?: number }[]; state?: string; message?: string };
+  // a namespace import's definition is its whole module (line 1 to the end) — ask at the member instead
+  const wholeModule = (r: Def) => r.ok && r.locations?.length === 1 && r.locations[0].line === 1 && !r.locations[0].character && (r.locations[0].endLine ?? 1) > 1;
+  void asking<Def>("/lsp/definition", p, src).then(async (first) => {
+    const member = first && wholeModule(first) && p.member != null ? await asking<Def>("/lsp/definition", { ...p, character: p.member }, src) : null;
+    const r = member?.ok && member.locations?.length ? member : first;
     if (!r) return;
     const locs = r.ok ? r.locations ?? [] : [];
     if (!locs.length) return void setPop({ kind: "note", x: p.x, y: p.y, text: r.ok ? "no definition found" : plainNote(r.message) || "types aren't available" });
