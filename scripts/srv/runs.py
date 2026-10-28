@@ -112,15 +112,24 @@ class Run:
         return data, offset + len(data)
 
 
-def start(kind, key, argv, cwd, meta=None, out="out.log", err=None, env=None):
+def dir_of(kind, key):
+    """Where the run (kind, key) lives — for arguments that must name a file in it before it starts."""
+    return _dir(kind, key)
+
+
+def start(kind, key, argv, cwd, meta=None, out="out.log", err=None, env=None, seed=None):
     """Launch `argv` as the run (kind, key). stdout goes to `out` in the run's directory, stderr to
-    `err` (or alongside stdout). Raises Busy when a live run holds the key."""
+    `err` (or alongside stdout); `seed` {name: text} files exist before it starts. Raises Busy when
+    a live run holds the key."""
     d = _dir(kind, key)
     old = find(kind, key)
     if old and old.alive():
         raise Busy(f"{kind} {key} is running (pid {old.pid})")
     shutil.rmtree(d, ignore_errors=True)
     os.makedirs(d)
+    for name, text in (seed or {}).items():
+        with open(os.path.join(d, name), "w") as f:
+            f.write(text)
     started = time.time()
     run_id = f"{started:.6f}".replace(".", "")
     with open(os.path.join(d, out), "wb") as o, open(os.path.join(d, err or out), "ab") as e:

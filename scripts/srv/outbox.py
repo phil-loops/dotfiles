@@ -223,11 +223,11 @@ def _gates(snap, branch, tree):
     green = snap.branch_key(branch, "gates-green-tree")
     if green and green == tree:
         return "green", []
-    job = push._GATE_JOBS.get(push._jkey(branch)) or push._adopt_job(branch)
-    if job and job.get("tree") == tree:
-        if push._job_running(job):
+    run = push.gate_run(branch)
+    if run and run.meta.get("tree") == tree:
+        if run.alive():
             return "running", []
-        res = next((e for e in push._journal_events(job["path"]) if e.get("event") == "result"), None)
+        res = push.gate_result(run)
         if res:
             if res.get("ok"):
                 return "green", []
