@@ -11,7 +11,7 @@ import { gateRows, type GateRow, type Progress } from "../gates";
 import { model } from "../model";
 import { keyOf } from "../registry";
 import { bind, runOf } from "../runner";
-import { forceScopeOf, pushRoute, readForceScope, type Guard } from "../commands/branch";
+import { forceScopeOf, gateShown, pushRoute, readForceScope, type Guard } from "../commands/branch";
 import { dirtOpen, inspecting, motionOf } from "../commands/sync";
 import Key from "../Key";
 import { PHASE_WORD, syncNeeds, type DirtRow, type PrepRoute, type SyncFacts } from "../syncing";
@@ -28,9 +28,11 @@ export default function ShipLine() {
   const id = () => pg.id();
   const v = () => model.branchView(id());
   const b = () => v()?.b;
+  const shown = () => (gateShown()?.startsWith(`${id()} `) ? gateShown()!.slice(id()!.length + 1) : "");
   const [progress, { refetch }] = createResource(
-    () => (b() ? `${b()!.repo}|${b()!.name}|${b()!.tip}|${b()!.gates}` : null),
-    () => getJSON<Progress>(atRepoPath(b()!.repo, `/gates-progress?branch=${encodeURIComponent(b()!.name)}`)).catch(() => null),
+    () => (b() ? `${b()!.repo}|${b()!.name}|${b()!.tip}|${b()!.gates}|${shown()}` : null),
+    () =>
+      getJSON<Progress>(atRepoPath(b()!.repo, `/gates-progress?branch=${encodeURIComponent(b()!.name)}${shown() ? `&gate=${encodeURIComponent(shown())}` : ""}`)).catch(() => null),
   );
   createEffect(() => {
     if (!progress()?.running) return;
@@ -160,6 +162,9 @@ export default function ShipLine() {
       <Show when={motion()}>
         <Strip id={id()} rows={motion()!.dirt?.rows ?? []} files={motion()!.dirt?.files ?? []} />
       </Show>
+      <Show when={!motion() && rows().length && (progress()?.running || red().length || shown())}>
+        <GatesStrip id={id()!} rows={rows()} progress={progress()!} shown={shown()} />
+      </Show>
       <Show when={!motion() && scope()}>
         <GuardStrip guards={scope()!.guards} />
       </Show>
@@ -259,7 +264,59 @@ function DirtDiff(props: { row: DirtRow }) {
   );
 }
 
-/** The force scope's guards as steps: each ✓ or ✗, so a refusal reads as the guard that failed. */
+const GATE_STEP = { queued: "idle", running: "run", green: "ok", waived: "skip", red: "fail", stopped: "fail" } as const;
+
+/** Every gate of the run as a step with its time, and the output of the one running (or the one
+ *  clicked) — read from the run's journal on the server, so a reload picks it up mid-run. */
+function GatesStrip(props: { id: string; rows: GateRow[]; progress: Progress; shown: string }) {
+  let pre: HTMLPreElement | undefined;
+  createEffect(() => {
+    props.progress.tail?.lines.length;
+    if (pre) pre.scrollTop = pre.scrollHeight;
+  });
+  const red = () => props.rows.filter((g) => g.state === "red" && g.summary && g.name !== props.progress.tail?.gate);
+  return (
+    <div class="rv-strip">
+      <div class="rv-strip-row">
+        <span class="text-ink-faint">gates</span>
+        <For each={props.rows}>
+          {(g) => (
+            <button class="rv-step rv-gate" data-state={GATE_STEP[g.state]} data-open={props.progress.tail?.gate === g.name} title={g.state === "queued" ? "queued" : "show its output"} onClick={bind("branch.gates.show", `${props.id} ${g.name}`)}>
+              <i>{ICON[GATE_STEP[g.state]]}</i>
+              {g.name}
+              <Show when={g.ms != null}>
+                <span class="text-ink-faint"> {secs(g.ms)}</span>
+              </Show>
+            </button>
+          )}
+        </For>
+        <span class="flex-1" />
+        <Show when={props.progress.running && props.progress.elapsed != null}>
+          <span class="text-ink-faint">{secs(props.progress.elapsed! * 1000)} in</span>
+        </Show>
+      </div>
+      <For each={red()}>
+        {(g) => (
+          <div class="rv-step-note" data-state="fail">
+            <b>{g.name}</b> {g.summary}
+          </div>
+        )}
+      </For>
+      <Show when={props.progress.tail}>
+        {(t) => (
+          <>
+            <div class="text-[11px] text-ink-faint">
+              {t().gate} · {props.rows.find((g) => g.name === t().gate)?.state === "running" ? "output so far" : "output"}
+            </div>
+            <pre ref={pre} class="rv-gate-tail">{t().lines.join("\n") || "(no output yet)"}</pre>
+          </>
+        )}
+      </Show>
+    </div>
+  );
+}
+
+/** The force scope's guards: each ✓ or ✗, so a refusal reads as the guard that failed. */
 function GuardStrip(props: { guards: Guard[] }) {
   return (
     <div class="rv-strip">

@@ -59,6 +59,16 @@ command({
     };
   },
 });
+/** The gate whose output the strip shows instead of the running one's — "<branch id> <gate>". */
+export const [gateShown, setGateShown] = createSignal<string | null>(null);
+command({
+  id: "branch.gates.show",
+  title: "Show a gate's output in the gates strip (again to go back to the running one)",
+  scope: "branch",
+  budget: "local",
+  quiet: true,
+  local: (target) => setGateShown((cur) => (cur === target ? null : target!)),
+});
 command({
   id: "branch.gates.skip",
   title: "Skip a red gate for this code and re-run the rest",
