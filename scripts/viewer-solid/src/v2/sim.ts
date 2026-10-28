@@ -174,7 +174,7 @@ export function createSim(scenario: Scenario, kernels: Partial<Kernels> = {}): S
   const lockHolder = (name: string, except?: Worker) =>
     s.workers.find((w) => w !== except && w.txn?.bookmarks.includes(name));
   const pos = (e: SimEvent): Cursor => ({ stamp: e.stamp, id: e.id });
-  const count = (w: Worker) => {
+  const applyCounts = (w: Worker) => {
     for (const [name, ids] of Object.entries(w.txn!.page)) {
       const projection = bookmark(name)!.projection;
       for (const id of ids) {
@@ -226,7 +226,7 @@ export function createSim(scenario: Scenario, kernels: Partial<Kernels> = {}): S
     if (!w.txn) return `${w.id} has no page open`;
     w.txn.applied = true;
     if (!k.atomicCommit) {
-      count(w);
+      applyCounts(w);
       return `${w.id} commits the counts (bookmark not saved yet)`;
     }
     return `${w.id} adds the counts in its open transaction`;
@@ -234,7 +234,7 @@ export function createSim(scenario: Scenario, kernels: Partial<Kernels> = {}): S
 
   function save(w: Worker) {
     if (!w.txn) return `${w.id} has no page open`;
-    if (k.atomicCommit && w.txn.applied) count(w);
+    if (k.atomicCommit && w.txn.applied) applyCounts(w);
     for (const [name, ids] of Object.entries(w.txn.page)) {
       const last = ids.at(-1);
       if (last) bookmark(name)!.cursor = pos(s.events.find((e) => e.id === last)!);
