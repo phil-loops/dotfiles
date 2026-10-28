@@ -26,6 +26,8 @@ export const SAME_MOVE: Record<string, string[]> = {
   "preview it": ["branch.preview", "review.preview", "forest.preview"],
   "sync it": ["branch.sync", "review.sync"],
   "the map": ["review.map", "tutor.map"],
+  "show the type": ["review.types", "tutor.types"],
+  "go to the definition": ["review.definition", "tutor.definition"],
   "start writing": ["review.note.insert", "tutor.write", "branch.describe.edit"],
 };
 
