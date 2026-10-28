@@ -135,8 +135,9 @@ export const tutor = createRoot(() => {
     if (typeof s.primed === "string") body.primed = s.primed;
     let tutorIdx = s.msgs.length - 1;
     let reset = reattach;
-    try {
-      await streamPost("/tutor", body, (event, p) => {
+    let ended = false;
+    const follow = (b: Record<string, string>) =>
+      streamPost("/tutor", b, (event, p) => {
         if (event === "session" && p.session_id) {
           setSessions(i(), "sessionId", String(p.session_id));
           if (p.session_id !== sessions[i()].importedFrom) setSessions(i(), "forkNext", false);
@@ -166,8 +167,26 @@ export const tutor = createRoot(() => {
         } else if (event === "done" && p.stopped) {
           setSessions(i(), "msgs", produce((m) => void (m[tutorIdx]?.role === "tutor" && !m[tutorIdx].text && m.splice(tutorIdx, 1))));
         }
-        return event === "done" || event === "error" || event === "gone";
+        ended = event === "done" || event === "error" || event === "gone";
+        return ended;
       });
+    try {
+      // the turn is a run on the server's disk: a dropped stream (the server restarting) is
+      // re-joined by turn id and replayed from its start, until the turn ends or ~a minute passes
+      for (let tries = 0; ; tries++) {
+        try {
+          await follow(body);
+        } catch (e) {
+          if (leaving) return;
+          if (tries >= 60) throw e;
+        }
+        if (ended || leaving) break;
+        if (tries >= 60) throw new Error("lost the turn's stream");
+        setStatus("reconnecting");
+        await new Promise((r) => setTimeout(r, 1000));
+        body = { turn: body.turn, tab: body.tab, ...(body.topic ? { topic: body.topic } : {}), ...(body.cwd ? { cwd: body.cwd } : {}) };
+        reset = true;
+      }
     } catch (e) {
       if (!leaving) setSessions(i(), "error", String(e));
     } finally {
