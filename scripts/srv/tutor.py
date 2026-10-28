@@ -174,7 +174,7 @@ class TutorJob(chat.Job):
     def emit(self, event, obj):
         if event == "token":
             self.text.append(obj.get("t", ""))
-        if event == "done" and not self.done:
+        if event == "done" and not self.done and not self.stopped:   # a cut-off turn's blocks are half-written
             try:
                 with learning.editing() as g:
                     topic, applied, errors = learning.apply_blocks(g, "".join(self.text), session=self.tab, topic=self.topic)
@@ -251,6 +251,7 @@ def stop(req, raw):
     turn = (json.loads(raw or "{}").get("turn") or "").strip()
     job = _JOBS.get(turn)
     if job and job.proc and job.proc.poll() is None:
+        job.stopped = True
         try:
             os.killpg(os.getpgid(job.proc.pid), 9)
         except (ProcessLookupError, OSError):

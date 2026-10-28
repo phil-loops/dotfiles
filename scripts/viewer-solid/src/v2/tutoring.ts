@@ -116,6 +116,9 @@ export const tutor = createRoot(() => {
     return s ? (latest(s.msgs, "rung")?.concept ?? undefined) : undefined;
   };
 
+  let leaving = false;
+  window.addEventListener("pagehide", () => (leaving = true));
+
   async function runTurn(id: string, body: Record<string, string>, reattach = false): Promise<void> {
     const i = () => at(id);
     setSessions(i(), { pendingTurn: body.turn, lastActive: Date.now(), error: undefined });
@@ -158,16 +161,21 @@ export const tutor = createRoot(() => {
           tutorIdx = -1;
         } else if (event === "error") {
           setSessions(i(), "error", String(p.err || "the turn failed"));
+        } else if (event === "done" && p.stopped) {
+          setSessions(i(), "msgs", produce((m) => void (m[tutorIdx]?.role === "tutor" && !m[tutorIdx].text && m.splice(tutorIdx, 1))));
         }
         return event === "done" || event === "error" || event === "gone";
       });
     } catch (e) {
-      setSessions(i(), "error", String(e));
+      if (!leaving) setSessions(i(), "error", String(e));
     } finally {
-      setSessions(i(), "pendingTurn", undefined);
-      save();
-      setStreaming(false);
-      setStatus("");
+      // a reload aborts the stream mid-turn: keep pendingTurn so the next load re-attaches
+      if (!leaving) {
+        setSessions(i(), "pendingTurn", undefined);
+        save();
+        setStreaming(false);
+        setStatus("");
+      }
     }
   }
 
