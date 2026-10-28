@@ -13,6 +13,24 @@ import { list, view } from "./store";
 import { getJSON } from "./sync";
 import { changed, drafts, editPr, editTo, githubOwns, hintsOf, PR, prChange, prHints, prValue, shown, valueOf, type Commit, type Outline } from "./words";
 
+/** Copies text for a PR form filled by hand, outside the viewer's push door. */
+function CopyButton(props: { label: string; text: () => string }) {
+  const [done, setDone] = createSignal(false);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  onCleanup(() => clearTimeout(timer));
+  const copy = async () => {
+    await navigator.clipboard.writeText(props.text());
+    setDone(true);
+    clearTimeout(timer);
+    timer = setTimeout(() => setDone(false), 1500);
+  };
+  return (
+    <button type="button" class="text-ink-faint hover:text-ink" onClick={copy}>
+      {done() ? "copied" : props.label}
+    </button>
+  );
+}
+
 const TONE: Record<Hint["tone"], string> = { error: "border-ember text-ember", warn: "border-gold-deep text-gold-leaf", note: "border-rule text-ink-faint" };
 
 /** A branch's /outline, read again when its tip moves (and while the server drafts the PR body). */
@@ -197,6 +215,10 @@ export default function Commits(props: { branchId: string; readOnly?: boolean; l
             <Show when={prParts().template}>
               <div class="px-2 text-[11px] text-ink-faint">＋ the repo's PR template</div>
             </Show>
+            <div class="mt-1 flex gap-3 px-2 text-[11px]">
+              <CopyButton label="copy title" text={() => pr().subject} />
+              <CopyButton label="copy body" text={() => pr().body} />
+            </div>
           </Show>
         </div>
       </Show>
