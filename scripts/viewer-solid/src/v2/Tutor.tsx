@@ -5,16 +5,17 @@
 //            the sessions this browser keeps, terminal sessions to pick up
 //   session  the topic's map ("you are here") · the current rung (earlier ones fold) · pinned code
 //   drawer   one concept: its depth and the evidence behind it (each credit correctable), links, questions
-import { createEffect, createMemo, For, Index, on, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { createEffect, createMemo, For, on, onCleanup, onMount, Show, type JSX } from "solid-js";
 import Key from "./Key";
 import { SimFrozen, SimPlayed } from "./TutorSim";
 import { ago, CONFIDENCES, CREDITS, LEVEL_HINT, LEVELS, rungsOf, segments, askOf, questionOf, latest, pipsTitle, spoken, type Evidence, type Mastery, type Session } from "./lesson";
 import { model } from "./model";
 import { routeArg } from "./router";
 import { renderMarkdown } from "./review/markdown";
-import { highlight, langOf } from "./review/highlight";
 import TypesPop from "./review/TypesPop";
-import { notePointer } from "./review/types";
+import CodePane from "./CodePane";
+import Picker from "./Picker";
+import { nav } from "./nav";
 import { bind, dispatch } from "./runner";
 import { armed, setCursor } from "./ui";
 import { ckey, skey, touched, tutor } from "./tutoring";
@@ -686,49 +687,28 @@ function SessionView(props: { s: Session }) {
         </div>
       </div>
       <Show when={tutor.pin()}>
-        <CodePane />
+        <PinnedCode />
       </Show>
     </div>
   );
 }
 
-/** The pinned file, lines lit and scrolled to. Highlighted a line at a time — plain enough to read by. */
-function CodePane() {
-  let pane: HTMLDivElement | undefined;
-  const lines = createMemo(() => (tutor.code()?.text ?? "").replace(/\n$/, "").split("\n"));
-  const lang = () => langOf(tutor.pin()?.path ?? "");
-  const lit = (n: number) => {
-    const r = tutor.pin()?.lines;
-    return !!r && n >= r[0] && n <= r[1];
-  };
-  createEffect(() => {
-    lines();
-    const start = tutor.pin()?.lines?.[0];
-    if (!start || !pane) return;
-    requestAnimationFrame(() => pane?.querySelector(`[data-line="${start}"]`)?.scrollIntoView({ block: "center" }));
-  });
+/** The pinned file — the shared code pane, typed at the pin's commit (else the checkout's HEAD). */
+function PinnedCode() {
   return (
-    <div class="flex min-h-0 flex-col bg-diff-bg max-[900px]:max-h-[50vh]">
-      <div class="flex items-baseline justify-between gap-3 border-b border-rule bg-vellum-raise px-4 py-2 text-[11px]">
-        <span class="truncate text-ink-dim">{tutor.pin()?.path}</span>
-        <span class="shrink-0 text-ink-faint">
-          {tutor.pin()?.lines ? `L${tutor.pin()!.lines![0]}–${tutor.pin()!.lines![1]} · ` : ""}
-          {(tutor.code()?.ref ?? "…").replace(/^([0-9a-f]{10})[0-9a-f]{30}$/, "$1")}
-        </span>
-      </div>
-      <div ref={pane} class="min-h-0 flex-1 overflow-auto py-1.5 text-[11.5px] leading-[1.6]" onPointerMove={notePointer}>
-        <Show when={!tutor.code()?.err} fallback={<p class="m-0 px-4 text-[12px] text-del">{tutor.code()!.err}</p>}>
-          <Index each={tutor.code() ? lines() : []}>
-            {(text, i) => (
-              <div data-line={i + 1} class="flex" classList={{ "bg-gold-wash": lit(i + 1) }}>
-                <span class="w-[48px] shrink-0 select-none pr-3 text-right text-ink-faint">{i + 1}</span>
-                <code data-code data-path={tutor.pin()?.path} data-line={i + 1} data-side="new" class="whitespace-pre pr-3" classList={{ "text-ink": lit(i + 1), "text-ink-dim": !lit(i + 1) }} innerHTML={highlight(text(), lang())} />
-              </div>
-            )}
-          </Index>
-        </Show>
-      </div>
-    </div>
+    <Show when={tutor.pin()}>
+      {(p) => (
+        <CodePane
+          path={p().path}
+          refLabel={tutor.code()?.ref ?? "…"}
+          text={tutor.code()?.text}
+          err={tutor.code()?.err}
+          lit={p().lines}
+          repo=""
+          sha={p().ref || "HEAD"}
+        />
+      )}
+    </Show>
   );
 }
 
@@ -883,6 +863,14 @@ function Drawer(props: { id: string }) {
 
 export default function Tutor() {
   onMount(() => {
+    const detach = nav.attach({
+      open: (l) => tutor.showPin({ path: l.path, ref: l.sha, lines: [l.line, Math.max(l.line, l.end ?? l.line)] }),
+      here: () => {
+        const p = tutor.pin();
+        return p ? { repo: "", sha: p.ref || "HEAD", path: p.path, line: p.lines?.[0] ?? 1, end: p.lines?.[1] } : null;
+      },
+    });
+    onCleanup(detach);
     tutor.refresh();
     tutor.reattach();
     // a shared link to a concept: /v2/tutor?concept=<id> opens its drawer
@@ -913,6 +901,7 @@ export default function Tutor() {
       </Show>
       <Show when={tutor.drawer()}>{(id) => <Drawer id={id()} />}</Show>
       <TypesPop />
+      <Picker />
     </Show>
   );
 }
