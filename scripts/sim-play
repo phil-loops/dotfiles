@@ -1,0 +1,21 @@
+#!/bin/bash
+# sim-play <scenario> [kernel,kernel…]  — play a tutor projection scenario in the terminal with the
+# named kernels switched off: the setup the learner predicts from, then the reveal and the result.
+# sim-play --list  — every scenario with its standard, concepts and the kernel its contrast flips.
+set -euo pipefail
+cd "$(dirname "$0")/viewer-solid"
+exec node --input-type=module -e '
+const { createSim } = await import("./src/v2/sim.ts");
+const { scenario, scenarios } = await import("./src/v2/simScenarios.ts");
+const [id, off] = process.argv.slice(1);
+if (!id || id === "--list") {
+  for (const s of scenarios) console.log(`${s.id}  [${s.standard}]  kernel: ${s.kernel ?? "none"}  concepts: ${s.concepts.join(", ")}`);
+  process.exit(0);
+}
+const kernels = Object.fromEntries((off ?? "").split(",").filter(Boolean).map((k) => [k, false]));
+const sim = createSim(scenario(id), kernels);
+const setup = sim.toReveal();
+console.log(`${sim.scenario.title}\n\nSETUP\n${setup.log.join("\n")}\n\n${sim.scenario.situation}\n${sim.scenario.question}`);
+const result = sim.runToEnd();
+console.log(`\nREVEAL\n${sim.state().log.slice(setup.log.length).join("\n")}\n\n${JSON.stringify({ scenario: id, kernels, ...result })}`);
+' -- "$@"

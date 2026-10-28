@@ -61,6 +61,7 @@ KINDS = ["principle", "convention"]
 CONFIDENCES = ["low", "medium", "high"]
 RUNGS = ["predict", "invent"]
 SOURCES = ["chat"]
+SIM_RESULTS = ["green", "red"]
 BASE_SPACING_DAYS = 4
 MAX_SPACING_DAYS = 120
 
@@ -238,8 +239,25 @@ def _extras(e):
     if source not in SOURCES + [""]:
         raise Invalid(f"bad source {source!r} — one of {SOURCES}, or absent for a tutor session")
     out = {"confidence": confidence, "rung": rung, "contrast": _clean(e.get("contrast")),
-           "via": slug(e["via"]) if e.get("via") else "", "source": source}
+           "via": slug(e["via"]) if e.get("via") else "", "source": source, "sim": _sim(e.get("sim"))}
     return {k: v for k, v in out.items() if v}
+
+
+def _sim(sim):
+    """The simulator run a rung played (viewer tutor-sim-result): scenario, kernel switches, green or red."""
+    if not sim:
+        return None
+    scenario, kernels, result = sim.get("scenario"), sim.get("kernels") or {}, sim.get("result") or sim.get("outcome")
+    if not isinstance(scenario, str) or not scenario:
+        raise Invalid("a sim run names its scenario")
+    if not isinstance(kernels, dict) or not all(isinstance(v, bool) for v in kernels.values()):
+        raise Invalid("sim kernels map each kernel to true or false")
+    if result not in SIM_RESULTS:
+        raise Invalid(f"bad sim result {result!r} — one of {SIM_RESULTS}")
+    out = {"scenario": scenario, "kernels": kernels, "result": result}
+    if sim.get("divergence"):
+        out["divergence"] = [{"event": str(d["event"]), "kind": str(d["kind"])} for d in sim["divergence"]]
+    return out
 
 
 def add_evidence(g, e, session="", topic=""):
