@@ -109,6 +109,18 @@ def _job_running(job):
         return False
 
 
+def _tail(path, n):
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, 2)
+            f.seek(max(0, f.tell() - 16384))
+            text = f.read().decode(errors="replace")
+    except OSError:
+        return []
+    # a progress bar's carriage returns: keep each line's last frame
+    return [ln.rsplit("\r", 1)[-1] for ln in text.splitlines() if ln.strip()][-n:]
+
+
 def _journal_events(path):
     events = []
     try:
@@ -231,6 +243,14 @@ def gates_progress(req, u):
         repostate.invalidate()   # the verdict landed outside a POST: unstale the snapshot now
     running = _job_running(job)
     out = {"running": running, "elapsed": round(time.time() - job["t0"], 1), "events": events}
+    # a gate's output so far: the one running, or ?gate= for any gate the run started
+    want = (qs.get("gate") or [""])[0]
+    done = {e.get("gate") for e in events if e.get("event") == "done"}
+    starts = [e for e in events if e.get("event") == "start" and e.get("log")]
+    pick = next((e for e in starts if e.get("gate") == want), None) if want else \
+        next((e for e in reversed(starts) if e.get("gate") not in done), None)
+    if pick and pick["log"].startswith(job["path"] + "."):
+        out["tail"] = {"gate": pick["gate"], "lines": _tail(pick["log"], 40)}
     if result:
         out["result"] = {"ok": result.get("ok"), "gates": result.get("gates", []), "note": result.get("note")}
     elif not running:
