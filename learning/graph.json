@@ -80,7 +80,9 @@
    "topics": [
     "croon-job-locks"
    ],
-   "created": "2026-06-26"
+   "created": "2026-06-26",
+   "statement_learner": "renew infinitely fast and you'd still wait the full TTL after a kill — to recover faster, shorten the TTL itself",
+   "restated": "2026-10-28"
   },
   "ownership-token": {
    "name": "Ownership token",
@@ -92,7 +94,8 @@
    "analogs": [
     "optimistic-concurrency",
     "correlation-tag",
-    "idempotency-key-minted-before-retry-boundary"
+    "idempotency-key-minted-before-retry-boundary",
+    "fence-the-predecessor"
    ],
    "code": [],
    "topics": [
@@ -126,7 +129,8 @@
     "sqs-at-least-once",
     "visibility-is-not-a-job-timeout",
     "timeout-doesnt-cancel-remote",
-    "pg-is-the-correctness-layer"
+    "pg-is-the-correctness-layer",
+    "fence-the-predecessor"
    ],
    "code": [],
    "topics": [
@@ -964,7 +968,7 @@
    "created": "2026-10-21"
   },
   "sqs-in-flight-invisible": {
-   "name": "Received = hidden, not removed",
+   "name": "Received means hidden, not gone",
    "statement": "ReceiveMessage hides a message for the visibility timeout; only DeleteMessage removes it, otherwise it becomes visible again when the timeout lapses.",
    "kind": "convention",
    "builds_on": [],
@@ -982,6 +986,13 @@
      "path": "monotoad:projects/terraform/shared/sqs/main.tf",
      "ref": "origin/main",
      "lines": "13-26"
+    },
+    {
+     "path": "lib/job-queue/poll.ts",
+     "lines": [
+      93,
+      107
+     ]
     }
    ],
    "topics": [
@@ -990,7 +1001,7 @@
    "created": "2026-10-22"
   },
   "sqs-at-least-once": {
-   "name": "SQS is at-least-once",
+   "name": "At-least-once delivery",
    "statement": "A consumer can finish the work and die (or time out) before DeleteMessage, so any message can be processed more than once; the queue cannot tell 'done but not deleted' from 'never done'.",
    "kind": "principle",
    "builds_on": [
@@ -1005,6 +1016,13 @@
      "path": "lib/job-queue/process.ts",
      "ref": "main",
      "lines": "92-111"
+    },
+    {
+     "path": "lib/job-queue/process.ts",
+     "lines": [
+      92,
+      118
+     ]
     }
    ],
    "topics": [
@@ -1013,8 +1031,8 @@
    "created": "2026-10-22"
   },
   "throw-waits-out-visibility": {
-   "name": "A thrown job waits out its visibility",
-   "statement": "A handler that throws (or returns {retry: true}) is not retried immediately: the message is simply not deleted, and it reappears only when its current visibility lapses — up to 30s after the last receive or extension.",
+   "name": "A throw waits out the visibility",
+   "statement": "A handler that throws (or returns {retry: true}) is not retried immediately: the message is simply not deleted, and it reappears only when its current visibility lapses.",
    "kind": "principle",
    "builds_on": [
     "sqs-in-flight-invisible"
@@ -1025,6 +1043,13 @@
      "path": "lib/job-queue/process.ts",
      "ref": "main",
      "lines": "92-123"
+    },
+    {
+     "path": "lib/job-queue/process.ts",
+     "lines": [
+      92,
+      123
+     ]
     }
    ],
    "topics": [
@@ -1033,8 +1058,8 @@
    "created": "2026-10-22"
   },
   "crash-recovery-is-visibility": {
-   "name": "Crash recovery time = visibility timeout",
-   "statement": "When a worker dies mid-job its extension timer dies with it, so the message reappears at most one visibility timeout (30s) after the last receive or extension — the timeout, not the 20s extension interval, sets recovery time.",
+   "name": "Crash recovery = the visibility timeout",
+   "statement": "When a worker dies its extension timer dies with it, so the message reappears at most one visibility timeout after the last receive or extension — the timeout, not the 20s interval, sets recovery time.",
    "kind": "principle",
    "builds_on": [
     "sqs-in-flight-invisible"
@@ -1049,6 +1074,13 @@
      "path": "lib/job-queue/poll.ts",
      "ref": "main",
      "lines": "93-105"
+    },
+    {
+     "path": "lib/job-queue/poll.ts",
+     "lines": [
+      9,
+      9
+     ]
     }
    ],
    "topics": [
@@ -1057,8 +1089,8 @@
    "created": "2026-10-22"
   },
   "visibility-heartbeat": {
-   "name": "Visibility extension is lease renewal",
-   "statement": "Loops calls ChangeMessageVisibility every 20s to push the deadline back to 30s from now, so a live handler of any length keeps its message with 10s of margin per beat; the timer is cleared before delete.",
+   "name": "The 20s visibility heartbeat",
+   "statement": "Loops calls ChangeMessageVisibility every 20s to push the deadline to 30s from now, so a live handler of any length keeps its message with 10s of margin per beat.",
    "kind": "principle",
    "builds_on": [
     "crash-recovery-is-visibility"
@@ -1083,6 +1115,13 @@
      "path": "lib/job-queue/process.ts",
      "ref": "main",
      "lines": "103-105"
+    },
+    {
+     "path": "lib/job-queue/poll.ts",
+     "lines": [
+      93,
+      126
+     ]
     }
    ],
    "topics": [
@@ -1091,8 +1130,8 @@
    "created": "2026-10-22"
   },
   "visibility-is-not-a-job-timeout": {
-   "name": "Visibility timeout is not a job timeout",
-   "statement": "When visibility lapses nothing stops the running handler; the message is handed to a second consumer while the first is still working, so the two run concurrently.",
+   "name": "Visibility is not a job timeout",
+   "statement": "When visibility lapses nothing stops the running handler; the message goes to a second consumer while the first is still working.",
    "kind": "principle",
    "builds_on": [
     "visibility-heartbeat"
@@ -1106,6 +1145,13 @@
      "path": "lib/job-queue/poll.ts",
      "ref": "main",
      "lines": "116-126"
+    },
+    {
+     "path": "lib/job-queue/poll.ts",
+     "lines": [
+      116,
+      126
+     ]
     }
    ],
    "topics": [
@@ -1114,8 +1160,8 @@
    "created": "2026-10-22"
   },
   "receive-count-redrive": {
-   "name": "Receive count drives the DLQ",
-   "statement": "Every receive bumps a message's receive count; once it exceeds the redrive policy's maxReceiveCount (3 for loops queues) SQS moves it to dlq-<queue> instead of delivering it again — thrown and {retry: true} attempts both count.",
+   "name": "Receive count and redrive",
+   "statement": "Every receive bumps the receive count; past maxReceiveCount (3) SQS moves the message to dlq-<queue> — thrown and {retry: true} attempts both count.",
    "kind": "convention",
    "builds_on": [
     "throw-waits-out-visibility"
@@ -1144,8 +1190,8 @@
    "created": "2026-10-22"
   },
   "timeout-doesnt-cancel-remote": {
-   "name": "Your timeout doesn't cancel their write",
-   "statement": "Giving up on a request on your side (a Promise.race timeout) doesn't stop the server from committing it, so 'it threw' does not mean 'it didn't happen'.",
+   "name": "A local timeout doesn't cancel the remote",
+   "statement": "Giving up on a request on your side doesn't stop the server from committing it, so 'it threw' does not mean 'it didn't happen'.",
    "kind": "principle",
    "builds_on": [
     "sqs-at-least-once"
@@ -1159,6 +1205,13 @@
      "path": "lib/svixIntegration/svixDispatchLib.ts",
      "ref": "main",
      "lines": "20,51-66"
+    },
+    {
+     "path": "lib/svixIntegration/svixDispatchLib.ts",
+     "lines": [
+      51,
+      66
+     ]
     }
    ],
    "topics": [
@@ -1167,8 +1220,8 @@
    "created": "2026-10-22"
   },
   "idempotency-key-minted-before-retry-boundary": {
-   "name": "Mint the idempotency key outside the retry loop",
-   "statement": "A dedupe key only dedupes retries that reuse it, so it must be minted before the outermost retry boundary — at enqueue, carried in the message — not per call (svix mints a fresh key per message.create).",
+   "name": "Mint the key outside the outermost retry",
+   "statement": "A dedupe key only dedupes retries that reuse it, so it must be minted before the outermost retry boundary — at enqueue, carried in the message.",
    "kind": "principle",
    "builds_on": [
     "sqs-at-least-once",
@@ -1194,6 +1247,13 @@
      "path": "jobs/svix-dispatch.ts",
      "ref": "pin-svix-idempotency-key-across-retries",
      "lines": "9-33"
+    },
+    {
+     "path": "lib/svixIntegration/svixDispatchLib.ts",
+     "lines": [
+      458,
+      475
+     ]
     }
    ],
    "topics": [
@@ -1203,7 +1263,7 @@
   },
   "nested-retry-layers": {
    "name": "Retry layers nest",
-   "statement": "svix's client retries (3 attempts, 50ms/100ms) run inside one SQS delivery, which retries every ~30s up to 3 receives; each layer dedupes only within the scope where its key was minted, and an inner timeout must fit the server's own idempotency lock.",
+   "statement": "svix's client retries run inside one SQS delivery, which retries up to 3 receives; each layer dedupes only within the scope where its key was minted.",
    "kind": "principle",
    "builds_on": [
     "idempotency-key-minted-before-retry-boundary",
@@ -1317,6 +1377,60 @@
    ],
    "topics": [],
    "created": "2026-10-27"
+  },
+  "fence-the-predecessor": {
+   "name": "Fence the old writer before the new ones start",
+   "statement": "A writer handoff first proves the old writer has stopped — here by taking its checkpoint lock — or both advance the counts at once.",
+   "kind": "principle",
+   "builds_on": [
+    "counts-and-bookmark-atomic"
+   ],
+   "analogs": [
+    "lock-guards-holders-not-execution",
+    "ownership-token"
+   ],
+   "code": [],
+   "topics": [],
+   "created": "2026-10-28"
+  },
+  "single-cutoff-start": {
+   "name": "Every shard starts at one cutoff, all at once",
+   "statement": "All 64 shard bookmarks are created at one cutoff in one transaction; a partial set is refused, because shards started at different points would skip or recount events between them.",
+   "kind": "principle",
+   "builds_on": [
+    "projection-shards",
+    "safety-lag"
+   ],
+   "analogs": [],
+   "code": [],
+   "topics": [],
+   "created": "2026-10-28"
+  },
+  "cutoff-after-predecessor": {
+   "name": "The new start must be past where the old writer stopped",
+   "statement": "If the shard cutoff is at or before the global bookmark, events the global writer already counted get counted again, so activation waits instead.",
+   "kind": "principle",
+   "builds_on": [
+    "single-cutoff-start",
+    "cursor-redelivery"
+   ],
+   "analogs": [],
+   "code": [],
+   "topics": [],
+   "created": "2026-10-28"
+  },
+  "fresh-start-gap": {
+   "name": "A fresh start skips what lies before its cutoff",
+   "statement": "Shards start at a cutoff one safety lag behind activation, so events after the old writer's last bookmark and before the cutoff are never counted by either writer.",
+   "kind": "principle",
+   "builds_on": [
+    "single-cutoff-start",
+    "safety-lag"
+   ],
+   "analogs": [],
+   "code": [],
+   "topics": [],
+   "created": "2026-10-28"
   }
  },
  "topics": {
@@ -1573,7 +1687,7 @@
   },
   "sqs-visibility-timeout": {
    "title": "SQS visibility timeout and redelivery (loops job queue)",
-   "source": "lib/job-queue/{poll,process}.ts + monotoad shared/sqs; motivated by LOO-6248 svixDispatch duplicate webhook; plan: ~/.dotfiles/learning/plans/sqs-visibility-timeout.md",
+   "source": "lib/job-queue/{poll,process}.ts + monotoad shared/sqs; LOO-6248",
    "stages": [
     {
      "name": "In flight, not gone",
@@ -1612,7 +1726,7 @@
     }
    ],
    "created": "2026-10-22",
-   "updated": "2026-10-22"
+   "updated": "2026-10-28"
   }
  },
  "evidence": [
@@ -2436,6 +2550,43 @@
    "topic": "",
    "session": "chat:2026-10-27-pr11236",
    "source": "chat"
+  },
+  {
+   "id": "a5e89bc861",
+   "concept": "ttl-vs-renewal-interval",
+   "level": "predict",
+   "credit": "scaffolded",
+   "outcome": "hit",
+   "note": "12:00:35 (last renew 12:00:05 + 30s), right after a worked run of the same shape",
+   "at": "2026-10-28",
+   "topic": "sqs-visibility-timeout",
+   "session": "9b994418-4add-4cfc-b75e-247a54668560",
+   "confidence": "high",
+   "rung": "predict"
+  },
+  {
+   "id": "5bfdb4f7e9",
+   "concept": "ttl-vs-renewal-interval",
+   "level": "explain",
+   "credit": "scaffolded",
+   "outcome": "hit",
+   "note": "renew infinitely fast → still a 30s delay after a kill; to recover faster, shrink the 30s itself",
+   "at": "2026-10-28",
+   "topic": "sqs-visibility-timeout",
+   "session": "9b994418-4add-4cfc-b75e-247a54668560",
+   "rung": "predict"
+  },
+  {
+   "id": "9afb0224f2",
+   "concept": "sqs-in-flight-invisible",
+   "level": "predict",
+   "credit": "scaffolded",
+   "outcome": "hit",
+   "note": "'the message is available but not able to be grabbed by a worker' — got the 'still in the queue but hidden' half; didn't say what starts or ends the hiding",
+   "at": "2026-10-28",
+   "topic": "sqs-visibility-timeout",
+   "session": "9b994418-4add-4cfc-b75e-247a54668560",
+   "rung": "predict"
   }
  ],
  "questions": [
@@ -2490,10 +2641,11 @@
     "sesp-retention",
     "sesp-parallel",
     "sesp-coordination",
-    "sesp-judge"
+    "sesp-judge",
+    "sesp-handoff"
    ],
    "created": "2026-10-27",
-   "updated": "2026-10-27"
+   "updated": "2026-10-28"
   },
   "job-queue": {
    "title": "Job queue (SQS)",
@@ -2634,6 +2786,17 @@
     "nested-retry-layers"
    ],
    "created": "2026-10-27"
+  },
+  "sesp-handoff": {
+   "can_do": "Predict what a switch from the global bookmark to shard bookmarks double-counts or skips, and name the checks that make it safe",
+   "system": "ses-projection",
+   "concepts": [
+    "fence-the-predecessor",
+    "single-cutoff-start",
+    "cutoff-after-predecessor",
+    "fresh-start-gap"
+   ],
+   "created": "2026-10-28"
   }
  }
 }
