@@ -25,7 +25,7 @@
 # unloaded after STACK_LSP_OLD_IDLE; tsgo never starts below the memory floor; the pidfile lets
 # the next server image reap a tsgo that a hot reload or os._exit orphaned.
 #
-#   POST /lsp/hover      {branch, path, line, character, side?: "new"|"old", base?: sha}
+#   POST /lsp/hover      {branch | sha, path, line, character, side?: "new"|"old", base?: sha}
 #                          → {ok, contents, range}
 #   POST /lsp/definition (same)  → {ok, sha, side, locations: [{path, line, character, endLine}]}
 #        either one       → {ok: false, state: "loading" | "refused" | "error", message}
@@ -919,27 +919,31 @@ def _loading(e):
 def _ask(req, raw, method):
     try:
         d = json.loads(raw or "{}")
-        branch, rel = str(d["branch"]), str(d["path"])
+        branch, commit, rel = str(d.get("branch") or ""), str(d.get("sha") or ""), str(d["path"])
         line, character = int(d["line"]), int(d["character"])
         side = str(d.get("side") or "new")
         base = str(d.get("base") or "")
+        if not (branch or commit) or commit.startswith("-"):
+            raise KeyError("branch")
     except (ValueError, KeyError, TypeError):
-        return req._send(400, json.dumps({"ok": False, "state": "error", "message": "want {branch, path, line, character}"}))
+        return req._send(400, json.dumps({"ok": False, "state": "error", "message": "want {branch or sha, path, line, character}"}))
     if os.path.isabs(rel) or ".." in rel.split("/") or line < 1 or character < 0 or side not in SIDES:
         return req._send(400, json.dumps({"ok": False, "state": "error", "message": f"bad position {side} {rel}:{line}:{character}"}))
     ext = os.path.splitext(rel)[1]
     if ext not in LANGS:
         return req._send(200, json.dumps({"ok": False, "state": "error", "message": f"no language server for {ext or 'this file'}"}))
     repo = ctx.repo_cwd()
-    sha = _tip(repo, branch) if side == "new" else (_commit(repo, base) if base else "")
+    tip = _commit(repo, commit) if commit else _tip(repo, branch)
+    sha = tip if side == "new" else (_commit(repo, base) if base else "")
     if not sha:
-        why = f"no branch {branch}" if side == "new" else "this view has no single base commit to type"
+        why = f"no commit {commit or branch}" if side == "new" else "this view has no single base commit to type"
         return req._send(200, json.dumps({"ok": False, "state": "error", "message": why}))
     e = _engine
     _start_idle()
     e.last_req = time.time()
     if side == "old":
         e.last_old = time.time()
+    branch = branch or commit[:10]
     e.branch[side] = branch if side == "new" else f"{branch}'s base"
     job = e.submit("ask", ("ask", repo, side, sha, method, rel, line, character),
                    lambda: e.answer(repo, side, sha, method, rel, line, character))
