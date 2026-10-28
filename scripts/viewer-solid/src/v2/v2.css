@@ -229,6 +229,7 @@
 /* a key label lights gold for a moment when its key runs the command, then fades back */
 .rv-hintkey { transition: color 0.6s ease-out, text-shadow 0.6s ease-out; }
 .rv-hintkey.rv-fired { color: var(--color-gold-leaf); text-shadow: 0 0 6px rgba(212, 170, 80, 0.35); transition: none; }
+.rv-hintkey.rv-armed { color: var(--color-gold-leaf); text-shadow: 0 0 8px rgba(212, 170, 80, 0.6); border-color: var(--color-gold-deep); transition: none; }
 
 /* ── the wiki: the one surface that is READ, so its body takes a serif (Georgia — the installed
    display face is an italic cut, and running copy sits upright); code and citations stay mono ── */

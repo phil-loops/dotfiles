@@ -142,7 +142,7 @@ export default function ShipLine() {
             title={live() === "failed" ? push()!.err : forcing() ? sheet() : undefined}
             onClick={bind("review.push", id())}
           >
-            {label()} <Show when={!live() || live() === "failed"}><kbd>{keyOf("review.push")}</kbd></Show>
+            {label()} <Show when={!live() || live() === "failed"}><kbd><Key id="review.push" /></kbd></Show>
           </button>
         </Show>
         <Show when={!live() && refused()}>
@@ -153,7 +153,7 @@ export default function ShipLine() {
         </Show>
         <Show when={!acts() && !live() && !v()?.pr && v()?.st.action === "pr" && warm()}>
           <button class="rv-btn rv-btn-gold" onClick={bind("review.finish", id())}>
-            open the PR ↗ <kbd>{keyOf("review.finish")}</kbd>
+            open the PR ↗ <kbd><Key id="review.finish" /></kbd>
           </button>
         </Show>
       </span>
