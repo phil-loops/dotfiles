@@ -866,8 +866,16 @@ export default function Tutor() {
     tutor.refresh();
     tutor.reattach();
     // a shared link to a concept: /v2/tutor?concept=<id> opens its drawer
-    const want = new URLSearchParams(location.search).get("concept");
+    const q = new URLSearchParams(location.search);
+    const want = q.get("concept");
     if (want) tutor.setDrawer(want);
+    // a terminal session handed over by link: /v2/tutor?import=<session>&say=<draft answer>
+    const session = q.get("import");
+    if (session)
+      void tutor.pickUp(session).then(
+        () => tutor.setDraft(q.get("say") ?? ""),
+        (e) => tutor.setError(String(e)),
+      );
   });
   return (
     <Show when={tutor.learn() || tutor.learnErr()} fallback={<p class="px-4 pl-11 text-ink-faint">reading your graph…</p>}>

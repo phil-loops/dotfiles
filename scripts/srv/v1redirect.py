@@ -1,7 +1,6 @@
 # srv/v1redirect.py — v1 is gone; a v1 URL answers 302 to its v2 page, so every link still pointing
 # at v1 (bookmarks, old tabs, a stale producer) lands on v2. Pages v1 had and v2 doesn't (/work,
-# /push, /outbox/launch, /watching, a terminal tutor session picked up by link — /tutor?import=)
-# land on the v2 home. A forest's ~integration is its integration ref on the v2 review page.
+# /push, /outbox/launch, /watching) land on the v2 home. A forest's ~integration is its integration ref on the v2 review page.
 from urllib.parse import parse_qsl, urlencode
 
 from . import ctx
@@ -39,7 +38,5 @@ def v2_path(path):
 def target(u):
     """Where a v1 page request goes instead: its v2 page (path + query, a stale ?v1 dropped)."""
     q = [(k, v) for k, v in parse_qsl(u.query, keep_blank_values=True) if k != "v1"]
-    if any(k == "import" for k, _ in q) and u.path.startswith("/tutor"):
-        return HOME
     to = v2_path(u.path)
     return to + ("?" + urlencode(q) if q and to != HOME else "")
