@@ -2,7 +2,7 @@
 // conversations on the diff — oldest first, the second reader's "nobody flagged" list, and the way
 // to GitHub, where Phil submits his pending review.
 import { createSelector, For, Match, Show, Switch } from "solid-js";
-import { keyOf } from "../registry";
+import Key from "../Key";
 import { bind } from "../runner";
 import { world } from "../store";
 import { renderMarkdown } from "./markdown";
@@ -93,7 +93,7 @@ export default function Conversation() {
             {c()!.pending!.count} comment{c()!.pending!.count === 1 ? "" : "s"} in your pending review —
           </Show>
           <button class="rv-btn rv-btn-gold" onClick={bind("review.finish")}>
-            submit on GitHub <kbd>{keyOf("review.finish")}</kbd>
+            submit on GitHub <kbd><Key id="review.finish" /></kbd>
           </button>
         </div>
       </Show>
