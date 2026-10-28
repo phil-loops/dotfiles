@@ -7,7 +7,8 @@
 //   drawer   one concept: its depth and the evidence behind it (each credit correctable), links, questions
 import { createEffect, createMemo, For, Index, on, onCleanup, onMount, Show, type JSX } from "solid-js";
 import Key from "./Key";
-import { ago, CONFIDENCES, CREDITS, LEVEL_HINT, LEVELS, rungsOf, segments, askOf, questionOf, latest, pipsTitle, type Evidence, type Mastery, type Session } from "./lesson";
+import { SimFrozen, SimPlayed } from "./TutorSim";
+import { ago, CONFIDENCES, CREDITS, LEVEL_HINT, LEVELS, rungsOf, segments, askOf, questionOf, latest, pipsTitle, spoken, type Evidence, type Mastery, type Session } from "./lesson";
 import { model } from "./model";
 import { routeArg } from "./router";
 import { renderMarkdown } from "./review/markdown";
@@ -433,12 +434,27 @@ function Turn(props: { text: string; latest: boolean }) {
                   ? your question, kept open{seg.concept ? ` on ${tutor.nameOf(seg.concept)}` : ""}: <span class="text-ink-dim">{seg.text}</span>
                 </div>
               );
+            case "sim":
+              return <SimFrozen scenario={seg.scenario} off={seg.off} />;
+            case "simResult":
+              return <SimPlayed scenario={seg.scenario} off={seg.off} />;
             default:
               return null;
           }
         }}
       </For>
     </div>
+  );
+}
+
+/** What the learner said: their words, then any sim their answer played. */
+function Said(props: { text: string; class: string }) {
+  const played = createMemo(() => segments(props.text).filter((x) => x.kind === "simResult"));
+  return (
+    <>
+      <div class={`whitespace-pre-wrap ${props.class}`}>{spoken(props.text)}</div>
+      <For each={played()}>{(x) => x.kind === "simResult" && <SimPlayed scenario={x.scenario} off={x.off} />}</For>
+    </>
   );
 }
 
@@ -587,7 +603,7 @@ function SessionView(props: { s: Session }) {
                           <span class="min-w-0">
                             <span class="block truncate text-[12.5px] text-ink-dim">{askOf(props.s.msgs[r.tutorIdx].text)}</span>
                             <Show when={r.answer}>
-                              <span class="block truncate text-[12.5px] text-ink">→ {r.answer}</span>
+                              <span class="block truncate text-[12.5px] text-ink">→ {spoken(r.answer!)}</span>
                             </Show>
                           </span>
                         </button>
@@ -595,7 +611,9 @@ function SessionView(props: { s: Session }) {
                           <div class="mx-5 mb-3 mt-1 border-l-2 border-gold-deep pl-4">
                             <Turn text={props.s.msgs[r.tutorIdx].text} latest={false} />
                             <Show when={r.answer}>
-                              <div class="mb-2 whitespace-pre-wrap text-[12.5px] text-ink-dim">you: {r.answer}</div>
+                              <div class="mb-2 text-[12.5px] text-ink-dim">
+                                <Said text={`you: ${r.answer}`} class="" />
+                              </div>
                             </Show>
                           </div>
                         </Show>
@@ -610,7 +628,7 @@ function SessionView(props: { s: Session }) {
             <Show when={prevAnswer()}>
               <div class="mb-4 border-l-2 border-rule pl-3 text-[12.5px] leading-snug">
                 <span class={LABEL}>you said</span>
-                <div class="mt-0.5 whitespace-pre-wrap text-ink-dim">{prevAnswer()}</div>
+                <Said text={prevAnswer()} class="mt-0.5 text-ink-dim" />
               </div>
             </Show>
             <Show when={current()}>{(c) => <Turn text={props.s.msgs[c().tutorIdx].text} latest />}</Show>

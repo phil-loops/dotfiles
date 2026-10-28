@@ -154,9 +154,14 @@ export type Seg =
   | { kind: "map"; title: string; count: number }
   | { kind: "restate"; concept: string; text: string }
   | { kind: "question"; concept: string; text: string }
+  /** a projection scenario frozen before its reveal; `off` names the safeguards switched off */
+  | { kind: "sim"; scenario: string; off: string[] }
+  /** the learner's answer to a sim, played: what the system did */
+  | { kind: "simResult"; scenario: string; off: string[]; outcome: string; divergence: { event: string; kind: string }[] }
   | { kind: "quiet" };
 
-const FENCE = /```tutor-(pin|options|rung|evidence|map|calibration|restate|question|ledger)[ \t]*\r?\n([\s\S]*?)```/g;
+const FENCE = /```tutor-(pin|options|rung|evidence|map|calibration|restate|question|ledger|sim-result|sim)[ \t]*\r?\n([\s\S]*?)```/g;
+const offOf = (k: unknown): string[] => Object.entries((k ?? {}) as Record<string, unknown>).filter(([, on]) => on === false).map(([name]) => name);
 const asList = (v: unknown): string[] => (Array.isArray(v) ? v.map((x) => String(x)).filter((x) => x.trim()) : []);
 
 /** A turn as prose and blocks. A fence still streaming in (no closing ```) is held back, never flashed as JSON. */
@@ -208,6 +213,11 @@ export function segments(text: string): Seg[] {
         })
         .filter((e) => e.concept);
       out.push({ kind: "evidence", items });
+    } else if (m[1] === "sim" && typeof d.scenario === "string") {
+      out.push({ kind: "sim", scenario: d.scenario, off: offOf(d.kernels) });
+    } else if (m[1] === "sim-result" && typeof d.scenario === "string") {
+      const divergence = (Array.isArray(d.divergence) ? d.divergence : []).map((x) => ({ event: String((x as Record<string, unknown>)?.event ?? ""), kind: String((x as Record<string, unknown>)?.kind ?? "") }));
+      out.push({ kind: "simResult", scenario: d.scenario, off: offOf(d.kernels), outcome: String(d.outcome ?? ""), divergence });
     } else if (m[1] === "map") {
       const t = (d.topic ?? {}) as Record<string, unknown>;
       const stages = Array.isArray(d.stages) ? (d.stages as { concepts?: unknown[] }[]) : [];
@@ -224,6 +234,13 @@ export function segments(text: string): Seg[] {
   if (last < text.length) out.push({ kind: "prose", text: text.slice(last) });
   return out;
 }
+
+/** The fence the tab appends to an answer once it has played the sim: the tutor copies it into its evidence. */
+export const simResultFence = (r: { scenario: string; off: string[]; outcome: string; divergence: { event: string; kind: string }[] }): string =>
+  "```tutor-sim-result\n" + JSON.stringify({ scenario: r.scenario, kernels: Object.fromEntries(r.off.map((k) => [k, false])), outcome: r.outcome, divergence: r.divergence }) + "\n```";
+
+/** What the learner said, without the machine fences the tab added to it. */
+export const spoken = (text: string): string => proseOf(text).join("").trim();
 
 const proseOf = (text: string) =>
   segments(text)
