@@ -1,6 +1,5 @@
-// The K / g d popover: the type in markdown, a "loading" line with what tsgo is doing, or the
-// definitions that aren't in this diff, each with a few lines of source.
-import { For, Match, Show, Switch } from "solid-js";
+// The space k popover: the type in markdown, or a line saying what tsgo is doing (or why not).
+import { Match, Show, Switch } from "solid-js";
 import { renderMarkdown } from "./markdown";
 import { pop } from "./types";
 
@@ -21,18 +20,6 @@ export default function TypesPop() {
           </Match>
           <Match when={pop()!.kind === "hover"}>
             <div class="md" innerHTML={renderMarkdown((pop() as { md: string }).md)} />
-          </Match>
-          <Match when={pop()!.kind === "defs"}>
-            <For each={(pop() as { locs: { path: string; line: number; text: string }[] }).locs}>
-              {(l) => (
-                <div class="rv-def">
-                  <div class="text-ink-faint">
-                    {l.path}:{l.line}
-                  </div>
-                  <pre>{l.text}</pre>
-                </div>
-              )}
-            </For>
           </Match>
         </Switch>
       </div>

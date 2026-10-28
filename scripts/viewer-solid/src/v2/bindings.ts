@@ -28,6 +28,10 @@ export const SAME_MOVE: Record<string, string[]> = {
   "the map": ["review.map", "tutor.map"],
   "show the type": ["review.types", "tutor.types"],
   "go to the definition": ["review.definition", "tutor.definition"],
+  "go to the type's definition": ["review.type-definition", "tutor.type-definition"],
+  "go to the implementations": ["review.implementation", "tutor.implementation"],
+  "list the references": ["review.references", "tutor.references"],
+  "list the file's symbols": ["review.symbols", "tutor.symbols"],
   "start writing": ["review.note.insert", "tutor.write", "branch.describe.edit"],
 };
 
