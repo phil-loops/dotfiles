@@ -12,6 +12,8 @@ import { model } from "./model";
 import { routeArg } from "./router";
 import { renderMarkdown } from "./review/markdown";
 import { highlight, langOf } from "./review/highlight";
+import TypesPop from "./review/TypesPop";
+import { notePointer } from "./review/types";
 import { bind, dispatch } from "./runner";
 import { armed, setCursor } from "./ui";
 import { ckey, skey, touched, tutor } from "./tutoring";
@@ -693,16 +695,16 @@ function CodePane() {
         <span class="truncate text-ink-dim">{tutor.pin()?.path}</span>
         <span class="shrink-0 text-ink-faint">
           {tutor.pin()?.lines ? `L${tutor.pin()!.lines![0]}–${tutor.pin()!.lines![1]} · ` : ""}
-          {tutor.code()?.ref ?? "…"}
+          {(tutor.code()?.ref ?? "…").replace(/^([0-9a-f]{10})[0-9a-f]{30}$/, "$1")}
         </span>
       </div>
-      <div ref={pane} class="min-h-0 flex-1 overflow-auto py-1.5 text-[11.5px] leading-[1.6]">
+      <div ref={pane} class="min-h-0 flex-1 overflow-auto py-1.5 text-[11.5px] leading-[1.6]" onPointerMove={notePointer}>
         <Show when={!tutor.code()?.err} fallback={<p class="m-0 px-4 text-[12px] text-del">{tutor.code()!.err}</p>}>
           <Index each={tutor.code() ? lines() : []}>
             {(text, i) => (
               <div data-line={i + 1} class="flex" classList={{ "bg-gold-wash": lit(i + 1) }}>
                 <span class="w-[48px] shrink-0 select-none pr-3 text-right text-ink-faint">{i + 1}</span>
-                <code class="whitespace-pre pr-3" classList={{ "text-ink": lit(i + 1), "text-ink-dim": !lit(i + 1) }} innerHTML={highlight(text(), lang())} />
+                <code data-code data-path={tutor.pin()?.path} data-line={i + 1} data-side="new" class="whitespace-pre pr-3" classList={{ "text-ink": lit(i + 1), "text-ink-dim": !lit(i + 1) }} innerHTML={highlight(text(), lang())} />
               </div>
             )}
           </Index>
@@ -892,6 +894,7 @@ export default function Tutor() {
         {(s) => <SessionView s={s()} />}
       </Show>
       <Show when={tutor.drawer()}>{(id) => <Drawer id={id()} />}</Show>
+      <TypesPop />
     </Show>
   );
 }

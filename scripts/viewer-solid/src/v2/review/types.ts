@@ -1,6 +1,7 @@
 // Types on the review page, the Helix way: K shows the type under the pointer (or the first name on
 // the cursor's line), g d goes to its definition — in the diff when it's there, else a snippet.
 // Both halves: a removed line, or the old half of split view, asks at the diff's base commit.
+// Any other code pane (the tutor's) passes a Source: the code there is one commit, typed by sha.
 // Answers come from srv/lsp.py's one tsgo; a "loading" answer is asked again until it settles.
 import { createSignal } from "solid-js";
 import { ask, getText } from "../sync";
@@ -13,6 +14,12 @@ export interface Pos {
   side: "new" | "old";
   x: number;
   y: number;
+}
+
+/** Code outside the review page: the repo it's in ("" for the server's own) and the commit it's at. */
+export interface Source {
+  repo: string;
+  sha: string;
 }
 
 type Pop =
@@ -64,7 +71,7 @@ function cellAt(x: number, y: number): { el: HTMLElement; offset: number } | nul
 }
 
 /** Where K points: the word under the pointer when it's over code, else the cursor line's first name. */
-export function position(): Pos | null {
+export function position(src?: Source): Pos | null {
   if (pointer) {
     const hit = cellAt(pointer.x, pointer.y);
     if (hit) {
@@ -75,6 +82,7 @@ export function position(): Pos | null {
       }
     }
   }
+  if (src) return null;
   const h = page.here();
   if (!h || h.kind !== "line") return null;
   const el = document.querySelector<HTMLElement>(`[data-stop="${CSS.escape(h.key)}"] [data-code]`);
@@ -93,11 +101,12 @@ const plainNote = (m?: string) => (m ?? "").replace(/^_+|_+$/g, "").replace(/^Re
 
 let seq = 0;
 
-async function asking<T extends { ok: boolean; state?: string; message?: string }>(route: string, p: Pos): Promise<T | null> {
-  const t = page.target();
+async function asking<T extends { ok: boolean; state?: string; message?: string }>(route: string, p: Pos, src?: Source): Promise<T | null> {
+  const t = src ? { repo: src.repo } : page.target();
   if (!t) return null;
   const mine = ++seq;
-  const body = { branch: t.name, path: p.path, line: p.line, character: p.character, side: p.side, ...(p.side === "old" && page.baseSha() ? { base: page.baseSha() } : {}) };
+  const at = src ? { sha: src.sha } : { branch: page.target()!.name, ...(p.side === "old" && page.baseSha() ? { base: page.baseSha() } : {}) };
+  const body = { ...at, path: p.path, line: p.line, character: p.character, side: p.side };
   const t0 = Date.now();
   for (;;) {
     const r = await ask<T>(atRepoPath(t.repo, route), body);
@@ -109,34 +118,34 @@ async function asking<T extends { ok: boolean; state?: string; message?: string 
   }
 }
 
-export function hover(): void {
-  const p = position();
+export function hover(src?: Source): void {
+  const p = position(src);
   if (!p) return void setPop({ kind: "note", x: innerWidth / 2, y: 120, text: "nothing to type here" });
   setPop({ kind: "wait", x: p.x, y: p.y, text: "asking tsgo…" });
-  void asking<{ ok: boolean; contents?: string; state?: string; message?: string }>("/lsp/hover", p).then((r) => {
+  void asking<{ ok: boolean; contents?: string; state?: string; message?: string }>("/lsp/hover", p, src).then((r) => {
     if (!r) return;
     if (r.ok && r.contents) setPop({ kind: "hover", x: p.x, y: p.y, md: r.contents });
     else setPop({ kind: "note", x: p.x, y: p.y, text: r.ok ? "no type here" : plainNote(r.message) || "types aren't available" });
   });
 }
 
-export function definition(jump: (path: string, line: number) => boolean): void {
-  const p = position();
+export function definition(jump: (path: string, line: number, sha: string) => boolean, src?: Source): void {
+  const p = position(src);
   if (!p) return void setPop({ kind: "note", x: innerWidth / 2, y: 120, text: "nothing to look up here" });
   setPop({ kind: "wait", x: p.x, y: p.y, text: "finding the definition…" });
   type Def = { ok: boolean; sha?: string; locations?: { path: string; line: number }[]; state?: string; message?: string };
-  void asking<Def>("/lsp/definition", p).then(async (r) => {
+  void asking<Def>("/lsp/definition", p, src).then(async (r) => {
     if (!r) return;
     const locs = r.ok ? r.locations ?? [] : [];
     if (!locs.length) return void setPop({ kind: "note", x: p.x, y: p.y, text: r.ok ? "no definition found" : plainNote(r.message) || "types aren't available" });
-    if (locs.length === 1 && jump(locs[0].path, locs[0].line)) return void setPop(null);
-    const t = page.target()!;
+    if (locs.length === 1 && jump(locs[0].path, locs[0].line, r.sha ?? "")) return void setPop(null);
+    const t = src ?? page.target()!;
     const rows = await Promise.all(
       locs.slice(0, 6).map(async (l) => {
-        const src = await getText(atRepoPath(t.repo, `/lsp/src?path=${encodeURIComponent(l.path)}&sha=${encodeURIComponent(r.sha ?? "")}`));
+        const got = await getText(atRepoPath(t.repo, `/lsp/src?path=${encodeURIComponent(l.path)}&sha=${encodeURIComponent(r.sha ?? "")}`));
         let text = "";
         try {
-          text = ((JSON.parse(src ?? "{}") as { text?: string }).text ?? "").split("\n").slice(Math.max(0, l.line - 2), l.line + 3).join("\n");
+          text = ((JSON.parse(got ?? "{}") as { text?: string }).text ?? "").split("\n").slice(Math.max(0, l.line - 2), l.line + 3).join("\n");
         } catch {
           text = "";
         }

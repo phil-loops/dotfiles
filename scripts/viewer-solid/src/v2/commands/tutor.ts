@@ -7,6 +7,7 @@ import { command, type Write } from "../registry";
 import { navigate, tutorPath } from "../router";
 import { armed, menuOpen, setArmed, setCursor, setMenuOpen, setSheetOpen, sheetOpen } from "../ui";
 import { ckey, tutor } from "../tutoring";
+import { definition, dismiss, hover, pop, type Source } from "../review/types";
 
 const known = (id: string | undefined) => !!tutor.concept(id);
 const kept = (id: string | undefined) => !!id && tutor.sessions.some((s) => s.id === id);
@@ -64,7 +65,8 @@ command({
     if (menuOpen() || sheetOpen()) {
       setMenuOpen(false);
       setSheetOpen(false);
-    } else if (armed()) setArmed(undefined);
+    } else if (pop()) dismiss();
+    else if (armed()) setArmed(undefined);
     else if (tutor.drawer()) tutor.setDrawer(undefined);
     else if (tutor.evidenceOpen()) tutor.setEvidenceOpen(false);
     else throw new Error("nothing to close");
@@ -378,4 +380,27 @@ command({
     if (!evidence(id)) return null;
     return { ops: [], path: "/learning-evidence", body: { op: "delete", id }, settled: () => true, said: "cut", failed: "the credit wasn't cut", answered: () => tutor.refresh() };
   },
+});
+
+// ── types in the code pane: the pinned file is one commit (its ref, else the checkout's HEAD) ──
+
+/** The pinned file as something tsgo can type — none for a file outside the repo. */
+const pinSource = (): Source | null => {
+  const p = tutor.pin();
+  return p && !p.path.startsWith("/") && tutor.code() && !tutor.code()!.err ? { repo: "", sha: p.ref || "HEAD" } : null;
+};
+command({ id: "tutor.types", label: "type", title: "Show the type under the pointer in the code pane (hover)", scope: "tutor", budget: "local", keys: ["space k"], available: () => !!pinSource(), local: () => hover(pinSource()!) });
+command({
+  id: "tutor.definition",
+  label: "def",
+  title: "Go to the definition of the name under the pointer — the code pane follows it",
+  scope: "tutor",
+  budget: "local",
+  keys: ["g d"],
+  available: () => !!pinSource(),
+  local: () =>
+    definition((path, line, sha) => {
+      tutor.showPin({ path, ref: sha, lines: [line, line] });
+      return true;
+    }, pinSource()!),
 });
