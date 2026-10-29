@@ -538,11 +538,13 @@ struct CanvasView: NSViewRepresentable {
     }
 }
 
-/// A stable reference to one canvas, kept by whoever owns the pane (the page state).
+/// A stable reference to one canvas, kept by whoever owns the pane (the page state; the Tutor's
+/// code pane keeps its own and hands it to `CodePaneView`).
 @MainActor
-final class CanvasHandle {
+public final class CanvasHandle {
     let canvas = Canvas()
     var centered: String?
+    public init() {}
 }
 
 /// The diff's type: Plex Mono at 12, with the column width the gutters are measured in.
