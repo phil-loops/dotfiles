@@ -30,7 +30,6 @@ public enum NavKeys {
         "review.branch.next", "review.branch.prev", "review.parent", "review.child", "review.root", "review.tip",
         "review.file.next", "review.file.prev", "review.thread.next", "review.thread.prev",
         "review.top", "review.bottom",
-        "nav.alternate",
     ]
 
     /// The keys NAV.md decided for `id` ([] when it decided none).

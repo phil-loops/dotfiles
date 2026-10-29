@@ -106,11 +106,11 @@ enum ShellCommands {
 
         // ── the jumplist and the picker layer (commands/nav.ts) ──
         r.register(Command(id: "nav.back", title: "Jump back to where you were (the jumplist)", scope: .global, keys: ["C-o"], label: "back",
-                           available: { [weak app] _ in !(app?.nav.back.isEmpty ?? true) },
-                           local: { [weak app] _, _ in app?.nav.goBack() }))
+                           available: { [weak app] _ in !(app?.jumps.back.isEmpty ?? true) },
+                           local: { [weak app] _, _ in if app?.jumpBack() != true { throw Refusal("nothing further back") } }))
         r.register(Command(id: "nav.forward", title: "Jump forward again (the jumplist)", scope: .global, keys: ["C-i"], label: "forward",
-                           available: { [weak app] _ in !(app?.nav.fwd.isEmpty ?? true) },
-                           local: { [weak app] _, _ in app?.nav.goForward() }))
+                           available: { [weak app] _ in !(app?.jumps.fwd.isEmpty ?? true) },
+                           local: { [weak app] _, _ in if app?.jumpForward() != true { throw Refusal("nothing further forward") } }))
         let picking: (String?) -> Bool = { [weak app] _ in app?.nav.picker != nil }
         r.register(Command(id: "picker.down", title: "Next place in the picker", scope: .global, keys: ["down", "C-n", "C-j", "tab"], modes: [.picker], quiet: true,
                            available: picking, local: { [weak app] _, _ in app?.nav.move(1) }))

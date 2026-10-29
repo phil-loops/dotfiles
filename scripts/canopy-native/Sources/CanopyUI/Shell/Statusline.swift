@@ -21,6 +21,7 @@ struct Statusline: View {
                     CommandLine()
                 } else {
                     if !app.keys.pendingKeys.isEmpty { Text(glyph(app.keys.pendingKeys)).foregroundStyle(theme.goldLeaf) }
+                    if !app.jumps.back.isEmpty || !app.jumps.fwd.isEmpty { Text("◀\(app.jumps.back.count) ▶\(app.jumps.fwd.count)").foregroundStyle(theme.inkFaint) }
                     if let l = app.labeling { Text("label \(l.typed)…").foregroundStyle(theme.goldLeaf) }
                     if let p = app.pane {
                         let n = p.rows.count

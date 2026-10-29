@@ -35,6 +35,8 @@ public final class AppModel: CommandContext {
     public internal(set) var labeling: LabelSession?
     /// >0 while one jump is under way: the jump recorded its origin once, nothing inside re-records.
     @ObservationIgnored var jumpDepth = 0
+    /// Branch visits, fuzzy × frecency for `space b` (seeded from the usage log at start).
+    @ObservationIgnored public var frecency = Frecency()
 
     // ── the `:` line and insert mode ──
     public var cmdline = ""
@@ -70,9 +72,17 @@ public final class AppModel: CommandContext {
         transport.count = { name, ms in Task { @MainActor in tel.count(name, ms) } }
         stream.count = { [weak self] name, ms in self?.telemetry.count(name, ms) }
         stream.onAsset = { [weak self] _ in Task { await self?.loadBootstrap() } }
+        router.willNavigate = { [weak self] _, _ in self?.recordJump() }
+        router.blocked = { [weak self] in self?.keys.cancelling == true ? "esc only cancels" : nil }
+        router.onBlocked = { [weak self] to, why in
+            Log.line("blocked a page change to \(to.path): \(why)")
+            self?.runner.say(KeyEngine.nothingToCancel)
+        }
+        nav.record = { [weak self] in self?.recordJump() }
         router.onNavigate = { [weak self] from, to in
             self?.keys.reset()
-            self?.telemetry.emit(["type": "nav", "from": .string(from.surfaceID), "to": .string(to.surfaceID), "paintMs": nil])
+            if let b = to.branchID { self?.frecency.visit(b) }
+            self?.telemetry.emit(["type": "nav", "from": .string(from.surfaceID), "to": .string(to.surfaceID), "path": .string(to.path), "paintMs": nil])
             Log.line("nav \(from.path) → \(to.path)")
         }
         keys.onChange = { [weak self] from, to in self?.modeChanged(from, to) }
@@ -96,6 +106,7 @@ public final class AppModel: CommandContext {
     public func start() {
         stream.connect()
         Task { await loadBootstrap() }
+        seedFrecency()
         runner.announce(surfaces: Surface.all)
     }
 
