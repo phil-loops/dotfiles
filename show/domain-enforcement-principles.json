@@ -17,13 +17,6 @@
    "body": "A restriction says **what was found** and **who decided** to act on it.\n\n- **Reason** — the kind of problem (a category such as `content.phishing`), and for an automation, the exact rule that fired.\n- **Finding** — the specific thing found, when there is one: `email:<id>`, `word:crypto`.\n- **Decider** — a **person** (by user id) or an **automation**, named with its version: `health-cron`, `phishtank-v0`, `ses`, `team-deletion`.\n\n\"Why can't this team send\" is answered by the claims in effect, read straight off them.\n\n# Scope: standing state\nThe question is about what **stays** blocked until something changes. A one-off rejection of a single send is answered on the spot in the error the customer sees, with its evidence logged — it is not a restriction.\n\n# Rules in\n- Decider separate from reason. A person who blocks must say why; there is no \"admin judgment\" reason.\n- Recording a claim even when the domain is already off — otherwise the second reason is invisible.\n\n# Rules out\n- A free-text `disableCriterion` that only goes to logs.\n- \"detector\" or \"system\" as an answer to who decided."
   },
   {
-   "id": "rule-1b",
-   "group": "Rules",
-   "title": "1b · Policies decide; restrictions record",
-   "tag": "the seam",
-   "body": "A policy answers \"given what we saw, should we act?\". Enforcement answers \"why can't this team send, who decided, what would change it?\". They meet at one seam:\n\n- **A policy changes sending state only by writing a restriction**, naming itself as the decider and a registered rule as the reason.\n- **A policy reads allowances** as one of its inputs, and skips findings a person has allowed.\n- **Enforcement never reads a policy.** Dependencies point one way: policies can be added, versioned or deleted without touching restrictions, lifts or allowances.\n\nA policy's internal reasoning — the facts it cited, the model's answer — lives in its evidence, not in the restriction.\n\n# Rules in\n- safety-v0's `act` disabling a domain becomes \"write a restriction\".\n- A future safety-log policy that blocks is one more caller of the same seam.\n\n# Rules out\n- A second override system next to allowances.\n- Diagnostic outcomes (inconclusive, unsupported version) becoming restriction reasons."
-  },
-  {
    "id": "rule-2",
    "group": "Rules",
    "title": "2 · The remedy matches the finding",
@@ -43,13 +36,6 @@
    "title": "4 · Record what happened once; compute everything else",
    "tag": "write once",
    "body": "Claims and judgments are written once and never edited. A lift fills in empty fields exactly once; it never rewrites a claim.\n\n\"In effect\", the review queue, \"what's blocking re-enable\" and the false-positive rate are **queries**, not stored state. The domain's `disabled` flag is a cache of \"has a claim in effect\".\n\n# Rules in\n- `liftedAt` / `revokedAt` written once, guarded by `WHERE liftedAt IS NULL` — a second lift, or one from a stale page, does nothing.\n- \"How often is this detector wrong\" = count of claims lifted as wrong, by reason.\n\n# Rules out\n- Overwriting `decision` in place.\n- `safetyClassification = \"override\"` replacing the classifier's label."
-  },
-  {
-   "id": "rule-5",
-   "group": "Rules",
-   "title": "5 · Add a concept only when a real case needs it",
-   "tag": "the brake",
-   "body": "A new concept enters only when a **real case** needs it **and** the existing concepts — restriction, lift, allowance — can't express it.\n\nBefore adding anything, write down the case and show why the three nouns can't cover it.\n\n# What this rule removed from the earlier designs\n- A generic decision log with seven kinds.\n- Overturns of overturns; overturning evidence vs decision.\n- Stale-decision version checks and \"superseded\" decisions.\n- Idempotency keys (kept as a future change).\n- Content-hash targets and policy replay — real eventually, not yet.\n\n# Sign off if\nYou'd hold me to it the next time a design grows a new noun."
   },
   {
    "id": "nouns",
@@ -77,7 +63,7 @@
    "group": "What the rules produce",
    "title": "Checked against earlier ideas",
    "tag": null,
-   "body": "| Idea | Verdict | Rule |\n|---|---|---|\n| reason + decider | keep | 1 |\n| decider = person or named automation | keep | 1 |\n| finding key, typed across rules | keep | 2 |\n| reason tree with prefix-matched allowances | drop (Codex) | 2, 5 |\n| three exact allowance selectors | keep | 2, 3 |\n| \"admin judgment\" as a reason | drop | 1 |\n| team-scoped restrictions | keep | 2 |\n| lift with wrong / fixed | keep | 3 |\n| allowance (incl. banned word) | keep | 2, 3 |\n| write-once lift fields | keep | 4 |\n| generic decision log | drop | 5 |\n| overturns of overturns | drop | 5 |\n| version checks / superseded | drop | 5 |\n| idempotency keys | later | 5 |\n| snooze | when the queue needs it | 1 (what would change it) |\n| content holds, policy replay | later | 5 |"
+   "body": "| Idea | Verdict | Rule |\n|---|---|---|\n| reason + decider | keep | 1 |\n| decider = person or named automation | keep | 1 |\n| finding key, typed across rules | keep | 2 |\n| reason tree with prefix-matched allowances | drop (Codex) | 2 |\n| three exact allowance selectors | keep | 2, 3 |\n| \"admin judgment\" as a reason | drop | 1 |\n| team-scoped restrictions | keep | 2 |\n| lift with wrong / fixed | keep | 3 |\n| allowance (incl. banned word) | keep | 2, 3 |\n| write-once lift fields | keep | 4 |\n| generic decision log | drop | the question |\n| overturns of overturns | drop | the question |\n| version checks / superseded | drop | the question |\n| idempotency keys | later | the question |\n| snooze | when the queue needs it | 1 (what would change it) |\n| content holds, policy replay | later | the question |"
   },
   {
    "id": "phases",

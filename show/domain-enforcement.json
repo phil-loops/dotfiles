@@ -14,7 +14,7 @@
    "group": "Overview",
    "title": "The guiding question",
    "tag": null,
-   "body": "> At any moment we can answer: why can't this team send, who decided that, and what would change it?\n\nRules that follow (signed off separately in the principles deck):\n- **1** · A restriction is a claim with a reason and a decider — a person, or a named automation.\n- **1b** · Policies decide; restrictions record. Enforcement never depends on a policy.\n- **2** · The remedy matches the finding — restrict and allow at the same grain.\n- **3** · A detector's verdict is provisional; a person's is binding.\n- **4** · Record what happened once; compute everything else.\n- **5** · Add a concept only when a real case needs it."
+   "body": "> At any moment we can answer: why can't this team send, who decided that, and what would change it?\n\nRules that follow (signed off separately in the principles deck):\n- **1** · A restriction is a claim with a reason and a decider — a person, or a named automation.\n- **2** · The remedy matches the finding — restrict and allow at the same grain.\n- **3** · A detector's verdict is provisional; a person's is binding.\n- **4** · Record what happened once; compute everything else."
   },
   {
    "id": "nouns",
@@ -91,7 +91,7 @@
    "group": "After the MVP",
    "title": "Phase 4 · One entry point for detectors",
    "tag": "enforce",
-   "body": "- `enforce` = the policy's `decide`, then write restrictions. safety-v0's `act` and a future safety-log policy call it.\n- Detectors link their evidence; the decider name carries the version.\n- `handleDisableNewDomain` is deleted."
+   "body": "- `enforce` = the policy's `decide`, then write restrictions. safety-v0's `act` and a future safety-log policy call it.\n- **The seam:** a policy changes sending state only by writing a restriction, and reads allowances as an input. Nothing in enforcement reads a policy, so policies can be added, versioned or deleted without touching restrictions.\n- Detectors link their evidence; the decider name carries the version.\n- `handleDisableNewDomain` is deleted."
   },
   {
    "id": "p5",
