@@ -326,3 +326,31 @@ import Testing
         #expect(a.router.route == .forests && a.jumps.back.count == 1)
     }
 }
+
+@MainActor @Suite struct KeymapDeltaTests {
+    func app(_ route: Route = .wiki(slug: nil)) -> AppModel {
+        var c = AppConfig()
+        c.route = route
+        return AppModel(config: c, port: 1, telemetry: false)
+    }
+
+    @Test func altHJKLMovesPanesLikeCtrlW() {
+        let a = app()
+        a.keys.handle("A-l")
+        #expect(a.pane?.id == "sources")
+        a.keys.handle("A-h")
+        #expect(a.pane?.id == "facts")
+        #expect(KeyName.name(keyCode: 4, characters: "˙", charactersIgnoringModifiers: "h", ctrl: false, meta: false, alt: true) == "A-h")
+    }
+
+    @Test func theDecidedKeysMeanWhatNAVSays() {
+        let a = app()
+        let keyOf = { (id: String) in a.registry.command(id)?.keys ?? [] }
+        #expect(keyOf("mode.select") == ["v"])
+        #expect(keyOf("nav.labels") == ["g w", "f"])
+        #expect(keyOf("nav.branches") == ["space b"])
+        #expect(keyOf("page.search") == ["/"])
+        #expect(keyOf("nav.back") == ["C-o"] && keyOf("nav.forward") == ["C-i"] && keyOf("nav.save") == ["C-s"])
+        #expect(a.registry.keyProblems.isEmpty)
+    }
+}
