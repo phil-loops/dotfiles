@@ -246,3 +246,83 @@ import Testing
         #expect(a.runner.note == KeyEngine.nothingToCancel)
     }
 }
+
+/// The pickers and slots, over a real /state with two forests moved into the focus lane.
+@MainActor @Suite struct PickerTests {
+    func app(_ route: Route = .forests) throws -> AppModel {
+        var c = AppConfig()
+        c.route = route
+        let a = AppModel(config: c, port: 1, telemetry: false)
+        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../CanopyCoreTests/Fixtures/state.json")
+        var j = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]
+        var e = j["entities"] as! [String: Any]
+        var ps = e["project"] as! [String: Any]
+        for (id, rank) in [("loops:email-destinations", 2), ("loops:hankles-limited-label", 1)] {
+            var p = ps[id] as! [String: Any]
+            p["state"] = "focus"; p["rank"] = rank
+            ps[id] = p
+        }
+        e["project"] = ps; j["entities"] = e
+        a.store.hydrate(try Snapshot.decode(JSONSerialization.data(withJSONObject: j)))
+        return a
+    }
+
+    func press(_ a: AppModel, _ keys: String) { for k in keys.split(separator: " ") { a.keys.handle(String(k)) } }
+
+    @Test func spaceBRanksByFrecencyAndOpensTheReview() throws {
+        let a = try app()
+        a.frecency.visit("loops:add-email-reading-format")
+        press(a, "space b")
+        #expect(a.keys.active == .picker)
+        #expect(a.nav.shown.first?.label == "add-email-reading-format", "the visited branch first")
+        a.keys.handle("ret")
+        #expect(a.router.route == .review(repo: "loops", branch: "add-email-reading-format"))
+        #expect(a.jumps.back.last?.route == .forests, "a picker pick is a jump")
+        #expect(a.frecency.entries["loops:add-email-reading-format"]?.rank == 2, "the visit counts")
+    }
+
+    @Test func spaceQuoteReopensTheLastPicker() throws {
+        let a = try app()
+        press(a, "space b")
+        a.nav.typed("hankles")
+        a.keys.handle("esc")
+        #expect(a.keys.active == .normal)
+        press(a, "space '")
+        #expect(a.keys.active == .picker && a.nav.filter == "hankles" && a.nav.shown.count == 1)
+    }
+
+    @Test func spaceJPicksFromTheJumplist() throws {
+        let a = try app()
+        press(a, "g o"); press(a, "g m")
+        press(a, "space j")
+        #expect(a.nav.shown.map(\.label) == ["todo", "forests · hankles-limited-label"])
+        a.nav.move(1)
+        a.keys.handle("ret")
+        #expect(a.router.route == .forests)
+        a.keys.handle("C-o")
+        #expect(a.router.route == .machine, "the pick was itself a jump")
+    }
+
+    @Test func gNGoesToTheFocusLane() throws {
+        let a = try app()
+        press(a, "g 1")
+        #expect(a.router.route == .forest(repo: "loops", project: "hankles-limited-label"))
+        a.frecency.visit("loops:add-email-reading-format")
+        press(a, "g 2")
+        #expect(a.router.route == .review(repo: "loops", branch: "add-email-reading-format"), "where you left it")
+        press(a, "g 3")
+        #expect(a.router.route == .review(repo: "loops", branch: "add-email-reading-format"))
+        press(a, "C-o")
+        #expect(a.router.route == .forest(repo: "loops", project: "hankles-limited-label"))
+    }
+
+    @Test func slashSearchesThePage() throws {
+        let a = try app()
+        press(a, "/")
+        #expect(a.keys.active == .picker)
+        a.nav.typed("email")
+        a.keys.handle("ret")
+        #expect(a.selected == RowKey.project("loops:email-destinations"))
+        #expect(a.router.route == .forests && a.jumps.back.count == 1)
+    }
+}
