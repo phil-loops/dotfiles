@@ -112,9 +112,9 @@ enum ShellCommands {
                            available: { [weak app] _ in !(app?.nav.fwd.isEmpty ?? true) },
                            local: { [weak app] _, _ in app?.nav.goForward() }))
         let picking: (String?) -> Bool = { [weak app] _ in app?.nav.picker != nil }
-        r.register(Command(id: "picker.down", title: "Next place in the picker", scope: .global, keys: ["down", "C-n", "tab"], modes: [.picker], quiet: true,
+        r.register(Command(id: "picker.down", title: "Next place in the picker", scope: .global, keys: ["down", "C-n", "C-j", "tab"], modes: [.picker], quiet: true,
                            available: picking, local: { [weak app] _, _ in app?.nav.move(1) }))
-        r.register(Command(id: "picker.up", title: "Previous place in the picker", scope: .global, keys: ["up", "C-p"], modes: [.picker], quiet: true,
+        r.register(Command(id: "picker.up", title: "Previous place in the picker", scope: .global, keys: ["up", "C-p", "C-k"], modes: [.picker], quiet: true,
                            available: picking, local: { [weak app] _, _ in app?.nav.move(-1) }))
         r.register(Command(id: "picker.open", title: "Open the picked place", scope: .global, keys: ["ret"], modes: [.picker], quiet: true,
                            available: picking, local: { [weak app] i, _ in app?.nav.choose(i.flatMap(Int.init)) }))

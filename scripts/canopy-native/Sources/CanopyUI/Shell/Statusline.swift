@@ -78,18 +78,23 @@ private struct Completions: View {
     @Environment(\.theme) private var theme
 
     var body: some View {
-        let cs = Array(app.completions.prefix(12))
+        // a window of 12 that keeps the highlighted completion in view as tab/C-n walk past the fold
+        let all = app.completions
+        let lo = max(0, min(app.cmdIndex - 11, all.count - 12))
+        let cs = Array(all.enumerated().dropFirst(lo).prefix(12))
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(cs.enumerated()), id: \.element.id) { i, c in
+            ForEach(cs, id: \.element.id) { i, c in
                 HStack(spacing: 12) {
                     Text(c.id).foregroundStyle(i == app.cmdIndex ? theme.goldLeaf : theme.ink)
                     Text(c.title).foregroundStyle(theme.inkDim).lineLimit(1)
                     Spacer()
-                    Text(c.keys.map(glyph).joined(separator: " · ")).foregroundStyle(theme.inkFaint)
+                    Text(c.keys.map(glyph).joined(separator: " · ")).foregroundStyle(i == app.cmdIndex ? theme.goldLeaf : theme.inkFaint)
                 }
                 .padding(.horizontal, 10).padding(.vertical, 2)
                 .background(i == app.cmdIndex ? theme.goldWash : .clear)
+                .overlay(alignment: .leading) { (i == app.cmdIndex ? theme.goldLeaf : .clear).frame(width: 2) }
             }
+            if all.count > 12 { Text("\(app.cmdIndex + 1)/\(all.count)").foregroundStyle(theme.inkFaint).padding(.horizontal, 10) }
             if cs.isEmpty { Text("no command matches").foregroundStyle(theme.inkFaint).padding(.horizontal, 10) }
         }
         .font(Theme.mono(11.5))

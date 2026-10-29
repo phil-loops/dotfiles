@@ -20,16 +20,9 @@ public struct PickItem: Equatable, Sendable {
     public var label: String
     /// the source line beside the label, read when the picker opens
     public var text: String?
-    /// a non-code item: picking it runs this command with `arg` instead of going to `loc`
-    public var command: String?
-    public var arg: String?
     public init(loc: Loc, label: String, text: String? = nil) { self.loc = loc; self.label = label; self.text = text }
-
-    /// An item that isn't a code place (a branch, a jumplist entry): picking it runs `command(arg)`.
-    public init(label: String, text: String? = nil, command: String, arg: String?) {
-        self.loc = Loc(repo: "", sha: "", path: "", line: 0)
-        self.label = label; self.text = text; self.command = command; self.arg = arg
-    }
+    /// An item that isn't a place in code: whoever opened the picker says what choosing it does.
+    public init(label: String, text: String? = nil) { self.init(loc: Loc(repo: "", sha: "", path: "", line: 0), label: label, text: text) }
 }
 
 /// The picker's filter, as Helix's (pick.ts): every typed character in order, best first. Lower
@@ -76,18 +69,18 @@ public final class CodeNav {
     public private(set) var picker: (title: String, items: [PickItem])?
     public private(set) var filter = ""
     public private(set) var index = 0
+    /// What choosing does when the opener said (`pick(_:_:choose:)`): the item's index in `items`.
+    /// nil: go to the item's place, through the jumplist.
+    @ObservationIgnored private var chooser: ((Int) -> Void)?
+    /// The last picker closed, with its query, for "reopen the last picker" (Helix `space '`).
+    @ObservationIgnored private var last: (title: String, items: [PickItem], filter: String, chooser: ((Int) -> Void)?)?
     /// The picker opened / closed: the shell raises and drops the `picker` key layer with it.
     @ObservationIgnored public var onPickerChange: ((Bool) -> Void)?
     @ObservationIgnored private var surface: Attached?
     @ObservationIgnored private var surfaceID = 0
     /// The app-wide jumplist (the shell sets it): `go` records there instead of in `back`/`fwd`.
     @ObservationIgnored public var record: (() -> Void)?
-    /// Runs a non-code item's command (the shell sets it to the runner, via the picker).
-    @ObservationIgnored public var run: ((_ command: String, _ arg: String?) -> Void)?
     @ObservationIgnored private var pending: Loc?
-    @ObservationIgnored private var rank: (([PickItem], String) -> [PickItem])?
-    /// The last picker closed, with its query: `space '` reopens it.
-    @ObservationIgnored public private(set) var last: (title: String, items: [PickItem], filter: String, rank: (([PickItem], String) -> [PickItem])?)?
 
     public init() {}
 
@@ -136,33 +129,37 @@ public final class CodeNav {
         return true
     }
 
+    /// Open the picker on places in code; choosing one goes there through the jumplist.
     public func pick(_ title: String, _ items: [PickItem]) {
-        filter = ""
+        open(title, items, filter: "", chooser: nil)
+    }
+
+    /// Open the picker on anything: `choose` gets the picked item's index in `items`. Any area can
+    /// feed it (branches, pages, sessions); the picker layer's keys and view are the same.
+    public func pick(_ title: String, _ items: [PickItem], choose: @escaping (Int) -> Void) {
+        open(title, items, filter: "", chooser: choose)
+    }
+
+    public var canReopen: Bool { last != nil }
+
+    /// Open the last picker again, its query as it was left.
+    @discardableResult
+    public func reopen() -> Bool {
+        guard let l = last else { return false }
+        open(l.title, l.items, filter: l.filter, chooser: l.chooser)
+        return true
+    }
+
+    private func open(_ title: String, _ items: [PickItem], filter f: String, chooser c: ((Int) -> Void)?) {
+        filter = f
         index = 0
-        rank = nil
+        chooser = c
         picker = (title, items)
         onPickerChange?(true)
     }
 
-    /// A picker with its own ranking (`space b`: fuzzy × frecency) — `rank(items, filter)` replaces
-    /// the default fuzzy order.
-    public func pick(_ title: String, _ items: [PickItem], rank: @escaping ([PickItem], String) -> [PickItem]) {
-        pick(title, items)
-        self.rank = rank
-    }
-
-    /// `space '`: the last picker again, with its query. False when there was none.
-    @discardableResult
-    public func reopen() -> Bool {
-        guard let l = last else { return false }
-        pick(l.title, l.items)
-        rank = l.rank
-        filter = l.filter
-        return true
-    }
-
     private func remember() {
-        if let p = picker { last = (p.title, p.items, filter, rank) }
+        if let p = picker { last = (p.title, p.items, filter, chooser) }
     }
 
     /// Fill a row's source line once its file arrives.
@@ -174,25 +171,28 @@ public final class CodeNav {
 
     public var shown: [PickItem] {
         guard let p = picker else { return [] }
-        if let rank { return rank(p.items, filter) }
-        return ranked(p.items, filter) { "\($0.label) \($0.text ?? "")" }
+        return shownIndices.map { p.items[$0] }
+    }
+
+    /// `shown` as indices into the picker's items.
+    public var shownIndices: [Int] {
+        guard let p = picker else { return [] }
+        return ranked(Array(p.items.indices), filter) { "\(p.items[$0].label) \(p.items[$0].text ?? "")" }
     }
 
     public func move(_ d: Int) { index = max(0, min(shown.count - 1, index + d)) }
 
     @discardableResult
     public func choose(_ i: Int? = nil) -> Bool {
-        let s = shown
+        let s = shownIndices
         let n = i ?? index
-        guard s.indices.contains(n) else { return false }
+        guard let items = picker?.items, s.indices.contains(n) else { return false }
+        let c = chooser
         remember()
         picker = nil
+        chooser = nil
         onPickerChange?(false)
-        if let c = s[n].command {
-            run?(c, s[n].arg)
-        } else {
-            go(s[n].loc)
-        }
+        if let c { c(s[n]) } else { go(items[s[n]].loc) }
         return true
     }
 
@@ -200,6 +200,7 @@ public final class CodeNav {
         guard picker != nil else { return }
         remember()
         picker = nil
+        chooser = nil
         onPickerChange?(false)
     }
 
