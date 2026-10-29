@@ -396,7 +396,7 @@ import Testing
         await until("the wait line") { look.pop == .wait("types are loading — starting") }
         ShipStub.answer(p, "POST", "/loops/lsp/hover", #"{"ok":true,"contents":"```ts\nconst keep: string\n```"}"#)
         await until("the type") { look.pop == .hover("```ts\nconst keep: string\n```") }
-        #expect(hoverText("```ts\nconst keep: string\n```") == "const keep: string")
+        #expect(Markdown.parse("```ts\nconst keep: string\n```") == [.code(lang: "ts", lines: ["const keep: string"])], "the hover draws as a code block")
         keys(a, "j")
         #expect(look.pop == nil)
     }
