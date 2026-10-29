@@ -39,6 +39,17 @@ public enum Bindings {
         "list the references": ["review.references", "tutor.references"],
         "list the file's symbols": ["review.symbols", "tutor.symbols"],
         "start writing": ["review.note.insert", "tutor.write", "branch.describe.edit"],
+        // NAV.md §5
+        "find on the page": ["review.filter", "forest.find", "forests.find"],
+        "search the page": ["page.search", "review.search"],
+        "next branch in merge order": ["forest.branch.next", "review.branch.next"],
+        "previous branch in merge order": ["forest.branch.prev", "review.branch.prev"],
+        "the parent branch": ["forest.parent", "review.parent"],
+        "a child branch": ["forest.child", "review.child"],
+        "the stack's root": ["forest.root", "review.root"],
+        "the stack's tip": ["forest.tip", "review.tip"],
+        "first row": ["cursor.top", "review.top"],
+        "last row": ["cursor.bottom", "review.bottom"],
     ]
 
     private static let named: Set<String> = ["space", "esc", "ret", "tab", "up", "down", "left", "right"]

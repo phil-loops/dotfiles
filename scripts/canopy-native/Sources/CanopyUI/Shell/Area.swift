@@ -31,6 +31,24 @@ public protocol SurfaceProvider {
     func panes(_ app: AppModel) -> [Pane]
     /// What `ret` (pane.open) runs on a row: the page's "main action" for it, or nil.
     func primary(for row: String, _ app: AppModel) -> RouteTo?
+
+    // ── navigation seams (NAV.md §7; PORTING.md "Navigation seams") ──
+
+    /// What the label layer (`g w` / `f`) can point at right now, on screen. Default:
+    /// `app.visibleTargets()` — every visible `PaneList` row, plus every view wearing
+    /// `.labelTarget(…)` (tabs, buttons, hunk headers). Override only to add targets that can't
+    /// wear the modifier, or to drop some.
+    func targets(_ app: AppModel) -> [LabelTarget]
+    /// A row's text, for `/` (search the page) and the label layer. Default: the shell's guess from
+    /// the store (a branch's or forest's name, a wiki slug) or the key itself.
+    func title(for row: String, _ app: AppModel) -> String?
+    /// Fill in what the jumplist keeps beyond route, pane and cursor (which the shell fills):
+    /// `place.tab`, `place.scroll`. Default: nothing. (`place.loc` comes from `app.nav` itself.)
+    func remember(_ place: inout Place, _ app: AppModel)
+    /// Put a remembered place's tab and scroll back. The shell has already navigated to
+    /// `place.route`, focused `place.pane`, set the cursor to `place.cursorKey`, and handed
+    /// `place.loc` to `app.nav.open`. Default: nothing.
+    func restore(_ place: Place, _ app: AppModel)
 }
 
 public extension SurfaceProvider {
@@ -40,6 +58,10 @@ public extension SurfaceProvider {
     func scopes(_ app: AppModel) -> [Scope] { [] }
     func target(for scope: Scope, _ app: AppModel) -> String? { nil }
     func crumbs(_ app: AppModel, route: Route) -> [Crumb]? { nil }
+    func targets(_ app: AppModel) -> [LabelTarget] { app.visibleTargets() }
+    func title(for row: String, _ app: AppModel) -> String? { app.guessTitle(row) }
+    func remember(_ place: inout Place, _ app: AppModel) {}
+    func restore(_ place: Place, _ app: AppModel) {}
 }
 
 /// One step of the header's "canopy › forest › branch"; `command` makes it a button.

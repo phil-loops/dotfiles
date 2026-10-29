@@ -20,6 +20,8 @@ public final class AppModel: CommandContext {
     public let runner: Runner
     public let keys: KeyEngine
     public let nav: CodeNav
+    /// The app-wide jumplist (NAV.md §4.4): `C-o` / `C-i` over pages and code places.
+    public let jumps = Jumplist()
 
     public private(set) var bootstrap = Bootstrap()
 
@@ -39,6 +41,10 @@ public final class AppModel: CommandContext {
     @ObservationIgnored public private(set) var installed: [String] = []
     @ObservationIgnored private var states: [ObjectIdentifier: AnyObject] = [:]
     /// What `esc` in normal mode (overlay.close) backs out of (app.ts: an armed push, a launch).
+    /// The label layer's geometry: what views wearing `.labelTarget` / `.labelPane` reported.
+    @ObservationIgnored private var targetGeometry: [String: LabelTarget] = [:]
+    @ObservationIgnored private var targetOrder: [String] = []
+    @ObservationIgnored private var paneFrames: [String: CGRect] = [:]
     @ObservationIgnored public private(set) var closers: [(isOpen: () -> Bool, close: () -> Void)] = []
 
     public init(config: AppConfig, port: Int, telemetry enabled: Bool = true) {
@@ -276,4 +282,52 @@ public final class AppModel: CommandContext {
     // ── navigation helpers ──
 
     public func go(_ r: Route) { router.navigate(r) }
+
+    // ── navigation seams: where things are (labels) and where we are (the jumplist) ──
+
+    public func noteTarget(_ t: LabelTarget) {
+        let k = "\(t.pane)\u{1}\(t.key)"
+        if targetGeometry.updateValue(t, forKey: k) == nil { targetOrder.append(k) }
+    }
+
+    public func dropTarget(pane: String, key: String) {
+        let k = "\(pane)\u{1}\(key)"
+        if targetGeometry.removeValue(forKey: k) != nil { targetOrder.removeAll { $0 == k } }
+    }
+
+    public func notePaneFrame(_ pane: String, _ rect: CGRect?) { paneFrames[pane] = rect }
+
+    /// What's on screen to label: every reported target that belongs to this page — a row target
+    /// only while its pane is on the page and holds that row, and only inside its pane's visible
+    /// frame — titled by the surface when it carries no title of its own.
+    public func visibleTargets() -> [LabelTarget] {
+        let ps = panes
+        return targetOrder.compactMap { targetGeometry[$0] }.compactMap { t in
+            var t = t
+            if let p = ps.first(where: { $0.id == t.pane }) {
+                guard p.rows.contains(t.key) else { return nil }
+                if t.title.isEmpty { t.title = provider?.title(for: t.key, self) ?? t.key }
+            } else if t.run == nil {
+                return nil
+            }
+            if let f = paneFrames[t.pane], !f.intersects(t.rect) { return nil }
+            return t
+        }
+    }
+
+    /// A row's text when its surface says nothing better: the entity's name, else the key's id.
+    public func guessTitle(_ row: String) -> String {
+        if let id = RowKey.id(row, "b") { return store.view(Branch.self, id)?.name ?? id }
+        if let id = RowKey.id(row, "p") { return store.view(Project.self, id)?.name ?? id }
+        if let i = row.firstIndex(of: ":") { return String(row[row.index(after: i)...]) }
+        return row
+    }
+
+    /// Where we are, exactly (a jumplist entry): route, pane, cursor, code place, plus what the
+    /// surface keeps (`remember`: its tab and scroll).
+    public func here() -> Place {
+        var p = Place(route: router.route, pane: pane?.id, cursorKey: selected, loc: nav.here)
+        provider?.remember(&p, self)
+        return p
+    }
 }

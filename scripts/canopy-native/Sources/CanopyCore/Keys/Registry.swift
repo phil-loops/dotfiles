@@ -36,6 +36,8 @@ public struct KeyMode: OpenString {
     public static let menu: KeyMode = "menu"
     public static let sheet: KeyMode = "sheet"
     public static let picker: KeyMode = "picker"
+    /// the label layer (`g w` / `f`): every visible target wears a label; typing one picks it
+    public static let labels: KeyMode = "labels"
 
     /// Modes whose printable keys go to a text field.
     public static var textEntry: Set<KeyMode> = [.insert, .command, .menu, .picker]
@@ -141,6 +143,9 @@ public struct Command {
     public var v1: [String]
     /// left out of the space menu (cursor motion, the menu itself)
     public var quiet: Bool
+    /// runs as a jump (NAV.md §4.4): the jumplist remembers where you were before it runs.
+    /// Page changes record on their own; ids in `NavKeys.jumps` get this set on register.
+    public var recordsJump: Bool
     public var available: ((String?) -> Bool)?
     /// a key that means "the right thing here": names the command that actually runs
     public var route: ((String?) -> RouteTo?)?
@@ -152,12 +157,13 @@ public struct Command {
     public init(id: String, title: String, scope: Scope, budget: Budget = .local, keys: [String] = [],
                 modes: [KeyMode] = [.normal], needsArg: Bool = false, label: String? = nil,
                 pair: String? = nil, hint: [String] = [], v1: [String] = [], quiet: Bool = false,
+                recordsJump: Bool = false,
                 available: ((String?) -> Bool)? = nil, route: ((String?) -> RouteTo?)? = nil,
                 local: ((_ target: String?, _ arg: Any?) throws -> Void)? = nil,
                 write: ((_ target: String, _ arg: Any?) throws -> Write?)? = nil) {
         self.id = id; self.title = title; self.scope = scope; self.budget = budget; self.keys = keys; self.label = label
         self.modes = modes; self.needsArg = needsArg
-        self.pair = pair; self.hint = hint; self.v1 = v1; self.quiet = quiet; self.available = available
+        self.pair = pair; self.hint = hint; self.v1 = v1; self.quiet = quiet; self.recordsJump = recordsJump; self.available = available
         self.route = route; self.local = local; self.write = write
     }
 }
@@ -182,6 +188,8 @@ public final class CommandRegistry {
 
     public func register(_ c: Command) {
         precondition(byID[c.id] == nil, "command \(c.id) registered twice")
+        var c = c
+        if NavKeys.jumps.contains(c.id) { c.recordsJump = true }
         byID[c.id] = c
         order.append(c.id)
         defaults[c.id] = c.keys
