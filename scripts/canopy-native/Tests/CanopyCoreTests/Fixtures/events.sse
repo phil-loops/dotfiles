@@ -1,0 +1,14 @@
+event: hello
+data: {"epoch":"131f86ae3771c","versions":{"git":21,"remote":10,"review":31,"todo":1},"asset":"babb1daf981437da5971aaa323dd1d3b65bf8259"}
+
+event: patch
+data: {"domain":"git","version":20,"upserts":{"branch":{"loops:add-hankles-limited-label":{"id":"loops:add-hankles-limited-label","repo":"loops","name":"add-hankles-limited-label","project":"loops:hankles-limited-label","parent":"main","parentId":null,"description":"Adds a one-shot-ai-review label that runs the code-review bot once and comes off when its review lands","subject":"rename the label to one-shot-ai-review","commits":3,"outline":["chore: add a one-shot hankles (limited edition) label","fail louder","rename the label to one-shot-ai-review"],"tip":"e1b98e2a133f5c4e82b6c74fb31efca5b5c3b233","tree":"0a347d2ce7026913dadc897ee29f91abddce5180","pushed":"ahead","ahead":1,"gates":"green","redGates":[],"order":1,"holdUntil":null,"behind":0,"drifted":false,"upstream":"","upstreamBad":false,"diverged":false}},"project":{"loops:hankles-limited-label":{"id":"loops:hankles-limited-label","repo":"loops","name":"hankles-limited-label","state":"workbench","rank":null,"ticket":null,"summary":"Adds a one-shot-ai-review label that runs the code-review bot once and comes off when its review lands","size":1}}},"deletes":{}}
+
+event: patch
+data: {"domain":"git","version":21,"upserts":{"branch":{"loops:add-hankles-limited-label":{"id":"loops:add-hankles-limited-label","repo":"loops","name":"add-hankles-limited-label","project":"loops:hankles-limited-label","parent":"main","parentId":null,"description":"Adds a one-shot-ai-review label that runs the code-review bot once and comes off when its review lands","subject":"rename the label to one-shot-ai-review","commits":3,"outline":["chore: add a one-shot hankles (limited edition) label","fail louder","rename the label to one-shot-ai-review"],"tip":"e1b98e2a133f5c4e82b6c74fb31efca5b5c3b233","tree":"0a347d2ce7026913dadc897ee29f91abddce5180","pushed":"synced","ahead":0,"gates":"green","redGates":[],"order":1,"holdUntil":null,"behind":0,"drifted":false,"upstream":"","upstreamBad":false,"diverged":false}}},"deletes":{}}
+
+: ping
+
+event: resync
+data: {"epoch":"131f86ae3771c","versions":{"git":21,"remote":10,"review":32,"todo":1}}
+

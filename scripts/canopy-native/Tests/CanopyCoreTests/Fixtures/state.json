@@ -1,0 +1,478 @@
+{
+ "epoch": "131f86ae3771c",
+ "versions": {
+  "git": 21,
+  "remote": 10,
+  "review": 32,
+  "todo": 1
+ },
+ "entities": {
+  "repo": {
+   "loops": {
+    "id": "loops",
+    "name": "loops",
+    "main": "main",
+    "trunk": "5691da94f78dbe3b2d4555ead5726f9cae5ef374"
+   },
+   "monotoad": {
+    "id": "monotoad",
+    "name": "monotoad",
+    "main": "main",
+    "trunk": "1ca875ab61ac17c07c0ba2035e754a1ff487075e"
+   }
+  },
+  "project": {
+   "loops:svix-timeouts": {
+    "id": "loops:svix-timeouts",
+    "repo": "loops",
+    "name": "svix-timeouts",
+    "state": "archive",
+    "rank": null,
+    "ticket": "LOO-6248",
+    "summary": "abort a webhook dispatch request when it times out so the svix client retries on a fresh connection",
+    "size": 3
+   },
+   "loops:admin-footer-copy-styles": {
+    "id": "loops:admin-footer-copy-styles",
+    "repo": "loops",
+    "name": "admin-footer-copy-styles",
+    "state": "archive",
+    "rank": null,
+    "ticket": null,
+    "summary": "render the admin-copied footer with the campaign's styles so buttons keep their theme colors",
+    "size": 1
+   },
+   "loops:agents-md": {
+    "id": "loops:agents-md",
+    "repo": "loops",
+    "name": "agents-md",
+    "state": "archive",
+    "rank": null,
+    "ticket": null,
+    "summary": "Requires no trailing period on single-line tooltips and fixes the two that carried one",
+    "size": 1
+   },
+   "loops:email-destinations": {
+    "id": "loops:email-destinations",
+    "repo": "loops",
+    "name": "email-destinations",
+    "state": "workbench",
+    "rank": null,
+    "ticket": null,
+    "summary": "converts email HTML into a standard reading format with inline links, buttons and images",
+    "size": 3
+   },
+   "loops:hankles-limited-label": {
+    "id": "loops:hankles-limited-label",
+    "repo": "loops",
+    "name": "hankles-limited-label",
+    "state": "workbench",
+    "rank": null,
+    "ticket": null,
+    "summary": "Adds a one-shot-ai-review label that runs the code-review bot once and comes off when its review lands",
+    "size": 1
+   }
+  },
+  "branch": {
+   "loops:add-hankles-limited-label": {
+    "id": "loops:add-hankles-limited-label",
+    "repo": "loops",
+    "name": "add-hankles-limited-label",
+    "project": "loops:hankles-limited-label",
+    "parent": "main",
+    "parentId": null,
+    "description": "Adds a one-shot-ai-review label that runs the code-review bot once and comes off when its review lands",
+    "subject": "rename the label to one-shot-ai-review",
+    "commits": 3,
+    "outline": [
+     "chore: add a one-shot hankles (limited edition) label",
+     "fail louder",
+     "rename the label to one-shot-ai-review"
+    ],
+    "tip": "e1b98e2a133f5c4e82b6c74fb31efca5b5c3b233",
+    "tree": "0a347d2ce7026913dadc897ee29f91abddce5180",
+    "pushed": "synced",
+    "ahead": 0,
+    "gates": "green",
+    "redGates": [],
+    "order": 1,
+    "holdUntil": null,
+    "behind": 0,
+    "drifted": false,
+    "upstream": "",
+    "upstreamBad": false,
+    "diverged": false
+   },
+   "loops:add-email-reading-format": {
+    "id": "loops:add-email-reading-format",
+    "repo": "loops",
+    "name": "add-email-reading-format",
+    "project": "loops:email-destinations",
+    "parent": "main",
+    "parentId": null,
+    "description": "converts email HTML into a standard reading format with inline links, buttons and images",
+    "subject": "feat: add email reading format",
+    "commits": 1,
+    "outline": [
+     "feat: add email reading format"
+    ],
+    "tip": "8131570f48b7e92e1e0addfee1cfe5f380b2410d",
+    "tree": "b0d7588e0720c1e693ff688ad93535c4458fee5b",
+    "pushed": "local",
+    "ahead": 0,
+    "gates": "green",
+    "redGates": [],
+    "order": 1,
+    "holdUntil": null,
+    "behind": 81,
+    "drifted": false,
+    "upstream": "",
+    "upstreamBad": false,
+    "diverged": false
+   }
+  },
+  "pr": {
+   "loops:add-hankles-limited-label": {
+    "id": "loops:add-hankles-limited-label",
+    "repo": "loops",
+    "branch": "add-hankles-limited-label",
+    "project": "loops:hankles-limited-label",
+    "number": 11285,
+    "url": "https://github.com/loops-so/loops/pull/11285",
+    "state": "OPEN",
+    "review": "CHANGES_REQUESTED",
+    "draft": false,
+    "base": "main",
+    "approvals": 0,
+    "mergeState": "BLOCKED",
+    "mergeable": "MERGEABLE",
+    "approvedAt": null,
+    "title": null
+   }
+  },
+  "landed": {
+   "loops:goal-metrics-page-job#9192": {
+    "id": "loops:goal-metrics-page-job#9192",
+    "repo": "loops",
+    "project": "loops:goal-metrics-page-job",
+    "pr": 9192,
+    "title": "feat(goals-metrics-ui-job): the main job",
+    "branch": "goal-metrics/metrics-job",
+    "at": "2026-06-23T10:41:01-07:00"
+   },
+   "loops:numeric-enum#9220": {
+    "id": "loops:numeric-enum#9220",
+    "repo": "loops",
+    "project": "loops:numeric-enum",
+    "pr": 9220,
+    "title": "chore(settings): extract settings definition",
+    "branch": "settings/numeric-enum-registry",
+    "at": "2026-06-24T10:49:35-07:00"
+   },
+   "loops:loo-5170#9196": {
+    "id": "loops:loo-5170#9196",
+    "repo": "loops",
+    "project": "loops:loo-5170",
+    "pr": 9196,
+    "title": "fix: goal chart window axis",
+    "branch": "loo-5170-goal-chart-window-axis",
+    "at": "2026-06-23T14:06:53-07:00"
+   }
+  },
+  "warm": {
+   "loops": {
+    "id": "loops",
+    "prs": true
+   },
+   "monotoad": {
+    "id": "monotoad",
+    "prs": true
+   }
+  },
+  "conv": {
+   "loops:add-hankles-limited-label": {
+    "id": "loops:add-hankles-limited-label",
+    "repo": "loops",
+    "branch": "add-hankles-limited-label",
+    "number": 11285,
+    "title": "chore: add a one-shot hankles tag",
+    "body": "[one-shot-ai-review] runs a review once, and removes its label when done\r\n\r\n---\r\n👮 Traffic Cop\r\n\r\n- [x] Not tested in staging because: ci\r\n",
+    "url": "https://github.com/loops-so/loops/pull/11285",
+    "author": "phil-loops",
+    "state": "OPEN",
+    "headRef": "add-hankles-limited-label",
+    "base": "main",
+    "head": "e1b98e2a133f5c4e82b6c74fb31efca5b5c3b233",
+    "tip": "e1b98e2a133f5c4e82b6c74fb31efca5b5c3b233",
+    "mapping": "same",
+    "behind": 0,
+    "unpushed": [],
+    "viewer": "phil-loops",
+    "reviews": [
+     {
+      "id": "PRR_kwDOGSZuWM8AAAABVA4fLQ",
+      "author": "john-hankles",
+      "state": "COMMENTED",
+      "body": "",
+      "at": "2026-10-29T21:25:41Z",
+      "url": "https://github.com/loops-so/loops/pull/11285#pullrequestreview-5705178925"
+     },
+     {
+      "id": "PRR_kwDOGSZuWM8AAAABVA7Bmw",
+      "author": "phil-loops",
+      "state": "COMMENTED",
+      "body": "",
+      "at": "2026-10-29T21:29:35Z",
+      "url": "https://github.com/loops-so/loops/pull/11285#pullrequestreview-5705220507"
+     },
+     {
+      "id": "PRR_kwDOGSZuWM8AAAABVA7RJQ",
+      "author": "phil-loops",
+      "state": "COMMENTED",
+      "body": "",
+      "at": "2026-10-29T21:29:56Z",
+      "url": "https://github.com/loops-so/loops/pull/11285#pullrequestreview-5705224485"
+     },
+     {
+      "id": "PRR_kwDOGSZuWM8AAAABVBUBIQ",
+      "author": "notnmeyer",
+      "state": "CHANGES_REQUESTED",
+      "body": "see my other comment",
+      "at": "2026-10-29T22:10:34Z",
+      "url": "https://github.com/loops-so/loops/pull/11285#pullrequestreview-5705629985"
+     }
+    ],
+    "comments": [
+     {
+      "id": "IC_kwDOGSZuWM8AAAABg_7AAg",
+      "author": "notnmeyer",
+      "body": "change the label to something that makes sense on its own, \"ai-code-review-single-run\" or something",
+      "at": "2026-10-29T22:10:02Z",
+      "url": "https://github.com/loops-so/loops/pull/11285#issuecomment-6509477890"
+     }
+    ],
+    "pending": null,
+    "unflagged": {
+     "items": [
+      {
+       "path": ".github/workflows/code-review.yml",
+       "line": 17,
+       "why": "The PR title and body promise a `hankles (limited edition)` label (\"tag\" in the title), but the last commit renamed it to `one-shot-ai-review`, which is the only name the workflow matches. The body is the text that survives the squash merge, so it now names a label that does nothing."
+      },
+      {
+       "path": ".github/workflows/code-review.yml",
+       "line": 107,
+       "why": "The concurrency group is set at the workflow level with `cancel-in-progress: true`, so adding any unrelated label during a one-shot review starts a skipped run that still cancels the review. The removal step then never runs and the label stays on the PR, so the next push runs a review again. That breaks the body's claim that the review runs once and the label comes off when it is done."
+      }
+     ],
+     "model": "opus",
+     "at": "2026-10-29T22:15:31Z"
+    },
+    "at": 1793313911.0196538
+   }
+  },
+  "thread": {
+   "loops:add-hankles-limited-label#PRRT_kwDOGSZuWM6xwpk_": {
+    "id": "loops:add-hankles-limited-label#PRRT_kwDOGSZuWM6xwpk_",
+    "repo": "loops",
+    "branch": "add-hankles-limited-label",
+    "pr": 11285,
+    "node": "PRRT_kwDOGSZuWM6xwpk_",
+    "path": ".github/workflows/code-review.yml",
+    "line": null,
+    "startLine": null,
+    "originalLine": 112,
+    "originalStartLine": null,
+    "side": "RIGHT",
+    "subject": "LINE",
+    "outdated": true,
+    "resolved": true,
+    "canResolve": false,
+    "canUnresolve": true,
+    "canReply": true,
+    "comments": [
+     {
+      "id": "PRRC_kwDOGSZuWM8AAAABB1ZPzA",
+      "db": 4418064332,
+      "author": "john-hankles",
+      "state": "SUBMITTED",
+      "body": "The `|| echo \"Label already removed.\"` fallback hides every failure, not only the 404 case. The GitHub App token needs `issues: write` to delete a label from a pull request. If the installation does not have it, the API call returns 403, the step still passes, and the label stays on the pull request. The one-shot label then becomes permanent, and each later push starts a new review. Please let the step fail on anything that is not a 404.\n\n```suggestion\n        run: |\n          if ! gh api -X DELETE \"repos/${GH_REPO}/issues/${PR_NUMBER}/labels/hankles%20%28limited%20edition%29\" --silent 2> label-error.log; then\n            grep -q \"HTTP 404\" label-error.log || { cat label-error.log; exit 1; }\n          fi\n```",
+      "at": "2026-10-29T21:25:42Z",
+      "url": "https://github.com/loops-so/loops/pull/11285#discussion_r4418064332",
+      "commit": "f2ebf1e98045fd274dbf12fe4477a933acd88d0c",
+      "originalCommit": "f2ebf1e98045fd274dbf12fe4477a933acd88d0c",
+      "hunk": "@@ -103,6 +103,14 @@ jobs:\n              Don't nit-pick. Don't leave low-value 'LGTM' style comments.\" \\\n             \"Review pull request #${PR_NUMBER} at head commit ${HEAD_SHA}.\"\n \n+      - name: Remove one-shot label\n+        if: ${{ success() && contains(github.event.pull_request.labels.*.name, 'hankles (limited edition)') }}\n+        env:\n+          GH_TOKEN: ${{ steps.app-token.outputs.token }}\n+          GH_REPO: ${{ github.repository }}\n+          PR_NUMBER: ${{ github.event.pull_request.number }}\n+        run: gh api -X DELETE \"repos/${GH_REPO}/issues/${PR_NUMBER}/labels/hankles%20%28limited%20edition%29\" --silent || echo \"Label already removed.\""
+     },
+     {
+      "id": "PRRC_kwDOGSZuWM8AAAABB1bdzQ",
+      "db": 4418100685,
+      "author": "phil-loops",
+      "state": "SUBMITTED",
+      "body": "we can just fail louder",
+      "at": "2026-10-29T21:29:56Z",
+      "url": "https://github.com/loops-so/loops/pull/11285#discussion_r4418100685",
+      "commit": "f2ebf1e98045fd274dbf12fe4477a933acd88d0c",
+      "originalCommit": "f2ebf1e98045fd274dbf12fe4477a933acd88d0c"
+     }
+    ],
+    "local": null,
+    "note": {
+     "verdict": "partly",
+     "evidence": [
+      {
+       "path": ".github/workflows/code-review.yml",
+       "line": 112,
+       "why": "`|| echo` does swallow every non-zero exit, including 403s and 5xx errors, so the general point is real and the suggested 404-only fallback is a small fix."
+      },
+      {
+       "path": ".github/workflows/code-review.yml",
+       "line": 50,
+       "why": "The same app token already posts inline review comments and resolves threads, so the installation has `pull_requests: write`. As far as I know, GitHub's label endpoints accept that permission or `issues: write`, so the 403 scenario the comment names is unlikely. I could not confirm the app's installed permissions from the repo."
+      },
+      {
+       "path": ".github/workflows/code-review.yml",
+       "line": 17,
+       "why": "If the delete did fail silently, the next push would start another review, so the failure shows up on its own. It does not linger unseen."
+      },
+      {
+       "path": ".github/workflows/code-review.yml",
+       "line": 115,
+       "why": "The cache save uses `!cancelled()`, so letting the delete step fail, as the suggestion does, would not lose the saved session. Adopting it costs little."
+      }
+     ],
+     "elsewhere": [],
+     "cause": null,
+     "draftReply": "Keeping this as-is: the app token already holds pull_requests: write (it posts the review comments), and that permission covers label deletes. If a delete ever did fail, the next push would run a second review, which is loud enough on its own.",
+     "model": "opus",
+     "at": "2026-10-29T21:27:40Z"
+    },
+    "fixedBy": []
+   },
+   "loops:add-hankles-limited-label#PRRT_kwDOGSZuWM6xwupd": {
+    "id": "loops:add-hankles-limited-label#PRRT_kwDOGSZuWM6xwupd",
+    "repo": "loops",
+    "branch": "add-hankles-limited-label",
+    "pr": 11285,
+    "node": "PRRT_kwDOGSZuWM6xwupd",
+    "path": ".github/workflows/code-review.yml",
+    "line": null,
+    "startLine": null,
+    "originalLine": 112,
+    "originalStartLine": null,
+    "side": "RIGHT",
+    "subject": "LINE",
+    "outdated": true,
+    "resolved": true,
+    "canResolve": false,
+    "canUnresolve": true,
+    "canReply": true,
+    "comments": [
+     {
+      "id": "PRRC_kwDOGSZuWM8AAAABB1bR1A",
+      "db": 4418097620,
+      "author": "phil-loops",
+      "state": "SUBMITTED",
+      "body": "```suggestion\n        run: gh api -X DELETE \"repos/${GH_REPO}/issues/${PR_NUMBER}/labels/hankles%20%28limited%20edition%29\" --silent\n```",
+      "at": "2026-10-29T21:29:35Z",
+      "url": "https://github.com/loops-so/loops/pull/11285#discussion_r4418097620",
+      "commit": "f2ebf1e98045fd274dbf12fe4477a933acd88d0c",
+      "originalCommit": "f2ebf1e98045fd274dbf12fe4477a933acd88d0c",
+      "hunk": "@@ -103,6 +103,14 @@ jobs:\n              Don't nit-pick. Don't leave low-value 'LGTM' style comments.\" \\\n             \"Review pull request #${PR_NUMBER} at head commit ${HEAD_SHA}.\"\n \n+      - name: Remove one-shot label\n+        if: ${{ success() && contains(github.event.pull_request.labels.*.name, 'hankles (limited edition)') }}\n+        env:\n+          GH_TOKEN: ${{ steps.app-token.outputs.token }}\n+          GH_REPO: ${{ github.repository }}\n+          PR_NUMBER: ${{ github.event.pull_request.number }}\n+        run: gh api -X DELETE \"repos/${GH_REPO}/issues/${PR_NUMBER}/labels/hankles%20%28limited%20edition%29\" --silent || echo \"Label already removed.\""
+     }
+    ],
+    "local": null,
+    "note": null,
+    "fixedBy": []
+   }
+  },
+  "draft": {
+   "loops:add-hankles-limited-label": {
+    "id": "loops:add-hankles-limited-label",
+    "repo": "loops",
+    "branch": "add-hankles-limited-label",
+    "items": []
+   }
+  },
+  "viewed": {
+   "loops:add-a-recorded-domain-reenable": {
+    "id": "loops:add-a-recorded-domain-reenable",
+    "repo": "loops",
+    "branch": "add-a-recorded-domain-reenable",
+    "keys": [
+     "bzkr2yfkrl"
+    ]
+   },
+   "loops:move-oauth-code-exchange-into-a-helper": {
+    "id": "loops:move-oauth-code-exchange-into-a-helper",
+    "repo": "loops",
+    "branch": "move-oauth-code-exchange-into-a-helper",
+    "keys": [
+     "1ofzy4ou6k2"
+    ]
+   },
+   "loops:skip-new-signups-without-user": {
+    "id": "loops:skip-new-signups-without-user",
+    "repo": "loops",
+    "branch": "skip-new-signups-without-user",
+    "keys": [
+     "28trxh5n2zc",
+     "8xw6tpx298",
+     "h6s2azd34i"
+    ]
+   }
+  },
+  "todo": {
+   "address-thread": {
+    "id": "address-thread",
+    "title": "Address a review thread with a commit",
+    "kind": "build",
+    "state": "done",
+    "area": "review",
+    "size": "M",
+    "why": "the fix commit is tied to the thread, shown on both, and the reply rides the push",
+    "blocked_by": [
+     "address-thread-spec"
+    ],
+    "links": [
+     "wiki/loops/canopy-v2-address.md"
+    ],
+    "created": "2026-10-25",
+    "updated": "2026-10-25",
+    "body": "## Done\n2026-10-25 — 4cd3c1a — E: Claude / Helix / pick; trailer link; reply rides the push"
+   },
+   "address-thread-spec": {
+    "id": "address-thread-spec",
+    "title": "Decide how addressing a thread with a commit works",
+    "kind": "decide",
+    "state": "done",
+    "area": "review",
+    "size": "S",
+    "why": "a plain review question today means Helix, commit, come back, paste the sha by hand",
+    "links": [
+     "wiki/loops/canopy-v2-address.md"
+    ],
+    "created": "2026-10-25",
+    "updated": "2026-10-25",
+    "body": "## Done\n2026-10-25 — 2026-10-25 — Phil: E, declarative (trailer in the commit), 'done in <sha>', no no-change offer; spec updated"
+   },
+   "auto-archive-closed-forests": {
+    "id": "auto-archive-closed-forests",
+    "title": "Decide whether a closed forest archives itself after its canopy-closed moment",
+    "kind": "decide",
+    "state": "open",
+    "area": "forests",
+    "size": "S",
+    "why": "finished forests leave Forests without a manual archive press",
+    "links": [
+     "memory:project_canopy-v2.md",
+     "wiki/loops/canopy-v2-joy.md"
+    ],
+    "rank": 8,
+    "created": "2026-10-25",
+    "updated": "2026-10-25",
+    "body": "v2 Forests plays a \"✦ canopy closed\" flourish when a forest's last PR lands (`v2/Forests.tsx`), then the row stays until Phil archives it (`a`).\nOpen since Phase 1 (2026-10-22): should it set `stack-project.<p>.archived=true` on its own after the flourish?"
+   }
+  }
+ },
+ "ms": 31.8
+}
