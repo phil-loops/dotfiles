@@ -54,9 +54,10 @@ public final class AppModel: CommandContext {
     @ObservationIgnored private var paneFrames: [String: CGRect] = [:]
     @ObservationIgnored public private(set) var closers: [(isOpen: () -> Bool, close: () -> Void)] = []
 
-    public init(config: AppConfig, port: Int, telemetry enabled: Bool = true) {
+    /// `protocolClasses` lets a test answer the app's requests with a URLProtocol stub.
+    public init(config: AppConfig, port: Int, telemetry enabled: Bool = true, protocolClasses: [AnyClass]? = nil) {
         self.config = config
-        transport = Transport(port: port)
+        transport = Transport(base: URL(string: "http://127.0.0.1:\(port)")!, protocolClasses: protocolClasses)
         telemetry = Telemetry(transport: transport, enabled: enabled)
         store = Store()
         router = Router(config.route)
