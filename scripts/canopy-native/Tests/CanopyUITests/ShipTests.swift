@@ -109,6 +109,7 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
 
     @Test func theConversationPaneIsTheTimeline() throws {
         let (a, _) = try app()
+        ShipState.of(a).host.tab = "conversation"   // the review page opens on its files tab
         let rows = ShipSeam.panes(a).first { $0.id == ShipSeam.conversationPane }?.rows ?? []
         #expect(rows.first == "c|body")
         #expect(rows.contains("t|\(Self.thread)"))

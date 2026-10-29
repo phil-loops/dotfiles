@@ -146,7 +146,7 @@ let learningFixture = #"""
         #expect(t.drawer == nil)
         #expect(a.pane?.id == "due", "focus returns to where the drawer opened from")
         a.keys.handle("esc")
-        #expect(a.runner.note == "esc · nothing here" || a.runner.note == "nothing to close")
+        #expect(a.runner.note?.contains(KeyEngine.nothingToCancel) == true, "esc with nothing open only cancels (NAV.md)")
     }
 
     @Test func findConceptOpensItsDrawerOnTheHome() {
@@ -436,7 +436,7 @@ let learningFixture = #"""
         #expect(a.keys.layer == .picker)
         a.keys.handle("ret")
         #expect(t.pin == Pin(path: "b.ts", ref: "abc", lines: [4, 4]), "the picked place opens in the code pane")
-        #expect(a.nav.back.first?.path == "a.ts", "and the jumplist remembers where from")
+        #expect(a.jumps.back.last?.loc?.path == "a.ts", "and the app-wide jumplist remembers where from")
     }
 }
 
