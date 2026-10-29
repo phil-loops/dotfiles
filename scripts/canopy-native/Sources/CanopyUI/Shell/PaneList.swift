@@ -29,6 +29,7 @@ public struct PaneList<Row: View>: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .background(key == cursor ? theme.goldWash : selection.contains(key) ? theme.emberWash : .clear)
                             .overlay(alignment: .leading) { if key == cursor { theme.goldLeaf.frame(width: 2) } }
+                            .labelTarget(pane: pane, key: key)
                             .id(key)
                     }
                 }
@@ -36,6 +37,7 @@ public struct PaneList<Row: View>: View {
             }
             .onChange(of: cursor) { _, k in if let k { proxy.scrollTo(k) } }
         }
+        .labelPane(pane)
         .overlay { Rectangle().stroke(focused ? theme.goldDeep : theme.rule.opacity(0.5), lineWidth: 1) }
     }
 }

@@ -11,6 +11,12 @@ public protocol CommandContext: AnyObject {
     func liveScopes() -> [Scope]
     /// A command ran from the menu or palette: close it.
     func closeMenu()
+    /// A command that records a jump (`Command.recordsJump`) is about to run: remember where we are.
+    func willJump(_ id: String)
+}
+
+public extension CommandContext {
+    func willJump(_ id: String) {}
 }
 
 /// A write's live state, for a button that becomes its own status (runner.ts Run).
@@ -99,6 +105,7 @@ public final class Runner {
         let t0 = Date()
         let target = explicit ?? context?.target(for: cmd.scope)
         if let available = cmd.available, !available(target) { return echo(named, via, false) }
+        if cmd.recordsJump { context?.willJump(id) }
         var base: JSONObject = ["type": "cmd", "id": .string(id), "budget": .string(cmd.budget.rawValue), "via": .string(via.rawValue)]
         if let target { base["target"] = .string(target) }
         let feedback = { (extra: JSONObject) in
