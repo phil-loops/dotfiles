@@ -1,0 +1,97 @@
+{
+ "title": "Domain enforcement — principles",
+ "subtitle": "Sign off from the top",
+ "sections": [
+  {
+   "id": "light",
+   "group": "Guiding light",
+   "title": "The one question",
+   "tag": null,
+   "body": "> At any moment we can answer: why can't this team send, who decided that, and what would change it?\n\nEvery table, column and feature earns its place by helping answer that question — for the **reviewer** looking at a case, the **customer** looking at their banner, or **us later** asking whether a detector is any good.\n\nIf it doesn't help answer it, it waits.\n\n# Why this one\n- It is what every complaint in the problem statement reduces to: reviewers can't see why, customers can't see why, re-enable doesn't say who or why, a wrong call leaves no trace.\n- It names three audiences, so it pulls in the customer-facing work without making it the center.\n- \"What would change it\" covers lifting, snoozing and allowances — the positive side — not just the restriction.\n\n# Sign off if\nYou'd use this sentence to reject a feature in review."
+  },
+  {
+   "id": "rule-1",
+   "group": "Rules",
+   "title": "1 · A restriction is a claim with a reason and a decider",
+   "tag": "why + who",
+   "body": "A restriction says **what was found** and **who decided** to act on it.\n\n- **Reason** — the kind of problem (a category such as `content.phishing`), and for an automation, the exact rule that fired.\n- **Finding** — the specific thing found, when there is one: `email:<id>`, `word:crypto`.\n- **Decider** — a **person** (by user id) or an **automation**, named with its version: `health-cron`, `phishtank-v0`, `ses`, `team-deletion`.\n\n\"Why can't this team send\" is answered by the claims in effect, read straight off them.\n\n# Scope: standing state\nThe question is about what **stays** blocked until something changes. A one-off rejection of a single send is answered on the spot in the error the customer sees, with its evidence logged — it is not a restriction.\n\n# Rules in\n- Decider separate from reason. A person who blocks must say why; there is no \"admin judgment\" reason.\n- Recording a claim even when the domain is already off — otherwise the second reason is invisible.\n\n# Rules out\n- A free-text `disableCriterion` that only goes to logs.\n- \"detector\" or \"system\" as an answer to who decided."
+  },
+  {
+   "id": "rule-1b",
+   "group": "Rules",
+   "title": "1b · Policies decide; restrictions record",
+   "tag": "the seam",
+   "body": "A policy answers \"given what we saw, should we act?\". Enforcement answers \"why can't this team send, who decided, what would change it?\". They meet at one seam:\n\n- **A policy changes sending state only by writing a restriction**, naming itself as the decider and a registered rule as the reason.\n- **A policy reads allowances** as one of its inputs, and skips findings a person has allowed.\n- **Enforcement never reads a policy.** Dependencies point one way: policies can be added, versioned or deleted without touching restrictions, lifts or allowances.\n\nA policy's internal reasoning — the facts it cited, the model's answer — lives in its evidence, not in the restriction.\n\n# Rules in\n- safety-v0's `act` disabling a domain becomes \"write a restriction\".\n- A future safety-log policy that blocks is one more caller of the same seam.\n\n# Rules out\n- A second override system next to allowances.\n- Diagnostic outcomes (inconclusive, unsupported version) becoming restriction reasons."
+  },
+  {
+   "id": "rule-2",
+   "group": "Rules",
+   "title": "2 · The remedy matches the finding",
+   "tag": "proportionality",
+   "body": "Act at the grain of what was found — and correct at the same grain.\n\n| Finding is about | Restrict | Allow / correct |\n|---|---|---|\n| a word | (the domain, today) | that word, for that team |\n| one email | that email (later), the domain today | that email |\n| sending behavior | the domain | a quiet window on that reason |\n| the account | the team | — |\n\n# Rules in\n- Team-scoped restrictions (provider pauses, suspicious signups, deletion are about the team).\n- Approving one email lifts only that email's restriction — never a complaint-rate restriction or an admin block.\n- Allowing a single banned word for a team, instead of exempting it from every check.\n\n# Rules out\n- Reenable clearing every flagged email the team ever sent.\n- Unleash as the only way to loosen anything."
+  },
+  {
+   "id": "rule-3",
+   "group": "Rules",
+   "title": "3 · A detector's verdict is provisional; a person's is binding",
+   "tag": "machines tighten, people loosen",
+   "body": "Machines may make claims. A person may **retract** one (\"it was wrong\") or **close** it (\"they fixed it\") — and that judgment holds until it expires. Detectors must respect it.\n\n# Rules in\n- A lift needs a person, a verdict (wrong / fixed) and a note.\n- A \"wrong\" lift can leave an **allowance** behind, so the same finding doesn't restrict again the next time the detector runs.\n- Allowances end on their own — a lapse moves toward safer, so no one has to act.\n\n# Rules out\n- A detector re-disabling a domain 15 minutes after a person lifted it for the same finding.\n- SES reinstating a tenant counting as a lift (the provider is evidence, not a person).\n- Permanent exemptions with no reason."
+  },
+  {
+   "id": "rule-4",
+   "group": "Rules",
+   "title": "4 · Record what happened once; compute everything else",
+   "tag": "write once",
+   "body": "Claims and judgments are written once and never edited. A lift fills in empty fields exactly once; it never rewrites a claim.\n\n\"In effect\", the review queue, \"what's blocking re-enable\" and the false-positive rate are **queries**, not stored state. The domain's `disabled` flag is a cache of \"has a claim in effect\".\n\n# Rules in\n- `liftedAt` / `revokedAt` written once, guarded by `WHERE liftedAt IS NULL` — a second lift, or one from a stale page, does nothing.\n- \"How often is this detector wrong\" = count of claims lifted as wrong, by reason.\n\n# Rules out\n- Overwriting `decision` in place.\n- `safetyClassification = \"override\"` replacing the classifier's label."
+  },
+  {
+   "id": "rule-5",
+   "group": "Rules",
+   "title": "5 · Add a concept only when a real case needs it",
+   "tag": "the brake",
+   "body": "A new concept enters only when a **real case** needs it **and** the existing concepts — restriction, lift, allowance — can't express it.\n\nBefore adding anything, write down the case and show why the three nouns can't cover it.\n\n# What this rule removed from the earlier designs\n- A generic decision log with seven kinds.\n- Overturns of overturns; overturning evidence vs decision.\n- Stale-decision version checks and \"superseded\" decisions.\n- Idempotency keys (kept as a future change).\n- Content-hash targets and policy replay — real eventually, not yet.\n\n# Sign off if\nYou'd hold me to it the next time a design grows a new noun."
+  },
+  {
+   "id": "nouns",
+   "group": "What the rules produce",
+   "title": "Three nouns",
+   "tag": "restriction · lift · allowance",
+   "body": "```\nRestriction\n  teamId, sendingDomainId?          // null = the whole team\n  category, ruleId?, findingKey?    // ruleId for an automation's claim\n  deciderKind (person | automation), deciderName   // user id, or \"health-cron@3\"\n  liftedAt?, liftedByUserId?, liftVerdict? (wrong | fixed), liftNote?   // written once\n\nAllowance                            // exactly one selector\n  teamId\n  category + findingKey   |  ruleId  |  category  |  (none = all checks)\n  until, grantedByUserId, note\n  revokedAt?, revokedByUserId?      // written once\n```\n\n- **Disabled** = the domain or its team has a restriction with no `liftedAt`.\n- **Dedupe** = an automation's repeat claim with the same rule + finding is skipped (under a row lock). A person's claim is never deduped against an automation's.\n- **Automations** check allowances before restricting; a suppressed finding can be noted, not acted on.\n- **The registry** (TS) holds categories and rules: subject, label, the finding type each rule produces.\n\nNo catch-all JSON. No generic event kinds."
+  },
+  {
+   "id": "reasons",
+   "group": "What the rules produce",
+   "title": "Reasons and how allowances match",
+   "tag": "category · rule · finding",
+   "body": "**Category** — the kind of problem, stable: `content.phishing`, `content.banned_word`, `behavior.complaint_rate`, `behavior.provider_paused`, `account.suspicious_signup`, `account.deleted`, …\n\n**Rule** — one automation's complete predicate, with an immutable id, in exactly one category: `phishing_classifier`, `classifier_unrecognized_output`, `banned_word_substring`, `lookalike_sender_root_plus_lure`, `health_complaint_limit`, … A rule whose meaning changes gets a new id.\n\n**Finding** — typed and the same across rules: `email:<id>`, `word:<lowercased word>` (later `content:<hash>`).\n\n# An allowance is one of three judgments\n| A person says | Selector | Matches when |\n|---|---|---|\n| this finding was wrong | category + finding | same category and finding, any rule |\n| this rule is wrong for this team | rule | same rule |\n| this category is wrong for this team | category | same category |\n\nExact equality only — no prefixes, no precedence: any matching allowance suppresses.\n\n- A finding allowance survives replacing the classifier with new rules; a rule allowance doesn't, and shouldn't.\n- Editing the banned-word list doesn't touch word allowances.\n- Creating an allowance doesn't lift what's already in effect; it governs what automations do next.\n- A decision citing several rules writes one restriction per rule + finding; the review groups them by finding.\n\n# Not reasons\nClassifier `spam` / `safe` (accepted today), mail-smell (rejects creation — a one-off), Apple Private Relay notices (warnings), the volume/age gate (decides whether a claim restricts), facets (evidence until a rule uses them)."
+  },
+  {
+   "id": "asks",
+   "group": "What the rules produce",
+   "title": "How the original asks are met",
+   "tag": null,
+   "body": "| Ask | Met by |\n|---|---|\n| clear story of why it was disabled | reason + finding + actor on each restriction; the case page lists what's in effect |\n| link disable and re-enable | the lift lives on the restriction it ends |\n| mark a decision wrong without overwriting | the lift's verdict, written once |\n| don't re-fire on what a person cleared | an allowance left by a \"wrong\" lift |\n| allow a specific banned word for a team | an allowance: reason `banned_words`, finding `crypto` |\n| review queue that tells the story | restrictions in effect, grouped by team, with reason and actor |"
+  },
+  {
+   "id": "checks",
+   "group": "What the rules produce",
+   "title": "Checked against earlier ideas",
+   "tag": null,
+   "body": "| Idea | Verdict | Rule |\n|---|---|---|\n| reason + decider | keep | 1 |\n| decider = person or named automation | keep | 1 |\n| finding key, typed across rules | keep | 2 |\n| reason tree with prefix-matched allowances | drop (Codex) | 2, 5 |\n| three exact allowance selectors | keep | 2, 3 |\n| \"admin judgment\" as a reason | drop | 1 |\n| team-scoped restrictions | keep | 2 |\n| lift with wrong / fixed | keep | 3 |\n| allowance (incl. banned word) | keep | 2, 3 |\n| write-once lift fields | keep | 4 |\n| generic decision log | drop | 5 |\n| overturns of overturns | drop | 5 |\n| version checks / superseded | drop | 5 |\n| idempotency keys | later | 5 |\n| snooze | when the queue needs it | 1 (what would change it) |\n| content holds, policy replay | later | 5 |"
+  },
+  {
+   "id": "phases",
+   "group": "Plan",
+   "title": "Phases",
+   "tag": null,
+   "body": "1. **Restrictions.** The table; every disable site writes one with reason, finding and actor; re-enable lifts them; the review page shows what's in effect; approving an email lifts only that email's restriction. Includes Codex's must-fixes: every enable goes through a lift, team scope, finding key.\n2. **Lift with a verdict, and allowances.** The lift dialog (wrong / fixed + optional allowance); detectors check allowances; allow a word for a team.\n3. **Notes and snooze.** When the review workflow needs them.\n4. **One entry point for detectors** (`enforce`), with linked evidence.\n5. **Customer surfaces** — banner, email, API error worded by subject."
+  },
+  {
+   "id": "open",
+   "group": "Plan",
+   "title": "Open questions",
+   "tag": null,
+   "body": "- After a \"wrong\" lift, what is the **default allowance length** per reason?\n- Is `DISABLE_SPAMMY_SENDING_DOMAINS` on in prod? (It re-disables on every cron run today.)\n- After a team is **hard-deleted**, does its enforcement history survive (abuse record) or go (privacy)?\n- How much do we tell customers about **content** flags?"
+  }
+ ]
+}
