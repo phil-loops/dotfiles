@@ -31,8 +31,6 @@ public protocol SurfaceProvider {
     func panes(_ app: AppModel) -> [Pane]
     /// What `ret` (pane.open) runs on a row: the page's "main action" for it, or nil.
     func primary(for row: String, _ app: AppModel) -> RouteTo?
-    /// Every visible thing the label layer (`g w`, `f`) can put a label on, top to bottom (NAV.md §7).
-    func targets(_ app: AppModel) -> [Target]
 }
 
 public extension SurfaceProvider {
@@ -42,9 +40,6 @@ public extension SurfaceProvider {
     func scopes(_ app: AppModel) -> [Scope] { [] }
     func target(for scope: Scope, _ app: AppModel) -> String? { nil }
     func crumbs(_ app: AppModel, route: Route) -> [Crumb]? { nil }
-    func targets(_ app: AppModel) -> [Target] {
-        panes(app).flatMap { p in p.rows.map { Target(pane: p.id, key: $0, primary: primary(for: $0, app)) } }
-    }
 }
 
 /// One step of the header's "canopy › forest › branch"; `command` makes it a button.
