@@ -1,57 +1,6 @@
 import CanopyCore
 import Foundation
 
-/// One tracker item as this page reads it (types.ts TodoItem). Read from the store's raw `todo`
-/// table, not the shared `TodoItem`: a file srv/todo.py can't parse arrives as
-/// `{id, title, state: "broken", problems, body}` with no kind/area/size/why, which the shared model
-/// can't decode (it would drop the item, and the "Can't read" section with it).
-struct TrackerItem: Decodable, Equatable {
-    var id: String
-    var title: String
-    var kind: String
-    var state: String
-    var area: String
-    var size: String
-    var why: String
-    var waiting: String?
-    var blocked_by: [String]?
-    var links: [String]?
-    var rank: Int?
-    var created: String?
-    var updated: String?
-    var body: String
-    var problems: [String]?
-
-    init(id: String, title: String? = nil, kind: String = "build", state: String = "open", area: String = "x", size: String = "S",
-         why: String = "", waiting: String? = nil, blocked_by: [String]? = nil, links: [String]? = nil, rank: Int? = nil,
-         created: String? = nil, updated: String? = nil, body: String = "", problems: [String]? = nil) {
-        self.id = id; self.title = title ?? id; self.kind = kind; self.state = state; self.area = area; self.size = size
-        self.why = why; self.waiting = waiting; self.blocked_by = blocked_by; self.links = links; self.rank = rank
-        self.created = created; self.updated = updated; self.body = body; self.problems = problems
-    }
-
-    enum K: String, CodingKey { case id, title, kind, state, area, size, why, waiting, blocked_by, links, rank, created, updated, body, problems }
-
-    init(from d: Decoder) throws {
-        let c = try d.container(keyedBy: K.self)
-        id = try c.decode(String.self, forKey: .id)
-        title = (try? c.decode(String.self, forKey: .title)) ?? id
-        kind = (try? c.decode(String.self, forKey: .kind)) ?? ""
-        state = (try? c.decode(String.self, forKey: .state)) ?? "broken"
-        area = (try? c.decode(String.self, forKey: .area)) ?? ""
-        size = (try? c.decode(String.self, forKey: .size)) ?? ""
-        why = (try? c.decode(String.self, forKey: .why)) ?? ""
-        waiting = try? c.decode(String.self, forKey: .waiting)
-        blocked_by = try? c.decode([String].self, forKey: .blocked_by)
-        links = try? c.decode([String].self, forKey: .links)
-        rank = (try? c.decode(Double.self, forKey: .rank)).map { Int($0) }
-        created = try? c.decode(String.self, forKey: .created)
-        updated = try? c.decode(String.self, forKey: .updated)
-        body = (try? c.decode(String.self, forKey: .body)) ?? ""
-        problems = try? c.decode([String].self, forKey: .problems)
-    }
-}
-
 /// The tracker page's order (tracker.ts): what needs Phil, what's under way, the ranked queue, what
 /// waits on something else. Pure, so the page, the cursor and reordering agree.
 enum Tracker {
@@ -59,7 +8,7 @@ enum Tracker {
 
     static let titles: [Section: String] = [.broken: "Can't read", .decide: "Needs you", .doing: "Doing", .next: "Next", .waiting: "Waiting"]
 
-    static func sectionOf(_ t: TrackerItem) -> Section? {
+    static func sectionOf(_ t: TodoItem) -> Section? {
         if t.state == "broken" { return .broken }
         if t.state == "done" || t.state == "dropped" { return nil }
         if t.state == "waiting" { return .waiting }
@@ -68,7 +17,7 @@ enum Tracker {
     }
 
     /// rank (unranked last), then oldest first, then id.
-    static func byQueue(_ a: TrackerItem, _ b: TrackerItem) -> Bool {
+    static func byQueue(_ a: TodoItem, _ b: TodoItem) -> Bool {
         let ra = a.rank ?? .max, rb = b.rank ?? .max
         if ra != rb { return ra < rb }
         let ca = a.created ?? "", cb = b.created ?? ""
@@ -77,7 +26,7 @@ enum Tracker {
     }
 
     /// Open items by section, each in rank order (unranked after, oldest first); empty sections left out.
-    static func queue(_ items: [TrackerItem]) -> [(section: Section, items: [TrackerItem])] {
+    static func queue(_ items: [TodoItem]) -> [(section: Section, items: [TodoItem])] {
         Section.allCases.map { s in (s, items.filter { sectionOf($0) == s }.sorted(by: byQueue)) }.filter { !$0.1.isEmpty }
     }
 
@@ -85,7 +34,7 @@ enum Tracker {
     /// numbers it already holds, so its place among /next's global ranking doesn't move; unranked
     /// items now ahead of a ranked one get numbers after every rank in use, those below stay
     /// unranked. Nil when nothing moves.
-    static func rerank(_ items: [TrackerItem], id: String, to want: Int) -> [String: Int]? {
+    static func rerank(_ items: [TodoItem], id: String, to want: Int) -> [String: Int]? {
         guard let me = items.first(where: { $0.id == id }), let section = sectionOf(me) else { return nil }
         var order = items.filter { sectionOf($0) == section }.sorted(by: byQueue)
         guard let from = order.firstIndex(where: { $0.id == id }) else { return nil }
@@ -108,13 +57,9 @@ enum Tracker {
 @MainActor
 extension Store {
     /// Every tracker item as the user should see it (the overlay applied), broken files included.
-    func trackerItems() -> [TrackerItem] {
-        (raw["todo"] ?? [:]).keys.sorted().compactMap(trackerItem)
-    }
+    func trackerItems() -> [TodoItem] { list(TodoItem.self) }
 
-    func trackerItem(_ id: String) -> TrackerItem? {
-        rawView("todo", id).flatMap { try? JSONValue.object($0).decode(TrackerItem.self) }
-    }
+    func trackerItem(_ id: String) -> TodoItem? { view(TodoItem.self, id) }
 
     /// The server's copy of one field, without the overlay — what `settled` checks.
     func trackerServer(_ id: String, _ field: String) -> JSONValue? {

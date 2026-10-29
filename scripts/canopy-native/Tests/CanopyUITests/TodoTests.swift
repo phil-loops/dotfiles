@@ -7,8 +7,8 @@ import Testing
 /// checked as the `Write` a command builds (path, body, overlay, inverse); the one dispatch that
 /// posts goes to port 1, where nothing listens — never the live server.
 @MainActor @Suite struct TodoTests {
-    func t(_ id: String, kind: String = "build", state: String = "open", rank: Int? = nil, created: String? = nil, waiting: String? = nil) -> TrackerItem {
-        TrackerItem(id: id, kind: kind, state: state, waiting: waiting, rank: rank, created: created)
+    func t(_ id: String, kind: String = "build", state: String = "open", rank: Int? = nil, created: String? = nil, waiting: String? = nil) -> TodoItem {
+        TodoItem(id: id, kind: kind, state: TodoState(rawValue: state), waiting: waiting, rank: rank, created: created)
     }
 
     func app() throws -> AppModel {

@@ -76,7 +76,7 @@ struct TodoPage: View {
 struct TodoRow: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme
-    let t: TrackerItem
+    let t: TodoItem
 
     var body: some View {
         let ui = app.state { TrackerUI() }
