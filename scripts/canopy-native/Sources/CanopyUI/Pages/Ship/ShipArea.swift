@@ -22,7 +22,7 @@ enum ShipArea: PageArea {
             for id in ids where Bindings.sameMove[group]?.contains(id) == false { Bindings.sameMove[group, default: []].append(id) }
         }
         // esc in normal backs out of what Ship has open (B's review.back calls ShipSeam.backOut first)
-        app.addCloser(isOpen: { [weak app] in app.map(ShipSeam.canBackOut) ?? false }, close: { [weak app] in app.map { ShipSeam.backOut($0) } })
+        app.addCloser(isOpen: { [weak app] in app.map(ShipSeam.canBackOut) ?? false }, close: { [weak app] in if let app { ShipSeam.backOut(app) } })
     }
 }
 
@@ -30,7 +30,7 @@ enum ShipArea: PageArea {
 @MainActor
 enum InsertCommands {
     static func install(_ app: AppModel) {
-        weak var weakApp = app
+        weak let weakApp = app
         app.registry.register(Command(
             id: "words.submit", title: "Save what you're writing — the words, or the description", scope: .words,
             keys: ["C-ret"], modes: [.normal, .insert], label: "save", quiet: true,

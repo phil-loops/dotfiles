@@ -218,7 +218,7 @@ public enum Markdown {
                 let mark = f[1]!
                 var body: [String] = []
                 i += 1
-                while i < lines.count && !lines[i].drop { $0 == " " || $0 == "\t" }.hasPrefix(mark) { body.append(lines[i]); i += 1 }
+                while i < lines.count && !lines[i].drop(while: { $0 == " " || $0 == "\t" }).hasPrefix(mark) { body.append(lines[i]); i += 1 }
                 let lang = f[2] ?? ""
                 out.append(lang == "suggestion" ? .suggestion(removes: replaces, adds: body) : .code(lang: lang, lines: body))
                 i += 1
