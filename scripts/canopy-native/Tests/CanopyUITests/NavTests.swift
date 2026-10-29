@@ -9,10 +9,12 @@ import Testing
     func app(_ route: Route = .wiki(slug: nil)) -> AppModel {
         var c = AppConfig()
         c.route = route
-        return AppModel(config: c, port: 1, telemetry: false)
+        let a = AppModel(config: c, port: 1, telemetry: false)
+        if case .wiki = route { a.state { WikiState() }.seed(try! JSONDecoder().decode(PagesReply.self, from: Data(WikiFixture.pages.utf8))) }
+        return a
     }
 
-    /// What a PaneList would report for the rows of the wiki placeholder: facts | sources.
+    /// What a PaneList would report for the rows of the wiki: pages | page.
     func layOut(_ a: AppModel) {
         for p in a.panes {
             a.notePaneFrame(p.id, CGRect(x: Double(p.column) * 400, y: 0, width: 400, height: 300))
@@ -54,8 +56,8 @@ import Testing
     @Test func offScreenAndForeignRowsAreNotTargets() {
         let a = app()
         layOut(a)
-        a.noteTarget(LabelTarget(pane: "sources", key: "src:gone.tsx", rect: CGRect(x: 400, y: 0, width: 10, height: 10)))
-        a.noteTarget(LabelTarget(pane: "sources", key: a.panes[1].rows[0], rect: CGRect(x: 400, y: 900, width: 10, height: 10)))
+        a.noteTarget(LabelTarget(pane: "page", key: "src:gone.tsx", rect: CGRect(x: 400, y: 0, width: 10, height: 10)))
+        a.noteTarget(LabelTarget(pane: "page", key: a.panes[1].rows[0], rect: CGRect(x: 400, y: 900, width: 10, height: 10)))
         a.noteTarget(LabelTarget(pane: "tabs", key: "tab:x", rect: CGRect(x: 0, y: 0, width: 10, height: 10)))
         a.noteTarget(LabelTarget(pane: "tabs", key: "tab:y", rect: CGRect(x: 20, y: 0, width: 10, height: 10), run: RouteTo("nav.forests")))
         let keys = a.visibleTargets().map(\.key)
@@ -67,10 +69,10 @@ import Testing
 
     @Test func hereIsExact() {
         let a = app()
-        a.focus(pane: "sources")
+        a.focus(pane: "page")
         a.keys.handle("j")
         let p = a.here()
-        #expect(p.route == .wiki(slug: nil) && p.pane == "sources" && p.cursorKey == a.panes[1].rows[1])
+        #expect(p.route == .wiki(slug: nil) && p.pane == "page" && p.cursorKey == a.panes[1].rows[1])
     }
 }
 
@@ -79,12 +81,14 @@ import Testing
     func app(_ route: Route = .wiki(slug: nil)) -> AppModel {
         var c = AppConfig()
         c.route = route
-        return AppModel(config: c, port: 1, telemetry: false)
+        let a = AppModel(config: c, port: 1, telemetry: false)
+        if case .wiki = route { a.state { WikiState() }.seed(try! JSONDecoder().decode(PagesReply.self, from: Data(WikiFixture.pages.utf8))) }
+        return a
     }
 
     func layOut(_ a: AppModel, extra: Int = 0) {
         for p in a.panes {
-            for (i, r) in p.rows.enumerated() {
+            for (i, r) in p.rows.prefix(4).enumerated() {
                 a.noteTarget(LabelTarget(pane: p.id, key: r, rect: CGRect(x: Double(p.column) * 400, y: Double(i) * 20, width: 300, height: 18)))
             }
         }
@@ -99,13 +103,13 @@ import Testing
         a.keys.handle("f")
         #expect(a.keys.active == .labels)
         let s = a.labeling!
-        let last = a.panes[1].rows.last!
-        let l = s.label("sources", last)!
+        let last = a.panes[1].rows.prefix(4).last!
+        let l = s.label("page", last)!
         #expect(l.count == 1, "≤ 10 targets: one key")
         for ch in l { a.keys.handle(String(ch)) }
         #expect(a.keys.active == .normal && a.labeling == nil, "one pick, then the layer is gone")
-        #expect(a.pane?.id == "sources" && a.selected == last)
-        #expect(a.jumps.back.last?.pane == "facts", "a label pick is a jump")
+        #expect(a.pane?.id == "page" && a.selected == last)
+        #expect(a.jumps.back.last?.pane == "pages", "a label pick is a jump")
         a.keys.handle("g"); a.keys.handle("w")
         #expect(a.keys.active == .labels)
     }
@@ -116,7 +120,7 @@ import Testing
         a.keys.handle("f")
         let first = a.labeling!.items.map(\.label)
         #expect(first.allSatisfy { $0.count == 2 }, "> 10 targets: two keys, the first picking the pane")
-        #expect(Set(a.labeling!.items.filter { $0.pane == "facts" }.map { $0.label.first! }).count == 1)
+        #expect(Set(a.labeling!.items.filter { $0.pane == "pages" }.map { $0.label.first! }).count == 1)
         a.keys.handle("esc")
         #expect(a.keys.active == .normal)
         a.keys.handle("j")
@@ -142,11 +146,11 @@ import Testing
 
     @Test func inSelectModeAPickExtendsTheRange() {
         let a = app()
-        a.focus(pane: "sources")
+        a.focus(pane: "page")
         layOut(a)
         a.keys.handle("v")
         a.keys.handle("f")
-        let l = a.labeling!.label("sources", a.panes[1].rows[3])!
+        let l = a.labeling!.label("page", a.panes[1].rows[3])!
         a.keys.handle(l)
         #expect(a.keys.mode == .select && a.selection.count == 4)
     }
@@ -165,12 +169,14 @@ import Testing
     func app(_ route: Route = .wiki(slug: nil)) -> AppModel {
         var c = AppConfig()
         c.route = route
-        return AppModel(config: c, port: 1, telemetry: false)
+        let a = AppModel(config: c, port: 1, telemetry: false)
+        if case .wiki = route { a.state { WikiState() }.seed(try! JSONDecoder().decode(PagesReply.self, from: Data(WikiFixture.pages.utf8))) }
+        return a
     }
 
     @Test func pageChangesRecordAndCORestoresPaneAndCursorExactly() {
         let a = app()
-        a.focus(pane: "sources")
+        a.focus(pane: "page")
         a.keys.handle("j"); a.keys.handle("j")
         let spot = a.selected
         a.keys.handle("g"); a.keys.handle("o")
@@ -179,7 +185,7 @@ import Testing
         a.keys.handle("C-o")
         #expect(a.router.route == .todo)
         a.keys.handle("C-o")
-        #expect(a.router.route == .wiki(slug: nil) && a.pane?.id == "sources" && a.selected == spot)
+        #expect(a.router.route == .wiki(slug: nil) && a.pane?.id == "page" && a.selected == spot)
         a.keys.handle("C-i"); a.keys.handle("C-i")
         #expect(a.router.route == .machine)
         #expect(a.jumps.fwd.isEmpty)
@@ -199,7 +205,7 @@ import Testing
 
     @Test func motionDoesntRecordButGGAndGDo() {
         let a = app()
-        a.focus(pane: "sources")
+        a.focus(pane: "page")
         a.keys.handle("j"); a.keys.handle("j"); a.keys.handle("k")
         #expect(a.jumps.back.isEmpty, "j/k aren't jumps")
         a.keys.handle("G")
@@ -295,7 +301,7 @@ import Testing
         let a = try app()
         press(a, "g o"); press(a, "g m")
         press(a, "space j")
-        #expect(a.nav.shown.map(\.label) == ["todo", "forests · hankles-limited-label"])
+        #expect(a.nav.shown.map(\.label) == ["todo · auto-archive-closed-forests", "forests · hankles-limited-label"], "a real page names its cursor row")
         a.nav.move(1)
         a.keys.handle("ret")
         #expect(a.router.route == .forests)
@@ -331,15 +337,17 @@ import Testing
     func app(_ route: Route = .wiki(slug: nil)) -> AppModel {
         var c = AppConfig()
         c.route = route
-        return AppModel(config: c, port: 1, telemetry: false)
+        let a = AppModel(config: c, port: 1, telemetry: false)
+        if case .wiki = route { a.state { WikiState() }.seed(try! JSONDecoder().decode(PagesReply.self, from: Data(WikiFixture.pages.utf8))) }
+        return a
     }
 
     @Test func altHJKLMovesPanesLikeCtrlW() {
         let a = app()
         a.keys.handle("A-l")
-        #expect(a.pane?.id == "sources")
+        #expect(a.pane?.id == "page")
         a.keys.handle("A-h")
-        #expect(a.pane?.id == "facts")
+        #expect(a.pane?.id == "pages")
         #expect(KeyName.name(keyCode: 4, characters: "˙", charactersIgnoringModifiers: "h", ctrl: false, meta: false, alt: true) == "A-h")
     }
 
