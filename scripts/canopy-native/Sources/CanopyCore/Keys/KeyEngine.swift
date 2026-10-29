@@ -157,6 +157,12 @@ public final class KeyEngine {
                 if seen.insert(rest).inserted { rows.append((rest, shortTitle(c.title))) }
             }
         }
+        // a run of numbered slots (g 1 … g 9) reads as one row
+        let digits = rows.filter { $0.key.count == 1 && $0.key.first!.isNumber }
+        if digits.count > 2, let one = digits.min(by: { $0.key < $1.key }), let top = digits.max(by: { $0.key < $1.key }) {
+            rows.removeAll { $0.key.count == 1 && $0.key.first!.isNumber }
+            rows.append(("\(one.key)–\(top.key)", one.what.replacingOccurrences(of: one.key, with: "N")))
+        }
         return rows.sorted { a, b in
             let la = a.key.lowercased(), lb = b.key.lowercased()
             return la != lb ? la < lb : a.key < b.key
