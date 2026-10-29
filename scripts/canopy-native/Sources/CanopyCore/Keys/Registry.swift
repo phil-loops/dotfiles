@@ -148,17 +148,19 @@ public struct Command {
     public var local: ((_ target: String?, _ arg: Any?) throws -> Void)?
     /// a server write; throw `Refusal` to refuse before sending
     public var write: ((_ target: String, _ arg: Any?) throws -> Write?)?
+    /// running it records a place on the app-wide jumplist (NAV.md §4.4)
+    public var recordsJump: Bool
 
     public init(id: String, title: String, scope: Scope, budget: Budget = .local, keys: [String] = [],
                 modes: [KeyMode] = [.normal], needsArg: Bool = false, label: String? = nil,
                 pair: String? = nil, hint: [String] = [], v1: [String] = [], quiet: Bool = false,
                 available: ((String?) -> Bool)? = nil, route: ((String?) -> RouteTo?)? = nil,
                 local: ((_ target: String?, _ arg: Any?) throws -> Void)? = nil,
-                write: ((_ target: String, _ arg: Any?) throws -> Write?)? = nil) {
+                write: ((_ target: String, _ arg: Any?) throws -> Write?)? = nil, recordsJump: Bool = false) {
         self.id = id; self.title = title; self.scope = scope; self.budget = budget; self.keys = keys; self.label = label
         self.modes = modes; self.needsArg = needsArg
         self.pair = pair; self.hint = hint; self.v1 = v1; self.quiet = quiet; self.available = available
-        self.route = route; self.local = local; self.write = write
+        self.route = route; self.local = local; self.write = write; self.recordsJump = recordsJump
     }
 }
 
