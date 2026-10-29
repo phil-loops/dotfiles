@@ -10,6 +10,7 @@ Two modes (the server maps endpoints to them):
 
   stack-forest --node <branch>         WAVE 2 — one node's file DIFFS. Expensive, but scoped to a single node and fetched
       lazily when you actually look at it.
+      Whitespace-only changes are hidden (git diff -w); add --ws to show them.
 
 Resolution: parents/children from stack-branch.*.parent,
 seeds from stack-project.*.branch, expand along the pointers. Bounded to the
@@ -30,6 +31,10 @@ node_mode = False
 if argv and argv[0] == "--node":
     node_mode = True
     argv = argv[1:]
+# --node hides whitespace-only changes (git diff -w) unless --ws asks for them back
+show_ws = "--ws" in argv
+if show_ws:
+    argv.remove("--ws")
 # WAVE 2 can diff against an arbitrary upstream ref (default = the node's parent)
 base = None
 if "--base" in argv:
@@ -318,7 +323,7 @@ if not node_mode and target == "--standalone":
 DIFF_HDR = re.compile(r"^diff --git a/(.+?) b/(.+)$")
 
 
-def file_rows(branch, parent):
+def file_rows(branch, parent, ws=()):
     """The branch's changed files with their +/- counts — NO diffs. 2 git calls."""
     toks = git_out(["diff", "--name-status", "-z", f"{parent}...{branch}"]).split("\x00")
     paths = []
@@ -339,7 +344,7 @@ def file_rows(branch, parent):
     rows = [{"path": p} for p in paths]
     # per-file +/- deltas (one numstat call) — for the node popover's file list
     nst = {}
-    for ln in git_out(["diff", "--numstat", f"{parent}...{branch}"]).splitlines():
+    for ln in git_out(["diff", "--numstat", *ws, f"{parent}...{branch}"]).splitlines():
         parts = ln.split("\t")
         if len(parts) == 3:
             a, d, p = parts
@@ -407,8 +412,11 @@ if node_mode:
     # name lists) each pay this repo's per-spawn floor — overlap them; serial they were the
     # bulk of a ~0.7s /node fetch (227 worktrees make `worktree list` alone ~200ms).
     pool = ThreadPoolExecutor(max_workers=8)
-    rows_f = pool.submit(file_rows, branch, diff_base)
-    full_f = pool.submit(git_out, ["diff", "-p", f"{diff_base}...{branch}"])
+    ws = [] if show_ws else ["-w"]
+    rows_f = pool.submit(file_rows, branch, diff_base, ws)
+    full_f = pool.submit(git_out, ["diff", "-p", *ws, f"{diff_base}...{branch}"])
+    # a whitespace-only file drops out of the -w patch; its raw chunk keeps the card from rendering blank
+    raw_f = pool.submit(git_out, ["diff", "-p", f"{diff_base}...{branch}"]) if ws else None
     # the old side of a three-dot diff is the merge-base — what the types for removed lines read
     base_f = pool.submit(git_out, ["merge-base", diff_base, branch])
     wts_f = pool.submit(_worktree_branches)
@@ -422,14 +430,19 @@ if node_mode:
         for f in req_fs:
             carried.update(f.result().split())
         rows = [row for row in rows if row["path"] not in carried]
-    chunks = {}
-    full = full_f.result()
-    for ch in re.split(r"(?m)^(?=diff --git )", full):
-        if ch.startswith("diff --git "):
-            m = DIFF_HDR.match(ch.splitlines()[0])
-            if m:
-                chunks[m.group(2)] = ch.rstrip("\n") + "\n"
-    files = [{"path": r["path"], "add": r["add"], "del": r["del"], "patch": chunks.get(r["path"], "")}
+    def split_chunks(patch):
+        out = {}
+        for ch in re.split(r"(?m)^(?=diff --git )", patch):
+            if ch.startswith("diff --git "):
+                m = DIFF_HDR.match(ch.splitlines()[0])
+                if m:
+                    out[m.group(2)] = ch.rstrip("\n") + "\n"
+        return out
+    chunks = split_chunks(full_f.result())
+    raw = split_chunks(raw_f.result()) if raw_f else {}
+    files = [{"path": r["path"], "add": r["add"], "del": r["del"],
+              "patch": chunks.get(r["path"], raw.get(r["path"], "")),
+              **({"wsOnly": True} if r["path"] not in chunks and r["path"] in raw else {})}
              for r in rows]
     # Working-tree dirt of the worktree HOLDING this branch — dirt is per-WORKTREE state
     # that ambushes whatever branch the checkout holds, so it rides the node payload as

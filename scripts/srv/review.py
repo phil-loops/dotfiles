@@ -1,7 +1,7 @@
 # srv/review.py — the review surface: the forest model, per-node file list + diffs,
 # commit log, and the squash/prep-for-push actions.
 #   GET  /model?branch=X    the forest model JSON (stack-forest), cached on model_sig
-#   GET  /node?branch=X     a node's file list (stack-forest --node)
+#   GET  /node?branch=X     a node's file list (stack-forest --node; whitespace hidden, ?ws=1 shows it)
 #   GET  /file?branch&path  a file's contents on a ref (git show)
 #   GET  /commits?branch=X  branch history: own commits (own:true) + ancestors (own:false)
 #   GET  /commit-diff?sha=X one commit's changed files + patches (git show)
@@ -299,7 +299,7 @@ def node(req, u):
     branch = q.get("branch", [""])[0]
     base = q.get("base", [""])[0]
     if branch.startswith("refs/stack/"):   # the ghost integration ref is rebuilt per select
-        return _node_uncached(req, branch, base)
+        return _node_uncached(req, branch, base, _hide_ws(u))
     # The payload is a pure function of the branch's, its parent's, its requires' and the base's
     # tips, their config blocks, and the dirt of the worktree holding it —
     # so that is the key. A hit costs a stat walk plus one `status` per holding worktree.
@@ -308,18 +308,19 @@ def node(req, u):
         names = [branch, snap.parent(branch), base, *snap.branch_key_all(branch, "requires")]
         return snap.inputs_fingerprint([n for n in names if n])
     rk = refs_key()
-    key = ("node", ctx.repo_cwd(), branch, base, rk, watch.dirt_stamp([p for p, _ in watch.holders(branch)]))
+    hide_ws = _hide_ws(u)
+    key = ("node", ctx.repo_cwd(), branch, base, hide_ws, rk, watch.dirt_stamp([p for p, _ in watch.holders(branch)]))
     # a ref that moved mid-build would file the newer payload under the older key
-    code, body = memo.get(key, lambda: _node_build(branch, base),
+    code, body = memo.get(key, lambda: _node_build(branch, base, hide_ws),
                           keep=lambda v: v[0] == 200 and refs_key() == rk)
     req._send(code, body)
 
 
-def _node_uncached(req, branch, base):
-    req._send(*_node_build(branch, base))
+def _node_uncached(req, branch, base, hide_ws):
+    req._send(*_node_build(branch, base, hide_ws))
 
 
-def _node_build(branch, base):
+def _node_build(branch, base, hide_ws=True):
     # the ghost ✦<project> node diffs main..refs/stack/<project>-integration — an ephemeral octopus
     # of the project's leaves. Branches move, so rebuild it on select before diffing; stack-forest
     # --node handles the raw ref + --base main exactly like a real node's parent..branch.
@@ -330,12 +331,14 @@ def _node_build(branch, base):
     args = [os.path.join(ctx.SCRIPTS, "stack-forest"), "--node", branch]
     if base:
         args += ["--base", base]
+    if not hide_ws:
+        args += ["--ws"]
     r = ctx.run(args)
     # A convergence node renders blank otherwise (its own parent...node diff is empty). Diff it
     # against the base instead (base...node, base=main) so it shows the WHOLE assembled feature —
     # a "review it all at once" surface — rather than a navigable blank.
     if r.returncode == 0 and not base and _is_convergence(branch, r.stdout):
-        r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-forest"), "--node", branch, "--base", "main"])
+        r = ctx.run([*args, "--base", "main"])
     return (200 if r.returncode == 0 else 500,
             r.stdout if r.returncode == 0 else json.dumps({"branch": branch, "files": []}))
 
