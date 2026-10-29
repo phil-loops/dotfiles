@@ -320,7 +320,10 @@ public final class ReviewPageState: ShipHost {
         let path = app.transport.atRepo(repo, "/node?branch=\(name.uriComponent)")
         Task { @MainActor [weak self] in
             defer { self?.loading.remove(key) }
-            if let d = try? await app.transport.getJSON(path, as: NodePayload.self) { self?.cache[key] = d }
+            guard let self, let d = try? await app.transport.getJSON(path, as: NodePayload.self) else { return }
+            self.cache[key] = d
+            // the page may have moved here while this was in flight, and sync() skips a key that's loading
+            if self.keyOf == key, self.payload?.key != key { self.land(key, d) }
         }
     }
 
