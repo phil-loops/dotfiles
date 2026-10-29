@@ -3,7 +3,7 @@ import Foundation
 
 /// Navigation on the forest pages, NAV.md's way: `ret`/`l` in and `h` out on one zoom axis, `J`/`K`
 /// through merge order, `g k`/`g j` along the DAG (labels over the children at a fork), `g K`/`g J`
-/// to the stack's root and tip, and `g 1–9` to the focus lane's forests (the harpoon list).
+/// to the stack's root and tip, `space f` to find on the page. (`g 1–9` is the shell's.)
 @MainActor
 enum ForestNav {
     /// What `ret` does on a row — the row's one primary action (commands/project.ts row.primary).
@@ -44,22 +44,8 @@ enum ForestNav {
 
     static func go(_ v: BranchView, _ app: AppModel) { app.setCursor(RowKey.branch(v.b.id)) }
 
-    /// The last branch of this forest you had open (the window's history, newest first), if it still exists.
-    static func lastOpened(in pid: String, _ app: AppModel) -> Branch? {
-        for r in [app.router.route] + app.router.back.reversed() {
-            if let id = r.branchID, let b = app.store.view(Branch.self, id), b.project == pid { return b }
-        }
-        return nil
-    }
-
-    /// Same-move groups for the keys this area shares with the review page (NAV.md §7).
+    /// Same-move groups this area adds (the nav ones live in Bindings already).
     static let sameMove: [String: [String]] = [
-        "next branch": ["forest.branch.next"],
-        "previous branch": ["forest.branch.prev"],
-        "parent branch": ["forest.branch.parent"],
-        "child branch": ["forest.branch.child"],
-        "root of the stack": ["forest.branch.root"],
-        "tip of the stack": ["forest.branch.tip"],
         "finish writing": ["branch.describe.save"],
     ]
 
@@ -74,7 +60,7 @@ enum ForestNav {
         let onBranch: (String?) -> Bool = { _ in here(app) != nil }
 
         r.register(Command(
-            id: "forest.branch.next", title: "Next branch in merge order", scope: .forest, keys: ["J"], label: "branch", pair: "forest.branch.prev",
+            id: "forest.branch.next", title: "Next branch in merge order", scope: .forest, keys: NavKeys.keys("forest.branch.next"), label: "branch", pair: "forest.branch.prev",
             available: { _ in !mergeOrder(app).isEmpty },
             local: { _, _ in
                 let order = mergeOrder(app)
@@ -83,9 +69,9 @@ enum ForestNav {
                     throw Refusal("the last branch in merge order")
                 }
                 go(order[next], app)
-            }, recordsJump: true))
+            }))
         r.register(Command(
-            id: "forest.branch.prev", title: "Previous branch in merge order", scope: .forest, keys: ["K"], label: "branch",
+            id: "forest.branch.prev", title: "Previous branch in merge order", scope: .forest, keys: NavKeys.keys("forest.branch.prev"), label: "branch",
             available: { _ in !mergeOrder(app).isEmpty },
             local: { _, _ in
                 let order = mergeOrder(app)
@@ -94,17 +80,17 @@ enum ForestNav {
                     throw Refusal("the first branch in merge order")
                 }
                 go(order[prev], app)
-            }, recordsJump: true))
+            }))
         r.register(Command(
-            id: "forest.branch.parent", title: "Go to the branch's parent", scope: .forest, keys: ["g k"], label: "parent", pair: "forest.branch.child",
+            id: "forest.parent", title: "Go to the branch's parent", scope: .forest, keys: NavKeys.keys("forest.parent"), label: "parent", pair: "forest.child",
             available: onBranch,
             local: { _, _ in
                 guard let v = here(app) else { return }
                 guard let p = parent(of: v, app) else { throw Refusal("\(leaf(v.b.name)) sits on \(v.b.parent)") }
                 go(p, app)
-            }, recordsJump: true))
+            }))
         r.register(Command(
-            id: "forest.branch.child", title: "Go to the branch's child (labels at a fork)", scope: .forest, keys: ["g j"], label: "child",
+            id: "forest.child", title: "Go to the branch's child (labels at a fork)", scope: .forest, keys: NavKeys.keys("forest.child"), label: "child",
             available: onBranch,
             local: { _, _ in
                 guard let v = here(app) else { return }
@@ -115,20 +101,21 @@ enum ForestNav {
                 default:
                     // Graphite asks at a fork; here the label layer offers just the children
                     m.childChoice = kids.map { RowKey.branch($0.b.id) }
-                    app.keys.openLayer(.labels)
+                    defer { m.childChoice = nil }
+                    try app.showLabels()
                 }
-            }, recordsJump: true))
+            }))
         r.register(Command(
-            id: "forest.branch.root", title: "Go to the root of the branch's stack", scope: .forest, keys: ["g K"], label: "root", pair: "forest.branch.tip",
+            id: "forest.root", title: "Go to the root of the branch's stack", scope: .forest, keys: NavKeys.keys("forest.root"), label: "root", pair: "forest.tip",
             available: onBranch,
             local: { _, _ in
                 guard var v = here(app) else { return }
                 var seen: Set<String> = [v.b.id]
                 while let p = parent(of: v, app), seen.insert(p.b.id).inserted { v = p }
                 go(v, app)
-            }, recordsJump: true))
+            }))
         r.register(Command(
-            id: "forest.branch.tip", title: "Go to the tip of the branch's stack", scope: .forest, keys: ["g J"], label: "tip",
+            id: "forest.tip", title: "Go to the tip of the branch's stack", scope: .forest, keys: NavKeys.keys("forest.tip"), label: "tip",
             available: onBranch,
             local: { _, _ in
                 guard let v = here(app) else { return }
@@ -144,22 +131,25 @@ enum ForestNav {
                 // past a fork the tip is the descendant that merges last
                 guard let tip = below.max(by: { $0.b.order < $1.b.order }) else { throw Refusal("\(leaf(v.b.name)) is the tip") }
                 go(tip, app)
-            }, recordsJump: true))
+            }))
 
-        // g 1–9: the focus lane is the harpoon list — the Nth forest, at the branch you last had open in it
-        for n in 1...9 {
-            r.register(Command(
-                id: "focus.slot.\(n)", title: "Go to focus forest \(n)", scope: .global, keys: ["g \(n)"], label: "slot \(n)", quiet: true,
-                local: { _, _ in
-                    let lane = m.projects().focus
-                    guard lane.indices.contains(n - 1) else { throw Refusal("no focus forest \(n)") }
-                    let p = lane[n - 1]
-                    if let b = lastOpened(in: p.id, app) { app.go(.review(repo: b.repo, branch: b.name)) }
-                    else {
-                        app.go(.forest(repo: p.repo, project: p.name))
-                        app.setCursor(nil)
-                    }
-                }, recordsJump: true))
+
+        // space f: find on this page — forests (and open spines) on Forests, branches on a forest; picking moves the cursor
+        func find(_ title: String) throws {
+            let rows = app.rows
+            guard !rows.isEmpty else { throw Refusal("nothing on this page to find") }
+            let items = rows.map { row -> PickItem in
+                if let id = RowKey.id(row, "b"), let v = m.branchView(id) { return PickItem(label: v.b.name, text: v.b.description) }
+                if let id = RowKey.id(row, "p"), let p = app.store.view(Project.self, id) { return PickItem(label: p.name, text: p.summary) }
+                return PickItem(label: app.provider?.title(for: row, app) ?? row)
+            }
+            app.nav.pick(title, items) { i in app.jump { app.setCursor(rows[i]) } }
         }
+        r.register(Command(
+            id: "forests.find", title: "Find a forest on this page", scope: .forests, keys: NavKeys.keys("forests.find"), label: "find",
+            local: { _, _ in try find("find a forest") }))
+        r.register(Command(
+            id: "forest.find", title: "Find a branch on this forest", scope: .forest, keys: NavKeys.keys("forest.find"), label: "find",
+            local: { _, _ in try find("find a branch") }))
     }
 }

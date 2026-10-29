@@ -27,14 +27,21 @@ public struct LoopStripView: View {
                                 + Text(s.note.map { " \($0)" } ?? "").foregroundColor(theme.inkDim))
                         }
                         .buttonStyle(.plain)
+                    } else if s.state == .now, let cmd = Loop.command(s.id) {
+                        // the step in the way is something to do: a label runs its next move
+                        stepText(s).labelTarget(pane: "loop", key: "step:\(branchID):\(s.id.rawValue)", title: s.word, run: RouteTo(cmd, target: branchID))
                     } else {
-                        (Text("\(s.state == .done ? "✓ " : "")\(s.word)").foregroundColor(color(s.state))
-                            + Text(s.state == .now ? s.note.map { " \($0)" } ?? "" : "").foregroundColor(theme.inkDim))
+                        stepText(s)
                     }
                 }
             }
             .font(Theme.mono(size))
         }
+    }
+
+    private func stepText(_ s: LoopStep) -> Text {
+                        (Text("\(s.state == .done ? "✓ " : "")\(s.word)").foregroundColor(color(s.state))
+                            + Text(s.state == .now ? s.note.map { " \($0)" } ?? "" : "").foregroundColor(theme.inkDim))
     }
 
     private func color(_ s: LoopStep.State) -> Color {
