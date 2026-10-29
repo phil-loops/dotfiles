@@ -21,6 +21,7 @@ struct Statusline: View {
                     CommandLine()
                 } else {
                     if !app.keys.pendingKeys.isEmpty { Text(glyph(app.keys.pendingKeys)).foregroundStyle(theme.goldLeaf) }
+                    if let l = app.labeling { Text("label \(l.typed)…").foregroundStyle(theme.goldLeaf) }
                     if let p = app.pane {
                         let n = p.rows.count
                         let at = app.selected.flatMap { p.rows.firstIndex(of: $0) }.map { $0 + 1 } ?? 0

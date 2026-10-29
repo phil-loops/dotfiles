@@ -21,6 +21,7 @@ public struct RootView: View {
                 .overlay { CommandMenuView() }
             Statusline()
         }
+        .overlay { LabelsView() }
         .background(theme.vellumNight)
         .foregroundStyle(theme.ink)
         .font(Theme.mono())

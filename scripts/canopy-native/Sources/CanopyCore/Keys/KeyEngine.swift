@@ -25,6 +25,9 @@ public final class KeyEngine {
     /// Mode or layer changed (from, to): the shell resigns a text field on leaving insert, drops
     /// the selection anchor on leaving select, closes the picker's state with its layer.
     @ObservationIgnored public var onChange: ((_ from: KeyMode, _ to: KeyMode) -> Void)?
+    /// A layer that reads raw keys rather than a keymap (the label layer: whatever label you type).
+    /// It sees every key but esc while it's the active layer; true means it took the key.
+    @ObservationIgnored public var layerKeys: [KeyMode: (String) -> Bool] = [:]
 
     @ObservationIgnored private let registry: CommandRegistry
     @ObservationIgnored private let runner: Runner
@@ -105,6 +108,7 @@ public final class KeyEngine {
     }
 
     private func feed(_ key: String) -> Bool {
+        if let raw = layerKeys[active] { return raw(key) }
         rebuild()
         let scopes = (runner.context?.liveScopes() ?? [.global]).map(\.rawValue)
         let fed = keymap.feed(key, scopes: scopes, mode: active.rawValue)
