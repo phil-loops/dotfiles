@@ -28,6 +28,10 @@ public final class KeyEngine {
     /// A layer that reads raw keys rather than a keymap (the label layer: whatever label you type).
     /// It sees every key but esc while it's the active layer; true means it took the key.
     @ObservationIgnored public var layerKeys: [KeyMode: (String) -> Bool] = [:]
+    /// True while esc runs a page's own back-out: esc only ever cancels (NAV.md §4.5), so the
+    /// shell refuses any page change made meanwhile.
+    public private(set) var cancelling = false
+    public static let nothingToCancel = "h goes up · C-o goes back"
 
     @ObservationIgnored private let registry: CommandRegistry
     @ObservationIgnored private let runner: Runner
@@ -86,7 +90,11 @@ public final class KeyEngine {
             setMode(.normal)
             return true
         }
-        return feed("esc")
+        cancelling = true
+        defer { cancelling = false }
+        let took = feed("esc")
+        if !took || runner.fired?.ok == false { runner.say(Self.nothingToCancel) }
+        return took
     }
 
     // ── keys ──

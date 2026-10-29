@@ -159,3 +159,90 @@ import Testing
         #expect(a.runner.note == "nothing on screen to label")
     }
 }
+
+/// The app-wide jumplist and esc, through keys.
+@MainActor @Suite struct HistoryTests {
+    func app(_ route: Route = .wiki(slug: nil)) -> AppModel {
+        var c = AppConfig()
+        c.route = route
+        return AppModel(config: c, port: 1, telemetry: false)
+    }
+
+    @Test func pageChangesRecordAndCORestoresPaneAndCursorExactly() {
+        let a = app()
+        a.focus(pane: "sources")
+        a.keys.handle("j"); a.keys.handle("j")
+        let spot = a.selected
+        a.keys.handle("g"); a.keys.handle("o")
+        #expect(a.router.route == .todo)
+        a.keys.handle("g"); a.keys.handle("m")
+        a.keys.handle("C-o")
+        #expect(a.router.route == .todo)
+        a.keys.handle("C-o")
+        #expect(a.router.route == .wiki(slug: nil) && a.pane?.id == "sources" && a.selected == spot)
+        a.keys.handle("C-i"); a.keys.handle("C-i")
+        #expect(a.router.route == .machine)
+        #expect(a.jumps.fwd.isEmpty)
+    }
+
+    @Test func aNewJumpAfterGoingBackTruncatesForward() {
+        let a = app()
+        a.keys.handle("g"); a.keys.handle("o")
+        a.keys.handle("g"); a.keys.handle("m")
+        a.keys.handle("C-o"); a.keys.handle("C-o")
+        #expect(a.jumps.fwd.count == 2)
+        a.keys.handle("g"); a.keys.handle("f")
+        #expect(a.jumps.fwd.isEmpty)
+        a.keys.handle("C-i")
+        #expect(a.router.route == .forests, "nothing forward any more")
+    }
+
+    @Test func motionDoesntRecordButGGAndGDo() {
+        let a = app()
+        a.focus(pane: "sources")
+        a.keys.handle("j"); a.keys.handle("j"); a.keys.handle("k")
+        #expect(a.jumps.back.isEmpty, "j/k aren't jumps")
+        a.keys.handle("G")
+        #expect(a.jumps.back.count == 1)
+        a.keys.handle("C-o")
+        #expect(a.cursorIdx == 1)
+    }
+
+    @Test func cSSavesAndGAAlternates() {
+        let a = app()
+        a.keys.handle("C-s")
+        #expect(a.jumps.back.count == 1)
+        a.keys.handle("g"); a.keys.handle("o")
+        a.keys.handle("g"); a.keys.handle("a")
+        #expect(a.router.route == .wiki(slug: nil))
+        a.keys.handle("g"); a.keys.handle("a")
+        #expect(a.router.route == .todo, "g a again comes back")
+    }
+
+    @Test func codePlacesShareTheList() {
+        let a = app()
+        var at = Loc(repo: "loops", sha: "s", path: "a.ts", line: 1)
+        var opened: [Loc] = []
+        let detach = a.nav.attach(.init(open: { at = $0; opened.append($0) }, here: { at }))
+        a.nav.go(Loc(repo: "loops", sha: "s", path: "b.ts", line: 9))
+        #expect(a.jumps.back.last?.loc?.path == "a.ts")
+        a.keys.handle("C-o")
+        #expect(at.path == "a.ts" && opened.count == 2)
+        detach()
+    }
+
+    @Test func escNeverChangesPage() {
+        let a = app(.todo)
+        a.registry.register(Command(id: "test.esc.leaves", title: "Leave", scope: .todo, keys: ["esc"], local: { [weak a] _, _ in a?.go(.forests) }))
+        a.keys.handle("esc")
+        #expect(a.router.route == .todo)
+        #expect(a.runner.note == KeyEngine.nothingToCancel)
+    }
+
+    @Test func escWithNothingToCancelSaysWhereToGo() {
+        let a = app()
+        a.keys.handle("esc")
+        #expect(a.router.route == .wiki(slug: nil))
+        #expect(a.runner.note == KeyEngine.nothingToCancel)
+    }
+}
