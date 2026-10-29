@@ -108,14 +108,14 @@ enum MachineCommands {
                            }))
 
         r.register(Command(id: "machine.main", title: "Run main (on the port beside it, else a free one)", scope: .machine, budget: .slowIO,
-                           keys: ["space b"], label: "main", v1: ["click:▷ run main"],
+                           keys: ["space M"], label: "main", v1: ["click:▷ run main"],
                            available: { [weak m] _ in m != nil && m!.main == nil },
                            write: { [weak m] _, _ in
                                guard let m else { return nil }
                                return Write(path: "/preview-main", body: ["port": .string(m.mainPort.trimmingCharacters(in: .whitespacesAndNewlines))],
                                             settled: { [weak m] in m?.main != nil }, failed: "main didn't start")
                            }))
-        // v2's port box beside "run main": type the port in insert mode, esc, then space b
+        // v2's port box beside "run main": type the port in insert mode, esc, then space M
         r.register(Command(id: "machine.port", title: "Type the port main runs on", scope: .machine, keys: ["i"], label: "port",
                            available: { [weak m] _ in m != nil && m!.main == nil },
                            local: { _, _ in wapp?.beginInsert(MachinePage.portField) }))
@@ -133,7 +133,5 @@ enum MachineCommands {
 
         // esc backs out of a readied kill before anything else on the page
         app.addCloser(isOpen: { [weak m] in m?.armed != nil }, close: { [weak m] in m?.armed = nil })
-        // `i` here is the same move as review's note / tutor's write: start writing
-        if Bindings.sameMove["start writing"]?.contains("machine.port") == false { Bindings.sameMove["start writing"]?.append("machine.port") }
     }
 }

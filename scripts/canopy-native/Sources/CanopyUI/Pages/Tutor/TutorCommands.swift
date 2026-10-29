@@ -21,10 +21,6 @@ enum TutorCommands {
         let kept: (String?) -> Bool = { [weak t] id in id != nil && (t?.sessions.contains { $0.id == id } ?? false) }
         let idle: () -> Bool = { [weak t] in !(t?.streaming ?? true) }
 
-        // send-what's-typed is one move wherever a page binds ret in insert mode
-        if !(Bindings.sameMove["send what's typed"] ?? []).contains("tutor.submit") { Bindings.sameMove["send what's typed", default: []].append("tutor.submit") }
-        if !(Bindings.sameMove["put it away"] ?? []).contains("tutor.evidence.cut") { Bindings.sameMove["put it away", default: []].append("tutor.evidence.cut") }
-        if !(Bindings.sameMove["the thing's main action"] ?? []).contains("tutor.concept.show") { Bindings.sameMove["the thing's main action", default: []].append("tutor.concept.show") }
 
         // ── going places ──
 
@@ -321,10 +317,10 @@ enum TutorCommands {
         /// The credit's own controls, by key: hit/miss, then cycling level, credit and confidence.
         func cycle(_ list: [String], _ now: String) -> String { list[((list.firstIndex(of: now) ?? -1) + 1) % list.count] }
         let edits: [(id: String, title: String, key: String, label: String, fields: (Evidence) -> [String: String])] = [
-            ("tutor.evidence.outcome", "Toggle the credit's hit / miss", "m", "hit/miss", { ["outcome": $0.outcome == "hit" ? "miss" : "hit"] }),
-            ("tutor.evidence.level", "Change the credit's level (predict → explain → transfer → critique)", "w", "level", { ["level": cycle(Lesson.levels, $0.level)] }),
-            ("tutor.evidence.credit", "Change the credit's help (unaided → scaffolded → handed)", "f", "credit", { ["credit": cycle(Lesson.credits, $0.credit)] }),
-            ("tutor.evidence.confidence", "Change the credit's confidence rating (none → low → medium → high)", "y", "confidence",
+            ("tutor.evidence.outcome", "Toggle the credit's hit / miss", "O", "hit/miss", { ["outcome": $0.outcome == "hit" ? "miss" : "hit"] }),
+            ("tutor.evidence.level", "Change the credit's level (predict → explain → transfer → critique)", "W", "level", { ["level": cycle(Lesson.levels, $0.level)] }),
+            ("tutor.evidence.credit", "Change the credit's help (unaided → scaffolded → handed)", "C", "credit", { ["credit": cycle(Lesson.credits, $0.credit)] }),
+            ("tutor.evidence.confidence", "Change the credit's confidence rating (none → low → medium → high)", "Y", "confidence",
              { ["confidence": cycle([""] + Lesson.confidences, $0.confidence ?? "")] }),
         ]
         for x in edits {

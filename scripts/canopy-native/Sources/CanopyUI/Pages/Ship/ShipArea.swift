@@ -17,10 +17,6 @@ enum ShipArea: PageArea {
         WordsCommands.install(app)
         ReviewCommands.install(app)
         InsertCommands.install(app)
-        // the same move as its namesakes on other pages (bindings.ts)
-        for (group, ids) in ["start writing": ["review.compose.edit", "words.edit"]] {
-            for id in ids where Bindings.sameMove[group]?.contains(id) == false { Bindings.sameMove[group, default: []].append(id) }
-        }
         // esc in normal backs out of what Ship has open (B's review.back calls ShipSeam.backOut first)
         app.addCloser(isOpen: { [weak app] in app.map(ShipSeam.canBackOut) ?? false }, close: { [weak app] in if let app { ShipSeam.backOut(app) } })
     }

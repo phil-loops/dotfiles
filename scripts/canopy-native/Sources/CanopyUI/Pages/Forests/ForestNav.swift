@@ -44,18 +44,10 @@ enum ForestNav {
 
     static func go(_ v: BranchView, _ app: AppModel) { app.setCursor(RowKey.branch(v.b.id)) }
 
-    /// Same-move groups this area adds (the nav ones live in Bindings already).
-    static let sameMove: [String: [String]] = [
-        "finish writing": ["branch.describe.save"],
-    ]
-
     static func install(_ app: AppModel) {
         unowned let app = app
         let r = app.registry
         let m = app.forestModel
-        for (group, ids) in sameMove {
-            for id in ids where !(Bindings.sameMove[group]?.contains(id) ?? false) { Bindings.sameMove[group, default: []].append(id) }
-        }
 
         let onBranch: (String?) -> Bool = { _ in here(app) != nil }
 

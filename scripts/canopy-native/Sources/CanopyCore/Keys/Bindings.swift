@@ -15,17 +15,17 @@ public struct Bound: Equatable, Sendable {
 /// page (bindings.ts). Pure.
 public enum Bindings {
     /// Commands that are the same move on different pages, each page doing it to its own things.
-    public static var sameMove: [String: [String]] = [
+    public static let sameMove: [String: [String]] = [
         "next": ["cursor.down", "review.down", "history.next"],
         "previous": ["cursor.up", "review.up", "history.prev"],
         "back out": ["overlay.close", "review.back", "history.exit", "commit.exit", "wiki.back", "tutor.back"],
         "out": ["forest.collapse", "review.leave", "forest.leave", "commit.back", "machine.log.close", "tutor.home"],
-        "in": ["forest.expand", "branch.open", "history.enter", "machine.log"],
-        "the thing's main action": ["row.primary", "review.fold", "todo.open", "review.expand", "history.open", "machine.open", "wiki.open", "tutor.concept", "tutor.open", "pane.open"],
+        "in": ["forest.expand", "branch.open", "history.enter", "machine.log", "review.in"],
+        "the thing's main action": ["row.primary", "review.fold", "todo.open", "review.expand", "history.open", "machine.open", "wiki.open", "tutor.concept", "tutor.open", "pane.open", "tutor.concept.show"],
         "send to GitHub": ["branch.push", "review.send", "review.push"],
         "move up the list": ["focus.up", "todo.up"],
         "move down the list": ["focus.down", "todo.down"],
-        "put it away": ["project.archive", "todo.drop", "machine.kill", "tutor.forget"],
+        "put it away": ["project.archive", "todo.drop", "machine.kill", "tutor.forget", "tutor.evidence.cut"],
         "the words": ["review.words", "forest.words", "story.why"],
         "the page's other face": ["review.tab", "forest.face", "machine.log.jobs"],
         "open on GitHub": ["branch.pr", "review.finish"],
@@ -38,7 +38,8 @@ public enum Bindings {
         "go to the implementations": ["review.implementation", "tutor.implementation"],
         "list the references": ["review.references", "tutor.references"],
         "list the file's symbols": ["review.symbols", "tutor.symbols"],
-        "start writing": ["review.note.insert", "tutor.write", "branch.describe.edit"],
+        "start writing": ["review.note.insert", "tutor.write", "branch.describe.edit", "machine.port", "review.compose.edit", "words.edit"],
+        "finish what's typed": ["branch.describe.save", "review.filter.accept", "tutor.submit"],
         // NAV.md §5
         "find on the page": ["review.filter", "forest.find", "forests.find"],
         "search the page": ["page.search", "review.search"],
