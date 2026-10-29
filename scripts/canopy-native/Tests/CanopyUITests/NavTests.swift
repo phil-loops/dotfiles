@@ -73,3 +73,89 @@ import Testing
         #expect(p.route == .wiki(slug: nil) && p.pane == "sources" && p.cursorKey == a.panes[1].rows[1])
     }
 }
+
+/// The label layer, driven by key names.
+@MainActor @Suite struct LabelLayerTests {
+    func app(_ route: Route = .wiki(slug: nil)) -> AppModel {
+        var c = AppConfig()
+        c.route = route
+        return AppModel(config: c, port: 1, telemetry: false)
+    }
+
+    func layOut(_ a: AppModel, extra: Int = 0) {
+        for p in a.panes {
+            for (i, r) in p.rows.enumerated() {
+                a.noteTarget(LabelTarget(pane: p.id, key: r, rect: CGRect(x: Double(p.column) * 400, y: Double(i) * 20, width: 300, height: 18)))
+            }
+        }
+        for i in 0..<extra {
+            a.noteTarget(LabelTarget(pane: "tabs", key: "tab:\(i)", rect: CGRect(x: Double(i) * 50, y: -30, width: 40, height: 18), run: RouteTo("nav.todo")))
+        }
+    }
+
+    @Test func fAndGWOpenTheLayerAndALabelPicksThenExits() {
+        let a = app()
+        layOut(a)
+        a.keys.handle("f")
+        #expect(a.keys.active == .labels)
+        let s = a.labeling!
+        let last = a.panes[1].rows.last!
+        let l = s.label("sources", last)!
+        #expect(l.count == 1, "≤ 10 targets: one key")
+        for ch in l { a.keys.handle(String(ch)) }
+        #expect(a.keys.active == .normal && a.labeling == nil, "one pick, then the layer is gone")
+        #expect(a.pane?.id == "sources" && a.selected == last)
+        #expect(a.jumps.back.last?.pane == "facts", "a label pick is a jump")
+        a.keys.handle("g"); a.keys.handle("w")
+        #expect(a.keys.active == .labels)
+    }
+
+    @Test func labelsAreStableAcrossOpens() {
+        let a = app()
+        layOut(a, extra: 12)
+        a.keys.handle("f")
+        let first = a.labeling!.items.map(\.label)
+        #expect(first.allSatisfy { $0.count == 2 }, "> 10 targets: two keys, the first picking the pane")
+        #expect(Set(a.labeling!.items.filter { $0.pane == "facts" }.map { $0.label.first! }).count == 1)
+        a.keys.handle("esc")
+        #expect(a.keys.active == .normal)
+        a.keys.handle("j")
+        a.keys.handle("f")
+        #expect(a.labeling!.items.map(\.label) == first, "moving the cursor doesn't reshuffle labels")
+    }
+
+    @Test func aPrefixWaitsAndAnythingElseCancels() {
+        let a = app()
+        layOut(a, extra: 12)
+        a.keys.handle("f")
+        let tab = a.labeling!.items.first { $0.pane == "tabs" }!.label
+        a.keys.handle(String(tab.first!))
+        #expect(a.keys.active == .labels && a.labeling?.typed.count == 1)
+        a.keys.handle("z")
+        #expect(a.keys.active == .normal && a.labeling == nil)
+        #expect(a.router.route == .wiki(slug: nil))
+        a.keys.handle("f")
+        for ch in tab { a.keys.handle(String(ch)) }
+        #expect(a.router.route == .todo, "a free target runs its command")
+        #expect(a.jumps.back.count == 1, "one jump, not one per record point")
+    }
+
+    @Test func inSelectModeAPickExtendsTheRange() {
+        let a = app()
+        a.focus(pane: "sources")
+        layOut(a)
+        a.keys.handle("v")
+        a.keys.handle("f")
+        let l = a.labeling!.label("sources", a.panes[1].rows[3])!
+        a.keys.handle(l)
+        #expect(a.keys.mode == .select && a.selection.count == 4)
+    }
+
+    @Test func nothingToLabelSaysSo() {
+        let a = app()
+        a.keys.handle("f")
+        #expect(a.keys.active == .normal && a.labeling == nil)
+        a.runner.dispatch("nav.labels", via: .palette)
+        #expect(a.runner.note == "nothing on screen to label")
+    }
+}

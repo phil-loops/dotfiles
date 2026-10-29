@@ -31,6 +31,11 @@ public final class AppModel: CommandContext {
     public private(set) var cursorIdxs: [String: Int] = [:]
     public private(set) var anchors: [String: Int] = [:]
 
+    /// The label layer while it's up: what's labelled, and what's been typed of a label.
+    public internal(set) var labeling: LabelSession?
+    /// >0 while one jump is under way: the jump recorded its origin once, nothing inside re-records.
+    @ObservationIgnored var jumpDepth = 0
+
     // ── the `:` line and insert mode ──
     public var cmdline = ""
     public var cmdIndex = 0
@@ -76,7 +81,10 @@ public final class AppModel: CommandContext {
             if open { self.keys.openLayer(.picker) } else if self.keys.layer == .picker { self.keys.closeLayer() }
         }
 
+        keys.layerKeys[.labels] = { [weak self] k in self?.labelKey(k) ?? false }
+
         ShellCommands.install(self)
+        NavCommands.install(self)
         for area in Areas.all {
             area.install(self)
             installed.append(area.name)
@@ -143,8 +151,9 @@ public final class AppModel: CommandContext {
 
     private func modeChanged(_ from: KeyMode, _ to: KeyMode) {
         if from == .insert { insertField = nil }
-        if from == .select { anchors[paneKey] = nil }
+        if from == .select && keys.mode != .select { anchors[paneKey] = nil }
         if from == .picker { nav.close() }
+        if from == .labels { labeling = nil }
         if to == .command { cmdline = ""; cmdIndex = 0 }
     }
 
