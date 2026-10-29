@@ -1,0 +1,42 @@
+import AppKit
+import CanopyCore
+
+/// The one keyDown listener: every key press becomes a key name for the KeyEngine, which runs it
+/// through the live mode's keymap. Pages never install key handlers of their own.
+///
+/// Text entry (insert, the `:` line, the menu's and picker's filters): the engine gets each key
+/// first and keeps the ones bound in that mode (esc, ret, C-n, …); anything else goes on to the
+/// focused field. Clicking into an editable field enters insert mode. A read-only text view (the
+/// CodeTextView) never owns the keyboard. ⌘ shortcuts are never page keys; they go to the menu bar.
+@MainActor
+final class KeyMonitor {
+    private var token: Any?
+    private weak var app: AppModel?
+
+    init(app: AppModel) { self.app = app }
+
+    func install() {
+        guard token == nil else { return }
+        token = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown]) { [weak self] e in
+            guard let self, let app = self.app else { return e }
+            if e.type == .leftMouseDown {
+                app.keys.reset()
+                return e
+            }
+            return self.key(e, app) ? nil : e
+        }
+    }
+
+    /// true: the key was the engine's, swallow it.
+    private func key(_ e: NSEvent, _ app: AppModel) -> Bool {
+        let mods = e.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let editing = (e.window?.firstResponder as? NSTextView)?.isEditable == true
+        if editing && !app.keys.textEntry { app.keys.setMode(.insert) }
+        guard let name = KeyName.name(keyCode: e.keyCode, characters: e.characters, charactersIgnoringModifiers: e.charactersIgnoringModifiers,
+                                      ctrl: mods.contains(.control), meta: mods.contains(.command), alt: mods.contains(.option))
+        else { return false }
+        let took = app.keys.handle(name)
+        if !app.keys.textEntry, editing { e.window?.makeFirstResponder(nil) }
+        return took
+    }
+}

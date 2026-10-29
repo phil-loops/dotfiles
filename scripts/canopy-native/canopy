@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+# canopy [--repo <path>] [--port <n>] [/v2/... | canopy://...] — open the native canopy app on a
+# repo's forest-viewer server, rebuilding it when its sources changed.
+#   canopy --build                 just (re)build; prints the .app path
+#   canopy --dump [--dump-wait s]  headless: hydrate + listen, print the world as JSON, exit
+#   canopy --appearance light|dark|system
+# The server port is per repo: --port wins, else `stack-review-port` in --repo, else the current git
+# repo's when a server listens there, else ~/coding/loops. A running app gets the route through
+# the canopy:// scheme.
+set -euo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cache="${XDG_CACHE_HOME:-$HOME/.cache}/canopy-native"
+app="$cache/Canopy.app"
+stamp="$cache/source.sha"
+bin="$app/Contents/MacOS/Canopy"
+
+sources_sha() {
+  (cd "$here" && find Package.swift Sources -type f -print0 | sort -z | xargs -0 shasum -a 256) | shasum -a 256 | cut -d' ' -f1
+}
+
+build() {
+  local sha
+  sha="$(sources_sha)"
+  if [[ -x "$bin" && -f "$stamp" && "$(cat "$stamp")" == "$sha" ]]; then
+    return
+  fi
+  echo "canopy: building…" >&2
+  (cd "$here" && swift build -c release --product Canopy >&2)
+  local out
+  out="$(cd "$here" && swift build -c release --show-bin-path)"
+  rm -rf "$app"
+  mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+  cp "$out/Canopy" "$bin"
+  cp -R "$out/canopy-native_CanopyUI.bundle" "$app/Contents/Resources/"
+  cat > "$app/Contents/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleExecutable</key><string>Canopy</string>
+  <key>CFBundleIdentifier</key><string>com.philbrockman.canopy</string>
+  <key>CFBundleName</key><string>canopy</string>
+  <key>CFBundleDisplayName</key><string>canopy</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>0.1</string>
+  <key>CFBundleVersion</key><string>1</string>
+  <key>LSMinimumSystemVersion</key><string>14.0</string>
+  <key>NSHighResolutionCapable</key><true/>
+  <key>NSPrincipalClass</key><string>NSApplication</string>
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key><string>com.philbrockman.canopy</string>
+      <key>CFBundleURLSchemes</key><array><string>canopy</string></array>
+    </dict>
+  </array>
+</dict>
+</plist>
+PLIST
+  codesign --force --sign - "$app" >/dev/null 2>&1 || true
+  echo "$sha" > "$stamp"
+}
+
+port="" repo="" route="" dump=0
+pass=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help) sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --build) build; echo "$app"; exit 0 ;;
+    --port) port="$2"; shift 2 ;;
+    --repo) repo="$2"; shift 2 ;;
+    --dump) dump=1; pass+=("--dump"); shift ;;
+    --dump-wait|--appearance) pass+=("$1" "$2"); shift 2 ;;
+    /v2*|canopy:*) route="$1"; shift ;;
+    *) echo "canopy: unknown argument $1" >&2; exit 64 ;;
+  esac
+done
+
+port_of() { (cd "$1" && "$HOME/.dotfiles/scripts/stack-review-port") 2>/dev/null; }
+listening() { nc -z 127.0.0.1 "$1" >/dev/null 2>&1; }
+
+if [[ -z "$port" ]]; then
+  if [[ -n "$repo" ]]; then
+    port="$(port_of "$repo")"
+  else
+    here_repo="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+    if [[ -n "$here_repo" ]] && p="$(port_of "$here_repo")" && [[ -n "$p" ]] && listening "$p"; then
+      repo="$here_repo" port="$p"
+    else
+      repo="$HOME/coding/loops" port="$(port_of "$repo")"
+    fi
+  fi
+fi
+[[ -n "$port" ]] || { echo "canopy: no server port (is \`stack web\` running?)" >&2; exit 69; }
+
+build
+args=(--port "$port" ${repo:+--repo "$repo"} ${route:+"$route"} ${pass[@]+"${pass[@]}"})
+
+if (( dump )); then
+  exec "$bin" "${args[@]}"
+fi
+
+if pgrep -xf "$bin.*" >/dev/null 2>&1 && [[ -n "$route" ]]; then
+  case "$route" in canopy:*) open "$route" ;; *) open "canopy://${route#/}" ;; esac
+else
+  open -a "$app" --args "${args[@]}"
+fi
