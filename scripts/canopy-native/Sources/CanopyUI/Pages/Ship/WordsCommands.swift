@@ -120,7 +120,7 @@ enum WordsCommands {
             }))
 
         r.register(Command(
-            id: "words.fix", title: "Apply a hint's fix to the words under the cursor", scope: .words, keys: ["f"], label: "fix",
+            id: "words.fix", title: "Apply a hint's fix to the words under the cursor", scope: .words, keys: ["A"], label: "fix",
             available: { [weak app] row in
                 guard let app, let row, let id = branchOf(app, nil) else { return false }
                 return !fixes(app, id, row).isEmpty
