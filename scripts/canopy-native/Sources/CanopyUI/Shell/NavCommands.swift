@@ -12,6 +12,7 @@ enum NavCommands {
                            keys: ["g w", "f"], modes: [.normal, .select], label: "labels",
                            local: { [weak app] _, _ in try app?.showLabels() }))
         installHistory(app)
+        installPickers(app)
     }
 }
 
