@@ -274,7 +274,9 @@ private struct SidePane: View {
 }
 
 /// One file at one commit, its lit lines scrolled to (CodePane.tsx) — the review page's side pane
-/// and the Tutor's pinned code. Its rows are "s:<line>" in pane `pane`; the cursor is that pane's.
+/// and the Tutor's pinned code. Its rows are "s:<line>" in pane `pane` (list them in your surface's
+/// `panes()` so j/k walk it); the cursor is that pane's. Ask about the cursor line with CodeLookup:
+/// `CodeLookup.position(path:line:text:)` + `.commit(repo:sha:)`.
 public struct CodePaneView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme
@@ -290,7 +292,7 @@ public struct CodePaneView: View {
     /// the command that closes it (its ✕), if it can be closed
     var close: String?
 
-    init(handle: CanvasHandle, pane: String, path: String, refLabel: String, text: String?, err: String? = nil, lit: ClosedRange<Int>?, repo: String, sha: String, close: String? = nil) {
+    public init(handle: CanvasHandle, pane: String, path: String, refLabel: String, text: String?, err: String? = nil, lit: ClosedRange<Int>?, repo: String, sha: String, close: String? = nil) {
         self.handle = handle; self.pane = pane; self.path = path; self.refLabel = refLabel; self.text = text; self.err = err
         self.lit = lit; self.repo = repo; self.sha = sha; self.close = close
     }
