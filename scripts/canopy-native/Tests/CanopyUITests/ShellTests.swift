@@ -71,12 +71,19 @@ import Testing
         #expect(KeyboardRule.violations(a).isEmpty, "\(KeyboardRule.violations(a))")
     }
 
-    @Test func motionThroughAPlaceholderPane() {
+    /// The wiki's real panes (its page list | the page's stops), from a saved /wiki-pages.
+    func wikiApp() throws -> AppModel {
         let a = app(.wiki(slug: nil))
-        // the wiki placeholder: facts (1 row) | sources (5 rows); focus starts on the first pane
-        #expect(a.pane?.id == "facts")
+        a.state { WikiState() }.seed(try JSONDecoder().decode(PagesReply.self, from: Data(WikiFixture.pages.utf8)))
+        return a
+    }
+
+    @Test func motionThroughPanes() throws {
+        let a = try wikiApp()
+        // focus starts on the first pane: the page list | the page's stops
+        #expect(a.pane?.id == "pages")
         a.keys.handle("C-w"); a.keys.handle("l")
-        #expect(a.pane?.id == "sources")
+        #expect(a.pane?.id == "page")
         #expect(a.selected == a.rows.first)
         a.keys.handle("G")
         #expect(a.selected == a.rows.last)
@@ -85,14 +92,14 @@ import Testing
         a.keys.handle("j")
         #expect(a.cursorIdx == 1)
         a.keys.handle("C-w"); a.keys.handle("h")
-        #expect(a.pane?.id == "facts")
+        #expect(a.pane?.id == "pages")
         a.keys.handle("C-w"); a.keys.handle("l")
         #expect(a.cursorIdx == 1, "each pane keeps its own cursor")
     }
 
-    @Test func selectModeExtendsFromTheAnchor() {
-        let a = app(.wiki(slug: nil))
-        a.focus(pane: "sources")
+    @Test func selectModeExtendsFromTheAnchor() throws {
+        let a = try wikiApp()
+        a.focus(pane: "pages")
         a.keys.handle("j")
         a.keys.handle("v")
         #expect(a.keys.mode == .select)
