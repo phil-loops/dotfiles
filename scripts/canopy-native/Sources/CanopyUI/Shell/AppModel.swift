@@ -272,6 +272,7 @@ public final class AppModel: CommandContext {
         case .row: return selected
         case .project: return RowKey.id(selected, "p")
         case .branch: return RowKey.id(selected, "b")
+        case .review: return router.route.branchID
         case .machine: return "machine"
         default: return nil
         }
