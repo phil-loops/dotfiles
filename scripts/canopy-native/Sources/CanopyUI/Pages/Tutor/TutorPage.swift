@@ -167,28 +167,12 @@ struct ConceptChip: View {
     }
 }
 
-/// Markdown prose — a stand-in for Ship's renderer (markdown.ts): inline markdown, paragraphs kept.
+/// The tutor's prose, through the one markdown renderer.
 struct TutorProse: View {
-    @Environment(\.theme) private var theme
     let text: String
     var size: CGFloat = 14.5
 
-    var body: some View {
-        let paras = text.components(separatedBy: "\n\n").map { $0.trimmingCharacters(in: .newlines) }.filter { !$0.isEmpty }
-        VStack(alignment: .leading, spacing: 8) {
-            ForEach(Array(paras.enumerated()), id: \.offset) { _, p in
-                if p.hasPrefix("```") {
-                    Text(p.replacingOccurrences(of: "```[a-z]*\\n?", with: "", options: .regularExpression))
-                        .font(Theme.mono(12)).foregroundStyle(theme.inkDim)
-                        .padding(8).frame(maxWidth: .infinity, alignment: .leading).background(theme.vellumRaise)
-                } else {
-                    Text((try? AttributedString(markdown: p, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(p))
-                        .font(.system(size: size, design: .serif)).foregroundStyle(theme.ink).lineSpacing(4)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-        }
-    }
+    var body: some View { MarkdownView(text, size: size) }
 }
 
 // ── home ─────────────────────────────────────────────────────────────────

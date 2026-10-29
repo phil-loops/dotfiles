@@ -276,7 +276,7 @@ public struct TypesPopView: View {
                 switch p {
                 case .wait(let t): Text(t).foregroundStyle(theme.inkDim).italic()
                 case .note(let t): Text(t).foregroundStyle(theme.inkDim)
-                case .hover(let md): ScrollView { Text(hoverText(md)).foregroundStyle(theme.ink).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
+                case .hover(let md): ScrollView { MarkdownView(md).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
                     .frame(maxHeight: 260)
                 }
             }
@@ -288,10 +288,4 @@ public struct TypesPopView: View {
             .overlay { Rectangle().stroke(theme.goldDeep, lineWidth: 1) }
         }
     }
-}
-
-/// The hover's markdown as monospace text: the fences go, the code stays.
-func hoverText(_ md: String) -> String {
-    md.components(separatedBy: "\n").filter { !$0.hasPrefix("```") }.joined(separator: "\n")
-        .replacingOccurrences(of: "\n---\n", with: "\n\n").trimmingCharacters(in: .whitespacesAndNewlines)
 }

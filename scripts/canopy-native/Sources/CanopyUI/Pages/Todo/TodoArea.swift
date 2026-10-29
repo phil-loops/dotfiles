@@ -111,7 +111,7 @@ struct TodoRow: View {
             if !t.why.isEmpty { Text(t.why).foregroundStyle(theme.ink) }
             if let p = t.problems, !p.isEmpty { Text(p.joined(separator: " · ")).foregroundStyle(theme.ember) }
             if let b = t.blocked_by, !b.isEmpty { Text("after: \(b.joined(separator: ", "))") }
-            if !t.body.isEmpty { Markdownish(text: t.body) }
+            if !t.body.isEmpty { MarkdownView(t.body, size: 13) }
             if let l = t.links, !l.isEmpty { Text(l.joined(separator: " · ")).foregroundStyle(theme.inkFaint) }
             Text("\(t.id) · since \(t.created ?? "?") · /next \(t.id)").font(Theme.mono(11)).foregroundStyle(theme.inkFaint)
         }
@@ -121,45 +121,5 @@ struct TodoRow: View {
         .padding(.leading, 16)
         .overlay(alignment: .leading) { theme.rule.frame(width: 1) }
         .padding(.leading, 86).padding(.trailing, 16).padding(.bottom, 12)
-    }
-}
-
-/// An item body until the Ship area's markdown renderer lands: headings and paragraphs, inline
-/// markdown (code, emphasis, links) through Foundation.
-struct Markdownish: View {
-    @Environment(\.theme) private var theme
-    let text: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            ForEach(Array(blocks.enumerated()), id: \.offset) { _, b in
-                if b.hasPrefix("#") {
-                    Text(b.drop { $0 == "#" }.trimmingCharacters(in: .whitespaces)).foregroundStyle(theme.ink)
-                } else {
-                    Text(inline(b))
-                }
-            }
-        }
-    }
-
-    private var blocks: [String] {
-        text.components(separatedBy: "\n\n").flatMap { para -> [String] in
-            let lines = para.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-            // a heading line opens its own block; the lines under it are its paragraph
-            var out: [String] = []
-            var cur: [String] = []
-            for l in lines {
-                if l.hasPrefix("#") {
-                    if !cur.isEmpty { out.append(cur.joined(separator: "\n")); cur = [] }
-                    out.append(l)
-                } else { cur.append(l) }
-            }
-            if !cur.isEmpty { out.append(cur.joined(separator: "\n")) }
-            return out
-        }.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-    }
-
-    private func inline(_ s: String) -> AttributedString {
-        (try? AttributedString(markdown: s, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(s)
     }
 }
