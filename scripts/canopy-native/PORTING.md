@@ -160,9 +160,41 @@ app.registry.register(Command(
   takes text, add it to `KeyMode.textEntry` in your install.
 - **Shell keys already bound** (don't rebind them to mean something else): `j`/`k`/`down`/`up`, `g g`, `G`, `C-d`/`C-u`,
   `ret` (`pane.open`), `v`, `:`, `?`, `space ?`, `esc`, `u`, `C-o`/`C-i`, `C-w h/j/k/l/w`, and `g f/s/o/m/i/t`.
+  The nav core adds `f`/`g w` (labels), `C-s`, `g a`, `g 1`–`g 9`, `space b`, `space j`, `space '`, `/` and `M-h/j/k/l` (`A-h`…).
   Page commands win over global ones in their scope (`review.down` over `cursor.down`). The bindings.ts
   same-move table (`Bindings.sameMove`) says when two ids sharing a key are the same move. Add your id to
   its group if it is.
+### Navigation seams (NAV.md is binding; the shell implements the rest)
+
+- **Labels (`f` / `g w`) come free from `PaneList`**: every visible row is a target, and picking it moves
+  the cursor there and runs your `primary(for:)`. Anything else you can see that Phil would click (tabs,
+  files in a tree, hunk headers, buttons, map nodes) wears `.labelTarget(pane: "tabs", key: "tab:files",
+  title: "files", run: RouteTo("review.tab.files"))`. A custom list that isn't a `PaneList` wears
+  `.labelTarget(pane: <pane id>, key: <row key>)` on each row (no `run`: it's a row) and `.labelPane(<pane id>)`
+  on its scroll view. Override `targets(app)` only for something that can't wear the modifier; start from
+  `app.visibleTargets()`.
+- **Row text**: override `title(for: row, app)` if the shell's guess (branch/forest name, else the key)
+  is poor — `/` searches it.
+- **The jumplist** records every page change and every command in `NavKeys.jumps` on its own (the
+  registry sets `recordsJump`); set `recordsJump: true` on any other command that moves somewhere far.
+  Code jumps through `app.nav.go(loc)` record too. To put your page back exactly, implement
+  `remember(_ place: inout Place, app)` (set `place.tab`, `place.scroll`) and `restore(_ place:, app)`
+  (apply them). The shell restores route, pane, cursor and `place.loc` (via `app.nav.open`) first.
+- **Reserved keys**: if you register an id in `NavKeys.reserved`, bind `keys: NavKeys.keys(id)`
+  (`ShellTests`' `reservedNavKeysAreHonored` checks). A (forests): `project.focus` = `F` (`f` is labels),
+  `forest.find`/`forests.find` = `space f`, `forest.branch.next/prev` = `J`/`K`,
+  `forest.parent/child/root/tip` = `g k`/`g j`/`g K`/`g J`. B (review): `review.viewed` = `m` (mark viewed
+  **and advance** to the next unviewed), `review.unviewed` = `M`, never `v` (select everywhere);
+  `review.filter` = `space f` only (`/` is the shell's `page.search`; add `review.search` on `/` for diff text);
+  `review.hunk.next/prev` = `}`/`{`; `review.file.next/prev` = `]`/`[`; `review.thread.next/prev` = `n`/`N`;
+  `review.branch.next/prev` = `J`/`K` (stay on review, same tab, same file if present);
+  `review.parent/child/root/tip` = `g k`/`g j`/`g K`/`g J`. The same-move groups are already in `Bindings.sameMove`.
+  E: `machine.main` must leave `space b` (now the branch picker).
+- **Esc only cancels.** A page change while esc runs is refused (logged); with nothing to cancel, esc says
+  "h goes up · C-o goes back". Your `esc` command closes things; `h` climbs.
+- **Pickers**: feed `app.nav.pick(title, items) { index in … }` with `PickItem(label:text:)`; picks that
+  navigate record a jump through the router. Wrap a pick that only moves the cursor in `app.jump { … }`.
+
 - **keys.toml** overrides are applied by `registry.applyUserKeys`. They come from the server's bootstrap script,
   or from `~/.dotfiles/canopy/keys.toml` directly if that fails, and are re-applied whenever the server's asset
   signature moves (saving keys.toml moves it). Problems and clashes show at the top of the `?` sheet and in the log.
