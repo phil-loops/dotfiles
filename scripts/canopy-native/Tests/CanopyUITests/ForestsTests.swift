@@ -39,7 +39,7 @@ private let NOW = iso("2026-10-22T18:00:00Z") // Thu 11:00 PT
 @Suite struct ShipRulesTests {
     func stand(_ b: Branch, _ p: Pr? = nil, _ parent: ParentStand? = nil, _ now: Date = NOW) -> Stand { ShipRules.stand(b, p, parent, now: now) }
 
-    @Test func eachShipStateHasOneActionOnReturn() {
+    @Test func eachShipStageHasOneActionOnReturn() {
         #expect(stand(br()).ship == .local && stand(br()).action == .open)
         #expect(stand(br(["gates": "green"])).action == .push)
         #expect(stand(br(["gates": "green", "pushed": "synced"])).action == .pr)
@@ -252,10 +252,10 @@ private func world(_ route: Route = .forests) -> AppModel {
         let a = world()
         a.setCursor("p:r:solo"); a.keys.handle("l"); a.keys.handle("j")
         #expect(a.selected == "b:r:s")
-        #expect(BranchCommands.pushRoute("r:s", a.forestModel) == "branch.push.arm")
+        #expect(BranchCommands.pushRoute("r:s", a) == "branch.push.arm")
         a.keys.handle("p")
         #expect(a.forestModel.armed == "r:s")
-        #expect(BranchCommands.pushRoute("r:s", a.forestModel) == "branch.push.confirm")
+        #expect(BranchCommands.pushRoute("r:s", a) == "branch.push.confirm")
         a.keys.handle("esc")
         #expect(a.forestModel.armed == nil)
         #expect(a.registry.command("branch.push.confirm")!.available!("r:s") == false, "an unarmed confirm sends nothing")
@@ -264,7 +264,7 @@ private func world(_ route: Route = .forests) -> AppModel {
         #expect(sent.path == "/push-origin" && sent.body == ["branch": "s", "stay": true])
         #expect(a.forestModel.armed == nil)
         // a branch with only the gates in the way: p runs them
-        #expect(BranchCommands.pushRoute("r:c", a.forestModel) == "branch.gates.run")
+        #expect(BranchCommands.pushRoute("r:c", a) == "branch.gates.run")
     }
 
     @Test func projectMovesAreOneWriteEachWithAnUndo() throws {

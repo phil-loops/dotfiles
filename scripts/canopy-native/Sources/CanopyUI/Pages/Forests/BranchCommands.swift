@@ -15,10 +15,11 @@ enum BranchCommands {
 
     /// What `p` does: arm, then send — or, when only the gates stand in the way, run them. A branch
     /// diverged from origin can't push; inside the force scope `p` arms a force-with-lease instead.
-    static func pushRoute(_ id: String?, _ m: ForestModel) -> String? {
+    static func pushRoute(_ id: String?, _ app: AppModel) -> String? {
+        let m = app.forestModel
         guard let v = m.branchView(id) else { return nil }
         if v.b.diverged {
-            guard let s = m.forceScopeOf(id), v.b.pending == nil else { return nil }
+            guard let s = forceScope(id, app), v.b.pending == nil else { return nil }
             if s.eligible { return m.armed == id ? "branch.force.confirm" : "branch.force.arm" }
             if !s.guards.allSatisfy({ $0.ok || $0.k == "gates" }) { return nil }
             return v.b.gates == .running ? "branch.gates.wait" : "branch.gates.run"
@@ -27,6 +28,9 @@ enum BranchCommands {
         if !ShipRules.pushableButGates(v.b, v.pr) { return nil }
         return v.b.gates == .running ? "branch.gates.wait" : "branch.gates.run"
     }
+
+    /// The force scope Ship read for this tip (`ShipState`: GET /force-scope, once per tip), if any.
+    static func forceScope(_ id: String?, _ app: AppModel) -> ForceScope? { ShipState.of(app).forceScopeOf(app, id) ?? nil }
 
     static func install(_ app: AppModel) {
         unowned let app = app
@@ -37,7 +41,7 @@ enum BranchCommands {
 
         r.register(Command(
             id: "branch.push", title: "Push to origin", scope: .branch, keys: ["p"], label: "push",
-            route: { id in pushRoute(id, m).map { RouteTo($0, target: id) } }))
+            route: { id in pushRoute(id, app).map { RouteTo($0, target: id) } }))
 
         func gatesWrite(_ v: BranchView, skip: [String]) -> Write {
             let id = v.b.id, was = v.b.gates
@@ -91,25 +95,23 @@ enum BranchCommands {
 
         r.register(Command(
             id: "branch.force.arm", title: "Ready a force-with-lease over origin (the next press sends it)", scope: .branch, quiet: true,
-            available: { id in m.branchView(id)?.b.diverged == true && m.forceScopeOf(id)?.eligible == true },
+            available: { id in m.branchView(id)?.b.diverged == true && forceScope(id, app)?.eligible == true },
             local: { id, _ in m.armed = id }))
         r.register(Command(
             id: "branch.force.confirm", title: "Send the readied force-with-lease", scope: .branch, budget: .gitWrite, v1: ["force-origin"], quiet: true,
-            available: { id in id != nil && m.armed == id && m.forceScopeOf(id)?.eligible == true },
+            available: { id in id != nil && m.armed == id && forceScope(id, app)?.eligible == true },
             write: { id, _ in
-                let sc = m.forceScopeOf(id)
+                let sc = forceScope(id, app)
                 m.armed = nil
                 guard let v = m.branchView(id), let sc else { return nil }
-                let key = m.scopeKey(id)
                 return Write(
                     ops: [Op(type: .branch, id: id, fields: ["pending": "pushing"])],
                     path: t.atRepo(v.b.repo, "/force-origin"), body: ["branch": .string(v.b.name), "lease": .string(sc.lease)],
                     settled: { s.table(Branch.self)[id]?.diverged == false },
                     said: "replaced origin's \(sc.lease.prefix(7))",
                     failed: "\(leaf(v.b.name)) didn't replace origin",
-                    answered: { _, body in
-                        if let fs = try? body["forceScope"]?.decode(ForceScope.self) { m.putScope(id, key, fs) }
-                    })
+                    // a refusal answers with the scope as it now stands; Ship re-reads it on the next tip
+                    answered: { ok, _ in if !ok { ShipState.of(app).readForceScope(app, id) } })
             }))
 
         r.register(Command(

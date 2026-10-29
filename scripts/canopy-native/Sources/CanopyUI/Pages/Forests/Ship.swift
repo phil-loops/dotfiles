@@ -5,7 +5,7 @@ import Foundation
 // (ship.ts), so the tests pin the rules. The facts are the outbox's (srv/outbox.py), derived from the store.
 
 /// A branch's place on its way to main.
-public enum ShipState: String, Sendable, CaseIterable {
+public enum ShipStage: String, Sendable, CaseIterable {
     case local, green, pushed, review, approved, landed
 
     public var glyph: String {
@@ -43,7 +43,7 @@ public enum ShipAction: String, Sendable { case push, pr, open }
 
 /// Everything the pages show about where one branch stands.
 public struct Stand: Equatable, Sendable {
-    public var ship: ShipState
+    public var ship: ShipStage
     public var action: ShipAction?
     /// an approved PR: what it still waits on, first thing first
     public var waiting: [Waiting]
@@ -55,22 +55,26 @@ public struct Stand: Equatable, Sendable {
 
 /// The parent's standing a child's stand depends on (merge order makes it available first).
 public struct ParentStand: Sendable {
-    public var ship: ShipState
+    public var ship: ShipStage
     public var pr: Pr?
     public var name: String
-    public init(ship: ShipState, pr: Pr? = nil, name: String) { self.ship = ship; self.pr = pr; self.name = name }
+    public init(ship: ShipStage, pr: Pr? = nil, name: String) { self.ship = ship; self.pr = pr; self.name = name }
 }
 
+/// The ship rules, for every page that shows where a branch stands (the forests and Ship's strip).
 public enum ShipRules {
-    public static func shipOf(_ b: Branch, _ pr: Pr?) -> ShipState {
+    /// Where the branch stands from its own facts and its PR: a merged PR has landed, an open one is in
+    /// review (or approved), else synced commits are pushed and green gates on commits are green.
+    public static func shipOf(_ b: Branch, _ pr: Pr?) -> ShipStage {
         if pr?.state == "MERGED" { return .landed }
         if pr?.state == "OPEN" { return pr?.review == "APPROVED" ? .approved : .review }
         if b.pushed == .synced && b.commits > 0 { return .pushed }
         return b.gates == .green && b.commits > 0 ? .green : .local
     }
 
-    static func settled(_ s: ShipState?) -> Bool { s == nil || s == .landed }
+    static func settled(_ s: ShipStage?) -> Bool { s == nil || s == .landed }
 
+    /// What an approved PR still waits on, first thing first — its unlanded parent before its own state.
     public static func waitingOn(_ pr: Pr, _ parent: ParentStand?) -> [Waiting] {
         var out: [Waiting] = []
         if let parent, !settled(parent.ship) {
@@ -116,13 +120,14 @@ public enum ShipRules {
     }
 
     /// The PR's base for a compare link: the parent's branch while it's unlanded, else trunk.
+    /// (`ForestModel.branchView(id)?.base` has it worked out for a branch in the store.)
     public static func baseFor(_ b: Branch, _ parent: ParentStand?, trunk: String) -> String {
         if let parent, !settled(parent.ship) { return parent.name }
         return trunk
     }
 
     /// A forest is closed once every branch in it has landed.
-    public static func isClosed(_ ships: [ShipState]) -> Bool { !ships.isEmpty && ships.allSatisfy { $0 == .landed } }
+    public static func isClosed(_ ships: [ShipStage]) -> Bool { !ships.isEmpty && ships.allSatisfy { $0 == .landed } }
 }
 
 /// The last path segment of a branch name ("goal-metrics/metrics-job" → "metrics-job").

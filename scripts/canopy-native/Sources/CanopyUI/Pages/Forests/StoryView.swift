@@ -42,7 +42,7 @@ struct StoryView: View {
         let side = [v.pr.map { "#\($0.number)" } ?? "", v.st.ship.word].filter { !$0.isEmpty }.joined(separator: " · ")
         return Chapter(n: n, key: k, line: v.b.description.isEmpty ? leaf(v.b.name) : v.b.description, side: side, dim: false,
                        cursor: cursor == k, selected: selection.contains(k)) {
-            if app.forestModel.wordsOpen.contains(v.b.id) { CommitsPanel(branchID: v.b.id) }
+            if app.forestModel.wordsOpen.contains(v.b.id) { CommitWords(branchID: v.b.id) }
         }
     }
 

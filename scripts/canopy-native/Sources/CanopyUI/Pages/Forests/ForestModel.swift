@@ -34,7 +34,7 @@ public struct IntegrationVerdict: Equatable {
 
 /// The forests area's state and derived views — model.ts's forest half plus ui.ts's forest bits and
 /// integrate.ts. Made once per window (`app.forestModel`); Ship reads `forests`, `branchView`,
-/// `armed`, `opened`, `gateShown` and the force scope from here.
+/// `armed`, `opened`, `gateShown` and `compareURL` from here. The force scope is Ship's (`ShipState`).
 @MainActor
 @Observable
 public final class ForestModel {
@@ -75,9 +75,6 @@ public final class ForestModel {
 
     public private(set) var verdicts: [String: IntegrationVerdict] = [:]
     @ObservationIgnored var wasClosed: Set<String>?
-    /// force scopes read per tip (`readForceScope`)
-    public private(set) var forceScopes: [String: (key: String, scope: ForceScope?)] = [:]
-    @ObservationIgnored var forceRead: Set<String> = []
 
     public enum Face: String { case branches, story }
     static let faceKey = "v2.forest.face"
@@ -247,57 +244,11 @@ public final class ForestModel {
     /// Tests and the stub path set a verdict directly.
     func setVerdict(_ pid: String, _ v: IntegrationVerdict) { verdicts[pid] = v }
 
-    // ── the force scope (commands/branch.ts): replace origin's copy while nobody else has read it ──
-
-    func scopeKey(_ id: String) -> String {
-        guard let b = store.view(Branch.self, id) else { return "" }
-        return "\(b.tip)|\(b.ahead)|\(b.gates.rawValue)"
+    /// model.ts compareUrl: GitHub's compare-and-create form for a branch with no PR yet, its body
+    /// prefilled by GET /packet-compare (a 302 — opened in the browser, never fetched), on `v.base`.
+    public func compareURL(_ v: BranchView) -> URL {
+        transport.url(transport.atRepo(v.b.repo, "/packet-compare?branch=\(v.b.name.uriComponent)&base=\(v.base.uriComponent)"))
     }
-
-    /// The force scope read for this tip — nil until read (or when it couldn't be read).
-    public func forceScopeOf(_ id: String?) -> ForceScope? {
-        guard let id, let s = forceScopes[id], s.key == scopeKey(id) else { return nil }
-        return s.scope
-    }
-
-    /// Whether the scope for this tip has been read (even if the read failed).
-    public func forceScopeRead(_ id: String) -> Bool { forceScopes[id]?.key == scopeKey(id) }
-
-    func putScope(_ id: String, _ key: String, _ scope: ForceScope?) { forceScopes[id] = (key, scope) }
-
-    struct ForceScopeAnswer: Decodable { var forceScope: ForceScope? }
-
-    /// Read the scope once per tip (it asks GitHub, so never on a poll). A run's green shows in
-    /// /state a moment before its verdict lands in git config, so a gates ✗ under green gates is
-    /// read again, a few times.
-    public func readForceScope(_ id: String, tries: Int = 0) {
-        guard let b = store.view(Branch.self, id) else { return }
-        let key = scopeKey(id)
-        if tries == 0 && forceScopes[id]?.key == key { return }
-        let path = transport.atRepo(b.repo, "/force-scope?branch=\(b.name.uriComponent)")
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            let d = try? await self.transport.getJSON(path, as: ForceScopeAnswer.self)
-            guard self.scopeKey(id) == key else { return }
-            self.putScope(id, key, d?.forceScope)
-            let early = b.gates == .green && (d?.forceScope?.guards.contains { $0.k == "gates" && !$0.ok } ?? false)
-            if early && tries < 4 {
-                try? await Task.sleep(nanoseconds: UInt64(1_000_000_000 * (tries + 1)))
-                self.readForceScope(id, tries: tries + 1)
-            }
-        }
-    }
-}
-
-/// GET /force-scope (srv/sync.py force_scope): no PR, or a draft no one else has touched, and gates
-/// green on this tree. /force-origin checks it all again; this only says.
-public struct ForceScope: Codable, Equatable, Sendable {
-    public struct Guard: Codable, Equatable, Sendable { public var k: String; public var label: String; public var ok: Bool }
-    public var eligible: Bool
-    public var guards: [Guard]
-    public var lease: String
-    public var prNumber: Int?
-    public var prUrl: String?
 }
 
 public extension AppModel {
