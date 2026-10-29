@@ -62,7 +62,7 @@ struct ForestPage: View {
 
     private func header(_ p: Project, _ f: ForestView) -> some View {
         let m = app.forestModel
-        let by = { (s: ShipState) in f.branches.filter { $0.st.ship == s }.count }
+        let by = { (s: ShipStage) in f.branches.filter { $0.st.ship == s }.count }
         let counts = ["\(f.branches.count) branch\(f.branches.count == 1 ? "" : "es")",
                       by(.landed) > 0 ? "\(by(.landed)) landed" : "", f.ready.isEmpty ? "" : "\(f.ready.count) ready"]
             .filter { !$0.isEmpty }.joined(separator: " · ")
@@ -145,7 +145,7 @@ private struct ForestBranchView: View {
                         .italic(b.description.isEmpty)
                 }
                 if m.wordsOpen.contains(b.id) {
-                    CommitsPanel(branchID: b.id).font(Theme.mono(12))
+                    CommitWords(branchID: b.id).font(Theme.mono(12))
                 } else if !b.outline.isEmpty {
                     VStack(alignment: .leading, spacing: 1) {
                         ForEach(Array(b.outline.enumerated()), id: \.offset) { _, s in

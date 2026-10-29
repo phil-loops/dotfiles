@@ -52,3 +52,28 @@ public struct LoopStripView: View {
         }
     }
 }
+
+/// `<Commits readOnly>` on the forest pages (`e`): the branch's own commits as /outline tells them,
+/// each message whole — read through Ship's WordsState, never edited here.
+struct CommitWords: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.theme) private var theme
+    let branchID: String
+
+    var body: some View {
+        let words = WordsState.of(app)
+        VStack(alignment: .leading, spacing: 6) {
+            if let o = words.shown[branchID] {
+                ForEach(o.commits, id: \.sha) { c in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(c.subject).foregroundStyle(theme.ink)
+                        if !c.body.isEmpty { Text(c.body).foregroundStyle(theme.inkDim) }
+                    }
+                }
+            } else {
+                Text("reading the commits…").foregroundStyle(theme.inkFaint)
+            }
+        }
+        .task(id: app.store.view(Branch.self, branchID)?.tip) { words.load(app, branchID) }
+    }
+}
