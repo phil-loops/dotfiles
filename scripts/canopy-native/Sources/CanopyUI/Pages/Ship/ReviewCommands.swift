@@ -19,7 +19,7 @@ enum ReviewCommands {
         let words = WordsState.of(app)
         let store = app.store
         let tr = app.transport
-        weak var weakApp = app
+        weak let weakApp = app
 
         func branch(_ id: String?) -> Branch? { id.flatMap { store.view(Branch.self, $0) } }
         func thread(_ id: String?) -> CanopyCore.Thread? { id.flatMap { store.view(CanopyCore.Thread.self, $0) } }
