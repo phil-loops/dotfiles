@@ -1,33 +1,181 @@
 import CanopyCore
 import SwiftUI
 
-/// Placeholder for Forest.tsx + Story.tsx: one forest's branches in merge order; ret opens one.
+/// Forest.tsx: one forest's page (/v2/p/<repo>/<project>) — every branch in merge order with what it
+/// does in full (its description and commit outline) and where it stands (ship state, gates, PR, open
+/// threads). `l` opens a branch's review page, `h` goes back to Forests, `tab` turns to the story.
 struct ForestPage: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme
+    @Environment(\.accessibilityReduceMotion) private var reduced
     let route: Route
 
-    static func branches(_ s: Store, _ route: Route) -> [Branch] {
-        let id = route.projectID ?? ""
-        return s.list(Branch.self).filter { $0.project == id }.sorted { ($0.order, $0.name) < ($1.order, $1.name) }
-    }
-
     var body: some View {
-        let bs = Self.branches(app.store, route)
-        VStack(alignment: .leading, spacing: 6) {
-            Text(app.store.view(Project.self, route.projectID ?? "")?.name ?? "no such forest").font(Theme.display(22)).foregroundStyle(theme.goldLeaf)
-            Text("placeholder — area: forests · ports Forest.tsx, Story.tsx, LoopStrip.tsx, loop.ts, ship.ts, integrate.ts, drag.ts, commands/project.ts, commands/branch.ts")
-                .font(Theme.mono(11)).foregroundStyle(theme.inkFaint)
-            PaneList(pane: "main", rows: bs.map { RowKey.branch($0.id) }) { key, on in
-                if let b = app.store.view(Branch.self, RowKey.id(key, "b") ?? "") {
-                    HStack(spacing: 10) {
-                        Text("\(b.order).").foregroundStyle(theme.inkFaint)
-                        Text(b.name).foregroundStyle(on ? theme.goldLeaf : theme.ink)
-                        Text("gates \(b.gates.rawValue) · \(b.pushed.rawValue)").foregroundStyle(theme.inkDim)
-                    }
-                }
+        let m = app.forestModel
+        let pid = m.pageProject
+        Group {
+            if !app.store.ready {
+                Text("reading the forest…").foregroundStyle(theme.inkFaint).padding(.leading, 44)
+            } else if let pid, let p = app.store.view(Project.self, pid), let f = m.forest(pid) {
+                page(p, f)
+            } else {
+                Text("no such forest").foregroundStyle(theme.inkFaint).padding(.leading, 44)
             }
         }
         .padding(.horizontal, 16).padding(.bottom, 8)
+        .onChange(of: app.keys.mode) { from, _ in
+            // esc out of insert drops the description being typed
+            if from == .insert && m.describing != nil { m.describing = nil }
+        }
+    }
+
+    private func page(_ p: Project, _ f: ForestView) -> some View {
+        let m = app.forestModel
+        let rows = m.forestRows(p.id)
+        let focused = app.isFocused("main")
+        let cursor = focused ? app.selected : nil
+        let selection = focused ? Set(app.selection) : []
+        return ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    header(p, f)
+                    if m.face == .story {
+                        StoryView(pid: p.id, cursor: cursor, selection: selection)
+                    } else {
+                        ForEach(f.branches, id: \.b.id) { v in
+                            ForestBranchView(v: v, cursor: cursor == RowKey.branch(v.b.id), selected: selection.contains(RowKey.branch(v.b.id)))
+                        }
+                    }
+                }
+                .frame(maxWidth: 980, alignment: .leading)
+                .glides(rows, reduced: reduced)
+            }
+            .onChange(of: cursor) { _, k in if let k { proxy.scrollTo(k) } }
+        }
+        .overlay { Rectangle().stroke(focused ? theme.goldDeep : theme.rule.opacity(0.5), lineWidth: 1) }
+        // does every branch merge onto main at once — asked when the page opens and whenever a tip moves
+        .task(id: m.integratable(p.id) ? m.stampOf(p.id) : "") {
+            if m.integratable(p.id) { await m.checkIntegration(p.id) }
+        }
+    }
+
+    private func header(_ p: Project, _ f: ForestView) -> some View {
+        let m = app.forestModel
+        let by = { (s: ShipState) in f.branches.filter { $0.st.ship == s }.count }
+        let counts = ["\(f.branches.count) branch\(f.branches.count == 1 ? "" : "es")",
+                      by(.landed) > 0 ? "\(by(.landed)) landed" : "", f.ready.isEmpty ? "" : "\(f.ready.count) ready"]
+            .filter { !$0.isEmpty }.joined(separator: " · ")
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text(p.name).font(Theme.display(26)).foregroundStyle(theme.ink)
+                if let t = p.ticket { Text(t).font(Theme.mono(12)).foregroundStyle(theme.inkFaint) }
+                Spacer()
+                faceTabs
+            }
+            if !p.summary.isEmpty { Text(p.summary).foregroundStyle(theme.inkDim) }
+            HStack(spacing: 0) {
+                Text("\(p.state.rawValue) · \(counts)").foregroundStyle(theme.inkFaint)
+                if m.integratable(p.id), let v = m.verdict(p.id) {
+                    Text(" · ").foregroundStyle(theme.inkFaint)
+                    Button(Self.merge[v.state]!) { app.runner.dispatch("forest.integrate", via: .click, target: p.id) }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(v.state == .conflicts ? theme.del : theme.inkFaint)
+                        .opacity(v.state == .checking ? 0.7 : 1)
+                        .help(v.state == .conflicts ? "the branches don't merge onto main together\n\(v.detail)" : v.state == .clean ? "every branch merged onto main at once, cleanly" : v.detail)
+                }
+            }
+            .font(Theme.mono(12))
+            if let v = m.verdict(p.id), v.state == .conflicts, !v.detail.isEmpty {
+                // the leaves that conflict, on the page itself — never only in a tooltip
+                Text(v.detail).font(Theme.mono(11)).foregroundStyle(theme.del.opacity(0.8)).lineLimit(3)
+            }
+        }
+        .padding(.leading, 44).padding(.trailing, 16).padding(.bottom, 24)
+    }
+
+    private var faceTabs: some View {
+        let face = app.forestModel.face
+        return HStack(spacing: 8) {
+            Text("branches").foregroundStyle(face == .branches ? theme.goldLeaf : theme.inkFaint)
+            Text("story").foregroundStyle(face == .story ? theme.goldLeaf : theme.inkFaint)
+            KeyHint(id: "forest.face")
+        }
+        .font(Theme.mono(11))
+        .contentShape(Rectangle())
+        .onTapGesture { app.runner.dispatch("forest.face", via: .click) }
+    }
+
+    static let merge: [IntegrationVerdict.State: String] = [
+        .checking: "◌ merging…", .clean: "✓ merges clean", .conflicts: "✕ doesn't merge", .failed: "merge check couldn't run",
+    ]
+}
+
+/// One branch on the forest page: name, its keys when the cursor's on it, the description (or the
+/// field typing it), the outline or the full commits, the loop strip and its PR facts.
+private struct ForestBranchView: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.theme) private var theme
+    let v: BranchView
+    let cursor: Bool
+    let selected: Bool
+
+    var body: some View {
+        @Bindable var m = app.forestModel
+        let b = v.b
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text(b.order < 999 ? "\(b.order)" : "").font(Theme.mono(11)).foregroundStyle(theme.inkFaint).frame(width: 20, alignment: .trailing)
+                Text(leaf(b.name)).font(Theme.display(17)).foregroundStyle(cursor ? theme.goldLeaf : theme.ink).lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if cursor { Text(caption).font(Theme.mono(11)).foregroundStyle(theme.inkFaint).fixedSize() }
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                if m.describing == b.id {
+                    ModalTextField(BranchCommands.describeField, prompt: "one line: what the branch does", text: $m.draft)
+                        .foregroundStyle(theme.ink)
+                        .padding(4)
+                        .overlay { Rectangle().stroke(theme.goldDeep, lineWidth: 1) }
+                    Text("\(app.registry.keyOf("branch.describe.save")) saves · esc leaves it").font(Theme.mono(11)).foregroundStyle(theme.inkFaint)
+                } else {
+                    Text(b.description.isEmpty ? "no description" : b.description)
+                        .foregroundStyle(b.description.isEmpty ? theme.inkFaint : theme.inkDim)
+                        .italic(b.description.isEmpty)
+                }
+                if m.wordsOpen.contains(b.id) {
+                    CommitsPanel(branchID: b.id).font(Theme.mono(12))
+                } else if !b.outline.isEmpty {
+                    VStack(alignment: .leading, spacing: 1) {
+                        ForEach(Array(b.outline.enumerated()), id: \.offset) { _, s in
+                            Text("· \(s)").font(Theme.mono(12)).foregroundStyle(theme.inkFaint).lineLimit(1)
+                        }
+                    }
+                }
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    LoopStripView(branchID: b.id, size: 11)
+                    if !facts.isEmpty { Text(facts.joined(separator: " · ")).font(Theme.mono(11)).foregroundStyle(theme.inkFaint) }
+                }
+            }
+            .padding(.leading, 32)
+        }
+        .padding(.vertical, 12).padding(.leading, 40).padding(.trailing, 16)
+        .opacity(v.st.ship == .landed ? 0.6 : 1)
+        .rowChrome(RowKey.branch(b.id), cursor: cursor, selected: selected)
+    }
+
+    private var facts: [String] {
+        var out: [String] = []
+        if let pr = v.pr { out.append("#\(pr.number)\((pr.approvals ?? 0) > 0 ? " · \(pr.approvals!) approval\(pr.approvals == 1 ? "" : "s")" : "")") }
+        let n = app.store.list(CanopyCore.Thread.self).filter { $0.repo == v.b.repo && $0.branch == v.b.name && !$0.resolved && !$0.outdated }.count
+        if n > 0 { out.append("\(n) open") }
+        return out
+    }
+
+    /// The keys for the row under the cursor: ↵ does its next step, l always opens it.
+    private var caption: String {
+        let k = app.registry.keyOf
+        let act = v.st.action
+        let go = act == .push ? "push" : act == .pr ? "open the PR" : "open"
+        return ["\(k("row.primary")) \(go)", act == .push || act == .pr ? "\(k("branch.open")) open" : "",
+                "\(k("forest.words")) words", "\(k("branch.describe.edit")) describe"].filter { !$0.isEmpty }.joined(separator: " · ")
     }
 }
