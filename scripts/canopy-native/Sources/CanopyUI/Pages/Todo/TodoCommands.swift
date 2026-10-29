@@ -27,12 +27,12 @@ enum TodoCommands {
         let closed: Set<String> = ["done", "dropped", "broken"]
         weak var wapp = app
 
-        func moveTo(_ state: String, said: ((TrackerItem) -> String)? = nil) -> (String, Any?) throws -> Write? {
+        func moveTo(_ state: String, said: ((TodoItem) -> String)? = nil) -> (String, Any?) throws -> Write? {
             { [weak s] id, _ in
-                guard let s, let t = s.trackerItem(id), t.state != state else { return nil }
+                guard let s, let t = s.trackerItem(id), t.state.rawValue != state else { return nil }
                 let closing = state == "done" || state == "dropped"
                 let fields: JSONObject = closing ? ["state": .string(state), "rank": .null] : ["state": .string(state)]
-                let back = TodoStateArg(state: t.state, rank: t.rank)
+                let back = TodoStateArg(state: t.state.rawValue, rank: t.rank)
                 return Write(ops: [Op(type: .todo, id: id, fields: fields)], path: "/todo-item",
                              body: ["id": .string(id), "set": ["state": .string(state)]],
                              settled: { [weak s] in s?.trackerServer(id, "state")?.string == state },
@@ -51,10 +51,10 @@ enum TodoCommands {
                            available: { [weak s] id in id.flatMap { s?.trackerItem($0) }?.state == "open" },
                            write: moveTo("doing")))
         r.register(Command(id: "todo.done", title: "Mark the item done", scope: .item, budget: .configWrite, keys: ["D"], label: "done",
-                           available: { [weak s] id in id.flatMap { s?.trackerItem($0) }.map { !closed.contains($0.state) } ?? false },
+                           available: { [weak s] id in id.flatMap { s?.trackerItem($0) }.map { !closed.contains($0.state.rawValue) } ?? false },
                            write: moveTo("done") { "done: \($0.title) — u puts it back" }))
         r.register(Command(id: "todo.drop", title: "Drop the item", scope: .item, budget: .configWrite, keys: ["X"], label: "drop",
-                           available: { [weak s] id in id.flatMap { s?.trackerItem($0) }.map { !closed.contains($0.state) } ?? false },
+                           available: { [weak s] id in id.flatMap { s?.trackerItem($0) }.map { !closed.contains($0.state.rawValue) } ?? false },
                            write: moveTo("dropped") { "dropped: \($0.title) — u puts it back" }))
         r.register(Command(
             id: "todo.state", title: "Put an item back as it was", scope: .item, budget: .configWrite, needsArg: true, quiet: true,

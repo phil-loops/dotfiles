@@ -313,6 +313,37 @@ public struct TodoItem: Entity {
     public var updated: String?
     public var body: String
     public var problems: [String]?
+
+    public init(id: String, title: String? = nil, kind: String = "build", state: TodoState = .open, area: String = "x", size: String = "S",
+                why: String = "", waiting: String? = nil, blocked_by: [String]? = nil, links: [String]? = nil, rank: Int? = nil,
+                created: String? = nil, updated: String? = nil, body: String = "", problems: [String]? = nil) {
+        self.id = id; self.title = title ?? id; self.kind = kind; self.state = state; self.area = area; self.size = size
+        self.why = why; self.waiting = waiting; self.blocked_by = blocked_by; self.links = links; self.rank = rank
+        self.created = created; self.updated = updated; self.body = body; self.problems = problems
+    }
+
+    enum K: String, CodingKey { case id, title, kind, state, area, size, why, waiting, blocked_by, links, rank, created, updated, body, problems }
+
+    /// A file srv/todo.py can't parse arrives as `{id, title, state: "broken", problems, body}`
+    /// with no kind/area/size/why; it still decodes, so the tracker's "Can't read" section shows it.
+    public init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: K.self)
+        id = try c.decode(String.self, forKey: .id)
+        title = (try? c.decode(String.self, forKey: .title)) ?? id
+        kind = (try? c.decode(String.self, forKey: .kind)) ?? ""
+        state = (try? c.decode(TodoState.self, forKey: .state)) ?? .broken
+        area = (try? c.decode(String.self, forKey: .area)) ?? ""
+        size = (try? c.decode(String.self, forKey: .size)) ?? ""
+        why = (try? c.decode(String.self, forKey: .why)) ?? ""
+        waiting = try? c.decode(String.self, forKey: .waiting)
+        blocked_by = try? c.decode([String].self, forKey: .blocked_by)
+        links = try? c.decode([String].self, forKey: .links)
+        rank = (try? c.decode(Double.self, forKey: .rank)).map { Int($0) }
+        created = try? c.decode(String.self, forKey: .created)
+        updated = try? c.decode(String.self, forKey: .updated)
+        body = (try? c.decode(String.self, forKey: .body)) ?? ""
+        problems = try? c.decode([String].self, forKey: .problems)
+    }
 }
 
 /// Domains are open strings ("git", "remote", "review", "todo" today): versions are keyed by
