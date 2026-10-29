@@ -9,8 +9,6 @@ lede: Every restriction records who imposed it and why; nothing is overwritten; 
 
 **The problem.** When a sending domain is disabled, the reason is lost the moment it happens. Detectors flip `SendingDomain.disabled` and log a free-text `disableCriterion` nobody reads; the `DisableDomainEvent` they leave says only "a domain was disabled". Reviewers reconstruct the why from thousands of inlined account-limit-notice cards. Customers see one generic "contact support" for every cause, and the API answers a disabled domain with "No sending domain configured". The positive side is blunter: Reenable overrides every phishing-flagged email the team ever sent, approving one flagged email re-enables a domain disabled for an unrelated reason (including a deliberate admin block), Unleash silently grants a permanent safety-check exemption, and every admin ruling overwrites `decision` in place, so a wrong call leaves no trace.
 
-**Prior art.** This is the archived safety-trail design ([[safety-loops-audit-trail]]) reached from the product side: its "one table of decisions; a ruling is a decision whose subject is another decision; the rest is derived" is the ledger below. Two of its invariants carry over unchanged: *a decision applies only at the state version it read, else it is recorded as superseded* (a stale check can't undo a newer ruling), and *a decision and its effect commit together, keyed so retries never duplicate*. What this page adds is the restriction as the unit of state, actor separated from reason, and a phase plan that starts from today's tables.
-
 ## Principles
 
 1. **A restriction is the unit.** Each one has a target, a reason, an actor and (later) evidence, and stays in effect until lifted. A domain is disabled exactly when it has an in-effect restriction; `SendingDomain.disabled` is a cache of that. Every disable records a restriction, even when the domain is already off — at most one in effect per target per reason.
@@ -22,6 +20,8 @@ lede: Every restriction records who imposed it and why; nothing is overwritten; 
 7. **What a lift clears depends on the subject and the verdict.** Content + wrong: clear the cited content. Content + fixed by the customer: the content stays flagged. Behavior: nothing to clear, maybe probation. Account + wrong: the only place a team-level allowance can be granted, explicitly, with an end date.
 8. **Restrict the smallest thing that works.** One bad email → hold that content; repeat findings → block the team's publishing; complaint rates or the provider → disable sending.
 9. **Our records are the truth; the provider mirrors them.** SES `DISABLED` is evidence that may restrict. SES `REINSTATED` is a note on the open restriction, never a lift.
+10. **A decision applies only to the state it read.** If the state moved on (a newer restriction, a lift) the decision is recorded but takes no effect, so a slow check can't undo a ruling made while it ran.
+11. **A decision and its effect commit together, keyed so retries never duplicate.** A detector's restriction is keyed by the check that produced it; a retried job finds the row instead of writing a second.
 
 ## Vocabulary
 
