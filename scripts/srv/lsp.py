@@ -1,6 +1,7 @@
 # srv/lsp.py — TypeScript hover + go-to-definition on both halves of a branch diff.
 #
-# One long-lived tsgo (`tsgo --lsp --stdio`, the binary Helix runs) reads viewer-owned detached
+# One long-lived tsgo (`tsc --lsp --stdio`: the donor's TypeScript 7 native compiler, else the global
+# tsgo preview) reads viewer-owned detached
 # worktrees that nobody works in: one serves the diff's "new" side (the branch tip), one its "old"
 # side (the base). Asking about another commit MOVES a tree there instead of starting over:
 # `git checkout` rewrites only the files that differ, seed-gen runs only when the generated
@@ -41,13 +42,14 @@
 #
 # Env: STACK_LSP_IDLE (600s), STACK_LSP_OLD_IDLE (180s), STACK_LSP_WAIT (per-request hold, 20s),
 # HEAVY_TURN_MEM_FLOOR (30), STACK_LSP_MEM_LEVEL (forces the measured level; tests),
-# STACK_LSP_STATE_DIR (pidfile, log, trees), STACK_LSP_TSGO (the binary),
+# STACK_LSP_STATE_DIR (pidfile, log, trees), STACK_LSP_TSGO (forces the binary),
 # STACK_LSP_ANSWER_CACHE (0 disables the per-commit answer cache; the differential test),
 # STACK_LSP_TREES (the tree pool, 4 ≈ 1 GB of disk; 1 flips one tree between tip and base),
 # STACK_LSP_PREWARM ("trees": a branch page moves the trees; "server": and loads tsgo too),
 # STACK_LSP_GOMEMLIMIT (tsgo's soft heap limit, 3000MiB), STACK_LSP_FRESH_CHECKER (0 trades the
 # canonical hover text for warm-checker speed; see Server.ask).
 import collections
+import glob
 import hashlib
 import json
 import os
@@ -104,9 +106,17 @@ def _alive(pid):
         return True
 
 
-def _is_tsgo(pid):
+def tsc_for(donor):
+    """The donor's own native `tsc` (TypeScript 7 ships it), else the global tsgo preview."""
+    if os.environ.get("STACK_LSP_TSGO") or not donor:
+        return TSGO
+    native = sorted(glob.glob(os.path.join(donor, "node_modules", "@typescript", "typescript-*", "lib", "tsc")))
+    return native[0] if native else TSGO
+
+
+def _is_tsgo(pid, exe=None):
     r = subprocess.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True, text=True)
-    return "tsgo" in r.stdout
+    return "tsgo" in r.stdout or bool(exe and r.stdout.startswith(exe))
 
 
 def _killpg(pgid, pid):
@@ -140,7 +150,7 @@ def _reap_recorded(only_orphans):
     owner, pid, pgid = d.get("owner"), d.get("pid"), d.get("pgid")
     if only_orphans and owner != os.getpid() and owner and _alive(owner):
         return
-    if pid and _alive(pid) and _is_tsgo(pid):
+    if pid and _alive(pid) and _is_tsgo(pid, d.get("exe")):
         _killpg(pgid or pid, pid)
     try:
         os.unlink(PIDFILE)
@@ -425,7 +435,7 @@ class _Pending:
 class Server:
     """One tsgo over stdio: the wire, the open documents, change notifications."""
 
-    def __init__(self, root, pidfile=True):
+    def __init__(self, root, pidfile=True, exe=TSGO):
         self.root = root
         self.started_at = time.time()
         self.progress = {}
@@ -441,13 +451,13 @@ class Server:
         # 4.0-4.5 GB with a fresh checker per hover, flat at 2.9 GB with 3000MiB; 2000MiB sits below
         # the live heap of two projects and GC-thrashes at 800% CPU (2026-10-23)
         env = dict(os.environ, GOMEMLIMIT=os.environ.get("STACK_LSP_GOMEMLIMIT", "3000MiB"))
-        self.proc = subprocess.Popen([TSGO, "--lsp", "--stdio"], cwd=root, stdin=subprocess.PIPE,
+        self.proc = subprocess.Popen([exe, "--lsp", "--stdio"], cwd=root, stdin=subprocess.PIPE,
                                      stdout=subprocess.PIPE, stderr=log, start_new_session=True, env=env)
         log.close()
         self.pidfile = pidfile
         if pidfile:
             with open(PIDFILE, "w") as f:
-                json.dump({"pid": self.proc.pid, "pgid": self.proc.pid, "owner": os.getpid(),
+                json.dump({"pid": self.proc.pid, "pgid": self.proc.pid, "owner": os.getpid(), "exe": exe,
                            "root": root, "started": self.started_at}, f)
         threading.Thread(target=self._reader, daemon=True).start()
         uri = "file://" + root
@@ -832,7 +842,7 @@ class Engine:
         _reap_recorded(only_orphans=False)   # one per machine: a rival server's tsgo goes too
         self.state, self.message = "starting", "starting the type server"
         # rooted above the trees: projects come from each opened file's tsconfig, not the root
-        self.server = Server(pool_dir(repo))
+        self.server = Server(pool_dir(repo), exe=tsc_for(self.donor(repo)))
         self.server_repo = repo
         self.state, self.message = "loading", "loading types"
         return self.server
