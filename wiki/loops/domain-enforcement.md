@@ -18,11 +18,9 @@ The walkthroughs live in Show: `show ~/.dotfiles/show/domain-enforcement-princip
 ## Rules
 
 1. **A restriction is a claim with a reason and a decider.** The reason is a category (the kind of problem) and, for an automation, the exact rule; the finding names the specific thing (`email:<id>`, `word:crypto`); the decider is a person or a named, versioned automation. No "admin judgment" reason — a person who blocks says why.
-1b. **Policies decide; restrictions record.** A policy changes sending state only by writing a restriction and reads allowances as an input. Enforcement never reads a policy.
 2. **The remedy matches the finding.** Restrict and allow at the grain of what was found: a word, an email, the domain's behavior, the team.
 3. **A detector's verdict is provisional; a person's is binding.** A person lifts with a verdict (wrong / fixed) and a note, and can leave an allowance so the same finding doesn't restrict again. Allowances expire on their own.
 4. **Record what happened once; compute everything else.** Lift and revoke fields are written once; "in effect", the queue and the false-positive rate are queries; `SendingDomain.disabled` is a cache.
-5. **Add a concept only when a real case needs it** and restriction, lift and allowance can't express it.
 
 ## Three nouns
 
@@ -72,7 +70,7 @@ model Allowance {
 1. **Restrictions (MVP).** The table and registry; every disable site records a restriction with category, rule, finding and decider (SES, signup patterns and deletion restrict the team; a new domain under a restricted team starts disabled); every enable is a lift; admins pick a category when blocking; the review page shows what's keeping a domain disabled; approving an email lifts only that email's restrictions, and a domain disabled before phase 1 needs a real review. `DisableDomainEvent` is still written on a flip, as history.
 2. **Lift verdicts and allowances.** The lift dialog (wrong / fixed + optional allowance, narrowest first); automations check allowances; allow a banned word for a team.
 3. **Notes and snooze**, when the queue needs them; the account-limit-notice chart.
-4. **One entry point for detectors** (`enforce` = policy decide + write restrictions); evidence linked; `handleDisableNewDomain` deleted.
+4. **One entry point for detectors** (`enforce` = policy decide + write restrictions); evidence linked; `handleDisableNewDomain` deleted. A policy changes sending state only by writing a restriction and reads allowances as an input; nothing in enforcement reads a policy.
 5. **Customer surfaces** worded by subject.
 
 Later, when a case needs it: content holds by content hash, team publishing blocks, idempotency keys, policy replay, retiring `safetyClassification = "override"`.
