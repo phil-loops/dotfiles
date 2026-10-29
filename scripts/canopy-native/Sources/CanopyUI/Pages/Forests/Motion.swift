@@ -60,6 +60,7 @@ struct RowChrome: ViewModifier {
             .overlay(alignment: .leading) { (cursor ? theme.goldLeaf : .clear).frame(width: 2) }
             .contentShape(Rectangle())
             .onTapGesture { app.runner.dispatch("cursor.set", via: .click, target: key) }
+            .labelTarget(pane: "main", key: key)
             .id(key)
     }
 }

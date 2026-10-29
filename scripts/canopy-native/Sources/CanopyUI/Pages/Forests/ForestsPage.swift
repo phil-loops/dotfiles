@@ -34,6 +34,7 @@ struct ForestsPage: View {
                                     Text("· \(n == 0 ? "nothing" : String(n)) ·").foregroundStyle(theme.inkDim)
                                     Button("show all") { app.runner.dispatch("ready.toggle", via: .click) }
                                         .buttonStyle(.plain).foregroundStyle(theme.inkFaint)
+                                        .labelTarget(pane: "controls", key: "ready.toggle", title: "show all", run: RouteTo("ready.toggle"))
                                     KeyHint(id: "ready.toggle")
                                 }
                                 .padding(.leading, 44).padding(.bottom, 20)
@@ -47,6 +48,7 @@ struct ForestsPage: View {
                                     HStack(spacing: 6) {
                                         Button("archive · \(p.archive.count)") { app.runner.dispatch("archive.toggle", via: .click) }
                                             .buttonStyle(.plain).foregroundStyle(theme.inkFaint)
+                                            .labelTarget(pane: "controls", key: "archive.toggle", title: "archive", run: RouteTo("archive.toggle"))
                                         KeyHint(id: "archive.toggle")
                                     }
                                     .padding(.leading, 44)
@@ -58,6 +60,7 @@ struct ForestsPage: View {
                         .padding(.vertical, 4)
                         .glides(rows, reduced: reduced)
                     }
+                    .labelPane("main")
                     .onChange(of: cursor) { _, k in if let k { proxy.scrollTo(k) } }
                 }
                 .overlay { Rectangle().stroke(focused ? theme.goldDeep : theme.rule.opacity(0.5), lineWidth: 1) }

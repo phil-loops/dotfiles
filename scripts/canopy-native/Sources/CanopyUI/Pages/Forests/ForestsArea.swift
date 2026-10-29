@@ -40,13 +40,9 @@ struct ForestsSurface: SurfaceProvider {
         return RowKey.id(app.selected, "b").flatMap { app.store.view(Branch.self, $0)?.project }
     }
 
-    /// Every row, and the two quiet buttons: the archive fold and the ready filter's "show all".
-    func targets(_ app: AppModel) -> [Target] {
-        let m = app.forestModel
-        var out = rows(app).map { Target(pane: "main", key: $0, primary: primary(for: $0, app)) }
-        if m.readyOnly { out.insert(Target(pane: "main", key: "ctl:ready", primary: RouteTo("ready.toggle")), at: 0) }
-        else if !m.showArchive && !m.projects().archive.isEmpty { out.append(Target(pane: "main", key: "ctl:archive", primary: RouteTo("archive.toggle"))) }
-        return out
+    func title(for row: String, _ app: AppModel) -> String? {
+        if let id = RowKey.id(row, "b"), let b = app.store.view(Branch.self, id) { return "\(leaf(b.name)) \(b.description)" }
+        return app.guessTitle(row)
     }
 }
 
@@ -80,25 +76,31 @@ struct ForestSurface: SurfaceProvider {
         return [Crumb(app.store.view(Project.self, id)?.name ?? id)]
     }
 
-    /// Every row, the step in each branch's way, the merge check and the face switch. While `g j` asks
-    /// which child at a fork, only those children.
-    func targets(_ app: AppModel) -> [Target] {
-        let m = app.forestModel
-        if app.keys.layer == .labels, let kids = m.childChoice {
-            return kids.map { Target(pane: "main", key: $0, primary: RouteTo("cursor.set", target: $0)) }
+    /// What's on screen — except while `g j` asks which child at a fork: then only those children,
+    /// and picking one only moves the cursor there.
+    func targets(_ app: AppModel) -> [LabelTarget] {
+        let all = app.visibleTargets()
+        guard let kids = app.forestModel.childChoice else { return all }
+        return all.filter { $0.pane == "main" && kids.contains($0.key) }.map { t in
+            var t = t
+            t.run = RouteTo("cursor.set", target: t.key)
+            return t
         }
-        guard let pid = m.pageProject else { return [] }
-        var out: [Target] = [Target(pane: "main", key: "ctl:face", primary: RouteTo("forest.face"))]
-        if m.integratable(pid), m.verdict(pid) != nil {
-            out.append(Target(pane: "main", key: "ctl:integrate:\(pid)", primary: RouteTo("forest.integrate", target: pid)))
-        }
-        for row in rows(app) {
-            out.append(Target(pane: "main", key: row, primary: primary(for: row, app)))
-            guard m.face == .branches, let id = RowKey.id(row, "b"), let v = m.branchView(id),
-                  let now = Loop.steps(v.b, v.pr, v.st, words: nil).first(where: { $0.state == .now }),
-                  let cmd = Loop.command(now.id) else { continue }
-            out.append(Target(pane: "main", key: "step:\(id):\(now.id.rawValue)", primary: RouteTo(cmd, target: id)))
-        }
-        return out
+    }
+
+    func title(for row: String, _ app: AppModel) -> String? {
+        if let id = RowKey.id(row, "b"), let b = app.store.view(Branch.self, id) { return "\(leaf(b.name)) \(b.description)" }
+        if let id = RowKey.id(row, "d"), let l = app.store.view(Landed.self, id) { return "#\(l.pr) \(StoryText.bare(l.title))" }
+        return app.guessTitle(row)
+    }
+
+    /// The jumplist keeps which face the page showed (the cursor key is the shell's).
+    func remember(_ place: inout Place, _ app: AppModel) { place.tab = app.forestModel.face.rawValue }
+
+    func restore(_ place: Place, _ app: AppModel) {
+        guard let f = place.tab.flatMap(ForestModel.Face.init(rawValue:)), f != app.forestModel.face else { return }
+        let key = place.cursorKey
+        app.forestModel.face = f
+        if let key { app.setCursor(key) }
     }
 }

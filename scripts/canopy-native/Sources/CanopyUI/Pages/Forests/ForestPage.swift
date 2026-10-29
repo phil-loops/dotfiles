@@ -50,6 +50,7 @@ struct ForestPage: View {
                 .frame(maxWidth: 980, alignment: .leading)
                 .glides(rows, reduced: reduced)
             }
+            .labelPane("main")
             .onChange(of: cursor) { _, k in if let k { proxy.scrollTo(k) } }
         }
         .overlay { Rectangle().stroke(focused ? theme.goldDeep : theme.rule.opacity(0.5), lineWidth: 1) }
@@ -81,6 +82,7 @@ struct ForestPage: View {
                         .buttonStyle(.plain)
                         .foregroundStyle(v.state == .conflicts ? theme.del : theme.inkFaint)
                         .opacity(v.state == .checking ? 0.7 : 1)
+                        .labelTarget(pane: "controls", key: "forest.integrate", title: "merge check", run: RouteTo("forest.integrate", target: p.id))
                         .help(v.state == .conflicts ? "the branches don't merge onto main together\n\(v.detail)" : v.state == .clean ? "every branch merged onto main at once, cleanly" : v.detail)
                 }
             }
@@ -103,6 +105,7 @@ struct ForestPage: View {
         .font(Theme.mono(11))
         .contentShape(Rectangle())
         .onTapGesture { app.runner.dispatch("forest.face", via: .click) }
+        .labelTarget(pane: "controls", key: "forest.face", title: face == .story ? "branches" : "story", run: RouteTo("forest.face"))
     }
 
     static let merge: [IntegrationVerdict.State: String] = [

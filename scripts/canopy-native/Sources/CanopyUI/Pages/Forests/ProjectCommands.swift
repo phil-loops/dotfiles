@@ -37,7 +37,7 @@ enum ProjectCommands {
         for state in [ProjectState.focus, .workbench, .archive] {
             r.register(Command(
                 id: "project.\(state.rawValue)", title: "Move to \(label[state]!)", scope: .project, budget: .configWrite,
-                keys: [key[state]!], label: state == .workbench ? "bench" : state.rawValue, v1: ["key:\(v1Key[state]!)"],
+                keys: state == .focus ? NavKeys.keys("project.focus") : [key[state]!], label: state == .workbench ? "bench" : state.rawValue, v1: ["key:\(v1Key[state]!)"],
                 available: { id in exists(id) && s.view(Project.self, id!)!.state != state },
                 write: moveTo(state)))
         }
@@ -171,12 +171,13 @@ enum ProjectCommands {
         func readyHere() -> [BranchView] { m.forest(m.pageProject)?.ready ?? [] }
         r.register(Command(
             id: "forest.next.ready", title: "Go to the next branch ready for you", scope: .forest, keys: ["space n"], label: "next ready",
+            recordsJump: true,
             available: { _ in m.face == .branches && !readyHere().isEmpty },
             local: { [unowned app] _, _ in
                 let rs = readyHere()
                 let at = rs.firstIndex { RowKey.branch($0.b.id) == app.selected } ?? -1
                 app.setCursor(RowKey.branch(rs[(at + 1) % rs.count].b.id))
-            }, recordsJump: true))
+            }))
         r.register(Command(
             id: "forest.words.all", title: "Show or hide every branch's commits in full", scope: .forest, keys: ["space e"], label: "all words",
             available: { _ in m.face == .branches && m.pageProject != nil },

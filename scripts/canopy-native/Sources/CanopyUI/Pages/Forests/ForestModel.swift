@@ -70,7 +70,7 @@ public final class ForestModel {
     }
     /// the clock stands use to decide whether a hold came due; the pages tick it
     public var now = Date()
-    /// g j at a fork: the children the label layer offers (shown only while that layer is up)
+    /// g j at a fork: the children the label layer offers, for the one `showLabels` call that reads them
     public var childChoice: [String]?
 
     public private(set) var verdicts: [String: IntegrationVerdict] = [:]

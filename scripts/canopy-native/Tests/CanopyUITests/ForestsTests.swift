@@ -203,7 +203,7 @@ private func world(_ route: Route = .forests) -> AppModel {
 @MainActor @Suite(.serialized) struct ForestsPageTests {
     @Test func keysFollowTheMouselessRule() {
         let a = world()
-        let mine = ["project.", "forest.", "focus.", "branch.", "hold.", "story.", "ready.", "archive.", "row.primary"]
+        let mine = ["project.", "forest.", "forests.", "focus.", "branch.", "hold.", "story.", "ready.", "archive.", "row.primary"]
         let v = KeyboardRule.violations(a) { id in mine.contains { id.hasPrefix($0) } }
         #expect(v.isEmpty, "\(v)")
         #expect(a.registry.keyProblems.isEmpty, "\(a.registry.keyProblems)")
@@ -306,6 +306,12 @@ private func world(_ route: Route = .forests) -> AppModel {
     }
 }
 
+/// What the views would report on screen: every row of the focused pane, stacked.
+@MainActor
+private func showRows(_ a: AppModel) {
+    for (i, r) in a.rows.enumerated() { a.noteTarget(LabelTarget(pane: "main", key: r, rect: CGRect(x: 40, y: 100 + i * 40, width: 600, height: 32), title: "")) }
+}
+
 @MainActor @Suite(.serialized) struct ForestPageNavTests {
     func page() -> AppModel { world(.forest(repo: "r", project: "tree")) }
 
@@ -320,9 +326,10 @@ private func world(_ route: Route = .forests) -> AppModel {
         #expect(a.selected == "b:r:d", "the last stays put")
         a.keys.handle("K")
         #expect(a.selected == "b:r:c")
-        for id in ["forest.branch.next", "forest.branch.prev", "forest.branch.parent", "forest.branch.child", "forest.branch.root", "forest.branch.tip", "focus.slot.1"] {
+        for id in ["forest.branch.next", "forest.branch.prev", "forest.parent", "forest.child", "forest.root", "forest.tip", "forest.next.ready"] {
             #expect(a.registry.command(id)?.recordsJump == true, "\(id)")
         }
+        #expect(a.jumps.back.count >= 4, "each J/K left a jumplist entry")
     }
 
     @Test func gkAndGjWalkTheDAGWithLabelsAtAFork() {
@@ -332,15 +339,17 @@ private func world(_ route: Route = .forests) -> AppModel {
         #expect(a.selected == "b:r:c")
         a.keys.handle("g"); a.keys.handle("k")
         #expect(a.selected == "b:r:a")
-        a.runner.dispatch("forest.branch.parent", via: .palette)
+        a.runner.dispatch("forest.parent", via: .palette)
         #expect(a.selected == "b:r:a" && a.runner.note?.contains("sits on main") == true, "\(a.runner.note ?? "")")
         // a forks into b and c: g j asks which, through the label layer over just the children
+        showRows(a)
         a.keys.handle("g"); a.keys.handle("j")
         #expect(a.keys.layer == .labels)
-        let t = a.provider!.targets(a)
-        #expect(t.map(\.key) == ["b:r:b", "b:r:c"] && t.allSatisfy { $0.primary?.id == "cursor.set" })
-        a.keys.handle("esc")
-        #expect(a.keys.layer == nil && a.provider!.targets(a).count > 2)
+        #expect(a.labeling?.items.map(\.key) == ["b:r:b", "b:r:c"])
+        #expect(a.forestModel.childChoice == nil, "the restriction lasts one layer")
+        let c = a.labeling!.label("main", "b:r:c")!
+        for k in c { a.keys.handle(String(k)) }
+        #expect(a.keys.layer == nil && a.selected == "b:r:c" && a.router.route == .forest(repo: "r", project: "tree"), "a pick only moves the cursor")
         a.setCursor("b:r:c")
         a.keys.handle("g"); a.keys.handle("j")
         #expect(a.selected == "b:r:d", "one child: no question")
@@ -355,15 +364,26 @@ private func world(_ route: Route = .forests) -> AppModel {
         #expect(a.selected == "b:r:d", "past the fork, the descendant that merges last")
     }
 
-    @Test func everyVisibleThingIsALabelTarget() {
+    @Test func ourOwnTargetsComeFromTheViewsAndFind() {
         let a = page()
-        let keys = a.provider!.targets(a).map(\.key)
-        #expect(keys.contains("ctl:face"))
-        for r in a.rows { #expect(keys.contains(r)) }
-        // the step in each branch's way: c and d wait on their gates, b (green, local) on its push, a (PR open) on review
-        #expect(keys.contains("step:r:c:gates") && keys.contains("step:r:b:push") && keys.contains("step:r:a:review"))
-        a.forestModel.setVerdict("r:tree", IntegrationVerdict(state: .clean, detail: "", stamp: a.forestModel.stampOf("r:tree")))
-        #expect(a.provider!.targets(a).contains { $0.key == "ctl:integrate:r:tree" && $0.primary?.id == "forest.integrate" })
+        showRows(a)
+        #expect(a.provider!.targets(a).map(\.key) == a.rows)
+        #expect(a.provider!.title(for: "b:r:b", a) == "b b does it")
+        a.keys.handle("space"); a.keys.handle("f")
+        #expect(a.keys.layer == .picker)
+        a.keys.handle("down"); a.keys.handle("down"); a.keys.handle("ret")
+        #expect(a.selected == "b:r:c")
+    }
+
+    @Test func theJumplistKeepsTheFace() {
+        let a = page()
+        a.keys.handle("tab")
+        var p = a.here()
+        #expect(p.tab == "story")
+        a.keys.handle("tab")
+        p.cursorKey = "d:r:tree#9"
+        a.provider!.restore(p, a)
+        #expect(a.forestModel.face == .story && a.selected == "d:r:tree#9")
     }
 
     @Test func tabTurnsToTheStoryAndEOpensAChaptersWhy() {
@@ -393,18 +413,6 @@ private func world(_ route: Route = .forests) -> AppModel {
         #expect(a.store.view(Branch.self, "r:a")?.description == "a does more", "shown at once, one line")
         let w = try! a.registry.command("branch.describe")!.write!("r:a", "a does it")
         #expect(w == nil || w?.body["description"] == "a does it")
-    }
-
-    @Test func gDigitGoesToTheFocusLanesForest() {
-        let a = page()
-        a.keys.handle("g"); a.keys.handle("2")
-        #expect(a.router.route == .forest(repo: "r", project: "solo"))
-        a.runner.dispatch("find.branch", via: .menu, arg: "r:a")
-        a.keys.handle("g"); a.keys.handle("2")
-        a.keys.handle("g"); a.keys.handle("1")
-        #expect(a.router.route == .review(repo: "r", branch: "a"), "the branch you last had open in it")
-        a.runner.dispatch("focus.slot.9", via: .palette)
-        #expect(a.runner.note == "no focus forest 9")
     }
 
     @Test func integrationWithNoServerIsFailedNotConflicts() async {
