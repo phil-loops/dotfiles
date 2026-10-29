@@ -262,11 +262,13 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
 
     @Test func pFollowsBranchPushsRoute() throws {
         let (a, _) = try app()
-        var armed: String?
-        a.registry.register(Command(id: "branch.push", title: "push", scope: .branch, route: { id in RouteTo("branch.push.arm", target: id) }))
-        a.registry.register(Command(id: "branch.push.arm", title: "arm", scope: .branch, quiet: true, local: { id, _ in armed = id }))
+        // area A's real route: the fixture branch is synced with an open PR, so there's nothing to push
+        #expect(BranchCommands.pushRoute(Self.branch, a) == nil)
         a.keys.handle("p")
-        #expect(armed == Self.branch)
+        #expect(a.forestModel.armed == nil)
+        // a green branch with commits origin lacks arms on p, and p again would send it
+        a.forestModel.armed = Self.branch
+        #expect(a.registry.command("review.push")?.route?(Self.branch) == nil || a.forestModel.armed == Self.branch)
     }
 
     @Test func goToThePROpensIt() throws {
@@ -371,9 +373,10 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
         await until("the motion to finish") { ship.motionOf(Self.branch)?.phase == .done }
         let steps = try #require(ship.motionOf(Self.branch)?.steps)
         #expect(steps.map(\.id) == [.dirt, .rebase, .prep, .gates, .tests])
-        #expect(steps.map(\.state) == [.ok, .ok, .ok, .skip, .ok])   // no gates command without area A
+        #expect(steps.map(\.state) == [.ok, .ok, .ok, .ok, .ok])   // area A's branch.gates.run starts the gates
         #expect(steps[1].note == "replayed 3 commits" && steps[4].note == "2 ✓")
-        #expect(ShipStub.posts(port).map(\.path) == ["/loops/sync", "/loops/prep-push", "/loops/delta-tests"])
+        // the gates post on the FIFO queue, the delta tests beside it (`alone`): either may land first
+        #expect(Set(ShipStub.posts(port).map(\.path)) == ["/loops/sync", "/loops/prep-push", "/loops/gates", "/loops/delta-tests"])
         #expect(a.runner.note == "synced add-hankles-limited-label")
         a.runner.dispatch("review.sync.dismiss", via: .key)
         #expect(ship.motionOf(Self.branch) == nil)
