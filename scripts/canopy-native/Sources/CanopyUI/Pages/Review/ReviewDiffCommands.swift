@@ -11,7 +11,6 @@ enum DiffCommands {
     static func install(_ app: AppModel) {
         let r = app.registry
         let pg = ReviewPageState.of(app)
-        Bindings.sameMove["in", default: []].append(contentsOf: Bindings.sameMove["in", default: []].contains("review.in") ? [] : ["review.in"])
 
         let onFiles: (String?) -> Bool = { [weak pg] _ in pg?.tab == "files" && app.keys.layer != .map }
         let onDiff: (String?) -> Bool = { [weak pg] _ in
