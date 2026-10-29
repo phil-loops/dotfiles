@@ -64,7 +64,7 @@ enum ShellCommands {
                            local: { [weak app] id, _ in id.map { app?.focus(pane: $0) } }))
         for (d, k) in [(Direction.left, "h"), (.down, "j"), (.up, "k"), (.right, "l")] {
             r.register(Command(id: "pane.\(d.rawValue)", title: "Focus the pane \(d == .left || d == .right ? "to the \(d.rawValue)" : d == .up ? "above" : "below")",
-                               scope: .global, keys: ["C-w \(k)"], quiet: true,
+                               scope: .global, keys: ["C-w \(k)", "A-\(k)"], quiet: true,
                                local: { [weak app] _, _ in if app?.focus(d) != true { throw Refusal("no pane \(d.rawValue)") } }))
         }
         r.register(Command(id: "pane.next", title: "Focus the next pane", scope: .global, keys: ["C-w w"], quiet: true,
