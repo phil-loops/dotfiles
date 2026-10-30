@@ -11,5 +11,6 @@ enum Areas {
         WikiArea.self,
         TodoArea.self,
         PaletteArea.self,
+        KeyTutorArea.self,
     ]
 }

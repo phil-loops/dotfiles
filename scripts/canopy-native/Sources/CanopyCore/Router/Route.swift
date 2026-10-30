@@ -21,6 +21,8 @@ public struct Surface: Hashable, Sendable {
         Surface(id: "machine", path: "\(base)/machine", title: "Machine"),
         Surface(id: "wiki", path: "\(base)/wiki", title: "Wiki", arg: true, bare: true),
         Surface(id: "tutor", path: "\(base)/tutor", title: "Tutor", arg: true, bare: true),
+        // native only (no v2 page): the vimtutor-style walkthrough of the keys, on practice data
+        Surface(id: "keytutor", path: "\(base)/keytutor", title: "Keytutor", arg: true, bare: true),
     ]
 
     public static func named(_ id: String) -> Surface { all.first { $0.id == id } ?? all[0] }
@@ -41,6 +43,8 @@ public enum Route: Hashable, Sendable {
     case wiki(slug: String?)
     /// /v2/tutor[/<session>]
     case tutor(session: String?)
+    /// /v2/keytutor[/<lesson>] — native only
+    case keytutor(lesson: String?)
 
     public var surface: Surface {
         switch self {
@@ -52,6 +56,7 @@ public enum Route: Hashable, Sendable {
         case .review: return .named("review")
         case .wiki: return .named("wiki")
         case .tutor: return .named("tutor")
+        case .keytutor: return .named("keytutor")
         }
     }
 
@@ -64,6 +69,7 @@ public enum Route: Hashable, Sendable {
         case .review(let r, let b, _): return "\(r)/\(b)"
         case .wiki(let s): return s ?? ""
         case .tutor(let s): return s ?? ""
+        case .keytutor(let l): return l ?? ""
         default: return ""
         }
     }
@@ -82,6 +88,7 @@ public enum Route: Hashable, Sendable {
             return "\(b)/b/\(r.uriComponent)/\(tail)" + (base.isEmpty ? "" : "?base=\(base.uriComponent)")
         case .wiki(let s): return s.map { "\(b)/wiki/\($0.uriComponent)" } ?? "\(b)/wiki"
         case .tutor(let s): return s.map { "\(b)/tutor/\($0.uriComponent)" } ?? "\(b)/tutor"
+        case .keytutor(let l): return l.map { "\(b)/keytutor/\($0.uriComponent)" } ?? "\(b)/keytutor"
         }
     }
 
@@ -134,6 +141,7 @@ public enum Route: Hashable, Sendable {
         case "machine": return .machine
         case "wiki": return .wiki(slug: arg.isEmpty ? nil : arg)
         case "tutor": return .tutor(session: arg.isEmpty ? nil : arg)
+        case "keytutor": return .keytutor(lesson: arg.isEmpty ? nil : arg)
         case "forest", "review":
             // decodeURIComponent of the whole tail, then cut at the first "/" (model.ts pageProject)
             guard let cut = arg.firstIndex(of: "/"), cut != arg.startIndex else { return hit.id == "forest" ? .forest(repo: "", project: "") : .review(repo: "", branch: "") }

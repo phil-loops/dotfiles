@@ -98,7 +98,7 @@ launch, in `Areas.all` order. That list is pre-populated with every area, so nob
 `install` you:
 
 - `app.addSurface(MySurface())` for each routed page you own (`Surface.all` ids: forests, dashboard,
-  review, todo, forest, machine, wiki, tutor).
+  review, todo, forest, machine, wiki, tutor, keytutor — the last native only, `Pages/KeyTutor/`).
 - `app.registry.register(Command(...))` for your commands (§4).
 - `app.registry.addScopes([...], to: "<surface>")` if you add a scope (`extension Scope { static let x: Scope = "x" }`).
 - `app.addCloser(isOpen:close:)` for anything `esc` in normal mode should back out of (v2's armed push, a launch).
@@ -315,6 +315,13 @@ the picker, which-key. Also polishing the `:` completion list look and the statu
 **Cross-area seams.** B ↔ C go through the three Ship views on the review page and B's `ReviewPageState`.
 A → C go through `ForestModel`. C → F go through the markdown renderer. B → D go through the LSP helper and `CodeTextView`. The publishing
 area defines the type in its own folder; consumers only read it. Agree on a seam's signature before both sides build on it.
+
+### G. Keytutor: `Pages/KeyTutor/` (native only)
+`:keytutor` — the keys taught by doing in a practice app (`KeyTutorSandbox`: an AppModel on canned data behind
+`KeyTutorStub`, with Ship's `openURL`/`copyText`, the remembered prefs and the Socratic sessions swapped out). The
+host's `keys.nested` hands it every key on the keytutor page; `keys.onVerb` tells it which verb fired. A new verb
+needs a lesson step (`KeyLessons`) or an entry in `KeyLessons.untaught` — `KeyTutorTests` fails otherwise. A page
+that grows a new way to leave the process (open, copy, write a file) needs a seam the sandbox can swap.
 
 ## 9. Shared files
 

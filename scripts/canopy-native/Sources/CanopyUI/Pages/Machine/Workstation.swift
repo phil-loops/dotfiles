@@ -25,7 +25,7 @@ final class Workstation {
     var armed: String?
 
     /// How `machine.open` opens a server's url; tests swap it so nothing leaves the process.
-    @ObservationIgnored var openURL: (URL) -> Void = { NSWorkspace.shared.open($0) }
+    @ObservationIgnored public var openURL: (URL) -> Void = { NSWorkspace.shared.open($0) }
 
     @ObservationIgnored private weak var app: AppModel?
     @ObservationIgnored private var reading = false

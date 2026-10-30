@@ -44,6 +44,11 @@ public final class AppModel: CommandContext {
     /// The text field insert mode is typing into (a page's own id for it); nil when none.
     public private(set) var insertField: String?
 
+    /// Scopes live on every page of this app (the keytutor's practice app keeps its own keys there).
+    @ObservationIgnored public var alwaysLive: [Scope] = []
+    /// More for `--dump` to say, by name (an area's own facts).
+    @ObservationIgnored public var dumpExtras: [String: () -> JSONValue] = [:]
+
     @ObservationIgnored public private(set) var surfaces: [String: SurfaceProvider] = [:]
     @ObservationIgnored public private(set) var installed: [String] = []
     @ObservationIgnored private var states: [ObjectIdentifier: AnyObject] = [:]
@@ -295,6 +300,7 @@ public final class AppModel: CommandContext {
         var out = provider?.scopes(self) ?? []
         let own = Scope(rawValue: router.surface.id)
         if !out.contains(own) { out.append(own) }
+        out += alwaysLive.filter { !out.contains($0) }
         out.append(.global)
         return out
     }
@@ -310,8 +316,14 @@ public final class AppModel: CommandContext {
         let c = completions
         guard c.indices.contains(cmdIndex) else { return runner.say("no command \(cmdline)") }
         let id = c[cmdIndex].id
+        // `:keytutor review`: what follows a command named exactly is its argument
+        let typed = cmdline.trimmingCharacters(in: .whitespaces)
+        var arg: String?
+        if let sp = typed.firstIndex(of: " "), typed[..<sp] == id {
+            arg = typed[typed.index(after: sp)...].trimmingCharacters(in: .whitespaces)
+        }
         keys.setMode(.normal)
-        runner.dispatch(id, via: .palette)
+        runner.dispatch(id, via: .palette, arg: arg?.isEmpty == false ? arg : nil)
     }
 
     // ── navigation helpers ──

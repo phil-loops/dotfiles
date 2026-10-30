@@ -37,6 +37,16 @@ public final class KeyEngine {
     public private(set) var cancelling = false
     public static let nothingToCancel = "h goes up · C-o goes back"
 
+    /// Every finished key sequence as the verb it is here (the keytutor watches these).
+    @ObservationIgnored public var onVerb: ((VerbEvent) -> Void)?
+    /// While this answers an engine (the keytutor's practice app), every key goes there instead, and
+    /// `afterNested` hears each one with what the nested engine did with it.
+    @ObservationIgnored public var nested: (() -> KeyEngine?)?
+    @ObservationIgnored public var afterNested: ((_ key: String, _ took: Bool) -> Void)?
+    /// Whether the last esc cancelled something (a chord, a layer, a mode, a page's own back-out
+    /// that went through) rather than finding nothing to cancel.
+    public private(set) var lastEscCancelled = false
+
     @ObservationIgnored private let registry: CommandRegistry
     @ObservationIgnored private let runner: Runner
     @ObservationIgnored private var keymap = Keymap([])
@@ -46,6 +56,9 @@ public final class KeyEngine {
         self.registry = registry
         self.runner = runner
     }
+
+    /// The engine keys really reach: a nested one while it's there, else this.
+    public var innermost: KeyEngine { nested?()?.innermost ?? self }
 
     /// The live keymap: the layer if one is up, else the mode.
     public var active: KeyMode { layer ?? mode }
@@ -83,23 +96,31 @@ public final class KeyEngine {
     /// One level out (see the type's doc). Returns false only when nothing at any level took it.
     @discardableResult
     public func backOut() -> Bool {
+        let from = active
         if !pendingKeys.isEmpty {
             reset()
-            return true
+            return cancelled(from)
         }
         if layer != nil {
             closeLayer()
-            return true
+            return cancelled(from)
         }
         if mode != .normal {
             setMode(.normal)
-            return true
+            return cancelled(from)
         }
         cancelling = true
         defer { cancelling = false }
         let took = feed("esc")
-        if !took || runner.fired?.ok == false { runner.say(Self.nothingToCancel) }
+        lastEscCancelled = took && runner.fired?.ok != false
+        if !lastEscCancelled { runner.say(Self.nothingToCancel) }
         return took
+    }
+
+    private func cancelled(_ from: KeyMode) -> Bool {
+        lastEscCancelled = true
+        onVerb?(VerbEvent(verb: .cancel, command: nil, keys: "esc", ok: true, mode: from))
+        return true
     }
 
     // ── keys ──
@@ -118,9 +139,15 @@ public final class KeyEngine {
     /// a chord, backed out) — the caller then swallows the event; false hands it on (to a text field).
     @discardableResult
     public func handle(_ key: String) -> Bool {
+        if let n = nested?() {
+            let took = n.handle(key)
+            afterNested?(key, took)
+            return took || key == "esc"
+        }
         if key == "esc" { return backOut() }
         if key == "ret", active == .insert, fieldLines == .multi {
             reset()
+            onVerb?(VerbEvent(verb: .newline, command: nil, keys: key, ok: true, mode: .insert))
             return false
         }
         return feed(key)
@@ -129,18 +156,31 @@ public final class KeyEngine {
     private func feed(_ key: String) -> Bool {
         if let raw = layerKeys[active] { return raw(key) }
         rebuild()
+        let mode = active
+        let seq = pendingKeys.isEmpty ? key : "\(pendingKeys) \(key)"
         let scopes = (runner.context?.liveScopes() ?? [.global]).map(\.rawValue)
-        let fed = keymap.feed(key, scopes: scopes, mode: active.rawValue)
+        let fed = keymap.feed(key, scopes: scopes, mode: mode.rawValue)
         // a prefix (space, g) waits for its next key as long as it takes, like Helix
         if case .pending(let prefix) = fed {
             pendingKeys = prefix
+            if prefix == registry.verbKeys.leader { onVerb?(VerbEvent(verb: .leader, command: nil, keys: prefix, ok: true, mode: mode)) }
             return true
         }
         let wasPending = !pendingKeys.isEmpty
         pendingKeys = ""
         if case .run(let id) = fed {
             runner.dispatch(id, via: .key)
+            if let onVerb {
+                let verb = registry.command(id)?.verbs.first { registry.verbKeys.of($0, in: mode).contains(seq) }
+                let ok = runner.fired.map { $0.id != id || $0.ok } ?? true
+                onVerb(VerbEvent(verb: verb, command: id, keys: seq, ok: ok, mode: mode))
+            }
             return true
+        }
+        if let onVerb {
+            let verb = Verb.allCases.first { registry.verbKeys.of($0, in: mode).contains(seq) }
+            // typing into a field isn't an attempt at anything
+            if verb != nil || !mode.takesText { onVerb(VerbEvent(verb: verb, command: nil, keys: seq, ok: false, mode: mode)) }
         }
         return wasPending
     }
@@ -197,11 +237,26 @@ public final class KeyEngine {
             !$0.needsArg && live.contains($0.scope) && ($0.available?(ctx.target(for: $0.scope)) ?? true)
         }
         let want = typed.trimmingCharacters(in: .whitespaces)
+        // "<id> <argument>": the command named exactly, with what follows as its argument
+        if let sp = want.firstIndex(of: " "), let named = cmds.first(where: { $0.id == want[..<sp] }) { return [named] }
         if let exact = cmds.first(where: { $0.id == want }) { return [exact] + cmds.filter { $0.id != want && ranked([$0], want, Self.text).count == 1 } }
         return ranked(cmds, want, Self.text)
     }
 
     private static func text(_ c: Command) -> String { "\(c.id) \(c.title)" }
+}
+
+/// A finished key sequence as the verb it is in the mode it was typed in: the command it ran (nil
+/// when nothing here implements it) and whether that went through.
+public struct VerbEvent: Equatable, Sendable {
+    public var verb: Verb?
+    public var command: String?
+    public var keys: String
+    public var ok: Bool
+    public var mode: KeyMode
+    public init(verb: Verb?, command: String?, keys: String, ok: Bool, mode: KeyMode) {
+        self.verb = verb; self.command = command; self.keys = keys; self.ok = ok; self.mode = mode
+    }
 }
 
 /// What a text field holds: one line (`↵` finishes it) or many (`↵` is a newline; `⌃↵` sends).

@@ -32,16 +32,18 @@ final class KeyMonitor {
         let mods = e.modifierFlags.intersection(.deviceIndependentFlagsMask)
         let field = e.window?.firstResponder as? NSTextView
         let editing = field?.isEditable == true
-        if editing && !app.keys.textEntry {
-            app.keys.setMode(.insert)
+        // the engine keys really reach: the keytutor's practice app while it's up
+        let keys = app.keys.innermost
+        if editing && !keys.textEntry {
+            keys.setMode(.insert)
             // clicked into: a field editor is a one-line field, a bare text view a many-line box
-            app.keys.fieldLines = field?.isFieldEditor == true ? .single : .multi
+            keys.fieldLines = field?.isFieldEditor == true ? .single : .multi
         }
         guard let name = KeyName.name(keyCode: e.keyCode, characters: e.characters, charactersIgnoringModifiers: e.charactersIgnoringModifiers,
                                       ctrl: mods.contains(.control), meta: mods.contains(.command), alt: mods.contains(.option))
         else { return false }
         let took = app.keys.handle(name)
-        if !app.keys.textEntry, editing { e.window?.makeFirstResponder(nil) }
+        if !app.keys.innermost.textEntry, editing { e.window?.makeFirstResponder(nil) }
         return took
     }
 }
