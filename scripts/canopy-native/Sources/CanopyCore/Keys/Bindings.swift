@@ -29,31 +29,23 @@ public enum Bindings {
         }
     }
 
-    /// keys.toml over the verb table: an entry names a verb (`mark = "v"`). v2's command-id entries
-    /// (`"review.viewed" = "v"`) are read past with a warning naming the verb to set instead.
-    public static func applyVerbKeys(_ overrides: [String: [String]], commands: [String: [Verb]])
+    /// The user's keys over the verb table. `overrides` is keys-native.toml — this app's own file,
+    /// verb → keys (`mark = "v"`). `shared` is keys.toml, which v2 reads too and keys by command id:
+    /// its command-id lines are read past with a warning naming the verb to set instead, and a verb
+    /// line found there still applies (keys-native.toml wins) but warns, since v2 flags it as
+    /// "no such command". v2 never reads keys-native.toml, so nothing here can trouble it.
+    public static func applyVerbKeys(_ overrides: [String: [String]], shared: [String: [String]] = [:], commands: [String: [Verb]])
         -> (keys: VerbKeys, customized: Set<Verb>, problems: [String], warnings: [String])
     {
         var vk = VerbKeys.defaults
         var customized = Set<Verb>()
         var problems: [String] = []
         var warnings: [String] = []
-        for (name, keys) in overrides.sorted(by: { $0.key < $1.key }) {
-            guard let verb = Verb(rawValue: name) else {
-                if let verbs = commands[name] {
-                    let to = verbs.first.map { "set `\($0.rawValue) = …` instead (every page doing it follows)" } ?? "it has no verb; its key is the page's own"
-                    warnings.append("\(name): keys belong to verbs now, so this command-id line is ignored — \(to)")
-                } else if name.contains(".") {
-                    warnings.append("\(name): a command id (v2's), ignored here — keys belong to verbs")
-                } else {
-                    problems.append("\(name): no such verb")
-                }
-                continue
-            }
+        func apply(_ verb: Verb, _ name: String, _ keys: [String]) {
             let bad = keys.filter { !validKey($0) }
             if !bad.isEmpty { problems.append("\(name): not a key — \(bad.map { "\"\($0)\"" }.joined(separator: ", "))") }
             let good = keys.filter(validKey)
-            if verb.spec.native { problems.append("\(name): the text field does it; it can't move"); continue }
+            if verb.spec.native { problems.append("\(name): the text field does it; it can't move"); return }
             if verb.spec.tier == .insert {
                 vk.entry[verb] = good
                 vk.keys[verb] = good.filter { $0 != "ret" }
@@ -61,6 +53,36 @@ public enum Bindings {
                 vk.keys[verb] = good
             }
             customized.insert(verb)
+        }
+        func instead(_ verbs: [Verb]) -> String {
+            verbs.first.map { "set `\($0.rawValue) = …` in keys-native.toml instead (every page doing it follows)" } ?? "it has no verb; its key is the page's own"
+        }
+        for (name, keys) in shared.sorted(by: { $0.key < $1.key }) {
+            if let verb = Verb(rawValue: name) {
+                if overrides[name] != nil {
+                    warnings.append("\(name): a verb in keys.toml (v2's file, where it reads as no such command) — keys-native.toml's line wins; drop this one")
+                    continue
+                }
+                warnings.append("\(name): a verb in keys.toml (v2's file, where it reads as no such command) — applied, but move it to keys-native.toml")
+                apply(verb, name, keys)
+            } else if let verbs = commands[name] {
+                warnings.append("\(name): keys belong to verbs now, so this command-id line is ignored — \(instead(verbs))")
+            } else {
+                warnings.append("\(name): a command id (v2's), ignored here — keys belong to verbs (keys-native.toml)")
+            }
+        }
+        for (name, keys) in overrides.sorted(by: { $0.key < $1.key }) {
+            guard let verb = Verb(rawValue: name) else {
+                if let verbs = commands[name] {
+                    warnings.append("\(name): keys belong to verbs now, so this command-id line is ignored — \(instead(verbs))")
+                } else if name.contains(".") {
+                    warnings.append("\(name): a command id (v2's), ignored here — keys belong to verbs")
+                } else {
+                    problems.append("\(name): no such verb")
+                }
+                continue
+            }
+            apply(verb, name, keys)
         }
         return (vk, customized, problems, warnings)
     }

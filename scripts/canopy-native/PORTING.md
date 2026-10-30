@@ -199,12 +199,14 @@ app.registry.register(Command(
 - **Pickers**: feed `app.nav.pick(title, items) { index in … }` with `PickItem(label:text:)`; picks that
   navigate record a jump through the router. Wrap a pick that only moves the cursor in `app.jump { … }`.
 
-- **keys.toml** overrides a **verb** by name (`mark = "v"`, `leader = ";"`), applied by `registry.applyUserKeys`
-  to every command implementing it. They come from the server's bootstrap script, or from
-  `~/.dotfiles/canopy/keys.toml` directly if that fails, and are re-applied whenever the server's asset signature
-  moves (saving keys.toml moves it). v2's command-id lines in the same file are read past with a warning
-  (`keyWarnings`, in `--dump` and dim atop `?`). Problems (a key on two verbs, a leader clash) show at the top of
-  the `?` sheet, in `--dump` and in the log.
+- **keys-native.toml** (`~/.dotfiles/canopy/keys-native.toml`, read from disk by `app.applyKeyFiles`) overrides a
+  **verb** by name (`mark = "v"`, `leader = ";"`), applied by `registry.applyUserKeys` to every command implementing it.
+  `keys.toml` stays v2's (command ids, injected by the server's bootstrap script, or read directly if that fails):
+  native reads its command-id lines past with a warning naming the verb to set instead (`keyWarnings`, in `--dump` and
+  dim atop `?`), and applies a verb line found there with a warning to move it. Both are re-applied whenever the
+  server's asset signature moves (saving keys.toml moves it) and on `:keys.reload`. Problems (a key on two verbs, a
+  leader clash) show at the top of the `?` sheet, in `--dump` and in the log. Tests point `app.nativeKeysPath` at a
+  temp file; never at the real one.
 
 ## 5. Calling the server
 

@@ -97,6 +97,33 @@ import Testing
         #expect(a.registry.command("project.archive")?.keys == ["X"])
     }
 
+    /// The two files end to end: keys.toml arrives in the server's bootstrap (v2's command ids, warned
+    /// about), keys-native.toml is read from disk (verbs). Both from a temp dir and a stub — never
+    /// Phil's real files or server.
+    @Test func keysNativeTomlMovesVerbsAndKeysTomlStaysV2s() async throws {
+        let port = 44901
+        let html = #"<script>window.__VIEWER_REPOS__=["loops"];window.__CANOPY_KEYS__={"keys":{"project.archive":["x"]},"errors":[]};window.__CANOPY_ASSET__="a1"</script>"#
+        ShipStub.answer(port, "GET", "/v2", html)
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("canopy-keys-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let native = dir.appendingPathComponent("keys-native.toml")
+        try "# verbs\nput-away = \"D\"\nleader = [\";\"]\n".write(to: native, atomically: true, encoding: .utf8)
+        let a = AppModel(config: AppConfig(), port: port, telemetry: false, protocolClasses: [ShipStub.self])
+        a.nativeKeysPath = native.path
+        #expect(a.nativeKeysPath != KeysToml.nativePath)
+        await a.loadBootstrap()
+        #expect(a.registry.keyProblems.isEmpty, "\(a.registry.keyProblems)")
+        #expect(a.registry.command("project.archive")?.keys == ["D"], "the verb moved; v2's id line didn't")
+        #expect(a.registry.command("project.focus")?.keys == ["; f"])
+        #expect(a.registry.keyWarnings.count == 1 && a.registry.keyWarnings[0].contains("`put-away = …` in keys-native.toml"))
+        // a bad native line is a problem of the native file's, named as such
+        try "mark = 3\n".write(to: native, atomically: true, encoding: .utf8)
+        a.applyKeyFiles()
+        #expect(a.registry.keyProblems == ["keys-native.toml: mark: wants a key or a list of keys"])
+        #expect(ShipStub.posts(port).isEmpty)
+    }
+
     @Test func liveScopesEndWithTheSurfaceAndGlobal() {
         for s in Surface.all {
             let a = app(Route(s.path + (s.arg && !s.bare ? "/loops/x" : "")))

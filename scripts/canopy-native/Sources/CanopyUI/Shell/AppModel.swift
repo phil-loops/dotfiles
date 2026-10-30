@@ -111,6 +111,9 @@ public final class AppModel: CommandContext {
         runner.announce(surfaces: Surface.all)
     }
 
+    /// This app's own keys file (verb → keys); tests point it somewhere else.
+    @ObservationIgnored public var nativeKeysPath = KeysToml.nativePath
+
     public func loadBootstrap() async {
         do {
             let b = try await Bootstrap.fetch(transport)
@@ -122,7 +125,14 @@ public final class AppModel: CommandContext {
             Log.line("bootstrap failed (\(error)); keys.toml read directly")
         }
         transport.repos = bootstrap.repos
-        registry.applyUserKeys(bootstrap.keys, errors: bootstrap.keyErrors)
+        applyKeyFiles()
+    }
+
+    /// keys-native.toml (verbs) over keys.toml (v2's, as the bootstrap carried it), then the rules.
+    public func applyKeyFiles() {
+        let (native, nativeErrors) = KeysToml.load(path: nativeKeysPath)
+        registry.applyUserKeys(native, shared: bootstrap.keys,
+                               errors: bootstrap.keyErrors + nativeErrors.map { "keys-native.toml: \($0.hasPrefix("keys.toml: ") ? String($0.dropFirst(11)) : $0)" })
         if !registry.keyProblems.isEmpty { Log.line("key problems: \(registry.keyProblems.joined(separator: "; "))") }
     }
 

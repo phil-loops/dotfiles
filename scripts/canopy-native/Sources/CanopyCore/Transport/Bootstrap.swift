@@ -44,10 +44,14 @@ public struct Bootstrap: Equatable, Sendable {
     }
 }
 
-/// Fallback when the bootstrap can't be read: ~/.dotfiles/canopy/keys.toml directly. Handles the
-/// file's one shape — `"id" = "key"` or `"id" = ["k", …]` — the same validation as srv/keymap.py.
+/// The keys files. `keys.toml` is shared with v2 (which keys it by command id; the server injects
+/// it, and this reads it directly only when the bootstrap can't be read). `keys-native.toml` is
+/// this app's own: verb → keys. v2 never reads it — the server's keymap.py loads keys.toml alone and
+/// would report a `[native]` table there as "native: wants a key or a list of keys" atop v2's `?`.
+/// Both have one shape — `"id" = "key"` or `"id" = ["k", …]` — the same validation as srv/keymap.py.
 public enum KeysToml {
     public static let path = NSString(string: "~/.dotfiles/canopy/keys.toml").expandingTildeInPath
+    public static let nativePath = NSString(string: "~/.dotfiles/canopy/keys-native.toml").expandingTildeInPath
 
     public static func load(path: String = path) -> (keys: [String: [String]], errors: [String]) {
         guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { return ([:], []) }
