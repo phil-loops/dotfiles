@@ -274,7 +274,6 @@ extension AppDelegate {
             if name == "Help" { NSApp.helpMenu = menu }
         }
         let editItem = NSMenuItem()
-        main.addItem(editItem)
         let editMenu = NSMenu(title: "Edit")
         editMenu.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
         editMenu.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "Z")
@@ -355,6 +354,9 @@ extension AppDelegate {
 
     func focus(_ view: NSView) {
         window.makeFirstResponder(view)
+        if let field = view as? NSTextField, let editor = field.currentEditor() {
+            editor.selectedRange = NSRange(location: (editor.string as NSString).length, length: 0)
+        }
         if let table = view as? NSTableView, table.selectedRow < 0,
            let first = (0..<table.numberOfRows).first(where: { table.delegate?.tableView?(table, shouldSelectRow: $0) ?? true }) {
             table.selectRowIndexes(IndexSet(integer: first), byExtendingSelection: false)
