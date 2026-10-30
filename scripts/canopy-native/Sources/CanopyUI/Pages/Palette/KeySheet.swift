@@ -67,7 +67,7 @@ enum KeySheet {
             Hint(title: $0.title, keys: $0.hint.joined(separator: " · "))
         }
         return Model(here: labelOf(liveScopes.first ?? .global, app), problems: app.registry.keyProblems, now: groups, hints: hints,
-                     everywhere: sheet.everywhere, notNow: sheet.notNow, customized: app.registry.customized)
+                     everywhere: sheet.everywhere, notNow: sheet.notNow, customized: Set(app.registry.commands.filter { $0.verbs.contains(where: app.registry.customized.contains) }.map(\.id)))
     }
 }
 

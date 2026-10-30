@@ -46,7 +46,7 @@ public enum Dump {
         let scopes = app.liveScopes().map(\.rawValue)
         // the key engine, end to end: a prefix opens which-key, a chord navigates
         app.keys.handle("g")
-        let whichKey = app.keys.whichKeyRows().map { "\($0.key) \($0.what)" }
+        let whichKey = app.keys.whichKeyRows().map { "\($0.key) \($0.line)" }
         let pendingAfterG = app.keys.pendingKeys
         app.keys.handle("o")
         let afterGO = app.router.route.path
@@ -89,6 +89,7 @@ public enum Dump {
             "focusForests": .array(focus.prefix(8).map(JSONValue.string)),
             "commands": .number(Double(app.registry.commands.count)),
             "keyProblems": .array(app.registry.keyProblems.map(JSONValue.string)),
+            "keyWarnings": .array(app.registry.keyWarnings.map(JSONValue.string)),
             "areas": .array(app.installed.map(JSONValue.string)),
             "surfacesRegistered": .array(app.surfaces.keys.sorted().map(JSONValue.string)),
             "keys": ["pendingAfterG": .string(pendingAfterG), "whichKeyG": .array(whichKey.map(JSONValue.string)),

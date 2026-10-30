@@ -127,7 +127,16 @@ public struct Command {
     public var title: String
     public var scope: Scope
     public var budget: Budget
-    public var keys: [String]
+    /// the verbs it implements here (Verbs.swift): its keys come from the verb table
+    public var verbs: [Verb]
+    /// its key under the page's leader, for an action no verb names
+    public var leader: LocalKey?
+    /// transitional: raw keys a not-yet-migrated command still names
+    var rawKeys: [String]
+    /// what it binds in each of its modes, resolved by the registry from the verb table + keys.toml
+    public internal(set) var keysByMode: [KeyMode: [String]] = [:]
+    /// its keys as shown: those of its first mode that binds any
+    public var keys: [String] { modes.lazy.compactMap { self.keysByMode[$0] }.first { !$0.isEmpty } ?? [] }
     /// the modes its keys bind in
     public var modes: [KeyMode]
     /// only ever run with an argument another view supplies (a found branch, a row index): exempt
@@ -144,7 +153,7 @@ public struct Command {
     /// left out of the space menu (cursor motion, the menu itself)
     public var quiet: Bool
     /// runs as a jump (NAV.md §4.4): the jumplist remembers where you were before it runs.
-    /// Page changes record on their own; ids in `NavKeys.jumps` get this set on register.
+    /// Page changes record on their own; a command implementing a jump verb gets this set on register.
     public var recordsJump: Bool
     public var available: ((String?) -> Bool)?
     /// a key that means "the right thing here": names the command that actually runs
@@ -154,31 +163,36 @@ public struct Command {
     /// a server write; throw `Refusal` to refuse before sending
     public var write: ((_ target: String, _ arg: Any?) throws -> Write?)?
 
-    public init(id: String, title: String, scope: Scope, budget: Budget = .local, keys: [String] = [],
+    public init(id: String, title: String, scope: Scope, budget: Budget = .local,
+                verb: Verb? = nil, verbs: [Verb] = [], leader: LocalKey? = nil, keys: [String] = [],
                 modes: [KeyMode] = [.normal], needsArg: Bool = false, label: String? = nil,
                 pair: String? = nil, hint: [String] = [], v1: [String] = [], quiet: Bool = false,
                 recordsJump: Bool = false,
                 available: ((String?) -> Bool)? = nil, route: ((String?) -> RouteTo?)? = nil,
                 local: ((_ target: String?, _ arg: Any?) throws -> Void)? = nil,
                 write: ((_ target: String, _ arg: Any?) throws -> Write?)? = nil) {
-        self.id = id; self.title = title; self.scope = scope; self.budget = budget; self.keys = keys; self.label = label
+        self.id = id; self.title = title; self.scope = scope; self.budget = budget; self.label = label
+        self.verbs = (verb.map { [$0] } ?? []) + verbs; self.leader = leader; self.rawKeys = keys
         self.modes = modes; self.needsArg = needsArg
         self.pair = pair; self.hint = hint; self.v1 = v1; self.quiet = quiet; self.recordsJump = recordsJump; self.available = available
         self.route = route; self.local = local; self.write = write
     }
 }
 
-/// The registry: every command, by id, in registration order. Keys can be overridden by
-/// keys.toml (`applyUserKeys`), which always starts again from each command's default keys.
+/// The registry: every command, by id, in registration order. A command's keys come from the verbs it
+/// implements and its leader key, through the verb table as keys.toml left it (`applyUserKeys`).
 @MainActor
 @Observable
 public final class CommandRegistry {
     public private(set) var byID: [String: Command] = [:]
     public private(set) var order: [String] = []
-    @ObservationIgnored private var defaults: [String: [String]] = [:]
-    /// Ids whose keys come from keys.toml, and what couldn't be applied (shown atop the key sheet).
-    public private(set) var customized: Set<String> = []
+    /// The verb table as keys.toml left it.
+    public private(set) var verbKeys = VerbKeys.defaults
+    /// Verbs whose keys come from keys.toml, and what couldn't be applied (shown atop the key sheet).
+    public private(set) var customized: Set<Verb> = []
     public private(set) var keyProblems: [String] = []
+    /// keys.toml entries this app reads past (v2's command ids): said in `--dump` and the sheet, never fatal.
+    public private(set) var keyWarnings: [String] = []
     /// Which scopes each surface shows (sheet.ts SURFACE_SCOPES). Areas add theirs.
     public private(set) var surfaceScopes: [String: [Scope]] = CommandRegistry.defaultSurfaceScopes
     /// Bumped whenever keys change, so the keymap rebuilds.
@@ -189,20 +203,34 @@ public final class CommandRegistry {
     public func register(_ c: Command) {
         precondition(byID[c.id] == nil, "command \(c.id) registered twice")
         var c = c
-        if NavKeys.jumps.contains(c.id) { c.recordsJump = true }
+        if NavKeys.jumps.contains(c.id) || c.verbs.contains(where: { $0.spec.jump }) { c.recordsJump = true }
+        resolve(&c)
         byID[c.id] = c
         order.append(c.id)
-        defaults[c.id] = c.keys
         keysVersion += 1
     }
 
     public func register(_ cs: [Command]) { cs.forEach(register) }
+
+    private func resolve(_ c: inout Command) {
+        var byMode: [KeyMode: [String]] = [:]
+        for m in c.modes {
+            var ks = c.rawKeys
+            for v in c.verbs { ks += verbKeys.of(v, in: m) }
+            if let l = c.leader { ks.append(l.key(leader: verbKeys.leader)) }
+            var seen = Set<String>()
+            byMode[m] = ks.filter { seen.insert($0).inserted }
+        }
+        c.keysByMode = byMode
+    }
 
     public var commands: [Command] { order.compactMap { byID[$0] } }
     public func command(_ id: String) -> Command? { byID[id] }
 
     /// The key a hint names for a command — its first, after keys.toml.
     public func keyOf(_ id: String) -> String { glyph(byID[id]?.keys.first ?? "space") }
+    /// The key a verb has in normal mode, after keys.toml.
+    public func verbKey(_ verb: Verb) -> String { glyph(verbKeys.keys[verb]?.first ?? verbKeys.entry[verb]?.first ?? "") }
 
     public func addScopes(_ scopes: [Scope], to surface: String) {
         var cur = surfaceScopes[surface] ?? []
@@ -210,15 +238,31 @@ public final class CommandRegistry {
         surfaceScopes[surface] = cur
     }
 
-    /// Lay keys.toml over the defaults (userkeys.ts), then check the one-meaning rule.
+    /// Lay keys.toml over the verb table, re-resolve every command, then check the rules.
     public func applyUserKeys(_ overrides: [String: [String]], errors: [String] = []) {
-        for (id, keys) in defaults { byID[id]?.keys = keys }
-        customized = Set(overrides.keys)
-        var bound = commands.map { Bound(id: $0.id, scope: $0.scope.rawValue, keys: $0.keys, modes: $0.modes.map(\.rawValue)) }
-        let problems = Bindings.applyKeys(&bound, overrides)
-        for b in bound { byID[b.id]?.keys = b.keys }
-        keyProblems = errors + problems + Bindings.clashes(bound, surfaceScopes: surfaceScopes.mapValues { $0.map(\.rawValue) })
+        let applied = Bindings.applyVerbKeys(overrides, commands: byID.mapValues(\.verbs))
+        verbKeys = applied.keys
+        customized = applied.customized
+        for id in order { resolve(&byID[id]!) }
+        keyProblems = errors + applied.problems + Bindings.tableProblems(verbKeys) + Bindings.clashes(bound, surfaceScopes: surfaceScopes.mapValues { $0.map(\.rawValue) })
+        keyWarnings = applied.warnings
         keysVersion += 1
+    }
+
+    /// Every command's keys, one entry per mode, as the key rules see them.
+    public var bound: [Bound] {
+        commands.flatMap { c in
+            c.modes.map { m in
+                let ks = c.keysByMode[m] ?? []
+                let local = c.leader.map { [$0.key(leader: verbKeys.leader)] } ?? []
+                var meaning: [String: String] = [:]
+                for k in ks {
+                    if local.contains(k) { meaning[k] = Bound.leaderMeaning }
+                    else if let v = c.verbs.first(where: { verbKeys.of($0, in: m).contains(k) }) { meaning[k] = v.rawValue }
+                }
+                return Bound(id: c.id, scope: c.scope.rawValue, keys: ks, modes: [m.rawValue], meaning: meaning)
+            }
+        }
     }
 
     public static let defaultSurfaceScopes: [String: [Scope]] = [
