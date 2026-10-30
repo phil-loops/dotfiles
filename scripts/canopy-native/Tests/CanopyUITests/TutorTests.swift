@@ -157,6 +157,24 @@ let learningFixture = #"""
         #expect(a.pane?.id == "drawer")
     }
 
+    @Test func aConceptLinkOpensItsDrawer() {
+        let (a, t) = app(.forests)
+        a.router.navigate("/v2/tutor?concept=lock-ttl")
+        t.arrive(a.router.takeQuery())
+        #expect(t.drawer == "lock-ttl")
+    }
+
+    @Test func anImportLinkPicksUpTheSessionWithTheAnswerDrafted() async {
+        let (a, t) = app(.forests)
+        TutorStub.reset([
+            "/tutor-import": .init(body: #"{"session":"term-1","cwd":"/x/loops-wt-1","target":"","msgs":[{"role":"tutor","text":"Q?"}]}"#),
+        ])
+        a.router.navigate("/v2/tutor?import=term-1&say=my%20guess")
+        t.arrive(a.router.takeQuery())
+        await settle { t.draft == "my guess" }
+        #expect(t.sessions.first?.importedFrom == "term-1" && t.draft == "my guess")
+    }
+
     @Test func iWritesInWhicheverBoxIsOnScreen() {
         let (a, t) = app()
         a.keys.handle("i")

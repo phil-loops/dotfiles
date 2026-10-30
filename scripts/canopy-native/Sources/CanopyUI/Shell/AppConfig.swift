@@ -13,6 +13,8 @@ public struct AppConfig: Sendable {
     public var port: Int?
     public var repo: String?
     public var route: Route = .forests
+    /// the launch address's query (`/v2/tutor?concept=x`), handed to the page that opens
+    public var query: [String: String] = [:]
     public var appearance = "dark"
     public var dump = false
     public var dumpWait: Double = 4
@@ -32,7 +34,7 @@ public struct AppConfig: Sendable {
             case "--dump": c.dump = true
             case "--dump-wait": c.dumpWait = next().flatMap(Double.init) ?? c.dumpWait
             default:
-                if a.hasPrefix("/v2") || a.hasPrefix("canopy:") { c.route = Route(a) }
+                if a.hasPrefix("/v2") || a.hasPrefix("canopy:") { c.route = Route(a); c.query = Route.query(a) }
                 // AppKit's own launch args (-NSDocumentRevisionsDebugMode YES, -psn_…) pass through
             }
             i += 1
