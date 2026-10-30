@@ -558,6 +558,34 @@ func sinceText(_ date: Date, now: Date = Date()) -> String {
     return "\(seconds / 3600)h ago"
 }
 
+// MARK: the menu bar's run list
+
+/// `~/Library/Application Support/Show/live-runs.json` (`SHOW_LIVE_RUNS` swaps it): every live deck Show has opened, for the menu bar.
+var liveRunsPath: String? {
+    if let path = ProcessInfo.processInfo.environment["SHOW_LIVE_RUNS"] { return (path as NSString).expandingTildeInPath }
+    if (NSApp.delegate as? AppDelegate)?.snapshotPath != nil { return nil }
+    return ("~/Library/Application Support/Show/live-runs.json" as NSString).expandingTildeInPath
+}
+
+struct LiveRun: Codable {
+    let path: String
+    let title: String
+    let openedAt: String
+}
+
+/// Records that Show opened the live deck at `path`, newest first, dropping runs whose file is gone.
+func recordLiveRun(_ path: String) {
+    guard let registry = liveRunsPath, let deck = try? loadDeck(path), deck.isLive else { return }
+    let url = URL(fileURLWithPath: registry)
+    let known = (try? JSONDecoder().decode([LiveRun].self, from: Data(contentsOf: url))) ?? []
+    let runs = [LiveRun(path: path, title: deck.title, openedAt: ISO8601DateFormatter().string(from: Date()))]
+        + known.filter { $0.path != path && FileManager.default.fileExists(atPath: $0.path) }
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .withoutEscapingSlashes]
+    try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try? encoder.encode(runs).write(to: url, options: .atomic)
+}
+
 // MARK: --check-live
 
 /// `--check-live`: print the Live view's header, list groups and each compare table (◆ marks a differing cell), without a window.
