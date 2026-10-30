@@ -10,7 +10,46 @@ struct Deck: Decodable {
     let title: String
     let subtitle: String?
     let replyTo: String?
+    let mode: String?
+    let status: LiveStatus?
     let sections: [Section]
+
+    /// A live deck is watched, not judged: no sign-off bar, no sign-off file, no sign-off marks.
+    var isLive: Bool { mode == "live" }
+}
+
+/// A live deck's optional run status, shown as one quiet line above the page.
+struct LiveStatus: Decodable {
+    let state: String?
+    let done: Int?
+    let total: Int?
+    let current: String?
+
+    func line(changed: Date?) -> String {
+        var parts: [String] = []
+        if let state, !state.isEmpty {
+            parts.append(state.prefix(1).uppercased() + state.dropFirst())
+        }
+        if let done, let total {
+            parts.append("\(done) of \(total)")
+        } else if let done {
+            parts.append("\(done) done")
+        }
+        if let current, !current.isEmpty {
+            parts.append("now: \(current)")
+        }
+        if let changed {
+            parts.append("updated \(sinceText(changed))")
+        }
+        return parts.joined(separator: " · ")
+    }
+}
+
+func sinceText(_ date: Date) -> String {
+    let seconds = max(0, Int(Date().timeIntervalSince(date)))
+    if seconds < 60 { return "\(seconds)s ago" }
+    if seconds < 3600 { return "\(seconds / 60)m ago" }
+    return "\(seconds / 3600)h ago"
 }
 
 struct Section: Decodable {
@@ -358,6 +397,9 @@ final class DeckController: NSObject, WKNavigationDelegate, NSWindowDelegate, NS
     let note = NSTextField()
     let progress = NSTextField(labelWithString: "")
     let submit = NSButton(title: "Submit", target: nil, action: nil)
+    let statusLine = NSTextField(labelWithString: "")
+    var actionBar: NSView!
+    var actionDivider: NSView!
     var onClose: (() -> Void)?
     var deckModified: Date?
 
@@ -554,11 +596,20 @@ final class DeckController: NSObject, WKNavigationDelegate, NSWindowDelegate, NS
 
         let divider = NSBox()
         divider.boxType = .separator
+        actionBar = bar
+        actionDivider = divider
 
-        let stack = NSStackView(views: [page, divider, bar])
+        statusLine.font = .systemFont(ofSize: 12, weight: .medium)
+        statusLine.textColor = .secondaryLabelColor
+        statusLine.lineBreakMode = .byTruncatingTail
+        let status = NSStackView(views: [statusLine])
+        status.edgeInsets = NSEdgeInsets(top: 36, left: 48, bottom: 0, right: 24)
+        status.isHidden = true
+
+        let stack = NSStackView(views: [status, page, divider, bar])
         stack.orientation = .vertical
         stack.spacing = 0
-        for view in [page, divider, bar] {
+        for view in [status, page, divider, bar] {
             view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
         let vc = NSViewController()
@@ -567,13 +618,13 @@ final class DeckController: NSObject, WKNavigationDelegate, NSWindowDelegate, NS
     }
 
     @objc private func toggleSigned() {
-        guard let section = selectedSection else { return }
+        guard !deck.isLive, let section = selectedSection else { return }
         store.update(section.key) { $0.signed = signed.state == .on }
         reloadSelectedRow()
     }
 
     @objc func saveNote() {
-        guard let section = selectedSection else { return }
+        guard !deck.isLive, let section = selectedSection else { return }
         let value = note.stringValue
         guard (store.entries[section.key]?.note ?? "") != value else { return }
         store.update(section.key) { $0.note = value }
@@ -581,6 +632,7 @@ final class DeckController: NSObject, WKNavigationDelegate, NSWindowDelegate, NS
     }
 
     @objc private func submitReview() {
+        guard !deck.isLive else { return }
         saveNote()
         let signedCount = deck.sections.filter { store.entries[$0.key]?.signed == true }.count
         let notes = deck.sections.filter { store.entries[$0.key]?.note.isEmpty == false }.count
@@ -629,10 +681,25 @@ final class DeckController: NSObject, WKNavigationDelegate, NSWindowDelegate, NS
     }
 
     private func updateProgress() {
+        actionBar.isHidden = deck.isLive
+        actionDivider.isHidden = deck.isLive
+        progress.isHidden = deck.isLive
+        updateStatusLine()
+        if deck.isLive {
+            window.subtitle = deck.subtitle ?? ""
+            return
+        }
         let total = deck.sections.count
         let done = deck.sections.filter { store.entries[$0.key]?.signed == true }.count
         progress.stringValue = "\(done) of \(total) signed off"
         window.subtitle = [deck.subtitle, "\(done)/\(total) signed off"].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    /// Refreshes the live status line, including how long ago the file changed; ticks once a second.
+    func updateStatusLine() {
+        let line = deck.isLive ? deck.status?.line(changed: deckModified) : nil
+        statusLine.superview?.isHidden = line == nil
+        statusLine.stringValue = line ?? ""
     }
 
     func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
@@ -670,7 +737,7 @@ final class DeckController: NSObject, WKNavigationDelegate, NSWindowDelegate, NS
             return label
         case .item(let i):
             let section = deck.sections[i]
-            let entry = store.entries[section.key]
+            let entry = deck.isLive ? nil : store.entries[section.key]
             let mark = entry?.signed == true ? "✓ " : (entry?.note.isEmpty == false ? "✎ " : "")
             let title = NSTextField(labelWithString: mark + section.title)
             title.font = .systemFont(ofSize: 13, weight: .medium)
@@ -2223,6 +2290,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         for controller in open.values where modificationDate(controller.path) != controller.deckModified {
             controller.reload()
         }
+        open.values.filter(\.deck.isLive).forEach { $0.updateStatusLine() }
         if let built = modificationDate(buildStamp), built != launchedBuild {
             relaunch()
         }
@@ -2418,7 +2486,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         for (path, deck, _) in listed {
             let store = SignOffStore(deckPath: path)
             let done = deck.sections.filter { store.entries[$0.key]?.signed == true }.count
-            let item = NSMenuItem(title: "\(deck.title)  —  \(done)/\(deck.sections.count)", action: #selector(openListedDeck), keyEquivalent: "")
+            let item = NSMenuItem(title: "\(deck.title)  —  \(deck.isLive ? "live" : "\(done)/\(deck.sections.count)")", action: #selector(openListedDeck), keyEquivalent: "")
             item.target = self
             item.representedObject = path
             item.state = open[path] == nil ? .off : .on
