@@ -38,27 +38,27 @@ enum DiffCommands {
 
         // ── moving ──
 
-        r.register(Command(id: "review.down", title: "Next line", scope: .review, keys: ["j", "down"], modes: motion, label: "line", pair: "review.up", quiet: true,
+        r.register(Command(id: "review.down", title: "Next line", scope: .review, verb: .next, modes: motion, label: "line", pair: "review.up", quiet: true,
                            local: { _, _ in
                                if app.keys.mode != .select { pg.mark = nil }
                                app.moveCursor(1)
                                pg.cursorMoved &+= 1
                                CodeLookup.of(app).dismiss()
                            }))
-        r.register(Command(id: "review.up", title: "Previous line", scope: .review, keys: ["k", "up"], modes: motion, label: "line", quiet: true,
+        r.register(Command(id: "review.up", title: "Previous line", scope: .review, verb: .previous, modes: motion, label: "line", quiet: true,
                            local: { _, _ in
                                if app.keys.mode != .select { pg.mark = nil }
                                app.moveCursor(-1)
                                pg.cursorMoved &+= 1
                                CodeLookup.of(app).dismiss()
                            }))
-        r.register(Command(id: "review.top", title: "Go to the first line", scope: .review, keys: ["g g"], modes: motion, label: "ends", pair: "review.bottom", quiet: true,
+        r.register(Command(id: "review.top", title: "Go to the first line", scope: .review, verb: .first, modes: motion, label: "ends", pair: "review.bottom", quiet: true,
                            local: { _, _ in app.cursorTo(0); pg.cursorMoved &+= 1; CodeLookup.of(app).dismiss() }))
-        r.register(Command(id: "review.bottom", title: "Go to the last line", scope: .review, keys: ["G"], modes: motion, label: "ends", quiet: true,
+        r.register(Command(id: "review.bottom", title: "Go to the last line", scope: .review, verb: .last, modes: motion, label: "ends", quiet: true,
                            local: { _, _ in app.cursorTo(Int.max); pg.cursorMoved &+= 1; CodeLookup.of(app).dismiss() }))
-        r.register(Command(id: "review.hunk.next", title: "Go to the next hunk", scope: .review, keys: NavKeys.keys("review.hunk.next"), modes: motion,
+        r.register(Command(id: "review.hunk.next", title: "Go to the next hunk", scope: .review, verb: .nextHunk, modes: motion,
                            label: "hunk", pair: "review.hunk.prev", available: onDiff, local: { _, _ in try hunk(1) }))
-        r.register(Command(id: "review.hunk.prev", title: "Go to the previous hunk", scope: .review, keys: NavKeys.keys("review.hunk.prev"), modes: motion,
+        r.register(Command(id: "review.hunk.prev", title: "Go to the previous hunk", scope: .review, verb: .previousHunk, modes: motion,
                            label: "hunk", available: onDiff, local: { _, _ in try hunk(-1) }))
         /// }/{: the first changed line of the next (previous) hunk — "a bigger j".
         func hunk(_ dir: Int) throws {
@@ -84,10 +84,10 @@ enum DiffCommands {
             if app.keys.mode != .select { pg.mark = nil }
             goTo(changed.offset)
         }
-        r.register(Command(id: "review.file.next", title: "Go to the next file", scope: .review, keys: NavKeys.keys("review.file.next"), modes: motion,
+        r.register(Command(id: "review.file.next", title: "Go to the next file", scope: .review, verb: .nextFile, modes: motion,
                            label: "file", pair: "review.file.prev", available: onDiff,
                            local: { _, _ in try seek(1) { $0.kind == .file } }))
-        r.register(Command(id: "review.file.prev", title: "Go to the previous file", scope: .review, keys: NavKeys.keys("review.file.prev"), modes: motion,
+        r.register(Command(id: "review.file.prev", title: "Go to the previous file", scope: .review, verb: .previousFile, modes: motion,
                            label: "file", available: onDiff,
                            local: { _, _ in try seek(-1) { $0.kind == .file } }))
         /// n/N: open conversations first, then any.
@@ -100,10 +100,10 @@ enum DiffCommands {
             try seek(dir) { $0.kind == .thread }
         }
         r.register(Command(id: "review.thread.next", title: "Go to the next conversation (open ones first)", scope: .review,
-                           keys: NavKeys.keys("review.thread.next"), label: "thread", pair: "review.thread.prev", available: onDiff,
+                           verb: .nextThread, label: "thread", pair: "review.thread.prev", available: onDiff,
                            local: { _, _ in try thread(1) }))
         r.register(Command(id: "review.thread.prev", title: "Go to the previous conversation (open ones first)", scope: .review,
-                           keys: NavKeys.keys("review.thread.prev"), label: "thread", available: onDiff,
+                           verb: .previousThread, label: "thread", available: onDiff,
                            local: { _, _ in try thread(-1) }))
         r.register(Command(id: "review.cursor.set", title: "Put the cursor here", scope: .review, needsArg: true, quiet: true,
                            local: { key, shift in
@@ -124,13 +124,13 @@ enum DiffCommands {
                                    }
                                }
                            }))
-        r.register(Command(id: "review.in", title: "Into the diff at the file", scope: .review, keys: ["l"], label: "in",
+        r.register(Command(id: "review.in", title: "Into the diff at the file", scope: .review, verb: .into, label: "in",
                            available: { _ in app.pane?.id == reviewTreePane && onFiles(nil) },
                            route: { _ in
                                guard let row = app.selected, row.hasPrefix("f|") else { return nil }
                                return RouteTo("review.file.go", arg: String(row.dropFirst(2)))
                            }))
-        r.register(Command(id: "review.extend", title: "Extend the selection a line (comment on a range)", scope: .line, keys: ["x"], label: "range",
+        r.register(Command(id: "review.extend", title: "Extend the selection a line (comment on a range)", scope: .line, verb: .extend, label: "range",
                            local: { _, _ in
                                guard let h = pg.here, h.kind == .line else { return }
                                guard pg.mark != nil else { pg.mark = h.key; return }
@@ -150,9 +150,9 @@ enum DiffCommands {
             app.go(.review(repo: b.repo, branch: b.name, base: pg.base == .outgoing ? "" : pg.base.rawValue))
         }
         let isBranch: (String?) -> Bool = { _ in pg.integration == nil && pg.branch != nil }
-        r.register(Command(id: "review.branch.next", title: "Review the next branch in merge order", scope: .review, keys: NavKeys.keys("review.branch.next"),
+        r.register(Command(id: "review.branch.next", title: "Review the next branch in merge order", scope: .review, verb: .nextSibling,
                            label: "branch", pair: "review.branch.prev", available: isBranch, local: { _, _ in try hop(pg.neighbour(1)) }))
-        r.register(Command(id: "review.branch.prev", title: "Review the previous branch in merge order", scope: .review, keys: NavKeys.keys("review.branch.prev"),
+        r.register(Command(id: "review.branch.prev", title: "Review the previous branch in merge order", scope: .review, verb: .previousSibling,
                            label: "branch", available: isBranch, local: { _, _ in try hop(pg.neighbour(-1)) }))
         func children(_ id: String) -> [Branch] {
             app.store.list(Branch.self).filter { $0.parentId == id }.sorted { ($0.order, $0.name) < ($1.order, $1.name) }
@@ -163,16 +163,16 @@ enum DiffCommands {
                 MainActor.assumeIsolated { then(kids[i]) }
             }
         }
-        r.register(Command(id: "review.parent", title: "Review its parent branch", scope: .review, keys: NavKeys.keys("review.parent"), label: "parent",
+        r.register(Command(id: "review.parent", title: "Review its parent branch", scope: .review, verb: .parent, label: "parent",
                            available: isBranch, local: { _, _ in try hop(pg.branch?.parentId.flatMap { app.store.view(Branch.self, $0) }) }))
-        r.register(Command(id: "review.child", title: "Review a child branch (which one, at a fan-out)", scope: .review, keys: NavKeys.keys("review.child"),
+        r.register(Command(id: "review.child", title: "Review a child branch (which one, at a fan-out)", scope: .review, verb: .child,
                            label: "child", available: isBranch,
                            local: { _, _ in
                                let kids = children(pg.id)
                                if kids.count > 1 { return pickChild(kids) { b in MainActor.assumeIsolated { _ = try? hop(b) } } }
                                try hop(kids.first)
                            }))
-        r.register(Command(id: "review.root", title: "Review the stack's root", scope: .review, keys: NavKeys.keys("review.root"), label: "root",
+        r.register(Command(id: "review.root", title: "Review the stack's root", scope: .review, verb: .root, label: "root",
                            available: isBranch,
                            local: { _, _ in
                                var b = pg.branch
@@ -181,7 +181,7 @@ enum DiffCommands {
                                if b?.id == pg.id { throw Refusal("this is the root") }
                                try hop(b)
                            }))
-        r.register(Command(id: "review.tip", title: "Review the stack's tip (which one, at a fan-out)", scope: .review, keys: NavKeys.keys("review.tip"), label: "tip",
+        r.register(Command(id: "review.tip", title: "Review the stack's tip (which one, at a fan-out)", scope: .review, verb: .tip, label: "tip",
                            available: isBranch,
                            local: { _, _ in
                                @MainActor func down(_ b: Branch, _ n: Int) {
@@ -197,22 +197,22 @@ enum DiffCommands {
         // ── the page ──
 
         let tabs = ["conversation", "commits", "files"]
-        r.register(Command(id: "review.tab", title: "Cycle the tabs", scope: .review, keys: ["tab"], label: "tab",
+        r.register(Command(id: "review.tab", title: "Cycle the tabs", scope: .review, verb: .face, label: "tab",
                            local: { _, _ in pg.tab = tabs[((tabs.firstIndex(of: pg.tab) ?? 2) + 1) % tabs.count] }))
         for (i, t) in tabs.enumerated() {
-            r.register(Command(id: "review.tab.\(t)", title: "Show the \(t) tab", scope: .review, keys: ["\(i + 1)"], label: t,
+            r.register(Command(id: "review.tab.\(t)", title: "Show the \(t) tab", scope: .review, verb: .nth(i + 1), label: t,
                                local: { _, _ in pg.tab = t }))
         }
-        r.register(Command(id: "review.split", title: "Switch between split and unified diff", scope: .review, keys: ["space s"], label: "split",
+        r.register(Command(id: "review.split", title: "Switch between split and unified diff", scope: .review, leader: LocalKey(",s"), label: "split",
                            local: { _, _ in pg.split.toggle() }))
-        r.register(Command(id: "review.outdated", title: "Show or hide outdated conversations", scope: .review, keys: ["space o"], label: "outdated",
+        r.register(Command(id: "review.outdated", title: "Show or hide outdated conversations", scope: .review, leader: LocalKey(",o"), label: "outdated",
                            local: { _, _ in pg.showOutdated.toggle() }))
 
         func baseOK(_ b: ReviewBase) -> Bool { pg.integration == nil && (b != .outgoing || (pg.branch != nil && pg.branch?.pushed != .local)) }
         for (b, k, title) in [(ReviewBase.parent, "p", "Diff against its parent — this branch's own change, what the PR shows"),
                               (.main, "m", "Diff against main — the whole stack up to here, as it would land"),
                               (.outgoing, "o", "Diff against origin — what the next push sends")] {
-            r.register(Command(id: "review.base.\(b.word)", title: title, scope: .review, keys: ["space d \(k)"], label: b.word,
+            r.register(Command(id: "review.base.\(b.word)", title: title, scope: .review, leader: LocalKey(",b \(k)"), label: b.word,
                                available: { _ in baseOK(b) },
                                local: { _, _ in pg.tab = "files"; pg.setBase(b) }))
         }
@@ -223,13 +223,13 @@ enum DiffCommands {
                                let at = ok.firstIndex(of: pg.base) ?? -1
                                pg.setBase(ok[(at + 1) % ok.count])
                            }))
-        r.register(Command(id: "review.filter", title: "Find a file (filter the tree)", scope: .review, keys: NavKeys.keys("review.filter"), label: "find",
+        r.register(Command(id: "review.filter", title: "Find a file (filter the tree)", scope: .review, verb: .find, label: "find",
                            local: { _, _ in
                                pg.tab = "files"
                                app.focus(pane: reviewTreePane)
                                app.beginInsert(ReviewPage.filterField)
                            }))
-        r.register(Command(id: "review.filter.accept", title: "Go to the first file the filter finds", scope: .review, keys: ["ret"], modes: [.insert], quiet: true,
+        r.register(Command(id: "review.filter.accept", title: "Go to the first file the filter finds", scope: .filter, verb: .send, modes: [.insert], quiet: true,
                            available: { _ in app.insertField == ReviewPage.filterField },
                            local: { _, _ in
                                app.keys.setMode(.normal)
@@ -237,24 +237,24 @@ enum DiffCommands {
                                app.runner.dispatch("review.file.go", via: .key, arg: String(first.dropFirst(2)))
                            }))
 
-        // ── the map (space m): a layer with its own keys ──
+        // ── the map (space m): a layer; its keys are the verbs' ──
 
-        r.register(Command(id: "review.map", title: "Show the forest map", scope: .review, keys: ["space m"], label: "map",
+        r.register(Command(id: "review.map", title: "Show the forest map", scope: .review, verb: .map, label: "map",
                            local: { _, _ in
                                if app.keys.layer == .map { return app.keys.closeLayer() }
                                pg.mapIndex = max(0, ReviewMap.rows(app).firstIndex { $0.id == pg.id } ?? 0)
                                app.keys.openLayer(.map)
                            }))
-        r.register(Command(id: "review.map.down", title: "Next branch on the map", scope: .review, keys: ["j", "down"], modes: [.map], quiet: true,
+        r.register(Command(id: "review.map.down", title: "Next branch on the map", scope: .review, verb: .next, modes: [.map], quiet: true,
                            local: { _, _ in pg.mapIndex = min(max(0, ReviewMap.rows(app).count - 1), pg.mapIndex + 1) }))
-        r.register(Command(id: "review.map.up", title: "Previous branch on the map", scope: .review, keys: ["k", "up"], modes: [.map], quiet: true,
+        r.register(Command(id: "review.map.up", title: "Previous branch on the map", scope: .review, verb: .previous, modes: [.map], quiet: true,
                            local: { _, _ in pg.mapIndex = max(0, pg.mapIndex - 1) }))
-        r.register(Command(id: "review.map.open", title: "Open the branch under the map's cursor", scope: .review, keys: ["ret", "l"], modes: [.map], quiet: true,
+        r.register(Command(id: "review.map.open", title: "Open the branch under the map's cursor", scope: .review, verbs: [.main, .into], modes: [.map], quiet: true,
                            route: { _ in
                                let rows = ReviewMap.rows(app)
                                return rows.indices.contains(pg.mapIndex) ? RouteTo("review.map.go", arg: rows[pg.mapIndex].id) : nil
                            }))
-        r.register(Command(id: "review.map.page", title: "Go to the forest's page", scope: .review, keys: ["p", "h"], modes: [.map], quiet: true,
+        r.register(Command(id: "review.map.page", title: "Go to the forest's page", scope: .review, verb: .out, modes: [.map], quiet: true,
                            local: { _, _ in app.keys.closeLayer(); app.runner.dispatch("review.leave", via: .key) }))
         r.register(Command(id: "review.map.go", title: "Open a branch from the map", scope: .review, needsArg: true, quiet: true,
                            local: { _, arg in
@@ -265,7 +265,7 @@ enum DiffCommands {
 
         // ── hidden lines ──
 
-        r.register(Command(id: "review.expand", title: "Show 20 more hidden lines", scope: .gap, keys: ["ret"], label: "more",
+        r.register(Command(id: "review.expand", title: "Show 20 more hidden lines", scope: .gap, verb: .main, label: "more",
                            available: { $0?.hasPrefix("g|") ?? false },
                            local: { key, _ in
                                guard let key, let cut = key.lastIndex(of: "|"), let at = Int(key[key.index(after: cut)...]) else { return }
@@ -281,7 +281,7 @@ enum DiffCommands {
 
         // ── out, and back out ──
 
-        r.register(Command(id: "review.leave", title: "Go back to its forest", scope: .review, keys: ["h"], label: "back",
+        r.register(Command(id: "review.leave", title: "Go back to its forest", scope: .review, verb: .out, label: "back",
                            available: { _ in app.pane?.id != reviewCodePane || pg.side == nil },
                            local: { _, _ in
                                let pid = pg.branch?.project ?? pg.integration
@@ -290,7 +290,7 @@ enum DiffCommands {
                                app.go(.forest(repo: p.repo, project: p.name))
                                if pg.integration == nil { app.setCursor(RowKey.branch(id)) }
                            }))
-        r.register(Command(id: "review.back", title: "Back out", scope: .review, keys: ["esc"], label: "back", quiet: true,
+        r.register(Command(id: "review.back", title: "Back out", scope: .review, verb: .cancel, label: "back", quiet: true,
                            local: { _, _ in
                                if ShipSeam.backOut(app) { return }
                                let look = CodeLookup.of(app)
@@ -325,16 +325,16 @@ enum DiffCommands {
             return (pos, w)
         }
         let codeOK: (String?) -> Bool = { _ in onFiles(nil) || app.pane?.id == reviewCodePane || pg.scoped }
-        r.register(Command(id: "review.types", title: "Show the type (hover)", scope: .review, keys: ["space k"], label: "type", available: codeOK,
+        r.register(Command(id: "review.types", title: "Show the type (hover)", scope: .review, verb: .type, label: "type", available: codeOK,
                            local: { _, _ in let (p, w) = position(); CodeLookup.of(app).hover(p, w) }))
-        for (id, kind, key, title, label) in [("review.definition", LSPGoto.definition, "g d", "Go to the definition — in the diff when it's there, else beside it", "def"),
-                                              ("review.type-definition", .typeDefinition, "g y", "Go to the definition of its type", "type def"),
-                                              ("review.implementation", .implementation, "g I", "Go to its implementations", "impl"),
-                                              ("review.references", .references, "g r", "List its references", "refs")] {
-            r.register(Command(id: id, title: title, scope: .review, keys: [key], label: label, available: codeOK,
+        for (id, kind, verb, title, label) in [("review.definition", LSPGoto.definition, Verb.definition, "Go to the definition — in the diff when it's there, else beside it", "def"),
+                                              ("review.type-definition", .typeDefinition, .typeDefinition, "Go to the definition of its type", "type def"),
+                                              ("review.implementation", .implementation, .implementations, "Go to its implementations", "impl"),
+                                              ("review.references", .references, .references, "List its references", "refs")] {
+            r.register(Command(id: id, title: title, scope: .review, verb: verb, label: label, available: codeOK,
                                local: { _, _ in let (p, w) = position(); CodeLookup.of(app).goto(kind, p, w) }))
         }
-        r.register(Command(id: "review.symbols", title: "List the file's symbols", scope: .review, keys: ["space S"], label: "symbols", available: codeOK,
+        r.register(Command(id: "review.symbols", title: "List the file's symbols", scope: .review, verb: .symbols, label: "symbols", available: codeOK,
                            local: { _, _ in
                                let (p, w) = position()
                                let path = p?.path ?? (app.pane?.id == reviewCodePane ? pg.side?.path : pg.here?.path)
@@ -343,14 +343,14 @@ enum DiffCommands {
         r.register(Command(id: "review.side.close", title: "Close the code beside the diff", scope: .review, quiet: true,
                            available: { _ in pg.side != nil }, local: { _, _ in pg.closeSide() }))
 
-        r.register(Command(id: "review.open", title: "Open in Helix", scope: .review, budget: .slowIO, keys: ["o"], label: "helix",
+        r.register(Command(id: "review.open", title: "Open in Helix", scope: .review, budget: .slowIO, verb: .editor, label: "helix",
                            available: { _ in pg.integration == nil },
                            write: { _, _ in openHere(pg) }))
 
         // ── viewed: m marks and moves on, M takes it back ──
 
         r.register(Command(id: "review.viewed", title: "Mark viewed and go on to the next unviewed — the hunk, the file on its header, the range in select",
-                           scope: .review, budget: .configWrite, keys: NavKeys.keys("review.viewed"), modes: motion, label: "viewed", pair: "review.unviewed",
+                           scope: .review, budget: .configWrite, verb: .mark, modes: motion, label: "viewed", pair: "review.unviewed",
                            available: { _ in onDiff(nil) && pg.here != nil && !pg.scoped },
                            write: { _, _ in
                                let w = viewed(app, pg, on: true)
@@ -358,7 +358,7 @@ enum DiffCommands {
                                return w
                            }))
         r.register(Command(id: "review.unviewed", title: "Mark unviewed — the hunk, the file on its header, the range in select",
-                           scope: .review, budget: .configWrite, keys: NavKeys.keys("review.unviewed"), modes: motion, label: "unviewed",
+                           scope: .review, budget: .configWrite, verb: .unmark, modes: motion, label: "unviewed",
                            available: { _ in onDiff(nil) && pg.here != nil && !pg.scoped },
                            write: { _, _ in
                                let w = viewed(app, pg, on: false)

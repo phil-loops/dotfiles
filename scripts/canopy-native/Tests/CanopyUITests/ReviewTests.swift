@@ -350,7 +350,7 @@ import Testing
 
     @Test func theBaseRidesTheAddress() async throws {
         let (a, _) = try await app()
-        keys(a, "space", "d", "m")
+        keys(a, ",", "b", "m")
         #expect(a.router.route == .review(repo: "loops", branch: "add-hankles-limited-label", base: "main"))
         #expect(ReviewPageState.of(a).keyOf.hasSuffix("|main"))
     }
@@ -448,8 +448,9 @@ import Testing
     @Test func theDiffsKeysKeepTheRules() async throws {
         let (a, _) = try await app()
         #expect(KeyboardRule.violations(a) { $0.hasPrefix("review.") || $0.hasPrefix("inline.") } == [])
-        for (id, keys) in NavKeys.reserved where id.hasPrefix("review.") {
-            #expect(a.registry.command(id)?.keys == keys, "\(id)")
+        for (id, verb) in ["review.file.next": Verb.nextFile, "review.hunk.next": .nextHunk, "review.thread.next": .nextThread,
+                           "review.branch.next": .nextSibling, "review.parent": .parent, "review.filter": .find, "review.unviewed": .unmark] {
+            #expect(a.registry.command(id)?.verbs == [verb], "\(id)")
         }
         #expect(a.registry.command("review.viewed")?.keys == ["m"])
         #expect(a.registry.keyProblems.isEmpty, "\(a.registry.keyProblems)")

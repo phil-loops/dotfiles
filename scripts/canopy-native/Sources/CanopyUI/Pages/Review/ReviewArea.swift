@@ -9,6 +9,7 @@ enum ReviewArea: PageArea {
 
     static func install(_ app: AppModel) {
         app.addSurface(ReviewSurface())
+        app.registry.addScopes([.filter], to: "review")
         DiffCommands.install(app)
         let pg = ReviewPageState.of(app)
         ShipState.of(app).host = pg
@@ -33,8 +34,13 @@ enum ReviewArea: PageArea {
 }
 
 public extension KeyMode {
-    /// the forest map over the review page (space m): j/k walk it, ↵ opens, p goes to the forest's page
+    /// the forest map over the review page (space m): j/k walk it, ↵ or l opens, h goes to the forest's page
     static let map: KeyMode = "map"
+}
+
+public extension Scope {
+    /// typing into the file filter: ⌃↵ / ↵ goes to the first file it finds
+    static let filter: Scope = "filter"
 }
 
 struct ReviewSurface: SurfaceProvider {
@@ -62,6 +68,7 @@ struct ReviewSurface: SurfaceProvider {
     func scopes(_ app: AppModel) -> [Scope] {
         let pg = ReviewPageState.of(app)
         guard app.keys.layer != .map else { return [] }
+        if app.insertField == ReviewPage.filterField { return [.filter] }
         var out = ShipSeam.scopes(app)
         if app.pane?.id == reviewDiffPane, let h = pg.here {
             let s = Scope(rawValue: h.kind.rawValue)
@@ -75,7 +82,7 @@ struct ReviewSurface: SurfaceProvider {
         let pg = ReviewPageState.of(app)
         if let t = ShipSeam.target(for: scope, app) { return t }
         switch scope {
-        case .review: return pg.id.isEmpty ? nil : pg.id
+        case .review, .filter: return pg.id.isEmpty ? nil : pg.id
         case .line, .gap, .thread, .pending:
             guard app.pane?.id == reviewDiffPane, let h = pg.here, h.kind.rawValue == scope.rawValue else { return nil }
             return h.kind == .line || h.kind == .gap ? h.key : h.id

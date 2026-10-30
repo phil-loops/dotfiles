@@ -24,11 +24,13 @@ import Testing
         }
     }
 
-    @Test func reservedNavKeysAreHonored() {
+    @Test func jumpVerbsRecordJumps() {
         let a = app()
-        for c in a.registry.commands {
-            if let keys = NavKeys.reserved[c.id] { #expect(c.keys == keys, "\(c.id) binds \(c.keys), NAV.md decided \(keys)") }
-            if NavKeys.jumps.contains(c.id) { #expect(c.recordsJump, "\(c.id) records a jump") }
+        for c in a.registry.commands where c.verbs.contains(where: { $0.spec.jump }) {
+            #expect(c.recordsJump, "\(c.id) records a jump")
+        }
+        for id in ["cursor.top", "review.file.next", "review.thread.prev", "forest.branch.next", "review.tip"] {
+            #expect(a.registry.command(id)?.recordsJump == true, "\(id)")
         }
     }
 
@@ -37,9 +39,9 @@ import Testing
         #expect(KeyboardRule.violations(a) { $0.hasPrefix("nav.") || $0.hasPrefix("pane.") || $0.hasPrefix("page.") }.isEmpty)
     }
 
-    @Test func registeringAJumpIdFlagsIt() {
+    @Test func implementingAJumpVerbFlagsIt() {
         let r = CommandRegistry()
-        r.register(Command(id: "review.file.next", title: "x", scope: .review))
+        r.register(Command(id: "review.file.next", title: "x", scope: .review, verb: .nextFile))
         r.register(Command(id: "review.other", title: "y", scope: .review))
         #expect(r.command("review.file.next")?.recordsJump == true)
         #expect(r.command("review.other")?.recordsJump == false)
