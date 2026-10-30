@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # show [<deck.json>…] — open decks as tabs in the one running Show app (no args: the newest deck in ~/.dotfiles/show),
 # rebuilding it when Show.swift changes. Re-showing an open deck reloads it. show --build — just (re)build. show --snapshot <deck.json> <out.png> — render offscreen, no window.
+# show --tutor [<session.json>] — open the Tutor space on a session (no file: the newest in ~/.dotfiles/show/tutor). show --tutor-check <session.json> — print what it would show.
 # Deck format: ~/.dotfiles/.claude/skills/show/SKILL.md. Source: show-app/Show.swift. Sign-offs land in <deck>.signoff.json.
 set -euo pipefail
 
@@ -46,7 +47,7 @@ PLIST
 
 case "${1:-}" in
   -h|--help)
-    echo "usage: show [<deck.json>…] | show --build | show --snapshot <deck.json> <out.png>" >&2
+    echo "usage: show [<deck.json>…] | show --build | show --snapshot <deck.json> <out.png> | show --tutor [<session.json>] | show --tutor-check <session.json>" >&2
     exit 64
     ;;
   --build)
@@ -58,9 +59,27 @@ case "${1:-}" in
     build
     "$app/Contents/MacOS/Show" "$2" --snapshot "$3"
     ;;
+  --tutor)
+    if [[ $# -ge 2 ]]; then
+      session="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"
+    else
+      session="$(ls -t "$HOME/.dotfiles/show/tutor/"*.json 2>/dev/null | grep -v '\.answers\.json$' | head -1)"
+      [[ -n "$session" ]] || { echo "show: no tutor sessions in ~/.dotfiles/show/tutor" >&2; exit 66; }
+    fi
+    [[ -f "$session" ]] || { echo "show: no such session: $session" >&2; exit 66; }
+    python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d.get("mode", d.get("kind")) == "tutor" and d["title"] and isinstance(d["rungs"], list)' "$session" \
+      || { echo "show: $session is not a tutor session (needs mode \"tutor\" + title + rungs)" >&2; exit 65; }
+    build
+    open -a "$app" "$session"
+    ;;
+  --tutor-check)
+    [[ $# -eq 2 ]] || { echo "usage: show --tutor-check <session.json>" >&2; exit 64; }
+    build
+    "$app/Contents/MacOS/Show" --tutor-check "$2"
+    ;;
   *)
     if [[ $# -eq 0 ]]; then
-      newest="$(ls -t "$HOME/.dotfiles/show/"*.json 2>/dev/null | grep -v '\.signoff\.json$' | head -1)"
+      newest="$(ls -t "$HOME/.dotfiles/show/"*.json 2>/dev/null | grep -v '\.signoff\.json$' | grep -v '\.answers\.json$' | head -1)"
       [[ -n "$newest" ]] || { echo "show: no decks in ~/.dotfiles/show" >&2; exit 66; }
       set -- "$newest"
     fi
