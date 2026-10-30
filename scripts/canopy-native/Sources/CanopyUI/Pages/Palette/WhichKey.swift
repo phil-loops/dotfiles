@@ -14,14 +14,19 @@ struct WhichKeyView: View {
         if !app.keys.pendingKeys.isEmpty {
             let rows = app.keys.whichKeyRows()
             VStack(alignment: .leading, spacing: 1) {
-                Text(glyph(app.keys.pendingKeys)).foregroundStyle(theme.goldLeaf).padding(.bottom, 4)
+                HStack(spacing: 8) {
+                    Text(glyph(app.keys.pendingKeys)).foregroundStyle(theme.goldLeaf)
+                    if app.keys.pendingIsLeader { Text("this page's keys").foregroundStyle(theme.inkFaint) }
+                }
+                .padding(.bottom, 4)
                 if rows.isEmpty {
                     Text("nothing here").foregroundStyle(theme.inkFaint)
                 }
                 ForEach(rows, id: \.key) { r in
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
                         Text(glyph(r.key)).foregroundStyle(theme.goldLeaf).frame(minWidth: 32, alignment: .leading)
-                        Text(r.what).foregroundStyle(theme.inkDim)
+                        if let v = r.verb { Text(v).foregroundStyle(theme.ink) }
+                        Text(r.what).foregroundStyle(r.verb == nil ? theme.inkDim : theme.inkFaint).lineLimit(1)
                     }
                 }
             }

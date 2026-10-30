@@ -19,7 +19,7 @@ public enum KeyboardRule {
             if c.keys.isEmpty && c.needsArg { continue }
             if !onPages.contains(c.scope) { out.append("\(c.id): scope \(c.scope.rawValue) is on no page — unreachable") }
             for m in c.modes where KeyMode.textEntry.contains(m) {
-                for k in c.keys where k.count == 1 {
+                for k in c.keysByMode[m] ?? [] where k.count == 1 {
                     out.append("\(c.id): binds \"\(k)\" in \(m.rawValue) mode — typing could never reach the field")
                 }
             }

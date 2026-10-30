@@ -146,24 +146,29 @@ final class Ctx: CommandContext {
     @Test func keyEngineDrivesTheRunner() throws {
         let (runner, _, ctx) = try setup()
         var hits: [String] = []
-        runner.registry.register(Command(id: "nav.x", title: "Go to X — somewhere", scope: .global, keys: ["g x"], local: { _, _ in hits.append("gx") }))
-        runner.registry.register(Command(id: "row.y", title: "Y", scope: .row, keys: ["g y"], local: { _, _ in hits.append("gy") }))
+        runner.registry.register(Command(id: "nav.x", title: "Go to X — somewhere", scope: .global, verb: .goForests, local: { _, _ in hits.append("gx") }))
+        runner.registry.register(Command(id: "row.y", title: "Y", scope: .row, verb: .typeDefinition, local: { _, _ in hits.append("gy") }))
         runner.registry.applyUserKeys([:])
         let keys = KeyEngine(registry: runner.registry, runner: runner)
         #expect(keys.handle("g"))
         #expect(keys.pendingKeys == "g")
-        #expect(keys.whichKeyRows().map(\.key) == ["x"])
-        #expect(keys.handle("x"))
+        #expect(keys.whichKeyRows().map(\.key) == ["f"])
+        #expect(keys.whichKeyRows().map(\.verb) == ["go-forests"])
+        #expect(keys.handle("f"))
         #expect(keys.pendingKeys == "")
         ctx.scopes = [.row, .global]
         keys.handle("g"); keys.handle("y")
         #expect(hits == ["gx", "gy"])
         #expect(!keys.handle("q"))
-        runner.registry.applyUserKeys(["nav.x": ["Q"]])
+        // keys.toml names the verb; every command doing it follows
+        runner.registry.applyUserKeys(["go-forests": ["Q"]])
         #expect(keys.handle("Q"))
         #expect(hits.last == "gx")
-        #expect(runner.registry.customized == ["nav.x"])
-        runner.registry.applyUserKeys([:])
-        #expect(runner.registry.command("nav.x")?.keys == ["g x"])
+        #expect(runner.registry.customized == [.goForests])
+        // a v2 command-id line is read past with a warning, never a problem
+        runner.registry.applyUserKeys(["nav.x": ["Z"]])
+        #expect(runner.registry.keyProblems.isEmpty)
+        #expect(runner.registry.keyWarnings.first?.contains("go-forests") == true)
+        #expect(runner.registry.command("nav.x")?.keys == ["g f"])
     }
 }

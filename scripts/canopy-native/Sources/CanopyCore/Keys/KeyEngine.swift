@@ -102,8 +102,10 @@ public final class KeyEngine {
     private func rebuild() {
         guard builtFor != registry.keysVersion else { return }
         builtFor = registry.keysVersion
-        keymap = Keymap(registry.commands.filter { !$0.keys.isEmpty }.map {
-            KeyBinding(id: $0.id, keys: $0.keys, scope: $0.scope.rawValue, modes: $0.modes.map(\.rawValue))
+        keymap = Keymap(registry.commands.flatMap { c in
+            c.modes.compactMap { m in
+                c.keysByMode[m].flatMap { $0.isEmpty ? nil : KeyBinding(id: c.id, keys: $0, scope: c.scope.rawValue, modes: [m.rawValue]) }
+            }
         })
     }
 
@@ -140,34 +142,42 @@ public final class KeyEngine {
         pendingKeys = ""
     }
 
-    /// What can follow the pending prefix here (WhichKey.tsx), narrowest scope's meaning winning.
-    public func whichKeyRows() -> [(key: String, what: String)] {
+    /// What can follow the pending prefix here (WhichKey.tsx), narrowest scope's meaning winning:
+    /// each row says the verb it is ("m · mark") with the page's own title after it; a key under
+    /// the page's leader has no verb, only its title.
+    public func whichKeyRows() -> [WhichKeyRow] {
         let prefix = pendingKeys
         guard !prefix.isEmpty, let ctx = runner.context else { return [] }
         let live = ctx.liveScopes()
         func rank(_ s: Scope) -> Int { s == .global ? live.count : (live.firstIndex(of: s) ?? .max) }
         var seen = Set<String>()
-        var rows: [(key: String, what: String)] = []
+        var rows: [WhichKeyRow] = []
+        let vk = registry.verbKeys
         let cmds = registry.commands
             .filter { $0.modes.contains(active) && ($0.scope == .global || live.contains($0.scope)) && ($0.available?(ctx.target(for: $0.scope)) ?? true) }
             .enumerated().sorted { (rank($0.element.scope), $0.offset) < (rank($1.element.scope), $1.offset) }.map(\.element)
         for c in cmds {
-            for k in c.keys where k.hasPrefix(prefix + " ") {
+            for k in c.keysByMode[active] ?? [] where k.hasPrefix(prefix + " ") {
                 let rest = String(k.dropFirst(prefix.count + 1))
-                if seen.insert(rest).inserted { rows.append((rest, shortTitle(c.title))) }
+                let verb = c.verbs.first { vk.of($0, in: active).contains(k) }
+                if seen.insert(rest).inserted { rows.append(WhichKeyRow(key: rest, verb: verb?.name, what: shortTitle(c.title))) }
             }
         }
         // a run of numbered slots (g 1 … g 9) reads as one row
         let digits = rows.filter { $0.key.count == 1 && $0.key.first!.isNumber }
         if digits.count > 2, let one = digits.min(by: { $0.key < $1.key }), let top = digits.max(by: { $0.key < $1.key }) {
             rows.removeAll { $0.key.count == 1 && $0.key.first!.isNumber }
-            rows.append(("\(one.key)–\(top.key)", one.what.replacingOccurrences(of: one.key, with: "N")))
+            rows.append(WhichKeyRow(key: "\(one.key)–\(top.key)", verb: one.verb.map { $0.replacingOccurrences(of: "1", with: "N") },
+                                    what: one.what.replacingOccurrences(of: one.key, with: "N")))
         }
         return rows.sorted { a, b in
             let la = a.key.lowercased(), lb = b.key.lowercased()
             return la != lb ? la < lb : a.key < b.key
         }
     }
+
+    /// True while the half-typed prefix is the page's leader: which-key titles it "this page's keys".
+    public var pendingIsLeader: Bool { pendingKeys == registry.verbKeys.leader }
 
     /// What `:` can run here, best match first: every live, available command that doesn't need an
     /// argument from another view — so nothing is keyless *and* unreachable.
@@ -183,4 +193,14 @@ public final class KeyEngine {
     }
 
     private static func text(_ c: Command) -> String { "\(c.id) \(c.title)" }
+}
+
+/// One which-key line: the key after the prefix, the verb it is (nil under the leader), the page's title.
+public struct WhichKeyRow: Equatable, Sendable {
+    public var key: String
+    public var verb: String?
+    public var what: String
+    public init(key: String, verb: String?, what: String) { self.key = key; self.verb = verb; self.what = what }
+    /// "m · mark — mark viewed and go on", or the bare title under the leader
+    public var line: String { verb.map { "\($0) — \(what)" } ?? what }
 }

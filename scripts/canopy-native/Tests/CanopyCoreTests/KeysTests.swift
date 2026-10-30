@@ -58,11 +58,15 @@ import Testing
         #expect(!Bindings.validKey(""))
     }
 
-    @Test func applyKeysReportsProblems() {
-        var cmds = [Bound(id: "a", scope: "global", keys: ["x"])]
-        let problems = Bindings.applyKeys(&cmds, ["a": ["y", "nope"], "zz": ["q"]])
-        #expect(cmds[0].keys == ["y"])
-        #expect(problems == ["a: not a key — \"nope\"", "zz: no such command"])
+    @Test func verbOverridesReportProblems() {
+        let r = Bindings.applyVerbKeys(["mark": ["v", "nope"], "zz": ["q"], "review.viewed": ["m"]], commands: ["review.viewed": [.mark]])
+        #expect(r.keys.keys[.mark] == ["v"])
+        #expect(r.customized == [.mark])
+        #expect(r.problems == ["mark: not a key — \"nope\"", "zz: no such verb"])
+        #expect(r.warnings.count == 1 && r.warnings[0].hasPrefix("review.viewed: keys belong to verbs now"))
+        // `v` is select's: moving mark onto it breaks the table, and the table says so
+        #expect(Bindings.tableProblems(r.keys) == ["v: select and mark"])
+        #expect(Bindings.tableProblems(.defaults).isEmpty, "\(Bindings.tableProblems(.defaults))")
     }
 
     @Test func clashes() {
