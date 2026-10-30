@@ -207,4 +207,12 @@ import Testing
         #expect(wiki(a).current(a) == nil)
         #expect(a.panes.first { $0.id == "page" }?.rows.isEmpty == true)
     }
+
+    @Test func citedLinesTakeReviewsSyntaxColours() {
+        let c = CodeColors(ink: .white, inkDim: .gray, inkFaint: .darkGray)
+        let line = WikiSource.highlighted("export async function sendMail(", .ts, c)
+        let coloured = line.runs.filter { $0.foregroundColor != nil }.map { String(line[$0.range].characters) }
+        #expect(coloured.contains("export") && coloured.contains("async") && coloured.contains("function"))
+        #expect(!coloured.contains("sendMail"))
+    }
 }
