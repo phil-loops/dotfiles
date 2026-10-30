@@ -39,6 +39,7 @@ When a UI branch has a running preview, add a `url` section pointing at it right
 - One page per branch, in merge order. `group` = the band, `title` = the branch's plain subject, `tag` = the branch name and `+adds/−removes`. Id = the branch name, so sign-offs map 1:1 to branches.
 - Each page body, in order: **Kernel** (one sentence, as a `>` quote), the picture, **Changes** (2–4 bullets), **Holds because** (one line), **Watch for** (anything a reviewer should press on, or nothing).
 - Set `replyTo` to this session so Submit reaches you.
+- Show's Forest workspace reads the deck without shelling out to git, so the deck carries the forest itself. At the top level, set `"mode": "forest"`, `"project": "<stack-project>"` and `"repo": "<repo name, e.g. loops>"`. On each branch section, set `"rank"` (from `stack-merge-rank <project>` JSON `.rank`) and `"parent"` (from `git config branch.<b>.stack-parent`). Read both when you generate the deck, never from memory. Sections that aren't branches (the overview, live pages) carry neither.
 - Write with a generator script in the scratchpad, output to `~/.dotfiles/show/<project>-branches.json`, then `show` it.
 
 ## 4 · After sign-off
