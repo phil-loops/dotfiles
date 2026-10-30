@@ -47,7 +47,7 @@ PLIST
 
 case "${1:-}" in
   -h|--help)
-    echo "usage: show [<deck.json>…] | show --build | show --snapshot <deck.json> <out.png> | show --tutor [<session.json>] | show --tutor-check <session.json>" >&2
+    echo "usage: show [<deck.json>…] | show --build | show --snapshot <deck.json> <out.png> | show --tutor [<session.json>] | show --tutor-check <session.json> | show --tutor-ask <session.json> <message>" >&2
     exit 64
     ;;
   --build)
@@ -71,6 +71,11 @@ case "${1:-}" in
       || { echo "show: $session is not a tutor session (needs mode \"tutor\" + title + rungs)" >&2; exit 65; }
     build
     open -a "$app" "$session"
+    ;;
+  --tutor-ask)
+    [[ $# -eq 3 ]] || { echo "usage: show --tutor-ask <session.json> <message>" >&2; exit 64; }
+    build
+    "$app/Contents/MacOS/Show" --tutor-ask "$2" "$3"
     ;;
   --tutor-check)
     [[ $# -eq 2 ]] || { echo "usage: show --tutor-check <session.json>" >&2; exit 64; }

@@ -62,7 +62,9 @@ Session file `~/.dotfiles/show/tutor/<name>.json` (Claude writes it):
     "reveal": "markdown, or { \"a\": \"markdown\", \"b\": \"markdown\" }, or null",
     "verdicts": { "a": "held", "b": "revised" },
     "followup": "markdown or null"
-  }]
+  }],
+  "notes": [{ "at": "ISO-8601", "text": "markdown: the tutor's reply to a learner message" }],
+  "agent": { "session": "<uuid Show minted for this file's headless tutor>" }
 }
 ```
 
@@ -74,15 +76,28 @@ Session file `~/.dotfiles/show/tutor/<name>.json` (Claude writes it):
 Answers sidecar `<name>.answers.json` beside the session. **Show writes it; Claude never does.**
 
 ```json
-{ "r1": { "parts": { "a": "text", "b": "text" }, "confidence": "low | medium | high | null", "at": "ISO-8601" } }
+{
+  "r1": { "parts": { "a": "text", "b": "text" }, "confidence": "low | medium | high | null", "at": "ISO-8601" },
+  "messages": [{ "at": "ISO-8601", "text": "why 30s?" }]
+}
 ```
 
-The loop:
+**The window is the chat.** A composer is pinned under the thread ("Ask the tutor anything"). Rungs, Phil's messages (right-aligned, in ink) and the tutor's `notes` (left-aligned) interleave by time; a rung counts from when the previous rung was answered. ⌘↩ sends whichever has focus: the composer, or the current rung's fields.
 
-1. Claude writes a rung, then runs `show --tutor <file>`.
-2. Phil answers and sends. Show writes the sidecar and runs `claude-say <replyTo> "tutor answer: <session path> rung <id>"`. His fields then lock, under "Sent. Waiting for Claude's reveal."
-3. Claude reads `.answers.json`, then rewrites the session file: it adds the reveal (and `verdicts`) to that rung and appends the next rung. Write the file atomically.
-4. Claude re-runs `show --tutor <file>`. The open session also reloads by itself within a second of the file changing, keeping unsent text, focus and scroll, and scrolls to the new current rung.
+**Each tutor file has its own headless tutor.** Show runs it, not your terminal session:
+
+- On the first send to a file without `agent.session`, Show mints a UUID and writes it into the file. It then boots the tutor with `claude -p --session-id <uuid>`, telling it to run the /tutor skill for this file and reply only by editing the file. Every send after that runs `claude -p --resume <uuid> --output-format stream-json --include-partial-messages --permission-mode acceptEdits --allowedTools "Read,Edit,Write,Bash(~/.dotfiles/scripts/learn:*),Bash(~/.dotfiles/scripts/sim-play:*)" -- "<message>"` in `~/.dotfiles`, resolving `claude` on the login-shell PATH with `~/.local/bin` in front.
+- The messages are `tutor answer: <session path> rung <id>` and `learner says: <text>`.
+- One turn runs at a time per file, and further sends queue. While a turn runs, a "Tutor is typing…" row streams the reply's text faintly. The row goes away when the turn ends, because the tutor's file edit reloads the real content. A failed turn leaves a quiet error row with the stderr tail and **Retry**.
+- A file that has a `replyTo` and no `agent` stays on the old path: sends go to `claude-say <replyTo>` (your terminal session) instead. Once `agent` exists, `replyTo` is ignored.
+- `show --tutor-ask <file> "<text>"` does what the composer does, without a window, and streams the reply to stdout. `SHOW_CLAUDE=<path>` swaps in another `claude` binary for testing.
+
+The tutor's loop, whether it's the headless tutor or you via `replyTo`:
+
+1. Write a rung, then run `show --tutor <file>`.
+2. Phil answers and sends. Show writes the sidecar, and the tutor gets `tutor answer: … rung <id>`. His fields lock under "Sent. Waiting for Claude's reveal."
+3. Read `.answers.json`. Then rewrite the session file atomically: add the reveal (and `verdicts`) to that rung, and append the next rung. Answer a `learner says:` message by appending to `notes`.
+4. The open session reloads within a second of the file changing. It keeps unsent text, focus and scroll, and scrolls to a new current rung. Re-running `show --tutor <file>` also brings it forward.
 
 ## Verifying
 
