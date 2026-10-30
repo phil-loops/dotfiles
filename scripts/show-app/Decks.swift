@@ -59,6 +59,9 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
     var thread: [String: [ThreadMessage]] = [:]
     var threadStamp = ""
     let delivery: ThreadDelivery
+    let freshness = BranchFreshness()
+    /// "branch moved since this page was written", above a forest page whose branch tip changed.
+    let movedLine = NSTextField(labelWithString: "")
 
     init(path: String, deck: Deck) {
         self.path = path
@@ -68,7 +71,13 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
         renderer.baseDirectory = (path as NSString).deletingLastPathComponent
         super.init()
         live.owner = self
+        _ = Self.forestKeys
         delivery.onChange = { [weak self] in self?.refreshThread(stickToBottom: true) }
+        freshness.onChange = { [weak self] in self?.freshnessChanged() }
+        NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            guard let self else { return }
+            self.freshness.refresh(self.deck)
+        }
         let sidebar = NSSplitViewItem(viewController: sidebarController())
         sidebar.minimumThickness = 220
         sidebar.maximumThickness = 360
@@ -79,6 +88,7 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
         thread = loadThread(path)
         threadStamp = fileStamp(threadURL(path).path)
         apply(deck, keepingSelection: prefs.string(forKey: selectionKey))
+        freshness.refresh(deck)
     }
 
     var window: NSWindow? { viewController.view.window }
@@ -119,6 +129,7 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
         thread = loadThread(path)
         threadStamp = fileStamp(threadURL(path).path)
         apply(fresh, keepingSelection: kept)
+        freshness.refresh(fresh)
         if let list = table.enclosingScrollView {
             list.contentView.scroll(to: list.contentView.constrainBoundsRect(NSRect(origin: listOrigin, size: list.contentView.bounds.size)).origin)
             list.reflectScrolledClipView(list.contentView)
@@ -190,6 +201,12 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
 
     /// Re-renders the selected section at the laid-out width, sized to its full height, for a snapshot.
     func prepareSnapshot() {
+        freshness.refreshNow(deck)
+        freshnessChanged()
+        if ProcessInfo.processInfo.environment["SHOW_SNAPSHOT_REGENERATE"] != nil {
+            print("regenerate: " + regenerateSelected())
+            delivery.settle(within: 10)
+        }
         if let message = ProcessInfo.processInfo.environment["SHOW_SNAPSHOT_SEND"] {
             composer.string = message
             sendMessage()
@@ -311,10 +328,17 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
         actionBar = bar
         actionDivider = divider
 
-        let stack = NSStackView(views: [live.header, page, divider, bar, live.bar])
+        movedLine.font = .systemFont(ofSize: 12, weight: .medium)
+        movedLine.textColor = .systemOrange
+        movedLine.lineBreakMode = .byTruncatingTail
+        let moved = NSStackView(views: [movedLine])
+        moved.edgeInsets = NSEdgeInsets(top: 14, left: 53, bottom: 0, right: 24)
+        moved.isHidden = true
+
+        let stack = NSStackView(views: [live.header, moved, page, divider, bar, live.bar])
         stack.orientation = .vertical
         stack.spacing = 0
-        for view in [live.header, page, divider, bar, live.bar] {
+        for view in [live.header, moved, page, divider, bar, live.bar] {
             view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
         let vc = NSViewController()
@@ -484,6 +508,25 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
     /// Refreshes the live header, including how long ago the file changed; ticks once a second.
     func updateStatusLine() {
         live.update(modified: deckModified)
+        let moved = deck.isForest ? selectedSection.flatMap(freshness.moved) : nil
+        movedLine.superview?.isHidden = moved == nil
+        movedLine.stringValue = moved.map { "◆  branch moved since this page was written · \($0.written.prefix(7)) → \($0.now.prefix(7)) · ⌘⇧R regenerates it" } ?? ""
+    }
+
+    private func freshnessChanged() {
+        if rows.count > 0 {
+            table.reloadData(forRowIndexes: IndexSet(integersIn: 0..<rows.count), columnIndexes: IndexSet(integer: 0))
+        }
+        updateStatusLine()
+    }
+
+    /// ⌘⇧R: asks whoever answers for the deck to rewrite the selected branch's page; returns what to say at the foot of the shelf.
+    func regenerateSelected() -> String {
+        guard let section = selectedSection, section.rank != nil else {
+            return "⌘⇧R regenerates a branch page; pick a branch first"
+        }
+        delivery.send("regenerate page \(section.key) — \(path)", key: "regen:" + section.key, replyTo: deck.replyTo)
+        return "Asked Claude to regenerate \(section.key)"
     }
 
     func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
@@ -527,6 +570,7 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
             title.attributedStringValue = number + sectionMark(section, selected: row == table.selectedRow)
                 + NSAttributedString(string: section.title, attributes: [.font: NSFont.systemFont(ofSize: 13, weight: .medium), .foregroundColor: NSColor.labelColor])
                 + (deck.isLive ? liveFlag(section) : NSAttributedString())
+                + (freshness.moved(section) == nil ? NSAttributedString() : NSAttributedString(string: "  moved", attributes: [.font: NSFont.systemFont(ofSize: 11, weight: .semibold), .foregroundColor: NSColor.systemOrange]))
             title.maximumNumberOfLines = 1
             title.cell?.truncatesLastVisibleLine = true
             title.lineBreakMode = .byTruncatingTail
@@ -557,12 +601,14 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
         }
     }
 
-    /// The list's mark for a section: ● signed, ◆ has a note, ◐ the open section, ○ not yet. Live decks carry none.
+    /// The list's mark for a section: ◆ a branch that moved since its page was written, ● signed, ◆ has a note, ◐ the open section, ○ not yet. Live decks carry none.
     private func sectionMark(_ section: Section, selected: Bool) -> NSAttributedString {
         guard !deck.isLive else { return liveMark(section, current: deck.status?.current) }
         let entry = store.entries[section.key]
         let (mark, color): (String, NSColor)
-        if entry?.signed == true {
+        if freshness.moved(section) != nil {
+            (mark, color) = ("◆", .systemOrange)
+        } else if entry?.signed == true {
             (mark, color) = ("●", .secondaryLabelColor)
         } else if entry?.note.isEmpty == false {
             (mark, color) = ("◆", .systemOrange)

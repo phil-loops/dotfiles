@@ -9,6 +9,7 @@ struct Deck: Decodable {
     let project: String?
     let repo: String?
     let runDir: String?
+    let repoPath: String?
     let sections: [Section]
 
     /// A live deck is watched, not judged: no sign-off bar, no sign-off file, no sign-off marks.
@@ -29,6 +30,7 @@ struct Section: Decodable {
     let compare: Compare?
     let tables: [DataTable]?
     let source: SourceText?
+    let sha: String?
 
     var key: String { id ?? title }
 }
