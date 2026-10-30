@@ -16,6 +16,7 @@ description: Present a design, plan or walkthrough as a native macOS app (Swift 
 {
   "title": "Domain enforcement — principles",
   "subtitle": "Sign off from the top",
+  "replyTo": "<your session id prefix, from claude-say's list>",
   "sections": [
     { "id": "rule-1", "group": "Rules", "title": "1 · …", "tag": "optional mono subtitle", "body": "markdown" }
   ]
@@ -31,7 +32,7 @@ description: Present a design, plan or walkthrough as a native macOS app (Swift 
 1. Write the deck with a small generator script in the scratchpad (Python building the JSON) rather than hand-escaping JSON; write output to `~/.dotfiles/show/<name>.json`.
 2. Order sections top-down for sign-off: the guiding idea first, then one page per principle, then what they produce, then plan and open questions. One idea per page.
 3. Open it: `show ~/.dotfiles/show/<name>.json`. After regenerating a deck, run the same command again: it reloads the open tab instead of opening a second window. Give every deck a distinct `title`, since that is the tab label.
-4. Tell Phil it's open and how sign-off works. Then wait — read `<name>.signoff.json` when he says he's been through it, and treat every note as pushback to address.
+4. Tell Phil it's open and how sign-off works. Then wait. **Submit** (⌘↩) sends `claude-say <replyTo>` a line naming the sign-off file; read `<name>.signoff.json` when it arrives, or when he says he's been through it, and treat every note as pushback to address. Set `replyTo` to this session's id prefix (`$CLAUDE_CODE_SESSION_ID`, first 8 characters); without it, Submit only marks the deck done.
 
 ## Verifying
 

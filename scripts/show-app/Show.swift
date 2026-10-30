@@ -1,12 +1,13 @@
 // Show — one native app for walkthrough decks; each deck opens as a labelled tab. Renders a JSON file of sections:
 // { "title", "subtitle"?, "sections": [{ "id"?, "group", "title", "tag"?, "body" (markdown) }] }
-// Sign-offs and notes save beside the deck as <deck>.signoff.json.
+// Sign-offs and notes save beside the deck as <deck>.signoff.json; "replyTo" names the claude-say session that Submit notifies.
 import AppKit
 import UniformTypeIdentifiers
 
 struct Deck: Decodable {
     let title: String
     let subtitle: String?
+    let replyTo: String?
     let sections: [Section]
 }
 
@@ -243,6 +244,7 @@ final class DeckController: NSObject, NSWindowDelegate, NSTableViewDataSource, N
     let signed = NSButton(checkboxWithTitle: "Signed off", target: nil, action: nil)
     let note = NSTextField()
     let progress = NSTextField(labelWithString: "")
+    let submit = NSButton(title: "Submit", target: nil, action: nil)
     var onClose: (() -> Void)?
 
     init(path: String, deck: Deck) {
@@ -373,7 +375,13 @@ final class DeckController: NSObject, NSWindowDelegate, NSTableViewDataSource, N
         note.delegate = self
         note.target = self
         note.action = #selector(saveNote)
-        let bar = NSStackView(views: [signed, note])
+        submit.target = self
+        submit.action = #selector(submitReview)
+        submit.bezelStyle = .rounded
+        submit.keyEquivalent = "\r"
+        submit.keyEquivalentModifierMask = [.command]
+        submit.toolTip = "Tell Claude you're done (⌘↩)"
+        let bar = NSStackView(views: [signed, note, submit])
         bar.orientation = .horizontal
         bar.spacing = 14
         bar.edgeInsets = NSEdgeInsets(top: 12, left: 48, bottom: 12, right: 24)
@@ -405,6 +413,45 @@ final class DeckController: NSObject, NSWindowDelegate, NSTableViewDataSource, N
         guard (store.entries[section.key]?.note ?? "") != value else { return }
         store.update(section.key) { $0.note = value }
         reloadSelectedRow()
+    }
+
+    @objc private func submitReview() {
+        saveNote()
+        let signedCount = deck.sections.filter { store.entries[$0.key]?.signed == true }.count
+        let notes = deck.sections.filter { store.entries[$0.key]?.note.isEmpty == false }.count
+        guard let replyTo = deck.replyTo else {
+            submit.title = "Submitted"
+            return
+        }
+        let message = "Show: \"\(deck.title)\" submitted — \(signedCount)/\(deck.sections.count) signed off, \(notes) notes. Read \(store.url.path)"
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: ("~/.dotfiles/scripts/claude-say" as NSString).expandingTildeInPath)
+        process.arguments = [replyTo, message]
+        var environment = ProcessInfo.processInfo.environment
+        environment["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:" + (environment["PATH"] ?? "")
+        process.environment = environment
+        let errors = Pipe()
+        process.standardError = errors
+        process.standardOutput = errors
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            showSubmitFailure("\(error)")
+            return
+        }
+        guard process.terminationStatus == 0 else {
+            showSubmitFailure(String(data: errors.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? "")
+            return
+        }
+        submit.title = "Submitted ✓"
+    }
+
+    private func showSubmitFailure(_ detail: String) {
+        let alert = NSAlert()
+        alert.messageText = "Couldn't reach Claude session \(deck.replyTo ?? "")"
+        alert.informativeText = "Your sign-offs are saved. \(detail)"
+        alert.beginSheetModal(for: window)
     }
 
     func controlTextDidEndEditing(_ obj: Notification) {
