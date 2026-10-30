@@ -85,8 +85,10 @@ public struct SheetCmd: Equatable, Sendable {
     public var scope: String
     public var keys: [String]
     public var available: Bool
-    public init(id: String, title: String, scope: String, keys: [String], available: Bool) {
-        self.id = id; self.title = title; self.scope = scope; self.keys = keys; self.available = available
+    /// the verb it is (what the sheet says first), nil for a key under the page's leader
+    public var verb: String?
+    public init(id: String, title: String, scope: String, keys: [String], available: Bool, verb: String? = nil) {
+        self.id = id; self.title = title; self.scope = scope; self.keys = keys; self.available = available; self.verb = verb
     }
 }
 

@@ -89,7 +89,8 @@ private struct Completions: View {
                     Text(c.id).foregroundStyle(i == app.cmdIndex ? theme.goldLeaf : theme.ink)
                     Text(c.title).foregroundStyle(theme.inkDim).lineLimit(1)
                     Spacer()
-                    Text(c.keys.map(glyph).joined(separator: " · ")).foregroundStyle(i == app.cmdIndex ? theme.goldLeaf : theme.inkFaint)
+                    Text(c.keys.first.map { k in glyph(k) + (c.verbs.first.map { " · \($0.name)" } ?? " · page") } ?? "")
+                        .foregroundStyle(i == app.cmdIndex ? theme.goldLeaf : theme.inkFaint)
                 }
                 .padding(.horizontal, 10).padding(.vertical, 2)
                 .background(i == app.cmdIndex ? theme.goldWash : .clear)
