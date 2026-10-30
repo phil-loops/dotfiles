@@ -60,7 +60,7 @@ public final class AppModel: CommandContext {
         transport = Transport(base: URL(string: "http://127.0.0.1:\(port)")!, protocolClasses: protocolClasses)
         telemetry = Telemetry(transport: transport, enabled: enabled)
         store = Store()
-        router = Router(config.route)
+        router = Router(config.route, query: config.query)
         registry = CommandRegistry()
         runner = Runner(registry: registry, store: store, transport: transport, telemetry: telemetry)
         keys = KeyEngine(registry: registry, runner: runner)

@@ -69,4 +69,23 @@ import Testing
         #expect(r.goForward())
         #expect(navs == ["/v2/todo", "/v2/machine", "/v2/todo", "/v2/dashboard", "/v2/todo", "/v2", "/v2/todo"])
     }
+
+    @Test func theQueryIsKeptForThePageNotTheRoute() {
+        #expect(Route("/v2/tutor?concept=lock-ttl") == .tutor(session: nil))
+        #expect(Route.query("/v2/tutor?concept=lock-ttl") == ["concept": "lock-ttl"])
+        #expect(Route.query("canopy://v2/tutor?import=term-1&say=a%20b") == ["import": "term-1", "say": "a b"])
+        #expect(Route.query("/v2/b/loops/x") == [:])
+    }
+
+    @MainActor @Test func anAddressHandsItsQueryToThePageOnce() {
+        let r = Router()
+        r.navigate("/v2/tutor?concept=a")
+        #expect(r.route == .tutor(session: nil) && r.query == ["concept": "a"])
+        r.navigate("/v2/tutor?concept=b")
+        #expect(r.query == ["concept": "b"], "a link to where you are still delivers its query")
+        #expect(r.takeQuery() == ["concept": "b"] && r.query.isEmpty)
+        r.navigate("/v2/tutor?concept=c")
+        r.navigate(.forests)
+        #expect(r.query.isEmpty, "moving on drops it")
+    }
 }

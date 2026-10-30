@@ -9,6 +9,9 @@ public final class Router {
     public private(set) var route: Route
     public private(set) var back: [Route] = []
     public private(set) var forward: [Route] = []
+    /// The query of the address that brought you here (`navigate(_ address:)`, a deep link, the
+    /// launch address); any other move clears it. A page reads it on arrival with `takeQuery`.
+    public private(set) var query: [String: String] = [:]
     @ObservationIgnored public var onNavigate: ((_ from: Route, _ to: Route) -> Void)?
     /// Called before a `navigate` (a new history entry) leaves `from` — the jumplist records it there.
     @ObservationIgnored public var willNavigate: ((_ from: Route, _ to: Route) -> Void)?
@@ -17,13 +20,20 @@ public final class Router {
     @ObservationIgnored public var blocked: (() -> String?)?
     @ObservationIgnored public var onBlocked: ((_ to: Route, _ why: String) -> Void)?
 
-    public init(_ route: Route = .forests) { self.route = route }
+    public init(_ route: Route = .forests, query: [String: String] = [:]) { self.route = route; self.query = query }
+
+    /// The arrival query, once: reading it clears it, so a re-render doesn't act on it twice.
+    public func takeQuery() -> [String: String] {
+        defer { if !query.isEmpty { query = [:] } }
+        return query
+    }
 
     public var surface: Surface { route.surface }
 
     /// Go somewhere new (history.pushState). Going where you already are does nothing.
     public func navigate(_ to: Route) {
         guard to != route, allowed(to) else { return }
+        query = [:]
         let from = route
         willNavigate?(from, to)
         back.append(from)
@@ -39,11 +49,17 @@ public final class Router {
         return false
     }
 
-    public func navigate(_ address: String) { navigate(Route(address)) }
+    /// Go to an address, keeping its query for the page (`query`), even when the route is where you are.
+    public func navigate(_ address: String) {
+        let to = Route(address)
+        navigate(to)
+        if route == to { query = Route.query(address) }
+    }
 
     /// Change the address without a history entry (history.replaceState: the review page's ?base=).
     public func replace(_ to: Route) {
         guard to != route, allowed(to) else { return }
+        query = [:]
         let from = route
         route = to
         onNavigate?(from, to)
@@ -52,6 +68,7 @@ public final class Router {
     @discardableResult
     public func goBack() -> Bool {
         guard let to = back.last, allowed(to) else { return false }
+        query = [:]
         back.removeLast()
         let from = route
         forward.append(from)
@@ -63,6 +80,7 @@ public final class Router {
     @discardableResult
     public func goForward() -> Bool {
         guard let to = forward.last, allowed(to) else { return false }
+        query = [:]
         forward.removeLast()
         let from = route
         back.append(from)

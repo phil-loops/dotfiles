@@ -32,7 +32,9 @@ struct TutorPage: View {
             detach = TutorArea.attachNav(app)
             t.refresh()
             t.reattach()
+            t.arrive(app.router.takeQuery())
         }
+        .onChange(of: app.router.query) { _, q in if !q.isEmpty { t.arrive(app.router.takeQuery()) } }
         .onDisappear { detach?(); detach = nil }
     }
 }

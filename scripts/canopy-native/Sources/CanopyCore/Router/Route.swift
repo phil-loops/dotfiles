@@ -88,6 +88,21 @@ public enum Route: Hashable, Sendable {
     /// Parse a v2 path ("/v2/b/loops/x?base=main"), a full http URL, or a `canopy://` deep link
     /// (`canopy://v2/b/loops/x`, `canopy:///v2/b/loops/x`, `canopy://open?path=/v2/...`).
     public init(_ address: String) {
+        let (s, query) = Route.split(address)
+        self = Route.match(path: s, query: query)
+    }
+
+    /// The address's query as name → value (`/v2/tutor?concept=x` → ["concept": "x"]): what a page
+    /// reads once on arrival. The route itself keeps only the review page's ?base=.
+    public static func query(_ address: String) -> [String: String] {
+        let q = split(address).query
+        guard !q.isEmpty else { return [:] }
+        var out: [String: String] = [:]
+        for item in URLComponents(string: "?\(q)")?.queryItems ?? [] { out[item.name] = item.value ?? "" }
+        return out
+    }
+
+    private static func split(_ address: String) -> (path: String, query: String) {
         var s = address.trimmingCharacters(in: .whitespacesAndNewlines)
         if s.hasPrefix("canopy:") || s.hasPrefix("http://") || s.hasPrefix("https://"), let u = URLComponents(string: s) {
             if u.scheme == "canopy", u.host == "open", let p = u.queryItems?.first(where: { $0.name == "path" })?.value {
@@ -103,7 +118,7 @@ public enum Route: Hashable, Sendable {
             s = String(s[..<q])
         }
         if let h = s.firstIndex(of: "#") { s = String(s[..<h]) }
-        self = Route.match(path: s, query: query)
+        return (s, query)
     }
 
     private static func match(path pathname: String, query: String) -> Route {

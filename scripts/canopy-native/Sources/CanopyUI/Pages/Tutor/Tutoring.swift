@@ -326,6 +326,19 @@ final class TutorState {
         save()
     }
 
+    /// What a link to the tutor asks for (Tutor.tsx): `?concept=<id>` opens its drawer;
+    /// `?import=<session>&say=<draft>` picks a terminal session up with the answer drafted.
+    func arrive(_ q: [String: String]) {
+        if let want = q["concept"], !want.isEmpty { openDrawer(want) }
+        guard let session = q["import"], !session.isEmpty else { return }
+        Task { @MainActor in
+            do {
+                try await pickUp(session)
+                draft = q["say"] ?? ""
+            } catch { self.error = String(describing: error) }
+        }
+    }
+
     /// A terminal /tutor session, continued here as a fork; its own transcript is left alone.
     func pickUp(_ session: String) async throws {
         if let kept = sessions.first(where: { $0.importedFrom == session && $0.saved != true }) {

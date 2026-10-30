@@ -50,7 +50,7 @@ public struct CanopyApp: App {
                 .frame(minWidth: 640, minHeight: 420)
                 .preferredColorScheme(scheme)
                 .onAppear { monitor.install() }
-                .onOpenURL { url in model.go(Route(url.absoluteString)) }
+                .onOpenURL { url in model.router.navigate(url.absoluteString) }
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
                     model.telemetry.flushPage(route: model.router.route.path)
                 }
