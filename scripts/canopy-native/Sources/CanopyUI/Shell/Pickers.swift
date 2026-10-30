@@ -16,11 +16,16 @@ extension AppModel {
         let here = currentForest
         let all = store.list(Branch.self)
         guard !all.isEmpty else { throw Refusal("no branches yet") }
-        let ordered = frecency.rank(all, "", id: \.id, text: \.name, boost: { $0.project == here ? 2 : 1 })
+        let boost: (Branch) -> Double = { $0.project == here ? 2 : 1 }
+        let ordered = frecency.rank(all, "", id: \.id, text: \.name, boost: boost)
         let items = ordered.map { b in
             PickItem(label: b.name, text: "\(store.view(Project.self, b.project)?.name ?? b.project) · \(b.subject)")
         }
-        nav.pick("branches", items) { [weak self] i in
+        let fr = frecency
+        let rank: (String) -> [Int] = { want in
+            fr.rank(Array(items.indices), want, id: { ordered[$0].id }, text: { "\(items[$0].label) \(items[$0].text ?? "")" }, boost: { boost(ordered[$0]) })
+        }
+        nav.pick("branches", items, rank: rank) { [weak self] i in
             let b = ordered[i]
             self?.go(.review(repo: b.repo, branch: b.name))
         }
