@@ -232,7 +232,7 @@ public struct ComposerView: View {
                     if note == nil { Text("\(k("review.compose.suggest")) suggestion").foregroundStyle(theme.inkFaint) }
                     if !waits.isEmpty { Text("names \(waits.map { String($0.prefix(7)) }.joined(separator: ", ")) — it stays a draft until that's on origin").foregroundStyle(theme.goldLeaf) }
                     Spacer(minLength: 0)
-                    Text(app.keys.mode == .insert && app.insertField == ReviewCommands.composeField ? "esc stops writing" : "\(k("review.compose.edit")) writes · esc cancels")
+                    Text(app.keys.mode == .insert && app.insertField == ReviewCommands.composeField ? "↵ new line · \(app.registry.verbKey(.send)) sends · esc stops writing" : "\(k("review.compose.edit")) writes · esc cancels")
                         .foregroundStyle(theme.inkFaint)
                     if note != nil {
                         KeyButton(title: "Hand to Claude", id: "review.compose.send", gold: true)

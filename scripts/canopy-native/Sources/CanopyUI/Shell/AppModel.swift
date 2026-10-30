@@ -156,9 +156,12 @@ public final class AppModel: CommandContext {
     }
 
     /// Enter insert mode on a page's text field (its view focuses when `insertField` names it).
-    public func beginInsert(_ field: String) {
+    /// `lines` is the field's kind: a many-line box (a comment, a body) takes ↵ as a newline and
+    /// sends only on ⌃↵; a one-line field finishes on ↵.
+    public func beginInsert(_ field: String, lines: FieldLines = .single) {
         insertField = field
         keys.setMode(.insert)
+        keys.fieldLines = lines
     }
 
     private func modeChanged(_ from: KeyMode, _ to: KeyMode) {

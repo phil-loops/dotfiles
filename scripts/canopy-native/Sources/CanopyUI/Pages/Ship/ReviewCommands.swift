@@ -213,7 +213,7 @@ enum ReviewCommands {
         let compose = { (c: ShipComposer?) in
             guard let c else { throw Refusal("no line under the cursor") }
             ship.composer = c
-            weakApp?.beginInsert(composeField)
+            weakApp?.beginInsert(composeField, lines: .multi)
         }
         r.register(Command(id: "review.comment", title: "Comment on the line (or the range x selected)", scope: .line, verb: .comment, label: "comment",
                            available: { _ in canNote() }, local: { _, _ in try compose(lineComposer()) }))
@@ -322,7 +322,7 @@ enum ReviewCommands {
         r.register(Command(
             id: "review.compose.edit", title: "Go back to writing the comment", scope: .review, verb: .write, label: "write",
             available: { _ in ship.composer != nil && weakApp?.keys.mode != .insert },
-            local: { _, _ in weakApp?.beginInsert(composeField) }))
+            local: { _, _ in weakApp?.beginInsert(composeField, lines: .multi) }))
         r.register(Command(
             id: "review.compose.suggest", title: "Insert a suggestion", scope: .review, leader: LocalKey(",S"), label: "suggest",
             available: { _ in ship.composer != nil && !noting() },

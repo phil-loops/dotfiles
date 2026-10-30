@@ -40,7 +40,7 @@ canopy-native is a Helix-style modal app, not a click UI with shortcuts added on
    `verb: .mark` — "I am mark here" — and gets the verb's keys from the one table (`Keys/Verbs.swift`). An action
    no verb names goes under the page leader: `leader: LocalKey(",c")`. There is no raw-key path for a page.
    Implement a verb only when its one-line meaning is what your command does; never invent one (a new verb is
-   a table change, by coordination). Insert mode is a fixed set (esc, ↵/⌃↵ send, ⌥↵ newline): don't bind in it.
+   a table change, by coordination). Insert mode is a fixed set (esc, ⌃↵ send — ↵ too in a one-line field — ⌥↵ newline): don't bind in it.
 6. **Every area adds a test** that `KeyboardRule.violations(app) { $0.hasPrefix("<yourprefix>.") }` is
    empty, alongside the app-wide `everyCommandIsReachableByKey`, `keysMeanOneThingEverywhere`,
    `noPageSourceNamesARawKey` and `leaderNamespacesDontOverlapWithinAPage`.
@@ -154,7 +154,9 @@ app.registry.register(Command(
   enforces this.
 - **Insert mode**: put the field on screen as `ModalTextField("<field id>", text: $draft)` and enter it with
   a `verb: .write` command calling `app.beginInsert("<field id>")`. Esc leaves insert, and the field loses focus.
-  Finishing is a `verb: .send` command with `modes: [.insert]` (↵ or ⌃↵); ⌥↵ is the field's newline. Nothing else
+  Finishing is a `verb: .send` command with `modes: [.insert]`; ⌃↵ always sends, ⌥↵ is the field's newline, and ↵
+  follows the field's kind: a one-line field finishes on it, a many-line box (`beginInsert(id, lines: .multi)` — a
+  comment, a body) takes it as a newline. Nothing else
   binds in insert — two sends live in one scope at once need a narrower scope for one (Review's `filter`).
 - **Select mode**: `v` drops an anchor at the cursor, `j`/`k` extend it, and `app.selection` is the range. Make
   multi-row commands (archive these, hold these) act on `app.selection`, and list `.select` in their modes.
