@@ -111,7 +111,7 @@ import Testing
     @Test func doneShowsAtOnceAndSettlesOnThePatch() throws {
         let a = try app()
         a.setCursor(RowKey.todo("honest-command-timing"))
-        a.keys.handle("D")
+        a.keys.handle("m")
         #expect(a.store.trackerItem("honest-command-timing")?.state == "done", "the overlay shows it before the server answers")
         #expect(!a.rows.contains(RowKey.todo("honest-command-timing")))
         #expect(a.selected == RowKey.todo("fix-o-key-line-by-line"), "the cursor falls to the next row")

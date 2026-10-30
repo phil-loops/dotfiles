@@ -41,19 +41,19 @@ enum TodoCommands {
             }
         }
 
-        r.register(Command(id: "todo.open", title: "Show or hide the item's notes", scope: .item, keys: ["ret"], label: "open",
+        r.register(Command(id: "todo.open", title: "Show or hide the item's notes", scope: .item, verb: .main, label: "open",
                            available: exists,
                            local: { [weak ui] id, _ in
                                guard let ui, let id else { return }
                                if ui.open.contains(id) { ui.open.remove(id) } else { ui.open.insert(id) }
                            }))
-        r.register(Command(id: "todo.start", title: "Start the item", scope: .item, budget: .configWrite, keys: ["I"], label: "start",
+        r.register(Command(id: "todo.start", title: "Start the item", scope: .item, budget: .configWrite, leader: LocalKey(",s"), label: "start",
                            available: { [weak s] id in id.flatMap { s?.trackerItem($0) }?.state == "open" },
                            write: moveTo("doing")))
-        r.register(Command(id: "todo.done", title: "Mark the item done", scope: .item, budget: .configWrite, keys: ["D"], label: "done",
+        r.register(Command(id: "todo.done", title: "Mark the item done", scope: .item, budget: .configWrite, verb: .mark, label: "done",
                            available: { [weak s] id in id.flatMap { s?.trackerItem($0) }.map { !closed.contains($0.state.rawValue) } ?? false },
                            write: moveTo("done") { "done: \($0.title) — u puts it back" }))
-        r.register(Command(id: "todo.drop", title: "Drop the item", scope: .item, budget: .configWrite, keys: ["X"], label: "drop",
+        r.register(Command(id: "todo.drop", title: "Drop the item", scope: .item, budget: .configWrite, verb: .putAway, label: "drop",
                            available: { [weak s] id in id.flatMap { s?.trackerItem($0) }.map { !closed.contains($0.state.rawValue) } ?? false },
                            write: moveTo("dropped") { "dropped: \($0.title) — u puts it back" }))
         r.register(Command(
@@ -94,9 +94,9 @@ enum TodoCommands {
             guard let t = id.flatMap({ s?.trackerItem($0) }) else { return false }
             return Tracker.sectionOf(t) != nil && t.state != "broken"
         }
-        r.register(Command(id: "todo.up", title: "Move up the queue", scope: .item, budget: .configWrite, keys: ["C-k"], label: "move", pair: "todo.down",
+        r.register(Command(id: "todo.up", title: "Move up the queue", scope: .item, budget: .configWrite, verb: .moveUp, label: "move", pair: "todo.down",
                            available: movable, write: { id, _ in move(id, by: -1) }))
-        r.register(Command(id: "todo.down", title: "Move down the queue", scope: .item, budget: .configWrite, keys: ["C-j"], label: "move",
+        r.register(Command(id: "todo.down", title: "Move down the queue", scope: .item, budget: .configWrite, verb: .moveDown, label: "move",
                            available: movable, write: { id, _ in move(id, by: 1) }))
         r.register(Command(id: "todo.ranks", title: "Put the queue's order back", scope: .item, budget: .configWrite, needsArg: true, quiet: true,
                            write: { id, arg in
