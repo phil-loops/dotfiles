@@ -1,7 +1,8 @@
-// Show — one native app for walkthrough decks; each deck opens as a labelled tab. Renders a JSON file of sections:
-// { "title", "subtitle"?, "sections": [{ "id"?, "group", "title", "tag"?, "body" (markdown), "url"? (a live page shown instead of the body) }] }
+// Show — one native window with four workspaces on a rail: Forest (⌘1), Review (⌘2), Learn (⌘3), Runs (⌘4).
+// A file goes to the workspace its optional "workspace" key names, otherwise to the one its "mode" implies (forest, deck, tutor, live).
+// Decks: { "title", "subtitle"?, "sections": [{ "id"?, "group", "title", "tag"?, "body" (markdown), "url"? (a live page shown instead of the body) }] }
 // Sign-offs and notes save beside the deck as <deck>.signoff.json; "replyTo" names the claude-say session that Submit notifies.
-// The Tutor space (⌘2) reads a { "mode": "tutor", … } session file and writes answers beside it as <session>.answers.json.
+// Learn reads a { "mode": "tutor", … } session file and writes answers beside it as <session>.answers.json.
 import AppKit
 import UniformTypeIdentifiers
 import WebKit
@@ -12,10 +13,13 @@ struct Deck: Decodable {
     let replyTo: String?
     let mode: String?
     let status: LiveStatus?
+    let project: String?
+    let repo: String?
     let sections: [Section]
 
     /// A live deck is watched, not judged: no sign-off bar, no sign-off file, no sign-off marks.
     var isLive: Bool { mode == "live" }
+    var isForest: Bool { mode == "forest" }
 }
 
 /// A live deck's optional run status, shown as one quiet line above the page.
@@ -59,6 +63,8 @@ struct Section: Decodable {
     let tag: String?
     let body: String?
     let url: String?
+    let rank: Int?
+    let parent: String?
 
     var key: String { id ?? title }
 }
@@ -350,7 +356,11 @@ func modificationDate(_ path: String) -> Date? {
 /// The launcher writes this after a successful build, so a change means a newer Show is ready.
 let buildStamp = ((Bundle.main.bundlePath as NSString).deletingLastPathComponent as NSString).appendingPathComponent("source.sha")
 
-let decksDirectory = ("~/.dotfiles/show" as NSString).expandingTildeInPath
+/// Where decks live; `SHOW_DIR` points a scratch build at fixtures instead.
+let decksDirectory = ((ProcessInfo.processInfo.environment["SHOW_DIR"] ?? "~/.dotfiles/show") as NSString).expandingTildeInPath
+
+/// Remembered selections, drafts and open documents; a snapshot run keeps its own so it never touches the real app's.
+var prefs = UserDefaults.standard
 
 /// A section-list row whose selection is a soft rounded fill, with an accent outline while the list has keyboard focus.
 final class QuietRowView: NSTableRowView {
@@ -377,14 +387,14 @@ final class QuietRowView: NSTableRowView {
     }
 }
 
-/// One deck in one window; windows share a tab group, so each deck is a labelled tab.
-final class DeckController: NSObject, WKNavigationDelegate, NSWindowDelegate, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate {
+/// One deck: its section list beside the rendered section and the sign-off bar. It owns no window; its workspace hosts `viewController`.
+final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate {
     let path: String
     var deck: Deck
     var rows: [Row] = []
     var store: SignOffStore
     let renderer = Renderer()
-    let window: NSWindow
+    let viewController = NSSplitViewController()
     let table = NSTableView()
     let text = NSTextView()
     var textScroll: NSScrollView!
@@ -400,33 +410,32 @@ final class DeckController: NSObject, WKNavigationDelegate, NSWindowDelegate, NS
     let statusLine = NSTextField(labelWithString: "")
     var actionBar: NSView!
     var actionDivider: NSView!
-    var onClose: (() -> Void)?
     var deckModified: Date?
+    var onTitleChange: (() -> Void)?
 
     init(path: String, deck: Deck) {
         self.path = path
         self.deck = deck
         store = SignOffStore(deckPath: path)
         renderer.baseDirectory = (path as NSString).deletingLastPathComponent
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1180, height: 780),
-                          styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
-                          backing: .buffered, defer: false)
         super.init()
-        window.isReleasedWhenClosed = false
-        window.tabbingMode = .preferred
-        window.tabbingIdentifier = "show.deck"
-        window.delegate = self
-        window.representedURL = URL(fileURLWithPath: path)
-        let split = NSSplitViewController()
         let sidebar = NSSplitViewItem(viewController: sidebarController())
-        sidebar.minimumThickness = 260
-        sidebar.maximumThickness = 380
-        split.addSplitViewItem(sidebar)
-        split.addSplitViewItem(NSSplitViewItem(viewController: detailController()))
-        window.contentViewController = SpaceContainer(space: .decks, content: split)
-        window.setContentSize(NSSize(width: 1180, height: 780))
+        sidebar.minimumThickness = 220
+        sidebar.maximumThickness = 360
+        sidebar.preferredThicknessFraction = 0.28
+        viewController.addSplitViewItem(sidebar)
+        viewController.addSplitViewItem(NSSplitViewItem(viewController: detailController()))
+        viewController.splitView.autosaveName = "show.deck.sections"
         deckModified = modificationDate(path)
-        apply(deck, keepingSelection: UserDefaults.standard.string(forKey: selectionKey))
+        apply(deck, keepingSelection: prefs.string(forKey: selectionKey))
+    }
+
+    var window: NSWindow? { viewController.view.window }
+    var title: String { deck.title }
+    var subtitle: String {
+        if deck.isLive { return deck.subtitle ?? "" }
+        let done = deck.sections.filter { store.entries[$0.key]?.signed == true }.count
+        return [deck.subtitle, "\(done) of \(deck.sections.count) signed off"].compactMap { $0 }.joined(separator: " · ")
     }
 
     var selectionKey: String { "selected." + path }
@@ -444,8 +453,13 @@ final class DeckController: NSObject, WKNavigationDelegate, NSWindowDelegate, NS
         let kept = selectedSection?.key
         let cursor = note.currentEditor()?.selectedRange
         let origin = textScroll.contentView.bounds.origin
+        let listOrigin = (table.enclosingScrollView?.contentView.bounds.origin) ?? .zero
         store = SignOffStore(deckPath: path)
         apply(fresh, keepingSelection: kept)
+        if let list = table.enclosingScrollView {
+            list.contentView.scroll(to: list.contentView.constrainBoundsRect(NSRect(origin: listOrigin, size: list.contentView.bounds.size)).origin)
+            list.reflectScrolledClipView(list.contentView)
+        }
         if selectedSection?.key == kept {
             if let container = text.textContainer {
                 text.layoutManager?.ensureLayout(for: container)
@@ -454,10 +468,16 @@ final class DeckController: NSObject, WKNavigationDelegate, NSWindowDelegate, NS
             clip.scroll(to: clip.constrainBoundsRect(NSRect(origin: origin, size: clip.bounds.size)).origin)
             textScroll.reflectScrolledClipView(clip)
             if let cursor {
-                window.makeFirstResponder(note)
+                window?.makeFirstResponder(note)
                 let length = (note.stringValue as NSString).length
                 note.currentEditor()?.selectedRange = NSRange(location: min(cursor.location, length), length: min(cursor.length, max(0, length - cursor.location)))
             }
+        }
+    }
+
+    func reloadIfChanged() {
+        if modificationDate(path) != deckModified {
+            reload()
         }
     }
 
@@ -472,8 +492,6 @@ final class DeckController: NSObject, WKNavigationDelegate, NSWindowDelegate, NS
             }
             rows.append(.item(i))
         }
-        window.title = deck.title
-        window.tab.title = deck.title
         table.reloadData()
         let kept = rows.firstIndex { if case .item(let i) = $0 { return deck.sections[i].key == key } else { return false } }
         let first = rows.firstIndex { if case .item = $0 { return true } else { return false } }
@@ -484,38 +502,19 @@ final class DeckController: NSObject, WKNavigationDelegate, NSWindowDelegate, NS
         updateProgress()
     }
 
-    func windowWillClose(_ notification: Notification) {
-        saveNote()
-        onClose?()
+    /// Selects a section by id, the way `SHOW_SNAPSHOT_SECTION` asks.
+    func select(section key: String) {
+        guard let row = rows.firstIndex(where: { if case .item(let i) = $0 { return deck.sections[i].key == key } else { return false } }) else { return }
+        table.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
     }
 
-    /// Renders the window offscreen to `path`, plus the detail text (`-detail.png`) and section list (`-sidebar.png`), which the window capture leaves blank.
-    func snapshot(to path: String, section key: String? = nil) {
-        guard let view = window.contentView else { return }
-        window.appearance = NSAppearance(named: .aqua)
-        table.reloadData()
-        if let key, let row = rows.firstIndex(where: { if case .item(let i) = $0 { return deck.sections[i].key == key } else { return false } }) {
-            table.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
-        }
-        window.layoutIfNeeded()
-        view.layoutSubtreeIfNeeded()
-        if let section = selectedSection {
-            text.setFrameSize(NSSize(width: 860, height: text.frame.height))
-            renderer.columnWidth = 860 - 96
-            text.textStorage?.setAttributedString(renderer.render(section))
-            if let container = text.textContainer {
-                text.layoutManager?.ensureLayout(for: container)
-            }
-            text.sizeToFit()
-        }
-        table.layoutSubtreeIfNeeded()
-        let stem = (path as NSString).deletingPathExtension
-        window.effectiveAppearance.performAsCurrentDrawingAppearance {
-            for (target, file) in [(view, path), (text as NSView, stem + "-detail.png"), (table as NSView, stem + "-sidebar.png")] {
-                guard let rep = target.bitmapImageRepForCachingDisplay(in: target.bounds) else { continue }
-                target.cacheDisplay(in: target.bounds, to: rep)
-                try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: file))
-            }
+    /// Re-renders the selected section at the laid-out width, sized to its full height, for a snapshot.
+    func prepareSnapshot() {
+        guard let section = selectedSection, section.url == nil else { return }
+        renderer.columnWidth = text.bounds.width > 300 ? text.bounds.width - 96 : 640
+        text.textStorage?.setAttributedString(renderer.render(section))
+        if let container = text.textContainer {
+            text.layoutManager?.ensureLayout(for: container)
         }
     }
 
@@ -524,6 +523,7 @@ final class DeckController: NSObject, WKNavigationDelegate, NSWindowDelegate, NS
         table.addTableColumn(column)
         table.headerView = nil
         table.style = .sourceList
+        table.backgroundColor = .clear
         table.rowSizeStyle = .custom
         table.dataSource = self
         table.delegate = self
@@ -542,7 +542,7 @@ final class DeckController: NSObject, WKNavigationDelegate, NSWindowDelegate, NS
         scroll.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         progress.leadingAnchor.constraint(equalTo: stack.leadingAnchor, constant: 18).isActive = true
         let vc = NSViewController()
-        vc.view = stack
+        vc.view = ListBackdrop(stack)
         return vc
     }
 
@@ -603,7 +603,7 @@ final class DeckController: NSObject, WKNavigationDelegate, NSWindowDelegate, NS
         statusLine.textColor = .secondaryLabelColor
         statusLine.lineBreakMode = .byTruncatingTail
         let status = NSStackView(views: [statusLine])
-        status.edgeInsets = NSEdgeInsets(top: 36, left: 48, bottom: 0, right: 24)
+        status.edgeInsets = NSEdgeInsets(top: 14, left: 53, bottom: 0, right: 24)
         status.isHidden = true
 
         let stack = NSStackView(views: [status, page, divider, bar])
@@ -686,13 +686,13 @@ final class DeckController: NSObject, WKNavigationDelegate, NSWindowDelegate, NS
         progress.isHidden = deck.isLive
         updateStatusLine()
         if deck.isLive {
-            window.subtitle = deck.subtitle ?? ""
+            onTitleChange?()
             return
         }
         let total = deck.sections.count
         let done = deck.sections.filter { store.entries[$0.key]?.signed == true }.count
         progress.stringValue = "\(done) of \(total) signed off"
-        window.subtitle = [deck.subtitle, "\(done)/\(total) signed off"].compactMap { $0 }.joined(separator: " · ")
+        onTitleChange?()
     }
 
     /// Refreshes the live status line, including how long ago the file changed; ticks once a second.
@@ -770,7 +770,7 @@ final class DeckController: NSObject, WKNavigationDelegate, NSWindowDelegate, NS
 
     func tableViewSelectionDidChange(_ notification: Notification) {
         guard let section = selectedSection else { return }
-        UserDefaults.standard.set(section.key, forKey: selectionKey)
+        prefs.set(section.key, forKey: selectionKey)
         if let address = section.url, let url = URL(string: address) {
             textScroll.isHidden = true
             web.isHidden = false
@@ -813,55 +813,119 @@ func claudeSay(_ replyTo: String, _ message: String) -> String? {
     return nil
 }
 
-func showClaudeSayFailure(replyTo: String?, saved: String, detail: String, window: NSWindow) {
+func showClaudeSayFailure(replyTo: String?, saved: String, detail: String, window: NSWindow?) {
     let alert = NSAlert()
     alert.messageText = "Couldn't reach Claude session \(replyTo ?? "")"
     alert.informativeText = "\(saved) \(detail)"
-    alert.beginSheetModal(for: window)
+    presentAlert(alert, in: window)
 }
 
-/// The spaces on the switcher rail, top to bottom; the nth answers to ⌘n.
-enum Space: CaseIterable {
-    case decks, tutor
-
-    var name: String {
-        switch self {
-        case .decks: return "Decks"
-        case .tutor: return "Tutor"
-        }
+func presentAlert(_ alert: NSAlert, in window: NSWindow?) {
+    if let window {
+        alert.beginSheetModal(for: window)
+    } else {
+        alert.runModal()
     }
+}
+
+/// The workspaces on the rail, top to bottom; the nth answers to ⌘n. Nothing crosses between them except the rail's waiting badges.
+enum Workspace: String, CaseIterable {
+    case forest, review, learn, runs
+
+    var name: String { rawValue.capitalized }
 
     var symbol: String {
         switch self {
-        case .decks: return "rectangle.stack"
-        case .tutor: return "graduationcap"
+        case .forest: return "tree"
+        case .review: return "rectangle.stack"
+        case .learn: return "graduationcap"
+        case .runs: return "dot.radiowaves.left.and.right"
         }
     }
 
-    var key: String { "\((Space.allCases.firstIndex(of: self) ?? 0) + 1)" }
+    var key: String { "\((Workspace.allCases.firstIndex(of: self) ?? 0) + 1)" }
+
+    /// The quiet tint on the selected rail tile and the window subtitle; Runs turns Signal orange only while a run is going.
+    func tint(running: Bool = false) -> NSColor {
+        switch self {
+        case .forest: return forestTint
+        case .review: return .secondaryLabelColor
+        case .learn: return inkColor
+        case .runs: return running ? .systemOrange : .secondaryLabelColor
+        }
+    }
+
+    /// The workspace a file opens in: its `"workspace"` key when that names one, otherwise its `mode` (`kind` in older tutor files).
+    static func route(_ path: String) -> (workspace: Workspace, reason: String) {
+        struct Head: Decodable {
+            let workspace: String?
+            let mode: String?
+            let kind: String?
+        }
+        let head = try? JSONDecoder().decode(Head.self, from: Data(contentsOf: URL(fileURLWithPath: path)))
+        if let named = head?.workspace, let workspace = Workspace(rawValue: named.lowercased()) {
+            return (workspace, "\"workspace\": \"\(named)\"")
+        }
+        let mode = head?.mode ?? head?.kind
+        switch mode {
+        case "forest": return (.forest, "mode \"forest\"")
+        case "tutor": return (.learn, head?.mode == nil ? "kind \"tutor\"" : "mode \"tutor\"")
+        case "live": return (.runs, "mode \"live\"")
+        case let other?: return (.review, "mode \"\(other)\"")
+        case nil: return (.review, "no mode")
+        }
+    }
 }
 
-/// A rail icon; the selected space sits on a quiet rounded tile.
+let forestTint = NSColor(name: "show.forest") { appearance in
+    appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        ? NSColor(srgbRed: 0xA4 / 255, green: 0xBC / 255, blue: 0xAE / 255, alpha: 1)
+        : NSColor(srgbRed: 0x5A / 255, green: 0x75 / 255, blue: 0x66 / 255, alpha: 1)
+}
+
+/// A rail icon: the selected workspace sits on a tile in its tint, and a count of what's waiting there rides the corner.
 final class RailButton: NSButton {
-    var isSelectedSpace = false
+    var isSelectedWorkspace = false { didSet { needsDisplay = true } }
+    var tint: NSColor = .labelColor { didSet { needsDisplay = true } }
+    var badge = 0 { didSet { if badge != oldValue { needsDisplay = true } } }
 
     override func draw(_ dirtyRect: NSRect) {
-        if isSelectedSpace {
-            NSColor.labelColor.withAlphaComponent(0.1).setFill()
+        if isSelectedWorkspace {
+            let fill = tint == .secondaryLabelColor ? NSColor.labelColor.withAlphaComponent(0.1) : tint.withAlphaComponent(0.16)
+            fill.setFill()
             NSBezierPath(roundedRect: bounds, xRadius: 8, yRadius: 8).fill()
         }
         super.draw(dirtyRect)
+        guard badge > 0, !isSelectedWorkspace else { return }
+        let text = NSAttributedString(string: badge > 99 ? "99+" : "\(badge)", attributes: [
+            .font: NSFont.systemFont(ofSize: 9, weight: .semibold),
+            .foregroundColor: NSColor.windowBackgroundColor,
+        ])
+        let size = text.size()
+        let width = max(14, ceil(size.width) + 7)
+        let pill = NSRect(x: bounds.maxX - width + 2, y: isFlipped ? 0 : bounds.maxY - 14, width: width, height: 14)
+        NSColor.secondaryLabelColor.setFill()
+        NSBezierPath(roundedRect: pill, xRadius: 7, yRadius: 7).fill()
+        text.draw(at: NSPoint(x: pill.midX - size.width / 2, y: pill.midY - size.height / 2))
     }
 }
 
-/// Wraps a space's content with the Slack-style switcher rail; ⌘1 / ⌘2 do what its buttons do.
-final class SpaceContainer: NSViewController {
-    let space: Space
-    let content: NSViewController
+/// The one window's content: a title band across the top, the fixed rail, and every workspace's kept-alive view stacked in one slot.
+/// Switching shows one workspace's view and hides the rest; it never creates, orders or resizes a window.
+final class ShellController: NSViewController {
+    let workspaces: [Workspace: NSViewController]
+    private(set) var active: Workspace
+    let rail = NSVisualEffectView()
+    let titleLabel = NSTextField(labelWithString: "")
+    private var buttons: [Workspace: RailButton] = [:]
+    var onPick: ((Workspace) -> Void)?
+    var runsRunning = false {
+        didSet { if runsRunning != oldValue { refreshRail() } }
+    }
 
-    init(space: Space, content: NSViewController) {
-        self.space = space
-        self.content = content
+    init(workspaces: [Workspace: NSViewController], active: Workspace) {
+        self.workspaces = workspaces
+        self.active = active
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -869,59 +933,128 @@ final class SpaceContainer: NSViewController {
 
     override func loadView() {
         let root = NSView()
-        let rail = NSVisualEffectView()
+        let band = NSVisualEffectView()
+        band.material = .titlebar
+        band.blendingMode = .withinWindow
+        let bandEdge = NSBox()
+        bandEdge.boxType = .separator
         rail.material = .titlebar
         rail.blendingMode = .behindWindow
         let edge = NSBox()
         edge.boxType = .separator
-        let buttons = NSStackView(views: Space.allCases.map(button))
-        buttons.orientation = .vertical
-        buttons.spacing = 10
-        addChild(content)
-        for view in [rail, edge, buttons, content.view] {
+        let stack = NSStackView(views: Workspace.allCases.map(button))
+        stack.orientation = .vertical
+        stack.spacing = 10
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.alignment = .center
+        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let slot = NSView()
+        for view in [band, bandEdge, rail, edge, stack, slot, titleLabel] {
             view.translatesAutoresizingMaskIntoConstraints = false
         }
         root.addSubview(rail)
         root.addSubview(edge)
-        root.addSubview(content.view)
-        rail.addSubview(buttons)
+        root.addSubview(slot)
+        root.addSubview(band)
+        root.addSubview(bandEdge)
+        band.addSubview(titleLabel)
+        rail.addSubview(stack)
         NSLayoutConstraint.activate([
+            band.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            band.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            band.topAnchor.constraint(equalTo: root.topAnchor),
+            band.bottomAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor),
+            band.heightAnchor.constraint(greaterThanOrEqualToConstant: 28),
+            bandEdge.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            bandEdge.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            bandEdge.topAnchor.constraint(equalTo: band.bottomAnchor),
+            bandEdge.heightAnchor.constraint(equalToConstant: 1),
+            titleLabel.centerYAnchor.constraint(equalTo: band.centerYAnchor),
+            titleLabel.centerXAnchor.constraint(equalTo: band.centerXAnchor),
+            titleLabel.leadingAnchor.constraint(greaterThanOrEqualTo: band.leadingAnchor, constant: 84),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: band.trailingAnchor, constant: -16),
             rail.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            rail.topAnchor.constraint(equalTo: root.topAnchor),
+            rail.topAnchor.constraint(equalTo: bandEdge.bottomAnchor),
             rail.bottomAnchor.constraint(equalTo: root.bottomAnchor),
             rail.widthAnchor.constraint(equalToConstant: 44),
             edge.leadingAnchor.constraint(equalTo: rail.trailingAnchor),
-            edge.topAnchor.constraint(equalTo: root.topAnchor),
+            edge.topAnchor.constraint(equalTo: bandEdge.bottomAnchor),
             edge.bottomAnchor.constraint(equalTo: root.bottomAnchor),
             edge.widthAnchor.constraint(equalToConstant: 1),
-            buttons.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor, constant: 10),
-            buttons.centerXAnchor.constraint(equalTo: rail.centerXAnchor),
-            content.view.leadingAnchor.constraint(equalTo: edge.trailingAnchor),
-            content.view.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            content.view.topAnchor.constraint(equalTo: root.topAnchor),
-            content.view.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            stack.topAnchor.constraint(equalTo: rail.topAnchor, constant: 10),
+            stack.centerXAnchor.constraint(equalTo: rail.centerXAnchor),
+            slot.leadingAnchor.constraint(equalTo: edge.trailingAnchor),
+            slot.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            slot.topAnchor.constraint(equalTo: bandEdge.bottomAnchor),
+            slot.bottomAnchor.constraint(equalTo: root.bottomAnchor),
         ])
+        for workspace in Workspace.allCases {
+            guard let content = workspaces[workspace] else { continue }
+            addChild(content)
+            content.view.translatesAutoresizingMaskIntoConstraints = false
+            slot.addSubview(content.view)
+            NSLayoutConstraint.activate([
+                content.view.leadingAnchor.constraint(equalTo: slot.leadingAnchor),
+                content.view.trailingAnchor.constraint(equalTo: slot.trailingAnchor),
+                content.view.topAnchor.constraint(equalTo: slot.topAnchor),
+                content.view.bottomAnchor.constraint(equalTo: slot.bottomAnchor),
+            ])
+            content.view.isHidden = workspace != active
+        }
         view = root
+        refreshRail()
     }
 
-    private func button(_ target: Space) -> NSButton {
+    /// Swaps which workspace's view is visible. The views stay alive, so each keeps its scroll, selection and typed text.
+    func show(_ workspace: Workspace) {
+        active = workspace
+        for (each, content) in workspaces {
+            content.view.isHidden = each != workspace
+        }
+        refreshRail()
+    }
+
+    func setTitle(_ title: String, subtitle: String, running: Bool = false) {
+        let out = NSMutableAttributedString(string: title, attributes: [.font: NSFont.systemFont(ofSize: 13, weight: .semibold), .foregroundColor: NSColor.labelColor])
+        if !subtitle.isEmpty {
+            out.append(NSAttributedString(string: "   " + subtitle, attributes: [.font: NSFont.systemFont(ofSize: 12, weight: .medium), .foregroundColor: active.tint(running: running)]))
+        }
+        titleLabel.attributedStringValue = out
+    }
+
+    func setBadges(_ counts: [Workspace: Int]) {
+        for (workspace, button) in buttons {
+            button.badge = counts[workspace] ?? 0
+            button.toolTip = "\(workspace.name) ⌘\(workspace.key)" + (button.badge > 0 ? " · \(button.badge) waiting" : "")
+        }
+    }
+
+    private func refreshRail() {
+        for (workspace, button) in buttons {
+            let selected = workspace == active
+            button.isSelectedWorkspace = selected
+            let tint = workspace.tint(running: workspace == .runs && runsRunning)
+            button.tint = tint
+            button.contentTintColor = selected ? (tint == .secondaryLabelColor ? .labelColor : tint) : .secondaryLabelColor
+            button.setAccessibilityValue(selected ? "selected" : nil)
+        }
+    }
+
+    private func button(_ target: Workspace) -> NSButton {
         let image = NSImage(systemSymbolName: target.symbol, accessibilityDescription: target.name)?
             .withSymbolConfiguration(.init(pointSize: 15, weight: .regular)) ?? NSImage()
         let button = RailButton(image: image, target: self, action: #selector(pick))
-        button.tag = Space.allCases.firstIndex(of: target) ?? 0
+        button.tag = Workspace.allCases.firstIndex(of: target) ?? 0
         button.isBordered = false
         button.refusesFirstResponder = true
         button.toolTip = "\(target.name) ⌘\(target.key)"
-        let selected = target == space
-        button.isSelectedSpace = selected
-        button.contentTintColor = selected ? .labelColor : .secondaryLabelColor
-        button.setAccessibilityValue(selected ? "selected" : nil)
+        buttons[target] = button
         NSLayoutConstraint.activate([button.widthAnchor.constraint(equalToConstant: 34), button.heightAnchor.constraint(equalToConstant: 34)])
         return button
     }
 
     @objc private func pick(_ sender: NSButton) {
-        (NSApp.delegate as? AppDelegate)?.switchSpace(Space.allCases[sender.tag], from: view.window)
+        onPick?(Workspace.allCases[sender.tag])
     }
 }
 
@@ -1352,6 +1485,29 @@ extension Renderer {
     }
 }
 
+/// The page color behind an empty state, redrawn in whichever appearance is current.
+final class PageBackdrop: NSView {
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.textBackgroundColor.setFill()
+        bounds.intersection(dirtyRect).fill()
+    }
+}
+
+/// The quiet gray a list column sits on, behind its content.
+final class ListBackdrop: NSView {
+    init(_ content: NSView) {
+        super.init(frame: .zero)
+        pinned(content, in: self)
+    }
+
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.windowBackgroundColor.setFill()
+        bounds.intersection(dirtyRect).fill()
+    }
+}
+
 final class FlippedView: NSView {
     override var isFlipped: Bool { true }
 }
@@ -1520,8 +1676,8 @@ final class RailRow: NSView {
     }
 }
 
-/// The Tutor space: one session as a worksheet — rungs oldest first, the current rung's fields answered in place.
-final class TutorController: NSObject, NSWindowDelegate, NSTextViewDelegate {
+/// The Learn workspace's document: one session as a worksheet — rungs oldest first, the current rung's fields answered in place.
+final class TutorController: NSObject, NSTextViewDelegate {
     static let column: CGFloat = 580
     static let margin: CGFloat = 64
     var path: String?
@@ -1534,9 +1690,11 @@ final class TutorController: NSObject, NSWindowDelegate, NSTextViewDelegate {
     var hasRendered = false
     var stamp = ""
     var timer: Timer?
-    var onClose: (() -> Void)?
     let renderer = Renderer()
-    let window: NSWindow
+    let viewController = NSSplitViewController()
+    var title = "Show"
+    var subtitle = ""
+    var onTitleChange: (() -> Void)?
     let sidebarScroll = NSTextView.scrollableTextView()
     let scroll = NSScrollView()
     let document = FlippedView()
@@ -1551,18 +1709,11 @@ final class TutorController: NSObject, NSWindowDelegate, NSTextViewDelegate {
     var agent: TutorAgent?
 
     var sidebar: NSTextView { sidebarScroll.documentView as! NSTextView }
+    var window: NSWindow? { viewController.view.window }
     var currentRungID: String? { session.flatMap { currentRung($0, answers)?.id } }
 
     override init() {
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1180, height: 780),
-                          styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
-                          backing: .buffered, defer: false)
         super.init()
-        window.isReleasedWhenClosed = false
-        window.tabbingMode = .disallowed
-        window.delegate = self
-        window.title = "Tutor"
-        window.contentMinSize = NSSize(width: 64 + 240 + Self.margin + Self.column + 48, height: 480)
 
         sidebar.isEditable = false
         sidebar.drawsBackground = false
@@ -1620,22 +1771,23 @@ final class TutorController: NSObject, NSWindowDelegate, NSTextViewDelegate {
         let detailVC = NSViewController()
         detailVC.view = detail
 
-        let split = NSSplitViewController()
         let sidebarItem = NSSplitViewItem(viewController: sidebarVC)
-        sidebarItem.minimumThickness = 240
+        sidebarItem.minimumThickness = 200
         sidebarItem.maximumThickness = 340
-        split.addSplitViewItem(sidebarItem)
-        split.addSplitViewItem(NSSplitViewItem(viewController: detailVC))
-        window.contentViewController = SpaceContainer(space: .tutor, content: split)
-        window.setContentSize(NSSize(width: 1180, height: 780))
+        sidebarItem.preferredThicknessFraction = 0.24
+        viewController.addSplitViewItem(sidebarItem)
+        let detailItem = NSSplitViewItem(viewController: detailVC)
+        detailItem.minimumThickness = Self.margin + Self.column + 48
+        viewController.addSplitViewItem(detailItem)
     }
 
     func show(path: String) {
         if path != self.path {
+            saveDrafts()
             self.path = path
-            drafts = UserDefaults.standard.dictionary(forKey: "tutor.drafts." + path) as? [String: [String: String]] ?? [:]
-            confidence = UserDefaults.standard.dictionary(forKey: "tutor.confidence." + path) as? [String: Int] ?? [:]
-            composer.string = UserDefaults.standard.string(forKey: "tutor.composer." + path) ?? ""
+            drafts = prefs.dictionary(forKey: "tutor.drafts." + path) as? [String: [String: String]] ?? [:]
+            confidence = prefs.dictionary(forKey: "tutor.confidence." + path) as? [String: Int] ?? [:]
+            composer.string = prefs.string(forKey: "tutor.composer." + path) ?? ""
             composer.didChangeText()
             agent?.onChange = nil
             agent = TutorAgent.agent(for: path)
@@ -1652,12 +1804,17 @@ final class TutorController: NSObject, NSWindowDelegate, NSTextViewDelegate {
         }
     }
 
-    func showEmpty() {
+    func showEmpty(_ message: String = "No tutor sessions in `~/.dotfiles/show/tutor` yet. Claude starts one with `show --tutor <file>`.") {
+        saveDrafts()
+        timer?.invalidate()
         path = nil
         session = nil
         rebuild()
-        column.addArrangedSubview(tutorText(renderer.tutorMarkdown("No tutor sessions in `~/.dotfiles/show/tutor` yet. Claude starts one with `show --tutor <file>`."), width: Self.column))
-        sidebar.textStorage?.setAttributedString(NSAttributedString(string: "Tutor", attributes: [.font: NSFont.systemFont(ofSize: 17, weight: .bold), .foregroundColor: NSColor.labelColor]))
+        column.addArrangedSubview(tutorText(renderer.tutorMarkdown(message), width: Self.column))
+        sidebar.textStorage?.setAttributedString(NSAttributedString(string: "Learn", attributes: [.font: NSFont.systemFont(ofSize: 17, weight: .bold), .foregroundColor: NSColor.labelColor]))
+        title = "Show"
+        subtitle = ""
+        onTitleChange?()
     }
 
     /// Re-reads the session and its answers; keeps drafts, focus and scroll unless a new rung became current.
@@ -1679,7 +1836,7 @@ final class TutorController: NSObject, NSWindowDelegate, NSTextViewDelegate {
         answers = sidecar.answers
         let current = currentRung(fresh, answers)?.id
         let moved = !hasRendered || current != lastCurrent
-        let focusedField = window.firstResponder as? AnswerField
+        let focusedField = window?.firstResponder as? AnswerField
         let focused = focusedField?.partID
         let cursor = focusedField?.selectedRange()
         let origin = scroll.contentView.bounds.origin
@@ -1692,7 +1849,7 @@ final class TutorController: NSObject, NSWindowDelegate, NSTextViewDelegate {
             scroll.reflectScrolledClipView(scroll.contentView)
         }
         if !moved, let focused, let field = fields.first(where: { $0.partID == focused }) {
-            window.makeFirstResponder(field)
+            window?.makeFirstResponder(field)
             if let cursor, NSMaxRange(cursor) <= (field.string as NSString).length {
                 field.setSelectedRange(cursor)
             }
@@ -1706,14 +1863,14 @@ final class TutorController: NSObject, NSWindowDelegate, NSTextViewDelegate {
     /// Keeps unsent answers across a relaunch into a new build; the answers sidecar only ever holds sent ones.
     func saveDrafts() {
         guard let path else { return }
-        UserDefaults.standard.set(drafts, forKey: "tutor.drafts." + path)
-        UserDefaults.standard.set(confidence, forKey: "tutor.confidence." + path)
-        UserDefaults.standard.set(composer.string, forKey: "tutor.composer." + path)
+        prefs.set(drafts, forKey: "tutor.drafts." + path)
+        prefs.set(confidence, forKey: "tutor.confidence." + path)
+        prefs.set(composer.string, forKey: "tutor.composer." + path)
     }
 
     func focusFirstField() {
         if let field = fields.first(where: { $0.string.isEmpty }) ?? fields.first {
-            window.makeFirstResponder(field)
+            window?.makeFirstResponder(field)
         }
     }
 
@@ -1732,8 +1889,9 @@ final class TutorController: NSObject, NSWindowDelegate, NSTextViewDelegate {
         focusRungView = nil
         guard let session else { return }
         renderSidebar(session)
-        window.title = session.title
-        window.subtitle = "Tutor · \(session.rungs.filter { answers[$0.id] != nil }.count) of \(session.rungs.count) answered"
+        title = session.title
+        subtitle = "\(session.rungs.filter { answers[$0.id] != nil }.count) of \(session.rungs.count) answered"
+        onTitleChange?()
         let current = currentRung(session, answers)
         let focusID = current?.id ?? session.rungs.last?.id
         var fresh: [NSView] = []
@@ -1882,7 +2040,7 @@ final class TutorController: NSObject, NSWindowDelegate, NSTextViewDelegate {
 
     /// ⌘↩: send the composer when it has focus, otherwise the current rung.
     func sendFocused() {
-        if window.firstResponder === composer {
+        if window?.firstResponder === composer {
             sendMessage()
         } else if currentRungID != nil {
             sendAnswer()
@@ -1908,7 +2066,7 @@ final class TutorController: NSObject, NSWindowDelegate, NSTextViewDelegate {
             let alert = NSAlert()
             alert.messageText = "Couldn't save your message"
             alert.informativeText = "\(error)"
-            alert.beginSheetModal(for: window)
+            presentAlert(alert, in: window)
             return
         }
         composer.string = ""
@@ -2110,7 +2268,7 @@ final class TutorController: NSObject, NSWindowDelegate, NSTextViewDelegate {
             let alert = NSAlert()
             alert.messageText = "Couldn't save your answer"
             alert.informativeText = "\(error)"
-            alert.beginSheetModal(for: window)
+            presentAlert(alert, in: window)
             return
         }
         drafts[rung.id] = nil
@@ -2133,42 +2291,28 @@ final class TutorController: NSObject, NSWindowDelegate, NSTextViewDelegate {
 
     func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
         if textView === composer, commandSelector == #selector(NSResponder.insertBacktab(_:)), let last = fields.last {
-            window.makeFirstResponder(last)
+            window?.makeFirstResponder(last)
             return true
         }
         guard let index = fields.firstIndex(where: { $0 === textView }), fields.count > 0 else { return false }
         switch commandSelector {
         case #selector(NSResponder.insertTab(_:)):
-            window.makeFirstResponder(fields[(index + 1) % fields.count])
+            window?.makeFirstResponder(fields[(index + 1) % fields.count])
             return true
         case #selector(NSResponder.insertBacktab(_:)):
-            window.makeFirstResponder(fields[(index + fields.count - 1) % fields.count])
+            window?.makeFirstResponder(fields[(index + fields.count - 1) % fields.count])
             return true
         default:
             return false
         }
     }
 
-    func windowWillClose(_ notification: Notification) {
+    /// Writes the whole worksheet column, which runs taller than the window, to `file`.
+    func snapshotWorksheet(to file: String) {
         timer?.invalidate()
-        onClose?()
-    }
-
-    func snapshot(to output: String) {
-        timer?.invalidate()
-        guard let view = window.contentView else { return }
-        window.appearance = NSAppearance(named: .aqua)
-        window.layoutIfNeeded()
-        view.layoutSubtreeIfNeeded()
         scroll.contentView.scroll(to: .zero)
-        let worksheet = (output as NSString).deletingPathExtension + "-worksheet.png"
-        window.effectiveAppearance.performAsCurrentDrawingAppearance {
-            for (target, file) in [(view, output), (document as NSView, worksheet)] {
-                guard let rep = target.bitmapImageRepForCachingDisplay(in: target.bounds) else { continue }
-                target.cacheDisplay(in: target.bounds, to: rep)
-                try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: file))
-            }
-        }
+        document.layoutSubtreeIfNeeded()
+        writePNG(document, to: file)
     }
 }
 
@@ -2258,62 +2402,475 @@ func tutorCheck(_ raw: String) -> Int32 {
     }
 }
 
-/// One Show process for every deck: `show <deck>` hands the file to the running app, which opens it as a tab or brings its tab forward.
-final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemValidation {
-    var open: [String: DeckController] = [:]
-    var tutor: TutorController?
-    weak var lastDeckWindow: NSWindow?
+/// What a document on the shelf wants from you.
+enum ShelfState: Int {
+    case waiting, running, done
+}
+
+/// One document as the library sees it: where it lives, which workspace owns it, and whether it waits on you.
+struct ShelfEntry {
+    let path: String
+    let workspace: Workspace
+    let title: String
+    let state: ShelfState
+    let progress: String
+    let touched: Date
+}
+
+func sidecarPaths(_ path: String) -> [String] {
+    let stem = (path as NSString).deletingPathExtension
+    return [stem + ".signoff.json", stem + ".answers.json"]
+}
+
+/// The newest of the file, its sidecars, and when Show last opened it.
+func touchedDate(_ path: String) -> Date {
+    let opened = prefs.object(forKey: "opened." + path) as? Date
+    return ([path] + sidecarPaths(path)).compactMap(modificationDate).reduce(opened ?? .distantPast) { max($0, $1) }
+}
+
+/// Every document Show can open, from `~/.dotfiles/show` and its `tutor/` folder, sidecars left out.
+func libraryPaths() -> [String] {
+    [decksDirectory, tutorDirectory].flatMap { directory in
+        ((try? FileManager.default.contentsOfDirectory(atPath: directory)) ?? [])
+            .filter { $0.hasSuffix(".json") && !$0.hasSuffix(".signoff.json") && !$0.hasSuffix(".answers.json") }
+            .map { (directory as NSString).appendingPathComponent($0) }
+    }
+}
+
+/// A cheap fingerprint of the library folders: changes when any document or sidecar is added, removed or rewritten.
+func librarySignature() -> String {
+    [decksDirectory, tutorDirectory].map { directory in
+        ((try? FileManager.default.contentsOfDirectory(atPath: directory)) ?? []).sorted().map { name in
+            "\(name):\(fileStamp((directory as NSString).appendingPathComponent(name)))"
+        }.joined(separator: "|")
+    }.joined(separator: "#")
+}
+
+func shelfEntry(_ path: String) -> ShelfEntry? {
+    let workspace = Workspace.route(path).workspace
+    let touched = touchedDate(path)
+    switch workspace {
+    case .learn:
+        guard let session = try? loadTutorSession(path) else { return nil }
+        let answers = loadAnswers(path)
+        let answered = session.rungs.filter { answers[$0.id] != nil }.count
+        let waiting = currentRung(session, answers) != nil
+        let progress = "\(answered) of \(session.rungs.count) answered" + (waiting ? "" : " · Claude's turn")
+        return ShelfEntry(path: path, workspace: workspace, title: session.title, state: waiting ? .waiting : .done, progress: progress, touched: touched)
+    case .runs:
+        struct Live: Decodable {
+            struct Status: Decodable {
+                let done: Int?
+                let total: Int?
+                let state: String?
+            }
+            let title: String
+            let status: Status?
+        }
+        guard let live = try? JSONDecoder().decode(Live.self, from: Data(contentsOf: URL(fileURLWithPath: path))) else { return nil }
+        let state: ShelfState
+        switch live.status?.state {
+        case "running": state = .running
+        case "done", "failed": state = .done
+        default: state = .waiting
+        }
+        let counts = live.status.flatMap { status in status.done.flatMap { done in status.total.map { "\(done) of \($0)" } } }
+        let progress = [counts, live.status?.state].compactMap { $0 }.joined(separator: " · ")
+        return ShelfEntry(path: path, workspace: workspace, title: live.title, state: state, progress: progress, touched: touched)
+    case .forest, .review:
+        guard let deck = try? loadDeck(path) else { return nil }
+        let store = SignOffStore(deckPath: path)
+        let done = deck.sections.filter { store.entries[$0.key]?.signed == true }.count
+        return ShelfEntry(path: path, workspace: workspace, title: deck.title, state: done < deck.sections.count ? .waiting : .done,
+                          progress: "\(done) of \(deck.sections.count) signed", touched: touched)
+    }
+}
+
+func scanLibrary() -> [ShelfEntry] {
+    libraryPaths().compactMap(shelfEntry).sorted { $0.touched > $1.touched }
+}
+
+func pinned(_ view: NSView, in host: NSView) {
+    view.translatesAutoresizingMaskIntoConstraints = false
+    host.addSubview(view)
+    NSLayoutConstraint.activate([
+        view.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+        view.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+        view.topAnchor.constraint(equalTo: host.topAnchor),
+        view.bottomAnchor.constraint(equalTo: host.bottomAnchor),
+    ])
+}
+
+/// A centered, quiet message for a workspace with nothing open.
+func emptyState(_ headline: String, _ detail: String) -> NSView {
+    let title = NSTextField(labelWithString: headline)
+    title.font = .systemFont(ofSize: 17, weight: .semibold)
+    title.textColor = .secondaryLabelColor
+    let body = NSTextField(wrappingLabelWithString: detail)
+    body.font = .systemFont(ofSize: 13)
+    body.textColor = .tertiaryLabelColor
+    body.alignment = .center
+    body.preferredMaxLayoutWidth = 360
+    let stack = NSStackView(views: [title, body])
+    stack.orientation = .vertical
+    stack.spacing = 8
+    let view = PageBackdrop()
+    stack.translatesAutoresizingMaskIntoConstraints = false
+    view.addSubview(stack)
+    NSLayoutConstraint.activate([
+        stack.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+        stack.centerYAnchor.constraint(equalTo: view.centerYAnchor, constant: -40),
+        stack.widthAnchor.constraint(lessThanOrEqualToConstant: 380),
+    ])
+    return view
+}
+
+/// One workspace: its own open document, typed text and focus, kept alive while another workspace is in front.
+final class WorkspaceController: NSViewController {
+    let workspace: Workspace
+    private(set) var current: String?
+    private(set) var decks: [String: DeckController] = [:]
+    let tutor: TutorController?
+    let host = NSView()
+    var onTitleChange: (() -> Void)?
+    private weak var savedResponder: NSResponder?
+    private var savedRange: NSRange?
+
+    init(workspace: Workspace) {
+        self.workspace = workspace
+        tutor = workspace == .learn ? TutorController() : nil
+        super.init(nibName: nil, bundle: nil)
+        tutor?.onTitleChange = { [weak self] in self?.onTitleChange?() }
+    }
+
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    override func loadView() {
+        view = host
+        if let tutor {
+            addChild(tutor.viewController)
+            pinned(tutor.viewController.view, in: host)
+        }
+        if current == nil {
+            showNothing()
+        }
+    }
+
+    var currentDeck: DeckController? { current.flatMap { decks[$0] } }
+
+    var documentTitle: String {
+        if let tutor { return tutor.title }
+        return currentDeck?.title ?? "Show"
+    }
+
+    var subtitle: String {
+        if let tutor { return tutor.subtitle }
+        return currentDeck?.subtitle ?? ""
+    }
+
+    /// Opens `path` here, or reloads it when it's already the open document.
+    func open(_ path: String) {
+        _ = view
+        prefs.set(Date(), forKey: "opened." + path)
+        if path == current {
+            reload()
+            return
+        }
+        currentDeck?.saveNote()
+        current = path
+        prefs.set(path, forKey: "workspace.\(workspace.rawValue).open")
+        switch workspace {
+        case .learn:
+            tutor?.show(path: path)
+        case .forest, .review, .runs:
+            let controller: DeckController
+            if let existing = decks[path] {
+                controller = existing
+                controller.reloadIfChanged()
+            } else {
+                guard let deck = loadOrComplain(path) else {
+                    current = nil
+                    showNothing()
+                    return
+                }
+                controller = DeckController(path: path, deck: deck)
+                controller.onTitleChange = { [weak self, weak controller] in
+                    guard let self, let controller, self.currentDeck === controller else { return }
+                    self.onTitleChange?()
+                }
+                decks[path] = controller
+            }
+            display(controller.viewController)
+            controller.window?.makeFirstResponder(controller.table)
+        }
+        onTitleChange?()
+    }
+
+    private func loadOrComplain(_ path: String) -> Deck? {
+        do {
+            return try loadDeck(path)
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "Can't open \((path as NSString).lastPathComponent)"
+            alert.informativeText = "\(error)"
+            presentAlert(alert, in: view.window)
+            return nil
+        }
+    }
+
+    /// Closes the open document, leaving the workspace's empty state.
+    func close() {
+        current = nil
+        prefs.removeObject(forKey: "workspace.\(workspace.rawValue).open")
+        showNothing()
+        onTitleChange?()
+    }
+
+    func showNothing() {
+        switch workspace {
+        case .learn:
+            tutor?.showEmpty(libraryPaths().contains(where: isTutorFile)
+                ? "Nothing open. Pick a session from the Tutor menu, or Claude opens one with `show --tutor <file>`."
+                : "No tutor sessions in `~/.dotfiles/show/tutor` yet. Claude starts one with `show --tutor <file>`.")
+        case .runs:
+            display(emptyState("No live runs yet", "A live run shows here while it's going."))
+        case .forest:
+            display(emptyState("No forest open", "Claude opens a project's branches here with `show <deck>`."))
+        case .review:
+            display(emptyState("Nothing to review", "Claude opens a deck here with `show <deck>`."))
+        }
+    }
+
+    private func display(_ content: NSViewController) {
+        children.filter { $0 !== content && $0 !== tutor?.viewController }.forEach { $0.removeFromParent() }
+        if content.parent !== self { addChild(content) }
+        display(content.view)
+    }
+
+    private func display(_ content: NSView) {
+        guard workspace != .learn else { return }
+        host.subviews.filter { $0 !== content }.forEach { $0.removeFromSuperview() }
+        if content.superview !== host {
+            pinned(content, in: host)
+        }
+    }
+
+    func reload() {
+        if let tutor {
+            tutor.reload()
+        } else {
+            currentDeck?.reload()
+        }
+    }
+
+    /// The file watcher's tick: decks reload when their file changed (Learn's tutor watches its own file), and live status lines age.
+    func reloadChanged() {
+        decks.values.forEach { $0.reloadIfChanged() }
+        decks.values.filter(\.deck.isLive).forEach { $0.updateStatusLine() }
+    }
+
+    /// Whether the open document is a live run that's going, which turns the Runs tint orange.
+    var isRunning: Bool {
+        guard let deck = currentDeck?.deck else { return false }
+        return deck.isLive && deck.status?.state == "running"
+    }
+
+    func saveState() {
+        decks.values.forEach { $0.saveNote() }
+        tutor?.saveDrafts()
+    }
+
+    /// Remembers which field had focus (and where its cursor was) before another workspace comes forward.
+    func rememberFocus(in window: NSWindow) {
+        saveState()
+        savedResponder = nil
+        savedRange = nil
+        var responder = window.firstResponder
+        if let editor = responder as? NSTextView, editor.isFieldEditor, let field = editor.delegate as? NSTextField {
+            savedRange = editor.selectedRange()
+            responder = field
+        } else if let textView = responder as? NSTextView {
+            savedRange = textView.selectedRange()
+        }
+        if let responderView = responder as? NSView, responderView.isDescendant(of: view) {
+            savedResponder = responderView
+        }
+    }
+
+    func restoreFocus(in window: NSWindow) {
+        guard let responder = savedResponder as? NSView, responder.window === window, !responder.isHiddenOrHasHiddenAncestor else {
+            if let tutor {
+                tutor.focusFirstField()
+            } else if let deck = currentDeck {
+                window.makeFirstResponder(deck.table)
+            }
+            return
+        }
+        window.makeFirstResponder(responder)
+        if let range = savedRange {
+            if let field = responder as? NSTextField, let editor = field.currentEditor() {
+                editor.selectedRange = NSRange(location: min(range.location, (editor.string as NSString).length), length: 0)
+            } else if let textView = responder as? NSTextView, NSMaxRange(range) <= (textView.string as NSString).length {
+                textView.setSelectedRange(range)
+            }
+        }
+    }
+}
+
+/// Writes a view as drawn into a PNG, in the light appearance.
+func writePNG(_ view: NSView, to file: String) {
+    NSAppearance(named: .aqua)?.performAsCurrentDrawingAppearance {
+        guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
+        view.cacheDisplay(in: view.bounds, to: rep)
+        try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: file))
+    }
+}
+
+/// The whole window as drawn, with each visible list painted over its slot: an ancestor's capture leaves table rows out.
+func writeComposite(_ root: NSView, to file: String) {
+    NSAppearance(named: .aqua)?.performAsCurrentDrawingAppearance {
+        guard let rep = root.bitmapImageRepForCachingDisplay(in: root.bounds) else { return }
+        root.cacheDisplay(in: root.bounds, to: rep)
+        func tables(in view: NSView) -> [NSTableView] {
+            view.subviews.flatMap { sub -> [NSTableView] in
+                if let table = sub as? NSTableView { return [table] }
+                return tables(in: sub)
+            }
+        }
+        guard let canvas = root.bitmapImageRepForCachingDisplay(in: root.bounds) else { return }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: canvas)
+        NSColor.windowBackgroundColor.setFill()
+        root.bounds.fill()
+        rep.draw(in: root.bounds, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: false, hints: nil)
+        for table in tables(in: root) where !table.isHiddenOrHasHiddenAncestor {
+            let visible = table.visibleRect
+            let pixels = CGFloat(canvas.pixelsWide) / max(root.bounds.width, 1)
+            guard visible.width > 0, visible.height > 0,
+                  let part = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(visible.width * pixels), pixelsHigh: Int(visible.height * pixels),
+                                              bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                              colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0) else { continue }
+            part.size = visible.size
+            table.cacheDisplay(in: visible, to: part)
+            let slot = table.convert(visible, to: root)
+            part.draw(in: slot, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: false, hints: nil)
+        }
+        NSGraphicsContext.restoreGraphicsState()
+        try? canvas.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: file))
+    }
+}
+
+/// One Show process and one window: `show <file>` hands the file to the running app, which switches to its workspace and opens it there.
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemValidation, NSWindowDelegate {
+    var window: NSWindow!
+    var shell: ShellController!
+    var workspaces: [Workspace: WorkspaceController] = [:]
     let decksMenu = NSMenu(title: "Decks")
     let tutorSessionsMenu = NSMenu(title: "Sessions")
     let launchPaths: [String]
-
-    init(launchPaths: [String]) {
-        self.launchPaths = launchPaths
-    }
-
+    let snapshotPath: String?
     var watcher: Timer?
+    var signature = ""
     let launchedBuild = modificationDate(buildStamp)
 
+    init(launchPaths: [String], snapshotPath: String? = nil) {
+        self.launchPaths = launchPaths
+        self.snapshotPath = snapshotPath
+    }
+
+    var active: Workspace { shell.active }
+    var tutor: TutorController? { workspaces[.learn]?.tutor }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
-        buildMenu()
-        NotificationCenter.default.addObserver(forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main) { [weak self] note in
-            guard let self, let window = note.object as? NSWindow, self.open.values.contains(where: { $0.window === window }) else { return }
-            self.lastDeckWindow = window
+        let start = prefs.string(forKey: "workspace.active").flatMap(Workspace.init(rawValue:)) ?? .review
+        for workspace in Workspace.allCases {
+            let controller = WorkspaceController(workspace: workspace)
+            controller.onTitleChange = { [weak self] in
+                guard let self, self.shell != nil, self.active == workspace else { return }
+                self.updateTitle()
+            }
+            workspaces[workspace] = controller
         }
+        shell = ShellController(workspaces: workspaces, active: start)
+        shell.onPick = { [weak self] in self?.switchTo($0) }
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1180, height: 780),
+                          styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+                          backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.tabbingMode = .disallowed
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        window.delegate = self
+        window.contentViewController = shell
+        window.setContentSize(NSSize(width: 1180, height: 780))
+        window.contentMinSize = NSSize(width: 45 + 200 + TutorController.margin + TutorController.column + 48, height: 480)
+        if snapshotPath == nil {
+            window.center()
+            window.setFrameAutosaveName("show.window")
+        }
+        restore()
+        updateTitle()
         launchPaths.forEach(openPath)
+        if let snapshotPath {
+            snapshot(to: snapshotPath)
+            NSApp.terminate(nil)
+            return
+        }
+        buildMenu()
+        window.makeKeyAndOrderFront(nil)
+        workspaces[active]?.restoreFocus(in: window)
         NSApp.activate(ignoringOtherApps: true)
+        refreshBadges()
         watcher = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.stayCurrent() }
     }
 
-    /// Reloads decks edited on disk, and relaunches into a newer build once the launcher finishes one.
-    private func stayCurrent() {
-        for controller in open.values where modificationDate(controller.path) != controller.deckModified {
-            controller.reload()
+    /// Reopens each workspace's last document, so a relaunch into a new build comes back where it was.
+    private func restore() {
+        for (workspace, controller) in workspaces {
+            if let path = prefs.string(forKey: "workspace.\(workspace.rawValue).open"), FileManager.default.fileExists(atPath: path),
+               Workspace.route(path).workspace == workspace {
+                controller.open(path)
+            } else {
+                _ = controller.view
+            }
         }
-        open.values.filter(\.deck.isLive).forEach { $0.updateStatusLine() }
+    }
+
+    /// Reloads documents edited on disk, refreshes the rail's waiting badges, and relaunches into a newer build once the launcher finishes one.
+    private func stayCurrent() {
+        workspaces.values.forEach { $0.reloadChanged() }
+        shell.runsRunning = workspaces[.runs]?.isRunning ?? false
+        refreshBadges()
         if let built = modificationDate(buildStamp), built != launchedBuild {
             relaunch()
         }
     }
 
+    func refreshBadges(force: Bool = false) {
+        let fresh = librarySignature()
+        guard force || fresh != signature else { return }
+        signature = fresh
+        let entries = scanLibrary()
+        var counts: [Workspace: Int] = [:]
+        for entry in entries where entry.state == .waiting {
+            counts[entry.workspace, default: 0] += 1
+        }
+        shell.setBadges(counts)
+    }
+
     private func relaunch() {
         watcher?.invalidate()
-        let tabs = (NSApp.keyWindow?.tabbedWindows ?? NSApp.orderedWindows).compactMap { window in
-            open.values.first { $0.window === window }
-        }
-        let ordered = tabs + open.values.filter { controller in !tabs.contains { $0 === controller } }
-        ordered.forEach { $0.saveNote() }
-        let key = open.values.first { $0.window.isKeyWindow }?.path
-        var paths = ordered.map(\.path).filter { $0 != key } + [key].compactMap { $0 }
-        if let tutor, let session = tutor.path {
-            tutor.saveDrafts()
-            paths.insert(session, at: tutor.window.isKeyWindow ? paths.count : 0)
-        }
+        saveAll()
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
-        process.arguments = ["-c", "sleep 0.7; open -a \"$0\" \"$@\"", Bundle.main.bundlePath] + paths
+        process.arguments = ["-c", "sleep 0.7; open -a \"$0\"", Bundle.main.bundlePath]
         try? process.run()
         NSApp.terminate(nil)
+    }
+
+    private func saveAll() {
+        workspaces.values.forEach { $0.saveState() }
+        prefs.set(active.rawValue, forKey: "workspace.active")
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
@@ -2322,79 +2879,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        open.values.forEach { $0.saveNote() }
+        if snapshotPath == nil {
+            saveAll()
+        }
     }
 
-    /// Tutor sessions open in the Tutor space; everything else is a deck.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+
+    /// Switches to the file's workspace and opens it there.
     func openPath(_ rawPath: String) {
         let path = URL(fileURLWithPath: (rawPath as NSString).expandingTildeInPath).standardizedFileURL.path
-        if isTutorFile(path) {
-            openTutor(path, from: NSApp.keyWindow)
-        } else {
-            openDeck(path)
-        }
+        let workspace = Workspace.route(path).workspace
+        switchTo(workspace)
+        workspaces[workspace]?.open(path)
+        refreshBadges(force: true)
+        window.makeKeyAndOrderFront(nil)
     }
 
-    func openTutor(_ path: String?, from source: NSWindow?) {
-        let controller: TutorController
-        if let tutor {
-            controller = tutor
-        } else {
-            controller = TutorController()
-            controller.onClose = { [weak self] in self?.tutor = nil }
-            controller.window.center()
-            tutor = controller
-        }
-        match(controller.window, to: source)
-        if let path {
-            controller.show(path: path)
-        } else if controller.path == nil {
-            if let newest = newestJSON(in: tutorDirectory, where: isTutorFile).first {
-                controller.show(path: newest)
-            } else {
-                controller.showEmpty()
-            }
-        }
-        controller.window.makeKeyAndOrderFront(nil)
-        controller.focusFirstField()
+    /// Brings a workspace forward in the same window: its view swaps in, nothing else moves.
+    func switchTo(_ workspace: Workspace) {
+        guard workspace != active else { return }
+        workspaces[active]?.rememberFocus(in: window)
+        shell.show(workspace)
+        prefs.set(workspace.rawValue, forKey: "workspace.active")
+        updateTitle()
+        workspaces[workspace]?.restoreFocus(in: window)
     }
 
-    func switchSpace(_ space: Space, from source: NSWindow?) {
-        switch space {
-        case .tutor:
-            openTutor(nil, from: source)
-        case .decks:
-            let remembered = lastDeckWindow.flatMap { window in open.values.contains { $0.window === window } ? window : nil }
-            if let window = remembered ?? open.values.first?.window {
-                match(window, to: source)
-                window.makeKeyAndOrderFront(nil)
-            } else if let newest = newestJSON(in: decksDirectory, where: { (try? loadDeck($0)) != nil }).first {
-                openDeck(newest)
-                if let window = open.values.first?.window {
-                    match(window, to: source)
-                }
-            } else {
-                NSSound.beep()
-            }
-        }
+    func updateTitle() {
+        guard let controller = workspaces[active] else { return }
+        let detail = controller.current == nil ? "" : controller.subtitle
+        shell.runsRunning = workspaces[.runs]?.isRunning ?? false
+        shell.setTitle(controller.documentTitle, subtitle: [active.name, detail].filter { !$0.isEmpty }.joined(separator: " · "), running: controller.isRunning)
+        window.title = controller.documentTitle
     }
 
-    private func match(_ window: NSWindow, to source: NSWindow?) {
-        guard let source, source !== window, source.isVisible else { return }
-        window.setFrame(source.frame, display: true)
-    }
-
-    @objc func showSpace(_ sender: NSMenuItem) {
-        switchSpace(Space.allCases[sender.tag], from: NSApp.keyWindow)
+    @objc func showWorkspace(_ sender: NSMenuItem) {
+        switchTo(Workspace.allCases[sender.tag])
     }
 
     @objc func pickConfidence(_ sender: NSMenuItem) {
         tutor?.choose(confidence: sender.tag)
     }
 
-    @objc func openListedTutor(_ sender: NSMenuItem) {
+    @objc func openListed(_ sender: NSMenuItem) {
         guard let path = sender.representedObject as? String else { return }
-        openTutor(path, from: NSApp.keyWindow)
+        openPath(path)
     }
 
     @objc func sendTutor(_ sender: Any?) {
@@ -2403,47 +2933,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         if menuItem.action == #selector(sendTutor) {
-            return tutor?.window.isKeyWindow == true
+            return active == .learn
         }
-        guard menuItem.action == #selector(pickConfidence) else { return true }
-        return tutor?.window.isKeyWindow == true && tutor?.currentRungID != nil
-    }
-
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
-
-    func openDeck(_ rawPath: String) {
-        let path = URL(fileURLWithPath: (rawPath as NSString).expandingTildeInPath).standardizedFileURL.path
-        if let existing = open[path] {
-            existing.reload()
-            existing.window.makeKeyAndOrderFront(nil)
-            return
+        if menuItem.action == #selector(pickConfidence) {
+            return active == .learn && tutor?.currentRungID != nil
         }
-        let deck: Deck
-        do {
-            deck = try loadDeck(path)
-        } catch {
-            let alert = NSAlert()
-            alert.messageText = "Can't open \((path as NSString).lastPathComponent)"
-            alert.informativeText = "\(error)"
-            alert.runModal()
-            return
-        }
-        let controller = DeckController(path: path, deck: deck)
-        controller.onClose = { [weak self] in self?.open[path] = nil }
-        open[path] = controller
-        let deckWindows = open.values.filter { $0 !== controller }.map(\.window)
-        if let host = deckWindows.first(where: \.isKeyWindow) ?? deckWindows.first {
-            host.addTabbedWindow(controller.window, ordered: .above)
-        } else {
-            controller.window.center()
-        }
-        controller.window.makeKeyAndOrderFront(nil)
-        controller.window.makeFirstResponder(controller.table)
-    }
-
-    @objc func openListedDeck(_ sender: NSMenuItem) {
-        guard let path = sender.representedObject as? String else { return }
-        openDeck(path)
+        return true
     }
 
     @objc func openOther(_ sender: Any?) {
@@ -2455,50 +2950,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         panel.urls.map(\.path).forEach(openPath)
     }
 
-    @objc func reloadKey(_ sender: Any?) {
-        open.values.first { $0.window.isKeyWindow }?.reload()
+    @objc func reloadCurrent(_ sender: Any?) {
+        workspaces[active]?.reload()
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
+        let wanted: Set<Workspace> = menu === tutorSessionsMenu ? [.learn] : [.forest, .review]
+        let entries = scanLibrary().filter { wanted.contains($0.workspace) }
+        for entry in entries {
+            let item = NSMenuItem(title: "\(entry.title)  —  \(entry.progress)", action: #selector(openListed), keyEquivalent: "")
+            item.target = self
+            item.representedObject = entry.path
+            item.state = workspaces[entry.workspace]?.current == entry.path ? .on : .off
+            menu.addItem(item)
+        }
         if menu === tutorSessionsMenu {
-            for path in newestJSON(in: tutorDirectory, where: isTutorFile) {
-                guard let session = try? loadTutorSession(path) else { continue }
-                let item = NSMenuItem(title: "\(session.title)  —  \((path as NSString).lastPathComponent)", action: #selector(openListedTutor), keyEquivalent: "")
-                item.target = self
-                item.representedObject = path
-                item.state = tutor?.path == path ? .on : .off
-                menu.addItem(item)
-            }
             if menu.items.isEmpty {
                 menu.addItem(withTitle: "No sessions in ~/.dotfiles/show/tutor", action: nil, keyEquivalent: "")
             }
             return
         }
-        let files = ((try? FileManager.default.contentsOfDirectory(atPath: decksDirectory)) ?? [])
-            .filter { $0.hasSuffix(".json") && !$0.hasSuffix(".signoff.json") && !$0.hasSuffix(".answers.json") }
-            .map { (decksDirectory as NSString).appendingPathComponent($0) }
-        let listed = files.compactMap { path -> (String, Deck, Date)? in
-            guard let deck = try? loadDeck(path) else { return nil }
-            let modified = (try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate] as? Date) ?? .distantPast
-            return (path, deck, modified)
-        }.sorted { $0.2 > $1.2 }
-        for (path, deck, _) in listed {
-            let store = SignOffStore(deckPath: path)
-            let done = deck.sections.filter { store.entries[$0.key]?.signed == true }.count
-            let item = NSMenuItem(title: "\(deck.title)  —  \(deck.isLive ? "live" : "\(done)/\(deck.sections.count)")", action: #selector(openListedDeck), keyEquivalent: "")
-            item.target = self
-            item.representedObject = path
-            item.state = open[path] == nil ? .off : .on
-            menu.addItem(item)
-        }
-        if !listed.isEmpty {
+        if !entries.isEmpty {
             menu.addItem(.separator())
         }
         let other = NSMenuItem(title: "Open Deck…", action: #selector(openOther), keyEquivalent: "o")
         other.target = self
         menu.addItem(other)
-        let reload = NSMenuItem(title: "Reload Deck", action: #selector(reloadKey), keyEquivalent: "r")
+        let reload = NSMenuItem(title: "Reload", action: #selector(reloadCurrent), keyEquivalent: "r")
         reload.target = self
         menu.addItem(reload)
     }
@@ -2515,16 +2994,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         decksMenu.delegate = self
         decksMenu.addItem(withTitle: "Open Deck…", action: #selector(openOther), keyEquivalent: "o").target = self
         decksItem.submenu = decksMenu
-        let spaceItem = NSMenuItem()
-        main.addItem(spaceItem)
-        let spaceMenu = NSMenu(title: "Space")
-        for (i, space) in Space.allCases.enumerated() {
-            let item = NSMenuItem(title: space.name, action: #selector(showSpace), keyEquivalent: space.key)
+        let workspaceItem = NSMenuItem()
+        main.addItem(workspaceItem)
+        let workspaceMenu = NSMenu(title: "Workspace")
+        for (i, workspace) in Workspace.allCases.enumerated() {
+            let item = NSMenuItem(title: workspace.name, action: #selector(showWorkspace), keyEquivalent: workspace.key)
             item.tag = i
             item.target = self
-            spaceMenu.addItem(item)
+            workspaceMenu.addItem(item)
         }
-        spaceItem.submenu = spaceMenu
+        workspaceItem.submenu = workspaceMenu
         let tutorItem = NSMenuItem()
         main.addItem(tutorItem)
         let tutorMenu = NSMenu(title: "Tutor")
@@ -2547,6 +3026,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         let editItem = NSMenuItem()
         main.addItem(editItem)
         let editMenu = NSMenu(title: "Edit")
+        editMenu.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
+        editMenu.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "Z")
+        editMenu.addItem(.separator())
         editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
         editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
         editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
@@ -2555,39 +3037,60 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         let windowItem = NSMenuItem()
         main.addItem(windowItem)
         let windowMenu = NSMenu(title: "Window")
-        windowMenu.addItem(withTitle: "Close Tab", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
-        windowMenu.addItem(withTitle: "Show Next Tab", action: #selector(NSWindow.selectNextTab(_:)), keyEquivalent: "}")
-        windowMenu.addItem(withTitle: "Show Previous Tab", action: #selector(NSWindow.selectPreviousTab(_:)), keyEquivalent: "{")
+        windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+        windowMenu.addItem(withTitle: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
         windowItem.submenu = windowMenu
         NSApp.windowsMenu = windowMenu
         NSApp.mainMenu = main
     }
+
+    /// Renders the window offscreen: the whole window (`out`), the rail (`-rail`), and the open document's parts, which run taller than the window.
+    func snapshot(to output: String) {
+        if let named = ProcessInfo.processInfo.environment["SHOW_SNAPSHOT_WORKSPACE"], let workspace = Workspace(rawValue: named) {
+            switchTo(workspace)
+        }
+        window.appearance = NSAppearance(named: .aqua)
+        refreshBadges(force: true)
+        let controller = workspaces[active]
+        if let key = ProcessInfo.processInfo.environment["SHOW_SNAPSHOT_SECTION"] {
+            controller?.currentDeck?.select(section: key)
+        }
+        window.layoutIfNeeded()
+        shell.view.layoutSubtreeIfNeeded()
+        controller?.currentDeck?.prepareSnapshot()
+        controller?.currentDeck?.table.reloadData()
+        shell.view.layoutSubtreeIfNeeded()
+        controller?.currentDeck?.table.layoutSubtreeIfNeeded()
+        let stem = (output as NSString).deletingPathExtension
+        writeComposite(shell.view, to: output)
+        writePNG(shell.rail, to: stem + "-rail.png")
+        if let deck = controller?.currentDeck {
+            writePNG(deck.table, to: stem + "-sidebar.png")
+            deck.text.sizeToFit()
+            writePNG(deck.text, to: stem + "-detail.png")
+        }
+        if active == .learn, let tutor {
+            tutor.snapshotWorksheet(to: stem + "-worksheet.png")
+        }
+        print("workspace: \(active.rawValue) · title: \(controller?.documentTitle ?? "-") · subtitle: \(controller?.subtitle ?? "-")")
+    }
 }
 
-/// Offscreen render of one deck for checks; no window is shown and no running Show is touched.
-final class SnapshotDelegate: NSObject, NSApplicationDelegate {
-    let path: String
-    let output: String
-
-    init(path: String, output: String) {
-        self.path = path
-        self.output = output
+/// `--check-routing`: print which workspace a file opens in, and why.
+func checkRouting(_ raw: String) -> Int32 {
+    let path = URL(fileURLWithPath: (raw as NSString).expandingTildeInPath).standardizedFileURL.path
+    guard FileManager.default.fileExists(atPath: path) else {
+        FileHandle.standardError.write("Show: no such file: \(path)\n".data(using: .utf8)!)
+        return 66
     }
-
-    func applicationDidFinishLaunching(_ notification: Notification) {
-        do {
-            if isTutorFile(path) {
-                let tutor = TutorController()
-                tutor.show(path: path)
-                tutor.snapshot(to: output)
-            } else {
-                DeckController(path: path, deck: try loadDeck(path)).snapshot(to: output, section: ProcessInfo.processInfo.environment["SHOW_SNAPSHOT_SECTION"])
-            }
-        } catch {
-            FileHandle.standardError.write("Show: \(path): \(error)\n".data(using: .utf8)!)
-        }
-        NSApp.terminate(nil)
+    let route = Workspace.route(path)
+    print("workspace: \(route.workspace.rawValue) (⌘\(route.workspace.key), by \(route.reason))")
+    if let entry = shelfEntry(path) {
+        print("shelf: \(entry.state) · \(entry.title) · \(entry.progress)")
+    } else {
+        print("shelf: unreadable as a \(route.workspace.name) document")
     }
+    return 0
 }
 
 var arguments = Array(CommandLine.arguments.dropFirst())
@@ -2605,6 +3108,13 @@ if let flag = arguments.firstIndex(of: "--tutor-check") {
     }
     exit(tutorCheck(arguments[flag + 1]))
 }
+if let flag = arguments.firstIndex(of: "--check-routing") {
+    guard flag + 1 < arguments.count else {
+        FileHandle.standardError.write("usage: Show --check-routing <file.json>\n".data(using: .utf8)!)
+        exit(64)
+    }
+    exit(checkRouting(arguments[flag + 1]))
+}
 var snapshotPath: String?
 if let flag = arguments.firstIndex(of: "--snapshot"), flag + 1 < arguments.count {
     snapshotPath = arguments[flag + 1]
@@ -2615,12 +3125,15 @@ let deckPaths = arguments.filter { !$0.hasPrefix("-") }.map { ($0 as NSString).e
 let app = NSApplication.shared
 let delegate: NSApplicationDelegate
 if let snapshotPath {
-    guard let path = deckPaths.first else {
-        FileHandle.standardError.write("usage: Show <deck.json> --snapshot out.png\n".data(using: .utf8)!)
+    guard !deckPaths.isEmpty else {
+        FileHandle.standardError.write("usage: Show <file.json>… --snapshot out.png\n".data(using: .utf8)!)
         exit(64)
     }
+    let suite = "com.philbrockman.show.snapshot"
+    UserDefaults.standard.removePersistentDomain(forName: suite)
+    prefs = UserDefaults(suiteName: suite) ?? .standard
     app.setActivationPolicy(.prohibited)
-    delegate = SnapshotDelegate(path: path, output: snapshotPath)
+    delegate = AppDelegate(launchPaths: deckPaths, snapshotPath: snapshotPath)
 } else {
     app.setActivationPolicy(.regular)
     delegate = AppDelegate(launchPaths: deckPaths)

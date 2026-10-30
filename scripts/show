@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# show [<deck.json>…] — open decks as tabs in the one running Show app (no args: the newest deck in ~/.dotfiles/show),
-# rebuilding it when Show.swift changes. Re-showing an open deck reloads it. show --build — just (re)build. show --snapshot <deck.json> <out.png> — render offscreen, no window.
+# show [<file.json>…] — open files in the one Show window, each in its workspace (Forest ⌘1, Review ⌘2, Learn ⌘3, Runs ⌘4;
+# no args: the newest deck in ~/.dotfiles/show), rebuilding it when Show.swift changes. Re-showing an open file reloads it.
+# show --build — just (re)build. show --snapshot <file.json> <out.png> — render the window offscreen, no window shown.
+# show --check-routing <file.json> — print the workspace a file opens in (and a forest's merge order).
 # show --tutor [<session.json>] — open the Tutor space on a session (no file: the newest in ~/.dotfiles/show/tutor). show --tutor-check <session.json> — print what it would show.
 # Deck format: ~/.dotfiles/.claude/skills/show/SKILL.md. Source: show-app/Show.swift. Sign-offs land in <deck>.signoff.json.
 set -euo pipefail
@@ -47,7 +49,7 @@ PLIST
 
 case "${1:-}" in
   -h|--help)
-    echo "usage: show [<deck.json>…] | show --build | show --snapshot <deck.json> <out.png> | show --tutor [<session.json>] | show --tutor-check <session.json> | show --tutor-ask <session.json> <message>" >&2
+    echo "usage: show [<file.json>…] | show --build | show --snapshot <file.json> <out.png> | show --check-routing <file.json> | show --tutor [<session.json>] | show --tutor-check <session.json> | show --tutor-ask <session.json> <message>" >&2
     exit 64
     ;;
   --build)
@@ -72,6 +74,11 @@ case "${1:-}" in
     build
     open -a "$app" "$session"
     ;;
+  --check-routing)
+    [[ $# -eq 2 ]] || { echo "usage: show --check-routing <file.json>" >&2; exit 64; }
+    build
+    "$app/Contents/MacOS/Show" --check-routing "$2"
+    ;;
   --tutor-ask)
     [[ $# -eq 3 ]] || { echo "usage: show --tutor-ask <session.json> <message>" >&2; exit 64; }
     build
@@ -92,8 +99,15 @@ case "${1:-}" in
     for arg in "$@"; do
       deck="$(cd "$(dirname "$arg")" && pwd)/$(basename "$arg")"
       [[ -f "$deck" ]] || { echo "show: no such deck: $arg" >&2; exit 66; }
-      python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["title"] and d["sections"] and all(s.get("body") or s.get("url") for s in d["sections"])' "$deck" \
-        || { echo "show: $deck is not a deck (needs title + sections)" >&2; exit 65; }
+      python3 -c '
+import json, sys
+d = json.load(open(sys.argv[1]))
+if d.get("mode", d.get("kind")) == "tutor":
+    assert d["title"] and isinstance(d["rungs"], list)
+else:
+    assert d["title"] and d["sections"] and all(s.get("body") or s.get("url") for s in d["sections"])
+' "$deck" \
+        || { echo "show: $deck is not a deck (needs title + sections) or a tutor session (mode \"tutor\" + title + rungs)" >&2; exit 65; }
       decks+=("$deck")
     done
     build
