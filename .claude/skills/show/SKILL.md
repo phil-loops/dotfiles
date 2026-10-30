@@ -26,7 +26,7 @@ description: Present a design, plan or walkthrough as a native macOS app (Swift 
 - `id` keys the sign-off; keep ids stable across regenerations so earlier sign-offs survive. When a section's meaning changes, give it a new id (its old sign-off then no longer applies).
 - `group` becomes a sidebar header; consecutive sections with the same group sit under it.
 - `url` (instead of `body`) shows a live page in the section, such as a preview server or a viewer page. It keeps its own login, which persists between launches.
-- `body` markdown supported: `# ` / `## ` headings, `- ` and `1. ` lists (indent for nesting), `> ` a large pull quote, fenced code blocks, `|` tables (rendered monospaced), inline `**bold**`, `*italic*`, `` `code` ``, links.
+- `body` markdown supported: `# ` / `## ` headings, `- ` and `1. ` lists (indent for nesting), `> ` a large pull quote, fenced code blocks (one panel; box-drawing lines join up), `|` tables (real table cells sized to their content, first row as header), `![alt](path)` on its own line for an image (absolute or relative to the deck; shrunk to the column, never enlarged; name a Retina PNG `…@2x.png`; the alt text becomes a caption), inline `**bold**`, `*italic*`, `` `code` ``, links.
 
 ## Recipe
 
@@ -101,4 +101,4 @@ The tutor's loop, whether it's the headless tutor or you via `replyTo`:
 
 ## Verifying
 
-**Never drive or capture his screen** — no `osascript`/System Events keystrokes, no `screencapture`. A clean compile is the check. `show --snapshot <deck> <out.png>` renders the window offscreen in-process; it currently draws the window chrome and the sign-off bar but not the scrolling panes, so it can confirm layout of the bar only. For a tutor session it also writes `<out>-worksheet.png`, the full worksheet column. If something looks wrong, ask Phil.
+**Never drive or capture his screen** — no `osascript`/System Events keystrokes, no `screencapture`. A clean compile is the check. `show --snapshot <deck> <out.png>` renders the window offscreen in-process; it also writes `<out>-detail.png` (the rendered section) and `<out>-sidebar.png` (the section list), and `SHOW_SNAPSHOT_SECTION=<id>` picks the section. The window capture itself draws the chrome and the sign-off bar but not the scrolling panes, so it can confirm layout of the bar only. For a tutor session it also writes `<out>-worksheet.png`, the full worksheet column. If something looks wrong, ask Phil.

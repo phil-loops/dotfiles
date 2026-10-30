@@ -58,10 +58,13 @@ enum Row {
 final class Renderer {
     let base = NSFont.systemFont(ofSize: 14)
     let mono = NSFont.monospacedSystemFont(ofSize: 12.5, weight: .regular)
+    /// Where relative image paths resolve, and how wide an image may draw.
+    var baseDirectory = decksDirectory
+    var columnWidth: CGFloat = 640
 
     func render(_ section: Section) -> NSAttributedString {
         let out = NSMutableAttributedString()
-        out.append(line(section.group.uppercased(), font: .systemFont(ofSize: 11, weight: .semibold), color: .secondaryLabelColor, after: 4))
+        out.append(line(section.group, font: .systemFont(ofSize: 12, weight: .semibold), color: .secondaryLabelColor, after: 4))
         out.append(line(section.title, font: .systemFont(ofSize: 26, weight: .bold), color: .labelColor, after: section.tag == nil ? 14 : 4))
         if let tag = section.tag {
             out.append(line(tag, font: mono, color: .systemBlue, after: 14))
@@ -97,6 +100,8 @@ final class Renderer {
                     lines = lines.dropFirst()
                 }
                 out.append(table(rows))
+            } else if let image = imageLine(text) {
+                out.append(picture(path: image.path, alt: image.alt))
             } else if text.hasPrefix("## ") {
                 out.append(paragraph(String(text.dropFirst(3)), font: .systemFont(ofSize: 17, weight: .semibold), before: 10, after: 6))
             } else if text.hasPrefix("# ") {
@@ -155,39 +160,106 @@ final class Renderer {
         return s
     }
 
+    /// A fenced block as one panel: one text block holds every line, and lines sit flush so box-drawing joins up.
     private func block(_ code: String) -> NSAttributedString {
+        let panel = NSTextBlock()
+        panel.backgroundColor = NSColor(name: "show.codePanel") { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(white: 1, alpha: 0.07) : NSColor(white: 0, alpha: 0.045)
+        }
+        panel.setValue(100, type: .percentageValueType, for: .width)
+        panel.setWidth(14, type: .absoluteValueType, for: .padding)
+        panel.setWidth(12, type: .absoluteValueType, for: .margin, edge: .maxY)
         let p = NSMutableParagraphStyle()
-        p.paragraphSpacing = 12
-        p.firstLineHeadIndent = 12
-        p.headIndent = 12
-        p.lineSpacing = 2
-        return NSAttributedString(string: code + "\n", attributes: [
-            .font: mono, .foregroundColor: NSColor.labelColor,
-            .backgroundColor: NSColor.quaternaryLabelColor.withAlphaComponent(0.12), .paragraphStyle: p,
-        ])
+        p.textBlocks = [panel]
+        p.paragraphSpacing = 0
+        p.paragraphSpacingBefore = 0
+        p.lineSpacing = 0
+        p.lineHeightMultiple = 1.0
+        let height = ceil(mono.ascender - mono.descender)
+        p.minimumLineHeight = height
+        p.maximumLineHeight = height
+        return NSAttributedString(string: code + "\n", attributes: [.font: mono, .foregroundColor: NSColor.labelColor, .paragraphStyle: p])
     }
 
+    private func imageLine(_ text: String) -> (alt: String, path: String)? {
+        guard let match = try? NSRegularExpression(pattern: #"^!\[(.*)\]\((.+)\)$"#).firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+              let alt = Range(match.range(at: 1), in: text), let path = Range(match.range(at: 2), in: text) else { return nil }
+        return (String(text[alt]), String(text[path]))
+    }
+
+    /// `![alt](path)` on its own line: the image at its natural size, shrunk to the column but never enlarged, captioned by its alt text.
+    private func picture(path: String, alt: String) -> NSAttributedString {
+        let expanded = (path as NSString).expandingTildeInPath
+        let file = expanded.hasPrefix("/") ? expanded : (baseDirectory as NSString).appendingPathComponent(expanded)
+        guard let image = NSImage(contentsOfFile: file) else {
+            return paragraph("Missing image: \(path)", font: .systemFont(ofSize: 12), color: .secondaryLabelColor, after: 10)
+        }
+        if let rep = image.representations.first, rep.pixelsWide > 0 {
+            let scale: CGFloat = (file as NSString).deletingPathExtension.hasSuffix("@2x") ? 2 : 1
+            image.size = NSSize(width: CGFloat(rep.pixelsWide) / scale, height: CGFloat(rep.pixelsHigh) / scale)
+        }
+        let fit = min(1, columnWidth / max(image.size.width, 1))
+        let attachment = NSTextAttachment()
+        attachment.image = image
+        attachment.bounds = NSRect(x: 0, y: 0, width: floor(image.size.width * fit), height: floor(image.size.height * fit))
+        let p = NSMutableParagraphStyle()
+        p.paragraphSpacing = alt.isEmpty ? 12 : 4
+        p.paragraphSpacingBefore = 4
+        let out = NSMutableAttributedString(attachment: attachment)
+        out.append(NSAttributedString(string: "\n"))
+        out.addAttribute(.paragraphStyle, value: p, range: NSRange(location: 0, length: out.length))
+        if !alt.isEmpty {
+            out.append(paragraph(alt, font: .systemFont(ofSize: 11.5), color: .secondaryLabelColor, after: 14))
+        }
+        return out
+    }
+
+    /// A pipe table as a real text table: hairline cells sized to their content, the first row as the header.
     private func table(_ rows: [String]) -> NSAttributedString {
         let cells = rows
             .filter { !$0.replacingOccurrences(of: #"[|\-: ]"#, with: "", options: .regularExpression).isEmpty }
             .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: "|")).components(separatedBy: "|").map { $0.trimmingCharacters(in: .whitespaces) } }
         let columns = cells.map(\.count).max() ?? 0
-        let widths = (0..<columns).map { c in cells.map { c < $0.count ? plain($0[c]).count : 0 }.max() ?? 0 }
-        let out = NSMutableAttributedString()
-        for (i, row) in cells.enumerated() {
-            let text = (0..<columns).map { c in
-                let cell = c < row.count ? plain(row[c]) : ""
-                return cell.padding(toLength: widths[c], withPad: " ", startingAt: 0)
-            }.joined(separator: "   ")
-            let font = i == 0 ? NSFont.monospacedSystemFont(ofSize: 12.5, weight: .semibold) : mono
-            out.append(NSAttributedString(string: text + "\n", attributes: [.font: font, .foregroundColor: NSColor.labelColor]))
+        let header = NSFont.systemFont(ofSize: base.pointSize, weight: .semibold)
+        var widths = (0..<columns).map { c in
+            cells.enumerated().map { r, row in
+                c < row.count ? ceil(inline(row[c], font: r == 0 ? header : base, color: .labelColor).size().width) : 0
+            }.max() ?? 0
         }
-        let p = NSMutableParagraphStyle()
-        p.paragraphSpacing = 3
-        p.firstLineHeadIndent = 12
-        p.headIndent = 12
-        out.addAttribute(.paragraphStyle, value: p, range: NSRange(location: 0, length: out.length))
-        out.append(NSAttributedString(string: "\n", attributes: [.font: NSFont.systemFont(ofSize: 6)]))
+        let chrome = CGFloat(columns) * 21
+        let natural = widths.reduce(0, +) + chrome
+        if natural > columnWidth {
+            let shrink = max(0.1, (columnWidth - chrome) / max(natural - chrome, 1))
+            widths = widths.map { floor($0 * shrink) }
+        }
+        let grid = NSTextTable()
+        grid.numberOfColumns = columns
+        grid.layoutAlgorithm = .fixedLayoutAlgorithm
+        grid.setValue(widths.reduce(0, +) + chrome, type: .absoluteValueType, for: .width)
+        grid.collapsesBorders = true
+        grid.hidesEmptyCells = false
+        grid.setWidth(12, type: .absoluteValueType, for: .margin, edge: .maxY)
+        let out = NSMutableAttributedString()
+        for (r, row) in cells.enumerated() {
+            for c in 0..<columns {
+                let cell = NSTextTableBlock(table: grid, startingRow: r, rowSpan: 1, startingColumn: c, columnSpan: 1)
+                cell.setValue(widths[c], type: .absoluteValueType, for: .width)
+                cell.setBorderColor(.separatorColor)
+                cell.setWidth(0.5, type: .absoluteValueType, for: .border)
+                cell.setWidth(6, type: .absoluteValueType, for: .padding, edge: .minY)
+                cell.setWidth(6, type: .absoluteValueType, for: .padding, edge: .maxY)
+                cell.setWidth(10, type: .absoluteValueType, for: .padding, edge: .minX)
+                cell.setWidth(10, type: .absoluteValueType, for: .padding, edge: .maxX)
+                let p = NSMutableParagraphStyle()
+                p.textBlocks = [cell]
+                p.lineSpacing = 2
+                let font = r == 0 ? header : base
+                let text = inline(c < row.count ? row[c] : "", font: font, color: .labelColor)
+                text.append(NSAttributedString(string: "\n", attributes: [.font: font]))
+                text.addAttribute(.paragraphStyle, value: p, range: NSRange(location: 0, length: text.length))
+                out.append(text)
+            }
+        }
         return out
     }
 
@@ -241,6 +313,31 @@ let buildStamp = ((Bundle.main.bundlePath as NSString).deletingLastPathComponent
 
 let decksDirectory = ("~/.dotfiles/show" as NSString).expandingTildeInPath
 
+/// A section-list row whose selection is a soft rounded fill, with an accent outline while the list has keyboard focus.
+final class QuietRowView: NSTableRowView {
+    override var interiorBackgroundStyle: NSView.BackgroundStyle { .normal }
+
+    override var isSelected: Bool {
+        didSet { needsDisplay = true }
+    }
+
+    override var isEmphasized: Bool {
+        didSet { needsDisplay = true }
+    }
+
+    override func drawBackground(in dirtyRect: NSRect) {
+        guard isSelected else { return }
+        let shape = NSBezierPath(roundedRect: bounds.insetBy(dx: 6, dy: 1), xRadius: 6, yRadius: 6)
+        NSColor.labelColor.withAlphaComponent(0.1).setFill()
+        shape.fill()
+        if isEmphasized {
+            NSColor.controlAccentColor.withAlphaComponent(0.8).setStroke()
+            shape.lineWidth = 1.5
+            shape.stroke()
+        }
+    }
+}
+
 /// One deck in one window; windows share a tab group, so each deck is a labelled tab.
 final class DeckController: NSObject, WKNavigationDelegate, NSWindowDelegate, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate {
     let path: String
@@ -268,6 +365,7 @@ final class DeckController: NSObject, WKNavigationDelegate, NSWindowDelegate, NS
         self.path = path
         self.deck = deck
         store = SignOffStore(deckPath: path)
+        renderer.baseDirectory = (path as NSString).deletingLastPathComponent
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1180, height: 780),
                           styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                           backing: .buffered, defer: false)
@@ -349,19 +447,33 @@ final class DeckController: NSObject, WKNavigationDelegate, NSWindowDelegate, NS
         onClose?()
     }
 
-    func snapshot(to path: String) {
+    /// Renders the window offscreen to `path`, plus the detail text (`-detail.png`) and section list (`-sidebar.png`), which the window capture leaves blank.
+    func snapshot(to path: String, section key: String? = nil) {
         guard let view = window.contentView else { return }
         window.appearance = NSAppearance(named: .aqua)
-        if let section = selectedSection {
-            text.textStorage?.setAttributedString(renderer.render(section))
-        }
         table.reloadData()
+        if let key, let row = rows.firstIndex(where: { if case .item(let i) = $0 { return deck.sections[i].key == key } else { return false } }) {
+            table.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        }
         window.layoutIfNeeded()
         view.layoutSubtreeIfNeeded()
+        if let section = selectedSection {
+            text.setFrameSize(NSSize(width: 860, height: text.frame.height))
+            renderer.columnWidth = 860 - 96
+            text.textStorage?.setAttributedString(renderer.render(section))
+            if let container = text.textContainer {
+                text.layoutManager?.ensureLayout(for: container)
+            }
+            text.sizeToFit()
+        }
+        table.layoutSubtreeIfNeeded()
+        let stem = (path as NSString).deletingPathExtension
         window.effectiveAppearance.performAsCurrentDrawingAppearance {
-            guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
-            view.cacheDisplay(in: view.bounds, to: rep)
-            try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+            for (target, file) in [(view, path), (text as NSView, stem + "-detail.png"), (table as NSView, stem + "-sidebar.png")] {
+                guard let rep = target.bitmapImageRepForCachingDisplay(in: target.bounds) else { continue }
+                target.cacheDisplay(in: target.bounds, to: rep)
+                try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: file))
+            }
         }
     }
 
@@ -543,11 +655,17 @@ final class DeckController: NSObject, WKNavigationDelegate, NSWindowDelegate, NS
         return false
     }
 
+    func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+        let rowView = QuietRowView()
+        rowView.selectionHighlightStyle = .none
+        return rowView
+    }
+
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         switch rows[row] {
         case .header(let group):
-            let label = NSTextField(labelWithString: group.uppercased())
-            label.font = .systemFont(ofSize: 11, weight: .semibold)
+            let label = NSTextField(labelWithString: group)
+            label.font = .systemFont(ofSize: 12, weight: .semibold)
             label.textColor = .secondaryLabelColor
             return label
         case .item(let i):
@@ -595,6 +713,7 @@ final class DeckController: NSObject, WKNavigationDelegate, NSWindowDelegate, NS
         } else {
             web.isHidden = true
             textScroll.isHidden = false
+            renderer.columnWidth = text.bounds.width > 300 ? text.bounds.width - 96 : 640
             text.textStorage?.setAttributedString(renderer.render(section))
             text.scroll(.zero)
         }
@@ -2394,7 +2513,7 @@ final class SnapshotDelegate: NSObject, NSApplicationDelegate {
                 tutor.show(path: path)
                 tutor.snapshot(to: output)
             } else {
-                DeckController(path: path, deck: try loadDeck(path)).snapshot(to: output)
+                DeckController(path: path, deck: try loadDeck(path)).snapshot(to: output, section: ProcessInfo.processInfo.environment["SHOW_SNAPSHOT_SECTION"])
             }
         } catch {
             FileHandle.standardError.write("Show: \(path): \(error)\n".data(using: .utf8)!)
