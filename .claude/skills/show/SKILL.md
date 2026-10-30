@@ -35,6 +35,55 @@ description: Present a design, plan or walkthrough as a native macOS app (Swift 
 3. Open it: `show ~/.dotfiles/show/<name>.json`. After regenerating a deck, run the same command again: it reloads the open tab instead of opening a second window. Give every deck a distinct `title`, since that is the tab label.
 4. Tell Phil it's open and how sign-off works. Then wait. **Submit** (⌘↩) sends `claude-say <replyTo>` a line naming the sign-off file; read `<name>.signoff.json` when it arrives, or when he says he's been through it, and treat every note as pushback to address. Set `replyTo` to this session's id prefix (`$CLAUDE_CODE_SESSION_ID`, first 8 characters); without it, Submit only marks the deck done.
 
+## Tutor space
+
+The rail on the window's left edge switches spaces: **Decks** (⌘1) and **Tutor** (⌘2). The Tutor space runs a `/tutor` session as a worksheet: one rung at a time, answered in place.
+
+- `show --tutor <file>` opens the Tutor space on a session; a bare `show --tutor` opens the newest one in `~/.dotfiles/show/tutor/`. The **Tutor → Sessions** menu lists the rest, newest first. Tutor files never appear in the Decks menu.
+- `show --tutor-check <file>` prints the current rung, the station states and each rung's rail order without opening a window.
+
+Session file `~/.dotfiles/show/tutor/<name>.json` (Claude writes it):
+
+```json
+{
+  "mode": "tutor",
+  "title": "SQS visibility timeout",
+  "replyTo": "<your session id prefix>",
+  "stations": [{ "name": "In flight, not gone", "state": "done | current | todo" }],
+  "due": [{ "concept": "lock-guards-holders-not-execution", "why": "missed: believed the lock prevents concurrent execution" }],
+  "rungs": [{
+    "id": "r1",
+    "station": "In flight, not gone",
+    "title": "One message or two?",
+    "situation": "markdown",
+    "ask": "predict | explain | restate | invent",
+    "timeline": [{ "t": "0", "event": "W1 calls ReceiveMessage, gets M" }],
+    "parts": [{ "id": "a", "at": "20", "ask": "How many messages does SQS have?" }, { "id": "b", "ask": "Why?" }],
+    "reveal": "markdown, or { \"a\": \"markdown\", \"b\": \"markdown\" }, or null",
+    "verdicts": { "a": "held", "b": "revised" },
+    "followup": "markdown or null"
+  }]
+}
+```
+
+- `"kind": "tutor"` is still accepted in place of `mode`; a file with neither is a deck.
+- `timeline` draws a vertical rail with the time in the gutter. A part with `at` sits on the rail at that time (after the last event at or before it) with its answer field under it; a part without `at` goes below the rail. A rung with no `parts` gets one field (part id `_`).
+- The **current rung** is the one after the last answered rung. Its fields are editable (Tab and ⇧Tab move between them), with a confidence control (Guessing / Fairly sure / Certain, ⌃1–⌃3; required for `predict` and optional otherwise) and **Send prediction** / **Send answer** (⌘↩). Earlier rungs are dimmed and locked.
+- A keyed `reveal` renders under that part's answer and a string reveal renders under the whole rung; reveals fade in when they arrive. `verdicts` puts a margin mark beside each part: a filled dot for held, a ring for revised.
+
+Answers sidecar `<name>.answers.json` beside the session. **Show writes it; Claude never does.**
+
+```json
+{ "r1": { "parts": { "a": "text", "b": "text" }, "confidence": "low | medium | high | null", "at": "ISO-8601" } }
+```
+
+The loop:
+
+1. Claude writes a rung, then runs `show --tutor <file>`.
+2. Phil answers and sends. Show writes the sidecar and runs `claude-say <replyTo> "tutor answer: <session path> rung <id>"`. His fields then lock, under "Sent. Waiting for Claude's reveal."
+3. Claude reads `.answers.json`, then rewrites the session file: it adds the reveal (and `verdicts`) to that rung and appends the next rung. Write the file atomically.
+4. Claude re-runs `show --tutor <file>`. The open session also reloads by itself within a second of the file changing, keeping unsent text, focus and scroll, and scrolls to the new current rung.
+
 ## Verifying
 
-**Never drive or capture his screen** — no `osascript`/System Events keystrokes, no `screencapture`. A clean compile is the check. `show --snapshot <deck> <out.png>` renders the window offscreen in-process; it currently draws the window chrome and the sign-off bar but not the scrolling panes, so it can confirm layout of the bar only. If something looks wrong, ask Phil.
+**Never drive or capture his screen** — no `osascript`/System Events keystrokes, no `screencapture`. A clean compile is the check. `show --snapshot <deck> <out.png>` renders the window offscreen in-process; it currently draws the window chrome and the sign-off bar but not the scrolling panes, so it can confirm layout of the bar only. For a tutor session it also writes `<out>-worksheet.png`, the full worksheet column. If something looks wrong, ask Phil.
