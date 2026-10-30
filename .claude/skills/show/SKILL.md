@@ -16,6 +16,12 @@ description: Present a design, plan or walkthrough as a native macOS app (Swift 
 
 An optional top-level `"workspace": "forest" | "review" | "learn" | "runs"` overrides the mode. `show <file>` switches to that file's workspace and opens it there; `show --check-routing <file>` prints where a file goes without opening anything. The only thing that crosses between workspaces is the count of documents waiting on Phil, a badge on each rail icon. The title band shows the document's title and, in the workspace's quiet tint, its progress.
 
+**A library, not tabs.** One document is open per workspace. Each workspace's left column is a shelf of its documents from `~/.dotfiles/show` and `show/tutor/`, grouped by what they want from Phil: **Waiting on you** (◆: unsigned sections, or a tutor rung with no answer), **Running** (◉: Runs only, `status.state` `running`), and **Done** (●: fully signed, finished runs, tutor sessions waiting on Claude), which folds after 5. Each row shows the title, "4 of 9 signed" and when it was last touched. The open document's section list is a second column beside the shelf (marks: ● signed, ◆ has a note, ◐ open, ○ not yet); ⌃⌘S hides the shelf, and it collapses by itself when the window gets narrow.
+
+- **⌘O** or **/** opens a fuzzy finder over the current workspace's shelf; **⌘[** goes back to the previously open document; **⌥⌘O** opens any file.
+- **⌫** on a shelf row archives the document, moving it and its `.signoff.json` / `.answers.json` into `~/.dotfiles/show/archive/`. Nothing is ever deleted.
+- `show <file>` moves the document to the top of its group.
+
 Open documents reload by themselves when their file changes on disk, keeping the selected section, scroll and cursor. When the launcher finishes a new build, the running app saves notes and relaunches into it, each workspace back on its document. So rewriting a deck or editing Show.swift and then running `show --build` is all it takes. A bare `show` opens the newest deck. Sign-offs and notes save to `<deck>.signoff.json` beside the deck, which is how Phil's verdicts come back to you.
 
 - Launcher: `~/.dotfiles/scripts/show` (on PATH). Source: `~/.dotfiles/scripts/show-app/Show.swift`. It rebuilds itself into `~/.cache/show/Show.app` whenever the source's hash changes (`show --build` to just build).
@@ -51,7 +57,7 @@ Open documents reload by themselves when their file changes on disk, keeping the
 
 The Learn workspace (⌘3) runs a `/tutor` session as a worksheet: one rung at a time, answered in place.
 
-- `show --tutor <file>` (or plain `show <file>`) opens Learn on a session; a bare `show --tutor` opens the newest one in `~/.dotfiles/show/tutor/`. The **Tutor → Sessions** menu lists the rest, newest first. Tutor files never appear in the Decks menu.
+- `show --tutor <file>` (or plain `show <file>`) opens Learn on a session; a bare `show --tutor` opens the newest one in `~/.dotfiles/show/tutor/`. Learn's shelf lists the rest; tutor files never appear on another workspace's shelf.
 - `show --tutor-check <file>` prints the current rung, the station states and each rung's rail order without opening a window.
 
 Session file `~/.dotfiles/show/tutor/<name>.json` (Claude writes it):
@@ -113,4 +119,4 @@ The tutor's loop, whether it's the headless tutor or you via `replyTo`:
 
 ## Verifying
 
-**Never drive or capture his screen** — no `osascript`/System Events keystrokes, no `screencapture`. A clean compile is the check. `show --snapshot <file> <out.png>` renders the whole window offscreen in-process (`<out>.png`, a composite with the lists painted in) and never touches the running app or its saved state. It also writes `<out>-rail.png` (the workspace rail), `<out>-detail.png` (the rendered section at full height) and `<out>-sidebar.png` (the section list), and for a tutor session `<out>-worksheet.png`, the full worksheet column. `SHOW_SNAPSHOT_SECTION=<id>` picks the section, `SHOW_SNAPSHOT_WORKSPACE=<name>` brings another workspace forward, and `SHOW_DIR=<dir>` points the library at fixtures instead of `~/.dotfiles/show`. If something looks wrong, ask Phil.
+**Never drive or capture his screen** — no `osascript`/System Events keystrokes, no `screencapture`. A clean compile is the check. `show --snapshot <file> <out.png>` renders the whole window offscreen in-process (`<out>.png`, a composite with the lists painted in) and never touches the running app or its saved state. It also writes `<out>-rail.png` (the workspace rail), `<out>-detail.png` (the rendered section at full height) and `<out>-sidebar.png` (the section list), and for a tutor session `<out>-worksheet.png`, the full worksheet column. It writes `<out>-shelf.png` (the workspace's shelf) too and prints the shelf and back history. `SHOW_SNAPSHOT_SECTION=<id>` picks the section, `SHOW_SNAPSHOT_WORKSPACE=<name>` brings another workspace forward, `SHOW_SNAPSHOT_FINDER=<query>` opens the finder on a query, `SHOW_SNAPSHOT_BACK=1` goes back once, `SHOW_SNAPSHOT_ARCHIVE=<path>` archives that shelf row (fixtures only), and `SHOW_DIR=<dir>` points the library at fixtures instead of `~/.dotfiles/show`. If something looks wrong, ask Phil.

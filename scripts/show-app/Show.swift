@@ -274,8 +274,15 @@ final class Renderer {
         let chrome = CGFloat(columns) * 21
         let natural = widths.reduce(0, +) + chrome
         if natural > columnWidth {
-            let shrink = max(0.1, (columnWidth - chrome) / max(natural - chrome, 1))
-            widths = widths.map { floor($0 * shrink) }
+            let floors = (0..<columns).map { c in
+                cells.enumerated().flatMap { r, row in
+                    c < row.count ? row[c].split(separator: " ").map { ceil(inline(String($0), font: r == 0 ? header : base, color: .labelColor).size().width) + 6 } : []
+                }.max() ?? 0
+            }
+            let room = columnWidth - chrome - floors.reduce(0, +)
+            let stretch = widths.enumerated().map { c, width in max(0, width - floors[c]) }.reduce(0, +)
+            let share = room > 0 && stretch > 0 ? room / stretch : 0
+            widths = widths.enumerated().map { c, width in floor(floors[c] + max(0, width - floors[c]) * share) }
         }
         let grid = NSTextTable()
         grid.numberOfColumns = columns
@@ -425,13 +432,21 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
         sidebar.preferredThicknessFraction = 0.28
         viewController.addSplitViewItem(sidebar)
         viewController.addSplitViewItem(NSSplitViewItem(viewController: detailController()))
-        viewController.splitView.autosaveName = "show.deck.sections"
         deckModified = modificationDate(path)
         apply(deck, keepingSelection: prefs.string(forKey: selectionKey))
     }
 
     var window: NSWindow? { viewController.view.window }
     var title: String { deck.title }
+    private var settled = false
+
+    /// Gives the section list its 250pt column the first time the deck is shown; after that the divider stays where it's dragged.
+    func settleColumns() {
+        guard !settled, viewController.view.window != nil else { return }
+        settled = true
+        viewController.view.layoutSubtreeIfNeeded()
+        viewController.splitView.setPosition(250, ofDividerAt: 0)
+    }
     var subtitle: String {
         if deck.isLive { return deck.subtitle ?? "" }
         let done = deck.sections.filter { store.entries[$0.key]?.signed == true }.count
@@ -511,7 +526,7 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
     /// Re-renders the selected section at the laid-out width, sized to its full height, for a snapshot.
     func prepareSnapshot() {
         guard let section = selectedSection, section.url == nil else { return }
-        renderer.columnWidth = text.bounds.width > 300 ? text.bounds.width - 96 : 640
+        renderer.columnWidth = text.bounds.width > 300 ? text.bounds.width - 96 - 2 * (text.textContainer?.lineFragmentPadding ?? 5) : 640
         text.textStorage?.setAttributedString(renderer.render(section))
         if let container = text.textContainer {
             text.layoutManager?.ensureLayout(for: container)
@@ -737,9 +752,11 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
             return label
         case .item(let i):
             let section = deck.sections[i]
-            let entry = deck.isLive ? nil : store.entries[section.key]
-            let mark = entry?.signed == true ? "✓ " : (entry?.note.isEmpty == false ? "✎ " : "")
-            let title = NSTextField(labelWithString: mark + section.title)
+            let title = NSTextField(labelWithString: "")
+            title.attributedStringValue = sectionMark(section, selected: row == table.selectedRow)
+                + NSAttributedString(string: section.title, attributes: [.font: NSFont.systemFont(ofSize: 13, weight: .medium), .foregroundColor: NSColor.labelColor])
+            title.maximumNumberOfLines = 1
+            title.cell?.truncatesLastVisibleLine = true
             title.font = .systemFont(ofSize: 13, weight: .medium)
             title.lineBreakMode = .byTruncatingTail
             let stack = NSStackView(views: [title])
@@ -768,7 +785,27 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
         }
     }
 
+    /// The list's mark for a section: ● signed, ◆ has a note, ◐ the open section, ○ not yet. Live decks carry none.
+    private func sectionMark(_ section: Section, selected: Bool) -> NSAttributedString {
+        guard !deck.isLive else { return NSAttributedString() }
+        let entry = store.entries[section.key]
+        let (mark, color): (String, NSColor)
+        if entry?.signed == true {
+            (mark, color) = ("●", .secondaryLabelColor)
+        } else if entry?.note.isEmpty == false {
+            (mark, color) = ("◆", .systemOrange)
+        } else if selected {
+            (mark, color) = ("◐", .labelColor)
+        } else {
+            (mark, color) = ("○", .tertiaryLabelColor)
+        }
+        return NSAttributedString(string: mark + "  ", attributes: [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: color, .baselineOffset: 1])
+    }
+
     func tableViewSelectionDidChange(_ notification: Notification) {
+        if rows.count > 0 {
+            table.reloadData(forRowIndexes: IndexSet(integersIn: 0..<rows.count), columnIndexes: IndexSet(integer: 0))
+        }
         guard let section = selectedSection else { return }
         prefs.set(section.key, forKey: selectionKey)
         if let address = section.url, let url = URL(string: address) {
@@ -780,7 +817,7 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
         } else {
             web.isHidden = true
             textScroll.isHidden = false
-            renderer.columnWidth = text.bounds.width > 300 ? text.bounds.width - 96 : 640
+            renderer.columnWidth = text.bounds.width > 300 ? text.bounds.width - 96 - 2 * (text.textContainer?.lineFragmentPadding ?? 5) : 640
             text.textStorage?.setAttributedString(renderer.render(section))
             text.scroll(.zero)
         }
@@ -907,6 +944,193 @@ final class RailButton: NSButton {
         NSColor.secondaryLabelColor.setFill()
         NSBezierPath(roundedRect: pill, xRadius: 7, yRadius: 7).fill()
         text.draw(at: NSPoint(x: pill.midX - size.width / 2, y: pill.midY - size.height / 2))
+    }
+}
+
+/// How well `query` matches `text` as a subsequence, lower is better; nil when it doesn't match at all.
+func fuzzyScore(_ query: String, _ text: String) -> Int? {
+    let needle = Array(query.lowercased().filter { !$0.isWhitespace })
+    guard !needle.isEmpty else { return 0 }
+    let hay = Array(text.lowercased())
+    var score = 0
+    var at = 0
+    var last = -1
+    for character in needle {
+        guard let found = hay[at...].firstIndex(of: character) else { return nil }
+        let wordStart = found == 0 || !(hay[found - 1].isLetter || hay[found - 1].isNumber)
+        score += (last >= 0 ? found - last - 1 : found) - (wordStart ? 3 : 0)
+        last = found
+        at = found + 1
+    }
+    return score
+}
+
+/// ⌘O or `/`: a fuzzy finder over the current workspace's shelf. Return opens the match, Esc or a click outside closes it.
+final class FinderOverlay: NSView, NSTextFieldDelegate, NSTableViewDataSource, NSTableViewDelegate {
+    let field = NSTextField()
+    let table = NSTableView()
+    let panel = NSVisualEffectView()
+    private var entries: [ShelfEntry] = []
+    private(set) var matches: [ShelfEntry] = []
+    var onPick: ((ShelfEntry) -> Void)?
+    var onClose: (() -> Void)?
+
+    init(entries: [ShelfEntry], workspace: Workspace) {
+        self.entries = entries
+        super.init(frame: .zero)
+        panel.material = .popover
+        panel.state = .active
+        panel.wantsLayer = true
+        panel.layer?.cornerRadius = 10
+        panel.layer?.masksToBounds = true
+        field.placeholderString = "Find in \(workspace.name)"
+        field.font = .systemFont(ofSize: 16)
+        field.isBordered = false
+        field.drawsBackground = false
+        field.focusRingType = .none
+        field.delegate = self
+        table.addTableColumn(NSTableColumn(identifier: .init("match")))
+        table.headerView = nil
+        table.style = .plain
+        table.backgroundColor = .clear
+        table.rowSizeStyle = .custom
+        table.dataSource = self
+        table.delegate = self
+        table.target = self
+        table.doubleAction = #selector(pickSelected)
+        table.refusesFirstResponder = true
+        let scroll = NSScrollView()
+        scroll.documentView = table
+        scroll.drawsBackground = false
+        scroll.hasVerticalScroller = true
+        let divider = NSBox()
+        divider.boxType = .separator
+        for view in [panel, field, divider, scroll] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+        }
+        addSubview(panel)
+        panel.addSubview(field)
+        panel.addSubview(divider)
+        panel.addSubview(scroll)
+        NSLayoutConstraint.activate([
+            panel.centerXAnchor.constraint(equalTo: centerXAnchor),
+            panel.topAnchor.constraint(equalTo: topAnchor, constant: 90),
+            panel.widthAnchor.constraint(equalToConstant: 520),
+            field.topAnchor.constraint(equalTo: panel.topAnchor, constant: 14),
+            field.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 16),
+            field.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -16),
+            divider.topAnchor.constraint(equalTo: field.bottomAnchor, constant: 12),
+            divider.leadingAnchor.constraint(equalTo: panel.leadingAnchor),
+            divider.trailingAnchor.constraint(equalTo: panel.trailingAnchor),
+            scroll.topAnchor.constraint(equalTo: divider.bottomAnchor, constant: 4),
+            scroll.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 6),
+            scroll.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -6),
+            scroll.heightAnchor.constraint(equalToConstant: 8 * 40),
+            scroll.bottomAnchor.constraint(equalTo: panel.bottomAnchor, constant: -6),
+        ])
+        filter()
+    }
+
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.black.withAlphaComponent(0.12).setFill()
+        bounds.intersection(dirtyRect).fill()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        if !panel.frame.contains(convert(event.locationInWindow, from: nil)) {
+            onClose?()
+        }
+    }
+
+    func search(_ query: String) {
+        field.stringValue = query
+        filter()
+    }
+
+    private func filter() {
+        let query = field.stringValue
+        matches = entries.compactMap { entry -> (ShelfEntry, Int)? in
+            let name = ((entry.path as NSString).lastPathComponent as NSString).deletingPathExtension
+            let score = [fuzzyScore(query, entry.title), fuzzyScore(query, name).map { $0 + 2 }].compactMap { $0 }.min()
+            return score.map { (entry, $0) }
+        }
+        .sorted { ($0.1, $1.0.touched) < ($1.1, $0.0.touched) }
+        .map(\.0)
+        table.reloadData()
+        if !matches.isEmpty {
+            table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+        }
+    }
+
+    func controlTextDidChange(_ obj: Notification) {
+        filter()
+    }
+
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+        switch selector {
+        case #selector(NSResponder.moveDown(_:)):
+            move(1)
+        case #selector(NSResponder.moveUp(_:)):
+            move(-1)
+        case #selector(NSResponder.insertNewline(_:)):
+            pickSelected()
+        case #selector(NSResponder.cancelOperation(_:)):
+            onClose?()
+        default:
+            return false
+        }
+        return true
+    }
+
+    private func move(_ step: Int) {
+        guard !matches.isEmpty else { return }
+        let row = min(max(0, table.selectedRow + step), matches.count - 1)
+        table.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        table.scrollRowToVisible(row)
+    }
+
+    @objc private func pickSelected() {
+        guard table.selectedRow >= 0, table.selectedRow < matches.count else {
+            NSSound.beep()
+            return
+        }
+        onPick?(matches[table.selectedRow])
+    }
+
+    func numberOfRows(in tableView: NSTableView) -> Int { max(matches.count, 1) }
+
+    func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat { 40 }
+
+    func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+        let rowView = QuietRowView()
+        rowView.selectionHighlightStyle = .none
+        return rowView
+    }
+
+    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        let label = NSTextField(labelWithString: "")
+        if matches.isEmpty {
+            label.stringValue = "No matches"
+            label.textColor = .tertiaryLabelColor
+            label.font = .systemFont(ofSize: 13)
+        } else {
+            let entry = matches[row]
+            label.attributedStringValue = NSAttributedString(string: entry.state.mark + "  ", attributes: [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: entry.state.markColor])
+                + NSAttributedString(string: entry.title, attributes: [.font: NSFont.systemFont(ofSize: 13, weight: .medium), .foregroundColor: NSColor.labelColor])
+                + NSAttributedString(string: "   " + entry.progress, attributes: [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.secondaryLabelColor])
+        }
+        label.lineBreakMode = .byTruncatingTail
+        let cell = NSTableCellView()
+        label.translatesAutoresizingMaskIntoConstraints = false
+        cell.addSubview(label)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 12),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: cell.trailingAnchor, constant: -12),
+            label.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+        ])
+        return cell
     }
 }
 
@@ -1055,6 +1279,27 @@ final class ShellController: NSViewController {
 
     @objc private func pick(_ sender: NSButton) {
         onPick?(Workspace.allCases[sender.tag])
+    }
+
+    private(set) var finder: FinderOverlay?
+
+    /// Lays the finder over the whole window, searching only `entries`.
+    func showFinder(entries: [ShelfEntry], onPick: @escaping (ShelfEntry) -> Void) {
+        hideFinder()
+        let overlay = FinderOverlay(entries: entries, workspace: active)
+        overlay.onPick = { [weak self] entry in
+            self?.hideFinder()
+            onPick(entry)
+        }
+        overlay.onClose = { [weak self] in self?.hideFinder() }
+        pinned(overlay, in: view)
+        finder = overlay
+        view.window?.makeFirstResponder(overlay.field)
+    }
+
+    func hideFinder() {
+        finder?.removeFromSuperview()
+        finder = nil
     }
 }
 
@@ -1772,7 +2017,7 @@ final class TutorController: NSObject, NSTextViewDelegate {
         detailVC.view = detail
 
         let sidebarItem = NSSplitViewItem(viewController: sidebarVC)
-        sidebarItem.minimumThickness = 200
+        sidebarItem.minimumThickness = 180
         sidebarItem.maximumThickness = 340
         sidebarItem.preferredThicknessFraction = 0.24
         viewController.addSplitViewItem(sidebarItem)
@@ -2417,6 +2662,11 @@ struct ShelfEntry {
     let touched: Date
 }
 
+/// One spelling per file, so the shelf, the open document and saved state agree (`/tmp` and `/private/tmp` included).
+func canonicalPath(_ raw: String) -> String {
+    URL(fileURLWithPath: (raw as NSString).expandingTildeInPath).standardizedFileURL.path
+}
+
 func sidecarPaths(_ path: String) -> [String] {
     let stem = (path as NSString).deletingPathExtension
     return [stem + ".signoff.json", stem + ".answers.json"]
@@ -2433,7 +2683,7 @@ func libraryPaths() -> [String] {
     [decksDirectory, tutorDirectory].flatMap { directory in
         ((try? FileManager.default.contentsOfDirectory(atPath: directory)) ?? [])
             .filter { $0.hasSuffix(".json") && !$0.hasSuffix(".signoff.json") && !$0.hasSuffix(".answers.json") }
-            .map { (directory as NSString).appendingPathComponent($0) }
+            .map { canonicalPath((directory as NSString).appendingPathComponent($0)) }
     }
 }
 
@@ -2525,28 +2775,154 @@ func emptyState(_ headline: String, _ detail: String) -> NSView {
     return view
 }
 
-/// One workspace: its own open document, typed text and focus, kept alive while another workspace is in front.
-final class WorkspaceController: NSViewController {
+func relativeTime(_ date: Date) -> String {
+    guard date > .distantPast else { return "" }
+    let seconds = max(0, Int(Date().timeIntervalSince(date)))
+    if seconds < 60 { return "just now" }
+    if seconds < 3600 { return "\(seconds / 60)m ago" }
+    if seconds < 86400 { return "\(seconds / 3600)h ago" }
+    if seconds < 86400 * 2 { return "yesterday" }
+    if seconds < 86400 * 14 { return "\(seconds / 86400)d ago" }
+    let format = DateFormatter()
+    format.dateFormat = "MMM d"
+    return format.string(from: date)
+}
+
+extension ShelfState {
+    var mark: String {
+        switch self {
+        case .waiting: return "◆"
+        case .running: return "◉"
+        case .done: return "●"
+        }
+    }
+
+    var markColor: NSColor {
+        switch self {
+        case .waiting, .running: return .systemOrange
+        case .done: return .secondaryLabelColor
+        }
+    }
+
+    var groupName: String {
+        switch self {
+        case .waiting: return "Waiting on you"
+        case .running: return "Running"
+        case .done: return "Done"
+        }
+    }
+}
+
+enum ShelfRow {
+    case header(ShelfState, Int)
+    case entry(ShelfEntry)
+    case fold(hidden: Int, expanded: Bool)
+}
+
+/// Moves a document and its sidecars into `~/.dotfiles/show/archive/`; nothing is ever deleted. Returns where the document went.
+func archiveDocument(_ path: String) throws -> String {
+    let archive = (decksDirectory as NSString).appendingPathComponent("archive")
+    try FileManager.default.createDirectory(atPath: archive, withIntermediateDirectories: true)
+    let stem = ((path as NSString).lastPathComponent as NSString).deletingPathExtension
+    var target = stem
+    if FileManager.default.fileExists(atPath: (archive as NSString).appendingPathComponent(stem + ".json")) {
+        let format = DateFormatter()
+        format.dateFormat = "yyyyMMdd-HHmmss"
+        target = stem + "-" + format.string(from: Date())
+    }
+    let moves = [(path, ".json")] + zip(sidecarPaths(path), [".signoff.json", ".answers.json"]).map { ($0, $1) }
+    for (source, suffix) in moves where FileManager.default.fileExists(atPath: source) {
+        try FileManager.default.moveItem(atPath: source, toPath: (archive as NSString).appendingPathComponent(target + suffix))
+    }
+    return (archive as NSString).appendingPathComponent(target + ".json")
+}
+
+/// The shelf's list: ⌫ archives the selected document.
+final class ShelfTable: NSTableView {
+    var onArchive: (() -> Void)?
+
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 51 || event.keyCode == 117, event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty {
+            onArchive?()
+        } else {
+            super.keyDown(with: event)
+        }
+    }
+}
+
+/// One workspace: a shelf of its documents beside the one open document, with its own back history, typed text and focus,
+/// kept alive while another workspace is in front.
+final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTableViewDelegate {
+    static let foldAfter = 5
     let workspace: Workspace
     private(set) var current: String?
     private(set) var decks: [String: DeckController] = [:]
+    private(set) var back: [String] = []
+    private(set) var entries: [ShelfEntry] = []
+    private var rows: [ShelfRow] = []
+    private var doneExpanded = false
+    private var syncingSelection = false
     let tutor: TutorController?
+    let split = NSSplitViewController()
+    let shelf = ShelfTable()
+    let statusLabel = NSTextField(labelWithString: "")
     let host = NSView()
     var onTitleChange: (() -> Void)?
+    var onLibraryChange: (() -> Void)?
     private weak var savedResponder: NSResponder?
     private var savedRange: NSRange?
+    private var statusClear: Timer?
 
     init(workspace: Workspace) {
         self.workspace = workspace
         tutor = workspace == .learn ? TutorController() : nil
         super.init(nibName: nil, bundle: nil)
         tutor?.onTitleChange = { [weak self] in self?.onTitleChange?() }
+        back = prefs.stringArray(forKey: "workspace.\(workspace.rawValue).back") ?? []
     }
 
     required init?(coder: NSCoder) { fatalError("unused") }
 
     override func loadView() {
-        view = host
+        let column = NSTableColumn(identifier: .init("shelf"))
+        shelf.addTableColumn(column)
+        shelf.headerView = nil
+        shelf.style = .sourceList
+        shelf.backgroundColor = .clear
+        shelf.rowSizeStyle = .custom
+        shelf.dataSource = self
+        shelf.delegate = self
+        shelf.onArchive = { [weak self] in self?.archiveSelected() }
+        let scroll = NSScrollView()
+        scroll.documentView = shelf
+        scroll.hasVerticalScroller = true
+        scroll.drawsBackground = false
+        statusLabel.font = .systemFont(ofSize: 11)
+        statusLabel.textColor = .tertiaryLabelColor
+        statusLabel.lineBreakMode = .byTruncatingTail
+        statusLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let stack = NSStackView(views: [scroll, statusLabel])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 8
+        stack.edgeInsets = NSEdgeInsets(top: 0, left: 0, bottom: 12, right: 0)
+        scroll.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        statusLabel.leadingAnchor.constraint(equalTo: stack.leadingAnchor, constant: 18).isActive = true
+        statusLabel.trailingAnchor.constraint(lessThanOrEqualTo: stack.trailingAnchor, constant: -12).isActive = true
+        let shelfVC = NSViewController()
+        shelfVC.view = ListBackdrop(stack)
+        let shelfItem = NSSplitViewItem(viewController: shelfVC)
+        shelfItem.minimumThickness = 180
+        shelfItem.maximumThickness = 320
+        shelfItem.canCollapse = true
+        shelfItem.canCollapseFromWindowResize = true
+        shelfItem.holdingPriority = .init(260)
+        let hostVC = NSViewController()
+        hostVC.view = host
+        split.addSplitViewItem(shelfItem)
+        split.addSplitViewItem(NSSplitViewItem(viewController: hostVC))
+        addChild(split)
+        view = split.view
         if let tutor {
             addChild(tutor.viewController)
             pinned(tutor.viewController.view, in: host)
@@ -2554,6 +2930,13 @@ final class WorkspaceController: NSViewController {
         if current == nil {
             showNothing()
         }
+        showHint()
+    }
+
+    /// Puts the dividers where they read best at 1180pt: a 210pt shelf, then the open document's own columns.
+    func settleColumns() {
+        split.view.layoutSubtreeIfNeeded()
+        split.splitView.setPosition(210, ofDividerAt: 0)
     }
 
     var currentDeck: DeckController? { current.flatMap { decks[$0] } }
@@ -2568,8 +2951,8 @@ final class WorkspaceController: NSViewController {
         return currentDeck?.subtitle ?? ""
     }
 
-    /// Opens `path` here, or reloads it when it's already the open document.
-    func open(_ path: String) {
+    /// Opens `path` here, or reloads it when it's already the open document. The document it replaces goes on the back history.
+    func open(_ path: String, remember: Bool = true) {
         _ = view
         prefs.set(Date(), forKey: "opened." + path)
         if path == current {
@@ -2577,6 +2960,13 @@ final class WorkspaceController: NSViewController {
             return
         }
         currentDeck?.saveNote()
+        tutor?.saveDrafts()
+        if remember, let current {
+            back.removeAll { $0 == current || $0 == path }
+            back.append(current)
+            back = Array(back.suffix(50))
+            prefs.set(back, forKey: "workspace.\(workspace.rawValue).back")
+        }
         current = path
         prefs.set(path, forKey: "workspace.\(workspace.rawValue).open")
         switch workspace {
@@ -2601,9 +2991,24 @@ final class WorkspaceController: NSViewController {
                 decks[path] = controller
             }
             display(controller.viewController)
+            controller.settleColumns()
             controller.window?.makeFirstResponder(controller.table)
         }
+        syncShelfSelection()
         onTitleChange?()
+        onLibraryChange?()
+    }
+
+    /// ⌘[: back to the document open before this one, skipping any that were archived or removed.
+    func goBack() {
+        while let previous = back.popLast() {
+            prefs.set(back, forKey: "workspace.\(workspace.rawValue).back")
+            if FileManager.default.fileExists(atPath: previous) {
+                open(previous, remember: false)
+                return
+            }
+        }
+        say("Nothing to go back to in \(workspace.name)")
     }
 
     private func loadOrComplain(_ path: String) -> Deck? {
@@ -2618,31 +3023,23 @@ final class WorkspaceController: NSViewController {
         }
     }
 
-    /// Closes the open document, leaving the workspace's empty state.
-    func close() {
-        current = nil
-        prefs.removeObject(forKey: "workspace.\(workspace.rawValue).open")
-        showNothing()
-        onTitleChange?()
-    }
-
     func showNothing() {
         switch workspace {
         case .learn:
-            tutor?.showEmpty(libraryPaths().contains(where: isTutorFile)
-                ? "Nothing open. Pick a session from the Tutor menu, or Claude opens one with `show --tutor <file>`."
-                : "No tutor sessions in `~/.dotfiles/show/tutor` yet. Claude starts one with `show --tutor <file>`.")
+            tutor?.showEmpty(entries.isEmpty
+                ? "No tutor sessions in `~/.dotfiles/show/tutor` yet. Claude starts one with `show --tutor <file>`."
+                : "Nothing open. Pick a session from the shelf, or press ⌘O.")
         case .runs:
             display(emptyState("No live runs yet", "A live run shows here while it's going."))
         case .forest:
-            display(emptyState("No forest open", "Claude opens a project's branches here with `show <deck>`."))
+            display(emptyState("No forest open", entries.isEmpty ? "Claude opens a project's branches here with `show <deck>`." : "Pick a project from the shelf, or press ⌘O."))
         case .review:
-            display(emptyState("Nothing to review", "Claude opens a deck here with `show <deck>`."))
+            display(emptyState("Nothing to review", entries.isEmpty ? "Claude opens a deck here with `show <deck>`." : "Pick a deck from the shelf, or press ⌘O."))
         }
     }
 
     private func display(_ content: NSViewController) {
-        children.filter { $0 !== content && $0 !== tutor?.viewController }.forEach { $0.removeFromParent() }
+        children.filter { $0 !== content && $0 !== tutor?.viewController && $0 !== split }.forEach { $0.removeFromParent() }
         if content.parent !== self { addChild(content) }
         display(content.view)
     }
@@ -2680,6 +3077,204 @@ final class WorkspaceController: NSViewController {
         tutor?.saveDrafts()
     }
 
+    // MARK: the shelf
+
+    /// Takes this workspace's documents from a library scan and regroups the shelf, keeping the open document selected.
+    func setEntries(_ all: [ShelfEntry]) {
+        entries = all.filter { $0.workspace == workspace }
+        var fresh: [ShelfRow] = []
+        for state in [ShelfState.waiting, .running, .done] {
+            let group = entries.filter { $0.state == state }.sorted { $0.touched > $1.touched }
+            guard !group.isEmpty else { continue }
+            fresh.append(.header(state, group.count))
+            let folds = state == .done && group.count > Self.foldAfter
+            let shown = folds && !doneExpanded ? Array(group.prefix(Self.foldAfter)) : group
+            fresh += shown.map(ShelfRow.entry)
+            if folds {
+                fresh.append(.fold(hidden: group.count - Self.foldAfter, expanded: doneExpanded))
+            }
+        }
+        rows = fresh
+        _ = view
+        let origin = shelf.enclosingScrollView?.contentView.bounds.origin
+        syncingSelection = true
+        shelf.reloadData()
+        syncingSelection = false
+        if let origin, let clip = shelf.enclosingScrollView?.contentView {
+            clip.scroll(to: clip.constrainBoundsRect(NSRect(origin: origin, size: clip.bounds.size)).origin)
+        }
+        syncShelfSelection()
+        if current == nil {
+            showNothing()
+        }
+    }
+
+    private func syncShelfSelection() {
+        let row = rows.firstIndex { if case .entry(let entry) = $0 { return entry.path == current } else { return false } }
+        syncingSelection = true
+        if let row {
+            shelf.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        } else {
+            shelf.deselectAll(nil)
+        }
+        syncingSelection = false
+    }
+
+    func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
+
+    func tableView(_ tableView: NSTableView, isGroupRow row: Int) -> Bool {
+        if case .header = rows[row] { return true }
+        return false
+    }
+
+    func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
+        switch rows[row] {
+        case .header: return 28
+        case .entry: return 44
+        case .fold: return 26
+        }
+    }
+
+    func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
+        switch rows[row] {
+        case .header: return false
+        case .entry: return true
+        case .fold:
+            doneExpanded.toggle()
+            onLibraryChange?()
+            return false
+        }
+    }
+
+    func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+        let rowView = QuietRowView()
+        rowView.selectionHighlightStyle = .none
+        return rowView
+    }
+
+    func tableViewSelectionDidChange(_ notification: Notification) {
+        guard !syncingSelection, shelf.selectedRow >= 0, shelf.selectedRow < rows.count, case .entry(let entry) = rows[shelf.selectedRow] else { return }
+        if entry.path != current {
+            open(entry.path)
+        }
+    }
+
+    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        switch rows[row] {
+        case .header(let state, let count):
+            let label = NSTextField(labelWithString: "")
+            label.attributedStringValue = NSAttributedString(string: "\(state.groupName)  ", attributes: [.font: NSFont.systemFont(ofSize: 12, weight: .semibold), .foregroundColor: NSColor.secondaryLabelColor])
+                + NSAttributedString(string: "\(count)", attributes: [.font: NSFont.systemFont(ofSize: 12), .foregroundColor: NSColor.tertiaryLabelColor])
+            return label
+        case .fold(let hidden, let expanded):
+            let label = NSTextField(labelWithString: expanded ? "Show fewer" : "Show \(hidden) more")
+            label.font = .systemFont(ofSize: 11.5, weight: .medium)
+            label.textColor = .secondaryLabelColor
+            return padded(label, leading: 30)
+        case .entry(let entry):
+            let mark = NSTextField(labelWithString: entry.state.mark)
+            mark.font = .systemFont(ofSize: 11)
+            mark.textColor = entry.state.markColor
+            let title = NSTextField(labelWithString: entry.title)
+            title.font = .systemFont(ofSize: 13, weight: .medium)
+            title.lineBreakMode = .byTruncatingTail
+            let detail = NSTextField(labelWithString: [entry.progress, relativeTime(entry.touched)].filter { !$0.isEmpty }.joined(separator: " · "))
+            detail.font = .systemFont(ofSize: 11)
+            detail.textColor = .secondaryLabelColor
+            detail.lineBreakMode = .byTruncatingTail
+            let text = NSStackView(views: [title, detail])
+            text.orientation = .vertical
+            text.alignment = .leading
+            text.spacing = 1
+            let cell = NSTableCellView()
+            for view in [mark, text] {
+                view.translatesAutoresizingMaskIntoConstraints = false
+                cell.addSubview(view)
+            }
+            NSLayoutConstraint.activate([
+                mark.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 10),
+                mark.firstBaselineAnchor.constraint(equalTo: title.firstBaselineAnchor),
+                text.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 26),
+                text.trailingAnchor.constraint(lessThanOrEqualTo: cell.trailingAnchor, constant: -8),
+                text.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+                title.widthAnchor.constraint(lessThanOrEqualTo: cell.widthAnchor, constant: -34),
+                detail.widthAnchor.constraint(lessThanOrEqualTo: cell.widthAnchor, constant: -34),
+            ])
+            cell.toolTip = (entry.path as NSString).abbreviatingWithTildeInPath
+            return cell
+        }
+    }
+
+    private func padded(_ view: NSView, leading: CGFloat) -> NSView {
+        let cell = NSTableCellView()
+        view.translatesAutoresizingMaskIntoConstraints = false
+        cell.addSubview(view)
+        NSLayoutConstraint.activate([
+            view.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: leading),
+            view.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+        ])
+        return cell
+    }
+
+    /// ⌫ on a shelf row: the document and its sidecars move to `show/archive/`.
+    func archiveSelected() {
+        guard shelf.selectedRow >= 0, shelf.selectedRow < rows.count, case .entry(let entry) = rows[shelf.selectedRow] else {
+            NSSound.beep()
+            return
+        }
+        archive(entry)
+    }
+
+    func archive(_ entry: ShelfEntry) {
+        let wasOpen = entry.path == current
+        if let deck = decks[entry.path] {
+            deck.saveNote()
+        }
+        if wasOpen {
+            tutor?.saveDrafts()
+        }
+        do {
+            _ = try archiveDocument(entry.path)
+        } catch {
+            say("Couldn't archive “\(entry.title)”: \(error.localizedDescription)")
+            return
+        }
+        decks[entry.path] = nil
+        back.removeAll { $0 == entry.path }
+        prefs.set(back, forKey: "workspace.\(workspace.rawValue).back")
+        if wasOpen {
+            current = nil
+            prefs.removeObject(forKey: "workspace.\(workspace.rawValue).open")
+            if let previous = back.last(where: { FileManager.default.fileExists(atPath: $0) }) {
+                back.removeAll { $0 == previous }
+                open(previous, remember: false)
+            } else {
+                showNothing()
+                onTitleChange?()
+            }
+        }
+        say("Archived “\(entry.title)” to show/archive")
+        onLibraryChange?()
+        view.window?.makeFirstResponder(shelf)
+    }
+
+    // MARK: the status line
+
+    /// A transient message at the foot of the shelf; the key hints come back after a few seconds.
+    func say(_ message: String) {
+        statusLabel.stringValue = message
+        statusLabel.textColor = .secondaryLabelColor
+        statusClear?.invalidate()
+        statusClear = Timer.scheduledTimer(withTimeInterval: 6, repeats: false) { [weak self] _ in self?.showHint() }
+    }
+
+    private func showHint() {
+        statusLabel.stringValue = "⌘O find · ⌘[ back · ⌫ archive"
+        statusLabel.textColor = .tertiaryLabelColor
+    }
+
+    // MARK: focus across workspace switches
+
     /// Remembers which field had focus (and where its cursor was) before another workspace comes forward.
     func rememberFocus(in window: NSWindow) {
         saveState()
@@ -2699,10 +3294,12 @@ final class WorkspaceController: NSViewController {
 
     func restoreFocus(in window: NSWindow) {
         guard let responder = savedResponder as? NSView, responder.window === window, !responder.isHiddenOrHasHiddenAncestor else {
-            if let tutor {
+            if let tutor, current != nil {
                 tutor.focusFirstField()
             } else if let deck = currentDeck {
                 window.makeFirstResponder(deck.table)
+            } else {
+                window.makeFirstResponder(shelf)
             }
             return
         }
@@ -2715,6 +3312,12 @@ final class WorkspaceController: NSViewController {
             }
         }
     }
+}
+
+func + (lhs: NSAttributedString, rhs: NSAttributedString) -> NSAttributedString {
+    let out = NSMutableAttributedString(attributedString: lhs)
+    out.append(rhs)
+    return out
 }
 
 /// Writes a view as drawn into a PNG, in the light appearance.
@@ -2761,12 +3364,10 @@ func writeComposite(_ root: NSView, to file: String) {
 }
 
 /// One Show process and one window: `show <file>` hands the file to the running app, which switches to its workspace and opens it there.
-final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemValidation, NSWindowDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, NSWindowDelegate {
     var window: NSWindow!
     var shell: ShellController!
     var workspaces: [Workspace: WorkspaceController] = [:]
-    let decksMenu = NSMenu(title: "Decks")
-    let tutorSessionsMenu = NSMenu(title: "Sessions")
     let launchPaths: [String]
     let snapshotPath: String?
     var watcher: Timer?
@@ -2789,6 +3390,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
                 guard let self, self.shell != nil, self.active == workspace else { return }
                 self.updateTitle()
             }
+            controller.onLibraryChange = { [weak self] in
+                guard let self, self.shell != nil else { return }
+                self.refreshLibrary(force: true)
+            }
             workspaces[workspace] = controller
         }
         shell = ShellController(workspaces: workspaces, active: start)
@@ -2808,6 +3413,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
             window.center()
             window.setFrameAutosaveName("show.window")
         }
+        _ = shell.view
+        workspaces.values.forEach { $0.settleColumns() }
+        refreshLibrary(force: true)
         restore()
         updateTitle()
         launchPaths.forEach(openPath)
@@ -2820,7 +3428,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         window.makeKeyAndOrderFront(nil)
         workspaces[active]?.restoreFocus(in: window)
         NSApp.activate(ignoringOtherApps: true)
-        refreshBadges()
+        refreshLibrary(force: true)
+        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self, event.charactersIgnoringModifiers == "/",
+                  event.modifierFlags.intersection([.command, .control, .option]).isEmpty,
+                  !self.isTyping else { return event }
+            self.showFinder(nil)
+            return nil
+        }
         watcher = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.stayCurrent() }
     }
 
@@ -2840,22 +3455,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
     private func stayCurrent() {
         workspaces.values.forEach { $0.reloadChanged() }
         shell.runsRunning = workspaces[.runs]?.isRunning ?? false
-        refreshBadges()
+        refreshLibrary()
         if let built = modificationDate(buildStamp), built != launchedBuild {
             relaunch()
         }
     }
 
-    func refreshBadges(force: Bool = false) {
+    /// Rescans the library when anything in it changed: every workspace regroups its shelf, and the rail's badges count what waits on you.
+    func refreshLibrary(force: Bool = false) {
         let fresh = librarySignature()
         guard force || fresh != signature else { return }
         signature = fresh
         let entries = scanLibrary()
+        workspaces.values.forEach { $0.setEntries(entries) }
         var counts: [Workspace: Int] = [:]
         for entry in entries where entry.state == .waiting {
             counts[entry.workspace, default: 0] += 1
         }
         shell.setBadges(counts)
+    }
+
+    /// Whether keystrokes are going into a text field, where `/` is just a slash.
+    private var isTyping: Bool {
+        guard let responder = window.firstResponder as? NSTextView else { return false }
+        return responder.isEditable
     }
 
     private func relaunch() {
@@ -2888,17 +3511,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
 
     /// Switches to the file's workspace and opens it there.
     func openPath(_ rawPath: String) {
-        let path = URL(fileURLWithPath: (rawPath as NSString).expandingTildeInPath).standardizedFileURL.path
+        let path = canonicalPath(rawPath)
         let workspace = Workspace.route(path).workspace
         switchTo(workspace)
         workspaces[workspace]?.open(path)
-        refreshBadges(force: true)
-        window.makeKeyAndOrderFront(nil)
+        if snapshotPath == nil {
+            window.makeKeyAndOrderFront(nil)
+        }
     }
 
     /// Brings a workspace forward in the same window: its view swaps in, nothing else moves.
     func switchTo(_ workspace: Workspace) {
         guard workspace != active else { return }
+        shell.hideFinder()
         workspaces[active]?.rememberFocus(in: window)
         shell.show(workspace)
         prefs.set(workspace.rawValue, forKey: "workspace.active")
@@ -2922,9 +3547,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         tutor?.choose(confidence: sender.tag)
     }
 
-    @objc func openListed(_ sender: NSMenuItem) {
-        guard let path = sender.representedObject as? String else { return }
-        openPath(path)
+    @objc func showFinder(_ sender: Any?) {
+        guard let controller = workspaces[active] else { return }
+        if shell.finder != nil {
+            shell.hideFinder()
+            controller.restoreFocus(in: window)
+            return
+        }
+        controller.rememberFocus(in: window)
+        shell.showFinder(entries: controller.entries) { [weak self] entry in
+            self?.openPath(entry.path)
+        }
+    }
+
+    @objc func goBack(_ sender: Any?) {
+        workspaces[active]?.goBack()
+    }
+
+    @objc func archiveSelected(_ sender: Any?) {
+        workspaces[active]?.archiveSelected()
+    }
+
+    @objc func toggleShelf(_ sender: Any?) {
+        guard let item = workspaces[active]?.split.splitViewItems.first else { return }
+        item.animator().isCollapsed.toggle()
     }
 
     @objc func sendTutor(_ sender: Any?) {
@@ -2937,6 +3583,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         }
         if menuItem.action == #selector(pickConfidence) {
             return active == .learn && tutor?.currentRungID != nil
+        }
+        if menuItem.action == #selector(archiveSelected) {
+            return workspaces[active].map { $0.shelf.selectedRow >= 0 } ?? false
+        }
+        if menuItem.action == #selector(goBack) {
+            return workspaces[active]?.back.isEmpty == false
         }
         return true
     }
@@ -2954,34 +3606,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         workspaces[active]?.reload()
     }
 
-    func menuNeedsUpdate(_ menu: NSMenu) {
-        menu.removeAllItems()
-        let wanted: Set<Workspace> = menu === tutorSessionsMenu ? [.learn] : [.forest, .review]
-        let entries = scanLibrary().filter { wanted.contains($0.workspace) }
-        for entry in entries {
-            let item = NSMenuItem(title: "\(entry.title)  —  \(entry.progress)", action: #selector(openListed), keyEquivalent: "")
-            item.target = self
-            item.representedObject = entry.path
-            item.state = workspaces[entry.workspace]?.current == entry.path ? .on : .off
-            menu.addItem(item)
-        }
-        if menu === tutorSessionsMenu {
-            if menu.items.isEmpty {
-                menu.addItem(withTitle: "No sessions in ~/.dotfiles/show/tutor", action: nil, keyEquivalent: "")
-            }
-            return
-        }
-        if !entries.isEmpty {
-            menu.addItem(.separator())
-        }
-        let other = NSMenuItem(title: "Open Deck…", action: #selector(openOther), keyEquivalent: "o")
-        other.target = self
-        menu.addItem(other)
-        let reload = NSMenuItem(title: "Reload", action: #selector(reloadCurrent), keyEquivalent: "r")
-        reload.target = self
-        menu.addItem(reload)
-    }
-
     private func buildMenu() {
         let main = NSMenu()
         let appItem = NSMenuItem()
@@ -2989,11 +3613,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         let appMenu = NSMenu()
         appMenu.addItem(withTitle: "Quit Show", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = appMenu
-        let decksItem = NSMenuItem()
-        main.addItem(decksItem)
-        decksMenu.delegate = self
-        decksMenu.addItem(withTitle: "Open Deck…", action: #selector(openOther), keyEquivalent: "o").target = self
-        decksItem.submenu = decksMenu
+        let libraryItem = NSMenuItem()
+        main.addItem(libraryItem)
+        let libraryMenu = NSMenu(title: "Library")
+        libraryMenu.addItem(withTitle: "Find…", action: #selector(showFinder), keyEquivalent: "o").target = self
+        let openFile = libraryMenu.addItem(withTitle: "Open File…", action: #selector(openOther), keyEquivalent: "o")
+        openFile.keyEquivalentModifierMask = [.command, .option]
+        openFile.target = self
+        libraryMenu.addItem(withTitle: "Back", action: #selector(goBack), keyEquivalent: "[").target = self
+        libraryMenu.addItem(.separator())
+        libraryMenu.addItem(withTitle: "Archive Shelf Row (⌫ on the shelf)", action: #selector(archiveSelected), keyEquivalent: "").target = self
+        libraryMenu.addItem(withTitle: "Reload", action: #selector(reloadCurrent), keyEquivalent: "r").target = self
+        libraryMenu.addItem(.separator())
+        let toggle = libraryMenu.addItem(withTitle: "Toggle Shelf", action: #selector(toggleShelf), keyEquivalent: "s")
+        toggle.keyEquivalentModifierMask = [.command, .control]
+        toggle.target = self
+        libraryItem.submenu = libraryMenu
         let workspaceItem = NSMenuItem()
         main.addItem(workspaceItem)
         let workspaceMenu = NSMenu(title: "Workspace")
@@ -3007,9 +3642,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         let tutorItem = NSMenuItem()
         main.addItem(tutorItem)
         let tutorMenu = NSMenu(title: "Tutor")
-        tutorSessionsMenu.delegate = self
-        tutorMenu.addItem(withTitle: "Sessions", action: nil, keyEquivalent: "").submenu = tutorSessionsMenu
-        tutorMenu.addItem(.separator())
         let sendItem = NSMenuItem(title: "Send", action: #selector(sendTutor), keyEquivalent: "\r")
         sendItem.keyEquivalentModifierMask = [.command]
         sendItem.target = self
@@ -3050,7 +3682,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
             switchTo(workspace)
         }
         window.appearance = NSAppearance(named: .aqua)
-        refreshBadges(force: true)
+        let environment = ProcessInfo.processInfo.environment
+        if environment["SHOW_SNAPSHOT_BACK"] != nil {
+            workspaces[active]?.goBack()
+        }
+        if let archived = environment["SHOW_SNAPSHOT_ARCHIVE"], let entry = workspaces[active]?.entries.first(where: { $0.path == canonicalPath(archived) }) {
+            workspaces[active]?.archive(entry)
+        }
+        refreshLibrary(force: true)
+        if let query = environment["SHOW_SNAPSHOT_FINDER"] {
+            showFinder(nil)
+            shell.finder?.search(query)
+            print("finder \"\(query)\": " + (shell.finder?.matches.map(\.title).joined(separator: " | ") ?? "-"))
+        }
         let controller = workspaces[active]
         if let key = ProcessInfo.processInfo.environment["SHOW_SNAPSHOT_SECTION"] {
             controller?.currentDeck?.select(section: key)
@@ -3058,12 +3702,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         window.layoutIfNeeded()
         shell.view.layoutSubtreeIfNeeded()
         controller?.currentDeck?.prepareSnapshot()
-        controller?.currentDeck?.table.reloadData()
         shell.view.layoutSubtreeIfNeeded()
         controller?.currentDeck?.table.layoutSubtreeIfNeeded()
         let stem = (output as NSString).deletingPathExtension
         writeComposite(shell.view, to: output)
         writePNG(shell.rail, to: stem + "-rail.png")
+        if let controller {
+            controller.shelf.layoutSubtreeIfNeeded()
+            writePNG(controller.shelf, to: stem + "-shelf.png")
+            print("shelf: " + controller.entries.map { "\($0.state.mark) \($0.title)" }.joined(separator: " | ") + " · back: \(controller.back.map { ($0 as NSString).lastPathComponent })")
+        }
         if let deck = controller?.currentDeck {
             writePNG(deck.table, to: stem + "-sidebar.png")
             deck.text.sizeToFit()
