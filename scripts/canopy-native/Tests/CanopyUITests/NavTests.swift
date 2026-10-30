@@ -241,7 +241,7 @@ import Testing
 
     @Test func escNeverChangesPage() {
         let a = app(.todo)
-        a.registry.register(Command(id: "test.esc.leaves", title: "Leave", scope: .todo, keys: ["esc"], local: { [weak a] _, _ in a?.go(.forests) }))
+        a.registry.register(Command(id: "test.esc.leaves", title: "Leave", scope: .todo, verb: .cancel, local: { [weak a] _, _ in a?.go(.forests) }))
         a.keys.handle("esc")
         #expect(a.router.route == .todo)
         #expect(a.runner.note == KeyEngine.nothingToCancel)

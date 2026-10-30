@@ -1,61 +1,24 @@
 import Foundation
 
-/// A command as the key rules see it.
+/// A command as the key rules see it, in one mode.
 public struct Bound: Equatable, Sendable {
     public var id: String
     public var scope: String
     public var keys: [String]
     public var modes: [String]
-    /// key → the verb it means here (its raw name), or `leaderMeaning` for a key under the page's leader
-    public var meaning: [String: String]
-    public static let leaderMeaning = "(leader)"
-    public init(id: String, scope: String, keys: [String], modes: [String] = ["normal"], meaning: [String: String] = [:]) {
-        self.id = id; self.scope = scope; self.keys = keys; self.modes = modes; self.meaning = meaning
+    /// the verbs it implements
+    public var verbs: [String]
+    /// its keys that sit under the page's leader
+    public var local: [String]
+    public init(id: String, scope: String, keys: [String], modes: [String] = ["normal"], verbs: [String] = [], local: [String] = []) {
+        self.id = id; self.scope = scope; self.keys = keys; self.modes = modes; self.verbs = verbs; self.local = local
     }
 }
 
-/// Your keys over the defaults, and the one rule they must keep: a key means one thing on every
-/// page (bindings.ts). Pure.
+/// The key rules (bindings.ts, rebuilt around verbs). A key means one thing everywhere because the
+/// verb table gives each key one verb; what's left to check is the table itself (after keys.toml),
+/// each page's leader namespace, and that nothing is bound twice in one place. Pure.
 public enum Bindings {
-    /// Transitional: commands not yet on verbs, grouped under the verb they'll become.
-    public static let sameMove: [String: [String]] = [
-        "next": ["cursor.down", "review.down", "history.next"],
-        "previous": ["cursor.up", "review.up", "history.prev"],
-        "cancel": ["overlay.close", "review.back", "history.exit", "commit.exit", "wiki.back", "tutor.back"],
-        "out": ["forest.collapse", "review.leave", "forest.leave", "commit.back", "machine.log.close", "tutor.home"],
-        "in": ["forest.expand", "branch.open", "history.enter", "machine.log", "review.in"],
-        "main": ["row.primary", "review.fold", "todo.open", "review.expand", "history.open", "machine.open", "wiki.open", "tutor.concept", "tutor.open", "pane.open", "tutor.concept.show"],
-        "push": ["branch.push", "review.send", "review.push"],
-        "move-up": ["focus.up", "todo.up"],
-        "move-down": ["focus.down", "todo.down"],
-        "put-away": ["project.archive", "todo.drop", "machine.kill", "tutor.forget", "tutor.evidence.cut"],
-        "words": ["review.words", "forest.words", "story.why"],
-        "face": ["review.tab", "forest.face", "machine.log.jobs"],
-        "github": ["branch.pr", "review.finish"],
-        "preview": ["branch.preview", "review.preview", "forest.preview"],
-        "sync": ["branch.sync", "review.sync"],
-        "map": ["review.map", "tutor.map"],
-        "type": ["review.types", "tutor.types"],
-        "definition": ["review.definition", "tutor.definition"],
-        "type-definition": ["review.type-definition", "tutor.type-definition"],
-        "implementations": ["review.implementation", "tutor.implementation"],
-        "references": ["review.references", "tutor.references"],
-        "symbols": ["review.symbols", "tutor.symbols"],
-        "write": ["review.note.insert", "tutor.write", "branch.describe.edit", "machine.port", "review.compose.edit", "words.edit"],
-        "send": ["branch.describe.save", "review.filter.accept", "tutor.submit", "review.compose.send", "words.submit"],
-        // NAV.md §5
-        "find": ["review.filter", "forest.find", "forests.find"],
-        "search": ["page.search", "review.search"],
-        "next-sibling": ["forest.branch.next", "review.branch.next"],
-        "previous-sibling": ["forest.branch.prev", "review.branch.prev"],
-        "parent": ["forest.parent", "review.parent"],
-        "child": ["forest.child", "review.child"],
-        "root": ["forest.root", "review.root"],
-        "tip": ["forest.tip", "review.tip"],
-        "first": ["cursor.top", "review.top"],
-        "last": ["cursor.bottom", "review.bottom"],
-    ]
-
     private static let named: Set<String> = ["space", "esc", "ret", "tab", "up", "down", "left", "right"]
 
     public static func validKey(_ k: String) -> Bool {
@@ -102,8 +65,8 @@ public enum Bindings {
         return (vk, customized, problems, warnings)
     }
 
-    /// The table's own rule: within each mode class a key (or a chord's prefix) belongs to one verb,
-    /// and nothing sits on the leader. Checked again after keys.toml.
+    /// The table's own rule: within each mode class a key (or a chord's prefix) belongs to one verb.
+    /// The leader is a verb like any other, so nothing can sit on it. Checked again after keys.toml.
     public static func tableProblems(_ vk: VerbKeys) -> [String] {
         var out: [String] = []
         for (cls, table) in [("", vk.keys), ("text entry: ", vk.entry)] {
@@ -123,43 +86,36 @@ public enum Bindings {
         return out
     }
 
-    /// Keys that mean different things on different pages, or two things in one place — checked
-    /// within each mode (a key may mean one thing in normal and another in insert).
+    /// What the commands do with the table, checked within each mode: a key bound twice in one
+    /// scope, a scope on no page, a page's leader namespace with a key twice or a key that swallows
+    /// another (`, b` and `, b p`), and insert mode growing past its fixed set (send; esc is the engine's).
     public static func clashes(_ cmds: [Bound], surfaceScopes: [String: [String]]) -> [String] {
         let modes = Array(Set(cmds.flatMap(\.modes))).sorted { $0 == "normal" ? true : $1 == "normal" ? false : $0 < $1 }
-        return modes.flatMap { m in
+        var out = cmds.filter { $0.modes.contains("insert") && !$0.keys.isEmpty && (!$0.local.isEmpty || $0.verbs.contains { $0 != Verb.send.rawValue }) }
+            .map { "insert: \($0.id) adds to the fixed set (esc stops, ⌃↵ sends, ⌥↵ newline)" }
+        out += cmds.filter { $0.verbs.contains { Verb(rawValue: $0)?.spec.native == true } }.map { "\($0.id): the text field does that itself" }
+        out += modes.flatMap { m in
             clashesInMode(cmds.filter { $0.modes.contains(m) }, surfaceScopes: surfaceScopes).map { m == "normal" ? $0 : "\(m): \($0)" }
         }
+        return out
     }
 
     static func clashesInMode(_ cmds: [Bound], surfaceScopes: [String: [String]]) -> [String] {
         let surfaces = surfaceScopes.sorted { $0.key < $1.key }
-        func move(_ id: String) -> String { sameMove.first { $0.value.contains(id) }?.key ?? id }
-        let byID = Dictionary(cmds.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        func token(_ id: String, _ key: String) -> String { byID[id]?.meaning[key] ?? move(id) }
-        let scopeOf = byID.mapValues(\.scope)
-        var leaderKeys: [String: [String: [String]]] = [:]
         var out: [String] = []
-        var byKey: [String: [String: [String]]] = [:]
-        var keyOrder: [String] = []
         var inScope: [String: [String]] = [:]
         var scopeOrder: [String] = []
+        var leaderKeys: [String: [String: [String]]] = [:]
+        var noPage = Set<String>()
         for c in cmds {
+            let pages = surfaces.filter { c.scope == "global" || $0.value.contains(c.scope) }.map(\.key)
+            if pages.isEmpty, !c.keys.isEmpty, noPage.insert(c.id).inserted { out.append("\(c.id): scope \(c.scope) is on no page") }
             for key in c.keys {
                 let here = "\(c.scope) \(key)"
                 if inScope[here] == nil { scopeOrder.append(here) }
-                inScope[here, default: []].append(c.id)
-                let pages = surfaces.filter { c.scope == "global" || $0.value.contains(c.scope) }.map(\.key)
-                if pages.isEmpty { out.append("\(c.id): scope \(c.scope) is on no page") }
-                if c.meaning[key] == Bound.leaderMeaning {
+                if !(inScope[here]?.contains(c.id) ?? false) { inScope[here, default: []].append(c.id) }
+                if c.local.contains(key) {
                     for p in pages where !(leaderKeys[p]?[key]?.contains(c.id) ?? false) { leaderKeys[p, default: [:]][key, default: []].append(c.id) }
-                    continue
-                }
-                if byKey[key] == nil { keyOrder.append(key) }
-                for p in pages {
-                    var ids = byKey[key, default: [:]][p, default: []]
-                    if !ids.contains(c.id) { ids.append(c.id) }
-                    byKey[key, default: [:]][p] = ids
                 }
             }
         }
@@ -167,23 +123,11 @@ public enum Bindings {
             let ids = inScope[here]!
             if ids.count > 1 { out.append("\(here.split(separator: " ").dropFirst().joined(separator: " ")): \(ids.joined(separator: " and ")) in one place") }
         }
-        for key in keyOrder {
-            let at = byKey[key] ?? [:]
-            // a page's own command wins over a global one, so the global meaning counts only where a page has none
-            var meaning: [(String, String)] = []
-            for (page, ids) in at.sorted(by: { $0.key < $1.key }) {
-                let own = ids.filter { scopeOf[$0] != "global" }
-                meaning.append((page, Array(Set((own.isEmpty ? ids : own).map { token($0, key) })).sorted().joined(separator: " | ")))
-            }
-            if Set(meaning.map(\.1)).count > 1 {
-                out.append("\(key): \(meaning.map { "\($0.0) → \($0.1)" }.joined(separator: ", "))")
-            }
-        }
-        // a page's leader namespace: one command per key, and no key a prefix of another
         for (page, keys) in leaderKeys.sorted(by: { $0.key < $1.key }) {
-            for (key, ids) in keys.sorted(by: { $0.key < $1.key }) {
+            let sorted = keys.sorted { $0.key < $1.key }
+            for (key, ids) in sorted {
                 if ids.count > 1 { out.append("\(page): \(key) is \(ids.joined(separator: " and "))") }
-                for (other, oids) in keys where other.hasPrefix(key + " ") {
+                for (other, oids) in sorted where other.hasPrefix(key + " ") {
                     out.append("\(page): \(key) (\(ids[0])) swallows \(other) (\(oids[0]))")
                 }
             }

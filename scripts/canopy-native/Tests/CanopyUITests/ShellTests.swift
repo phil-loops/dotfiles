@@ -18,9 +18,83 @@ import Testing
         #expect(a.installed == Areas.all.map { $0.name })
     }
 
+    /// The verb table gives every key one meaning; this guards the table (after keys.toml), each
+    /// page's leader namespace, nothing bound twice in one place, and insert's fixed set.
     @Test func keysMeanOneThingEverywhere() {
         let a = app()
         #expect(a.registry.keyProblems.isEmpty, "\(a.registry.keyProblems)")
+        #expect(a.registry.keyWarnings.isEmpty)
+    }
+
+    /// Pages implement verbs or name a key under their leader; no page source spells a raw key.
+    @Test func noPageSourceNamesARawKey() throws {
+        let pages = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../Sources/CanopyUI/Pages").standardized
+        let files = FileManager.default.enumerator(at: pages, includingPropertiesForKeys: nil)!.compactMap { $0 as? URL }.filter { $0.pathExtension == "swift" }
+        #expect(files.count > 20)
+        let raw = try NSRegularExpression(pattern: #"\bkeys:\s*(\[\s*"|NavKeys)|NavKeys\.|hint:\s*\[\s*"(ret|esc|tab|space|[A-Z]-\S+|.)""#)
+        for f in files {
+            let text = try String(contentsOf: f, encoding: .utf8)
+            for m in raw.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+                Issue.record("\(f.lastPathComponent): \((text as NSString).substring(with: m.range)) — implement a verb or use LocalKey")
+            }
+        }
+    }
+
+    @Test func everyKeyIsAVerbsOrUnderTheLeader() {
+        let a = app()
+        let leader = a.registry.verbKeys.leader
+        for c in a.registry.commands where !c.keys.isEmpty {
+            #expect(!c.verbs.isEmpty || c.leader != nil, "\(c.id)")
+            for k in c.keysByMode.values.flatMap({ $0 }) {
+                let fromVerb = c.verbs.contains { v in c.modes.contains { a.registry.verbKeys.of(v, in: $0).contains(k) } }
+                #expect(fromVerb || k.hasPrefix(leader + " "), "\(c.id): \(k)")
+            }
+        }
+    }
+
+    /// Within a page (all its scopes, one mode at a time) a leader key is one command, and no leader
+    /// key swallows another.
+    @Test func leaderNamespacesDontOverlapWithinAPage() {
+        let a = app()
+        for (surface, scopes) in a.registry.surfaceScopes {
+            for mode in Set(a.registry.commands.flatMap(\.modes)) {
+                var owner: [String: String] = [:]
+                for c in a.registry.commands where c.leader != nil && scopes.contains(c.scope) && c.modes.contains(mode) {
+                    let k = c.leader!.key(leader: ",")
+                    #expect(owner[k] == nil || owner[k] == c.id, "\(surface): \(k) is \(owner[k] ?? "") and \(c.id)")
+                    owner[k] = c.id
+                }
+                for k in owner.keys { for o in owner.keys where o != k { #expect(!o.hasPrefix(k + " "), "\(surface): \(k) swallows \(o)") } }
+            }
+        }
+    }
+
+    @Test func insertKeepsItsFixedSet() {
+        let a = app()
+        for c in a.registry.commands where c.modes.contains(.insert) && !(c.keysByMode[.insert] ?? []).isEmpty {
+            #expect(c.verbs == [.send] && c.leader == nil, "\(c.id) adds to insert: \(c.verbs) \(String(describing: c.leader))")
+        }
+        #expect(Verb.send.spec.entry == ["ret", "C-ret"] && Verb.newline.spec.entry == ["A-ret"])
+    }
+
+    /// keys.toml moves a verb, and every page implementing it follows; the leader moves too.
+    @Test func keysTomlOverridesApplyPerVerbAcrossPages() {
+        let a = app()
+        a.registry.applyUserKeys(["put-away": ["D"], "leader": [";"]])
+        #expect(a.registry.keyProblems.isEmpty, "\(a.registry.keyProblems)")
+        for id in ["project.archive", "todo.drop", "machine.kill", "tutor.forget", "review.pending.remove"] {
+            #expect(a.registry.command(id)?.keys == ["D"], "\(id)")
+        }
+        #expect(a.registry.command("project.focus")?.keys == ["; f"])
+        #expect(a.registry.command("review.split")?.keys == ["; s"])
+        #expect(a.registry.customized == [.putAway, .leader])
+        // onto a key another verb holds: the table says so
+        a.registry.applyUserKeys(["put-away": ["m"]])
+        #expect(a.registry.keyProblems.contains("m: mark and put-away"))
+        // v2's command-id lines are warnings, never problems
+        a.registry.applyUserKeys(["project.archive": ["x"]])
+        #expect(a.registry.keyProblems.isEmpty && a.registry.keyWarnings.count == 1)
+        #expect(a.registry.command("project.archive")?.keys == ["X"])
     }
 
     @Test func liveScopesEndWithTheSurfaceAndGlobal() {

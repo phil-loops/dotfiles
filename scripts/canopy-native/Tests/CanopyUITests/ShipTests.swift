@@ -147,8 +147,11 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
         #expect(a.keys.mode == .insert && a.insertField == ReviewCommands.composeField)
         // typing goes to the field: printable keys aren't bound in insert
         #expect(a.keys.handle("x") == false)
+        // ⌥↵ is the field's own newline: insert's fixed set leaves it alone
+        #expect(a.keys.handle("A-ret") == false)
         ship.setText("r|\(Self.thread)", "  thanks — fixed  ")
-        #expect(a.keys.handle("C-ret"))
+        // ↵ sends (⌃↵ does too): the send verb in insert
+        #expect(a.keys.handle("ret"))
         #expect(a.keys.mode == .normal)
         #expect(ship.composer == nil)
         #expect(a.store.view(Draft.self, Self.branch)?.items.first?.body == "thanks — fixed")   // the optimistic overlay

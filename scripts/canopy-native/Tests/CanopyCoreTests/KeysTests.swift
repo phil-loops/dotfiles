@@ -42,6 +42,7 @@ import Testing
         #expect(glyph("g d") == "g d")
         #expect(glyph("C-k") == "⌃k")
         #expect(glyph("tab") == "⇥")
+        #expect(glyph("C-ret") == "⌃↵" && glyph("A-ret") == "⌥↵")
         #expect(glyph("space ?") == "space ?")
         #expect(shortTitle("Show outdated conversations — the ones GitHub hid") == "show outdated conversations")
     }
@@ -70,15 +71,45 @@ import Testing
     }
 
     @Test func clashes() {
-        let scopes = ["forests": ["row", "forests"], "review": ["line", "review"]]
-        // the same move on two pages is fine
-        #expect(Bindings.clashes([Bound(id: "cursor.down", scope: "global", keys: ["j"]), Bound(id: "review.down", scope: "review", keys: ["j"])], surfaceScopes: scopes).isEmpty)
-        // a key meaning two things on two pages is not
-        let bad = Bindings.clashes([Bound(id: "row.x", scope: "row", keys: ["x"]), Bound(id: "line.x", scope: "line", keys: ["x"])], surfaceScopes: scopes)
-        #expect(bad == ["x: forests → row.x, review → line.x"])
+        let scopes = ["forests": ["row", "project", "forests"], "review": ["line", "thread", "review"]]
+        // the same verb on two pages is the point
+        #expect(Bindings.clashes([Bound(id: "cursor.down", scope: "global", keys: ["j"], verbs: ["next"]),
+                                  Bound(id: "review.down", scope: "review", keys: ["j"], verbs: ["next"])], surfaceScopes: scopes).isEmpty)
+        // one leader key on two pages: each page's own namespace
+        #expect(Bindings.clashes([Bound(id: "row.x", scope: "row", keys: [", x"], local: [", x"]),
+                                  Bound(id: "line.x", scope: "line", keys: [", x"], local: [", x"])], surfaceScopes: scopes).isEmpty)
+        // …but twice on one page, even from two scopes, or one swallowing another, is not
+        #expect(Bindings.clashes([Bound(id: "row.x", scope: "row", keys: [", x"], local: [", x"]),
+                                  Bound(id: "proj.x", scope: "project", keys: [", x"], local: [", x"])], surfaceScopes: scopes)
+                == ["forests: , x is row.x and proj.x"])
+        #expect(Bindings.clashes([Bound(id: "a", scope: "line", keys: [", b"], local: [", b"]),
+                                  Bound(id: "b", scope: "review", keys: [", b p"], local: [", b p"])], surfaceScopes: scopes)
+                == ["review: , b (a) swallows , b p (b)"])
         let twice = Bindings.clashes([Bound(id: "a", scope: "row", keys: ["q"]), Bound(id: "b", scope: "row", keys: ["q"])], surfaceScopes: scopes)
         #expect(twice.first == "q: a and b in one place")
         #expect(Bindings.clashes([Bound(id: "a", scope: "nowhere", keys: ["q"])], surfaceScopes: scopes) == ["a: scope nowhere is on no page"])
+        // insert keeps its fixed set
+        #expect(Bindings.clashes([Bound(id: "a", scope: "review", keys: ["A-1"], modes: ["insert"], verbs: ["nth-1"])], surfaceScopes: scopes)
+                == ["insert: a adds to the fixed set (esc stops, ⌃↵ sends, ⌥↵ newline)"])
+        #expect(Bindings.clashes([Bound(id: "a", scope: "review", keys: ["ret", "C-ret"], modes: ["insert"], verbs: ["send"])], surfaceScopes: scopes).isEmpty)
+    }
+
+    @Test func everyVerbHasAMeaningAndKeys() {
+        for v in Verb.allCases {
+            guard let spec = Verbs.byVerb[v] else { Issue.record("\(v) has no row in the table"); continue }
+            let all = spec.keys + spec.entry
+            #expect(!spec.meaning.isEmpty, "\(v) has no meaning")
+            #expect(!all.isEmpty, "\(v) has no keys")
+            for k in all { #expect(Bindings.validKey(k), "\(v): \(k)") }
+            for k in spec.entry { #expect(k.count > 1, "\(v): \(k) is printable — it could never reach a text field") }
+        }
+        #expect(Verbs.table.count == Verb.allCases.count)
+    }
+
+    @Test func leaderKeysFollowTheLeader() {
+        #expect(LocalKey(",c").key(leader: ",") == ", c")
+        #expect(LocalKey(", b p").key(leader: ";") == "; b p")
+        #expect(LocalKey(",S").description == ", S")
     }
 
     @Test func sheet() {
