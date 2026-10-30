@@ -126,6 +126,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         restore()
         updateTitle()
         launchPaths.forEach(openPath)
+        if launchPaths.isEmpty, snapshotPath == nil, selfTest == nil, workspaces.values.allSatisfy({ $0.current == nil }) {
+            openNewest()
+        }
         if let snapshotPath {
             snapshot(to: snapshotPath)
             NSApp.terminate(nil)
@@ -201,6 +204,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     func applicationWillTerminate(_ notification: Notification) {
         if snapshotPath == nil {
             saveAll()
+        }
+    }
+
+    /// A bare `show` while Show runs: the window comes forward as it was.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if window.isMiniaturized {
+            window.deminiaturize(nil)
+        }
+        window.makeKeyAndOrderFront(nil)
+        return false
+    }
+
+    /// First launch with nothing saved: the most recently touched document, in its workspace.
+    private func openNewest() {
+        if let newest = workspaces.values.flatMap(\.entries).max(by: { $0.touched < $1.touched }) {
+            openPath(newest.path)
         }
     }
 

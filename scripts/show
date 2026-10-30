@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # show [<file.json>…] — open files in the one Show window, each in its workspace (Forest ⌘1, Review ⌘2, Learn ⌘3, Runs ⌘4;
-# no args: the newest deck in ~/.dotfiles/show), rebuilding it when any show-app/*.swift changes. Re-showing an open file reloads it.
+# no args: bring Show to the front, or start it back on the last workspace and documents), rebuilding it when any show-app/*.swift changes. Re-showing an open file reloads it.
 # show --build — just (re)build. show --snapshot <file.json> <out.png> [--appearance light|dark] — render the window offscreen, no window shown.
 # show --selftest — drive the app's own offscreen window through every workspace on scratch fixtures; non-zero exit on a failed step.
 # show --check-routing <file.json> — print the workspace a file opens in (and a forest's merge order). show --check-live <deck.json> — print a live deck's header, groups and compare diffs.
@@ -102,9 +102,10 @@ case "${1:-}" in
     ;;
   *)
     if [[ $# -eq 0 ]]; then
-      newest="$(ls -t "$HOME/.dotfiles/show/"*.json 2>/dev/null | grep -v '\.signoff\.json$' | grep -v '\.answers\.json$' | head -1)"
-      [[ -n "$newest" ]] || { echo "show: no decks in ~/.dotfiles/show" >&2; exit 66; }
-      set -- "$newest"
+      # A running Show comes to the front; a fresh one reopens the last workspace and each workspace's document.
+      build
+      open -a "$app"
+      exit
     fi
     decks=()
     for arg in "$@"; do
