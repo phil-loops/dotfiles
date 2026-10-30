@@ -70,7 +70,11 @@ private struct ReviewHeader: View {
                 }
                 Spacer()
             }
-            if pg.integration == nil { ShipStripView(branchID: pg.id) }
+            if pg.integration == nil {
+                LoopStripView(branchID: pg.id, words: loopWords(pg.id))
+                    .task(id: b.map { "\($0.id)@\($0.tip)" }) { WordsState.of(app).load(app, pg.id) }
+                ShipStripView(branchID: pg.id)
+            }
             HStack(spacing: 12) {
                 if let c {
                     Text("→ \(c.base)")
@@ -94,6 +98,14 @@ private struct ReviewHeader: View {
             Tabs()
         }
         .padding(.horizontal, 16).padding(.bottom, 8)
+    }
+
+    /// The PR form's title and body hints, for the loop strip's words step (LoopStrip.tsx words);
+    /// nil until the branch's /outline is read.
+    private func loopWords(_ id: String) -> [LoopWord]? {
+        let w = WordsState.of(app)
+        guard w.shown[id] != nil else { return nil }
+        return w.prHints(id).map { LoopWord(id: $0.id, tone: $0.tone.rawValue) }
     }
 
     private func latest(_ c: Conv) -> [(String, String)] {
