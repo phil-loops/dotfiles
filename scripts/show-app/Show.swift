@@ -278,7 +278,7 @@ final class DeckController: NSObject, WKNavigationDelegate, NSWindowDelegate, NS
         window.delegate = self
         window.representedURL = URL(fileURLWithPath: path)
         let split = NSSplitViewController()
-        let sidebar = NSSplitViewItem(sidebarWithViewController: sidebarController())
+        let sidebar = NSSplitViewItem(viewController: sidebarController())
         sidebar.minimumThickness = 260
         sidebar.maximumThickness = 380
         split.addSplitViewItem(sidebar)
@@ -655,6 +655,19 @@ enum Space: CaseIterable {
     var key: String { "\((Space.allCases.firstIndex(of: self) ?? 0) + 1)" }
 }
 
+/// A rail icon; the selected space sits on a quiet rounded tile.
+final class RailButton: NSButton {
+    var isSelectedSpace = false
+
+    override func draw(_ dirtyRect: NSRect) {
+        if isSelectedSpace {
+            NSColor.labelColor.withAlphaComponent(0.1).setFill()
+            NSBezierPath(roundedRect: bounds, xRadius: 8, yRadius: 8).fill()
+        }
+        super.draw(dirtyRect)
+    }
+}
+
 /// Wraps a space's content with the Slack-style switcher rail; ⌘1 / ⌘2 do what its buttons do.
 final class SpaceContainer: NSViewController {
     let space: Space
@@ -690,12 +703,12 @@ final class SpaceContainer: NSViewController {
             rail.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             rail.topAnchor.constraint(equalTo: root.topAnchor),
             rail.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-            rail.widthAnchor.constraint(equalToConstant: 64),
+            rail.widthAnchor.constraint(equalToConstant: 44),
             edge.leadingAnchor.constraint(equalTo: rail.trailingAnchor),
             edge.topAnchor.constraint(equalTo: root.topAnchor),
             edge.bottomAnchor.constraint(equalTo: root.bottomAnchor),
             edge.widthAnchor.constraint(equalToConstant: 1),
-            buttons.topAnchor.constraint(equalTo: rail.topAnchor, constant: 48),
+            buttons.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor, constant: 10),
             buttons.centerXAnchor.constraint(equalTo: rail.centerXAnchor),
             content.view.leadingAnchor.constraint(equalTo: edge.trailingAnchor),
             content.view.trailingAnchor.constraint(equalTo: root.trailingAnchor),
@@ -707,19 +720,17 @@ final class SpaceContainer: NSViewController {
 
     private func button(_ target: Space) -> NSButton {
         let image = NSImage(systemSymbolName: target.symbol, accessibilityDescription: target.name)?
-            .withSymbolConfiguration(.init(pointSize: 17, weight: .regular)) ?? NSImage()
-        let button = NSButton(image: image, target: self, action: #selector(pick))
+            .withSymbolConfiguration(.init(pointSize: 15, weight: .regular)) ?? NSImage()
+        let button = RailButton(image: image, target: self, action: #selector(pick))
         button.tag = Space.allCases.firstIndex(of: target) ?? 0
         button.isBordered = false
         button.refusesFirstResponder = true
         button.toolTip = "\(target.name) ⌘\(target.key)"
-        button.wantsLayer = true
-        button.layer?.cornerRadius = 9
         let selected = target == space
-        button.contentTintColor = selected ? .controlAccentColor : .secondaryLabelColor
-        button.layer?.backgroundColor = selected ? NSColor.controlAccentColor.withAlphaComponent(0.18).cgColor : nil
+        button.isSelectedSpace = selected
+        button.contentTintColor = selected ? .labelColor : .secondaryLabelColor
         button.setAccessibilityValue(selected ? "selected" : nil)
-        NSLayoutConstraint.activate([button.widthAnchor.constraint(equalToConstant: 40), button.heightAnchor.constraint(equalToConstant: 40)])
+        NSLayoutConstraint.activate([button.widthAnchor.constraint(equalToConstant: 34), button.heightAnchor.constraint(equalToConstant: 34)])
         return button
     }
 
@@ -1161,11 +1172,12 @@ final class TutorController: NSObject, NSWindowDelegate, NSTextViewDelegate {
             column.widthAnchor.constraint(equalToConstant: Self.column),
             document.bottomAnchor.constraint(equalTo: column.bottomAnchor, constant: 160),
         ])
+        scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 420).isActive = true
         let detailVC = NSViewController()
         detailVC.view = scroll
 
         let split = NSSplitViewController()
-        let sidebarItem = NSSplitViewItem(sidebarWithViewController: sidebarVC)
+        let sidebarItem = NSSplitViewItem(viewController: sidebarVC)
         sidebarItem.minimumThickness = 240
         sidebarItem.maximumThickness = 340
         split.addSplitViewItem(sidebarItem)
