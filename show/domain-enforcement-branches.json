@@ -1,0 +1,62 @@
+{
+  "title": "Notice chart — branches",
+  "subtitle": "One page per PR · kernel · picture · changes",
+  "replyTo": "ddabd63a",
+  "sections": [
+    {
+      "id": "forest",
+      "group": "Forest",
+      "title": "Chart the notices, mark the disables",
+      "body": "> A reviewer should see the readings that matter at a glance, and see which one tripped the disable.\n\n```\ndomain-enforcement → main, in merge order\n1  feat(loo-6239): add hourly notice readings query\n   2  feat(loo-6239): chart notices by type                 ↳ builds on 1\n      3  feat(loo-6239): return the notice chart for review ↳ builds on 2\n         4  feat(loo-6239): chart notices on domain review  ↳ builds on 3\n            5  chore(loo-6239): stop loading notice rows    ↳ builds on 4\n            6  feat(loo-6239): mark disables on the chart   ↳ builds on 4   (new, not gated yet)\n```\n\nBranches 1–5 are gates-green, waiting for you to push. Branch 6 hasn't been reviewed or gated.\n\nSign off on each branch page. A note there is review feedback on that branch."
+    },
+    {
+      "id": "add-hourly-account-limit-notice-query",
+      "group": "Query",
+      "title": "Add hourly notice readings query",
+      "body": "> One row per hour and type: the highest rate that hour, the bad-email count of that same reading, and the worst level.\n\nThe cron writes a reading every 15 minutes. The query folds four readings into one point:\n\n```\nAccountLimitNotice (Spam, one hour)              listHourlyForTeam → one row\n──────────────────────────────────────           ──────────────────────────────────\n09:07  Warning   4 / 1000  = 0.40%               hour       09:00\n09:22  Error     3 /  500  = 0.60%   ← peak      type       Spam\n                                                 peakRate   0.006\n                                                 peakNumerator  3   (from the 0.60% reading,\n                                                                     not the larger 4)\n                                                 worstLevel Error\n                                                 readings   2\n```\n\n**Changes**\n- New `listHourlyForTeam` in `queries/account-limit-notice.ts` (one raw SQL group-by).\n- New test factory `createAccountLimitNotice`, and three query tests against the real DB.\n\n**Holds because** the count is taken from the peak-rate reading (`array_agg … ORDER BY rate`), so the rate and count always come from the same reading. A reading with 0 deliveries has no rate (`nullif`) instead of dividing by zero.\n\n**Watch for** levels order by enum position (Info < Warning < Error), so `max(level)` is the worst one.",
+      "tag": "add-hourly-account-limit-notice-query · +177"
+    },
+    {
+      "id": "chart-account-limit-notices-by-type",
+      "group": "Model",
+      "title": "Chart notices by type",
+      "body": "> Split the hours into one series per type, with the three things a reviewer reads first: the peak, the hours at Warning or Error, and the last Error.\n\n```\nchartForTeam({ teamId, since }) →\n{\n  since: 2026-10-29 00:00,  until: now,          ← one shared time axis\n  series: [\n    { type: \"Spam\",\n      peakRate: 0.0042, warningHours: 1, errorHours: 2, lastErrorAt: 11:00,\n      points: [ { hour: 09:00, rate: 0.002,  count: 2, level: \"Warning\" },\n                { hour: 10:00, rate: 0.0042, count: 5, level: \"Error\" },\n                { hour: 11:00, rate: null,   count: 1, level: \"Error\" } ] },  ← no deliveries\n    { type: \"Bounce\", peakRate: 0.01, warningHours: 0, errorHours: 0, lastErrorAt: null, … }\n  ]\n}\n```\n\n**Changes**\n- New `models/account-limit-notice.ts` with `chartForTeam`; `now` is injected.\n- Three model tests with fake deps and no DB.\n\n**Holds because** `peakRate` skips hours without a rate, and is `null` when no hour had one, never 0.",
+      "tag": "chart-account-limit-notices-by-type · +168"
+    },
+    {
+      "id": "return-the-notice-chart-from-domain-info",
+      "group": "Wiring",
+      "title": "Return the notice chart for review",
+      "body": "> The domain review's query returns the chart for the same window as everything else on the page.\n\n```\nadmin.getDomainInfo  →  {\n  domain, recentSuspiciousActivity,\n  recentAccountLimitNotices,                 (still here, removed in branch 5)\n+ accountLimitNoticeChart: { since, until, series[] },\n  disabledEmailMessages\n}\n```\n\n**Changes**\n- One call in `getDomainInfo`: `chartForTeam({ teamId: domain.teamId, since: cutoffDate })`.\n\n**Holds because** `since` is the same cutoff the page's time filter already uses, so the chart and the other sections cover the same window.",
+      "tag": "return-the-notice-chart-from-domain-info · +7"
+    },
+    {
+      "id": "chart-notices-on-domain-review",
+      "group": "UI",
+      "title": "Chart notices on domain review",
+      "body": "> Replace the wall of notice cards with one small chart per type, and make Error impossible to miss.\n\n**Before**: one card per non-Info reading. While a team sits at Warning or Error, that's 4 cards an hour for each type.\n\n```\n┌ Spam · Error  0.41%  Oct 28 15:07 ┐\n┌ Spam · Error  0.38%  Oct 28 14:52 ┐\n┌ Bounce · Warning  1.62%  14:52    ┐\n┌ Spam · Error  0.44%  Oct 28 14:37 ┐\n  … one per 15 minutes, for the whole window\n```\n\n**After**: one chart per type that has readings in the window.\n\n```\n╔ Spam complaints  per non-Gmail delivery  [Error]  peak 0.42% · 5 h at Error · last Error 3 PM ╗\n║                                   ●●●                                                         ║\n║                                 ●     ●                                                       ║\n║ ·─·─·─·─·─·─·─·─·─·─·─·─·─·─·─·─╱───────╲─·─·─·─·─·─·─·                                        ║\n╚══════════════════════════════════════════════════════════════════════════ ▸ Hourly readings ══╝\n┌ Hard bounces  per delivery ───────────────────────── peak 2.20% · 3 h at Warning ┐\n│          ○○○                                                                    │\n│ ·─·─·─·─╱───╲─·─·─·─·─·─·─·─·─·─·─·─·─·─·─·─·─·─·─·─·─·─·─·─·─·─·─·─·─·─·─·─·─·  │\n└──────────────────────────────────────────────────────────────── ▸ Hourly readings ┘\n  · Info hour   ● Error   ○ Warning   hover: \"0.42% · 105 bad emails at peak · Error\"\n```\n\n**Changes**\n- New `components/admin/AccountLimitNoticeChart.tsx`: one SVG per type, the line broken at gaps, hover on the nearest hour, and the hourly table behind a `<details>`.\n- `DomainReview.tsx`: the \"Account Limit Notices\" section renders the chart.\n\n**Behavior change** the chart includes Info readings, which the card list filtered out, so you can see the baseline. \"Peak\" is per hour, not per 15-minute reading.\n\n**Watch for** not yet looked at in a real browser before tonight's preview.",
+      "tag": "chart-notices-on-domain-review · +275 −10"
+    },
+    {
+      "id": "live-chart",
+      "group": "UI",
+      "title": "Live · domain review on the preview",
+      "tag": "localhost:3010 · Disabled domains → new-signups-disabled… → last 7 days",
+      "url": "http://localhost:3010/admin"
+    },
+    {
+      "id": "stop-loading-notice-rows-for-domain-review",
+      "group": "Cleanup",
+      "title": "Stop loading notice rows for review",
+      "body": "> Once the chart exists, nothing on the review page reads the raw rows, so the query stops loading them.\n\n```\nadmin.getDomainInfo  →  {\n  domain, recentSuspiciousActivity,\n- recentAccountLimitNotices,          ← every non-Info row in the window\n  accountLimitNoticeChart,\n  disabledEmailMessages\n}\n```\n\n**Changes**\n- Drops the `recentAccountLimitNotices` query and the now-unused `AccountLimitNoticeLevel` import.\n- `AccountLimitNoticeItem` (the card) is still used by the team breakdown feed. Its prop type now comes from that feed's own query, `listTeamAccountLimitNotices`, instead of the deleted field.\n\n**Holds because** typecheck: any remaining reader of the deleted field would fail to compile.",
+      "tag": "stop-loading-notice-rows-for-domain-review · +2 −21"
+    },
+    {
+      "id": "mark-domain-disables-on-notice-chart",
+      "group": "UI",
+      "title": "Mark domain disables on the notice chart",
+      "body": "> Draw each disable of this domain on the charts, so the reviewer sees which reading tripped it without matching timestamps.\n\n```\n╔ Spam complaints  per non-Gmail delivery  [Error] ═══════════════ peak 0.42% · 5 h at Error ╗\n║        ┆                                  ┃●●                                             ║\n║        ┆                                ● ┃  ●                                            ║\n║ ·─·─·─·┆·─·─·─·─·─·─·─·─·─·─·─·─·─·─·─·─╱──┃───╲─·─·─·─·─·                                 ║\n╚════════┆══════════════════════════════════┃═════════════════════════════════════════════════╝\n         ┆ earlier disable · Reenable        ┃ this disable (under review)\n         dashed grey                         solid red\n  hover that hour: \"Domain disabled 3:42 PM (this review)\"\n```\n\n**Changes**\n- `AccountLimitNoticeChart` takes `disables` and `currentDisableId`, and draws a vertical line for each disable inside the window.\n- `DomainReview` passes `domain.disableDomainEvents`, which `getDomainInfo` already returned, so the API doesn't change.\n\n**Holds because** only disables inside `since…until` are drawn, so a line is always on the axis.\n\n**Watch for** a disable shows on every type's chart, including types that had nothing to do with it. That's intentional: the line answers \"when\", and the red dots answer \"which\".",
+      "tag": "mark-domain-disables-on-notice-chart · +73 −4 · not gated"
+    }
+  ]
+}
