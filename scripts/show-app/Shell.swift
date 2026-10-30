@@ -485,11 +485,38 @@ func touchedDate(_ path: String) -> Date {
 
 /// Every document Show can open, from `~/.dotfiles/show` and its `tutor/` folder, sidecars left out.
 func libraryPaths() -> [String] {
-    [decksDirectory, tutorDirectory].flatMap { directory in
+    let folders = [decksDirectory, tutorDirectory].flatMap { directory in
         ((try? FileManager.default.contentsOfDirectory(atPath: directory)) ?? [])
             .filter { $0.hasSuffix(".json") && !$0.hasSuffix(".signoff.json") && !$0.hasSuffix(".answers.json") }
             .map { canonicalPath((directory as NSString).appendingPathComponent($0)) }
     }
+    let known = Set(folders)
+    return folders + registeredLiveRuns().filter { !known.contains($0) }
+}
+
+/// Live decks Show has opened from anywhere (runs live in their own run directories), from `live-runs.json`; missing files left out.
+func registeredLiveRuns() -> [String] {
+    guard let registry = liveRunsPath,
+          let runs = try? JSONDecoder().decode([LiveRun].self, from: Data(contentsOf: URL(fileURLWithPath: registry))) else { return [] }
+    var seen = Set<String>()
+    return runs.map { canonicalPath($0.path) }.filter { FileManager.default.fileExists(atPath: $0) && seen.insert($0).inserted }
+}
+
+/// Whether `path` sits in the library folders, where ⌫ archives it, rather than only in `live-runs.json`, where ⌫ just forgets it.
+func isInLibraryFolders(_ path: String) -> Bool {
+    [decksDirectory, tutorDirectory].contains { canonicalPath($0) == (path as NSString).deletingLastPathComponent }
+}
+
+/// Drops `path` from `live-runs.json`. The run's own files are never touched.
+func forgetLiveRun(_ path: String) throws {
+    guard let registry = liveRunsPath else { return }
+    let url = URL(fileURLWithPath: registry)
+    let runs = (try? JSONDecoder().decode([LiveRun].self, from: Data(contentsOf: url))) ?? []
+    let kept = runs.filter { canonicalPath($0.path) != path }
+    guard kept.count != runs.count else { return }
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .withoutEscapingSlashes]
+    try encoder.encode(kept).write(to: url, options: .atomic)
 }
 
 /// A cheap fingerprint of the library folders: changes when any document or sidecar is added, removed or rewritten.
@@ -498,7 +525,7 @@ func librarySignature() -> String {
         ((try? FileManager.default.contentsOfDirectory(atPath: directory)) ?? []).sorted().map { name in
             "\(name):\(fileStamp((directory as NSString).appendingPathComponent(name)))"
         }.joined(separator: "|")
-    }.joined(separator: "#")
+    }.joined(separator: "#") + "#" + ([liveRunsPath].compactMap { $0 } + registeredLiveRuns()).map(fileStamp).joined(separator: "|")
 }
 
 func shelfEntry(_ path: String) -> ShelfEntry? {
@@ -526,7 +553,7 @@ func shelfEntry(_ path: String) -> ShelfEntry? {
         let state: ShelfState
         switch live.status?.state {
         case "running": state = .running
-        case "done", "failed": state = .done
+        case "done": state = .done
         default: state = .waiting
         }
         let counts = live.status.flatMap { status in status.done.flatMap { done in status.total.map { "\(done) of \($0)" } } }
@@ -1051,10 +1078,16 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
         if wasOpen {
             tutor?.saveDrafts()
         }
+        let onlyListed = !isInLibraryFolders(entry.path)
         do {
-            _ = try archiveDocument(entry.path)
+            if onlyListed {
+                try forgetLiveRun(entry.path)
+            } else {
+                _ = try archiveDocument(entry.path)
+                try? forgetLiveRun(entry.path)
+            }
         } catch {
-            say("Couldn't archive “\(entry.title)”: \(error.localizedDescription)")
+            say("Couldn't \(onlyListed ? "forget" : "archive") “\(entry.title)”: \(error.localizedDescription)")
             return
         }
         decks[entry.path] = nil
@@ -1071,7 +1104,7 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
                 onTitleChange?()
             }
         }
-        say("Archived “\(entry.title)” to show/archive")
+        say(onlyListed ? "Forgot “\(entry.title)”; its run files are untouched" : "Archived “\(entry.title)” to show/archive")
         onLibraryChange?()
         view.window?.makeFirstResponder(shelf)
     }
