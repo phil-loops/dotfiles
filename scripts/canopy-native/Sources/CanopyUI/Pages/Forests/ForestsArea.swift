@@ -90,7 +90,7 @@ struct ForestSurface: SurfaceProvider {
 
     func title(for row: String, _ app: AppModel) -> String? {
         if let id = RowKey.id(row, "b"), let b = app.store.view(Branch.self, id) { return "\(leaf(b.name)) \(b.description)" }
-        if let id = RowKey.id(row, "d"), let l = app.store.view(Landed.self, id) { return "#\(l.pr) \(StoryText.bare(l.title))" }
+        if let id = RowKey.id(row, "d"), let l = app.store.view(Landed.self, id) { return "#\(l.pr) \(OutlineHints.bare(l.title))" }
         return app.guessTitle(row)
     }
 

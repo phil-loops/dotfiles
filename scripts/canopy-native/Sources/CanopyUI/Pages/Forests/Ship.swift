@@ -104,8 +104,12 @@ public enum ShipRules {
         case .approved: ready = waiting.first?.kind != .parent
         default: break
         }
-        let action: ShipAction = ship == .green ? .push : [.pushed, .review, .approved].contains(ship) ? .pr : .open
-        return Stand(ship: ship, action: action, waiting: waiting, ready: ready, held: held)
+        return Stand(ship: ship, action: action(ship), waiting: waiting, ready: ready, held: held)
+    }
+
+    /// What ↵ does for a branch at this stage: push it, go to its PR, or open it.
+    public static func action(_ ship: ShipStage) -> ShipAction {
+        ship == .green ? .push : [.pushed, .review, .approved].contains(ship) ? .pr : .open
     }
 
     /// Whether `p` can push the branch: commits origin doesn't have, and green gates on this tip —

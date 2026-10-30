@@ -467,7 +467,7 @@ enum ReviewCommands {
             id: "review.finish", title: "Go to GitHub — submit your review, or open the PR once it's pushed", scope: .review, keys: ["g h"], label: "github",
             route: { id in
                 if canWrite() { return RouteTo("review.github", target: id) }
-                return ShipStand.prAction(weakApp!, id) ? RouteTo("branch.pr", target: id) : nil
+                return weakApp?.forestModel.opensPR(id) == true ? RouteTo("branch.pr", target: id) : nil
             }))
         r.register(Command(
             id: "review.preview", title: "Preview this branch — a dev server on a side port, opened once it answers", scope: .review, keys: ["g p"], label: "preview",
@@ -483,10 +483,10 @@ enum ReviewCommands {
 
         r.register(Command(
             id: "branch.pr", title: "Go to the PR (the prefilled compare form if there's none yet)", scope: .branch, keys: ["g h"], label: "pr", v1: ["open-pr"],
-            available: { id in weakApp.map { ShipStand.prAction($0, id) } ?? false },
+            available: { id in weakApp?.forestModel.opensPR(id) ?? false },
             local: { id, _ in
                 guard let app = weakApp, let id, let b = branch(id) else { return }
-                if let pr = store.view(Pr.self, id), let u = URL(string: pr.url) { open(u) } else { open(ShipStand.compareURL(app, b)) }
+                if let pr = store.view(Pr.self, id), let u = URL(string: pr.url) { open(u) } else if let v = app.forestModel.branchView(b.id) { open(app.forestModel.compareURL(v)) }
             }))
         r.register(Command(
             id: "branch.preview", title: "Preview it — a dev server on a side port, opened once it answers", scope: .branch, keys: ["g p"], label: "preview",
@@ -502,7 +502,7 @@ enum ReviewCommands {
             available: { pid in
                 guard let pid else { return false }
                 let bs = store.list(Branch.self).filter { $0.project == pid }
-                return bs.count > 1 && bs.contains { ShipStand.shipOf($0, store.view(Pr.self, $0.id)) != .landed }
+                return bs.count > 1 && bs.contains { ShipRules.shipOf($0, store.view(Pr.self, $0.id)) != .landed }
             },
             local: { pid, _ in
                 guard let pid, let p = store.view(Project.self, pid) else { return }

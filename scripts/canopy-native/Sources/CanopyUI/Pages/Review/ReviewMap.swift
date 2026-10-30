@@ -7,7 +7,7 @@ import SwiftUI
 enum ReviewMap {
     struct Row: Equatable { var id: String; var label: String; var depth: Int; var word: String; var threads: Int }
 
-    static let words: [ShipStand.Ship: String] = [.local: "local", .green: "green", .pushed: "pushed", .review: "in review", .approved: "approved", .landed: "landed"]
+    static let words: [ShipStage: String] = [.local: "local", .green: "green", .pushed: "pushed", .review: "in review", .approved: "approved", .landed: "landed"]
 
     static func rows(_ app: AppModel) -> [Row] {
         let pg = ReviewPageState.of(app)
@@ -22,7 +22,7 @@ enum ReviewMap {
                 return depth(p.parentId, n + 1)
             }
             for x in app.store.list(Branch.self).filter({ $0.project == b.project }).sorted(by: { ($0.order, $0.name) < ($1.order, $1.name) }) {
-                let ship = ShipStand.shipOf(x, app.store.view(Pr.self, x.id))
+                let ship = ShipRules.shipOf(x, app.store.view(Pr.self, x.id))
                 if ship == .landed { continue }
                 out.append(Row(id: x.id, label: x.name, depth: depth(x.parentId), word: words[ship] ?? "", threads: open(x.id)))
             }
