@@ -6,11 +6,11 @@ import Foundation
 /// (POST /learning-question, /learning-evidence), each with its undo where one exists. Forgetting
 /// a session and cutting a credit take a second press.
 ///
-/// Native additions, all to keep the page mouseless: `tutor.submit` (ret in insert: send what's
+/// Native additions, all to keep the page mouseless: `tutor.submit` (send, ↵ in insert: what's
 /// typed in whichever box), `tutor.concept.show` (ret's target when a row is a concept),
-/// `tutor.confidence.low/medium/high` (⌥1–3, the rating chips), `tutor.question.toggle` (Q, the
-/// answered/reopen link), and `tutor.evidence.outcome/level/credit/confidence` (m/w/f/y, the
-/// credit's toggles and dropdowns).
+/// `tutor.confidence.low/medium/high` (1–3, the rating chips), `tutor.question.toggle` (m, the
+/// answered/reopen link), and `tutor.evidence.outcome/level/credit/confidence` (, o / , l / , h / , c,
+/// the credit's toggles and dropdowns).
 @MainActor
 enum TutorCommands {
     static let insertField = (draft: "tutor.draft", target: "tutor.target", question: "tutor.question")
@@ -25,7 +25,7 @@ enum TutorCommands {
         // ── going places ──
 
         r.register(Command(
-            id: "tutor.concept", title: "Open the concept: its depth, evidence and questions", scope: .concept, keys: ["ret"], label: "open",
+            id: "tutor.concept", title: "Open the concept: its depth, evidence and questions", scope: .concept, verb: .main, label: "open",
             available: known,
             // ret is the row's main action; on a row that has none, it opens the concept in reach
             route: { [weak app] id in
@@ -41,20 +41,20 @@ enum TutorCommands {
                 if t.drawer != id { t.openDrawer(id) }
             }))
         r.register(Command(
-            id: "tutor.open", title: "Open the session", scope: .lesson, keys: ["ret"], label: "open", v1: ["click:continue"],
+            id: "tutor.open", title: "Open the session", scope: .lesson, verb: .main, label: "open", v1: ["click:continue"],
             available: kept,
             local: { [weak t, weak app] id, _ in
                 t?.closeDrawer()
                 app?.go(.tutor(session: id))
             }))
         r.register(Command(
-            id: "tutor.home", title: "Leave the session for your graph", scope: .session, keys: ["h", "left"], label: "home", v1: ["click:your graph"],
+            id: "tutor.home", title: "Leave the session for your graph", scope: .session, verb: .out, label: "home", v1: ["click:your graph"],
             local: { [weak t, weak app] _, _ in
                 t?.closeDrawer()
                 app?.go(.tutor(session: nil))
             }))
         r.register(Command(
-            id: "tutor.back", title: "Back out", scope: .tutor, keys: ["esc"], label: "back", v1: ["click:close (esc)"], quiet: true,
+            id: "tutor.back", title: "Back out", scope: .tutor, verb: .cancel, label: "back", v1: ["click:close (esc)"], quiet: true,
             local: { [weak t, weak app] _, _ in
                 guard let t, let app else { return }
                 if CodeLookup.of(app).pop != nil { CodeLookup.of(app).dismiss() }
@@ -85,7 +85,7 @@ enum TutorCommands {
                 app?.keys.setMode(.normal)
             }))
         r.register(Command(
-            id: "tutor.retest", title: "Re-test me cold on the concept", scope: .concept, budget: .slowIO, keys: ["T"], label: "re-test",
+            id: "tutor.retest", title: "Re-test me cold on the concept", scope: .concept, budget: .slowIO, leader: LocalKey(",t"), label: "re-test",
             v1: ["click:re-test cold", "click:re-test me cold"],
             available: { known($0) && idle() },
             local: { [weak t] id, _ in
@@ -117,7 +117,7 @@ enum TutorCommands {
         /// The answer box's text, rated when the rung asks for it: ret without a rating flags the
         /// chips once; a second ret sends without one rather than trapping the answer.
         r.register(Command(
-            id: "tutor.send", title: "Send your answer", scope: .session, budget: .slowIO, hint: ["ret"],
+            id: "tutor.send", title: "Send your answer", scope: .session, budget: .slowIO,
             available: { [weak t] _ in t?.active != nil && idle() && !(t?.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) },
             local: { [weak t, weak app] _, _ in
                 guard let t, let s = t.active else { return }
@@ -135,7 +135,7 @@ enum TutorCommands {
                 }
             }))
         r.register(Command(
-            id: "tutor.submit", title: "Send what's typed", scope: .tutor, keys: ["ret"], modes: [.insert], label: "send", quiet: true,
+            id: "tutor.submit", title: "Send what's typed", scope: .tutor, verb: .send, modes: [.insert], label: "send", quiet: true,
             route: { [weak t, weak app] _ in
                 switch app?.insertField {
                 case insertField.draft: return RouteTo("tutor.send")
@@ -146,14 +146,14 @@ enum TutorCommands {
             }))
         r.register(Command(
             id: "tutor.wrap", title: "Wrap up: say each principle plainly, and record my last answer", scope: .session, budget: .slowIO,
-            keys: ["space q"], label: "wrap up", v1: ["click:ask for the consolidation: each "],
+            leader: LocalKey(",q"), label: "wrap up", v1: ["click:ask for the consolidation: each "],
             available: { [weak t] _ in t?.active != nil && idle() },
             local: { [weak t] _, _ in
                 guard let t, let s = t.active else { return }
                 t.answer(s.id, "Let's stop here. Consolidate: say each principle we reached plainly, and record evidence for my last answer.")
             }))
         r.register(Command(
-            id: "tutor.stop", title: "Stop the tutor's turn", scope: .session, keys: ["C-c"], label: "stop", v1: ["click:■ stop"],
+            id: "tutor.stop", title: "Stop the tutor's turn", scope: .session, leader: LocalKey(",s"), label: "stop", v1: ["click:■ stop"],
             available: { [weak t] _ in t?.active?.pendingTurn != nil },
             write: { [weak t] _, _ in
                 guard let turn = t?.active?.pendingTurn else { return nil }
@@ -163,7 +163,7 @@ enum TutorCommands {
         // ── the session's page ──
 
         r.register(Command(
-            id: "tutor.write", title: "Write: the answer box, or what to dig into", scope: .tutor, keys: ["i"], label: "write",
+            id: "tutor.write", title: "Write: the answer box, or what to dig into", scope: .tutor, verb: .write, label: "write",
             local: { [weak t, weak app] _, _ in
                 guard let t, let app else { return }
                 if t.learn == nil && t.learnErr.isEmpty { throw Refusal("nothing to write in") }
@@ -173,7 +173,7 @@ enum TutorCommands {
                 else { throw Refusal("nothing to write in") }
             }))
         r.register(Command(
-            id: "tutor.evidence", title: "Show what this session recorded about you", scope: .session, keys: ["space v"], label: "evidence",
+            id: "tutor.evidence", title: "Show what this session recorded about you", scope: .session, leader: LocalKey(",v"), label: "evidence",
             v1: ["click:what this session has recorded a"],
             local: { [weak t, weak app] _, _ in
                 guard let t else { return }
@@ -181,7 +181,7 @@ enum TutorCommands {
                 if t.evidenceOpen { app?.focus(pane: TutorPane.credits) }
             }))
         r.register(Command(
-            id: "tutor.map", title: "Show the topic's map", scope: .session, keys: ["space m"], label: "map",
+            id: "tutor.map", title: "Show the topic's map", scope: .session, verb: .map, label: "map",
             local: { [weak t] _, _ in t?.mapOpen.toggle() }))
         r.register(Command(
             id: "tutor.rungs", title: "Show the earlier rungs", scope: .session,
@@ -214,7 +214,7 @@ enum TutorCommands {
             }))
         for (n, c) in Lesson.confidences.enumerated() {
             r.register(Command(
-                id: "tutor.confidence.\(c)", title: "Rate how sure you are: \(c)", scope: .session, keys: ["A-\(n + 1)"], modes: [.normal, .insert],
+                id: "tutor.confidence.\(c)", title: "Rate how sure you are: \(c)", scope: .session, verb: .nth(n + 1),
                 label: c, quiet: true,
                 available: { [weak t] _ in t?.active != nil },
                 route: { _ in RouteTo("tutor.confidence", target: c) }))
@@ -227,7 +227,7 @@ enum TutorCommands {
 
         let forgetArm = { (id: String) in "forget \(id)" }
         r.register(Command(
-            id: "tutor.forget", title: "Forget the session (its evidence stays in the graph)", scope: .lesson, keys: ["X"], label: "forget",
+            id: "tutor.forget", title: "Forget the session (its evidence stays in the graph)", scope: .lesson, verb: .putAway, label: "forget",
             available: kept,
             route: { [weak t] id in
                 guard let t, let id, kept(id) else { return nil }
@@ -267,7 +267,7 @@ enum TutorCommands {
         r.register(Command(id: "tutor.question.reopen", title: "Reopen the question", scope: .question, budget: .configWrite, v1: ["click:reopen"], quiet: true,
                            write: { id, _ in question("reopen", id) }))
         r.register(Command(
-            id: "tutor.question.toggle", title: "Mark the question answered, or reopen it", scope: .question, keys: ["Q"], label: "answered",
+            id: "tutor.question.toggle", title: "Mark the question answered, or reopen it", scope: .question, verb: .mark, label: "answered",
             route: { [weak t] id in
                 guard let q = t?.learn?.questions.first(where: { $0.id == id }) else { return nil }
                 return RouteTo(q.status == "open" ? "tutor.question.close" : "tutor.question.reopen", target: q.id)
@@ -316,22 +316,22 @@ enum TutorCommands {
             }))
         /// The credit's own controls, by key: hit/miss, then cycling level, credit and confidence.
         func cycle(_ list: [String], _ now: String) -> String { list[((list.firstIndex(of: now) ?? -1) + 1) % list.count] }
-        let edits: [(id: String, title: String, key: String, label: String, fields: (Evidence) -> [String: String])] = [
-            ("tutor.evidence.outcome", "Toggle the credit's hit / miss", "O", "hit/miss", { ["outcome": $0.outcome == "hit" ? "miss" : "hit"] }),
-            ("tutor.evidence.level", "Change the credit's level (predict → explain → transfer → critique)", "W", "level", { ["level": cycle(Lesson.levels, $0.level)] }),
-            ("tutor.evidence.credit", "Change the credit's help (unaided → scaffolded → handed)", "C", "credit", { ["credit": cycle(Lesson.credits, $0.credit)] }),
-            ("tutor.evidence.confidence", "Change the credit's confidence rating (none → low → medium → high)", "Y", "confidence",
+        let edits: [(id: String, title: String, key: LocalKey, label: String, fields: (Evidence) -> [String: String])] = [
+            ("tutor.evidence.outcome", "Toggle the credit's hit / miss", LocalKey(",o"), "hit/miss", { ["outcome": $0.outcome == "hit" ? "miss" : "hit"] }),
+            ("tutor.evidence.level", "Change the credit's level (predict → explain → transfer → critique)", LocalKey(",l"), "level", { ["level": cycle(Lesson.levels, $0.level)] }),
+            ("tutor.evidence.credit", "Change the credit's help (unaided → scaffolded → handed)", LocalKey(",h"), "credit", { ["credit": cycle(Lesson.credits, $0.credit)] }),
+            ("tutor.evidence.confidence", "Change the credit's confidence rating (none → low → medium → high)", LocalKey(",c"), "confidence",
              { ["confidence": cycle([""] + Lesson.confidences, $0.confidence ?? "")] }),
         ]
         for x in edits {
             r.register(Command(
-                id: x.id, title: x.title, scope: .credit, budget: .configWrite, keys: [x.key], label: x.label,
+                id: x.id, title: x.title, scope: .credit, budget: .configWrite, leader: x.key, label: x.label,
                 available: { id in id.flatMap(evidence) != nil },
                 route: { id in id.flatMap(evidence).map { RouteTo("tutor.evidence.edit", target: $0.id, arg: x.fields($0)) } }))
         }
         let cutArm = { (id: String) in "cut \(id)" }
         r.register(Command(
-            id: "tutor.evidence.cut", title: "Cut a credit", scope: .credit, keys: ["X"], label: "cut",
+            id: "tutor.evidence.cut", title: "Cut a credit", scope: .credit, verb: .putAway, label: "cut",
             available: { id in id.flatMap(evidence) != nil },
             route: { [weak t] id in
                 guard let t, let id, evidence(id) != nil else { return nil }
@@ -363,19 +363,19 @@ enum TutorCommands {
         }
         let look = CodeLookup.of(app)
         let typed: (String?) -> Bool = { _ in source() != nil }
-        r.register(Command(id: "tutor.types", title: "Show the type on the code pane's cursor line (hover)", scope: .tutor, keys: ["space k"], label: "type",
+        r.register(Command(id: "tutor.types", title: "Show the type on the code pane's cursor line (hover)", scope: .tutor, verb: .type, label: "type",
                            available: typed, local: { _, _ in if let s = source() { look.hover(position(), s) } }))
-        let gotos: [(String, LSPGoto, String, String, String)] = [
-            ("tutor.definition", .definition, "g d", "def", "Go to the definition — the code pane follows it"),
-            ("tutor.type-definition", .typeDefinition, "g y", "type def", "Go to the definition of its type"),
-            ("tutor.implementation", .implementation, "g I", "impl", "Go to its implementations"),
-            ("tutor.references", .references, "g r", "refs", "List its references"),
+        let gotos: [(String, LSPGoto, Verb, String, String)] = [
+            ("tutor.definition", .definition, .definition, "def", "Go to the definition — the code pane follows it"),
+            ("tutor.type-definition", .typeDefinition, .typeDefinition, "type def", "Go to the definition of its type"),
+            ("tutor.implementation", .implementation, .implementations, "impl", "Go to its implementations"),
+            ("tutor.references", .references, .references, "refs", "List its references"),
         ]
-        for (id, kind, key, label, title) in gotos {
-            r.register(Command(id: id, title: title, scope: .tutor, keys: [key], label: label, available: typed,
+        for (id, kind, verb, label, title) in gotos {
+            r.register(Command(id: id, title: title, scope: .tutor, verb: verb, label: label, available: typed,
                                local: { _, _ in if let s = source() { look.goto(kind, position(), s) } }))
         }
-        r.register(Command(id: "tutor.symbols", title: "List the pinned file's symbols", scope: .tutor, keys: ["space S"], label: "symbols",
+        r.register(Command(id: "tutor.symbols", title: "List the pinned file's symbols", scope: .tutor, verb: .symbols, label: "symbols",
                            available: typed, local: { [weak t] _, _ in if let t, let s = source(), let p = t.pin { look.symbols(path: p.path, s) } }))
     }
 }
