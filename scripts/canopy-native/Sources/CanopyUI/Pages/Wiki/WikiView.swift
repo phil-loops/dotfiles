@@ -195,13 +195,15 @@ struct WikiSource: View {
                     ScrollViewReader { proxy in
                         ScrollView([.vertical, .horizontal]) {
                             LazyVStack(alignment: .leading, spacing: 0) {
+                                let colors = CanvasColors(theme).code
+                                let lang = langOf(s.path)
                                 ForEach(Array(s.text.components(separatedBy: "\n").enumerated()), id: \.offset) { i, text in
                                     let n = s.from + i
                                     let lit = n >= s.start && n <= s.end
                                     let key = "s:\(n)"
                                     HStack(spacing: 0) {
                                         Text("\(n)").foregroundStyle(theme.inkFaint).frame(width: 44, alignment: .trailing).padding(.trailing, 12)
-                                        Text(text.isEmpty ? " " : text).foregroundStyle(lit ? theme.ink : theme.inkDim).fixedSize()
+                                        Text(Self.highlighted(text, lang, colors)).foregroundStyle(lit ? theme.ink : theme.inkDim).fixedSize()
                                     }
                                     .font(Theme.mono(11.5))
                                     .padding(.vertical, 1)
@@ -222,5 +224,19 @@ struct WikiSource: View {
         .background(theme.diffBg)
         .overlay { Rectangle().stroke(focused ? theme.goldDeep : theme.rule, lineWidth: 1) }
         .padding(.leading, 16).padding(.trailing, 12)
+    }
+
+    /// A cited line in review's syntax colours (Highlight.swift), the rest left to the row's ink.
+    static func highlighted(_ text: String, _ lang: Lang, _ colors: CodeColors) -> AttributedString {
+        guard !text.isEmpty else { return AttributedString(" ") }
+        var out = AttributedString(text)
+        let u = text.utf16
+        for t in tokens(text, lang) {
+            guard let lo = u.index(u.startIndex, offsetBy: t.location, limitedBy: u.endIndex),
+                  let hi = u.index(lo, offsetBy: t.length, limitedBy: u.endIndex),
+                  let r = Range(NSRange(lo..<hi, in: text), in: out) else { continue }
+            out[r].foregroundColor = Color(nsColor: colors.color(t.kind))
+        }
+        return out
     }
 }
