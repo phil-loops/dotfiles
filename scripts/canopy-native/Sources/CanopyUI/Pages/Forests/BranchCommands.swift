@@ -110,8 +110,10 @@ enum BranchCommands {
                     settled: { s.table(Branch.self)[id]?.diverged == false },
                     said: "replaced origin's \(sc.lease.prefix(7))",
                     failed: "\(leaf(v.b.name)) didn't replace origin",
-                    // a refusal answers with the scope as it now stands; Ship re-reads it on the next tip
-                    answered: { ok, _ in if !ok { ShipState.of(app).readForceScope(app, id) } })
+                    // the answer carries the scope as it now stands
+                    answered: { _, body in
+                        if let fs = body["forceScope"], let sc = try? fs.decode(ForceScope.self) { ShipState.of(app).putForceScope(app, id, sc) }
+                    })
             }))
 
         r.register(Command(

@@ -141,14 +141,14 @@ private let NOW = iso("2026-10-22T18:00:00Z") // Thu 11:00 PT
 
 @Suite struct StoryTextTests {
     @Test func bareDropsTheConventionalPrefix() {
-        #expect(StoryText.bare("feat(goals-metrics-ui-job): the main job") == "the main job")
-        #expect(StoryText.bare("Fix!: loud") == "loud")
-        #expect(StoryText.bare("plain subject") == "plain subject")
+        #expect(OutlineHints.bare("feat(goals-metrics-ui-job): the main job") == "the main job")
+        #expect(OutlineHints.bare("Fix!: loud") == "loud")
+        #expect(OutlineHints.bare("plain subject") == "plain subject")
     }
 
     @Test func stripPlanDropsTheGeneratedBlock() {
         let body = "the why\n\nPart of a stack:\n  1. a\n  2. b\n\n  3. c\n\n-- forest --\nafter"
-        #expect(StoryText.stripPlan(body) == "the why\n\nafter")
+        #expect(OutlineHints.stripPlan(body) == "the why\n\nafter")
     }
 }
 
@@ -265,6 +265,17 @@ private func world(_ route: Route = .forests) -> AppModel {
         #expect(a.forestModel.armed == nil)
         // a branch with only the gates in the way: p runs them
         #expect(BranchCommands.pushRoute("r:c", a) == "branch.gates.run")
+    }
+
+    @Test func aRefusedForceKeepsTheScopeItsAnswerCarries() throws {
+        let a = world()
+        let ship = ShipState.of(a)
+        ship.putForceScope(a, "r:s", ForceScope(eligible: true, guards: [], lease: "aaaaaaa", prNumber: nil, prUrl: nil))
+        a.forestModel.armed = "r:s"
+        let w = try #require(try a.registry.command("branch.force.confirm")!.write!("r:s", nil))
+        #expect(w.path == "/force-origin" && w.body == ["branch": "s", "lease": "aaaaaaa"])
+        w.answered?(false, ["forceScope": ["eligible": false, "guards": [["k": "pr", "label": "PR merged", "ok": false]], "lease": "bbbbbbb"]])
+        #expect(ship.forceScopeOf(a, "r:s") == .some(ForceScope(eligible: false, guards: [.init(k: "pr", label: "PR merged", ok: false)], lease: "bbbbbbb", prNumber: nil, prUrl: nil)))
     }
 
     @Test func projectMovesAreOneWriteEachWithAnUndo() throws {
