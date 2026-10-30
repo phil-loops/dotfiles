@@ -14,28 +14,28 @@
       "group": "Kernels",
       "title": "1 · A restriction is a claim with a reason and a decider",
       "body": "```\nevery Restriction has\n  category\n  ∧ (ruleId ∨ decider = person)\n  ∧ decider ∈ { person, automation@version }\n```\n\n**Breaks when** a domain is disabled and nobody can say which check or person did it.\n\n**Caught by** NOT NULL and CHECK constraints on the table, and every disable call site going through one model function that takes the claim.",
-      "tag": "signed off as rule-1"
+      "tag": "principles deck: rule-1 ✓"
     },
     {
       "id": "k-2",
       "group": "Kernels",
       "title": "2 · The remedy matches the finding",
       "body": "```\nlift(restriction) and allow(selector) act at the grain\nthe finding was made: an email, a word, a rule, a team\n```\n\n**Breaks when** approving one flagged email re-enables a domain that was disabled for a bounce spike.\n\nThat break is live today. It's the first fix on the path, and it needs no new tables.",
-      "tag": "signed off as rule-2"
+      "tag": "principles deck: rule-2 ✓"
     },
     {
       "id": "k-3",
       "group": "Kernels",
       "title": "3 · Detectors are provisional, people are binding",
       "body": "**Lift** means \"this reason no longer blocks the domain\". It's today's Re-enable button, but aimed at one reason instead of the whole domain. Nothing is deleted. The restriction row gets three fields filled once: who lifted it, the verdict, and a note.\n\n```\nlift      needs  person ∧ verdict ∈ { wrong, fixed } ∧ note\nallowance needs  person ∧ until\n```\n\n**Breaks when** a reviewer re-enables with no record of whether the detector misfired. Without the verdict we can't measure a detector's false-positive rate or tune it.",
-      "tag": "signed off as rule-3"
+      "tag": "principles deck: rule-3 ✓"
     },
     {
       "id": "k-4",
       "group": "Kernels",
       "title": "4 · Write once, compute everything else",
       "body": "```\nsendingDomain.disabled  ⇔  ∃ restriction in effect on (domain ∨ team)\nonly restrict() and lift() change it\n```\n\n**Breaks when** any code path flips `disabled` directly, or edits a past row.\n\nThe timeline, the \"keeping it disabled\" panel, the sender's banner and the API reason are all reads over the same rows.",
-      "tag": "signed off as rule-4"
+      "tag": "principles deck: rule-4 ✓"
     },
     {
       "id": "nouns",
