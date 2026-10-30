@@ -84,8 +84,10 @@ final class Ctx: CommandContext {
         #expect(ran == ["p:x", "explicit"])
         runner.dispatch("t.refuse", via: .click)
         #expect(runner.note == "nothing to undo")
-        // a key's refusal echoes over it, as runner.ts does
+        // a key's refusal keeps its reason; "nothing here" is only for a key with nothing to act on
         runner.dispatch("t.refuse", via: .key)
+        #expect(runner.note == "nothing to undo")
+        runner.dispatch("t.never", via: .key)
         #expect(runner.note == " · nothing here")
     }
 

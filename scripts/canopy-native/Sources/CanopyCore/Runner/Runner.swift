@@ -76,7 +76,8 @@ public final class Runner {
         }
     }
 
-    private func echo(_ id: String, _ via: Via, _ ok: Bool) {
+    /// `explained`: a refusal already said why, so the key's "nothing here" doesn't cover it.
+    private func echo(_ id: String, _ via: Via, _ ok: Bool, explained: Bool = false) {
         guard via == .key else { return }
         let at = Date()
         fired = (id, ok, at)
@@ -85,7 +86,7 @@ public final class Runner {
         DispatchQueue.main.asyncAfter(deadline: .now() + (ok ? 0.6 : 1.4)) { [weak self] in
             if self?.firedGen == g { self?.fired = nil }
         }
-        if !ok { say("\(glyph(registry.command(id)?.keys.first ?? "")) · nothing here") }
+        if !ok && !explained { say("\(glyph(registry.command(id)?.keys.first ?? "")) · nothing here") }
     }
 
     /// Run a registered command. Never awaited by callers — the UI has already moved.
@@ -125,7 +126,7 @@ public final class Runner {
             } catch {
                 let err = String(describing: error)
                 say(err)
-                echo(named, via, false)
+                echo(named, via, false, explained: true)
                 feedback(["outcome": "refused", "err": .string(String(err.prefix(48))), "settledMs": nil])
             }
             return
