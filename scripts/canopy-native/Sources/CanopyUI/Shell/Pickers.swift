@@ -90,17 +90,17 @@ extension AppModel {
 extension NavCommands {
     static func installPickers(_ app: AppModel) {
         let r = app.registry
-        r.register(Command(id: "nav.branches", title: "Find a branch — every forest, most visited first", scope: .global, keys: ["space b"], label: "branches",
+        r.register(Command(id: "nav.branches", title: "Find a branch — every forest, most visited first", scope: .global, verb: .branches, label: "branches",
                            local: { [weak app] _, _ in try app?.pickBranch() }))
-        r.register(Command(id: "nav.jumps", title: "Pick from the jumplist", scope: .global, keys: ["space j"], label: "jumplist",
+        r.register(Command(id: "nav.jumps", title: "Pick from the jumplist", scope: .global, verb: .jumps, label: "jumplist",
                            local: { [weak app] _, _ in try app?.pickJump() }))
-        r.register(Command(id: "nav.picker.last", title: "Reopen the last picker, query and all", scope: .global, keys: ["space '"], label: "last picker",
+        r.register(Command(id: "nav.picker.last", title: "Reopen the last picker, query and all", scope: .global, verb: .lastPicker, label: "last picker",
                            available: { [weak app] _ in app?.nav.canReopen ?? false },
                            local: { [weak app] _, _ in app?.nav.reopen() }))
-        r.register(Command(id: "page.search", title: "Search this page", scope: .global, keys: ["/"], label: "search",
+        r.register(Command(id: "page.search", title: "Search this page", scope: .global, verb: .search, label: "search",
                            local: { [weak app] _, _ in try app?.searchPage() }))
         for n in 1...9 {
-            r.register(Command(id: "nav.slot.\(n)", title: "Go to focus forest \(n) (where you left it)", scope: .global, keys: ["g \(n)"],
+            r.register(Command(id: "nav.slot.\(n)", title: "Go to focus forest \(n) (where you left it)", scope: .global, verb: .slot(n),
                                quiet: n > 1, recordsJump: true,
                                local: { [weak app] _, _ in try app?.goSlot(n) }))
         }
