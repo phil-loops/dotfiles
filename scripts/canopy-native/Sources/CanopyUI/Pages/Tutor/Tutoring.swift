@@ -47,12 +47,9 @@ final class TutorState {
     var error = ""
     /// a two-press removal waiting for its second press ("forget <id>", "cut <id>")
     var armed: String?
-    /// the code pane's type popover (review/types.ts Pop)
-    var pop: Pop?
     /// the pane focus was on when the drawer opened, to return to
     @ObservationIgnored var beforeDrawer: String?
 
-    enum Pop: Equatable { case wait(String), hover(String), note(String) }
 
     nonisolated static let defaultSessionsFile: URL = {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
