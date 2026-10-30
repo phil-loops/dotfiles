@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# show <deck.json> — open a JSON walkthrough in the native Show app, rebuilding it when Show.swift changes.
-# show --build — just (re)build. show --snapshot <deck.json> <out.png> — render offscreen, no window.
+# show [<deck.json>…] — open decks as tabs in the one running Show app (no args: the newest deck in ~/.dotfiles/show),
+# rebuilding it when Show.swift changes. Re-showing an open deck reloads it. show --build — just (re)build. show --snapshot <deck.json> <out.png> — render offscreen, no window.
 # Deck format: ~/.dotfiles/.claude/skills/show/SKILL.md. Source: show-app/Show.swift. Sign-offs land in <deck>.signoff.json.
 set -euo pipefail
 
@@ -31,6 +31,13 @@ build() {
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSPrincipalClass</key><string>NSApplication</string>
+  <key>CFBundleDocumentTypes</key>
+  <array><dict>
+    <key>CFBundleTypeName</key><string>Show deck</string>
+    <key>CFBundleTypeRole</key><string>Viewer</string>
+    <key>LSHandlerRank</key><string>None</string>
+    <key>LSItemContentTypes</key><array><string>public.json</string></array>
+  </dict></array>
 </dict>
 </plist>
 PLIST
@@ -38,8 +45,8 @@ PLIST
 }
 
 case "${1:-}" in
-  ""|-h|--help)
-    echo "usage: show <deck.json> | show --build" >&2
+  -h|--help)
+    echo "usage: show [<deck.json>…] | show --build | show --snapshot <deck.json> <out.png>" >&2
     exit 64
     ;;
   --build)
@@ -52,11 +59,20 @@ case "${1:-}" in
     "$app/Contents/MacOS/Show" "$2" --snapshot "$3"
     ;;
   *)
-    deck="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
-    [[ -f "$deck" ]] || { echo "show: no such deck: $1" >&2; exit 66; }
-    python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["title"] and d["sections"]' "$deck" \
-      || { echo "show: $deck is not a deck (needs title + sections)" >&2; exit 65; }
+    if [[ $# -eq 0 ]]; then
+      newest="$(ls -t "$HOME/.dotfiles/show/"*.json 2>/dev/null | grep -v '\.signoff\.json$' | head -1)"
+      [[ -n "$newest" ]] || { echo "show: no decks in ~/.dotfiles/show" >&2; exit 66; }
+      set -- "$newest"
+    fi
+    decks=()
+    for arg in "$@"; do
+      deck="$(cd "$(dirname "$arg")" && pwd)/$(basename "$arg")"
+      [[ -f "$deck" ]] || { echo "show: no such deck: $arg" >&2; exit 66; }
+      python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["title"] and d["sections"]' "$deck" \
+        || { echo "show: $deck is not a deck (needs title + sections)" >&2; exit 65; }
+      decks+=("$deck")
+    done
     build
-    open -n "$app" --args "$deck"
+    open -a "$app" "${decks[@]}"
     ;;
 esac

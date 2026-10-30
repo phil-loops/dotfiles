@@ -1,7 +1,8 @@
-// Show — a tiny native walkthrough viewer. Renders a JSON file of sections:
+// Show — one native app for walkthrough decks; each deck opens as a labelled tab. Renders a JSON file of sections:
 // { "title", "subtitle"?, "sections": [{ "id"?, "group", "title", "tag"?, "body" (markdown) }] }
 // Sign-offs and notes save beside the deck as <deck>.signoff.json.
 import AppKit
+import UniformTypeIdentifiers
 
 struct Deck: Decodable {
     let title: String
@@ -223,48 +224,40 @@ final class Renderer {
     }
 }
 
-final class Controller: NSObject, NSApplicationDelegate, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate {
-    let deck: Deck
-    let rows: [Row]
-    let store: SignOffStore
-    let snapshotPath: String?
+func loadDeck(_ path: String) throws -> Deck {
+    try JSONDecoder().decode(Deck.self, from: Data(contentsOf: URL(fileURLWithPath: path)))
+}
+
+let decksDirectory = ("~/.dotfiles/show" as NSString).expandingTildeInPath
+
+/// One deck in one window; windows share a tab group, so each deck is a labelled tab.
+final class DeckController: NSObject, NSWindowDelegate, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate {
+    let path: String
+    var deck: Deck
+    var rows: [Row] = []
+    var store: SignOffStore
     let renderer = Renderer()
-    var window: NSWindow!
+    let window: NSWindow
     let table = NSTableView()
     let text = NSTextView()
     let signed = NSButton(checkboxWithTitle: "Signed off", target: nil, action: nil)
     let note = NSTextField()
     let progress = NSTextField(labelWithString: "")
+    var onClose: (() -> Void)?
 
-    init(deck: Deck, store: SignOffStore, snapshotPath: String?) {
+    init(path: String, deck: Deck) {
+        self.path = path
         self.deck = deck
-        self.store = store
-        self.snapshotPath = snapshotPath
-        var rows: [Row] = []
-        var lastGroup: String?
-        for (i, section) in deck.sections.enumerated() {
-            if section.group != lastGroup {
-                rows.append(.header(section.group))
-                lastGroup = section.group
-            }
-            rows.append(.item(i))
-        }
-        self.rows = rows
-    }
-
-    var selectedSection: Section? {
-        guard table.selectedRow >= 0, case .item(let i) = rows[table.selectedRow] else { return nil }
-        return deck.sections[i]
-    }
-
-    func applicationDidFinishLaunching(_ notification: Notification) {
-        buildMenu()
+        store = SignOffStore(deckPath: path)
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1180, height: 780),
                           styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                           backing: .buffered, defer: false)
-        window.title = deck.title
-        window.subtitle = deck.subtitle ?? ""
-
+        super.init()
+        window.isReleasedWhenClosed = false
+        window.tabbingMode = .preferred
+        window.tabbingIdentifier = "show.deck"
+        window.delegate = self
+        window.representedURL = URL(fileURLWithPath: path)
         let split = NSSplitViewController()
         let sidebar = NSSplitViewItem(sidebarWithViewController: sidebarController())
         sidebar.minimumThickness = 260
@@ -273,26 +266,50 @@ final class Controller: NSObject, NSApplicationDelegate, NSTableViewDataSource, 
         split.addSplitViewItem(NSSplitViewItem(viewController: detailController()))
         window.contentViewController = split
         window.setContentSize(NSSize(width: 1180, height: 780))
-
-        if let first = rows.firstIndex(where: { if case .item = $0 { return true } else { return false } }) {
-            table.selectRowIndexes(IndexSet(integer: first), byExtendingSelection: false)
-        }
-        updateProgress()
-
-        if let snapshotPath {
-            snapshot(to: snapshotPath)
-            NSApp.terminate(nil)
-            return
-        }
-        window.center()
-        window.makeKeyAndOrderFront(nil)
-        window.makeFirstResponder(table)
-        NSApp.activate(ignoringOtherApps: true)
+        apply(deck, keepingSelection: nil)
     }
 
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+    var selectedSection: Section? {
+        guard table.selectedRow >= 0, table.selectedRow < rows.count, case .item(let i) = rows[table.selectedRow] else { return nil }
+        return deck.sections[i]
+    }
 
-    private func snapshot(to path: String) {
+    /// Re-reads the deck and its sign-offs from disk, keeping the selected section when it still exists.
+    func reload() {
+        guard let fresh = try? loadDeck(path) else { return }
+        store = SignOffStore(deckPath: path)
+        apply(fresh, keepingSelection: selectedSection?.key)
+    }
+
+    private func apply(_ deck: Deck, keepingSelection key: String?) {
+        self.deck = deck
+        rows = []
+        var lastGroup: String?
+        for (i, section) in deck.sections.enumerated() {
+            if section.group != lastGroup {
+                rows.append(.header(section.group))
+                lastGroup = section.group
+            }
+            rows.append(.item(i))
+        }
+        window.title = deck.title
+        window.tab.title = deck.title
+        table.reloadData()
+        let kept = rows.firstIndex { if case .item(let i) = $0 { return deck.sections[i].key == key } else { return false } }
+        let first = rows.firstIndex { if case .item = $0 { return true } else { return false } }
+        if let row = kept ?? first {
+            table.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+            tableViewSelectionDidChange(Notification(name: NSTableView.selectionDidChangeNotification))
+        }
+        updateProgress()
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        saveNote()
+        onClose?()
+    }
+
+    func snapshot(to path: String) {
         guard let view = window.contentView else { return }
         window.appearance = NSAppearance(named: .aqua)
         if let section = selectedSection {
@@ -306,24 +323,6 @@ final class Controller: NSObject, NSApplicationDelegate, NSTableViewDataSource, 
             view.cacheDisplay(in: view.bounds, to: rep)
             try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
         }
-    }
-
-    private func buildMenu() {
-        let main = NSMenu()
-        let appItem = NSMenuItem()
-        main.addItem(appItem)
-        let appMenu = NSMenu()
-        appMenu.addItem(withTitle: "Quit \(deck.title)", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        appItem.submenu = appMenu
-        let editItem = NSMenuItem()
-        main.addItem(editItem)
-        let editMenu = NSMenu(title: "Edit")
-        editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
-        editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
-        editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
-        editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
-        editItem.submenu = editMenu
-        NSApp.mainMenu = main
     }
 
     private func sidebarController() -> NSViewController {
@@ -423,6 +422,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSTableViewDataSource, 
         let total = deck.sections.count
         let done = deck.sections.filter { store.entries[$0.key]?.signed == true }.count
         progress.stringValue = "\(done) of \(total) signed off"
+        window.subtitle = [deck.subtitle, "\(done)/\(total) signed off"].compactMap { $0 }.joined(separator: " · ")
     }
 
     func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
@@ -495,27 +495,178 @@ final class Controller: NSObject, NSApplicationDelegate, NSTableViewDataSource, 
     }
 }
 
+/// One Show process for every deck: `show <deck>` hands the file to the running app, which opens it as a tab or brings its tab forward.
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+    var open: [String: DeckController] = [:]
+    let decksMenu = NSMenu(title: "Decks")
+    let launchPaths: [String]
+
+    init(launchPaths: [String]) {
+        self.launchPaths = launchPaths
+    }
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        buildMenu()
+        launchPaths.forEach(openDeck)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        urls.map(\.path).forEach(openDeck)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+
+    func openDeck(_ rawPath: String) {
+        let path = URL(fileURLWithPath: (rawPath as NSString).expandingTildeInPath).standardizedFileURL.path
+        if let existing = open[path] {
+            existing.reload()
+            existing.window.makeKeyAndOrderFront(nil)
+            return
+        }
+        let deck: Deck
+        do {
+            deck = try loadDeck(path)
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "Can't open \((path as NSString).lastPathComponent)"
+            alert.informativeText = "\(error)"
+            alert.runModal()
+            return
+        }
+        let controller = DeckController(path: path, deck: deck)
+        controller.onClose = { [weak self] in self?.open[path] = nil }
+        open[path] = controller
+        if let host = NSApp.keyWindow ?? open.values.first(where: { $0 !== controller })?.window {
+            host.addTabbedWindow(controller.window, ordered: .above)
+        } else {
+            controller.window.center()
+        }
+        controller.window.makeKeyAndOrderFront(nil)
+        controller.window.makeFirstResponder(controller.table)
+    }
+
+    @objc func openListedDeck(_ sender: NSMenuItem) {
+        guard let path = sender.representedObject as? String else { return }
+        openDeck(path)
+    }
+
+    @objc func openOther(_ sender: Any?) {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.json]
+        panel.directoryURL = URL(fileURLWithPath: decksDirectory)
+        panel.allowsMultipleSelection = true
+        guard panel.runModal() == .OK else { return }
+        panel.urls.map(\.path).forEach(openDeck)
+    }
+
+    @objc func reloadKey(_ sender: Any?) {
+        open.values.first { $0.window.isKeyWindow }?.reload()
+    }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+        let files = ((try? FileManager.default.contentsOfDirectory(atPath: decksDirectory)) ?? [])
+            .filter { $0.hasSuffix(".json") && !$0.hasSuffix(".signoff.json") }
+            .map { (decksDirectory as NSString).appendingPathComponent($0) }
+        let listed = files.compactMap { path -> (String, Deck, Date)? in
+            guard let deck = try? loadDeck(path) else { return nil }
+            let modified = (try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate] as? Date) ?? .distantPast
+            return (path, deck, modified)
+        }.sorted { $0.2 > $1.2 }
+        for (path, deck, _) in listed {
+            let store = SignOffStore(deckPath: path)
+            let done = deck.sections.filter { store.entries[$0.key]?.signed == true }.count
+            let item = NSMenuItem(title: "\(deck.title)  —  \(done)/\(deck.sections.count)", action: #selector(openListedDeck), keyEquivalent: "")
+            item.target = self
+            item.representedObject = path
+            item.state = open[path] == nil ? .off : .on
+            menu.addItem(item)
+        }
+        if !listed.isEmpty {
+            menu.addItem(.separator())
+        }
+        let other = NSMenuItem(title: "Open Deck…", action: #selector(openOther), keyEquivalent: "o")
+        other.target = self
+        menu.addItem(other)
+        let reload = NSMenuItem(title: "Reload Deck", action: #selector(reloadKey), keyEquivalent: "r")
+        reload.target = self
+        menu.addItem(reload)
+    }
+
+    private func buildMenu() {
+        let main = NSMenu()
+        let appItem = NSMenuItem()
+        main.addItem(appItem)
+        let appMenu = NSMenu()
+        appMenu.addItem(withTitle: "Quit Show", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appItem.submenu = appMenu
+        let decksItem = NSMenuItem()
+        main.addItem(decksItem)
+        decksMenu.delegate = self
+        decksMenu.addItem(withTitle: "Open Deck…", action: #selector(openOther), keyEquivalent: "o").target = self
+        decksItem.submenu = decksMenu
+        let editItem = NSMenuItem()
+        main.addItem(editItem)
+        let editMenu = NSMenu(title: "Edit")
+        editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        editItem.submenu = editMenu
+        let windowItem = NSMenuItem()
+        main.addItem(windowItem)
+        let windowMenu = NSMenu(title: "Window")
+        windowMenu.addItem(withTitle: "Close Tab", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        windowMenu.addItem(withTitle: "Show Next Tab", action: #selector(NSWindow.selectNextTab(_:)), keyEquivalent: "}")
+        windowMenu.addItem(withTitle: "Show Previous Tab", action: #selector(NSWindow.selectPreviousTab(_:)), keyEquivalent: "{")
+        windowItem.submenu = windowMenu
+        NSApp.windowsMenu = windowMenu
+        NSApp.mainMenu = main
+    }
+}
+
+/// Offscreen render of one deck for checks; no window is shown and no running Show is touched.
+final class SnapshotDelegate: NSObject, NSApplicationDelegate {
+    let path: String
+    let output: String
+
+    init(path: String, output: String) {
+        self.path = path
+        self.output = output
+    }
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        do {
+            DeckController(path: path, deck: try loadDeck(path)).snapshot(to: output)
+        } catch {
+            FileHandle.standardError.write("Show: \(path): \(error)\n".data(using: .utf8)!)
+        }
+        NSApp.terminate(nil)
+    }
+}
+
 var arguments = Array(CommandLine.arguments.dropFirst())
 var snapshotPath: String?
 if let flag = arguments.firstIndex(of: "--snapshot"), flag + 1 < arguments.count {
     snapshotPath = arguments[flag + 1]
     arguments.removeSubrange(flag...(flag + 1))
 }
-guard let path = arguments.first(where: { !$0.hasPrefix("-") }),
-      let data = FileManager.default.contents(atPath: (path as NSString).expandingTildeInPath) else {
-    FileHandle.standardError.write("usage: Show <deck.json> [--snapshot out.png]\n".data(using: .utf8)!)
-    exit(64)
-}
-let deck: Deck
-do {
-    deck = try JSONDecoder().decode(Deck.self, from: data)
-} catch {
-    FileHandle.standardError.write("Show: \(path): \(error)\n".data(using: .utf8)!)
-    exit(65)
-}
+let deckPaths = arguments.filter { !$0.hasPrefix("-") }.map { ($0 as NSString).expandingTildeInPath }
 
 let app = NSApplication.shared
-app.setActivationPolicy(snapshotPath == nil ? .regular : .prohibited)
-let controller = Controller(deck: deck, store: SignOffStore(deckPath: (path as NSString).expandingTildeInPath), snapshotPath: snapshotPath)
-app.delegate = controller
+let delegate: NSApplicationDelegate
+if let snapshotPath {
+    guard let path = deckPaths.first else {
+        FileHandle.standardError.write("usage: Show <deck.json> --snapshot out.png\n".data(using: .utf8)!)
+        exit(64)
+    }
+    app.setActivationPolicy(.prohibited)
+    delegate = SnapshotDelegate(path: path, output: snapshotPath)
+} else {
+    app.setActivationPolicy(.regular)
+    delegate = AppDelegate(launchPaths: deckPaths)
+}
+app.delegate = delegate
 app.run()
