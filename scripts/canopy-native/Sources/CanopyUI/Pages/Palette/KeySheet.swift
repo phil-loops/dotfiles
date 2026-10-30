@@ -146,7 +146,7 @@ struct KeySheetView: View {
                             }
                             HStack(spacing: 0) {
                                 Text("yours: ").foregroundStyle(theme.inkFaint)
-                                Text("canopy/keys.toml").foregroundStyle(theme.inkDim)
+                                Text("canopy/keys-native.toml").foregroundStyle(theme.inkDim)
                                 Text(" (").foregroundStyle(theme.inkFaint)
                                 Text("underlined").underline(pattern: .dot).foregroundStyle(theme.inkFaint)
                                 Text(") · keys belong to verbs · , is this page's own · j/k scroll · ? or esc closes").foregroundStyle(theme.inkFaint)

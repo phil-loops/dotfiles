@@ -101,6 +101,15 @@ enum ShellCommands {
                                app.go(.forest(repo: p.repo, project: p.name))
                            }))
 
+        // the server's asset signature moves with keys.toml, not keys-native.toml: this re-reads both
+        r.register(Command(id: "keys.reload", title: "Re-read your keys (keys-native.toml, keys.toml)", scope: .global, quiet: true,
+                           local: { [weak app] _, _ in
+                               guard let app else { return }
+                               Task { @MainActor in
+                                   await app.loadBootstrap()
+                                   app.runner.say(app.registry.keyProblems.isEmpty ? "keys re-read" : "keys re-read · \(app.registry.keyProblems.count) problems atop ?")
+                               }
+                           }))
         r.register(Command(id: "undo", title: "Undo the last change", scope: .global, verb: .undo, label: "undo",
                            local: { [weak app] _, _ in if app?.runner.undoLast() != true { throw Refusal("nothing to undo") } }))
 

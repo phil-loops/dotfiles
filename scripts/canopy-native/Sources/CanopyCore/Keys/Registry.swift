@@ -193,6 +193,9 @@ public final class CommandRegistry {
     public private(set) var keyWarnings: [String] = []
     /// Which scopes each surface shows (sheet.ts SURFACE_SCOPES). Areas add theirs.
     public private(set) var surfaceScopes: [String: [Scope]] = CommandRegistry.defaultSurfaceScopes
+    /// What `applyUserKeys` was last given, so another registry (the keytutor's sandbox) can take the same keys.
+    public private(set) var lastOverrides: [String: [String]] = [:]
+    public private(set) var lastShared: [String: [String]] = [:]
     /// Bumped whenever keys change, so the keymap rebuilds.
     public private(set) var keysVersion = 0
 
@@ -236,9 +239,12 @@ public final class CommandRegistry {
         surfaceScopes[surface] = cur
     }
 
-    /// Lay keys.toml over the verb table, re-resolve every command, then check the rules.
-    public func applyUserKeys(_ overrides: [String: [String]], errors: [String] = []) {
-        let applied = Bindings.applyVerbKeys(overrides, commands: byID.mapValues(\.verbs))
+    /// Lay the user's keys over the verb table — `overrides` from keys-native.toml (verbs), `shared`
+    /// from keys.toml (v2's, by command id) — re-resolve every command, then check the rules.
+    public func applyUserKeys(_ overrides: [String: [String]], shared: [String: [String]] = [:], errors: [String] = []) {
+        lastOverrides = overrides
+        lastShared = shared
+        let applied = Bindings.applyVerbKeys(overrides, shared: shared, commands: byID.mapValues(\.verbs))
         verbKeys = applied.keys
         customized = applied.customized
         for id in order { resolve(&byID[id]!) }

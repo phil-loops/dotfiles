@@ -13,7 +13,7 @@
 3. **The page leader `,`** — an action with no general verb is the page's own: `, <key>`. The leader's namespace is per page (a surface and all its scopes), so it can't collide with another page's or a future global. Pick its keys mnemonically; a chord is fine (`, b p`). `,` alone opens which-key titled "this page's keys".
 4. **Insert** — a fixed set: `esc` stops writing, `⌃↵` always sends or finishes what's typed, `⌥↵` is a newline (the field does it). Plain `↵` depends on the field: it finishes a one-line field (`:`, the menu, a picker, a filter, a description, a subject) and is a newline in a many-line box (a comment, a PR or commit body) — where the frequent act is a new line, sending must be deliberate. A field declares its kind (`app.beginInsert(id, lines: .multi)`) and the engine routes `↵` by it; no page decides per key. Everything else goes to the field. No page adds to it; a page action wanted mid-typing is esc, then its key.
 
-**The verbs** (keys are the defaults; keys.toml moves them)
+**The verbs** (keys are the defaults; keys-native.toml moves them)
 
 | verb | keys | meaning |
 |---|---|---|
@@ -78,9 +78,9 @@
 | Dashboard | `r` the range |
 | Tracker | `s` start the item |
 
-**keys.toml** overrides a verb by name (`mark = "v"`, `put-away = ["D"]`, `leader = ";"`) and every page doing it follows; the table's rules are re-checked after (a key on two verbs is flagged atop `?`). v2 keys commands by id in the same file; native reads those lines past with a warning (in `--dump` and dim atop `?`) naming the verb to set instead.
+**keys-native.toml** (`~/.dotfiles/canopy/keys-native.toml`, this app's own) overrides a verb by name (`mark = "v"`, `put-away = ["D"]`, `leader = ";"`) and every page doing it follows; the table's rules are re-checked after (a key on two verbs is flagged atop `?`). It's a separate file because `keys.toml` is shared with v2, which keys it by command id and would flag a verb line there as "no such command" — and a `[native]` table too, since the server's `keymap.py` reads every top-level entry of `keys.toml` and reports a table as "native: wants a key or a list of keys". v2 never opens `keys-native.toml`. Native still reads `keys.toml` (from the server's bootstrap): its command-id lines are read past with a warning naming the verb to set in `keys-native.toml` (in `--dump` and dim atop `?`); a verb line left there still applies, with a warning to move it, and `keys-native.toml` wins over it. Saving `keys.toml` reloads both files (the server's asset signature moves); after saving `keys-native.toml` alone, `:keys.reload`.
 
-**What the tests guard** (`ShellTests`, `KeysTests`): no page source names a raw key; every verb has a meaning and keys; the table holds after keys.toml; a page's leader keys don't repeat or swallow each other; nothing is bound twice in one place; insert keeps its fixed set; keys.toml moves a verb on every page.
+**What the tests guard** (`ShellTests`, `KeysTests`): no page source names a raw key; every verb has a meaning and keys; the table holds after keys-native.toml; a page's leader keys don't repeat or swallow each other; nothing is bound twice in one place; insert keeps its fixed set; keys-native.toml moves a verb on every page while keys.toml stays v2's.
 
 
 ---

@@ -70,6 +70,23 @@ import Testing
         #expect(Bindings.tableProblems(.defaults).isEmpty, "\(Bindings.tableProblems(.defaults))")
     }
 
+    /// keys-native.toml (verbs) over keys.toml (v2's): v2's command ids warn and name the verb and
+    /// the file; a verb line in keys.toml still applies but warns, and the native file wins it.
+    @Test func theNativeFileOverTheSharedOne() {
+        let r = Bindings.applyVerbKeys(["mark": ["b"]],
+                                       shared: ["review.viewed": ["m"], "put-away": ["D"], "mark": ["q"], "zz.top": ["z"], "zz": ["z"]],
+                                       commands: ["review.viewed": [.mark]])
+        #expect(r.keys.keys[.mark] == ["b"], "the native file wins")
+        #expect(r.keys.keys[.putAway] == ["D"], "a verb line in keys.toml still applies")
+        #expect(r.customized == [.mark, .putAway])
+        #expect(r.problems.isEmpty, "keys.toml is v2's: nothing in it is a native problem — \(r.problems)")
+        #expect(r.warnings.contains { $0.hasPrefix("review.viewed: keys belong to verbs now") && $0.contains("`mark = …` in keys-native.toml") })
+        #expect(r.warnings.contains { $0.hasPrefix("put-away: a verb in keys.toml") && $0.contains("move it to keys-native.toml") })
+        #expect(r.warnings.contains { $0.hasPrefix("mark: a verb in keys.toml") && $0.contains("keys-native.toml's line wins") })
+        #expect(r.warnings.count == 5)
+        #expect(KeysToml.nativePath.hasSuffix("/.dotfiles/canopy/keys-native.toml") && KeysToml.path.hasSuffix("/.dotfiles/canopy/keys.toml"))
+    }
+
     @Test func clashes() {
         let scopes = ["forests": ["row", "project", "forests"], "review": ["line", "thread", "review"]]
         // the same verb on two pages is the point

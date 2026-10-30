@@ -5,7 +5,7 @@ import Foundation
 /// (`Command(leader: LocalKey(",c"), …)`) — never a raw key. This table is the one place a key's
 /// meaning is decided, so a key can't mean two things on two pages by construction.
 ///
-/// keys.toml overrides a verb by its name (`mark = "v"`); every page implementing it follows.
+/// keys-native.toml overrides a verb by its name (`mark = "v"`); every page implementing it follows.
 public enum Verb: String, CaseIterable, Sendable, Comparable {
     // ── nav: owned by the nav core, the same on every page ──
     case next, previous, first, last
