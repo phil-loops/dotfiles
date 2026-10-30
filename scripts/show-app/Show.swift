@@ -1,8 +1,9 @@
 // Show — one native app for walkthrough decks; each deck opens as a labelled tab. Renders a JSON file of sections:
-// { "title", "subtitle"?, "sections": [{ "id"?, "group", "title", "tag"?, "body" (markdown) }] }
+// { "title", "subtitle"?, "sections": [{ "id"?, "group", "title", "tag"?, "body" (markdown), "url"? (a live page shown instead of the body) }] }
 // Sign-offs and notes save beside the deck as <deck>.signoff.json; "replyTo" names the claude-say session that Submit notifies.
 import AppKit
 import UniformTypeIdentifiers
+import WebKit
 
 struct Deck: Decodable {
     let title: String
@@ -16,7 +17,8 @@ struct Section: Decodable {
     let group: String
     let title: String
     let tag: String?
-    let body: String
+    let body: String?
+    let url: String?
 
     var key: String { id ?? title }
 }
@@ -63,7 +65,7 @@ final class Renderer {
         if let tag = section.tag {
             out.append(line(tag, font: mono, color: .systemBlue, after: 14))
         }
-        out.append(markdown(section.body))
+        out.append(markdown(section.body ?? ""))
         return out
     }
 
@@ -241,6 +243,12 @@ final class DeckController: NSObject, NSWindowDelegate, NSTableViewDataSource, N
     let window: NSWindow
     let table = NSTableView()
     let text = NSTextView()
+    var textScroll: NSScrollView!
+    let web = WKWebView(frame: .zero, configuration: {
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .default()
+        return configuration
+    }())
     let signed = NSButton(checkboxWithTitle: "Signed off", target: nil, action: nil)
     let note = NSTextField()
     let progress = NSTextField(labelWithString: "")
@@ -366,6 +374,9 @@ final class DeckController: NSObject, NSWindowDelegate, NSTableViewDataSource, N
         let scroll = NSScrollView()
         scroll.documentView = text
         scroll.hasVerticalScroller = true
+        textScroll = scroll
+        web.isHidden = true
+        web.setContentHuggingPriority(.defaultLow, for: .vertical)
 
         signed.target = self
         signed.action = #selector(toggleSigned)
@@ -390,10 +401,11 @@ final class DeckController: NSObject, NSWindowDelegate, NSTableViewDataSource, N
         let divider = NSBox()
         divider.boxType = .separator
 
-        let stack = NSStackView(views: [scroll, divider, bar])
+        let stack = NSStackView(views: [scroll, web, divider, bar])
         stack.orientation = .vertical
         stack.spacing = 0
-        for view in [scroll, divider, bar] {
+        stack.detachesHiddenViews = true
+        for view in [scroll, web, divider, bar] {
             view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
         let vc = NSViewController()
@@ -534,8 +546,18 @@ final class DeckController: NSObject, NSWindowDelegate, NSTableViewDataSource, N
 
     func tableViewSelectionDidChange(_ notification: Notification) {
         guard let section = selectedSection else { return }
-        text.textStorage?.setAttributedString(renderer.render(section))
-        text.scroll(.zero)
+        if let address = section.url, let url = URL(string: address) {
+            textScroll.isHidden = true
+            web.isHidden = false
+            if web.url != url {
+                web.load(URLRequest(url: url))
+            }
+        } else {
+            web.isHidden = true
+            textScroll.isHidden = false
+            text.textStorage?.setAttributedString(renderer.render(section))
+            text.scroll(.zero)
+        }
         let entry = store.entries[section.key]
         signed.state = entry?.signed == true ? .on : .off
         note.stringValue = entry?.note ?? ""

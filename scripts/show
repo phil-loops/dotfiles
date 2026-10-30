@@ -17,7 +17,7 @@ build() {
     return
   fi
   mkdir -p "$app/Contents/MacOS"
-  swiftc -O -swift-version 5 -target arm64-apple-macos14 -framework AppKit "$src" -o "$app/Contents/MacOS/Show"
+  swiftc -O -swift-version 5 -target arm64-apple-macos14 -framework AppKit -framework WebKit "$src" -o "$app/Contents/MacOS/Show"
   cat > "$app/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -68,7 +68,7 @@ case "${1:-}" in
     for arg in "$@"; do
       deck="$(cd "$(dirname "$arg")" && pwd)/$(basename "$arg")"
       [[ -f "$deck" ]] || { echo "show: no such deck: $arg" >&2; exit 66; }
-      python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["title"] and d["sections"]' "$deck" \
+      python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["title"] and d["sections"] and all(s.get("body") or s.get("url") for s in d["sections"])' "$deck" \
         || { echo "show: $deck is not a deck (needs title + sections)" >&2; exit 65; }
       decks+=("$deck")
     done

@@ -25,6 +25,7 @@ description: Present a design, plan or walkthrough as a native macOS app (Swift 
 
 - `id` keys the sign-off; keep ids stable across regenerations so earlier sign-offs survive. When a section's meaning changes, give it a new id (its old sign-off then no longer applies).
 - `group` becomes a sidebar header; consecutive sections with the same group sit under it.
+- `url` (instead of `body`) shows a live page in the section, such as a preview server or a viewer page. It keeps its own login, which persists between launches.
 - `body` markdown supported: `# ` / `## ` headings, `- ` and `1. ` lists (indent for nesting), `> ` a large pull quote, fenced code blocks, `|` tables (rendered monospaced), inline `**bold**`, `*italic*`, `` `code` ``, links.
 
 ## Recipe
