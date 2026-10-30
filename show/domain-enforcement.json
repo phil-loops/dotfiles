@@ -1,111 +1,112 @@
 {
- "title": "Domain enforcement — MVP and phases",
- "subtitle": "Restriction · lift · allowance",
- "sections": [
-  {
-   "id": "problem",
-   "group": "Overview",
-   "title": "The problem",
-   "tag": null,
-   "body": "When a sending domain is disabled, **the reason is lost the moment it happens.** A detector flips `SendingDomain.disabled`, logs a free-text `disableCriterion` nobody reads, and leaves a `DisableDomainEvent` that says only \"a domain was disabled\".\n\n- **Reviewers** reconstruct the why from thousands of inlined account-limit-notice cards.\n- **Customers** see one generic \"contact support\"; the API says \"No sending domain configured\".\n- **Re-enable is blunt:** Reenable overrides every flagged email the team ever sent; approving one flagged email re-enables a domain disabled for something unrelated — even a deliberate admin block.\n- **Unleash** silently grants a permanent safety-check exemption.\n- **Every ruling overwrites** `decision` in place, so a wrong call leaves no trace."
-  },
-  {
-   "id": "light",
-   "group": "Overview",
-   "title": "The guiding question",
-   "tag": null,
-   "body": "> At any moment we can answer: why can't this team send, who decided that, and what would change it?\n\nRules that follow (signed off separately in the principles deck):\n- **1** · A restriction is a claim with a reason and a decider — a person, or a named automation.\n- **2** · The remedy matches the finding — restrict and allow at the same grain.\n- **3** · A detector's verdict is provisional; a person's is binding.\n- **4** · Record what happened once; compute everything else."
-  },
-  {
-   "id": "nouns",
-   "group": "Overview",
-   "title": "Three nouns",
-   "tag": "restriction · lift · allowance",
-   "body": "```\nRestriction\n  teamId, sendingDomainId?          // null = the whole team\n  category, ruleId?, findingKey?\n  deciderKind (person | automation), deciderName\n  liftedAt?, liftedByUserId?, liftVerdict? (wrong | fixed), liftNote?   // written once\n\nAllowance                            // exactly one selector\n  teamId\n  category + findingKey  |  ruleId  |  category  |  (none = all checks)\n  until, grantedByUserId, note\n  revokedAt?, revokedByUserId?      // written once\n```\n\n- **Disabled** = the domain or its team has a restriction with no `liftedAt`. `SendingDomain.disabled` is the cache.\n- **A lift** is `UPDATE … WHERE liftedAt IS NULL` — a second lift, or one from a stale page, does nothing.\n- **The registry** (TS) holds categories and rules: subject, label, which finding type a rule produces."
-  },
-  {
-   "id": "mvp",
-   "group": "Phase 1 · Restrictions (MVP)",
-   "title": "What the MVP is",
-   "tag": "6 branches · LOO-6239",
-   "body": "**Every disable records a restriction that says why and who decided; every enable goes through a lift; the review page shows what's keeping a domain disabled; approving an email lifts only that email's restrictions.**\n\n# Folded in from Codex's first review\n- **Every enable is a lift** — admin Reenable and Unleash lift what's in effect, so the cache and the restrictions can't disagree.\n- **Team scope** — SES pauses, suspicious signups and deletion restrict the team; a domain added later starts disabled.\n- **Findings cite the email** — two flagged emails are two restrictions; approving one can't lift the other.\n\n# Deliberately unchanged\n- `DisableDomainEvent` is still written on a flip, as history; the review page reads restrictions.\n- Allowances, the lift verdict dialog, snooze and `enforce` wait for later phases.\n\n# What we learn\nThe real mix of categories; how often restrictions overlap; how often each gets lifted."
-  },
-  {
-   "id": "p1-1",
-   "group": "Phase 1 · Restrictions (MVP)",
-   "title": "1 · The restriction table",
-   "tag": "add-the-restriction-table",
-   "body": "**Band:** schema + queries.\n\n- Migration: `Restriction` with CHECKs — `deciderKind = 'person' ⇒ ruleId IS NULL`; `deciderKind = 'automation' ⇒ ruleId IS NOT NULL`; `liftedAt IS NOT NULL ⇒ liftedByUserId, liftVerdict, liftNote IS NOT NULL`. Indexes on `(sendingDomainId, liftedAt)` and `(teamId, liftedAt)`. Squawk-clean.\n- Queries (`queries/restriction.ts`): `create`, `listInEffectForDomain` (domain + its team), `listForDomain`, `lift(id, …)` as a guarded update.\n- Tests (real DB): round-trip; a second lift changes nothing; a team-scoped restriction shows up for each of the team's domains; the CHECKs reject a person claim with a rule."
-  },
-  {
-   "id": "p1-2",
-   "group": "Phase 1 · Restrictions (MVP)",
-   "title": "2 · The registry",
-   "tag": "add-the-enforcement-registry",
-   "body": "**Band:** pure lib, unit tests.\n\n```\n// lib/enforcement/registry.ts\ncategories: content.phishing, content.unclassified, content.banned_word,\n            behavior.complaint_rate, behavior.bounce_rate, behavior.provider_paused,\n            account.suspicious_signup, account.new_domains_paused, account.deleted\nrules:      phishing_classifier, classifier_unrecognized_output, banned_word_substring,\n            health_complaint_limit, health_bounce_limit, ses_tenant_disabled,\n            spammy_signup_pattern, new_domains_paused_flag, team_deletion\nfindings:   email:<id>, word:<lowercased>\n```\n\nEach rule names its one category and its finding type. Only what phase 1 reads is in it — labels, subject, finding type. Customer copy and policy arrive with the phases that read them."
-  },
-  {
-   "id": "p1-3",
-   "group": "Phase 1 · Restrictions (MVP)",
-   "title": "3 · Every disable records a restriction",
-   "tag": "record-a-restriction-on-every-disable",
-   "body": "**Band:** model + its callers (the parameter is required, so callers land with it).\n\n`SendingDomainModel.restrict({ teamId, sendingDomainId?, category, ruleId?, findingKey?, decider })`, in one transaction:\n1. Lock the domain row (or the team row for a team claim).\n2. An automation's claim with the same rule + finding already in effect → skip. A person's claim is always recorded.\n3. Create the restriction; flip `disabled` on the affected domains; write `DisableDomainEvent` only on a flip, as today.\n\n| Site | Decider | Category / rule | Finding | Scope |\n|---|---|---|---|---|\n| health cron | health-cron | complaint / bounce limit | — | domain |\n| AI check ×4 | phishtank or ai-check | phishing_classifier / unrecognized | email | domain |\n| banned words | banned-words | banned_word_substring | each word | domain |\n| SES DISABLED | ses | ses_tenant_disabled | — | team |\n| creation | domain-creation | signup pattern / pause flag | — | team |\n| team deletion | team-deletion | team_deletion | — | team |\n| admin mark unsafe | the admin | content.phishing | email | domain |\n| bulk signup block | the admin | account.suspicious_signup | — | team |\n\nDomain creation also checks the team: a new domain under a restricted team starts disabled."
-  },
-  {
-   "id": "p1-4",
-   "group": "Phase 1 · Restrictions (MVP)",
-   "title": "4 · Every enable is a lift; admins say why they block",
-   "tag": "lift-on-reenable-and-ask-why",
-   "body": "**Band:** model + the assessment flow.\n\n- Reenable and Unleash lift every restriction in effect on the domain and its team (`liftVerdict: fixed` until the dialog lets the admin choose), then flip the cache. Unleash still sets `skipSafetyChecks` as today.\n- Block requires the admin to pick a **category** (a small select in the assessment form, note required) and records a person's claim.\n- Approving from the old queue keeps resolving the legacy event — history only.\n\nThis is where \"re-enabling lifts an admin's block too\" lands — derived state requires it, and the block survives as its own row with its lift."
-  },
-  {
-   "id": "p1-5",
-   "group": "Phase 1 · Restrictions (MVP)",
-   "title": "5 · Show what's keeping it disabled",
-   "tag": "show-whats-keeping-a-domain-disabled",
-   "body": "**Band:** wiring + UI.\n\n- `getDomainInfo` returns the restrictions in effect: category label, rule, finding, decider, time.\n- DomainReview opens with **Keeping this domain disabled**; the queue row shows the category.\n- A domain disabled before phase 1 has none: the section says **Disabled before reasons were recorded**."
-  },
-  {
-   "id": "p1-6",
-   "group": "Phase 1 · Restrictions (MVP)",
-   "title": "6 · Approving an email lifts only that email",
-   "tag": "approve-lifts-only-that-email",
-   "body": "**Band:** model + its one adoption site.\n\n`approveEmail({ teamId, sendingDomainId, emailMessageId, adminUserId })`:\n1. Lock; lift every restriction in effect whose finding is `email:<id>` (`liftVerdict: wrong`, note \"approved flagged email\").\n2. Nothing left in effect → enable. Something left → return what still blocks.\n3. Disabled before phase 1 (nothing recorded) → don't enable; return `unrecorded_disable` so the admin reviews it.\n\n`overrideEmailMessage` still sets `override` on the email (today's mechanism), calls this, and names what still blocks."
-  },
-  {
-   "id": "p2",
-   "group": "After the MVP",
-   "title": "Phase 2 · Lift verdicts and allowances",
-   "tag": null,
-   "body": "- The lift dialog: **was it wrong, or did they fix it?** — plus an optional allowance at the narrowest grain: this finding → this rule for this team → this category for this team, with an end date.\n- Automations check allowances before restricting; a suppressed finding is noted, not acted on.\n- Allow a specific banned word for a team.\n- Closes the \"fires again right after a person lifted it\" gap."
-  },
-  {
-   "id": "p3",
-   "group": "After the MVP",
-   "title": "Phase 3 · Notes and snooze",
-   "tag": null,
-   "body": "- A notes table on restrictions.\n- Snooze (`awaiting_customer`, `cooling_off`, `probation`) with an end — as a field or a note kind, whichever the queue needs.\n- Queue: paying first, age against the SLA; the account-limit-notice chart replaces the inlined cards."
-  },
-  {
-   "id": "p4",
-   "group": "After the MVP",
-   "title": "Phase 4 · One entry point for detectors",
-   "tag": "enforce",
-   "body": "- `enforce` = the policy's `decide`, then write restrictions. safety-v0's `act` and a future safety-log policy call it.\n- **The seam:** a policy changes sending state only by writing a restriction, and reads allowances as an input. Nothing in enforcement reads a policy, so policies can be added, versioned or deleted without touching restrictions.\n- Detectors link their evidence; the decider name carries the version.\n- `handleDisableNewDomain` is deleted."
-  },
-  {
-   "id": "p5",
-   "group": "After the MVP",
-   "title": "Phase 5 · Customer surfaces",
-   "tag": null,
-   "body": "- Banner, notification email and API error (`sending_domain_disabled` + category) worded by subject through the registry."
-  },
-  {
-   "id": "later",
-   "group": "After the MVP",
-   "title": "Later, when a case needs it",
-   "tag": null,
-   "body": "- Content holds keyed on a content hash; team publishing blocks.\n- Idempotency keys.\n- Policy replay against history.\n- Retiring `safetyClassification = \"override\"` for content-scoped clearance."
-  }
- ]
+  "title": "Domain enforcement — MVP and phases",
+  "subtitle": "Restriction · lift · allowance",
+  "replyTo": "ddabd63a",
+  "sections": [
+    {
+      "id": "problem",
+      "group": "Overview",
+      "title": "The problem",
+      "tag": null,
+      "body": "When a sending domain is disabled, **the reason is lost the moment it happens.** A detector flips `SendingDomain.disabled`, logs a free-text `disableCriterion` nobody reads, and leaves a `DisableDomainEvent` that says only \"a domain was disabled\".\n\n- **Reviewers** reconstruct the why from thousands of inlined account-limit-notice cards.\n- **Customers** see one generic \"contact support\"; the API says \"No sending domain configured\".\n- **Re-enable is blunt:** Reenable overrides every flagged email the team ever sent; approving one flagged email re-enables a domain disabled for something unrelated — even a deliberate admin block.\n- **Unleash** silently grants a permanent safety-check exemption.\n- **Every ruling overwrites** `decision` in place, so a wrong call leaves no trace."
+    },
+    {
+      "id": "light",
+      "group": "Overview",
+      "title": "The guiding question",
+      "tag": null,
+      "body": "> At any moment we can answer: why can't this team send, who decided that, and what would change it?\n\nRules that follow (signed off separately in the principles deck):\n- **1** · A restriction is a claim with a reason and a decider — a person, or a named automation.\n- **2** · The remedy matches the finding — restrict and allow at the same grain.\n- **3** · A detector's verdict is provisional; a person's is binding.\n- **4** · Record what happened once; compute everything else."
+    },
+    {
+      "id": "nouns",
+      "group": "Overview",
+      "title": "Three nouns",
+      "tag": "restriction · lift · allowance",
+      "body": "```\nRestriction\n  teamId, sendingDomainId?          // null = the whole team\n  category, ruleId?, findingKey?\n  deciderKind (person | automation), deciderName\n  liftedAt?, liftedByUserId?, liftVerdict? (wrong | fixed), liftNote?   // written once\n\nAllowance                            // exactly one selector\n  teamId\n  category + findingKey  |  ruleId  |  category  |  (none = all checks)\n  until, grantedByUserId, note\n  revokedAt?, revokedByUserId?      // written once\n```\n\n- **Disabled** = the domain or its team has a restriction with no `liftedAt`. `SendingDomain.disabled` is the cache.\n- **A lift** is `UPDATE … WHERE liftedAt IS NULL` — a second lift, or one from a stale page, does nothing.\n- **The registry** (TS) holds categories and rules: subject, label, which finding type a rule produces."
+    },
+    {
+      "id": "mvp",
+      "group": "Phase 1 · Restrictions (MVP)",
+      "title": "What the MVP is",
+      "tag": "6 branches · LOO-6239",
+      "body": "**Every disable records a restriction that says why and who decided; every enable goes through a lift; the review page shows what's keeping a domain disabled; approving an email lifts only that email's restrictions.**\n\n# Folded in from Codex's first review\n- **Every enable is a lift** — admin Reenable and Unleash lift what's in effect, so the cache and the restrictions can't disagree.\n- **Team scope** — SES pauses, suspicious signups and deletion restrict the team; a domain added later starts disabled.\n- **Findings cite the email** — two flagged emails are two restrictions; approving one can't lift the other.\n\n# Deliberately unchanged\n- `DisableDomainEvent` is still written on a flip, as history; the review page reads restrictions.\n- Allowances, the lift verdict dialog, snooze and `enforce` wait for later phases.\n\n# What we learn\nThe real mix of categories; how often restrictions overlap; how often each gets lifted."
+    },
+    {
+      "id": "p1-1",
+      "group": "Phase 1 · Restrictions (MVP)",
+      "title": "1 · The restriction table",
+      "tag": "add-the-restriction-table",
+      "body": "**Band:** schema + queries.\n\n- Migration: `Restriction` with CHECKs — `deciderKind = 'person' ⇒ ruleId IS NULL`; `deciderKind = 'automation' ⇒ ruleId IS NOT NULL`; `liftedAt IS NOT NULL ⇒ liftedByUserId, liftVerdict, liftNote IS NOT NULL`. Indexes on `(sendingDomainId, liftedAt)` and `(teamId, liftedAt)`. Squawk-clean.\n- Queries (`queries/restriction.ts`): `create`, `listInEffectForDomain` (domain + its team), `listForDomain`, `lift(id, …)` as a guarded update.\n- Tests (real DB): round-trip; a second lift changes nothing; a team-scoped restriction shows up for each of the team's domains; the CHECKs reject a person claim with a rule."
+    },
+    {
+      "id": "p1-2",
+      "group": "Phase 1 · Restrictions (MVP)",
+      "title": "2 · The registry",
+      "tag": "add-the-enforcement-registry",
+      "body": "**Band:** pure lib, unit tests.\n\n```\n// lib/enforcement/registry.ts\ncategories: content.phishing, content.unclassified, content.banned_word,\n            behavior.complaint_rate, behavior.bounce_rate, behavior.provider_paused,\n            account.suspicious_signup, account.new_domains_paused, account.deleted\nrules:      phishing_classifier, classifier_unrecognized_output, banned_word_substring,\n            health_complaint_limit, health_bounce_limit, ses_tenant_disabled,\n            spammy_signup_pattern, new_domains_paused_flag, team_deletion\nfindings:   email:<id>, word:<lowercased>\n```\n\nEach rule names its one category and its finding type. Only what phase 1 reads is in it — labels, subject, finding type. Customer copy and policy arrive with the phases that read them."
+    },
+    {
+      "id": "p1-3",
+      "group": "Phase 1 · Restrictions (MVP)",
+      "title": "3 · Every disable records a restriction",
+      "tag": "record-a-restriction-on-every-disable",
+      "body": "**Band:** model + its callers (the parameter is required, so callers land with it).\n\n`SendingDomainModel.restrict({ teamId, sendingDomainId?, category, ruleId?, findingKey?, decider })`, in one transaction:\n1. Lock the domain row (or the team row for a team claim).\n2. An automation's claim with the same rule + finding already in effect → skip. A person's claim is always recorded.\n3. Create the restriction; flip `disabled` on the affected domains; write `DisableDomainEvent` only on a flip, as today.\n\n| Site | Decider | Category / rule | Finding | Scope |\n|---|---|---|---|---|\n| health cron | health-cron | complaint / bounce limit | — | domain |\n| AI check ×4 | phishtank or ai-check | phishing_classifier / unrecognized | email | domain |\n| banned words | banned-words | banned_word_substring | each word | domain |\n| SES DISABLED | ses | ses_tenant_disabled | — | team |\n| creation | domain-creation | signup pattern / pause flag | — | team |\n| team deletion | team-deletion | team_deletion | — | team |\n| admin mark unsafe | the admin | content.phishing | email | domain |\n| bulk signup block | the admin | account.suspicious_signup | — | team |\n\nDomain creation also checks the team: a new domain under a restricted team starts disabled."
+    },
+    {
+      "id": "p1-4",
+      "group": "Phase 1 · Restrictions (MVP)",
+      "title": "4 · Every enable is a lift; admins say why they block",
+      "tag": "lift-on-reenable-and-ask-why",
+      "body": "**Band:** model + the assessment flow.\n\n- Reenable and Unleash lift every restriction in effect on the domain and its team (`liftVerdict: fixed` until the dialog lets the admin choose), then flip the cache. Unleash still sets `skipSafetyChecks` as today.\n- Block requires the admin to pick a **category** (a small select in the assessment form, note required) and records a person's claim.\n- Approving from the old queue keeps resolving the legacy event — history only.\n\nThis is where \"re-enabling lifts an admin's block too\" lands — derived state requires it, and the block survives as its own row with its lift."
+    },
+    {
+      "id": "p1-5",
+      "group": "Phase 1 · Restrictions (MVP)",
+      "title": "5 · Show what's keeping it disabled",
+      "tag": "show-whats-keeping-a-domain-disabled",
+      "body": "**Band:** wiring + UI.\n\n- `getDomainInfo` returns the restrictions in effect: category label, rule, finding, decider, time.\n- DomainReview opens with **Keeping this domain disabled**; the queue row shows the category.\n- A domain disabled before phase 1 has none: the section says **Disabled before reasons were recorded**."
+    },
+    {
+      "id": "p1-6",
+      "group": "Phase 1 · Restrictions (MVP)",
+      "title": "6 · Approving an email lifts only that email",
+      "tag": "approve-lifts-only-that-email",
+      "body": "**Band:** model + its one adoption site.\n\n`approveEmail({ teamId, sendingDomainId, emailMessageId, adminUserId })`:\n1. Lock; lift every restriction in effect whose finding is `email:<id>` (`liftVerdict: wrong`, note \"approved flagged email\").\n2. Nothing left in effect → enable. Something left → return what still blocks.\n3. Disabled before phase 1 (nothing recorded) → don't enable; return `unrecorded_disable` so the admin reviews it.\n\n`overrideEmailMessage` still sets `override` on the email (today's mechanism), calls this, and names what still blocks."
+    },
+    {
+      "id": "p2",
+      "group": "After the MVP",
+      "title": "Phase 2 · Lift verdicts and allowances",
+      "tag": null,
+      "body": "- The lift dialog: **was it wrong, or did they fix it?** — plus an optional allowance at the narrowest grain: this finding → this rule for this team → this category for this team, with an end date.\n- Automations check allowances before restricting; a suppressed finding is noted, not acted on.\n- Allow a specific banned word for a team.\n- Closes the \"fires again right after a person lifted it\" gap."
+    },
+    {
+      "id": "p3",
+      "group": "After the MVP",
+      "title": "Phase 3 · Notes and snooze",
+      "tag": null,
+      "body": "- A notes table on restrictions.\n- Snooze (`awaiting_customer`, `cooling_off`, `probation`) with an end — as a field or a note kind, whichever the queue needs.\n- Queue: paying first, age against the SLA; the account-limit-notice chart replaces the inlined cards."
+    },
+    {
+      "id": "p4",
+      "group": "After the MVP",
+      "title": "Phase 4 · One entry point for detectors",
+      "tag": "enforce",
+      "body": "- `enforce` = the policy's `decide`, then write restrictions. safety-v0's `act` and a future safety-log policy call it.\n- **The seam:** a policy changes sending state only by writing a restriction, and reads allowances as an input. Nothing in enforcement reads a policy, so policies can be added, versioned or deleted without touching restrictions.\n- Detectors link their evidence; the decider name carries the version.\n- `handleDisableNewDomain` is deleted."
+    },
+    {
+      "id": "p5",
+      "group": "After the MVP",
+      "title": "Phase 5 · Customer surfaces",
+      "tag": null,
+      "body": "- Banner, notification email and API error (`sending_domain_disabled` + category) worded by subject through the registry."
+    },
+    {
+      "id": "later",
+      "group": "After the MVP",
+      "title": "Later, when a case needs it",
+      "tag": null,
+      "body": "- Content holds keyed on a content hash; team publishing blocks.\n- Idempotency keys.\n- Policy replay against history.\n- Retiring `safetyClassification = \"override\"` for content-scoped clearance."
+    }
+  ]
 }
