@@ -49,6 +49,8 @@ final class TutorState {
     var armed: String?
     /// the pane focus was on when the drawer opened, to return to
     @ObservationIgnored var beforeDrawer: String?
+    /// the pinned code's canvas (review's CodePaneView)
+    @ObservationIgnored let codeCanvas = CanvasHandle()
 
 
     nonisolated static let defaultSessionsFile: URL = {
