@@ -5,7 +5,18 @@ description: Present a design, plan or walkthrough as a native macOS app (Swift 
 
 # show — a native walkthrough Phil can sign off on
 
-`show <deck.json>` opens a deck as a tab in the one running Show app (sidebar of sections, rendered markdown, a **Signed off** checkbox and a note field per section). Each tab and window is titled with the deck's title, and its subtitle shows how many sections are signed off. The **Decks** menu lists every deck in `~/.dotfiles/show`, newest first, with sign-off counts. Open decks reload by themselves when their file changes on disk, keeping the selected section. When the launcher finishes a new build, the running app saves notes and relaunches into it with the same decks open. So rewriting a deck or editing Show.swift and then running `show --build` is all it takes. A bare `show` opens the newest deck. Sign-offs and notes save to `<deck>.signoff.json` beside the deck, which is how Phil's verdicts come back to you.
+`show <file.json>` opens a file in the one Show window (section list, rendered markdown, a **Signed off** checkbox and a note field per section). The window never multiplies: a rail on its left edge switches between four **workspaces**, and each keeps its own open document, typed text and scroll while another is in front.
+
+| Workspace | Key | Opens files with | Holds |
+|---|---|---|---|
+| Forest | ⌘1 | `"mode": "forest"` | a project's branches in merge order (branch-deck decks) |
+| Review | ⌘2 | `"mode": "deck"` or no mode | plans and designs to sign off |
+| Learn | ⌘3 | `"mode": "tutor"` | tutor sessions |
+| Runs | ⌘4 | `"mode": "live"` | live runs, read-only |
+
+An optional top-level `"workspace": "forest" | "review" | "learn" | "runs"` overrides the mode. `show <file>` switches to that file's workspace and opens it there; `show --check-routing <file>` prints where a file goes without opening anything. The only thing that crosses between workspaces is the count of documents waiting on Phil, a badge on each rail icon. The title band shows the document's title and, in the workspace's quiet tint, its progress.
+
+Open documents reload by themselves when their file changes on disk, keeping the selected section, scroll and cursor. When the launcher finishes a new build, the running app saves notes and relaunches into it, each workspace back on its document. So rewriting a deck or editing Show.swift and then running `show --build` is all it takes. A bare `show` opens the newest deck. Sign-offs and notes save to `<deck>.signoff.json` beside the deck, which is how Phil's verdicts come back to you.
 
 - Launcher: `~/.dotfiles/scripts/show` (on PATH). Source: `~/.dotfiles/scripts/show-app/Show.swift`. It rebuilds itself into `~/.cache/show/Show.app` whenever the source's hash changes (`show --build` to just build).
 - Decks live in `~/.dotfiles/show/<name>.json`.
@@ -25,6 +36,7 @@ description: Present a design, plan or walkthrough as a native macOS app (Swift 
 
 - `id` keys the sign-off; keep ids stable across regenerations so earlier sign-offs survive. When a section's meaning changes, give it a new id (its old sign-off then no longer applies).
 - `group` becomes a sidebar header; consecutive sections with the same group sit under it.
+- `"mode": "live"` makes the deck read-only: no sign-off bar, no `.signoff.json`, no sign-off marks. An optional top-level `"status": {"state": "preparing|running|paused|done|failed", "done", "total", "current"}` shows as one quiet line above the page with how long ago the file changed; the Runs tint turns orange while `state` is `running`.
 - `url` (instead of `body`) shows a live page in the section, such as a preview server or a viewer page. It keeps its own login, which persists between launches.
 - `body` markdown supported: `# ` / `## ` headings, `- ` and `1. ` lists (indent for nesting), `> ` a large pull quote, fenced code blocks (one panel; box-drawing lines join up), `|` tables (real table cells sized to their content, first row as header), `![alt](path)` on its own line for an image (absolute or relative to the deck; shrunk to the column, never enlarged; name a Retina PNG `…@2x.png`; the alt text becomes a caption), inline `**bold**`, `*italic*`, `` `code` ``, links.
 
@@ -35,11 +47,11 @@ description: Present a design, plan or walkthrough as a native macOS app (Swift 
 3. Open it: `show ~/.dotfiles/show/<name>.json`. After regenerating a deck, run the same command again: it reloads the open tab instead of opening a second window. Give every deck a distinct `title`, since that is the tab label.
 4. Tell Phil it's open and how sign-off works. Then wait. **Submit** (⌘↩) sends `claude-say <replyTo>` a line naming the sign-off file; read `<name>.signoff.json` when it arrives, or when he says he's been through it, and treat every note as pushback to address. Set `replyTo` to this session's id prefix (`$CLAUDE_CODE_SESSION_ID`, first 8 characters); without it, Submit only marks the deck done.
 
-## Tutor space
+## Learn workspace
 
-The rail on the window's left edge switches spaces: **Decks** (⌘1) and **Tutor** (⌘2). The Tutor space runs a `/tutor` session as a worksheet: one rung at a time, answered in place.
+The Learn workspace (⌘3) runs a `/tutor` session as a worksheet: one rung at a time, answered in place.
 
-- `show --tutor <file>` opens the Tutor space on a session; a bare `show --tutor` opens the newest one in `~/.dotfiles/show/tutor/`. The **Tutor → Sessions** menu lists the rest, newest first. Tutor files never appear in the Decks menu.
+- `show --tutor <file>` (or plain `show <file>`) opens Learn on a session; a bare `show --tutor` opens the newest one in `~/.dotfiles/show/tutor/`. The **Tutor → Sessions** menu lists the rest, newest first. Tutor files never appear in the Decks menu.
 - `show --tutor-check <file>` prints the current rung, the station states and each rung's rail order without opening a window.
 
 Session file `~/.dotfiles/show/tutor/<name>.json` (Claude writes it):
@@ -101,4 +113,4 @@ The tutor's loop, whether it's the headless tutor or you via `replyTo`:
 
 ## Verifying
 
-**Never drive or capture his screen** — no `osascript`/System Events keystrokes, no `screencapture`. A clean compile is the check. `show --snapshot <deck> <out.png>` renders the window offscreen in-process; it also writes `<out>-detail.png` (the rendered section) and `<out>-sidebar.png` (the section list), and `SHOW_SNAPSHOT_SECTION=<id>` picks the section. The window capture itself draws the chrome and the sign-off bar but not the scrolling panes, so it can confirm layout of the bar only. For a tutor session it also writes `<out>-worksheet.png`, the full worksheet column. If something looks wrong, ask Phil.
+**Never drive or capture his screen** — no `osascript`/System Events keystrokes, no `screencapture`. A clean compile is the check. `show --snapshot <file> <out.png>` renders the whole window offscreen in-process (`<out>.png`, a composite with the lists painted in) and never touches the running app or its saved state. It also writes `<out>-rail.png` (the workspace rail), `<out>-detail.png` (the rendered section at full height) and `<out>-sidebar.png` (the section list), and for a tutor session `<out>-worksheet.png`, the full worksheet column. `SHOW_SNAPSHOT_SECTION=<id>` picks the section, `SHOW_SNAPSHOT_WORKSPACE=<name>` brings another workspace forward, and `SHOW_DIR=<dir>` points the library at fixtures instead of `~/.dotfiles/show`. If something looks wrong, ask Phil.
