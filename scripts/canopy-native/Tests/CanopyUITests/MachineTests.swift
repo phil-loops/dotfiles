@@ -99,11 +99,11 @@ import Testing
 
     @Test func killAllAndReapArmToo() throws {
         let (a, m) = try app()
-        a.keys.handle("space"); a.keys.handle("x")
+        a.keys.handle(","); a.keys.handle("x")
         #expect(m.armed == "kill all")
         #expect(a.registry.command("machine.killall")!.route!("machine")?.id == "machine.stop.all")
         a.keys.handle("esc")
-        a.keys.handle("space"); a.keys.handle("c")
+        a.keys.handle(","); a.keys.handle("c")
         #expect(m.armed == "reap")
         #expect(a.registry.command("machine.reap")!.route!("machine")?.id == "machine.reap.confirm")
         let reap = try a.registry.command("machine.reap.confirm")!.write!("machine", nil)!
@@ -181,9 +181,9 @@ import Testing
         let a = AppModel(config: c, port: 1, telemetry: false)
         let d = a.state { DashboardState(app: a) }
         #expect(d.days == 30)
-        a.keys.handle("space"); a.keys.handle("t")
+        a.keys.handle(","); a.keys.handle("r")
         #expect(d.days == 90)
-        a.keys.handle("space"); a.keys.handle("t")
+        a.keys.handle(","); a.keys.handle("r")
         #expect(d.days == 7)
     }
 

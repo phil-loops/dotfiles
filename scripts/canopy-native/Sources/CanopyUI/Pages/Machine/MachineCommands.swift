@@ -12,24 +12,24 @@ enum MachineCommands {
         weak var wapp = app
         let owned: (String?) -> Bool = { [weak m] id in m?.server(id)?.owned ?? false }
 
-        r.register(Command(id: "machine.open", title: "Open the server in the browser", scope: .server, keys: ["ret"], label: "open",
+        r.register(Command(id: "machine.open", title: "Open the server in the browser", scope: .server, verb: .main, label: "open",
                            available: { [weak m] id in m?.server(id)?.url != nil },
                            local: { [weak m] id, _ in
                                guard let m, let u = m.server(id)?.url, let url = URL(string: u) else { throw Refusal("no url") }
                                m.openURL(url)
                            }))
-        r.register(Command(id: "machine.log", title: "Show the server's log", scope: .server, keys: ["l", "right"], label: "log", v1: ["click:log"],
+        r.register(Command(id: "machine.log", title: "Show the server's log", scope: .server, verb: .into, label: "log", v1: ["click:log"],
                            available: { [weak m] id in owned(id) && m?.logFor != id },
                            local: { [weak m] id, _ in m?.showLog(id) }))
-        r.register(Command(id: "machine.log.close", title: "Hide the log", scope: .server, keys: ["h", "left"], label: "log", v1: ["click:hide log"],
+        r.register(Command(id: "machine.log.close", title: "Hide the log", scope: .server, verb: .out, label: "log", v1: ["click:hide log"],
                            available: { [weak m] _ in m?.logFor != nil },
                            local: { [weak m] _, _ in m?.showLog(nil) }))
-        r.register(Command(id: "machine.log.jobs", title: "Switch the log between web and the jobs worker", scope: .server, keys: ["tab"], label: "jobs",
+        r.register(Command(id: "machine.log.jobs", title: "Switch the log between web and the jobs worker", scope: .server, verb: .face, label: "jobs",
                            v1: ["click:jobs worker", "click:web"],
                            available: { [weak m] id in m != nil && m!.logFor == id && m!.server(id)?.jobs == true },
                            local: { [weak m] id, _ in m.map { $0.showLog(id, $0.logSrc == .jobs ? .web : .jobs) } }))
 
-        r.register(Command(id: "machine.restart", title: "Restart the server on its port", scope: .server, budget: .slowIO, keys: ["t"], label: "restart",
+        r.register(Command(id: "machine.restart", title: "Restart the server on its port", scope: .server, budget: .slowIO, leader: LocalKey(",r"), label: "restart",
                            v1: ["click:restart"], available: owned,
                            write: { [weak m] id, _ in
                                guard let s = m?.server(id) else { return nil }
@@ -38,7 +38,7 @@ enum MachineCommands {
                            }))
 
         r.register(Command(id: "machine.swap", title: "Swap the port to the branch's parent build, or back", scope: .server, budget: .slowIO,
-                           keys: ["space w"], label: "swap",
+                           leader: LocalKey(",w"), label: "swap",
                            available: { [weak m] id in
                                guard let m, owned(id), let id else { return false }
                                return m.swapped[id] != nil || m.server(id)?.swapTo != nil
@@ -58,7 +58,7 @@ enum MachineCommands {
         // ── kill: arm, then send ──
 
         let killArm = { (id: String) in "kill \(id)" }
-        r.register(Command(id: "machine.kill", title: "Kill the server", scope: .server, keys: ["X"], label: "kill",
+        r.register(Command(id: "machine.kill", title: "Kill the server", scope: .server, verb: .putAway, label: "kill",
                            available: { [weak m] id in m?.server(id) != nil },
                            route: { [weak m] id in
                                guard let m, let id, m.server(id) != nil else { return nil }
@@ -76,7 +76,7 @@ enum MachineCommands {
                                             said: "killed \(s.label)", failed: "\(s.label) is still running")
                            }))
 
-        r.register(Command(id: "machine.killall", title: "Kill every server", scope: .machine, keys: ["space x"], label: "kill all",
+        r.register(Command(id: "machine.killall", title: "Kill every server", scope: .machine, leader: LocalKey(",x"), label: "kill all",
                            available: { [weak m] _ in !(m?.servers.isEmpty ?? true) },
                            route: { [weak m] _ in
                                guard let m, !m.servers.isEmpty else { return nil }
@@ -92,7 +92,7 @@ enum MachineCommands {
                                for s in m.servers { wapp?.runner.dispatch("machine.stop", via: .key, target: s.sid) }
                            }))
 
-        r.register(Command(id: "machine.reap", title: "Reap orphaned servers (their worktree is gone)", scope: .machine, keys: ["space c"], label: "reap",
+        r.register(Command(id: "machine.reap", title: "Reap orphaned servers (their worktree is gone)", scope: .machine, leader: LocalKey(",c"), label: "reap",
                            available: { [weak m] _ in !(m?.servers.isEmpty ?? true) },
                            route: { [weak m] _ in
                                guard let m, !m.servers.isEmpty else { return nil }
@@ -108,19 +108,19 @@ enum MachineCommands {
                            }))
 
         r.register(Command(id: "machine.main", title: "Run main (on the port beside it, else a free one)", scope: .machine, budget: .slowIO,
-                           keys: ["space M"], label: "main", v1: ["click:▷ run main"],
+                           leader: LocalKey(",m"), label: "main", v1: ["click:▷ run main"],
                            available: { [weak m] _ in m != nil && m!.main == nil },
                            write: { [weak m] _, _ in
                                guard let m else { return nil }
                                return Write(path: "/preview-main", body: ["port": .string(m.mainPort.trimmingCharacters(in: .whitespacesAndNewlines))],
                                             settled: { [weak m] in m?.main != nil }, failed: "main didn't start")
                            }))
-        // v2's port box beside "run main": type the port in insert mode, esc, then space M
-        r.register(Command(id: "machine.port", title: "Type the port main runs on", scope: .machine, keys: ["i"], label: "port",
+        // v2's port box beside "run main": type the port in insert mode, esc, then , m
+        r.register(Command(id: "machine.port", title: "Type the port main runs on", scope: .machine, verb: .write, label: "port",
                            available: { [weak m] _ in m != nil && m!.main == nil },
                            local: { _, _ in wapp?.beginInsert(MachinePage.portField) }))
 
-        r.register(Command(id: "machine.stack", title: "Start the shared Docker stack", scope: .machine, budget: .gitWrite, keys: ["space u"], label: "stack",
+        r.register(Command(id: "machine.stack", title: "Start the shared Docker stack", scope: .machine, budget: .gitWrite, leader: LocalKey(",u"), label: "stack",
                            v1: ["click:▷ start stack"],
                            available: { [weak m] _ in
                                guard let s = m?.substrate else { return false }

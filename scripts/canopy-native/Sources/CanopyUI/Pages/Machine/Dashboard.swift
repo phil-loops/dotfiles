@@ -137,7 +137,7 @@ final class DashboardState {
 enum DashboardCommands {
     static func install(_ app: AppModel) {
         let d = app.state { DashboardState(app: app) }
-        app.registry.register(Command(id: "dashboard.range", title: "Change the dashboard's window", scope: .dashboard, keys: ["space t"], label: "range",
+        app.registry.register(Command(id: "dashboard.range", title: "Change the dashboard's window", scope: .dashboard, leader: LocalKey(",r"), label: "range",
                                       local: { [weak d] _, _ in d?.cycle() }))
     }
 }
