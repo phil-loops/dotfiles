@@ -209,6 +209,24 @@ private func world(_ route: Route = .forests) -> AppModel {
         #expect(a.registry.keyProblems.isEmpty, "\(a.registry.keyProblems)")
     }
 
+    /// `,` is the page's leader: which-key lists the page's own keys, by title (they have no verb);
+    /// a verb key's row says the verb first.
+    @Test func theLeaderOpensThisPagesKeys() {
+        let a = world()
+        a.setCursor("p:r:bench")
+        a.keys.handle(",")
+        #expect(a.keys.pendingKeys == "," && a.keys.pendingIsLeader)
+        let rows = a.keys.whichKeyRows()
+        #expect(rows.contains { $0.key == "f" && $0.verb == nil && $0.what == "move to focus" }, "\(rows)")
+        #expect(rows.contains { $0.key == "a" && $0.what.hasPrefix("show or hide the archive") })
+        #expect(rows.allSatisfy { $0.verb == nil })
+        a.keys.handle("f")
+        #expect(a.store.view(Project.self, "r:bench")?.state == .focus)
+        a.keys.handle("g")
+        #expect(a.keys.whichKeyRows().contains { $0.key == "f" && $0.verb == "go-forests" })
+        a.keys.handle("esc")
+    }
+
     @Test func homeRowsAreFocusThenWorkbenchWithTheArchiveFolded() {
         let a = world()
         a.forestModel.syncClosings()

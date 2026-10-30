@@ -131,8 +131,6 @@ public struct Command {
     public var verbs: [Verb]
     /// its key under the page's leader, for an action no verb names
     public var leader: LocalKey?
-    /// transitional: raw keys a not-yet-migrated command still names
-    var rawKeys: [String]
     /// what it binds in each of its modes, resolved by the registry from the verb table + keys.toml
     public internal(set) var keysByMode: [KeyMode: [String]] = [:]
     /// its keys as shown: those of its first mode that binds any
@@ -164,7 +162,7 @@ public struct Command {
     public var write: ((_ target: String, _ arg: Any?) throws -> Write?)?
 
     public init(id: String, title: String, scope: Scope, budget: Budget = .local,
-                verb: Verb? = nil, verbs: [Verb] = [], leader: LocalKey? = nil, keys: [String] = [],
+                verb: Verb? = nil, verbs: [Verb] = [], leader: LocalKey? = nil,
                 modes: [KeyMode] = [.normal], needsArg: Bool = false, label: String? = nil,
                 pair: String? = nil, hint: [String] = [], v1: [String] = [], quiet: Bool = false,
                 recordsJump: Bool = false,
@@ -172,7 +170,7 @@ public struct Command {
                 local: ((_ target: String?, _ arg: Any?) throws -> Void)? = nil,
                 write: ((_ target: String, _ arg: Any?) throws -> Write?)? = nil) {
         self.id = id; self.title = title; self.scope = scope; self.budget = budget; self.label = label
-        self.verbs = (verb.map { [$0] } ?? []) + verbs; self.leader = leader; self.rawKeys = keys
+        self.verbs = (verb.map { [$0] } ?? []) + verbs; self.leader = leader
         self.modes = modes; self.needsArg = needsArg
         self.pair = pair; self.hint = hint; self.v1 = v1; self.quiet = quiet; self.recordsJump = recordsJump; self.available = available
         self.route = route; self.local = local; self.write = write
@@ -215,7 +213,7 @@ public final class CommandRegistry {
     private func resolve(_ c: inout Command) {
         var byMode: [KeyMode: [String]] = [:]
         for m in c.modes {
-            var ks = c.rawKeys
+            var ks: [String] = []
             for v in c.verbs { ks += verbKeys.of(v, in: m) }
             if let l = c.leader { ks.append(l.key(leader: verbKeys.leader)) }
             var seen = Set<String>()
@@ -253,14 +251,8 @@ public final class CommandRegistry {
     public var bound: [Bound] {
         commands.flatMap { c in
             c.modes.map { m in
-                let ks = c.keysByMode[m] ?? []
-                let local = c.leader.map { [$0.key(leader: verbKeys.leader)] } ?? []
-                var meaning: [String: String] = [:]
-                for k in ks {
-                    if local.contains(k) { meaning[k] = Bound.leaderMeaning }
-                    else if let v = c.verbs.first(where: { verbKeys.of($0, in: m).contains(k) }) { meaning[k] = v.rawValue }
-                }
-                return Bound(id: c.id, scope: c.scope.rawValue, keys: ks, modes: [m.rawValue], meaning: meaning)
+                Bound(id: c.id, scope: c.scope.rawValue, keys: c.keysByMode[m] ?? [], modes: [m.rawValue], verbs: c.verbs.map(\.rawValue),
+                      local: c.leader.map { [$0.key(leader: verbKeys.leader)] } ?? [])
             }
         }
     }
@@ -286,7 +278,7 @@ public final class CommandRegistry {
     ]
 }
 
-/// A key as it reads on screen (registry.ts glyph): ⇧s for S, ⇥ tab, ↵ ret, ⌃k for C-k.
+/// A key as it reads on screen (registry.ts glyph): ⇧s for S, ⇥ tab, ↵ ret, ⌃k for C-k, ⌃↵ for C-ret.
 public func glyph(_ k: String) -> String {
     let named = ["tab": "⇥", "ret": "↵", "down": "↓", "up": "↑", "left": "←", "right": "→"]
     return k.split(separator: " ").map { tok -> String in
@@ -294,8 +286,9 @@ public func glyph(_ k: String) -> String {
         if let n = named[t] { return n }
         var mod = ""
         var rest = Substring(t)
-        if t.count == 3, t.hasPrefix("C-") { mod = "⌃"; rest = rest.dropFirst(2) }
-        else if t.count == 3, t.hasPrefix("A-") { mod = "⌥"; rest = rest.dropFirst(2) }
+        if t.count >= 3, t.hasPrefix("C-") { mod = "⌃"; rest = rest.dropFirst(2) }
+        else if t.count >= 3, t.hasPrefix("A-") { mod = "⌥"; rest = rest.dropFirst(2) }
+        if let n = named[String(rest)] { return mod + n }
         guard rest.count == 1, let ch = rest.first else { return t }
         let s = String(ch)
         return mod + (s != s.lowercased() ? "⇧\(s.lowercased())" : s)
