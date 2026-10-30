@@ -2,6 +2,89 @@
 
 > **Decided 2026-10-29:** Phil adopted every recommendation below (Q1–Q5) and both stated assumptions (one app-wide jumplist; `M-h/j/k/l` pane alias). This file is binding for every area; change it only by coordination.
 
+## Keys by verb (decided 2026-10-29; binding)
+
+**Keys belong to verbs; pages implement verbs.** One table, `Sources/CanopyCore/Keys/Verbs.swift`, owns every key in every mode. A command registers "I am <verb> in scope <s>" (`Command(verb: .mark, …)`) or names a key under its page's leader (`Command(leader: LocalKey(",f"), …)`). There is no way to hand a command a raw key, so a key can't mean two things on two pages: the table gives each key one verb, and every page doing that verb does it to its own things. Which-key, the `?` sheet and the `:` line say the verb first ("m · mark"), the page's title after it.
+
+**Tiers, each with a fixed owner**
+
+1. **Nav** — `f`, `g …`, `space …`, h/l, J/K, C-o/C-i, `:`, `/`, `?`, esc, and the review moves (`]`/`[`, `}`/`{`, `n`/`N`). Owned by the nav core and the same on every page. A page may *implement* a nav verb on its own things (Review's `next-sibling`, the map's `next`), never rebind one.
+2. **Shared verbs** — bare letters (and C-k/C-j, the digits). A page implements the ones that fit; it never invents one. A new shared verb is a change to the table, by coordination.
+3. **The page leader `,`** — an action with no general verb is the page's own: `, <key>`. The leader's namespace is per page (a surface and all its scopes), so it can't collide with another page's or a future global. Pick its keys mnemonically; a chord is fine (`, b p`). `,` alone opens which-key titled "this page's keys".
+4. **Insert** — a fixed set: `esc` stops writing, `↵` / `⌃↵` sends or finishes what's typed, `⌥↵` is a newline (the field does it). Everything else goes to the field. No page adds to it; a page action wanted mid-typing is esc, then its key.
+
+**The verbs** (keys are the defaults; keys.toml moves them)
+
+| verb | keys | meaning |
+|---|---|---|
+| *nav* | | |
+| next / previous | `j` `↓` / `k` `↑` (typing in `:`, the menu, a picker: `↓` `C-n` `C-j` `⇥` / `↑` `C-p` `C-k`) | the next / previous row, line or item |
+| first / last | `g g` / `G` | the first / last row (jumps) |
+| half-down / half-up | `C-d` / `C-u` | half a page |
+| in / out | `l` `→` / `h` `←` | one level in / out on the zoom ladder (forests → forest → branch → file → line) |
+| cancel | `esc` | close the innermost transient thing — never changes page |
+| next-sibling / previous-sibling | `J` / `K` | the next / previous branch in merge order, staying on this kind of page (jumps) |
+| parent / child / root / tip | `g k` / `g j` / `g K` / `g J` | the branch's parent, child (labels at a fork), its stack's root, tip (jumps) |
+| next-file / previous-file | `]` / `[` | the next / previous file (jumps) |
+| next-hunk / previous-hunk | `}` / `{` | the next / previous hunk |
+| next-thread / previous-thread | `n` / `N` | the next / previous conversation, open ones first (jumps) |
+| face | `⇥` | the page's other face (story ⇄ branches, the next tab, web ⇄ jobs) |
+| labels | `g w` `f` | label everything on screen; type a label to go there |
+| find | `space f` | find something on this page by name |
+| search | `/` | search this page's text |
+| map | `space m` | the map around what you're on |
+| type | `space k` | the type under the cursor (hover) |
+| definition / type-definition / implementations / references | `g d` / `g y` / `g I` / `g r` | code navigation |
+| symbols | `space S` | list the file's symbols |
+| github | `g h` | open it on GitHub |
+| preview | `g p` | preview it on a side port |
+| go-forests / go-dashboard / go-todo / go-machine / go-wiki / go-tutor | `g f` / `g s` / `g o` / `g m` / `g i` / `g t` | go to that page |
+| alternate | `g a` | the alternate place (where the last jump left from) |
+| slot-1 … slot-9 | `g 1` … `g 9` | the Nth focus forest |
+| jump-back / jump-forward / save-jump | `C-o` / `C-i` / `C-s` | the jumplist |
+| branches / jumps / last-picker | `space b` / `space j` / `space '` | pickers: any branch, the jumplist, the last picker again |
+| pane-left / -down / -up / -right / pane-next | `C-w h/j/k/l` `A-h/j/k/l` / `C-w w` | focus a pane |
+| command / menu / keys / select | `:` / `space ?` / `?` / `v` | the command line, the menu, the key sheet, select mode |
+| leader | `,` | this page's own keys follow |
+| *shared* | | |
+| main | `↵` | the thing's main action |
+| write | `i` | start writing: the field for the thing under the cursor |
+| mark / unmark | `m` / `M` | mark it (viewed, done, answered) and go on / take the mark off |
+| put-away | `X` | put it away: archive, drop, delete, kill, forget, cut |
+| apply | `A` | apply the suggested fix |
+| copy | `y` | copy it |
+| push | `p` | send it out: push to origin, send the draft |
+| sync | `s` | sync it: fold or stash dirt, rebase onto its parent, shape the commits |
+| words | `e` | the words: what's written about it, in full |
+| editor | `o` | open it in Helix |
+| comment / reply | `c` / `r` | comment on it / reply to it |
+| extend | `x` | extend the selection a line (`x x c` comments on a range: three verbs, not a chord) |
+| undo | `u` | undo the last change |
+| move-up / move-down | `C-k` / `C-j` | move it up / down its hand-ordered list |
+| nth-1 … nth-9 | `1` … `9` | the Nth one shown: a tab, a choice |
+| *insert* | | |
+| send | `↵` `⌃↵` (normal mode: `⌃↵`) | send or finish what's typed |
+| newline | `⌥↵` | a new line in what's typed (the field's own; nothing may bind it) |
+
+**Each page's leader keys**
+
+| page | `,` keys |
+|---|---|
+| Forests (home) | `f` focus · `w` workbench · `i` the whole forest's diff · `l` launch · `b` / `B` hold / release · `r` only what's ready · `a` the archive |
+| a forest | `f` · `w` · `i` · `l` · `b` / `B` (as home) · `n` next ready branch · `e` every branch's words |
+| Review | `s` split ⇄ unified · `o` outdated threads · `b p` / `b m` / `b o` diff against parent / main / origin · `h` history · `g` gate output · `p` send every draft · `a` address a thread · `r` resolve · `n` the second reader's note · `d` save the comment as a draft · `S` insert a suggestion · in the address layer, `l` list the commits |
+| Tutor | `t` re-test · `q` wrap up · `s` stop the tutor's turn · `v` the session's evidence · `o` / `l` / `h` / `c` a credit's hit-miss / level / help / confidence |
+| Machine | `r` restart · `w` swap the port's build · `x` kill every server · `c` reap orphans · `m` run main · `u` the Docker stack |
+| Dashboard | `r` the range |
+| Tracker | `s` start the item |
+
+**keys.toml** overrides a verb by name (`mark = "v"`, `put-away = ["D"]`, `leader = ";"`) and every page doing it follows; the table's rules are re-checked after (a key on two verbs is flagged atop `?`). v2 keys commands by id in the same file; native reads those lines past with a warning (in `--dump` and dim atop `?`) naming the verb to set instead.
+
+**What the tests guard** (`ShellTests`, `KeysTests`): no page source names a raw key; every verb has a meaning and keys; the table holds after keys.toml; a page's leader keys don't repeat or swallow each other; nothing is bound twice in one place; insert keeps its fixed set; keys.toml moves a verb on every page.
+
+
+---
+
 # Keyboard navigation for canopy-native: research and proposed model
 
 2026-10-29. Scope: what makes keyboard-only, modal navigation feel good, with evidence, and the navigation model canopy-native should use. Grounded in v2's actual keymap (`viewer-solid/src/v2`), canopy-native's `PORTING.md` conventions, and v2's own usage telemetry.
@@ -180,6 +263,8 @@ Esc unwinds exactly one level: pending chord → layer (label/space/g/menu/picke
 
 ## 5. Default keymap (keep / change / add / drop)
 
+*Superseded where it differs by **Keys by verb** above (e.g. focus is `, f`, not `F`; `space` keys a page owned moved under `,`).*
+
 | key | command | status | why |
 |---|---|---|---|
 | `j` `k` `↓` `↑` | next / previous row (same-move family) | **keep** | 37% of all commands; home row |
@@ -240,7 +325,7 @@ Esc unwinds exactly one level: pending chord → layer (label/space/g/menu/picke
 
 ## 7. Implementation notes for canopy-native
 - Labels need a per-pane `targets()` on `SurfaceProvider` (rect + RowKey + primary). The label layer is a `KeyMode` layer (`.labels`) per PORTING §4, with a single renderer in the Shell.
-- Add the new ids to `Bindings.sameMove` (`find on page` = review.filter/forest.find/forests.find; `next branch`). `keysMeanOneThingEverywhere` keeps guarding.
+- ~~Add the new ids to `Bindings.sameMove`~~ — superseded: the verb table (Keys by verb) replaced the same-move groups.
 - Extend `CodeNav` (nav.ts port) into an app-wide `Jumplist` of `Place {surface, arg, cursorKey, tab, base, scroll}`. Record from the router and from the commands listed in §4.4 via a `recordsJump: true` flag on `Command`.
 - Frecency: reuse the router's `nav` telemetry events as the visit log, so it's seeded from day one.
 - Measure: telemetry already records `via`. The success metric is **the click share of cursor.set / review.cursor.set / history.select / review.file.go / tabs going from ~100% to ≈0**, plus fewer forest↔review round trips per reviewed branch.
