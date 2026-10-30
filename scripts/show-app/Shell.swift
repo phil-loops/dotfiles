@@ -649,6 +649,9 @@ enum ShelfRow {
     case header(ShelfState, Int)
     case entry(ShelfEntry)
     case fold(hidden: Int, expanded: Bool)
+    case dueHeader(Int)
+    case due(DueConcept)
+    case dueFold(hidden: Int, expanded: Bool)
 }
 
 /// Moves a document and its sidecars into `~/.dotfiles/show/archive/`; nothing is ever deleted. Returns where the document went.
@@ -711,6 +714,7 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
         tutor = workspace == .learn ? TutorController() : nil
         super.init(nibName: nil, bundle: nil)
         tutor?.onTitleChange = { [weak self] in self?.onTitleChange?() }
+        tutor?.onStartRetest = { [weak self] concept in self?.startTutor(.retest(concept: concept)) }
         back = prefs.stringArray(forKey: "workspace.\(workspace.rawValue).back") ?? []
     }
 
@@ -726,6 +730,8 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
         shelf.dataSource = self
         shelf.delegate = self
         shelf.onArchive = { [weak self] in self?.archiveSelected() }
+        shelf.target = self
+        shelf.doubleAction = #selector(doubleClickedShelf)
         let scroll = NSScrollView()
         scroll.documentView = shelf
         scroll.hasVerticalScroller = true
@@ -930,6 +936,9 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
                 fresh.append(.fold(hidden: group.count - Self.foldAfter, expanded: doneExpanded))
             }
         }
+        if workspace == .learn {
+            fresh.insert(contentsOf: dueShelfRows(), at: fresh.firstIndex { if case .header(let state, _) = $0 { return state != .waiting } else { return false } } ?? fresh.count)
+        }
         rows = fresh
         _ = view
         let origin = shelf.enclosingScrollView?.contentView.bounds.origin
@@ -959,22 +968,34 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
     func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
 
     func tableView(_ tableView: NSTableView, isGroupRow row: Int) -> Bool {
-        if case .header = rows[row] { return true }
-        return false
+        switch rows[row] {
+        case .header, .dueHeader: return true
+        default: return false
+        }
+    }
+
+    @objc private func doubleClickedShelf() {
+        guard shelf.clickedRow >= 0, shelf.clickedRow < rows.count, case .due(let concept) = rows[shelf.clickedRow] else { return }
+        activateDue(concept)
     }
 
     func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
         switch rows[row] {
-        case .header: return 28
-        case .entry: return 44
-        case .fold: return 26
+        case .header, .dueHeader: return 28
+        case .entry, .due: return 44
+        case .fold, .dueFold: return 26
         }
     }
 
     func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
         switch rows[row] {
-        case .header: return false
-        case .entry: return true
+        case .header, .dueHeader: return false
+        case .entry, .due: return true
+        case .dueFold:
+            guard NSApp.currentEvent?.type == .leftMouseDown else { return true }
+            LearnDue.expanded.toggle()
+            setEntries(entries)
+            return false
         case .fold:
             guard NSApp.currentEvent?.type == .leftMouseDown else { return true }
             doneExpanded.toggle()
@@ -983,11 +1004,21 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
         }
     }
 
-    /// ↵ on the shelf: unfolds or folds Done on the fold row (true), otherwise leaves the selected document open (false).
+    /// ↵ on the shelf: unfolds or folds Done or Due on a fold row, starts a re-test on a Due row (true), otherwise leaves the selected document open (false).
     func activateSelectedShelfRow() -> Bool {
-        guard shelf.selectedRow >= 0, shelf.selectedRow < rows.count, case .fold = rows[shelf.selectedRow] else { return false }
-        doneExpanded.toggle()
-        onLibraryChange?()
+        guard shelf.selectedRow >= 0, shelf.selectedRow < rows.count else { return false }
+        switch rows[shelf.selectedRow] {
+        case .fold:
+            doneExpanded.toggle()
+            onLibraryChange?()
+        case .dueFold:
+            LearnDue.expanded.toggle()
+            setEntries(entries)
+        case .due(let concept):
+            activateDue(concept)
+        default:
+            return false
+        }
         return true
     }
 
@@ -1005,6 +1036,7 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
     }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        if let view = dueShelfView(rows[row]) { return view }
         switch rows[row] {
         case .header(let state, let count):
             let label = NSTextField(labelWithString: "")
@@ -1016,6 +1048,8 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
             label.font = .systemFont(ofSize: 11.5, weight: .medium)
             label.textColor = .secondaryLabelColor
             return padded(label, leading: 30)
+        case .dueHeader, .due, .dueFold:
+            return nil
         case .entry(let entry):
             let mark = NSTextField(labelWithString: entry.state.mark)
             mark.font = .systemFont(ofSize: 11)

@@ -121,6 +121,18 @@ extension AppDelegate {
             shell.finder?.search(query)
             print("finder \"\(query)\": " + (shell.finder?.matches.map(\.title).joined(separator: " | ") ?? "-"))
         }
+        if let opening = environment["SHOW_SNAPSHOT_TUTOR_START"] {
+            workspaces[.learn]?.startTutor(opening.hasPrefix("re-test ") ? .retest(concept: String(opening.dropFirst(8))) : .topic(opening))
+            RunLoop.main.run(until: Date().addingTimeInterval(2))
+        }
+        if let text = environment["SHOW_SNAPSHOT_TUTOR_NEW"] {
+            askNewTutorSession()
+            (shell.overlay as? NewSessionOverlay)?.field.stringValue = text
+        }
+        if let station = environment["SHOW_SNAPSHOT_TUTOR_STATION"] {
+            tutor?.sidebar.activate(station: station)
+            RunLoop.main.run(until: Date().addingTimeInterval(2))
+        }
         let controller = workspaces[active]
         if let key = ProcessInfo.processInfo.environment["SHOW_SNAPSHOT_SECTION"] {
             controller?.currentDeck?.select(section: key)

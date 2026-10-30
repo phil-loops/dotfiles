@@ -365,6 +365,7 @@ final class TutorAgent {
                 guard let self else { return }
                 self.running = nil
                 self.preview = ""
+                LearnDue.refresh()
                 if status == 0, resultError == nil {
                     self.queue.removeFirst()
                 } else {
@@ -623,7 +624,9 @@ final class TutorController: NSObject, NSTextViewDelegate {
     var title = "Show"
     var subtitle = ""
     var onTitleChange: (() -> Void)?
-    let sidebarScroll = NSTextView.scrollableTextView()
+    let sidebar = TutorSidebar()
+    /// Starts a re-test session for a concept; the workspace that owns this controller opens it.
+    var onStartRetest: ((String) -> Void)?
     let scroll = NSScrollView()
     let document = FlippedView()
     let column = NSStackView()
@@ -636,19 +639,17 @@ final class TutorController: NSObject, NSTextViewDelegate {
     var agentRow: NSView?
     var agent: TutorAgent?
 
-    var sidebar: NSTextView { sidebarScroll.documentView as! NSTextView }
     var window: NSWindow? { viewController.view.window }
     var currentRungID: String? { session.flatMap { currentRung($0, answers)?.id } }
 
     override init() {
         super.init()
 
-        sidebar.isEditable = false
-        sidebar.drawsBackground = false
-        sidebar.textContainerInset = NSSize(width: 14, height: 48)
-        sidebarScroll.drawsBackground = false
+        KeyTable.register(learnKeys)
+        sidebar.onStation = { [weak self] station in self?.deliver("learner wants station \(station.name)") }
+        sidebar.onDue = { [weak self] due in self?.onStartRetest?(due.concept) }
         let sidebarVC = NSViewController()
-        sidebarVC.view = sidebarScroll
+        sidebarVC.view = sidebar.scroll
 
         scroll.hasVerticalScroller = true
         scroll.drawsBackground = true
@@ -739,7 +740,7 @@ final class TutorController: NSObject, NSTextViewDelegate {
         session = nil
         rebuild()
         column.addArrangedSubview(tutorText(renderer.tutorMarkdown(message), width: Self.column))
-        sidebar.textStorage?.setAttributedString(NSAttributedString(string: "Learn", attributes: [.font: NSFont.systemFont(ofSize: 17, weight: .bold), .foregroundColor: NSColor.labelColor]))
+        sidebar.show(nil)
         title = "Show"
         subtitle = ""
         onTitleChange?()
@@ -1123,34 +1124,7 @@ final class TutorController: NSObject, NSTextViewDelegate {
     }
 
     private func renderSidebar(_ session: TutorSession) {
-        let out = NSMutableAttributedString()
-        func line(_ text: String, _ font: NSFont, _ color: NSColor, before: CGFloat = 0, after: CGFloat = 4) {
-            let p = NSMutableParagraphStyle()
-            p.paragraphSpacingBefore = before
-            p.paragraphSpacing = after
-            p.headIndent = 16
-            out.append(NSAttributedString(string: text + "\n", attributes: [.font: font, .foregroundColor: color, .paragraphStyle: p]))
-        }
-        let caption = NSFont.systemFont(ofSize: 10.5, weight: .semibold)
-        line(session.title, .systemFont(ofSize: 17, weight: .bold), .labelColor, after: 14)
-        if let stations = session.stations, !stations.isEmpty {
-            line("STATIONS", caption, .secondaryLabelColor, before: 6, after: 6)
-            for station in stations {
-                let marker = station.state == "done" ? "✓" : station.state == "current" ? "●" : "○"
-                let color: NSColor = station.state == "current" ? .controlAccentColor : station.state == "done" ? .secondaryLabelColor : .labelColor
-                line("\(marker)  \(station.name)", .systemFont(ofSize: 13, weight: station.state == "current" ? .semibold : .regular), color)
-            }
-        }
-        if let due = session.due, !due.isEmpty {
-            line("DUE RE-TESTS", caption, .secondaryLabelColor, before: 16, after: 6)
-            for item in due {
-                line(item.concept, .systemFont(ofSize: 12.5, weight: .medium), .labelColor, after: item.why == nil ? 8 : 1)
-                if let why = item.why {
-                    line(why, .systemFont(ofSize: 11.5), .secondaryLabelColor, after: 8)
-                }
-            }
-        }
-        sidebar.textStorage?.setAttributedString(out)
+        sidebar.show(session)
     }
 
     private func scrollToFocusRung() {
