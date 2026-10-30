@@ -15,6 +15,13 @@ if let flag = arguments.firstIndex(of: "--tutor-check") {
     }
     exit(tutorCheck(arguments[flag + 1]))
 }
+if let flag = arguments.firstIndex(of: "--check-live") {
+    guard flag + 1 < arguments.count else {
+        FileHandle.standardError.write("usage: Show --check-live <deck.json>\n".data(using: .utf8)!)
+        exit(64)
+    }
+    exit(checkLive(arguments[flag + 1]))
+}
 if let flag = arguments.firstIndex(of: "--check-routing") {
     guard flag + 1 < arguments.count else {
         FileHandle.standardError.write("usage: Show --check-routing <file.json>\n".data(using: .utf8)!)

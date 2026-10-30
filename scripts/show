@@ -2,7 +2,7 @@
 # show [<file.json>…] — open files in the one Show window, each in its workspace (Forest ⌘1, Review ⌘2, Learn ⌘3, Runs ⌘4;
 # no args: the newest deck in ~/.dotfiles/show), rebuilding it when any show-app/*.swift changes. Re-showing an open file reloads it.
 # show --build — just (re)build. show --snapshot <file.json> <out.png> — render the window offscreen, no window shown.
-# show --check-routing <file.json> — print the workspace a file opens in (and a forest's merge order).
+# show --check-routing <file.json> — print the workspace a file opens in (and a forest's merge order). show --check-live <deck.json> — print a live deck's header, groups and compare diffs.
 # show --tutor [<session.json>] — open the Tutor space on a session (no file: the newest in ~/.dotfiles/show/tutor). show --tutor-check <session.json> — print what it would show.
 # Deck format: ~/.dotfiles/.claude/skills/show/SKILL.md. Source: show-app/*.swift (one file per area; main.swift holds the entry point). Sign-offs land in <deck>.signoff.json.
 set -euo pipefail
@@ -49,7 +49,7 @@ PLIST
 
 case "${1:-}" in
   -h|--help)
-    echo "usage: show [<file.json>…] | show --build | show --snapshot <file.json> <out.png> | show --check-routing <file.json> | show --tutor [<session.json>] | show --tutor-check <session.json> | show --tutor-ask <session.json> <message>" >&2
+    echo "usage: show [<file.json>…] | show --build | show --snapshot <file.json> <out.png> | show --check-routing <file.json> | show --check-live <deck.json> | show --tutor [<session.json>] | show --tutor-check <session.json> | show --tutor-ask <session.json> <message>" >&2
     exit 64
     ;;
   --build)
@@ -79,6 +79,11 @@ case "${1:-}" in
     build
     "$app/Contents/MacOS/Show" --check-routing "$2"
     ;;
+  --check-live)
+    [[ $# -eq 2 ]] || { echo "usage: show --check-live <deck.json>" >&2; exit 64; }
+    build
+    "$app/Contents/MacOS/Show" --check-live "$2"
+    ;;
   --tutor-ask)
     [[ $# -eq 3 ]] || { echo "usage: show --tutor-ask <session.json> <message>" >&2; exit 64; }
     build
@@ -105,7 +110,7 @@ d = json.load(open(sys.argv[1]))
 if d.get("mode", d.get("kind")) == "tutor":
     assert d["title"] and isinstance(d["rungs"], list)
 else:
-    assert d["title"] and d["sections"] and all(s.get("body") or s.get("url") for s in d["sections"])
+    assert d["title"] and d["sections"] and all(s.get("body") or s.get("url") or d.get("mode") == "live" for s in d["sections"])
 ' "$deck" \
         || { echo "show: $deck is not a deck (needs title + sections) or a tutor session (mode \"tutor\" + title + rungs)" >&2; exit 65; }
       decks+=("$deck")

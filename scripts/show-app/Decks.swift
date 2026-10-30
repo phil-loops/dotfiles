@@ -46,7 +46,7 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
     let note = NSTextField()
     let progress = NSTextField(labelWithString: "")
     let submit = NSButton(title: "Submit", target: nil, action: nil)
-    let statusLine = NSTextField(labelWithString: "")
+    let live = LivePanel()
     var actionBar: NSView!
     var actionDivider: NSView!
     var deckModified: Date?
@@ -58,6 +58,7 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
         store = SignOffStore(deckPath: path)
         renderer.baseDirectory = (path as NSString).deletingLastPathComponent
         super.init()
+        live.owner = self
         let sidebar = NSSplitViewItem(viewController: sidebarController())
         sidebar.minimumThickness = 220
         sidebar.maximumThickness = 360
@@ -147,6 +148,8 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
                     branchPlaces[branch.index] = (branch.number, branch.depth)
                 }
             }
+        } else if deck.isLive {
+            rows = liveRows(deck)
         } else {
             var lastGroup: String?
             for (i, section) in deck.sections.enumerated() {
@@ -264,17 +267,10 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
         actionBar = bar
         actionDivider = divider
 
-        statusLine.font = .systemFont(ofSize: 12, weight: .medium)
-        statusLine.textColor = .secondaryLabelColor
-        statusLine.lineBreakMode = .byTruncatingTail
-        let status = NSStackView(views: [statusLine])
-        status.edgeInsets = NSEdgeInsets(top: 14, left: 53, bottom: 0, right: 24)
-        status.isHidden = true
-
-        let stack = NSStackView(views: [status, page, divider, bar])
+        let stack = NSStackView(views: [live.header, page, divider, bar, live.bar])
         stack.orientation = .vertical
         stack.spacing = 0
-        for view in [status, page, divider, bar] {
+        for view in [live.header, page, divider, bar, live.bar] {
             view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
         let vc = NSViewController()
@@ -347,7 +343,6 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
 
     private func updateProgress() {
         actionBar.isHidden = deck.isLive
-        actionDivider.isHidden = deck.isLive
         progress.isHidden = deck.isLive
         updateStatusLine()
         if deck.isLive {
@@ -360,11 +355,9 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
         onTitleChange?()
     }
 
-    /// Refreshes the live status line, including how long ago the file changed; ticks once a second.
+    /// Refreshes the live header, including how long ago the file changed; ticks once a second.
     func updateStatusLine() {
-        let line = deck.isLive ? deck.status?.line(changed: deckModified) : nil
-        statusLine.superview?.isHidden = line == nil
-        statusLine.stringValue = line ?? ""
+        live.update(modified: deckModified)
     }
 
     func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
@@ -407,6 +400,7 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
             let number = place.map { NSAttributedString(string: "\($0.number)  ", attributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: 11.5, weight: .medium), .foregroundColor: NSColor.secondaryLabelColor]) } ?? NSAttributedString()
             title.attributedStringValue = number + sectionMark(section, selected: row == table.selectedRow)
                 + NSAttributedString(string: section.title, attributes: [.font: NSFont.systemFont(ofSize: 13, weight: .medium), .foregroundColor: NSColor.labelColor])
+                + (deck.isLive ? liveFlag(section) : NSAttributedString())
             title.maximumNumberOfLines = 1
             title.cell?.truncatesLastVisibleLine = true
             title.lineBreakMode = .byTruncatingTail
@@ -439,7 +433,7 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
 
     /// The list's mark for a section: ● signed, ◆ has a note, ◐ the open section, ○ not yet. Live decks carry none.
     private func sectionMark(_ section: Section, selected: Bool) -> NSAttributedString {
-        guard !deck.isLive else { return NSAttributedString() }
+        guard !deck.isLive else { return liveMark(section, current: deck.status?.current) }
         let entry = store.entries[section.key]
         let (mark, color): (String, NSColor)
         if entry?.signed == true {
@@ -476,6 +470,7 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
         let entry = store.entries[section.key]
         signed.state = entry?.signed == true ? .on : .off
         note.stringValue = entry?.note ?? ""
+        live.update(modified: deckModified)
     }
 }
 

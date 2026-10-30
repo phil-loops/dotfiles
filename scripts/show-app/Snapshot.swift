@@ -47,9 +47,12 @@ func tutorCheck(_ raw: String) -> Int32 {
     }
 }
 
-/// Writes a view as drawn into a PNG, in the light appearance.
+/// The appearance snapshots draw in: light, or dark with `SHOW_SNAPSHOT_APPEARANCE=dark`.
+let snapshotAppearance = NSAppearance(named: ProcessInfo.processInfo.environment["SHOW_SNAPSHOT_APPEARANCE"] == "dark" ? .darkAqua : .aqua)
+
+/// Writes a view as drawn into a PNG, in the snapshot appearance.
 func writePNG(_ view: NSView, to file: String) {
-    NSAppearance(named: .aqua)?.performAsCurrentDrawingAppearance {
+    snapshotAppearance?.performAsCurrentDrawingAppearance {
         guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
         view.cacheDisplay(in: view.bounds, to: rep)
         try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: file))
@@ -58,7 +61,7 @@ func writePNG(_ view: NSView, to file: String) {
 
 /// The whole window as drawn, with each visible list painted over its slot: an ancestor's capture leaves table rows out.
 func writeComposite(_ root: NSView, to file: String) {
-    NSAppearance(named: .aqua)?.performAsCurrentDrawingAppearance {
+    snapshotAppearance?.performAsCurrentDrawingAppearance {
         guard let rep = root.bitmapImageRepForCachingDisplay(in: root.bounds) else { return }
         root.cacheDisplay(in: root.bounds, to: rep)
         func tables(in view: NSView) -> [NSTableView] {
@@ -96,7 +99,7 @@ extension AppDelegate {
         if let named = ProcessInfo.processInfo.environment["SHOW_SNAPSHOT_WORKSPACE"], let workspace = Workspace(rawValue: named) {
             switchTo(workspace)
         }
-        window.appearance = NSAppearance(named: .aqua)
+        window.appearance = snapshotAppearance
         let environment = ProcessInfo.processInfo.environment
         if environment["SHOW_SNAPSHOT_BACK"] != nil {
             workspaces[active]?.goBack()
@@ -115,6 +118,9 @@ extension AppDelegate {
             controller?.currentDeck?.select(section: key)
         }
         window.layoutIfNeeded()
+        if let keys = environment["SHOW_SNAPSHOT_KEYS"] {
+            controller?.currentDeck?.live.typeSnapshotKeys(keys)
+        }
         shell.view.layoutSubtreeIfNeeded()
         controller?.currentDeck?.prepareSnapshot()
         shell.view.layoutSubtreeIfNeeded()

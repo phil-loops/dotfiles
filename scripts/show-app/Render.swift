@@ -6,15 +6,18 @@ final class Renderer {
     /// Where relative image paths resolve, and how wide an image may draw.
     var baseDirectory = decksDirectory
     var columnWidth: CGFloat = 640
+    /// Live's **d**: a compare table shows only the rows whose models disagree.
+    var onlyDifferingRows = false
 
     func render(_ section: Section) -> NSAttributedString {
         let out = NSMutableAttributedString()
-        out.append(line(section.group, font: .systemFont(ofSize: 12, weight: .semibold), color: .secondaryLabelColor, after: 4))
+        out.append(line(eyebrow(section), font: .systemFont(ofSize: 12, weight: .semibold), color: .secondaryLabelColor, after: 4))
         out.append(line(section.title, font: .systemFont(ofSize: 26, weight: .bold), color: .labelColor, after: section.tag == nil ? 14 : 4))
         if let tag = section.tag {
             out.append(line(tag, font: mono, color: .systemBlue, after: 14))
         }
         out.append(markdown(section.body ?? ""))
+        out.append(liveData(section))
         return out
     }
 
@@ -161,9 +164,13 @@ final class Renderer {
 
     /// A pipe table as a real text table: hairline cells sized to their content, the first row as the header.
     private func table(_ rows: [String]) -> NSAttributedString {
-        let cells = rows
+        grid(rows
             .filter { !$0.replacingOccurrences(of: #"[|\-: ]"#, with: "", options: .regularExpression).isEmpty }
-            .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: "|")).components(separatedBy: "|").map { $0.trimmingCharacters(in: .whitespaces) } }
+            .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: "|")).components(separatedBy: "|").map { $0.trimmingCharacters(in: .whitespaces) } })
+    }
+
+    /// Rows of cells as a real text table, the first row as the header; `style` colors a cell's text and fills its background.
+    func grid(_ cells: [[String]], style: (_ row: Int, _ column: Int) -> (text: NSColor, fill: NSColor?) = { _, _ in (.labelColor, nil) }) -> NSAttributedString {
         let columns = cells.map(\.count).max() ?? 0
         let header = NSFont.systemFont(ofSize: base.pointSize, weight: .semibold)
         var widths = (0..<columns).map { c in
@@ -202,11 +209,13 @@ final class Renderer {
                 cell.setWidth(6, type: .absoluteValueType, for: .padding, edge: .maxY)
                 cell.setWidth(10, type: .absoluteValueType, for: .padding, edge: .minX)
                 cell.setWidth(10, type: .absoluteValueType, for: .padding, edge: .maxX)
+                let look = style(r, c)
+                cell.backgroundColor = look.fill
                 let p = NSMutableParagraphStyle()
                 p.textBlocks = [cell]
                 p.lineSpacing = 2
                 let font = r == 0 ? header : base
-                let text = inline(c < row.count ? row[c] : "", font: font, color: .labelColor)
+                let text = inline(c < row.count ? row[c] : "", font: font, color: look.text)
                 text.append(NSAttributedString(string: "\n", attributes: [.font: font]))
                 text.addAttribute(.paragraphStyle, value: p, range: NSRange(location: 0, length: text.length))
                 out.append(text)
