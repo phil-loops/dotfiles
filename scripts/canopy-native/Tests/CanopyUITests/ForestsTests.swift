@@ -214,7 +214,7 @@ private func world(_ route: Route = .forests) -> AppModel {
         a.forestModel.syncClosings()
         // `done` is closed (every PR landed), so it's shelved into the archive fold
         #expect(a.rows == ["p:r:tree", "p:r:solo", "p:r:bench"])
-        a.keys.handle("space"); a.keys.handle("a")
+        a.keys.handle(","); a.keys.handle("a")
         #expect(a.rows == ["p:r:tree", "p:r:solo", "p:r:bench", "p:r:done", "p:r:old"])
         #expect(ForestNav.primary(for: "p:r:old", a)?.id == "project.restore")
         #expect(ForestNav.primary(for: "p:r:done", a)?.id == "project.archive")
@@ -243,7 +243,7 @@ private func world(_ route: Route = .forests) -> AppModel {
 
     @Test func theReadyFilterShowsOnlyWhatsReady() {
         let a = world()
-        a.keys.handle("space"); a.keys.handle("r")
+        a.keys.handle(","); a.keys.handle("r")
         // a: pushed, no PR → ready; b: green on a pushed parent → ready; s: green → ready
         #expect(a.rows == ["p:r:tree", "b:r:b", "p:r:solo", "b:r:s"])
     }
@@ -286,7 +286,7 @@ private func world(_ route: Route = .forests) -> AppModel {
         #expect(w.inverse?([:])?.id == "project.workbench")
         let f = try a.registry.command("project.focus")!.write!("r:bench", nil)!
         #expect(f.ops.first?.fields["rank"] == 3)
-        #expect(a.registry.command("project.focus")!.keys == ["F"], "f belongs to the label layer")
+        #expect(a.registry.command("project.focus")!.keys == [", f"], "focus is the page's own: under the leader")
     }
 
     @Test func cjAndCkReorderTheFocusLane() throws {
@@ -310,7 +310,7 @@ private func world(_ route: Route = .forests) -> AppModel {
 
     @Test func launchOpensTheSpineAtTheFirstUnopenedBranch() {
         let a = world()
-        a.keys.handle("L")
+        a.keys.handle(","); a.keys.handle("l")
         #expect(a.forestModel.launching == "r:tree" && a.selected == "b:r:b")
         a.keys.handle("esc")
         #expect(a.forestModel.launching == nil)

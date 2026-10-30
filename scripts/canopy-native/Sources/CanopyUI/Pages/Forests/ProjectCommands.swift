@@ -7,8 +7,8 @@ import Foundation
 @MainActor
 enum ProjectCommands {
     static let label: [ProjectState: String] = [.focus: "focus", .workbench: "the workbench", .archive: "the archive"]
-    /// `f` is the label layer's (NAV.md Q1), so focus moved to `F`.
-    static let key: [ProjectState: String] = [.focus: "F", .workbench: "w", .archive: "X"]
+    /// Archive is putting it away; focus and the workbench are this page's own (`, f` / `, w`).
+    static let key: [ProjectState: (verb: Verb?, leader: LocalKey?)] = [.focus: (nil, LocalKey(",f")), .workbench: (nil, LocalKey(",w")), .archive: (.putAway, nil)]
     static let v1Key: [ProjectState: String] = [.focus: "f", .workbench: "w", .archive: "x"]
 
     static func install(_ app: AppModel) {
@@ -37,7 +37,7 @@ enum ProjectCommands {
         for state in [ProjectState.focus, .workbench, .archive] {
             r.register(Command(
                 id: "project.\(state.rawValue)", title: "Move to \(label[state]!)", scope: .project, budget: .configWrite,
-                keys: state == .focus ? NavKeys.keys("project.focus") : [key[state]!], label: state == .workbench ? "bench" : state.rawValue, v1: ["key:\(v1Key[state]!)"],
+                verb: key[state]!.verb, leader: key[state]!.leader, label: state == .workbench ? "bench" : state.rawValue, v1: ["key:\(v1Key[state]!)"],
                 available: { id in exists(id) && s.view(Project.self, id!)!.state != state },
                 write: moveTo(state)))
         }
@@ -56,7 +56,7 @@ enum ProjectCommands {
                 Task { await m.checkIntegration(id, again: true) }
             }))
         r.register(Command(
-            id: "forest.integration", title: "Read the whole forest's diff against main", scope: .project, keys: ["space i"], label: "whole diff",
+            id: "forest.integration", title: "Read the whole forest's diff against main", scope: .project, leader: LocalKey(",i"), label: "whole diff",
             available: { m.integratable($0) },
             local: { [unowned app] id, _ in
                 guard let p = id.flatMap({ s.view(Project.self, $0) }) else { return }
@@ -90,11 +90,11 @@ enum ProjectCommands {
         }
 
         r.register(Command(
-            id: "focus.up", title: "Move up the focus lane", scope: .project, budget: .configWrite, keys: ["C-k"],
+            id: "focus.up", title: "Move up the focus lane", scope: .project, budget: .configWrite, verb: .moveUp,
             label: "move", pair: "focus.down", available: inFocus,
             write: { id, _ in reorder(id, (focusIDs().firstIndex(of: id) ?? 0) - 1) }))
         r.register(Command(
-            id: "focus.down", title: "Move down the focus lane", scope: .project, budget: .configWrite, keys: ["C-j"],
+            id: "focus.down", title: "Move down the focus lane", scope: .project, budget: .configWrite, verb: .moveDown,
             label: "move", available: inFocus,
             write: { id, _ in reorder(id, (focusIDs().firstIndex(of: id) ?? 0) + 1) }))
         // v2's drop target and the reorder's undo: reached only with a place to put it
@@ -108,7 +108,7 @@ enum ProjectCommands {
         func hasBranches(_ id: String?) -> Bool { !(m.forest(id)?.branches.isEmpty ?? true) }
 
         r.register(Command(
-            id: "forest.expand", title: "Show the forest's branches (open again: its page)", scope: .project, keys: ["l", "right"], label: "open",
+            id: "forest.expand", title: "Show the forest's branches (open again: its page)", scope: .project, verb: .into, label: "open",
             available: { [unowned app] id in exists(id) && app.router.surface.id == "forests" },
             local: { [unowned app] id, _ in
                 guard let id else { return }
@@ -117,7 +117,7 @@ enum ProjectCommands {
                 else { app.runner.dispatch("forest.page", via: .key, target: id) }
             }))
         r.register(Command(
-            id: "forest.collapse", title: "Hide the forest's branches", scope: .project, keys: ["h", "left"], label: "fold",
+            id: "forest.collapse", title: "Hide the forest's branches", scope: .project, verb: .out, label: "fold",
             available: { id in id.map { m.expanded.contains($0) } == true && !m.readyOnly },
             local: { [unowned app] id, _ in
                 guard let id else { return }
@@ -139,7 +139,7 @@ enum ProjectCommands {
 
         // ↵: the selected row's one primary action
         r.register(Command(
-            id: "row.primary", title: "Do the row's thing", scope: .row, keys: ["ret"], label: "go", quiet: true,
+            id: "row.primary", title: "Do the row's thing", scope: .row, verb: .main, label: "go", quiet: true,
             route: { [unowned app] row in ForestNav.primary(for: row ?? app.selected, app) }))
 
         r.register(Command(
@@ -150,17 +150,17 @@ enum ProjectCommands {
                 app.setCursor(nil)
             }))
         r.register(Command(
-            id: "forest.words", title: "Show the branch's commits in full", scope: .branch, keys: ["e"], label: "words",
+            id: "forest.words", title: "Show the branch's commits in full", scope: .branch, verb: .words, label: "words",
             available: { [unowned app] id in app.router.surface.id == "forest" && id != nil },
             local: { id, _ in if let id { m.wordsOpen.formSymmetricDifference([id]) } }))
         r.register(Command(
-            id: "forest.face", title: "Switch between the story and the branches", scope: .forest, keys: ["tab"], label: "story",
+            id: "forest.face", title: "Switch between the story and the branches", scope: .forest, verb: .face, label: "story",
             local: { [unowned app] _, _ in
                 m.face = m.face == .story ? .branches : .story
                 app.setCursor(nil)
             }))
         r.register(Command(
-            id: "story.why", title: "Show why a landed chapter happened", scope: .forest, keys: ["e"], label: "why",
+            id: "story.why", title: "Show why a landed chapter happened", scope: .forest, verb: .words, label: "why",
             available: { [unowned app] _ in m.face == .story && app.selected?.hasPrefix("d:") == true },
             local: { [unowned app] _, arg in
                 guard let k = (arg as? String) ?? app.selected else { return }
@@ -170,7 +170,7 @@ enum ProjectCommands {
         /// The forest page's branches that wait on Phil (push, open the PR, merge), in merge order.
         func readyHere() -> [BranchView] { m.forest(m.pageProject)?.ready ?? [] }
         r.register(Command(
-            id: "forest.next.ready", title: "Go to the next branch ready for you", scope: .forest, keys: ["space n"], label: "next ready",
+            id: "forest.next.ready", title: "Go to the next branch ready for you", scope: .forest, leader: LocalKey(",n"), label: "next ready",
             recordsJump: true,
             available: { _ in m.face == .branches && !readyHere().isEmpty },
             local: { [unowned app] _, _ in
@@ -179,14 +179,14 @@ enum ProjectCommands {
                 app.setCursor(RowKey.branch(rs[(at + 1) % rs.count].b.id))
             }))
         r.register(Command(
-            id: "forest.words.all", title: "Show or hide every branch's commits in full", scope: .forest, keys: ["space e"], label: "all words",
+            id: "forest.words.all", title: "Show or hide every branch's commits in full", scope: .forest, leader: LocalKey(",e"), label: "all words",
             available: { _ in m.face == .branches && m.pageProject != nil },
             local: { _, _ in
                 let ids = (m.forest(m.pageProject)?.branches ?? []).map(\.b.id)
                 if ids.allSatisfy(m.wordsOpen.contains) { m.wordsOpen.subtract(ids) } else { m.wordsOpen.formUnion(ids) }
             }))
         r.register(Command(
-            id: "forest.leave", title: "Go back to Forests", scope: .forest, keys: ["h", "left"], label: "back",
+            id: "forest.leave", title: "Go back to Forests", scope: .forest, verb: .out, label: "back",
             local: { [unowned app] _, _ in
                 // `h` is deterministic (NAV.md §4.1): Forests, with the cursor on this forest
                 let pid = m.pageProject
@@ -196,17 +196,17 @@ enum ProjectCommands {
             }))
 
         r.register(Command(
-            id: "ready.toggle", title: "Show only what's ready for you", scope: .forests, keys: ["space r"], label: "ready", v1: ["nav:outbox"],
+            id: "ready.toggle", title: "Show only what's ready for you", scope: .forests, leader: LocalKey(",r"), label: "ready", v1: ["nav:outbox"],
             local: { _, _ in
                 m.armed = nil
                 m.readyOnly.toggle()
             }))
         r.register(Command(
-            id: "archive.toggle", title: "Show or hide the archive", scope: .forests, keys: ["space a"], label: "archive",
+            id: "archive.toggle", title: "Show or hide the archive", scope: .forests, leader: LocalKey(",a"), label: "archive",
             available: { _ in !m.readyOnly },
             local: { _, _ in m.showArchive.toggle() }))
         r.register(Command(
-            id: "forest.launch", title: "Launch the whole forest", scope: .project, keys: ["L", "space l"], label: "launch", v1: ["launch"],
+            id: "forest.launch", title: "Launch the whole forest", scope: .project, leader: LocalKey(",l"), label: "launch", v1: ["launch"],
             available: { id in !(m.forest(id)?.unopened.isEmpty ?? true) },
             local: { [unowned app] id, _ in
                 guard let id, let first = m.forest(id)?.unopened.first else { return }

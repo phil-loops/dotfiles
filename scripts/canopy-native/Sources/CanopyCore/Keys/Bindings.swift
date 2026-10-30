@@ -42,7 +42,7 @@ public enum Bindings {
         "references": ["review.references", "tutor.references"],
         "symbols": ["review.symbols", "tutor.symbols"],
         "write": ["review.note.insert", "tutor.write", "branch.describe.edit", "machine.port", "review.compose.edit", "words.edit"],
-        "send": ["branch.describe.save", "review.filter.accept", "tutor.submit"],
+        "send": ["branch.describe.save", "review.filter.accept", "tutor.submit", "review.compose.send", "words.submit"],
         // NAV.md §5
         "find": ["review.filter", "forest.find", "forests.find"],
         "search": ["page.search", "review.search"],
