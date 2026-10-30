@@ -27,7 +27,7 @@
       "id": "k-3",
       "group": "Kernels",
       "title": "3 · Detectors are provisional, people are binding",
-      "body": "```\nlift      needs  person ∧ verdict ∈ { wrong, fixed } ∧ note\nallowance needs  person ∧ until\n```\n\n**Breaks when** a reviewer re-enables with no record of whether the detector misfired. Without the verdict we can't measure a detector's false-positive rate or tune it.",
+      "body": "**Lift** means \"this reason no longer blocks the domain\". It's today's Re-enable button, but aimed at one reason instead of the whole domain. Nothing is deleted. The restriction row gets three fields filled once: who lifted it, the verdict, and a note.\n\n```\nlift      needs  person ∧ verdict ∈ { wrong, fixed } ∧ note\nallowance needs  person ∧ until\n```\n\n**Breaks when** a reviewer re-enables with no record of whether the detector misfired. Without the verdict we can't measure a detector's false-positive rate or tune it.",
       "tag": "signed off as rule-3"
     },
     {
@@ -75,7 +75,7 @@
       "id": "p-improve",
       "group": "Path",
       "title": "Improve what we have",
-      "body": "Each step is its own PR off main, and none needs new tables.\n\n1. **Chart the account limit notices**: built, 5 PRs gates-green. *reviewer signal*\n2. **Approving a flagged email re-enables only when nothing else holds the domain**: next; the live bug. *kernel 2*\n3. **The phishing check keeps its reason**: next. isSafe returns a tag that today's code throws away. *kernel 1*\n4. **Workflow preflight disables the failing email's domain**: candidate, needs a check. Today it disables the team's first sending domain. *kernel 2*\n5. **Collapse notice runs in the team feed**: candidate. It's the same deluge, on the team page. *reviewer signal*"
+      "body": "Each step is its own PR off main, and none needs new tables.\n\n1. **Chart the account limit notices**: built, 5 PRs gates-green. *reviewer signal*\n2. **Approving a flagged email re-enables only when nothing else holds the domain**: next; the live bug. *kernel 2*\n   - Approve returns what's still blocking, and the toast says \"Approved. mail.acme stays disabled: complaint rate hit Error Oct 28 15:52.\"\n   - The review page lists \"Still keeping this domain disabled\", computed from signals we already store: unreviewed flagged emails, health readings at Error since the disable, and team flags.\n   - On main today a disable doesn't record its cause (DisableDomainEvent only has `decision`), so this list is inferred. That gap is what the Restriction table closes.\n3. **The phishing check keeps its reason**: next. isSafe returns a tag that today's code throws away. *kernel 1*\n4. **Workflow preflight disables the failing email's domain**: candidate, needs a check. Today it disables the team's first sending domain. *kernel 2*\n5. **Collapse notice runs in the team feed**: candidate. It's the same deluge, on the team page. *reviewer signal*"
     },
     {
       "id": "p-new",
