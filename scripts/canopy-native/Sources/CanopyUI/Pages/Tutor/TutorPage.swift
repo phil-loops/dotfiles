@@ -900,37 +900,12 @@ struct PinnedCode: View {
             }
             .background(theme.diffBg)
             .tutorPane(TutorPane.code)
-            .overlay(alignment: .bottom) { TypesPop() }
+            .overlay(alignment: .bottom) { TypesPopView() }
         }
     }
 
     static func short(_ ref: String) -> String {
         ref.range(of: "^[0-9a-f]{40}$", options: .regularExpression) != nil ? String(ref.prefix(10)) : ref
-    }
-}
-
-/// The space k popover: the type in markdown, or a line saying what tsgo is doing (or why not).
-struct TypesPop: View {
-    @Environment(AppModel.self) private var app
-    @Environment(\.theme) private var theme
-
-    var body: some View {
-        let t = TutorArea.state(app)
-        if let pop = t.pop {
-            Group {
-                switch pop {
-                case .wait(let s): Text(s).foregroundStyle(theme.inkDim)
-                case .note(let s): Text(s).foregroundStyle(theme.inkDim)
-                case .hover(let md): TutorProse(text: md, size: 12.5)
-                }
-            }
-            .font(Theme.mono(12))
-            .padding(10)
-            .frame(maxWidth: 560, alignment: .leading)
-            .background(theme.vellumRaise)
-            .overlay(Rectangle().stroke(theme.rule))
-            .padding(12)
-        }
     }
 }
 

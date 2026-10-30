@@ -56,12 +56,12 @@ enum TutorCommands {
         r.register(Command(
             id: "tutor.back", title: "Back out", scope: .tutor, keys: ["esc"], label: "back", v1: ["click:close (esc)"], quiet: true,
             local: { [weak t, weak app] _, _ in
-                guard let t else { return }
-                if t.pop != nil { TutorLookup.dismiss(t) }
+                guard let t, let app else { return }
+                if CodeLookup.of(app).pop != nil { CodeLookup.of(app).dismiss() }
                 else if t.armed != nil { t.armed = nil }
                 else if t.drawer != nil { t.closeDrawer() }
                 else if t.evidenceOpen { t.evidenceOpen = false }
-                else if let c = app?.closers.first(where: { $0.isOpen() }) { c.close() }
+                else if let c = app.closers.first(where: { $0.isOpen() }) { c.close() }
                 else { throw Refusal("nothing to close") }
             }))
         r.register(Command(
@@ -351,19 +351,20 @@ enum TutorCommands {
 
         // ── types in the code pane: the pinned file is one commit (its ref, else the checkout's HEAD) ──
 
-        let source: () -> CodeSource? = { [weak t] in
+        let source: () -> CodeLookup.Where? = { [weak t] in
             guard let t, let p = t.pin, !p.path.hasPrefix("/"), let c = t.code, c.err == nil else { return nil }
-            return CodeSource(repo: "", sha: (p.ref ?? "").isEmpty ? "HEAD" : p.ref!)
+            return .commit(repo: "", sha: (p.ref ?? "").isEmpty ? "HEAD" : p.ref!)
         }
-        let position: () -> CodePos? = { [weak t, weak app] in
+        let position: () -> CodeLookup.Position? = { [weak t, weak app] in
             guard let t, let app, let p = t.pin, let text = t.code?.text, let line = TutorRows.codeCursor(app, t) else { return nil }
             let lines = TutorRows.lines(text)
-            guard lines.indices.contains(line - 1), let hit = TutorLookup.firstName(lines[line - 1]) else { return nil }
-            return CodePos(path: p.path, line: line, character: hit.character, member: hit.member)
+            guard lines.indices.contains(line - 1) else { return nil }
+            return CodeLookup.position(path: p.path, line: line, text: lines[line - 1])
         }
+        let look = CodeLookup.of(app)
         let typed: (String?) -> Bool = { _ in source() != nil }
         r.register(Command(id: "tutor.types", title: "Show the type on the code pane's cursor line (hover)", scope: .tutor, keys: ["space k"], label: "type",
-                           available: typed, local: { [weak t] _, _ in if let t, let s = source() { TutorLookup.hover(t, s, position()) } }))
+                           available: typed, local: { _, _ in if let s = source() { look.hover(position(), s) } }))
         let gotos: [(String, LSPGoto, String, String, String)] = [
             ("tutor.definition", .definition, "g d", "def", "Go to the definition — the code pane follows it"),
             ("tutor.type-definition", .typeDefinition, "g y", "type def", "Go to the definition of its type"),
@@ -372,9 +373,9 @@ enum TutorCommands {
         ]
         for (id, kind, key, label, title) in gotos {
             r.register(Command(id: id, title: title, scope: .tutor, keys: [key], label: label, available: typed,
-                               local: { [weak t] _, _ in if let t, let s = source() { TutorLookup.goto(t, kind, s, position()) } }))
+                               local: { _, _ in if let s = source() { look.goto(kind, position(), s) } }))
         }
         r.register(Command(id: "tutor.symbols", title: "List the pinned file's symbols", scope: .tutor, keys: ["space S"], label: "symbols",
-                           available: typed, local: { [weak t] _, _ in if let t, let s = source(), let p = t.pin { TutorLookup.symbols(t, s, path: p.path) } }))
+                           available: typed, local: { [weak t] _, _ in if let t, let s = source(), let p = t.pin { look.symbols(path: p.path, s) } }))
     }
 }

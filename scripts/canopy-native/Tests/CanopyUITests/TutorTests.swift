@@ -75,11 +75,11 @@ let learningFixture = #"""
     func app(_ route: Route = .tutor(session: nil)) -> (AppModel, TutorState) {
         var c = AppConfig()
         c.route = route
-        let a = AppModel(config: c, port: 1, telemetry: false)
+        let a = AppModel(config: c, port: 1, telemetry: false, protocolClasses: [TutorStub.self])
         let t = TutorArea.state(a)
         t.sessionsFile = nil
         t.sessions = []
-        t.transport = Transport(base: URL(string: "http://stub.test")!, protocolClasses: [TutorStub.self])
+        t.transport = a.transport
         t.retryDelay = .milliseconds(1)
         t.maxTries = 2
         t.learn = try! JSONDecoder().decode(LearnState.self, from: Data(learningFixture.utf8))
@@ -208,9 +208,9 @@ let learningFixture = #"""
         a.focus(pane: "code")
         a.setCursor("L:2")
         #expect(TutorRows.codeCursor(a, t) == 2)
-        #expect(TutorLookup.firstName("export const lock = Locks.take(1)")! == (13, nil))
-        #expect(TutorLookup.firstName("x = Locks.take(1)")!.character == 0)
-        #expect(TutorLookup.firstName("  Locks.take(1)")! == (2, 8))
+        #expect(CodeLookup.position(path: "a.ts", line: 1, text: "export const lock = Locks.take(1)").map { [$0.character, $0.member ?? -1] } == [13, -1])
+        #expect(CodeLookup.position(path: "a.ts", line: 1, text: "x = Locks.take(1)")?.character == 0)
+        #expect(CodeLookup.position(path: "a.ts", line: 1, text: "  Locks.take(1)").map { [$0.character, $0.member ?? -1] } == [2, 8])
 
         // ret on an option puts it in the box and starts writing
         a.focus(pane: "turn")
@@ -424,12 +424,12 @@ let learningFixture = #"""
         await settle { t.code != nil }
         #expect(a.registry.command("tutor.types")?.available?(nil) == true)
         a.keys.handle("space"); a.keys.handle("k")
-        await settle { if case .hover = t.pop { return true }; return false }
-        #expect(t.pop == .hover("```ts\nconst one: Lock\n```"))
+        await settle { if case .hover = CodeLookup.of(a).pop { return true }; return false }
+        #expect(CodeLookup.of(a).pop == .hover("```ts\nconst one: Lock\n```"))
         let hover = TutorStub.sent("/lsp/hover").first??.object ?? [:]
         #expect(hover["sha"] == "abc" && hover["path"] == "a.ts" && hover["line"] == 1 && hover["character"] == 6 && hover["side"] == "new")
         a.keys.handle("esc")
-        #expect(t.pop == nil)
+        #expect(CodeLookup.of(a).pop == nil)
         a.keys.handle("g"); a.keys.handle("d")
         await settle { a.nav.picker != nil }
         #expect(a.nav.picker?.title == "definitions · 2")
