@@ -20,6 +20,8 @@ enum KeySheet {
     struct Model: Equatable {
         var here: String
         var problems: [String]
+        /// keys.toml lines read past (v2's command ids)
+        var warnings: [String]
         var now: [Group]
         /// commands whose keys a component handles itself (shown, never bound)
         var hints: [Hint]
@@ -54,7 +56,8 @@ enum KeySheet {
         let liveScopes = app.liveScopes()
         let live = liveScopes.map(\.rawValue)
         let cmds = app.registry.commands.filter { !$0.keys.isEmpty }.map {
-            SheetCmd(id: $0.id, title: $0.title, scope: $0.scope.rawValue, keys: $0.keys, available: $0.available?(app.target(for: $0.scope)) ?? true)
+            SheetCmd(id: $0.id, title: $0.title, scope: $0.scope.rawValue, keys: $0.keys, available: $0.available?(app.target(for: $0.scope)) ?? true,
+                     verb: $0.verbs.first?.name)
         }
         let sheet = sheetNow(surface: app.router.surface.id, live: live, cmds: cmds,
                              surfaceScopes: app.registry.surfaceScopes.mapValues { $0.map(\.rawValue) })
@@ -66,7 +69,7 @@ enum KeySheet {
         let hints = app.registry.commands.filter { !$0.hint.isEmpty && liveScopes.contains($0.scope) }.map {
             Hint(title: $0.title, keys: $0.hint.joined(separator: " · "))
         }
-        return Model(here: labelOf(liveScopes.first ?? .global, app), problems: app.registry.keyProblems, now: groups, hints: hints,
+        return Model(here: labelOf(liveScopes.first ?? .global, app), problems: app.registry.keyProblems, warnings: app.registry.keyWarnings, now: groups, hints: hints,
                      everywhere: sheet.everywhere, notNow: sheet.notNow, customized: Set(app.registry.commands.filter { $0.verbs.contains(where: app.registry.customized.contains) }.map(\.id)))
     }
 }
@@ -128,9 +131,10 @@ struct KeySheetView: View {
                                 Text("· \(m.here)").foregroundStyle(theme.inkFaint)
                             }
                             .font(Theme.display(20)).padding(.bottom, 12)
-                            if !m.problems.isEmpty {
+                            if !m.problems.isEmpty || !m.warnings.isEmpty {
                                 VStack(alignment: .leading, spacing: 2) {
                                     ForEach(m.problems, id: \.self) { Text($0) }
+                                    ForEach(m.warnings, id: \.self) { Text($0).foregroundStyle(theme.inkFaint) }
                                 }
                                 .font(Theme.mono(12)).foregroundStyle(theme.ink)
                                 .padding(.leading, 10)
@@ -145,7 +149,7 @@ struct KeySheetView: View {
                                 Text("canopy/keys.toml").foregroundStyle(theme.inkDim)
                                 Text(" (").foregroundStyle(theme.inkFaint)
                                 Text("underlined").underline(pattern: .dot).foregroundStyle(theme.inkFaint)
-                                Text(") · j/k scroll · ? or esc closes").foregroundStyle(theme.inkFaint)
+                                Text(") · keys belong to verbs · , is this page's own · j/k scroll · ? or esc closes").foregroundStyle(theme.inkFaint)
                             }
                             .font(Theme.mono(11)).padding(.top, 16)
                         }
@@ -179,7 +183,11 @@ struct KeySheetView: View {
             .padding(.vertical, 1)
         case .line(let l, let dim):
             HStack(alignment: .firstTextBaseline, spacing: 16) {
-                Text(l.cmd.title).foregroundStyle(dim ? theme.inkFaint : theme.inkDim)
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(l.cmd.verb ?? "page").foregroundStyle(dim ? theme.inkFaint : l.cmd.verb == nil ? theme.inkFaint : theme.ink)
+                        .frame(minWidth: 96, alignment: .leading)
+                    Text(l.cmd.title).foregroundStyle(dim ? theme.inkFaint : theme.inkDim).lineLimit(1)
+                }
                 Spacer(minLength: 8)
                 Text(l.key.components(separatedBy: " · ").map(glyph).joined(separator: " · "))
                     .foregroundStyle(dim ? theme.inkFaint : theme.goldLeaf)
