@@ -60,7 +60,7 @@ func writePNG(_ view: NSView, to file: String) {
 }
 
 /// The whole window as drawn, with each visible list painted over its slot: an ancestor's capture leaves table rows out.
-func writeComposite(_ root: NSView, to file: String) {
+func writeComposite(_ root: NSView, to file: String, cover: NSView? = nil) {
     snapshotAppearance?.performAsCurrentDrawingAppearance {
         guard let rep = root.bitmapImageRepForCachingDisplay(in: root.bounds) else { return }
         root.cacheDisplay(in: root.bounds, to: rep)
@@ -76,17 +76,25 @@ func writeComposite(_ root: NSView, to file: String) {
         NSColor.windowBackgroundColor.setFill()
         root.bounds.fill()
         rep.draw(in: root.bounds, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: false, hints: nil)
-        for table in tables(in: root) where !table.isHiddenOrHasHiddenAncestor {
-            let visible = table.visibleRect
-            let pixels = CGFloat(canvas.pixelsWide) / max(root.bounds.width, 1)
-            guard visible.width > 0, visible.height > 0,
-                  let part = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(visible.width * pixels), pixelsHigh: Int(visible.height * pixels),
-                                              bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
-                                              colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0) else { continue }
-            part.size = visible.size
-            table.cacheDisplay(in: visible, to: part)
-            let slot = table.convert(visible, to: root)
-            part.draw(in: slot, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: false, hints: nil)
+        func paint(_ found: [NSTableView]) {
+            for table in found where !table.isHiddenOrHasHiddenAncestor {
+                let visible = table.visibleRect
+                let pixels = CGFloat(canvas.pixelsWide) / max(root.bounds.width, 1)
+                guard visible.width > 0, visible.height > 0,
+                      let part = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(visible.width * pixels), pixelsHigh: Int(visible.height * pixels),
+                                                  bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                                  colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0) else { continue }
+                part.size = visible.size
+                table.cacheDisplay(in: visible, to: part)
+                let slot = table.convert(visible, to: root)
+                part.draw(in: slot, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: false, hints: nil)
+            }
+        }
+        paint(tables(in: root).filter { table in !(cover.map(table.isDescendant(of:)) ?? false) })
+        if let cover, let top = cover.bitmapImageRepForCachingDisplay(in: cover.bounds) {
+            cover.cacheDisplay(in: cover.bounds, to: top)
+            top.draw(in: cover.convert(cover.bounds, to: root), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: false, hints: nil)
+            paint(tables(in: cover))
         }
         NSGraphicsContext.restoreGraphicsState()
         try? canvas.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: file))
@@ -125,13 +133,21 @@ extension AppDelegate {
         controller?.currentDeck?.prepareSnapshot()
         shell.view.layoutSubtreeIfNeeded()
         controller?.currentDeck?.table.layoutSubtreeIfNeeded()
+        if let tabs = environment["SHOW_SNAPSHOT_TABS"].flatMap(Int.init) {
+            (0..<tabs).forEach { _ in cycleFocus(1) }
+            print("focus: stop \(currentStop().map(String.init) ?? "-") of \(focusStops.count) · \(window.firstResponder.map { String(describing: type(of: $0)) } ?? "-")")
+        }
+        if environment["SHOW_SNAPSHOT_SHEET"] != nil {
+            toggleKeySheet()
+            shell.view.layoutSubtreeIfNeeded()
+        }
         if environment["SHOW_SNAPSHOT_CANOPY"] != nil {
             openInCanopy(nil)
             RunLoop.main.run(until: Date().addingTimeInterval(1))
             print("status: \(controller?.statusLabel.stringValue ?? "-")")
         }
         let stem = (output as NSString).deletingPathExtension
-        writeComposite(shell.view, to: output)
+        writeComposite(shell.view, to: output, cover: shell.overlay ?? shell.finder)
         writePNG(shell.rail, to: stem + "-rail.png")
         if let controller {
             controller.shelf.layoutSubtreeIfNeeded()

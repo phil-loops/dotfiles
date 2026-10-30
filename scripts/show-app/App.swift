@@ -99,7 +99,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
         shell = ShellController(workspaces: workspaces, active: start)
         shell.onPick = { [weak self] in self?.switchTo($0) }
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1180, height: 780),
+        window = ShowWindow(contentRect: NSRect(x: 0, y: 0, width: 1180, height: 780),
                           styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                           backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
@@ -115,6 +115,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             window.setFrameAutosaveName("show.window")
         }
         _ = shell.view
+        installKeys()
         workspaces.values.forEach { $0.settleColumns() }
         refreshLibrary(force: true)
         restore()
@@ -125,18 +126,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             NSApp.terminate(nil)
             return
         }
-        buildMenu()
+        installMenus()
         window.makeKeyAndOrderFront(nil)
         workspaces[active]?.restoreFocus(in: window)
         NSApp.activate(ignoringOtherApps: true)
         refreshLibrary(force: true)
-        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self, event.charactersIgnoringModifiers == "/",
-                  event.modifierFlags.intersection([.command, .control, .option]).isEmpty,
-                  !self.isTyping else { return event }
-            self.showFinder(nil)
-            return nil
-        }
         watcher = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.stayCurrent() }
     }
 
@@ -174,12 +168,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             counts[entry.workspace, default: 0] += 1
         }
         shell.setBadges(counts)
-    }
-
-    /// Whether keystrokes are going into a text field, where `/` is just a slash.
-    private var isTyping: Bool {
-        guard let responder = window.firstResponder as? NSTextView else { return false }
-        return responder.isEditable
     }
 
     private func relaunch() {
@@ -230,6 +218,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         prefs.set(workspace.rawValue, forKey: "workspace.active")
         updateTitle()
         workspaces[workspace]?.restoreFocus(in: window)
+        scopeMenus()
+        updateFocusOutline()
     }
 
     func updateTitle() {
@@ -240,16 +230,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         window.title = controller.documentTitle
     }
 
-    @objc func showWorkspace(_ sender: NSMenuItem) {
-        switchTo(Workspace.allCases[sender.tag])
-    }
-
-    @objc func pickConfidence(_ sender: NSMenuItem) {
-        tutor?.choose(confidence: sender.tag)
-    }
-
     @objc func showFinder(_ sender: Any?) {
         guard let controller = workspaces[active] else { return }
+        shell.hideOverlay()
         if shell.finder != nil {
             shell.hideFinder()
             controller.restoreFocus(in: window)
@@ -311,24 +294,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         item.animator().isCollapsed.toggle()
     }
 
-    @objc func sendTutor(_ sender: Any?) {
-        tutor?.sendFocused()
-    }
-
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
-        if menuItem.action == #selector(sendTutor) {
-            return active == .learn
-        }
-        if menuItem.action == #selector(pickConfidence) {
-            return active == .learn && tutor?.currentRungID != nil
-        }
-        if menuItem.action == #selector(archiveSelected) {
-            return workspaces[active].map { $0.shelf.selectedRow >= 0 } ?? false
-        }
-        if menuItem.action == #selector(goBack) {
-            return workspaces[active]?.back.isEmpty == false
-        }
-        return true
+        guard menuItem.action == #selector(runBinding), let id = menuItem.representedObject as? String, let binding = KeyTable.binding(id) else { return true }
+        return isEnabled(binding)
     }
 
     @objc func openOther(_ sender: Any?) {
@@ -342,76 +310,5 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     @objc func reloadCurrent(_ sender: Any?) {
         workspaces[active]?.reload()
-    }
-
-    private func buildMenu() {
-        let main = NSMenu()
-        let appItem = NSMenuItem()
-        main.addItem(appItem)
-        let appMenu = NSMenu()
-        appMenu.addItem(withTitle: "Quit Show", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        appItem.submenu = appMenu
-        let libraryItem = NSMenuItem()
-        main.addItem(libraryItem)
-        let libraryMenu = NSMenu(title: "Library")
-        libraryMenu.addItem(withTitle: "Find…", action: #selector(showFinder), keyEquivalent: "o").target = self
-        let openFile = libraryMenu.addItem(withTitle: "Open File…", action: #selector(openOther), keyEquivalent: "o")
-        openFile.keyEquivalentModifierMask = [.command, .option]
-        openFile.target = self
-        libraryMenu.addItem(withTitle: "Back", action: #selector(goBack), keyEquivalent: "[").target = self
-        libraryMenu.addItem(withTitle: "Open Branch in Canopy", action: #selector(openInCanopy), keyEquivalent: "O").target = self
-        libraryMenu.addItem(.separator())
-        libraryMenu.addItem(withTitle: "Archive Shelf Row (⌫ on the shelf)", action: #selector(archiveSelected), keyEquivalent: "").target = self
-        libraryMenu.addItem(withTitle: "Reload", action: #selector(reloadCurrent), keyEquivalent: "r").target = self
-        libraryMenu.addItem(.separator())
-        let toggle = libraryMenu.addItem(withTitle: "Toggle Shelf", action: #selector(toggleShelf), keyEquivalent: "s")
-        toggle.keyEquivalentModifierMask = [.command, .control]
-        toggle.target = self
-        libraryItem.submenu = libraryMenu
-        let workspaceItem = NSMenuItem()
-        main.addItem(workspaceItem)
-        let workspaceMenu = NSMenu(title: "Workspace")
-        for (i, workspace) in Workspace.allCases.enumerated() {
-            let item = NSMenuItem(title: workspace.name, action: #selector(showWorkspace), keyEquivalent: workspace.key)
-            item.tag = i
-            item.target = self
-            workspaceMenu.addItem(item)
-        }
-        workspaceItem.submenu = workspaceMenu
-        let tutorItem = NSMenuItem()
-        main.addItem(tutorItem)
-        let tutorMenu = NSMenu(title: "Tutor")
-        let sendItem = NSMenuItem(title: "Send", action: #selector(sendTutor), keyEquivalent: "\r")
-        sendItem.keyEquivalentModifierMask = [.command]
-        sendItem.target = self
-        tutorMenu.addItem(sendItem)
-        tutorMenu.addItem(.separator())
-        for (i, level) in confidenceLevels.enumerated() {
-            let item = NSMenuItem(title: level.1, action: #selector(pickConfidence), keyEquivalent: "\(i + 1)")
-            item.keyEquivalentModifierMask = [.control]
-            item.tag = i
-            item.target = self
-            tutorMenu.addItem(item)
-        }
-        tutorItem.submenu = tutorMenu
-        let editItem = NSMenuItem()
-        main.addItem(editItem)
-        let editMenu = NSMenu(title: "Edit")
-        editMenu.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
-        editMenu.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "Z")
-        editMenu.addItem(.separator())
-        editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
-        editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
-        editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
-        editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
-        editItem.submenu = editMenu
-        let windowItem = NSMenuItem()
-        main.addItem(windowItem)
-        let windowMenu = NSMenu(title: "Window")
-        windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
-        windowMenu.addItem(withTitle: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
-        windowItem.submenu = windowMenu
-        NSApp.windowsMenu = windowMenu
-        NSApp.mainMenu = main
     }
 }
