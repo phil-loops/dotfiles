@@ -196,7 +196,10 @@ func isoDate(_ text: String) -> Date? {
 /// The Learn workspace's own tutor: one headless `claude -p` session per tutor file, one turn at a time, later sends queued.
 final class TutorAgent {
     static var all: [String: TutorAgent] = [:]
-    static let allowedTools = "Read,Edit,Write,Bash(~/.dotfiles/scripts/learn:*),Bash(~/.dotfiles/scripts/sim-play:*)"
+    static let allowedTools = "Read,Edit,Write,Grep,Glob,Bash(~/.dotfiles/scripts/learn:*),Bash(~/.dotfiles/scripts/sim-play:*),Bash(date:*)"
+    static let workingDirectory = ("~/.dotfiles" as NSString).expandingTildeInPath
+    /// Passed through to the tutor when set, so a test can point `learn` at a scratch graph.
+    static let passedEnvironment = ["LEARNING_GRAPH", "LEARNING_MEMORY"]
 
     static func agent(for sessionPath: String) -> TutorAgent {
         if let existing = all[sessionPath] { return existing }
@@ -219,17 +222,15 @@ final class TutorAgent {
 
     var isBusy: Bool { running != nil || (!queue.isEmpty && failure == nil) }
 
-    /// Queues a message for the tutor, minting its session (and a boot turn) the first time.
+    /// Queues a message for the tutor, minting its session the first time. A session Claude has never seen boots on this turn.
     func send(_ message: String) {
-        if Self.sessionID(sessionPath) == nil {
-            guard mintSession() else {
-                failure = "Couldn't write agent.session into \(sessionPath)"
-                onChange?()
-                return
-            }
-            queue.append((bootPrompt, true))
+        if Self.sessionID(sessionPath) == nil, !mintSession() {
+            failure = "Couldn't write agent.session into \(sessionPath)"
+            onChange?()
+            return
         }
-        queue.append((message, false))
+        let booted = queue.contains(where: \.boot) || Self.sessionID(sessionPath).map(Self.hasTranscript) == true
+        queue.append(booted ? (message, false) : (bootPrompt + "\n\nOpening message: " + message, true))
         startNext()
     }
 
@@ -254,9 +255,26 @@ final class TutorAgent {
         return (try? out.write(to: URL(fileURLWithPath: sessionPath), options: .atomic)) != nil
     }
 
+    /// Whether Claude already has this session's transcript, so the next turn resumes it instead of booting it.
+    static func hasTranscript(_ session: String) -> Bool {
+        let project = String(workingDirectory.map { $0.isLetter || $0.isNumber ? $0 : "-" })
+        let home = ProcessInfo.processInfo.environment["CLAUDE_CONFIG_DIR"] ?? ("~/.claude" as NSString).expandingTildeInPath
+        return FileManager.default.fileExists(atPath: "\(home)/projects/\(project)/\(session).jsonl")
+    }
+
     private var bootPrompt: String {
-        let answers = (sessionPath as NSString).deletingPathExtension + ".answers.json"
-        return "You are running the /tutor skill (read ~/.dotfiles/.claude/skills/tutor/SKILL.md and the show skill's Tutor section) for the Show session file \(sessionPath). The learner answers in Show: their answers arrive in \(answers). Reply ONLY by editing the session file (reveal, verdicts, followup, the next rung) and recording evidence with `learn`; never write the answers file. Keep one rung per turn."
+        let answers = answersURL(sessionPath).path
+        return """
+        You are the tutor for one Show worksheet, the session file \(sessionPath). Teach by ~/.dotfiles/.claude/skills/tutor/SKILL.md; for an opening "re-test <concept>", by ~/.dotfiles/.claude/skills/retest/SKILL.md instead (`learn concept <id>` gives its history), one situation only.
+        Every turn:
+        - Reply only by editing the session file (Edit, or Write for a whole rewrite). Keep it valid JSON and leave "mode" and "agent" alone. The learner never sees your chat text, so keep it to a line.
+        - One rung per turn: add at most one new rung, then stop.
+        - The learner's answers and messages arrive in \(answers). Read it; never write it.
+        - Record evidence after each answer with `~/.dotfiles/scripts/learn evidence '<json>'`, called by exactly that path, as is `~/.dotfiles/scripts/learn state`. Never touch the graph another way.
+        - Show asks for confidence itself; don't ask for it in the rung.
+        Messages: "tutor answer: <file> rung <id>" → set that rung's "reveal" and "verdicts", record evidence, append the next rung. "learner says: <text>" → append {"at": <`date -u +%Y-%m-%dT%H:%M:%SZ`>, "text": "<reply, markdown>"} to "notes". "learner wants station <name>" → make it the current station and append its first rung.
+        Schema: {"mode": "tutor", "title", "stations": [{"name", "state": "done|current|todo"}], "rungs": [{"id": "r1", "station", "title", "situation": "markdown: concrete state, one action", "ask": "predict|explain|restate|invent", "timeline": [{"t": "0", "event"}], "parts": [{"id": "a", "at": "20", "ask"}], "reveal": null, "verdicts": {"a": "held|revised"}, "followup": null}], "notes": [], "agent": {…}}. "timeline" and "parts" are optional; a part with "at" sits on the timeline at that time; "reveal" is markdown, or {"<part id>": "markdown"}.
+        """
     }
 
     private func startNext() {
@@ -266,17 +284,23 @@ final class TutorAgent {
         }
         var arguments = ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
                          "--permission-mode", "acceptEdits", "--allowedTools", Self.allowedTools]
-        arguments += next.boot ? ["--session-id", session] : ["--resume", session]
-        arguments += ["--", next.message]
+        arguments += next.boot && !Self.hasTranscript(session) ? ["--session-id", session] : ["--resume", session]
+        arguments += ["--add-dir", (sessionPath as NSString).deletingLastPathComponent, "--", next.message]
         let process = Process()
+        let parent = ProcessInfo.processInfo.environment
+        var exports = ""
+        for name in Self.passedEnvironment {
+            guard let value = parent[name] else { continue }
+            exports += "export \(name)='\(value.replacingOccurrences(of: "'", with: "'\\''"))'; "
+        }
         if let override = ProcessInfo.processInfo.environment["SHOW_CLAUDE"] {
             process.executableURL = URL(fileURLWithPath: override)
             process.arguments = arguments
         } else {
             process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-            process.arguments = ["-lc", "export PATH=\"$HOME/.local/bin:$PATH\"; exec claude \"$@\"", "claude"] + arguments
+            process.arguments = ["-lc", exports + "export PATH=\"$HOME/.local/bin:$PATH\"; exec claude \"$@\"", "claude"] + arguments
         }
-        process.currentDirectoryURL = URL(fileURLWithPath: ("~/.dotfiles" as NSString).expandingTildeInPath)
+        process.currentDirectoryURL = URL(fileURLWithPath: Self.workingDirectory)
         let output = Pipe()
         let errors = Pipe()
         process.standardOutput = output
@@ -825,7 +849,7 @@ final class TutorController: NSObject, NSTextViewDelegate {
                 marks.forEach { $0.mark.alphaValue = 0.6 }
             }
         }
-        if session.rungs.isEmpty {
+        if session.rungs.isEmpty, agent?.isBusy != true {
             column.addArrangedSubview(quiet("No rungs yet. Waiting for Claude."))
         }
         agentRow = nil
@@ -847,13 +871,15 @@ final class TutorController: NSObject, NSTextViewDelegate {
         case note(TutorSession.Note)
     }
 
-    /// Rungs, the learner's messages and the tutor's notes as one conversation by time; a rung counts from when the previous rung was answered.
+    /// Rungs, the learner's messages and the tutor's notes as one conversation by time; a rung counts from when the previous rung was answered,
+    /// and the first rung from just after the tutor's first note, so a boot's map sits above it.
     private func thread(_ session: TutorSession) -> [ThreadItem] {
         var keyed: [(Date, Int, ThreadItem)] = []
+        let firstNote = (session.notes ?? []).compactMap { isoDate($0.at) }.min()
         for (i, rung) in session.rungs.enumerated() {
             let posted: Date
             if i == 0 {
-                posted = .distantPast
+                posted = firstNote?.addingTimeInterval(0.001) ?? .distantPast
             } else if let previous = answers[session.rungs[i - 1].id] {
                 posted = isoDate(previous.at) ?? .distantPast
             } else {
@@ -1238,7 +1264,13 @@ func tutorAsk(_ raw: String, _ text: String) -> Int32 {
         FileHandle.standardError.write("Show: \(path): \(error)\n".data(using: .utf8)!)
         return 65
     }
+    return streamTutorTurn(path, "learner says: \(text)")
+}
+
+/// Sends one message to the file's tutor and streams the reply's text to stdout until the turn ends; exits with its outcome.
+func streamTutorTurn(_ path: String, _ message: String) -> Int32 {
     let agent = TutorAgent.agent(for: path)
+    let began = Date()
     var started = false
     agent.onDelta = { piece in
         FileHandle.standardOutput.write(piece.data(using: .utf8)!)
@@ -1250,11 +1282,11 @@ func tutorAsk(_ raw: String, _ text: String) -> Int32 {
                 FileHandle.standardError.write("\ntutor failed:\n\(failure)\n".data(using: .utf8)!)
                 exit(1)
             }
-            print("\n[done; agent.session \(TutorAgent.sessionID(path) ?? "-")]")
+            print("\n[done in \(Int(Date().timeIntervalSince(began)))s; agent.session \(TutorAgent.sessionID(path) ?? "-")]")
             exit(0)
         }
     }
-    agent.send("learner says: \(text)")
+    agent.send(message)
     RunLoop.main.run()
     return 0
 }
