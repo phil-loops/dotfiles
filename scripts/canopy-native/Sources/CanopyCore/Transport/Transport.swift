@@ -155,16 +155,16 @@ public final class Transport: @unchecked Sendable {
     }
 
     /// POST, then read the answer as server-sent events (a tutor turn, a chat turn): each frame
-    /// goes to `on`, which returns true at the stream's last frame — the server holds the
-    /// connection open after it. Throws when the server won't stream.
-    public func streamPost(_ path: String, _ body: some Encodable, on: (SSEFrame) -> Bool) async throws {
+    /// goes to `on`, on the main actor, which returns true at the stream's last frame — the server
+    /// holds the connection open after it. Throws when the server won't stream.
+    public func streamPost(_ path: String, _ body: some Encodable, on: @MainActor (SSEFrame) -> Bool) async throws {
         let t0 = Date()
         defer { count?("stream", Date().timeIntervalSince(t0) * 1000) }
         let json = try JSONEncoder().encode(body)
         let (bytes, resp) = try await streaming.bytes(for: request(path, method: "POST", rid: nextRid(), json: json))
         let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(status) else { throw HTTPError(path: path, status: status) }
-        for try await f in bytes.sseFrames() where on(f) { return }
+        for try await f in bytes.sseFrames() where await on(f) { return }
     }
 
     /// Open a GET server-sent-event stream (/v2/events, /events).
