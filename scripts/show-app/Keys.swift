@@ -186,7 +186,7 @@ extension WorkspaceController {
             let page = deck.web.isHidden ? deck.text as NSView : deck.web
             stops.append(FocusStop(responder: page, column: deck.textScroll.superview ?? page))
             if !deck.actionBar.isHidden {
-                stops.append(FocusStop(responder: deck.note, column: deck.actionBar))
+                stops.append(FocusStop(responder: deck.composer, column: deck.actionBar))
             }
         }
         return stops.filter { !$0.responder.isHiddenOrHasHiddenAncestor }
@@ -389,7 +389,7 @@ extension AppDelegate {
         guard let controller = workspaces[active] else { return nil }
         if let tutor = controller.tutor, controller.current != nil { return tutor.composer }
         guard let deck = controller.currentDeck, !deck.actionBar.isHidden else { return nil }
-        return deck.note
+        return deck.composer
     }
 
     func focusComposer() {

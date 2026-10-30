@@ -44,4 +44,7 @@ When a UI branch has a running preview, add a `url` section pointing at it right
 
 ## 4 · After sign-off
 
+Phil can also talk back per page: a `Show thread: …` or `regenerate page <branch>` line means reply per the show skill's **Threads** section (`<deck>.thread.json`).
+
+
 A note on a branch page is review feedback on that branch. Fix it on that branch (new commit), regenerate the page, and the open deck reloads by itself.
