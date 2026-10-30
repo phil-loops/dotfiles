@@ -747,6 +747,20 @@ struct TutorSession: Decodable {
     let stations: [Station]?
     let due: [Due]?
     let rungs: [Rung]
+    let agent: Agent?
+    let notes: [Note]?
+
+    struct Agent: Decodable {
+        let session: String?
+    }
+
+    struct Note: Decodable {
+        let at: String
+        let text: String
+    }
+
+    /// Answers go to the session's own headless tutor, except in a file still driven by a `replyTo` terminal session.
+    var usesAgent: Bool { agent != nil || replyTo == nil }
 
     struct Station: Decodable {
         let name: String
@@ -863,14 +877,227 @@ func answersURL(_ sessionPath: String) -> URL {
     URL(fileURLWithPath: sessionPath).deletingPathExtension().appendingPathExtension("answers.json")
 }
 
-func loadAnswers(_ sessionPath: String) -> [String: TutorAnswer] {
-    (try? JSONDecoder().decode([String: TutorAnswer].self, from: Data(contentsOf: answersURL(sessionPath)))) ?? [:]
+struct LearnerMessage: Codable {
+    let at: String
+    let text: String
 }
 
-func writeAnswers(_ answers: [String: TutorAnswer], _ sessionPath: String) throws {
+/// The answers sidecar: one entry per answered rung, plus the learner's free messages under `messages`.
+struct Sidecar {
+    var answers: [String: TutorAnswer] = [:]
+    var messages: [LearnerMessage] = []
+}
+
+func readSidecar(_ sessionPath: String) throws -> Sidecar {
+    let url = answersURL(sessionPath)
+    guard FileManager.default.fileExists(atPath: url.path) else { return Sidecar() }
+    let raw = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any] ?? [:]
+    var sidecar = Sidecar()
+    for (key, value) in raw {
+        let data = try JSONSerialization.data(withJSONObject: value)
+        if key == "messages" {
+            sidecar.messages = try JSONDecoder().decode([LearnerMessage].self, from: data)
+        } else {
+            sidecar.answers[key] = try JSONDecoder().decode(TutorAnswer.self, from: data)
+        }
+    }
+    return sidecar
+}
+
+func loadSidecar(_ sessionPath: String) -> Sidecar {
+    (try? readSidecar(sessionPath)) ?? Sidecar()
+}
+
+func loadAnswers(_ sessionPath: String) -> [String: TutorAnswer] {
+    loadSidecar(sessionPath).answers
+}
+
+func writeSidecar(_ sidecar: Sidecar, _ sessionPath: String) throws {
     let encoder = JSONEncoder()
-    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-    try encoder.encode(answers).write(to: answersURL(sessionPath), options: .atomic)
+    var raw: [String: Any] = [:]
+    for (id, answer) in sidecar.answers {
+        raw[id] = try JSONSerialization.jsonObject(with: encoder.encode(answer))
+    }
+    if !sidecar.messages.isEmpty {
+        raw["messages"] = try JSONSerialization.jsonObject(with: encoder.encode(sidecar.messages))
+    }
+    try JSONSerialization.data(withJSONObject: raw, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
+        .write(to: answersURL(sessionPath), options: .atomic)
+}
+
+func isoDate(_ text: String) -> Date? {
+    let plain = ISO8601DateFormatter()
+    let fractional = ISO8601DateFormatter()
+    fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return plain.date(from: text) ?? fractional.date(from: text)
+}
+
+/// The Learn workspace's own tutor: one headless `claude -p` session per tutor file, one turn at a time, later sends queued.
+final class TutorAgent {
+    static var all: [String: TutorAgent] = [:]
+    static let allowedTools = "Read,Edit,Write,Bash(~/.dotfiles/scripts/learn:*),Bash(~/.dotfiles/scripts/sim-play:*)"
+
+    static func agent(for sessionPath: String) -> TutorAgent {
+        if let existing = all[sessionPath] { return existing }
+        let agent = TutorAgent(sessionPath: sessionPath)
+        all[sessionPath] = agent
+        return agent
+    }
+
+    let sessionPath: String
+    private var queue: [(message: String, boot: Bool)] = []
+    private(set) var running: Process?
+    private(set) var failure: String?
+    private(set) var preview = ""
+    var onChange: (() -> Void)?
+    var onDelta: ((String) -> Void)?
+
+    init(sessionPath: String) {
+        self.sessionPath = sessionPath
+    }
+
+    var isBusy: Bool { running != nil || (!queue.isEmpty && failure == nil) }
+
+    /// Queues a message for the tutor, minting its session (and a boot turn) the first time.
+    func send(_ message: String) {
+        if Self.sessionID(sessionPath) == nil {
+            guard mintSession() else {
+                failure = "Couldn't write agent.session into \(sessionPath)"
+                onChange?()
+                return
+            }
+            queue.append((bootPrompt, true))
+        }
+        queue.append((message, false))
+        startNext()
+    }
+
+    func retry() {
+        failure = nil
+        startNext()
+    }
+
+    static func sessionID(_ sessionPath: String) -> String? {
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: sessionPath)),
+              let raw = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        return (raw["agent"] as? [String: Any])?["session"] as? String
+    }
+
+    private func mintSession() -> Bool {
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: sessionPath)),
+              var raw = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return false }
+        var agent = raw["agent"] as? [String: Any] ?? [:]
+        agent["session"] = UUID().uuidString.lowercased()
+        raw["agent"] = agent
+        guard let out = try? JSONSerialization.data(withJSONObject: raw, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]) else { return false }
+        return (try? out.write(to: URL(fileURLWithPath: sessionPath), options: .atomic)) != nil
+    }
+
+    private var bootPrompt: String {
+        let answers = (sessionPath as NSString).deletingPathExtension + ".answers.json"
+        return "You are running the /tutor skill (read ~/.dotfiles/.claude/skills/tutor/SKILL.md and the show skill's Tutor section) for the Show session file \(sessionPath). The learner answers in Show: their answers arrive in \(answers). Reply ONLY by editing the session file (reveal, verdicts, followup, the next rung) and recording evidence with `learn`; never write the answers file. Keep one rung per turn."
+    }
+
+    private func startNext() {
+        guard running == nil, failure == nil, let next = queue.first, let session = Self.sessionID(sessionPath) else {
+            onChange?()
+            return
+        }
+        var arguments = ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
+                         "--permission-mode", "acceptEdits", "--allowedTools", Self.allowedTools]
+        arguments += next.boot ? ["--session-id", session] : ["--resume", session]
+        arguments += ["--", next.message]
+        let process = Process()
+        if let override = ProcessInfo.processInfo.environment["SHOW_CLAUDE"] {
+            process.executableURL = URL(fileURLWithPath: override)
+            process.arguments = arguments
+        } else {
+            process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+            process.arguments = ["-lc", "export PATH=\"$HOME/.local/bin:$PATH\"; exec claude \"$@\"", "claude"] + arguments
+        }
+        process.currentDirectoryURL = URL(fileURLWithPath: ("~/.dotfiles" as NSString).expandingTildeInPath)
+        let output = Pipe()
+        let errors = Pipe()
+        process.standardOutput = output
+        process.standardError = errors
+        process.standardInput = FileHandle.nullDevice
+        let lock = NSLock()
+        var pending = Data()
+        var stderrTail = Data()
+        var resultError: String?
+        let handleLine: (Data) -> Void = { [weak self] line in
+            guard let event = try? JSONSerialization.jsonObject(with: line) as? [String: Any] else { return }
+            if event["type"] as? String == "result", event["is_error"] as? Bool == true {
+                resultError = event["result"] as? String ?? event["subtype"] as? String
+            }
+            guard event["type"] as? String == "stream_event", let inner = event["event"] as? [String: Any] else { return }
+            var piece: String?
+            if inner["type"] as? String == "content_block_delta", let delta = inner["delta"] as? [String: Any], delta["type"] as? String == "text_delta" {
+                piece = delta["text"] as? String
+            } else if inner["type"] as? String == "message_start" {
+                piece = "\n\n"
+            }
+            guard let piece else { return }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.preview = (self.preview + piece).trimmingCharacters(in: .newlines) == "" ? "" : self.preview + piece
+                self.onDelta?(piece)
+                self.onChange?()
+            }
+        }
+        output.fileHandleForReading.readabilityHandler = { handle in
+            let chunk = handle.availableData
+            lock.lock()
+            pending.append(chunk)
+            var lines: [Data] = []
+            while let newline = pending.firstIndex(of: 0x0A) {
+                lines.append(pending.subdata(in: pending.startIndex..<newline))
+                pending.removeSubrange(pending.startIndex...newline)
+            }
+            lock.unlock()
+            lines.forEach(handleLine)
+        }
+        errors.fileHandleForReading.readabilityHandler = { handle in
+            let chunk = handle.availableData
+            lock.lock()
+            stderrTail.append(chunk)
+            if stderrTail.count > 8192 { stderrTail = stderrTail.suffix(8192) }
+            lock.unlock()
+        }
+        process.terminationHandler = { [weak self] finished in
+            output.fileHandleForReading.readabilityHandler = nil
+            errors.fileHandleForReading.readabilityHandler = nil
+            let rest = output.fileHandleForReading.readDataToEndOfFile()
+            lock.lock()
+            pending.append(rest)
+            let last = pending
+            stderrTail.append(errors.fileHandleForReading.readDataToEndOfFile())
+            let tail = String(data: stderrTail, encoding: .utf8) ?? ""
+            lock.unlock()
+            if !last.isEmpty { handleLine(last) }
+            let status = finished.terminationStatus
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.running = nil
+                self.preview = ""
+                if status == 0, resultError == nil {
+                    self.queue.removeFirst()
+                } else {
+                    let lines = tail.split(separator: "\n").suffix(6).joined(separator: "\n")
+                    self.failure = [resultError, lines.isEmpty ? nil : lines, "exit \(status)"].compactMap { $0 }.joined(separator: "\n")
+                }
+                self.startNext()
+            }
+        }
+        do {
+            try process.run()
+            running = process
+            preview = ""
+        } catch {
+            failure = "\(error)"
+        }
+        onChange?()
+    }
 }
 
 /// The rung awaiting an answer: the first one after the last answered rung, or nil while Claude owes the next rung.
@@ -969,6 +1196,7 @@ func tutorText(_ text: NSAttributedString, width: CGFloat) -> NSTextView {
 /// The learner's pen: a serif, ink-blue field that grows with its text.
 final class AnswerField: NSTextView {
     let partID: String
+    var maximumHeight: CGFloat = .greatestFiniteMagnitude
     private var height: NSLayoutConstraint?
 
     init(partID: String, text: String, width: CGFloat, editable: Bool) {
@@ -1017,7 +1245,7 @@ final class AnswerField: NSTextView {
         guard let layout = layoutManager, let container = textContainer else { return }
         layout.ensureLayout(for: container)
         let used = ceil(layout.usedRect(for: container).height) + textContainerInset.height * 2
-        height?.constant = max(used, isEditable ? 64 : 0)
+        height?.constant = min(max(used, isEditable ? 64 : 0), maximumHeight)
     }
 }
 
@@ -1131,6 +1359,10 @@ final class TutorController: NSObject, NSWindowDelegate, NSTextViewDelegate {
     var focusRungView: NSView?
     weak var picker: NSSegmentedControl?
     weak var hint: NSTextField?
+    let composer = AnswerField(partID: "__composer", text: "", width: TutorController.column, editable: true)
+    var sidecar = Sidecar()
+    var agentRow: NSView?
+    var agent: TutorAgent?
 
     var sidebar: NSTextView { sidebarScroll.documentView as! NSTextView }
     var currentRungID: String? { session.flatMap { currentRung($0, answers)?.id } }
@@ -1173,8 +1405,34 @@ final class TutorController: NSObject, NSWindowDelegate, NSTextViewDelegate {
             document.bottomAnchor.constraint(equalTo: column.bottomAnchor, constant: 160),
         ])
         scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 420).isActive = true
+        composer.delegate = self
+        composer.maximumHeight = 160
+        let composerSend = NSButton(title: "Send", target: self, action: #selector(sendMessage))
+        composerSend.bezelStyle = .rounded
+        composerSend.toolTip = "⌘↩"
+        let composerHint = NSTextField(labelWithString: "Ask the tutor anything")
+        composerHint.font = .systemFont(ofSize: 11)
+        composerHint.textColor = .tertiaryLabelColor
+        let composerRow = NSStackView(views: [composer, composerSend])
+        composerRow.orientation = .horizontal
+        composerRow.alignment = .bottom
+        composerRow.spacing = 12
+        let composerBar = NSStackView(views: [composerHint, composerRow])
+        composerBar.orientation = .vertical
+        composerBar.alignment = .leading
+        composerBar.spacing = 6
+        composerBar.edgeInsets = NSEdgeInsets(top: 12, left: Self.margin, bottom: 14, right: 24)
+        let divider = NSBox()
+        divider.boxType = .separator
+        let detail = NSStackView(views: [scroll, divider, composerBar])
+        detail.orientation = .vertical
+        detail.spacing = 0
+        for view in [scroll, divider, composerBar] {
+            view.widthAnchor.constraint(equalTo: detail.widthAnchor).isActive = true
+        }
+        scroll.setContentHuggingPriority(.init(1), for: .vertical)
         let detailVC = NSViewController()
-        detailVC.view = scroll
+        detailVC.view = detail
 
         let split = NSSplitViewController()
         let sidebarItem = NSSplitViewItem(viewController: sidebarVC)
@@ -1191,6 +1449,11 @@ final class TutorController: NSObject, NSWindowDelegate, NSTextViewDelegate {
             self.path = path
             drafts = UserDefaults.standard.dictionary(forKey: "tutor.drafts." + path) as? [String: [String: String]] ?? [:]
             confidence = UserDefaults.standard.dictionary(forKey: "tutor.confidence." + path) as? [String: Int] ?? [:]
+            composer.string = UserDefaults.standard.string(forKey: "tutor.composer." + path) ?? ""
+            composer.didChangeText()
+            agent?.onChange = nil
+            agent = TutorAgent.agent(for: path)
+            agent?.onChange = { [weak self] in self?.refreshAgentRow() }
             shownReveals = []
             hasRendered = false
         }
@@ -1226,7 +1489,8 @@ final class TutorController: NSObject, NSWindowDelegate, NSTextViewDelegate {
         }
         stamp = fileStamp(path)
         session = fresh
-        answers = loadAnswers(path)
+        sidecar = loadSidecar(path)
+        answers = sidecar.answers
         let current = currentRung(fresh, answers)?.id
         let moved = !hasRendered || current != lastCurrent
         let focusedField = window.firstResponder as? AnswerField
@@ -1258,6 +1522,7 @@ final class TutorController: NSObject, NSWindowDelegate, NSTextViewDelegate {
         guard let path else { return }
         UserDefaults.standard.set(drafts, forKey: "tutor.drafts." + path)
         UserDefaults.standard.set(confidence, forKey: "tutor.confidence." + path)
+        UserDefaults.standard.set(composer.string, forKey: "tutor.composer." + path)
     }
 
     func focusFirstField() {
@@ -1287,7 +1552,13 @@ final class TutorController: NSObject, NSWindowDelegate, NSTextViewDelegate {
         let focusID = current?.id ?? session.rungs.last?.id
         var fresh: [NSView] = []
         var seen: Set<String> = []
-        for rung in session.rungs {
+        for item in thread(session) {
+            guard case .rung(let rung) = item else {
+                let view = threadRow(item)
+                column.addArrangedSubview(view)
+                column.setCustomSpacing(28, after: view)
+                continue
+            }
             var marks: [(mark: NSView, block: NSView)] = []
             let view = rungView(rung, isCurrent: rung.id == current?.id, fresh: &fresh, seen: &seen, marks: &marks)
             column.addArrangedSubview(view)
@@ -1309,6 +1580,8 @@ final class TutorController: NSObject, NSWindowDelegate, NSTextViewDelegate {
         if session.rungs.isEmpty {
             column.addArrangedSubview(quiet("No rungs yet. Waiting for Claude."))
         }
+        agentRow = nil
+        refreshAgentRow()
         document.layoutSubtreeIfNeeded()
         if hasRendered, !fresh.isEmpty, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
             fresh.forEach { $0.alphaValue = 0 }
@@ -1318,6 +1591,145 @@ final class TutorController: NSObject, NSWindowDelegate, NSTextViewDelegate {
             }
         }
         shownReveals = seen
+    }
+
+    enum ThreadItem {
+        case rung(Rung)
+        case message(LearnerMessage)
+        case note(TutorSession.Note)
+    }
+
+    /// Rungs, the learner's messages and the tutor's notes as one conversation by time; a rung counts from when the previous rung was answered.
+    private func thread(_ session: TutorSession) -> [ThreadItem] {
+        var keyed: [(Date, Int, ThreadItem)] = []
+        for (i, rung) in session.rungs.enumerated() {
+            let posted: Date
+            if i == 0 {
+                posted = .distantPast
+            } else if let previous = answers[session.rungs[i - 1].id] {
+                posted = isoDate(previous.at) ?? .distantPast
+            } else {
+                posted = .distantFuture
+            }
+            keyed.append((posted, keyed.count, .rung(rung)))
+        }
+        for message in sidecar.messages {
+            keyed.append((isoDate(message.at) ?? .distantFuture, keyed.count, .message(message)))
+        }
+        for note in session.notes ?? [] {
+            keyed.append((isoDate(note.at) ?? .distantFuture, keyed.count, .note(note)))
+        }
+        return keyed.sorted { ($0.0, $0.1) < ($1.0, $1.1) }.map(\.2)
+    }
+
+    private func threadRow(_ item: ThreadItem) -> NSView {
+        switch item {
+        case .message(let message):
+            let p = NSMutableParagraphStyle()
+            p.alignment = .right
+            p.lineSpacing = 3
+            return tutorText(NSAttributedString(string: message.text, attributes: [.font: inkFont, .foregroundColor: inkColor, .paragraphStyle: p]), width: Self.column)
+        case .note(let note):
+            return tutorText(renderer.tutorMarkdown(note.text), width: Self.column)
+        case .rung:
+            return NSView()
+        }
+    }
+
+    /// The tutor's live row under the thread: a typing line with the streamed preview, or the last failure with Retry.
+    func refreshAgentRow() {
+        let atBottom = scroll.contentView.bounds.maxY >= document.bounds.height - 40
+        if let agentRow {
+            column.removeArrangedSubview(agentRow)
+            agentRow.removeFromSuperview()
+            self.agentRow = nil
+        }
+        guard let agent else { return }
+        let row = NSStackView()
+        row.orientation = .vertical
+        row.alignment = .leading
+        row.spacing = 6
+        if let failure = agent.failure {
+            let label = quiet("The tutor stopped with an error:")
+            let detail = tutorText(NSAttributedString(string: failure, attributes: [.font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular), .foregroundColor: NSColor.secondaryLabelColor]), width: Self.column)
+            let retry = NSButton(title: "Retry", target: self, action: #selector(retryAgent))
+            retry.bezelStyle = .rounded
+            [label, detail, retry].forEach(row.addArrangedSubview)
+        } else if agent.isBusy {
+            row.addArrangedSubview(quiet("Tutor is typing…"))
+            let text = agent.preview.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !text.isEmpty {
+                row.addArrangedSubview(tutorText(NSAttributedString(string: text, attributes: [.font: renderer.base, .foregroundColor: NSColor.tertiaryLabelColor]), width: Self.column))
+            }
+        } else {
+            return
+        }
+        column.addArrangedSubview(row)
+        agentRow = row
+        document.layoutSubtreeIfNeeded()
+        if atBottom {
+            scrollToBottom()
+        }
+    }
+
+    private func scrollToBottom() {
+        document.layoutSubtreeIfNeeded()
+        let clip = scroll.contentView
+        clip.scroll(to: NSPoint(x: 0, y: max(0, document.bounds.height - clip.bounds.height)))
+        scroll.reflectScrolledClipView(clip)
+    }
+
+    @objc private func retryAgent() {
+        agent?.retry()
+    }
+
+    /// Hands a line to whoever tutors this file: its own headless session, or the `replyTo` terminal session in older files.
+    private func deliver(_ message: String) {
+        guard let path, let session else { return }
+        if session.usesAgent {
+            agent?.send(message)
+            scrollToBottom()
+        } else if let replyTo = session.replyTo, let failure = claudeSay(replyTo, message) {
+            showClaudeSayFailure(replyTo: replyTo, saved: "It's saved in \((answersURL(path).path as NSString).lastPathComponent).", detail: failure, window: window)
+        }
+    }
+
+    /// ⌘↩: send the composer when it has focus, otherwise the current rung.
+    func sendFocused() {
+        if window.firstResponder === composer {
+            sendMessage()
+        } else if currentRungID != nil {
+            sendAnswer()
+        } else if !composer.string.isEmpty {
+            sendMessage()
+        } else {
+            NSSound.beep()
+        }
+    }
+
+    @objc private func sendMessage() {
+        guard let path else { return }
+        let text = composer.string.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else {
+            NSSound.beep()
+            return
+        }
+        var all = loadSidecar(path)
+        all.messages.append(LearnerMessage(at: ISO8601DateFormatter().string(from: Date()), text: text))
+        do {
+            try writeSidecar(all, path)
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "Couldn't save your message"
+            alert.informativeText = "\(error)"
+            alert.beginSheetModal(for: window)
+            return
+        }
+        composer.string = ""
+        composer.didChangeText()
+        saveDrafts()
+        reload()
+        deliver("learner says: \(text)")
     }
 
     private func rungView(_ rung: Rung, isCurrent: Bool, fresh: inout [NSView], seen: inout Set<String>, marks: inout [(mark: NSView, block: NSView)]) -> NSView {
@@ -1412,8 +1824,6 @@ final class TutorController: NSObject, NSWindowDelegate, NSTextViewDelegate {
             add(control, after: 18)
             let send = NSButton(title: rung.isPredict ? "Send prediction" : "Send answer", target: self, action: #selector(sendAnswer))
             send.bezelStyle = .rounded
-            send.keyEquivalent = "\r"
-            send.keyEquivalentModifierMask = [.command]
             send.toolTip = "⌘↩"
             add(send, after: 8)
             let note = quiet("")
@@ -1506,10 +1916,10 @@ final class TutorController: NSObject, NSWindowDelegate, NSTextViewDelegate {
             showHint("Pick how sure you are first: ⌃1 Guessing · ⌃2 Fairly sure · ⌃3 Certain.")
             return
         }
-        var all = loadAnswers(path)
-        all[rung.id] = TutorAnswer(parts: texts, confidence: level.map { confidenceLevels[$0].0 }, at: ISO8601DateFormatter().string(from: Date()))
+        var all = loadSidecar(path)
+        all.answers[rung.id] = TutorAnswer(parts: texts, confidence: level.map { confidenceLevels[$0].0 }, at: ISO8601DateFormatter().string(from: Date()))
         do {
-            try writeAnswers(all, path)
+            try writeSidecar(all, path)
         } catch {
             let alert = NSAlert()
             alert.messageText = "Couldn't save your answer"
@@ -1521,12 +1931,14 @@ final class TutorController: NSObject, NSWindowDelegate, NSTextViewDelegate {
         confidence[rung.id] = nil
         saveDrafts()
         reload()
-        if let replyTo = session.replyTo, let failure = claudeSay(replyTo, "tutor answer: \(path) rung \(rung.id)") {
-            showClaudeSayFailure(replyTo: replyTo, saved: "Your answer is saved.", detail: failure, window: window)
-        }
+        deliver("tutor answer: \(path) rung \(rung.id)")
     }
 
     func textDidChange(_ notification: Notification) {
+        if notification.object as? AnswerField === composer {
+            saveDrafts()
+            return
+        }
         guard let field = notification.object as? AnswerField, let id = currentRungID else { return }
         drafts[id, default: [:]][field.partID] = field.string
         hint?.isHidden = true
@@ -1534,6 +1946,10 @@ final class TutorController: NSObject, NSWindowDelegate, NSTextViewDelegate {
     }
 
     func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        if textView === composer, commandSelector == #selector(NSResponder.insertBacktab(_:)), let last = fields.last {
+            window.makeFirstResponder(last)
+            return true
+        }
         guard let index = fields.firstIndex(where: { $0 === textView }), fields.count > 0 else { return false }
         switch commandSelector {
         case #selector(NSResponder.insertTab(_:)):
@@ -1576,17 +1992,50 @@ func fileStamp(_ path: String) -> String {
     return "\(modified)-\(attributes[.size] as? Int ?? 0)"
 }
 
+/// `--tutor-ask`: what the composer does, without a window: record a learner message, run the tutor turn, stream its text to stdout.
+func tutorAsk(_ raw: String, _ text: String) -> Int32 {
+    let path = URL(fileURLWithPath: (raw as NSString).expandingTildeInPath).standardizedFileURL.path
+    do {
+        _ = try loadTutorSession(path)
+        var sidecar = try readSidecar(path)
+        sidecar.messages.append(LearnerMessage(at: ISO8601DateFormatter().string(from: Date()), text: text))
+        try writeSidecar(sidecar, path)
+    } catch {
+        FileHandle.standardError.write("Show: \(path): \(error)\n".data(using: .utf8)!)
+        return 65
+    }
+    let agent = TutorAgent.agent(for: path)
+    var started = false
+    agent.onDelta = { piece in
+        FileHandle.standardOutput.write(piece.data(using: .utf8)!)
+    }
+    agent.onChange = {
+        if agent.isBusy { started = true }
+        if started, !agent.isBusy || agent.failure != nil {
+            if let failure = agent.failure {
+                FileHandle.standardError.write("\ntutor failed:\n\(failure)\n".data(using: .utf8)!)
+                exit(1)
+            }
+            print("\n[done; agent.session \(TutorAgent.sessionID(path) ?? "-")]")
+            exit(0)
+        }
+    }
+    agent.send("learner says: \(text)")
+    RunLoop.main.run()
+    return 0
+}
+
 /// `--tutor-check`: parse a session plus its answers and print what the Tutor space would show, without a window.
 func tutorCheck(_ raw: String) -> Int32 {
     let path = URL(fileURLWithPath: (raw as NSString).expandingTildeInPath).standardizedFileURL.path
     do {
         let session = try loadTutorSession(path)
-        var answers: [String: TutorAnswer] = [:]
-        if FileManager.default.fileExists(atPath: answersURL(path).path) {
-            answers = try JSONDecoder().decode([String: TutorAnswer].self, from: Data(contentsOf: answersURL(path)))
-        }
+        let sidecar = try readSidecar(path)
+        let answers = sidecar.answers
         print("session: \(session.title)")
         print("replyTo: \(session.replyTo ?? "-")")
+        print("agent: \(session.agent?.session ?? "-") (\(session.usesAgent ? "answers go to the headless tutor" : "answers go to replyTo via claude-say"))")
+        print("thread: \(sidecar.messages.count) learner messages, \((session.notes ?? []).count) tutor notes")
         print("answers: \(answersURL(path).path)")
         print("answered: \(session.rungs.filter { answers[$0.id] != nil }.map(\.id).joined(separator: ", "))")
         if let rung = currentRung(session, answers) {
@@ -1761,7 +2210,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         openTutor(path, from: NSApp.keyWindow)
     }
 
+    @objc func sendTutor(_ sender: Any?) {
+        tutor?.sendFocused()
+    }
+
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(sendTutor) {
+            return tutor?.window.isKeyWindow == true
+        }
         guard menuItem.action == #selector(pickConfidence) else { return true }
         return tutor?.window.isKeyWindow == true && tutor?.currentRungID != nil
     }
@@ -1888,6 +2344,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         tutorSessionsMenu.delegate = self
         tutorMenu.addItem(withTitle: "Sessions", action: nil, keyEquivalent: "").submenu = tutorSessionsMenu
         tutorMenu.addItem(.separator())
+        let sendItem = NSMenuItem(title: "Send", action: #selector(sendTutor), keyEquivalent: "\r")
+        sendItem.keyEquivalentModifierMask = [.command]
+        sendItem.target = self
+        tutorMenu.addItem(sendItem)
+        tutorMenu.addItem(.separator())
         for (i, level) in confidenceLevels.enumerated() {
             let item = NSMenuItem(title: level.1, action: #selector(pickConfidence), keyEquivalent: "\(i + 1)")
             item.keyEquivalentModifierMask = [.control]
@@ -1943,6 +2404,13 @@ final class SnapshotDelegate: NSObject, NSApplicationDelegate {
 }
 
 var arguments = Array(CommandLine.arguments.dropFirst())
+if let flag = arguments.firstIndex(of: "--tutor-ask") {
+    guard flag + 2 < arguments.count else {
+        FileHandle.standardError.write("usage: Show --tutor-ask <session.json> <message>\n".data(using: .utf8)!)
+        exit(64)
+    }
+    exit(tutorAsk(arguments[flag + 1], arguments[flag + 2]))
+}
 if let flag = arguments.firstIndex(of: "--tutor-check") {
     guard flag + 1 < arguments.count else {
         FileHandle.standardError.write("usage: Show --tutor-check <session.json>\n".data(using: .utf8)!)
