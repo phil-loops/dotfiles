@@ -110,7 +110,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         window.contentViewController = shell
         window.setContentSize(NSSize(width: 1180, height: 780))
         window.contentMinSize = NSSize(width: 45 + 200 + TutorController.margin + TutorController.column + 48, height: 480)
-        if snapshotPath == nil {
+        if snapshotPath == nil && selfTest == nil {
             window.center()
             window.setFrameAutosaveName("show.window")
         }
@@ -132,6 +132,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             return
         }
         installMenus()
+        if let selfTest {
+            exit(runSelfTest(selfTest))
+        }
         window.makeKeyAndOrderFront(nil)
         workspaces[active]?.restoreFocus(in: window)
         NSApp.activate(ignoringOtherApps: true)
@@ -185,7 +188,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         NSApp.terminate(nil)
     }
 
-    private func saveAll() {
+    func saveAll() {
         workspaces.values.forEach { $0.saveState() }
         prefs.set(active.rawValue, forKey: "workspace.active")
     }
@@ -213,7 +216,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         let workspace = Workspace.route(path).workspace
         switchTo(workspace)
         workspaces[workspace]?.open(path)
-        if snapshotPath == nil {
+        if snapshotPath == nil && selfTest == nil {
             window.makeKeyAndOrderFront(nil)
         }
     }
@@ -305,7 +308,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         guard menuItem.action == #selector(runBinding), let id = menuItem.representedObject as? String, let binding = KeyTable.binding(id) else { return true }
-        return isEnabled(binding)
+        let enabled = isEnabled(binding)
+        let reason = enabled ? nil : binding.reason(self)
+        menuItem.title = binding.title + (reason.map { " — \($0)" } ?? "")
+        return enabled
     }
 
     @objc func openOther(_ sender: Any?) {

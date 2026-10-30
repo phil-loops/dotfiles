@@ -43,6 +43,10 @@ if let flag = arguments.firstIndex(of: "--check-routing") {
     }
     exit(checkRouting(arguments[flag + 1]))
 }
+if let flag = arguments.firstIndex(of: "--appearance"), flag + 1 < arguments.count {
+    setenv("SHOW_SNAPSHOT_APPEARANCE", arguments[flag + 1], 1)
+    arguments.removeSubrange(flag...(flag + 1))
+}
 var snapshotPath: String?
 if let flag = arguments.firstIndex(of: "--snapshot"), flag + 1 < arguments.count {
     snapshotPath = arguments[flag + 1]
@@ -52,7 +56,12 @@ let deckPaths = arguments.filter { !$0.hasPrefix("-") }.map { ($0 as NSString).e
 
 let app = NSApplication.shared
 let delegate: NSApplicationDelegate
-if let snapshotPath {
+if let mode = SelfTestMode(arguments) {
+    selfTest = mode
+    prepareSelfTest(mode)
+    app.setActivationPolicy(.prohibited)
+    delegate = AppDelegate(launchPaths: [])
+} else if let snapshotPath {
     guard !deckPaths.isEmpty else {
         FileHandle.standardError.write("usage: Show <file.json>… --snapshot out.png\n".data(using: .utf8)!)
         exit(64)
