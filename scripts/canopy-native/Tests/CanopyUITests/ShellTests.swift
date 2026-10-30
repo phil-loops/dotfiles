@@ -229,6 +229,33 @@ import Testing
         #expect(a.keys.mode == .normal && a.insertField == nil)
     }
 
+    /// ↵ follows the field: a newline in a many-line box (only ⌃↵ sends there), finishing in a
+    /// one-line field; ⌃↵ sends in both; ⌥↵ is always the field's.
+    @Test func retDependsOnTheFieldCtrlRetAlwaysSends() {
+        let a = app()
+        var sent = 0
+        a.registry.register(Command(id: "test.send", title: "Send it", scope: .global, verb: .send, modes: [.insert],
+                                    local: { _, _ in sent += 1 }))
+        a.beginInsert("box", lines: .multi)
+        #expect(a.keys.fieldLines == .multi)
+        #expect(!a.keys.handle("ret"), "↵ goes to the box: a new line")
+        #expect(sent == 0 && a.keys.mode == .insert && a.insertField == "box")
+        #expect(!a.keys.handle("A-ret"), "⌥↵ is the field's newline")
+        #expect(a.keys.handle("C-ret"))
+        #expect(sent == 1)
+        a.keys.handle("esc")
+        #expect(a.keys.mode == .normal && a.keys.fieldLines == .single, "the kind ends with insert")
+
+        a.beginInsert("line")
+        #expect(a.keys.fieldLines == .single)
+        #expect(a.keys.handle("ret"), "↵ finishes a one-line field")
+        #expect(sent == 2)
+        #expect(a.keys.handle("C-ret"))
+        #expect(sent == 3)
+        #expect(!a.keys.handle("A-ret"))
+        #expect(Verb.send.spec.meaning.contains("⌃↵ always"))
+    }
+
     @Test func menuIsALayerWithItsOwnKeys() {
         let a = app()
         a.keys.handle("space"); a.keys.handle("?")

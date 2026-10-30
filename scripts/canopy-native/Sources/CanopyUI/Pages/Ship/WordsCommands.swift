@@ -41,6 +41,11 @@ enum WordsRow: Equatable {
         }
     }
 
+    /// The bodies are many-line boxes (↵ a newline, ⌃↵ saves); the rest are one line (↵ saves).
+    var lines: FieldLines {
+        switch self { case .body, .commitBody: .multi; default: .single }
+    }
+
     var sha: String? {
         switch self { case .subject(let s), .commitBody(let s): s; default: nil }
     }
@@ -154,7 +159,7 @@ enum WordsCommands {
                 guard let app, let row, let w = WordsRow(row), let id = branchOf(app, nil) else { return }
                 app.focus(pane: ShipSeam.wordsPane)
                 app.setCursor(row)
-                app.beginInsert(w.field(id))
+                app.beginInsert(w.field(id), lines: w.lines)
             }))
     }
 

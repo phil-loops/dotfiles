@@ -150,8 +150,10 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
         // ⌥↵ is the field's own newline: insert's fixed set leaves it alone
         #expect(a.keys.handle("A-ret") == false)
         ship.setText("r|\(Self.thread)", "  thanks — fixed  ")
-        // ↵ sends (⌃↵ does too): the send verb in insert
-        #expect(a.keys.handle("ret"))
+        // the reply box is many lines: ↵ is its newline, ⌃↵ sends
+        #expect(a.keys.handle("ret") == false)
+        #expect(ship.composer != nil && a.keys.mode == .insert)
+        #expect(a.keys.handle("C-ret"))
         #expect(a.keys.mode == .normal)
         #expect(ship.composer == nil)
         #expect(a.store.view(Draft.self, Self.branch)?.items.first?.body == "thanks — fixed")   // the optimistic overlay

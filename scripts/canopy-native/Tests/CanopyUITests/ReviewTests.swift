@@ -424,6 +424,9 @@ import Testing
             Issue.record("no comment box: \(String(describing: ShipState.of(a).composer))"); return
         }
         #expect(path == "a.ts" && side == .right && line == 3 && start == 2)
+        #expect(a.keys.mode == .insert && a.keys.fieldLines == .multi, "the comment box is many lines")
+        #expect(!a.keys.handle("ret"), "↵ is a newline in the box, never a send")
+        #expect(ShipState.of(a).composer != nil && a.keys.mode == .insert)
         #expect(ReviewDocument.segments(pg, a, CanvasColors(.dark)).contains { $0.key.contains("R:3") })
         keys(a, "esc", "esc")     // out of insert, then the box
         #expect(ShipState.of(a).composer == nil, "esc closes Ship's box")

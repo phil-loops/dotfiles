@@ -12,7 +12,9 @@ import Observation
 ///     review.back, wiki.back, …).
 ///
 /// In text-entry modes (insert, command, menu, picker) a key nobody bound in that mode returns
-/// false, and the caller hands it to the focused text field. The UI layer turns NSEvents into key
+/// false, and the caller hands it to the focused text field. Insert routes `↵` by the field's kind
+/// (`fieldLines`): it finishes a one-line field, and in a many-line box it's the box's own newline —
+/// there only `⌃↵` sends, so sending is always deliberate where the frequent act is a new line. The UI layer turns NSEvents into key
 /// names (`KeyName`); everything else is here, so it's testable without a window.
 @MainActor
 @Observable
@@ -21,6 +23,8 @@ public final class KeyEngine {
     public private(set) var layer: KeyMode?
     /// The half-typed prefix ("space", "g") which-key and the statusline show; "" when none.
     public private(set) var pendingKeys = ""
+    /// The kind of field insert mode is typing into; back to `.single` whenever insert ends.
+    public var fieldLines: FieldLines = .single
 
     /// Mode or layer changed (from, to): the shell resigns a text field on leaving insert, drops
     /// the selection anchor on leaving select, closes the picker's state with its layer.
@@ -52,6 +56,7 @@ public final class KeyEngine {
     public func setMode(_ m: KeyMode) {
         guard m != mode else { return }
         let from = active
+        if mode == .insert { fieldLines = .single }
         mode = m
         keymap.reset()
         pendingKeys = ""
@@ -114,6 +119,10 @@ public final class KeyEngine {
     @discardableResult
     public func handle(_ key: String) -> Bool {
         if key == "esc" { return backOut() }
+        if key == "ret", active == .insert, fieldLines == .multi {
+            reset()
+            return false
+        }
         return feed(key)
     }
 
@@ -193,6 +202,11 @@ public final class KeyEngine {
     }
 
     private static func text(_ c: Command) -> String { "\(c.id) \(c.title)" }
+}
+
+/// What a text field holds: one line (`↵` finishes it) or many (`↵` is a newline; `⌃↵` sends).
+public enum FieldLines: Sendable, Equatable {
+    case single, multi
 }
 
 /// One which-key line: the key after the prefix, the verb it is (nil under the leader), the page's title.

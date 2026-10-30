@@ -11,7 +11,7 @@
 1. **Nav** — `f`, `g …`, `space …`, h/l, J/K, C-o/C-i, `:`, `/`, `?`, esc, and the review moves (`]`/`[`, `}`/`{`, `n`/`N`). Owned by the nav core and the same on every page. A page may *implement* a nav verb on its own things (Review's `next-sibling`, the map's `next`), never rebind one.
 2. **Shared verbs** — bare letters (and C-k/C-j, the digits). A page implements the ones that fit; it never invents one. A new shared verb is a change to the table, by coordination.
 3. **The page leader `,`** — an action with no general verb is the page's own: `, <key>`. The leader's namespace is per page (a surface and all its scopes), so it can't collide with another page's or a future global. Pick its keys mnemonically; a chord is fine (`, b p`). `,` alone opens which-key titled "this page's keys".
-4. **Insert** — a fixed set: `esc` stops writing, `↵` / `⌃↵` sends or finishes what's typed, `⌥↵` is a newline (the field does it). Everything else goes to the field. No page adds to it; a page action wanted mid-typing is esc, then its key.
+4. **Insert** — a fixed set: `esc` stops writing, `⌃↵` always sends or finishes what's typed, `⌥↵` is a newline (the field does it). Plain `↵` depends on the field: it finishes a one-line field (`:`, the menu, a picker, a filter, a description, a subject) and is a newline in a many-line box (a comment, a PR or commit body) — where the frequent act is a new line, sending must be deliberate. A field declares its kind (`app.beginInsert(id, lines: .multi)`) and the engine routes `↵` by it; no page decides per key. Everything else goes to the field. No page adds to it; a page action wanted mid-typing is esc, then its key.
 
 **The verbs** (keys are the defaults; keys.toml moves them)
 
@@ -63,8 +63,8 @@
 | move-up / move-down | `C-k` / `C-j` | move it up / down its hand-ordered list |
 | nth-1 … nth-9 | `1` … `9` | the Nth one shown: a tab, a choice |
 | *insert* | | |
-| send | `↵` `⌃↵` (normal mode: `⌃↵`) | send or finish what's typed |
-| newline | `⌥↵` | a new line in what's typed (the field's own; nothing may bind it) |
+| send | `⌃↵` always; `↵` in a one-line field (normal mode: `⌃↵`) | send or finish what's typed |
+| newline | `⌥↵`; `↵` in a many-line box | a new line in what's typed (the field's own; nothing may bind it) |
 
 **Each page's leader keys**
 

@@ -60,7 +60,7 @@ public enum VerbTier: String, Sendable {
     case nav
     /// bare letters (and a few chords) pages implement on their own things
     case shared
-    /// while typing: esc stops, ⌃↵ sends, ⌥↵ is a newline — nothing else
+    /// while typing: esc stops, ⌃↵ sends (↵ too in a one-line field), ⌥↵ is a newline — nothing else
     case insert
 }
 
@@ -171,8 +171,8 @@ public enum Verbs {
         v(.nth6, .shared, ["6"], "the 6th one shown"), v(.nth7, .shared, ["7"], "the 7th one shown"), v(.nth8, .shared, ["8"], "the 8th one shown"),
         v(.nth9, .shared, ["9"], "the 9th one shown"),
 
-        v(.send, .insert, ["C-ret"], entry: ["ret", "C-ret"], "send or finish what's typed"),
-        v(.newline, .insert, [], entry: ["A-ret"], native: true, "a new line in what's typed"),
+        v(.send, .insert, ["C-ret"], entry: ["ret", "C-ret"], "send or finish what's typed: ⌃↵ always; ↵ only in a one-line field"),
+        v(.newline, .insert, [], entry: ["A-ret"], native: true, "a new line in what's typed (↵ too, in a many-line box)"),
     ]
 
     public static let byVerb: [Verb: VerbSpec] = Dictionary(table.map { ($0.verb, $0) }, uniquingKeysWith: { a, _ in a })

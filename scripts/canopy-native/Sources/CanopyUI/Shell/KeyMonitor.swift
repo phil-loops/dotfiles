@@ -30,8 +30,13 @@ final class KeyMonitor {
     /// true: the key was the engine's, swallow it.
     private func key(_ e: NSEvent, _ app: AppModel) -> Bool {
         let mods = e.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        let editing = (e.window?.firstResponder as? NSTextView)?.isEditable == true
-        if editing && !app.keys.textEntry { app.keys.setMode(.insert) }
+        let field = e.window?.firstResponder as? NSTextView
+        let editing = field?.isEditable == true
+        if editing && !app.keys.textEntry {
+            app.keys.setMode(.insert)
+            // clicked into: a field editor is a one-line field, a bare text view a many-line box
+            app.keys.fieldLines = field?.isFieldEditor == true ? .single : .multi
+        }
         guard let name = KeyName.name(keyCode: e.keyCode, characters: e.characters, charactersIgnoringModifiers: e.charactersIgnoringModifiers,
                                       ctrl: mods.contains(.control), meta: mods.contains(.command), alt: mods.contains(.option))
         else { return false }
