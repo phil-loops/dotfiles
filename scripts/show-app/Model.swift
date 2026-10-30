@@ -8,6 +8,7 @@ struct Deck: Decodable {
     let status: LiveStatus?
     let project: String?
     let repo: String?
+    let runDir: String?
     let sections: [Section]
 
     /// A live deck is watched, not judged: no sign-off bar, no sign-off file, no sign-off marks.
@@ -17,13 +18,17 @@ struct Deck: Decodable {
 
 struct Section: Decodable {
     let id: String?
-    let group: String
+    @MissingIsEmpty var group: String
     let title: String
     let tag: String?
     let body: String?
     let url: String?
     let rank: Int?
     let parent: String?
+    let status: String?
+    let compare: Compare?
+    let tables: [DataTable]?
+    let source: SourceText?
 
     var key: String { id ?? title }
 }
