@@ -23,8 +23,6 @@ struct KeyBinding {
     /// False for a second key to an action already listed (its `also` names it): it routes, but gets no menu item or sheet row.
     var listed = true
     var isEnabled: (AppDelegate) -> Bool = { _ in true }
-    /// Why it's off right now, shown after its menu title; nil when there's nothing to explain.
-    var reason: (AppDelegate) -> String? = { _ in nil }
     let perform: (AppDelegate) -> Void
 
     /// Bare keys (Shift aside) go through the router, since a menu only fires keys that carry ⌘, ⌃ or ⌥.
@@ -99,8 +97,9 @@ enum KeyTable {
     static let core: [KeyBinding] = [
         KeyBinding(id: "library.find", menu: "Library", title: "Find…", key: "o", modifiers: .command, also: "/", overOverlay: true) { $0.showFinder(nil) },
         KeyBinding(id: "library.find-slash", menu: "Library", title: "Find…", key: "/", when: .notTyping, listed: false) { $0.showFinder(nil) },
-        KeyBinding(id: "library.new", menu: "Library", title: "New…", key: "n", modifiers: .command, workspaces: [.forest, .review, .runs],
-                   isEnabled: { NewRequest.unavailable($0.active) == nil }, reason: { NewRequest.unavailable($0.active) }) { $0.showNewPrompt() },
+        KeyBinding(id: "library.new", menu: "Library", title: "New…", key: "n", modifiers: .command, workspaces: [.forest, .review]) { $0.showNewPrompt() },
+        KeyBinding(id: "library.new-runs", menu: "Library", title: "New… (off: runs start from their own scripts)", key: "n", modifiers: .command, workspaces: [.runs],
+                   isEnabled: { _ in false }) { _ in },
         KeyBinding(id: "library.open-file", menu: "Library", title: "Open File…", key: "o", modifiers: [.command, .option]) { $0.openOther(nil) },
         KeyBinding(id: "library.back", menu: "Library", title: "Back", key: "[", modifiers: .command,
                    isEnabled: { $0.workspaces[$0.active]?.back.isEmpty == false }) { $0.goBack(nil) },
@@ -485,7 +484,7 @@ final class KeySheetOverlay: NSView {
         title.font = .systemFont(ofSize: 17, weight: .semibold)
         let hint = NSTextField(labelWithString: "? or ⎋ closes")
         hint.font = .systemFont(ofSize: 11)
-        hint.textColor = .tertiaryLabelColor
+        hint.textColor = .secondaryLabelColor
         let left = Self.column(groups.filter { $0.workspace == nil }, active: active)
         let right = Self.column(groups.filter { $0.workspace != nil }, active: active)
         for view in [panel, title, hint, left, right] {

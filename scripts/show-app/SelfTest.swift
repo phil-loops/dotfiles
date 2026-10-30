@@ -275,7 +275,7 @@ final class SelfTestDriver {
         command("4", code: 21)
         command("n", code: 45)
         check("⌘N in Runs opens nothing", app.shell.overlay == nil)
-        check("…and its menu item is off, with the reason", !app.isEnabled(KeyTable.binding("library.new")!))
+        check("…and its menu item is off, with the reason", !app.isEnabled(KeyTable.binding("library.new-runs")!) && !app.isEnabled(KeyTable.binding("library.new")!))
 
         let runEight = canonicalPath((scratch as NSString).appendingPathComponent("runs/run-8.json"))
         check("the Runs shelf lists live-runs.json", front.entries.contains { $0.path == runEight && $0.state == .waiting })
