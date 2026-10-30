@@ -1,26 +1,26 @@
 #!/usr/bin/env bash
 # show [<file.json>…] — open files in the one Show window, each in its workspace (Forest ⌘1, Review ⌘2, Learn ⌘3, Runs ⌘4;
-# no args: the newest deck in ~/.dotfiles/show), rebuilding it when Show.swift changes. Re-showing an open file reloads it.
+# no args: the newest deck in ~/.dotfiles/show), rebuilding it when any show-app/*.swift changes. Re-showing an open file reloads it.
 # show --build — just (re)build. show --snapshot <file.json> <out.png> — render the window offscreen, no window shown.
 # show --check-routing <file.json> — print the workspace a file opens in (and a forest's merge order).
 # show --tutor [<session.json>] — open the Tutor space on a session (no file: the newest in ~/.dotfiles/show/tutor). show --tutor-check <session.json> — print what it would show.
-# Deck format: ~/.dotfiles/.claude/skills/show/SKILL.md. Source: show-app/Show.swift. Sign-offs land in <deck>.signoff.json.
+# Deck format: ~/.dotfiles/.claude/skills/show/SKILL.md. Source: show-app/*.swift (one file per area; main.swift holds the entry point). Sign-offs land in <deck>.signoff.json.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-src="$here/show-app/Show.swift"
+srcs=("$here"/show-app/*.swift)
 cache="${XDG_CACHE_HOME:-$HOME/.cache}/show"
 app="$cache/Show.app"
 stamp="$cache/source.sha"
 
 build() {
   local sha
-  sha="$(shasum -a 256 "$src" | cut -d' ' -f1)"
+  sha="$(cd "$here" && shasum -a 256 show-app/*.swift | shasum -a 256 | cut -d' ' -f1)"
   if [[ -x "$app/Contents/MacOS/Show" && -f "$stamp" && "$(cat "$stamp")" == "$sha" ]]; then
     return
   fi
   mkdir -p "$app/Contents/MacOS"
-  swiftc -O -swift-version 5 -target arm64-apple-macos14 -framework AppKit -framework WebKit "$src" -o "$app/Contents/MacOS/Show"
+  swiftc -O -swift-version 5 -target arm64-apple-macos14 -framework AppKit -framework WebKit "${srcs[@]}" -o "$app/Contents/MacOS/Show"
   cat > "$app/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
