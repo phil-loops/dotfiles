@@ -274,20 +274,9 @@ final class TutorState {
         status = ""
     }
 
-    /// The turn's frames, handled here on the main actor: `Transport.streamPost` calls its `on` off
-    /// it, so the stream is pumped through an AsyncStream; it stops at the frame that ends a turn.
+    /// The turn's frames, on the main actor; it stops at the frame that ends a turn.
     private func follow(_ body: [String: String], _ handle: (SSEFrame) -> Bool) async throws {
-        let (frames, cont) = AsyncStream.makeStream(of: SSEFrame.self)
-        let t = transport
-        let pump = Task.detached {
-            defer { cont.finish() }
-            try await t.streamPost("/tutor", body) { f in
-                cont.yield(f)
-                return TutorState.ends(f.event)
-            }
-        }
-        for await f in frames where handle(f) { break }
-        try await pump.value
+        try await transport.streamPost("/tutor", body) { f in handle(f) || TutorState.ends(f.event) }
     }
 
     nonisolated static func ends(_ event: String) -> Bool { event == "done" || event == "error" || event == "gone" }
