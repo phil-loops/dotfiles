@@ -15,7 +15,7 @@ enum WikiArea: PageArea {
         app.addSurface(WikiSurface())
         let r = app.registry
 
-        r.register(Command(id: "wiki.open", title: "Open the wiki page", scope: .article, keys: ["ret"], label: "open",
+        r.register(Command(id: "wiki.open", title: "Open the wiki page", scope: .article, verb: .main, label: "open",
                            available: { slug in wiki.page(slug) != nil },
                            local: { [weak app] slug, _ in
                                guard let app, let slug else { throw Refusal("no such page") }
@@ -28,7 +28,7 @@ enum WikiArea: PageArea {
                                guard let url, let u = URL(string: url), u.scheme == "http" || u.scheme == "https" else { throw Refusal("not a web link") }
                                NSWorkspace.shared.open(u)
                            }))
-        r.register(Command(id: "wiki.back", title: "Back out", scope: .wiki, keys: ["esc"], label: "back", quiet: true,
+        r.register(Command(id: "wiki.back", title: "Back out", scope: .wiki, verb: .cancel, label: "back", quiet: true,
                            local: { [weak app] _, _ in
                                guard let app else { return }
                                if wiki.cite != nil { wiki.closeCite(app) }
