@@ -36,10 +36,14 @@ canopy-native is a Helix-style modal app, not a click UI with shortcuts added on
    wheels may still work, but don't design any UI around them.
 4. **Focus is always visible.** Every list is a pane (`SurfaceProvider.panes`) drawn with `PaneList`, or
    with the same three rules: a focus ring on the focused pane, the cursor row lit, the cursor kept on screen.
-5. **Port v2's Helix keys as they are** (keys.toml ids, `g d`/`g y`/`g I`/`g r`/`space S`, `C-o`/`C-i`, the
-   bindings.ts same-move rule). This port extends v2's grammar app-wide; don't invent a new one.
+5. **Keys belong to verbs; pages implement verbs** (NAV.md "Keys by verb" is binding). A command says
+   `verb: .mark` — "I am mark here" — and gets the verb's keys from the one table (`Keys/Verbs.swift`). An action
+   no verb names goes under the page leader: `leader: LocalKey(",c")`. There is no raw-key path for a page.
+   Implement a verb only when its one-line meaning is what your command does; never invent one (a new verb is
+   a table change, by coordination). Insert mode is a fixed set (esc, ↵/⌃↵ send, ⌥↵ newline): don't bind in it.
 6. **Every area adds a test** that `KeyboardRule.violations(app) { $0.hasPrefix("<yourprefix>.") }` is
-   empty, alongside the app-wide `everyCommandIsReachableByKey` and `keysMeanOneThingEverywhere`.
+   empty, alongside the app-wide `everyCommandIsReachableByKey`, `keysMeanOneThingEverywhere`,
+   `noPageSourceNamesARawKey` and `leaderNamespacesDontOverlapWithinAPage`.
 
 ## 1. Layout
 
@@ -55,7 +59,7 @@ canopy-native/
       Store/               Store (@Observable store.ts), Wire (Snapshot, Patch, LossyTable, checkVersion)
       Models/              Entities.swift (types.ts), LSP.swift (review/types.ts answers)
       Router/              Route (every v2 address), Router (back/forward)
-      Keys/                Registry (Command, Scope, KeyMode, Write), Keymap/KeyName/sheetNow, Bindings, KeyEngine
+      Keys/                Verbs (the verb table, LocalKey), Registry (Command, Scope, KeyMode, Write), Keymap/KeyName/sheetNow, Bindings, KeyEngine
       Runner/              Runner (runner.ts: dispatch, optimistic writes, FIFO, undo), Telemetry
       Support/             JSONValue, OpenString, CodeNav (nav.ts jumplist + picker), pickScore/ranked
     CanopyUI/
@@ -128,7 +132,7 @@ the store, `PaneList`, and `primary` → `find.forest` / `find.branch`.
 ```swift
 app.registry.register(Command(
     id: "todo.up", title: "Move the item up the queue", scope: .item, budget: .configWrite,
-    keys: ["K"],                       // chords are space-separated: "g d", "space S", "C-w l"
+    verb: .moveUp,                     // its keys come from the verb table (C-k); or leader: LocalKey(",s")
     modes: [.normal],                  // default; motion commands also take .select
     label: "up", pair: "todo.down",
     available: { id in id != nil },
@@ -149,8 +153,9 @@ app.registry.register(Command(
   mode to the focused field, so bind only non-printables there (`ret`, `tab`, `up`, `C-n`). KeyboardRule
   enforces this.
 - **Insert mode**: put the field on screen as `ModalTextField("<field id>", text: $draft)` and enter it with
-  a command calling `app.beginInsert("<field id>")` (v2's `review.note.insert`, `tutor.write`,
-  `branch.describe.edit` are "start writing"). Esc leaves insert, and the field loses focus.
+  a `verb: .write` command calling `app.beginInsert("<field id>")`. Esc leaves insert, and the field loses focus.
+  Finishing is a `verb: .send` command with `modes: [.insert]` (↵ or ⌃↵); ⌥↵ is the field's newline. Nothing else
+  binds in insert — two sends live in one scope at once need a narrower scope for one (Review's `filter`).
 - **Select mode**: `v` drops an anchor at the cursor, `j`/`k` extend it, and `app.selection` is the range. Make
   multi-row commands (archive these, hold these) act on `app.selection`, and list `.select` in their modes.
 - **Esc** backs out exactly one level, innermost first: pending chord → layer → mode → your page's own
@@ -158,12 +163,15 @@ app.registry.register(Command(
 - **Your own layer** (a composer, a confirm step): `extension KeyMode { static let confirm: KeyMode = "confirm" }`,
   then `app.keys.openLayer(.confirm)` / `closeLayer()`, and bind its keys with `modes: [.confirm]`. If it
   takes text, add it to `KeyMode.textEntry` in your install.
-- **Shell keys already bound** (don't rebind them to mean something else): `j`/`k`/`down`/`up`, `g g`, `G`, `C-d`/`C-u`,
-  `ret` (`pane.open`), `v`, `:`, `?`, `space ?`, `esc`, `u`, `C-o`/`C-i`, `C-w h/j/k/l/w`, and `g f/s/o/m/i/t`.
-  The nav core adds `f`/`g w` (labels), `C-s`, `g a`, `g 1`–`g 9`, `space b`, `space j`, `space '`, `/` and `M-h/j/k/l` (`A-h`…).
-  Page commands win over global ones in their scope (`review.down` over `cursor.down`). The bindings.ts
-  same-move table (`Bindings.sameMove`) says when two ids sharing a key are the same move. Add your id to
-  its group if it is.
+- **Picking keys** (NAV.md "Keys by verb"): find the verb whose meaning is your command's and pass `verb:`
+  (`.next`, `.into`, `.main`, `.putAway`, `.write`, `.send`, …). A page command implementing a verb wins over the
+  shell's in its scope (`review.down` over `cursor.down`, both `next`). Several verbs at once is `verbs: [.main, .into]`.
+  No verb fits → `leader: LocalKey(",x")`, mnemonic, unique on your page (all its scopes), never a prefix of
+  another of your page's leader keys. The nav tier (`f`, `g …`, `space …`, h/l, J/K, C-o/C-i, `:`, `/`, `?`,
+  esc, `]`/`[`, `}`/`{`, `n`/`N`) is the nav core's: implement those verbs, never claim their keys. A page's
+  own layer (Review's map, its address sheet) binds verbs and leader keys in that mode the same way.
+- **Hints in copy**: say a key through the registry — `app.registry.keyOf("<id>")`, or `verbKey(.mark)` — so
+  keys.toml moves the copy too.
 ### Navigation seams (NAV.md is binding; the shell implements the rest)
 
 - **Labels (`f` / `g w`) come free from `PaneList`**: every visible row is a target, and picking it moves
@@ -175,29 +183,26 @@ app.registry.register(Command(
   `app.visibleTargets()`.
 - **Row text**: override `title(for: row, app)` if the shell's guess (branch/forest name, else the key)
   is poor — `/` searches it.
-- **The jumplist** records every page change and every command in `NavKeys.jumps` on its own (the
+- **The jumplist** records every page change and every command implementing a jump verb on its own (the
   registry sets `recordsJump`); set `recordsJump: true` on any other command that moves somewhere far.
   Code jumps through `app.nav.go(loc)` record too. To put your page back exactly, implement
   `remember(_ place: inout Place, app)` (set `place.tab`, `place.scroll`) and `restore(_ place:, app)`
   (apply them). The shell restores route, pane, cursor and `place.loc` (via `app.nav.open`) first.
-- **Reserved keys**: if you register an id in `NavKeys.reserved`, bind `keys: NavKeys.keys(id)`
-  (`ShellTests`' `reservedNavKeysAreHonored` checks). A (forests): `project.focus` = `F` (`f` is labels),
-  `forest.find`/`forests.find` = `space f`, `forest.branch.next/prev` = `J`/`K`,
-  `forest.parent/child/root/tip` = `g k`/`g j`/`g K`/`g J`. B (review): `review.viewed` = `m` (mark viewed
-  **and advance** to the next unviewed), `review.unviewed` = `M`, never `v` (select everywhere);
-  `review.filter` = `space f` only (`/` is the shell's `page.search`; add `review.search` on `/` for diff text);
-  `review.hunk.next/prev` = `}`/`{`; `review.file.next/prev` = `]`/`[`; `review.thread.next/prev` = `n`/`N`;
-  `review.branch.next/prev` = `J`/`K` (stay on review, same tab, same file if present);
-  `review.parent/child/root/tip` = `g k`/`g j`/`g K`/`g J`. The same-move groups are already in `Bindings.sameMove`.
-  E: `machine.main` must leave `space b` (now the branch picker).
+- **Jump verbs record jumps**: a command implementing `first`/`last`, `next-sibling`/`previous-sibling`,
+  `parent`/`child`/`root`/`tip`, `next-file`/`previous-file` or `next-thread`/`previous-thread` gets
+  `recordsJump` from the verb. `mark` on Review marks viewed **and advances**; `J`/`K` on Review stay on
+  review (same tab, same file if present).
 - **Esc only cancels.** A page change while esc runs is refused (logged); with nothing to cancel, esc says
   "h goes up · C-o goes back". Your `esc` command closes things; `h` climbs.
 - **Pickers**: feed `app.nav.pick(title, items) { index in … }` with `PickItem(label:text:)`; picks that
   navigate record a jump through the router. Wrap a pick that only moves the cursor in `app.jump { … }`.
 
-- **keys.toml** overrides are applied by `registry.applyUserKeys`. They come from the server's bootstrap script,
-  or from `~/.dotfiles/canopy/keys.toml` directly if that fails, and are re-applied whenever the server's asset
-  signature moves (saving keys.toml moves it). Problems and clashes show at the top of the `?` sheet and in the log.
+- **keys.toml** overrides a **verb** by name (`mark = "v"`, `leader = ";"`), applied by `registry.applyUserKeys`
+  to every command implementing it. They come from the server's bootstrap script, or from
+  `~/.dotfiles/canopy/keys.toml` directly if that fails, and are re-applied whenever the server's asset signature
+  moves (saving keys.toml moves it). v2's command-id lines in the same file are read past with a warning
+  (`keyWarnings`, in `--dump` and dim atop `?`). Problems (a key on two verbs, a leader clash) show at the top of
+  the `?` sheet, in `--dump` and in the log.
 
 ## 5. Calling the server
 
