@@ -24,7 +24,7 @@ An optional top-level `"workspace": "forest" | "review" | "learn" | "runs"` over
 - **⌫** on a shelf row archives the document, moving it and its `.signoff.json` / `.answers.json` into `~/.dotfiles/show/archive/`. Nothing is ever deleted.
 - `show <file>` moves the document to the top of its group.
 
-Open documents reload by themselves when their file changes on disk, keeping the selected section, scroll and cursor. When the launcher finishes a new build, the running app saves notes and relaunches into it, each workspace back on its document. So rewriting a deck or editing the Swift source and then running `show --build` is all it takes. A bare `show` opens the newest deck. Sign-offs and notes save to `<deck>.signoff.json` beside the deck, which is how Phil's verdicts come back to you.
+Open documents reload by themselves when their file changes on disk, keeping the selected section, scroll and cursor. When the launcher finishes a new build, the running app saves notes and relaunches into it, each workspace back on its document. So rewriting a deck or editing the Swift source and then running `show --build` is all it takes. A bare `show` brings a running Show to the front as it was; when Show isn't running it starts it back on the last workspace with each workspace's document (the newest document, the very first time). Sign-offs and notes save to `<deck>.signoff.json` beside the deck, which is how Phil's verdicts come back to you.
 
 - Launcher: `~/.dotfiles/scripts/show` (on PATH). Source: `~/.dotfiles/scripts/show-app/*.swift`. It compiles every file there into `~/.cache/show/Show.app` whenever any of their hashes changes (`show --build` to just build).
 
