@@ -203,7 +203,7 @@ public final class CommandRegistry {
     public func register(_ c: Command) {
         precondition(byID[c.id] == nil, "command \(c.id) registered twice")
         var c = c
-        if NavKeys.jumps.contains(c.id) || c.verbs.contains(where: { $0.spec.jump }) { c.recordsJump = true }
+        if c.verbs.contains(where: { $0.spec.jump }) { c.recordsJump = true }
         resolve(&c)
         byID[c.id] = c
         order.append(c.id)
