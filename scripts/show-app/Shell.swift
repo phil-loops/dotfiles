@@ -388,10 +388,26 @@ final class ShellController: NSViewController {
     }
 
     private(set) var finder: FinderOverlay?
+    /// The key sheet or the New… prompt, whichever covers the window; the finder keeps its own slot.
+    private(set) var overlay: NSView?
+    var focusOutline: FocusOutline?
+
+    func showOverlay(_ cover: NSView) {
+        hideOverlay()
+        hideFinder()
+        pinned(cover, in: view)
+        overlay = cover
+    }
+
+    func hideOverlay() {
+        overlay?.removeFromSuperview()
+        overlay = nil
+    }
 
     /// Lays the finder over the whole window, searching only `entries`.
     func showFinder(entries: [ShelfEntry], onPick: @escaping (ShelfEntry) -> Void) {
         hideFinder()
+        hideOverlay()
         let overlay = FinderOverlay(entries: entries, workspace: active)
         overlay.onPick = { [weak self] entry in
             self?.hideFinder()
@@ -933,10 +949,19 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
         case .header: return false
         case .entry: return true
         case .fold:
+            guard NSApp.currentEvent?.type == .leftMouseDown else { return true }
             doneExpanded.toggle()
             onLibraryChange?()
             return false
         }
+    }
+
+    /// ↵ on the shelf: unfolds or folds Done on the fold row (true), otherwise leaves the selected document open (false).
+    func activateSelectedShelfRow() -> Bool {
+        guard shelf.selectedRow >= 0, shelf.selectedRow < rows.count, case .fold = rows[shelf.selectedRow] else { return false }
+        doneExpanded.toggle()
+        onLibraryChange?()
+        return true
     }
 
     func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
@@ -1062,7 +1087,7 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
     }
 
     private func showHint() {
-        statusLabel.stringValue = "⌘O find · ⌘[ back · ⌫ archive"
+        statusLabel.stringValue = "⌘O find · ⌫ archive · ? keys"
         statusLabel.textColor = .tertiaryLabelColor
     }
 
