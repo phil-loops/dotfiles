@@ -204,8 +204,8 @@ public struct PendingView: View {
     }
 }
 
-/// The comment box, written in insert mode: ⌃↵ sends to the pending review (or hands a commit's
-/// note to Claude), ⌥↵ saves a draft, ⌃G inserts a suggestion, esc stops writing.
+/// The comment box, written in insert mode: ↵ / ⌃↵ sends to the pending review (or hands a commit's
+/// note to Claude), ⌥↵ is a newline, esc stops writing; then `, d` saves a draft, `, S` inserts a suggestion.
 public struct ComposerView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme

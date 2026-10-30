@@ -248,7 +248,7 @@ struct DirtDiff: View {
 }
 
 /// Every gate of the run as a step with its time, and the output of the one running (or the one
-/// `space g` picked) — read from the run's journal on the server, so a relaunch picks it up mid-run.
+/// `, g` picked) — read from the run's journal on the server, so a relaunch picks it up mid-run.
 struct GatesStrip: View {
     @Environment(\.theme) private var theme
     let branchID: String

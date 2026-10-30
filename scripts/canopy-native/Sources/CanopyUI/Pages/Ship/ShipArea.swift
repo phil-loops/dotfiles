@@ -29,7 +29,7 @@ enum InsertCommands {
         weak let weakApp = app
         app.registry.register(Command(
             id: "words.submit", title: "Save what you're writing — the words, or the description", scope: .words,
-            keys: ["C-ret"], modes: [.normal, .insert], label: "save", quiet: true,
+            verb: .send, modes: [.normal, .insert], label: "save", quiet: true,
             local: { _, _ in
                 guard let app = weakApp, let id = WordsCommands.branchOf(app, nil) else { return }
                 let describing = app.insertField?.hasPrefix("words.desc|") == true

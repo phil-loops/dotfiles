@@ -4,10 +4,10 @@ import Foundation
 
 // commands/review.ts, the ship half: the push key, the words and history, GitHub's review verbs
 // (comment on a line or a range, reply, apply a suggestion, address a thread) with GitHub's keys
-// where it has them (r reply, c comment, ⌃G a suggestion) and Helix's otherwise. What Phil writes
+// where they're verbs (r reply, c comment) and the review page's leader otherwise. What Phil writes
 // lands in the ledger (srv/reviewdesk.py) and, on his keypress, in his PENDING review on GitHub —
 // submitting it, and resolving, happen on GitHub, which `g h` opens. Text is typed in insert mode:
-// ⌃↵ sends, ⌥↵ saves a draft, ⌃G inserts a suggestion, esc stops typing (the words stay).
+// ↵ / ⌃↵ sends, ⌥↵ is a newline, esc stops typing (the words stay); `, d` drafts, `, S` suggests.
 
 @MainActor
 enum ReviewCommands {
@@ -38,11 +38,11 @@ enum ReviewCommands {
 
         r.register(Command(
             id: "review.push", title: "Push to origin — a first push or follow-ups onto the PR (press twice)", scope: .review,
-            keys: ["p"], label: "push",
+            verb: .push, label: "push",
             available: { id in pushRoute(weakApp, id) != nil },
             route: { id in pushRoute(weakApp, id).map { RouteTo($0, target: id) } }))
         r.register(Command(
-            id: "review.words", title: "Edit what lands on main: the PR's title and why", scope: .review, keys: ["e"], label: "words",
+            id: "review.words", title: "Edit what lands on main: the PR's title and why", scope: .review, verb: .words, label: "words",
             available: { _ in !integration() },
             local: { id, _ in
                 guard let app = weakApp, let id = id ?? page() else { return }
@@ -55,7 +55,7 @@ enum ReviewCommands {
                 app.setCursor(words.shown[id].map { WordsState.githubOwns($0.pr) } == false ? "w|title" : "w|desc")
             }))
         r.register(Command(
-            id: "review.history", title: "Step through the commits one at a time", scope: .review, keys: ["space h"], label: "commits",
+            id: "review.history", title: "Step through the commits one at a time", scope: .review, leader: LocalKey(",h"), label: "commits",
             local: { id, _ in
                 guard let app = weakApp, let id = id ?? page() else { return }
                 ship.host.tab = "commits"
@@ -74,9 +74,9 @@ enum ReviewCommands {
             let sha = app.selected.flatMap { $0.hasPrefix("h|") ? String($0.dropFirst(2)) : nil }
             ship.showCommit(sha?.isEmpty == false ? sha : nil)
         }
-        r.register(Command(id: "history.next", title: "Next commit", scope: .history, keys: ["j", "down"], modes: [.normal, .select],
+        r.register(Command(id: "history.next", title: "Next commit", scope: .history, verb: .next, modes: [.normal, .select],
                            label: "commit", pair: "history.prev", quiet: true, local: { _, _ in stepHistory(1) }))
-        r.register(Command(id: "history.prev", title: "Previous commit", scope: .history, keys: ["k", "up"], modes: [.normal, .select],
+        r.register(Command(id: "history.prev", title: "Previous commit", scope: .history, verb: .previous, modes: [.normal, .select],
                            label: "commit", quiet: true, local: { _, _ in stepHistory(-1) }))
         r.register(Command(
             id: "history.select", title: "Show one commit's diff", scope: .review, needsArg: true, quiet: true,
@@ -94,11 +94,11 @@ enum ReviewCommands {
             ship.historyFocus = .diff
             ship.host.focusDiff(app, true)
         }
-        r.register(Command(id: "history.enter", title: "Read the commit's diff", scope: .history, keys: ["l", "right"], label: "read",
+        r.register(Command(id: "history.enter", title: "Read the commit's diff", scope: .history, verb: .into, label: "read",
                            available: { _ in ship.commitScope != nil }, local: enterDiff))
-        r.register(Command(id: "history.open", title: "Open the commit's diff", scope: .history, keys: ["ret"], label: "read", quiet: true,
+        r.register(Command(id: "history.open", title: "Open the commit's diff", scope: .history, verb: .main, label: "read", quiet: true,
                            available: { _ in ship.commitScope != nil }, local: enterDiff))
-        r.register(Command(id: "history.exit", title: "Go back to what lands on main", scope: .history, keys: ["esc"], label: "back",
+        r.register(Command(id: "history.exit", title: "Go back to what lands on main", scope: .history, verb: .cancel, label: "back",
                            local: { _, _ in
                                ship.showCommit(nil)
                                weakApp?.setCursor("h|")
@@ -108,8 +108,8 @@ enum ReviewCommands {
             ship.historyFocus = .list
             ship.host.focusDiff(app, false)
         }
-        r.register(Command(id: "commit.back", title: "Go back to the commit list", scope: .commit, keys: ["h", "left"], label: "list", local: backToList))
-        r.register(Command(id: "commit.exit", title: "Go back to the commit list", scope: .commit, keys: ["esc"], label: "list", local: backToList))
+        r.register(Command(id: "commit.back", title: "Go back to the commit list", scope: .commit, verb: .out, label: "list", local: backToList))
+        r.register(Command(id: "commit.exit", title: "Go back to the commit list", scope: .commit, verb: .cancel, label: "list", local: backToList))
 
         // ── address: the commit that fixes a thread (wiki canopy-v2-address) ──
 
@@ -119,7 +119,7 @@ enum ReviewCommands {
             if weakApp?.keys.layer == .address { weakApp?.keys.closeLayer() }
         }
         r.register(Command(
-            id: "review.address", title: "Address it — hand it to Claude, fix it yourself, or pick its commit", scope: .thread, keys: ["E"], label: "address",
+            id: "review.address", title: "Address it — hand it to Claude, fix it yourself, or pick its commit", scope: .thread, leader: LocalKey(",a"), label: "address",
             available: { id in thread(id).map { !$0.outdated && !$0.resolved } == true },
             local: { id, _ in
                 guard let app = weakApp, let id else { return }
@@ -131,7 +131,7 @@ enum ReviewCommands {
         let inSheet: (String?) -> Bool = { _ in weakApp?.keys.layer == .address && ship.addressing != nil }
         r.register(Command(
             id: "review.address.claude", title: "Hand the thread to Claude to fix", scope: .review, budget: .slowIO,
-            keys: ["ret", "c"], modes: [.address], label: "claude", available: inSheet,
+            verb: .main, modes: [.address], label: "claude", available: inSheet,
             write: { _, _ in
                 guard let t = addressed() else { return nil }
                 closeAddress()
@@ -141,16 +141,16 @@ enum ReviewCommands {
             }))
         r.register(Command(
             id: "review.address.helix", title: "Fix the thread yourself in Helix", scope: .review, budget: .slowIO,
-            keys: ["o"], modes: [.address], label: "helix", available: inSheet,
+            verb: .editor, modes: [.address], label: "helix", available: inSheet,
             write: { _, _ in
                 guard let t = addressed() else { return nil }
                 closeAddress()
                 return Write(path: repoPath("/open"), body: ["branch": .string(name()), "path": .string(t.path), "line": t.local.map { .number(Double($0.line)) } ?? .null],
-                             settled: { true }, said: "fix, commit, then \(weakApp?.registry.keyOf("review.address") ?? "E") to pick it", failed: "couldn't open it in Helix")
+                             settled: { true }, said: "fix, commit, then \(weakApp?.registry.keyOf("review.address") ?? ", a") to pick it", failed: "couldn't open it in Helix")
             }))
         r.register(Command(
             id: "review.address.pick.list", title: "List the commits that could fix the thread", scope: .review,
-            keys: ["p"], modes: [.address], label: "pick", available: inSheet,
+            leader: LocalKey(",l"), modes: [.address], label: "pick", available: inSheet,
             local: { _, _ in
                 guard let app = weakApp, let id = page() else { return }
                 ship.addressPicking.toggle()
@@ -169,7 +169,7 @@ enum ReviewCommands {
             }))
         for n in 1...9 {
             r.register(Command(
-                id: "review.address.pick.\(n)", title: "Pick commit \(n) as the thread's fix", scope: .review, keys: ["\(n)"], modes: [.address], quiet: true,
+                id: "review.address.pick.\(n)", title: "Pick commit \(n) as the thread's fix", scope: .review, verb: .nth(n), modes: [.address], quiet: true,
                 available: { t in inSheet(t) && ship.addressPicking && addressCandidates(weakApp).count >= n },
                 route: { t in
                     let c = addressCandidates(weakApp)
@@ -215,7 +215,7 @@ enum ReviewCommands {
             ship.composer = c
             weakApp?.beginInsert(composeField)
         }
-        r.register(Command(id: "review.comment", title: "Comment on the line (or the range x selected)", scope: .line, keys: ["c"], label: "comment",
+        r.register(Command(id: "review.comment", title: "Comment on the line (or the range x selected)", scope: .line, verb: .comment, label: "comment",
                            available: { _ in canNote() }, local: { _, _ in try compose(lineComposer()) }))
         r.register(Command(id: "review.gutter", title: "Comment on this line", scope: .review, needsArg: true, hint: ["click +"], quiet: true,
                            available: { _ in canNote() },
@@ -275,7 +275,7 @@ enum ReviewCommands {
                     ship.composer = c
                 }
             }
-            let undoKey = weakApp?.registry.keyOf("review.pending.remove") ?? "d"
+            let undoKey = weakApp?.registry.keyOf("review.pending.remove") ?? "X"
             let sendKey = weakApp?.registry.keyOf("review.send") ?? "p"
             let ghKey = weakApp?.registry.keyOf("review.finish") ?? "g h"
             _ = d
@@ -297,7 +297,7 @@ enum ReviewCommands {
         let composing: (String?) -> Bool = { _ in ship.composer != nil }
         r.register(Command(
             id: "review.compose.send", title: "Add to your pending review on GitHub (or hand a commit's note to Claude)", scope: .review, budget: .slowIO,
-            keys: ["C-ret"], modes: [.normal, .insert], label: "send", available: composing,
+            verb: .send, modes: [.normal, .insert], label: "send", available: composing,
             write: { _, _ in
                 let w = noting() ? try handNote() : try addItem(true)
                 weakApp?.keys.setMode(.normal)
@@ -305,7 +305,7 @@ enum ReviewCommands {
             }))
         r.register(Command(
             id: "review.compose.draft", title: "Save the comment as a draft (only here)", scope: .review, budget: .configWrite,
-            keys: ["A-ret"], modes: [.normal, .insert], label: "draft",
+            leader: LocalKey(",d"), label: "draft",
             available: { _ in ship.composer != nil && !noting() },
             write: { _, _ in
                 let w = try addItem(false)
@@ -320,11 +320,11 @@ enum ReviewCommands {
                 if weakApp?.insertField == composeField { weakApp?.keys.setMode(.normal) }
             }))
         r.register(Command(
-            id: "review.compose.edit", title: "Go back to writing the comment", scope: .review, keys: ["i"], label: "write",
+            id: "review.compose.edit", title: "Go back to writing the comment", scope: .review, verb: .write, label: "write",
             available: { _ in ship.composer != nil && weakApp?.keys.mode != .insert },
             local: { _, _ in weakApp?.beginInsert(composeField) }))
         r.register(Command(
-            id: "review.compose.suggest", title: "Insert a suggestion", scope: .review, keys: ["C-g"], modes: [.normal, .insert], label: "suggest",
+            id: "review.compose.suggest", title: "Insert a suggestion", scope: .review, leader: LocalKey(",S"), label: "suggest",
             available: { _ in ship.composer != nil && !noting() },
             local: { _, _ in
                 guard let app = weakApp, let c = ship.composer else { return }
@@ -342,7 +342,7 @@ enum ReviewCommands {
         let item = { (key: String?) -> DraftItem? in draft()?.items.first { $0.key == key } }
         let unsent = { (i: DraftItem?) -> Bool in i.map { $0.state == .draft || $0.state == .waiting || $0.state == .gone } ?? false }
         r.register(Command(
-            id: "review.pending.remove", title: "Delete the draft", scope: .pending, budget: .configWrite, keys: ["d"], label: "delete",
+            id: "review.pending.remove", title: "Delete the draft", scope: .pending, budget: .configWrite, verb: .putAway, label: "delete",
             available: { key in unsent(item(key)) },
             write: { key, _ in
                 guard let id = page(), let it = item(key) else { return nil }
@@ -387,14 +387,14 @@ enum ReviewCommands {
                          said: "in your pending review — \(weakApp?.registry.keyOf("review.finish") ?? "g h") opens GitHub to submit it",
                          failed: "kept as a draft, not on GitHub")
         }
-        r.register(Command(id: "review.send", title: "Send the draft to your pending review", scope: .pending, budget: .slowIO, keys: ["p"], label: "send",
+        r.register(Command(id: "review.send", title: "Send the draft to your pending review", scope: .pending, budget: .slowIO, verb: .push, label: "send",
                            available: { key in item(key)?.state == .draft }, write: { key, _ in sendWrite([key]) }))
-        r.register(Command(id: "review.send.all", title: "Send every draft to your pending review", scope: .review, budget: .slowIO, keys: ["space p"], label: "send all",
+        r.register(Command(id: "review.send.all", title: "Send every draft to your pending review", scope: .review, budget: .slowIO, leader: LocalKey(",p"), label: "send all",
                            available: { _ in draft()?.items.contains { $0.state == .draft } == true },
                            write: { _, _ in sendWrite((draft()?.items ?? []).filter { $0.state == .draft }.map(\.key)) }))
 
         r.register(Command(
-            id: "review.reply", title: "Reply", scope: .thread, keys: ["r"], label: "reply",
+            id: "review.reply", title: "Reply", scope: .thread, verb: .reply, label: "reply",
             available: { id in canWrite() && thread(id) != nil },
             local: { id, _ in
                 guard let t = thread(id) else { return }
@@ -406,7 +406,7 @@ enum ReviewCommands {
                 try compose(.reply(key: key, threadID: t.id))
             }))
         r.register(Command(
-            id: "review.note.insert", title: "Reply with the second reader's draft", scope: .thread, keys: ["i"], label: "insert",
+            id: "review.note.insert", title: "Reply with the second reader's draft", scope: .thread, verb: .write, label: "insert",
             available: { id in canWrite() && thread(id)?.note?.draftReply?.isEmpty == false },
             local: { id, _ in
                 guard let t = thread(id), let d = t.note?.draftReply else { return }
@@ -416,10 +416,10 @@ enum ReviewCommands {
                 try compose(.reply(key: key, threadID: t.id))
             }))
         r.register(Command(
-            id: "review.fold", title: "Fold or unfold the conversation", scope: .thread, keys: ["ret"], label: "fold",
+            id: "review.fold", title: "Fold or unfold the conversation", scope: .thread, verb: .main, label: "fold",
             local: { id, _ in if let t = thread(id) { ship.unfold[t.id] = !ship.isOpen(t) } }))
         r.register(Command(
-            id: "review.note.toggle", title: "Open or fold the second reader's note", scope: .thread, keys: ["z"], label: "note",
+            id: "review.note.toggle", title: "Open or fold the second reader's note", scope: .thread, leader: LocalKey(",n"), label: "note",
             available: { id in thread(id)?.note != nil },
             local: { id, _ in
                 guard let id else { return }
@@ -433,11 +433,11 @@ enum ReviewCommands {
                 ship.host.showThread(app, id: t.id)
             }))
         r.register(Command(
-            id: "review.resolve", title: "Resolve on GitHub (opens the conversation there)", scope: .thread, keys: ["R"], label: "resolve",
+            id: "review.resolve", title: "Resolve on GitHub (opens the conversation there)", scope: .thread, leader: LocalKey(",r"), label: "resolve",
             available: { id in thread(id)?.comments.first.map { !$0.url.isEmpty } == true },
             local: { id, _ in if let u = thread(id)?.comments.first.flatMap({ URL(string: $0.url) }) { open(u) } }))
         r.register(Command(
-            id: "review.apply", title: "Apply suggestion (a local commit)", scope: .thread, budget: .gitWrite, keys: ["a"], label: "apply",
+            id: "review.apply", title: "Apply suggestion (a local commit)", scope: .thread, budget: .gitWrite, verb: .apply, label: "apply",
             available: { id in
                 guard let t = thread(id) else { return false }
                 return !t.outdated && t.side == .right && t.local?.addressedBy == nil && t.applying != true
@@ -464,13 +464,13 @@ enum ReviewCommands {
         // ── submitting happens on GitHub ──
 
         r.register(Command(
-            id: "review.finish", title: "Go to GitHub — submit your review, or open the PR once it's pushed", scope: .review, keys: ["g h"], label: "github",
+            id: "review.finish", title: "Go to GitHub — submit your review, or open the PR once it's pushed", scope: .review, verb: .github, label: "github",
             route: { id in
                 if canWrite() { return RouteTo("review.github", target: id) }
                 return weakApp?.forestModel.opensPR(id) == true ? RouteTo("branch.pr", target: id) : nil
             }))
         r.register(Command(
-            id: "review.preview", title: "Preview this branch — a dev server on a side port, opened once it answers", scope: .review, keys: ["g p"], label: "preview",
+            id: "review.preview", title: "Preview this branch — a dev server on a side port, opened once it answers", scope: .review, verb: .preview, label: "preview",
             route: { id in
                 guard let app = weakApp, let id, let b = ShipRows.splitID(id) else { return nil }
                 if let p = Route.integrationOf(b.name), app.store.view(Project.self, "\(b.repo):\(p)") != nil { return RouteTo("forest.preview", target: "\(b.repo):\(p)") }
@@ -482,14 +482,14 @@ enum ReviewCommands {
             local: { _, _ in if let c = conv(), let u = URL(string: "\(c.url)/files") { open(u) } }))
 
         r.register(Command(
-            id: "branch.pr", title: "Go to the PR (the prefilled compare form if there's none yet)", scope: .branch, keys: ["g h"], label: "pr", v1: ["open-pr"],
+            id: "branch.pr", title: "Go to the PR (the prefilled compare form if there's none yet)", scope: .branch, verb: .github, label: "pr", v1: ["open-pr"],
             available: { id in weakApp?.forestModel.opensPR(id) ?? false },
             local: { id, _ in
                 guard let app = weakApp, let id, let b = branch(id) else { return }
                 if let pr = store.view(Pr.self, id), let u = URL(string: pr.url) { open(u) } else if let v = app.forestModel.branchView(b.id) { open(app.forestModel.compareURL(v)) }
             }))
         r.register(Command(
-            id: "branch.preview", title: "Preview it — a dev server on a side port, opened once it answers", scope: .branch, keys: ["g p"], label: "preview",
+            id: "branch.preview", title: "Preview it — a dev server on a side port, opened once it answers", scope: .branch, verb: .preview, label: "preview",
             v1: ["node.preview"],
             available: { id in branch(id) != nil },
             local: { id, _ in
@@ -498,7 +498,7 @@ enum ReviewCommands {
             }))
         r.register(Command(
             id: "forest.preview", title: "Preview the whole forest — every branch merged, on a side port, opened once it answers", scope: .project,
-            keys: ["g p"], label: "preview", v1: ["click:build this project's integration"],
+            verb: .preview, label: "preview", v1: ["click:build this project's integration"],
             available: { pid in
                 guard let pid else { return false }
                 let bs = store.list(Branch.self).filter { $0.project == pid }
@@ -513,7 +513,7 @@ enum ReviewCommands {
 
         r.register(Command(
             id: "review.gates.show", title: "Show the next gate's output in the gates strip (round to the running one)", scope: .review,
-            keys: ["space g"], label: "gate output",
+            leader: LocalKey(",g"), label: "gate output",
             available: { id in !(GatesRun.rows(id.flatMap { ship.progressOf($0) }, now: Date().timeIntervalSince1970).isEmpty) },
             local: { id, arg in
                 guard let id else { return }
