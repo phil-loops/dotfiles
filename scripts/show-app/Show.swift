@@ -241,7 +241,7 @@ let buildStamp = ((Bundle.main.bundlePath as NSString).deletingLastPathComponent
 let decksDirectory = ("~/.dotfiles/show" as NSString).expandingTildeInPath
 
 /// One deck in one window; windows share a tab group, so each deck is a labelled tab.
-final class DeckController: NSObject, NSWindowDelegate, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate {
+final class DeckController: NSObject, WKNavigationDelegate, NSWindowDelegate, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate {
     let path: String
     var deck: Deck
     var rows: [Row] = []
@@ -388,7 +388,19 @@ final class DeckController: NSObject, NSWindowDelegate, NSTableViewDataSource, N
         scroll.hasVerticalScroller = true
         textScroll = scroll
         web.isHidden = true
-        web.setContentHuggingPriority(.defaultLow, for: .vertical)
+        web.navigationDelegate = self
+        let page = NSView()
+        for view in [scroll, web] as [NSView] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            page.addSubview(view)
+            NSLayoutConstraint.activate([
+                view.topAnchor.constraint(equalTo: page.topAnchor),
+                view.bottomAnchor.constraint(equalTo: page.bottomAnchor),
+                view.leadingAnchor.constraint(equalTo: page.leadingAnchor),
+                view.trailingAnchor.constraint(equalTo: page.trailingAnchor),
+            ])
+        }
+        page.setContentHuggingPriority(.init(1), for: .vertical)
 
         signed.target = self
         signed.action = #selector(toggleSigned)
@@ -413,11 +425,10 @@ final class DeckController: NSObject, NSWindowDelegate, NSTableViewDataSource, N
         let divider = NSBox()
         divider.boxType = .separator
 
-        let stack = NSStackView(views: [scroll, web, divider, bar])
+        let stack = NSStackView(views: [page, divider, bar])
         stack.orientation = .vertical
         stack.spacing = 0
-        stack.detachesHiddenViews = true
-        for view in [scroll, web, divider, bar] {
+        for view in [page, divider, bar] {
             view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
         let vc = NSViewController()
@@ -476,6 +487,19 @@ final class DeckController: NSObject, NSWindowDelegate, NSTableViewDataSource, N
         alert.messageText = "Couldn't reach Claude session \(deck.replyTo ?? "")"
         alert.informativeText = "Your sign-offs are saved. \(detail)"
         alert.beginSheetModal(for: window)
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        showPageError(error)
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        showPageError(error)
+    }
+
+    private func showPageError(_ error: Error) {
+        let address = selectedSection?.url ?? ""
+        web.loadHTMLString("<body style='font: 14px -apple-system; padding: 40px; color: #888'><h3>Couldn't load \(address)</h3><p>\(error.localizedDescription)</p><p>Is the server running?</p></body>", baseURL: nil)
     }
 
     func controlTextDidEndEditing(_ obj: Notification) {
