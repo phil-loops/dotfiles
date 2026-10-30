@@ -27,7 +27,7 @@ enum Row {
 }
 
 /// One deck: its section list beside the rendered section and the sign-off bar. It owns no window; its workspace hosts `viewController`.
-final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate {
+final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSource, NSTableViewDelegate, NSTextViewDelegate {
     let path: String
     var deck: Deck
     var rows: [Row] = []
@@ -43,7 +43,12 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
         return configuration
     }())
     let signed = NSButton(checkboxWithTitle: "Signed off", target: nil, action: nil)
-    let note = NSTextField()
+    let composer = ThreadComposer()
+    var composerScroll: NSScrollView!
+    var composerHeight: NSLayoutConstraint!
+    /// The section whose draft the composer holds.
+    var composerKey: String?
+    let send = NSButton(title: "Send", target: nil, action: nil)
     let progress = NSTextField(labelWithString: "")
     let submit = NSButton(title: "Submit", target: nil, action: nil)
     let live = LivePanel()
@@ -51,14 +56,19 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
     var actionDivider: NSView!
     var deckModified: Date?
     var onTitleChange: (() -> Void)?
+    var thread: [String: [ThreadMessage]] = [:]
+    var threadStamp = ""
+    let delivery: ThreadDelivery
 
     init(path: String, deck: Deck) {
         self.path = path
         self.deck = deck
         store = SignOffStore(deckPath: path)
+        delivery = ThreadDelivery.delivery(for: path)
         renderer.baseDirectory = (path as NSString).deletingLastPathComponent
         super.init()
         live.owner = self
+        delivery.onChange = { [weak self] in self?.refreshThread(stickToBottom: true) }
         let sidebar = NSSplitViewItem(viewController: sidebarController())
         sidebar.minimumThickness = 220
         sidebar.maximumThickness = 360
@@ -66,6 +76,8 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
         viewController.addSplitViewItem(sidebar)
         viewController.addSplitViewItem(NSSplitViewItem(viewController: detailController()))
         deckModified = modificationDate(path)
+        thread = loadThread(path)
+        threadStamp = fileStamp(threadURL(path).path)
         apply(deck, keepingSelection: prefs.string(forKey: selectionKey))
     }
 
@@ -101,10 +113,11 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
         saveNote()
         guard let fresh = try? loadDeck(path) else { return }
         let kept = selectedSection?.key
-        let cursor = note.currentEditor()?.selectedRange
         let origin = textScroll.contentView.bounds.origin
         let listOrigin = (table.enclosingScrollView?.contentView.bounds.origin) ?? .zero
         store = SignOffStore(deckPath: path)
+        thread = loadThread(path)
+        threadStamp = fileStamp(threadURL(path).path)
         apply(fresh, keepingSelection: kept)
         if let list = table.enclosingScrollView {
             list.contentView.scroll(to: list.contentView.constrainBoundsRect(NSRect(origin: listOrigin, size: list.contentView.bounds.size)).origin)
@@ -117,17 +130,16 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
             let clip = textScroll.contentView
             clip.scroll(to: clip.constrainBoundsRect(NSRect(origin: origin, size: clip.bounds.size)).origin)
             textScroll.reflectScrolledClipView(clip)
-            if let cursor {
-                window?.makeFirstResponder(note)
-                let length = (note.stringValue as NSString).length
-                note.currentEditor()?.selectedRange = NSRange(location: min(cursor.location, length), length: min(cursor.length, max(0, length - cursor.location)))
-            }
         }
     }
 
     func reloadIfChanged() {
         if modificationDate(path) != deckModified {
             reload()
+        } else if fileStamp(threadURL(path).path) != threadStamp {
+            thread = loadThread(path)
+            threadStamp = fileStamp(threadURL(path).path)
+            refreshThread(stickToBottom: true)
         }
     }
 
@@ -178,9 +190,14 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
 
     /// Re-renders the selected section at the laid-out width, sized to its full height, for a snapshot.
     func prepareSnapshot() {
+        if let message = ProcessInfo.processInfo.environment["SHOW_SNAPSHOT_SEND"] {
+            composer.string = message
+            sendMessage()
+            delivery.settle(within: 10)
+        }
         guard let section = selectedSection, section.url == nil else { return }
         renderer.columnWidth = text.bounds.width > 300 ? text.bounds.width - 96 - 2 * (text.textContainer?.lineFragmentPadding ?? 5) : 640
-        text.textStorage?.setAttributedString(renderer.render(section))
+        text.textStorage?.setAttributedString(page(section))
         if let container = text.textContainer {
             text.layoutManager?.ensureLayout(for: container)
         }
@@ -223,6 +240,7 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
         text.isVerticallyResizable = true
         text.autoresizingMask = [.width]
         text.textContainer?.widthTracksTextView = true
+        text.delegate = self
         let scroll = NSScrollView()
         scroll.documentView = text
         scroll.hasVerticalScroller = true
@@ -245,22 +263,48 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
         signed.target = self
         signed.action = #selector(toggleSigned)
         signed.font = .systemFont(ofSize: 13, weight: .semibold)
-        note.placeholderString = "Note or pushback — saved when you press Return or move on"
-        note.font = .systemFont(ofSize: 13)
-        note.delegate = self
-        note.target = self
-        note.action = #selector(saveNote)
+        composer.isRichText = false
+        composer.allowsUndo = true
+        composer.font = inkFont
+        composer.textColor = inkColor
+        composer.insertionPointColor = inkColor
+        composer.drawsBackground = false
+        composer.textContainerInset = NSSize(width: 6, height: 6)
+        composer.isAutomaticQuoteSubstitutionEnabled = false
+        composer.isAutomaticDashSubstitutionEnabled = false
+        composer.isVerticallyResizable = true
+        composer.autoresizingMask = [.width]
+        composer.textContainer?.widthTracksTextView = true
+        composer.delegate = self
+        let composerScroll = NSScrollView()
+        composerScroll.documentView = composer
+        composerScroll.hasVerticalScroller = true
+        composerScroll.autohidesScrollers = true
+        composerScroll.drawsBackground = true
+        composerScroll.backgroundColor = .quaternaryLabelColor
+        composerScroll.wantsLayer = true
+        composerScroll.layer?.cornerRadius = 6
+        composerHeight = composerScroll.heightAnchor.constraint(equalToConstant: 34)
+        composerHeight.isActive = true
+        self.composerScroll = composerScroll
+        send.target = self
+        send.action = #selector(sendMessage)
+        send.bezelStyle = .rounded
+        send.toolTip = "Send to Claude (⌘↩ in the reply field)"
         submit.target = self
-        submit.action = #selector(submitReview)
+        submit.action = #selector(commandReturn)
         submit.bezelStyle = .rounded
         submit.keyEquivalent = "\r"
         submit.keyEquivalentModifierMask = [.command]
-        submit.toolTip = "Tell Claude you're done (⌘↩)"
-        let bar = NSStackView(views: [signed, note, submit])
+        submit.toolTip = "Tell Claude you're done (⌘↩ outside the reply field)"
+        let bar = NSStackView(views: [signed, composerScroll, send, submit])
         bar.orientation = .horizontal
+        bar.alignment = .centerY
         bar.spacing = 14
-        bar.edgeInsets = NSEdgeInsets(top: 12, left: 48, bottom: 12, right: 24)
-        note.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        bar.edgeInsets = NSEdgeInsets(top: 12, left: 48, bottom: 14, right: 24)
+        composerScroll.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        composerScroll.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        bar.heightAnchor.constraint(equalTo: composerScroll.heightAnchor, constant: 26).isActive = true
 
         let divider = NSBox()
         divider.boxType = .separator
@@ -284,12 +328,51 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
         reloadSelectedRow()
     }
 
+    /// Keeps the reply being typed as the section's draft, so a reload, a section switch or a relaunch never loses it.
     @objc func saveNote() {
+        guard !deck.isLive, let key = composerKey else { return }
+        prefs.set(composer.string, forKey: draftKey(key))
+    }
+
+    private func draftKey(_ section: String) -> String { "thread.draft.\(path).\(section)" }
+
+    /// ⌘↩ sends the reply when the reply field holds one, otherwise submits the deck as before.
+    @objc private func commandReturn() {
+        if NSApp.currentEvent?.type == .keyDown, window?.firstResponder === composer,
+           !composer.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            sendMessage()
+        } else {
+            submitReview()
+        }
+    }
+
+    /// Appends the reply to the section's thread, mirrors it into the sign-off `note`, and hands it to Claude.
+    @objc func sendMessage() {
         guard !deck.isLive, let section = selectedSection else { return }
-        let value = note.stringValue
-        guard (store.entries[section.key]?.note ?? "") != value else { return }
+        let value = composer.string.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else {
+            NSSound.beep()
+            return
+        }
+        do {
+            try appendThreadMessage(ThreadMessage(at: ISO8601DateFormatter().string(from: Date()), from: "phil", text: value), section: section.key, deckPath: path)
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "Couldn't save your reply"
+            alert.informativeText = "\(error)"
+            presentAlert(alert, in: window)
+            return
+        }
         store.update(section.key) { $0.note = value }
+        composer.string = ""
+        composer.didChangeText()
+        fitComposer()
+        saveNote()
+        thread = loadThread(path)
+        threadStamp = fileStamp(threadURL(path).path)
         reloadSelectedRow()
+        delivery.send(delivery.threadLine(section: section.key), key: section.key, replyTo: deck.replyTo)
+        refreshThread(stickToBottom: true)
     }
 
     @objc private func submitReview() {
@@ -326,13 +409,56 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
         web.loadHTMLString("<body style='font: 14px -apple-system; padding: 40px; color: #888'><h3>Couldn't load \(address)</h3><p>\(error.localizedDescription)</p><p>Is the server running?</p></body>", baseURL: nil)
     }
 
-    func controlTextDidEndEditing(_ obj: Notification) {
+    func textDidChange(_ notification: Notification) {
+        guard notification.object as? NSTextView === composer else { return }
+        fitComposer()
         saveNote()
     }
 
-    func controlTextDidChange(_ obj: Notification) {
-        saveNote()
+    func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
+        guard textView === text, (link as? URL)?.absoluteString == "show-thread:retry", let key = selectedSection?.key else { return false }
+        delivery.retry(key)
+        return true
     }
+
+    /// Grows the reply field with its text, up to about six lines.
+    private func fitComposer() {
+        guard let layout = composer.layoutManager, let container = composer.textContainer else { return }
+        layout.ensureLayout(for: container)
+        let used = ceil(layout.usedRect(for: container).height) + composer.textContainerInset.height * 2
+        composerHeight.constant = min(max(used, 34), 150)
+    }
+
+    /// The section's page: its body, then (outside live decks) its conversation.
+    private func page(_ section: Section) -> NSAttributedString {
+        let body = renderer.render(section)
+        guard !deck.isLive else { return body }
+        let status = delivery.status[section.key]
+        return body + threadText(thread[section.key] ?? [], status: status, renderer: renderer, width: renderer.columnWidth)
+    }
+
+    /// Re-renders the open page after its thread or delivery changed, holding the scroll, or following the conversation down when asked.
+    func refreshThread(stickToBottom: Bool) {
+        if fileStamp(threadURL(path).path) != threadStamp {
+            thread = loadThread(path)
+            threadStamp = fileStamp(threadURL(path).path)
+        }
+        guard let section = selectedSection, section.url == nil, !deck.isLive else { return }
+        let clip = textScroll.contentView
+        let origin = clip.bounds.origin
+        let wasAtBottom = clip.bounds.maxY >= text.bounds.height - 60
+        text.textStorage?.setAttributedString(page(section))
+        if let container = text.textContainer {
+            text.layoutManager?.ensureLayout(for: container)
+        }
+        if stickToBottom || wasAtBottom {
+            text.scrollToEndOfDocument(nil)
+        } else {
+            clip.scroll(to: clip.constrainBoundsRect(NSRect(origin: origin, size: clip.bounds.size)).origin)
+            textScroll.reflectScrolledClipView(clip)
+        }
+    }
+
 
     private func reloadSelectedRow() {
         let row = table.selectedRow
@@ -464,12 +590,18 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
             web.isHidden = true
             textScroll.isHidden = false
             renderer.columnWidth = text.bounds.width > 300 ? text.bounds.width - 96 - 2 * (text.textContainer?.lineFragmentPadding ?? 5) : 640
-            text.textStorage?.setAttributedString(renderer.render(section))
+            text.textStorage?.setAttributedString(page(section))
             text.scroll(.zero)
         }
         let entry = store.entries[section.key]
         signed.state = entry?.signed == true ? .on : .off
-        note.stringValue = entry?.note ?? ""
+        if composerKey != section.key {
+            saveNote()
+            composerKey = section.key
+            composer.string = prefs.string(forKey: draftKey(section.key)) ?? ""
+            composer.didChangeText()
+            fitComposer()
+        }
         live.update(modified: deckModified)
     }
 }
@@ -477,7 +609,7 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
 /// Runs `claude-say <replyTo> <message>`; returns what went wrong, or nil once it's delivered.
 func claudeSay(_ replyTo: String, _ message: String) -> String? {
     let process = Process()
-    process.executableURL = URL(fileURLWithPath: ("~/.dotfiles/scripts/claude-say" as NSString).expandingTildeInPath)
+    process.executableURL = URL(fileURLWithPath: claudeSayPath)
     process.arguments = [replyTo, message]
     var environment = ProcessInfo.processInfo.environment
     environment["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:" + (environment["PATH"] ?? "")

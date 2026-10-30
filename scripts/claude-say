@@ -18,6 +18,8 @@ it already starts with a [sig] — the receiver must never have to guess who's t
 Empty, --list, ambiguous, or no-match → prints the addressable sessions.
 --json (no <who>) → the same list as JSON with each session's tmux pane + address,
 for machine callers (the viewer's ✦ session picker).
+--check (with <who>, no message) → resolve <who> exactly as a send would, print the target,
+and exit 0 only if a note would be delivered; sends nothing (Show uses it to pick a reply path).
 
 A live pid is necessary but NOT sufficient for reachability: a session idle for a
 day still has a healthy process, and a note typed into its pane just sits unread.
@@ -198,7 +200,8 @@ def main():
         return 0
 
     who, msg = args[0], " ".join(args[1:]).strip()
-    if not msg:
+    check = "--check" in flags
+    if not msg and not check:
         print("usage: claude-say <who> <message…> [--draft]", file=sys.stderr)
         return 2
 
@@ -248,6 +251,11 @@ def main():
     # (and eat it as "Unknown command: /<word>") — a leading space defuses the parse.
     if msg.startswith("/"):
         msg = " " + msg
+
+    if check:
+        print("%s · %s  (pane %s, idle %s%s)" % (tgt.get("session_id", "")[:8], area(tgt), pane,
+              ago(idle_of(tgt)), " ⚠ STALE" if idle_of(tgt) >= STALE_WINDOW else ""))
+        return 0
 
     idle = idle_of(tgt)
     if idle >= STALE_WINDOW:
