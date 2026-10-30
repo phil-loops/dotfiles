@@ -66,7 +66,7 @@ enum SyncCommands {
         let deciding = { (id: String?) in ship.motionOf(id)?.phase == .dirt }
         r.register(Command(
             id: "branch.sync", title: "Sync — fold or stash dirt, reseat, rebase, shape the commits, then gates and tests", scope: .branch,
-            keys: ["s"], label: "sync", v1: ["prep-push"],
+            verb: .sync, label: "sync", v1: ["prep-push"],
             available: { id in branch(id).map { !$0.tip.isEmpty } == true && !running(id) && !deciding(id) },
             local: { [weak app] id, _ in
                 guard let app, let id else { return }
@@ -75,7 +75,7 @@ enum SyncCommands {
             }))
         r.register(Command(
             id: "review.sync", title: "Sync this branch — fold or stash dirt, reseat, rebase, shape the commits, then gates and tests", scope: .review,
-            keys: ["s"], label: "sync",
+            verb: .sync, label: "sync",
             route: { id in branch(id) != nil ? RouteTo("branch.sync", target: id) : nil }))
 
         // ── the dirt decision, on the branch page ──

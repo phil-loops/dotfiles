@@ -120,7 +120,7 @@ enum WordsCommands {
             }))
 
         r.register(Command(
-            id: "words.fix", title: "Apply a hint's fix to the words under the cursor", scope: .words, keys: ["A"], label: "fix",
+            id: "words.fix", title: "Apply a hint's fix to the words under the cursor", scope: .words, verb: .apply, label: "fix",
             available: { [weak app] row in
                 guard let app, let row, let id = branchOf(app, nil) else { return false }
                 return !fixes(app, id, row).isEmpty
@@ -133,7 +133,7 @@ enum WordsCommands {
             }))
 
         r.register(Command(
-            id: "words.copy", title: "Copy the PR title, or its body on the body row, for a PR form filled by hand", scope: .words, keys: ["y"], label: "copy",
+            id: "words.copy", title: "Copy the PR title, or its body on the body row, for a PR form filled by hand", scope: .words, verb: .copy, label: "copy",
             available: { row in row == "w|title" || row == "w|body" },
             local: { [weak app] row, _ in
                 guard let app, let id = branchOf(app, nil) else { return }
@@ -145,7 +145,7 @@ enum WordsCommands {
             }))
 
         r.register(Command(
-            id: "words.edit", title: "Write the words under the cursor (esc stops; ⌃↵ saves)", scope: .words, keys: ["i"], label: "write",
+            id: "words.edit", title: "Write the words under the cursor (esc stops; ⌃↵ saves)", scope: .words, verb: .write, label: "write",
             available: { [weak app] row in
                 guard let app, let row, let w = WordsRow(row), let id = branchOf(app, nil) else { return false }
                 return editable(app, id, w)

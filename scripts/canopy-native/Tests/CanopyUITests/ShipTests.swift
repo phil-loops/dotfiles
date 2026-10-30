@@ -167,7 +167,7 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
         let ship = ShipState.of(a)
         a.runner.dispatch("review.reply", via: .key, target: Self.thread)
         ship.setText("r|\(Self.thread)", "words")
-        a.keys.handle("A-ret")   // save as a draft
+        a.keys.handle("esc"); a.keys.handle(","); a.keys.handle("d")   // stop writing, save as a draft
         #expect(ship.composer == nil)
         await until("the words back") { ship.composer != nil }
         #expect(ship.text("r|\(Self.thread)") == "words")
@@ -213,7 +213,7 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
         ship.host = Host()
         a.runner.dispatch("review.comment", via: .key, target: "l|a.ts|R:4")
         guard case .line(let key, "a.ts", .right, 4, 3, nil) = ship.composer else { Issue.record("\(String(describing: ship.composer))"); return }
-        a.keys.handle("C-g")
+        a.keys.handle("esc"); a.keys.handle(","); a.keys.handle("S")
         #expect(ship.text(key) == "```suggestion\nline 3\nline 4\n```\n")
         ship.setText(key, "")
     }
