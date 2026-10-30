@@ -23,6 +23,8 @@ struct KeyBinding {
     /// False for a second key to an action already listed (its `also` names it): it routes, but gets no menu item or sheet row.
     var listed = true
     var isEnabled: (AppDelegate) -> Bool = { _ in true }
+    /// Why it's off right now, shown after its menu title; nil when there's nothing to explain.
+    var reason: (AppDelegate) -> String? = { _ in nil }
     let perform: (AppDelegate) -> Void
 
     /// Bare keys (Shift aside) go through the router, since a menu only fires keys that carry ⌘, ⌃ or ⌥.
@@ -97,6 +99,8 @@ enum KeyTable {
     static let core: [KeyBinding] = [
         KeyBinding(id: "library.find", menu: "Library", title: "Find…", key: "o", modifiers: .command, also: "/", overOverlay: true) { $0.showFinder(nil) },
         KeyBinding(id: "library.find-slash", menu: "Library", title: "Find…", key: "/", when: .notTyping, listed: false) { $0.showFinder(nil) },
+        KeyBinding(id: "library.new", menu: "Library", title: "New…", key: "n", modifiers: .command, workspaces: [.forest, .review, .runs],
+                   isEnabled: { NewRequest.unavailable($0.active) == nil }, reason: { NewRequest.unavailable($0.active) }) { $0.showNewPrompt() },
         KeyBinding(id: "library.open-file", menu: "Library", title: "Open File…", key: "o", modifiers: [.command, .option]) { $0.openOther(nil) },
         KeyBinding(id: "library.back", menu: "Library", title: "Back", key: "[", modifiers: .command,
                    isEnabled: { $0.workspaces[$0.active]?.back.isEmpty == false }) { $0.goBack(nil) },
@@ -116,8 +120,8 @@ enum KeyTable {
 
         KeyBinding(id: "section.sign", menu: "Section", title: "Toggle Signed Off", key: "s", modifiers: .command, workspaces: [.forest, .review],
                    isEnabled: { $0.signableDeck != nil }) { $0.toggleSignedOff() },
-        KeyBinding(id: "section.submit", menu: "Section", title: "Submit", key: "\r", modifiers: .command, workspaces: [.forest, .review],
-                   isEnabled: { $0.signableDeck != nil }) { $0.signableDeck?.submit.performClick(nil) },
+        KeyBinding(id: "section.submit", menu: "Section", title: "Send Reply or Submit", key: "\r", modifiers: .command, workspaces: [.forest, .review],
+                   isEnabled: { $0.signableDeck != nil }) { $0.sendOrSubmit() },
         KeyBinding(id: "section.canopy", menu: "Section", title: "Open Branch in Canopy", key: "O", modifiers: [.command, .shift], workspaces: [.forest]) { $0.openInCanopy(nil) },
 
         KeyBinding(id: "workspace.forest", menu: "Workspace", title: "Forest", key: "1", modifiers: .command, overOverlay: true) { $0.switchTo(.forest) },
@@ -154,6 +158,11 @@ final class ShowWindow: NSWindow {
     override func sendEvent(_ event: NSEvent) {
         if event.type == .keyDown, onKeyDown?(event) == true { return }
         super.sendEvent(event)
+    }
+
+    /// The self-test parks the window far offscreen; a titled window would otherwise be pulled back onto a screen.
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
+        selfTest == nil ? super.constrainFrameRect(frameRect, to: screen) : frameRect
     }
 
     override func makeFirstResponder(_ responder: NSResponder?) -> Bool {
@@ -401,6 +410,16 @@ extension AppDelegate {
 
     func focusComposer() {
         if let view = composerStop { focus(view) }
+    }
+
+    /// ⌘↩: sends the reply being typed, otherwise submits the deck.
+    func sendOrSubmit() {
+        guard let deck = signableDeck else { return }
+        if window.firstResponder === deck.composer, !deck.composer.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            deck.sendMessage()
+        } else {
+            deck.submit.performClick(nil)
+        }
     }
 
     func toggleSignedOff() {

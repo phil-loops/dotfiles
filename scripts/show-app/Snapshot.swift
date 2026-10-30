@@ -149,6 +149,11 @@ extension AppDelegate {
             (0..<tabs).forEach { _ in cycleFocus(1) }
             print("focus: stop \(currentStop().map(String.init) ?? "-") of \(focusStops.count) · \(window.firstResponder.map { String(describing: type(of: $0)) } ?? "-")")
         }
+        if let draft = environment["SHOW_SNAPSHOT_NEW"] {
+            prefs.set(draft, forKey: "new.draft." + active.rawValue)
+            showNewPrompt()
+            shell.view.layoutSubtreeIfNeeded()
+        }
         if environment["SHOW_SNAPSHOT_SHEET"] != nil {
             toggleKeySheet()
             shell.view.layoutSubtreeIfNeeded()
