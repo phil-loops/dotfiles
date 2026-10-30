@@ -5,7 +5,7 @@ description: Present a design, plan or walkthrough as a native macOS app (Swift 
 
 # show — a native walkthrough Phil can sign off on
 
-`show <deck.json>` opens a deck in a small AppKit app (sidebar of sections, rendered markdown, a **Signed off** checkbox and a note field per section). Sign-offs and notes save to `<deck>.signoff.json` beside the deck, which is how Phil's verdicts come back to you.
+`show <deck.json>` opens a deck as a tab in the one running Show app (sidebar of sections, rendered markdown, a **Signed off** checkbox and a note field per section). Each tab and window is titled with the deck's title, and its subtitle shows how many sections are signed off. The **Decks** menu lists every deck in `~/.dotfiles/show`, newest first, with sign-off counts. Running `show` again on a deck that's already open reloads it in place, and ⌘R reloads the current one. A bare `show` opens the newest deck. Sign-offs and notes save to `<deck>.signoff.json` beside the deck, which is how Phil's verdicts come back to you.
 
 - Launcher: `~/.dotfiles/scripts/show` (on PATH). Source: `~/.dotfiles/scripts/show-app/Show.swift`. It rebuilds itself into `~/.cache/show/Show.app` whenever the source's hash changes (`show --build` to just build).
 - Decks live in `~/.dotfiles/show/<name>.json`.
@@ -30,7 +30,7 @@ description: Present a design, plan or walkthrough as a native macOS app (Swift 
 
 1. Write the deck with a small generator script in the scratchpad (Python building the JSON) rather than hand-escaping JSON; write output to `~/.dotfiles/show/<name>.json`.
 2. Order sections top-down for sign-off: the guiding idea first, then one page per principle, then what they produce, then plan and open questions. One idea per page.
-3. Open it: `show ~/.dotfiles/show/<name>.json` (launching with `open` is fine).
+3. Open it: `show ~/.dotfiles/show/<name>.json`. After regenerating a deck, run the same command again: it reloads the open tab instead of opening a second window. Give every deck a distinct `title`, since that is the tab label.
 4. Tell Phil it's open and how sign-off works. Then wait — read `<name>.signoff.json` when he says he's been through it, and treat every note as pushback to address.
 
 ## Verifying
