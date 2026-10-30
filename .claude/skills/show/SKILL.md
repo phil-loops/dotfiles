@@ -22,9 +22,11 @@ An optional top-level `"workspace": "forest" | "review" | "learn" | "runs"` over
 - **⌫** on a shelf row archives the document, moving it and its `.signoff.json` / `.answers.json` into `~/.dotfiles/show/archive/`. Nothing is ever deleted.
 - `show <file>` moves the document to the top of its group.
 
-Open documents reload by themselves when their file changes on disk, keeping the selected section, scroll and cursor. When the launcher finishes a new build, the running app saves notes and relaunches into it, each workspace back on its document. So rewriting a deck or editing Show.swift and then running `show --build` is all it takes. A bare `show` opens the newest deck. Sign-offs and notes save to `<deck>.signoff.json` beside the deck, which is how Phil's verdicts come back to you.
+Open documents reload by themselves when their file changes on disk, keeping the selected section, scroll and cursor. When the launcher finishes a new build, the running app saves notes and relaunches into it, each workspace back on its document. So rewriting a deck or editing the Swift source and then running `show --build` is all it takes. A bare `show` opens the newest deck. Sign-offs and notes save to `<deck>.signoff.json` beside the deck, which is how Phil's verdicts come back to you.
 
-- Launcher: `~/.dotfiles/scripts/show` (on PATH). Source: `~/.dotfiles/scripts/show-app/Show.swift`. It rebuilds itself into `~/.cache/show/Show.app` whenever the source's hash changes (`show --build` to just build).
+- Launcher: `~/.dotfiles/scripts/show` (on PATH). Source: `~/.dotfiles/scripts/show-app/*.swift`. It compiles every file there into `~/.cache/show/Show.app` whenever any of their hashes changes (`show --build` to just build).
+
+**Source layout** (`scripts/show-app/`, one file per area): `App.swift` is the AppDelegate, launch, menus, the one window and `Workspace` routing; `main.swift` parses the command line and starts the app (Swift only runs top-level code from `main.swift`). `Shell.swift` holds the rail, `WorkspaceController`, the shelf/library and the ⌘O finder; `Render.swift` the markdown renderer (tables, code, images); `Decks.swift` `DeckController` with sign-off and Submit (`claude-say`); `Forest.swift` the merge-order `ForestOrder`, the forest tint and ⌘⇧O's canopy command; `Tutor.swift` the Learn session types, sidecar, headless `TutorAgent`, worksheet and `--tutor-ask`; `Live.swift` the live deck's status line; `Snapshot.swift` `--snapshot` plus `--check-routing` / `--tutor-check`; `Model.swift` the shared `Deck` / `Section` / `SignOff` types.
 - Decks live in `~/.dotfiles/show/<name>.json`.
 
 ## Deck format
