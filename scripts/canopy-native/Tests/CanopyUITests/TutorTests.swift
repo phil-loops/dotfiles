@@ -206,7 +206,7 @@ let learningFixture = #"""
         #expect(TutorStub.queries("/tutor-src") == ["path=packages%2Fcroon%2Flock.ts&ref=abc"])
         #expect(a.panes.map(\.id).contains("code"))
         a.focus(pane: "code")
-        a.setCursor("L:2")
+        a.setCursor("s:2")
         #expect(TutorRows.codeCursor(a, t) == 2)
         #expect(CodeLookup.position(path: "a.ts", line: 1, text: "export const lock = Locks.take(1)").map { [$0.character, $0.member ?? -1] } == [13, -1])
         #expect(CodeLookup.position(path: "a.ts", line: 1, text: "x = Locks.take(1)")?.character == 0)

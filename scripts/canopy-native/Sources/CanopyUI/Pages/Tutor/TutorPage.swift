@@ -481,7 +481,7 @@ struct TutorSessionView: View {
 
     /// the code pane's cursor starts on the pin's lines
     private func placeCodeCursor(_ t: TutorState) {
-        if let lit = t.pin?.lit, t.code?.text != nil { place("L:\(lit.0)", in: TutorPane.code) }
+        if let lit = t.pin?.lit, t.code?.text != nil { place("s:\(lit.0)", in: TutorPane.code) }
     }
 
     private func place(_ key: String, in pane: String) {
@@ -847,60 +847,19 @@ struct EvidenceRow: View {
     }
 }
 
-/// The pinned file — one commit's copy (its ref, else the checkout's HEAD), a line per row so the
-/// pane's cursor is a line; space k and the g keys ask at it.
+/// The pinned file — one commit's copy (its ref, else the checkout's HEAD) in review's code pane,
+/// so its rows are lines and space k and the g keys ask at the cursor.
 struct PinnedCode: View {
     @Environment(AppModel.self) private var app
-    @Environment(\.theme) private var theme
 
     var body: some View {
         let t = TutorArea.state(app)
         if let p = t.pin {
-            let lit = p.lit
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(p.path).foregroundStyle(theme.inkDim).lineLimit(1)
-                    Spacer()
-                    Text("\(lit.map { "L\($0.0)–\($0.1) · " } ?? "")\(Self.short(t.code?.ref ?? "…"))").foregroundStyle(theme.inkFaint)
-                }
-                .font(Theme.mono(11)).padding(.horizontal, 14).padding(.vertical, 7).background(theme.vellumRaise)
-                theme.rule.frame(height: 1)
-                if let err = t.code?.err {
-                    Text(err).font(Theme.mono(12)).foregroundStyle(theme.del).padding(14)
-                } else if let text = t.code?.text {
-                    let lines = TutorRows.lines(text)
-                    let focused = app.isFocused(TutorPane.code)
-                    ScrollViewReader { proxy in
-                        ScrollView([.vertical, .horizontal]) {
-                            LazyVStack(alignment: .leading, spacing: 0) {
-                                ForEach(lines.indices, id: \.self) { i in
-                                    let n = i + 1
-                                    let isLit = lit.map { n >= $0.0 && n <= $0.1 } ?? false
-                                    let on = focused && app.selected == "L:\(n)"
-                                    HStack(spacing: 0) {
-                                        Text("\(n)").foregroundStyle(theme.inkFaint).frame(width: 48, alignment: .trailing).padding(.trailing, 12)
-                                        Text(lines[i].isEmpty ? " " : lines[i]).foregroundStyle(isLit || on ? theme.ink : theme.inkDim).fixedSize()
-                                    }
-                                    .font(Theme.mono(11.5))
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .background(on ? theme.goldWash.opacity(3) : isLit ? theme.goldWash : .clear)
-                                    .overlay(alignment: .leading) { if on { theme.goldLeaf.frame(width: 2) } }
-                                    .id(TutorScroll.id(TutorPane.code, "L:\(n)"))
-                                }
-                            }
-                            .padding(.vertical, 6)
-                        }
-                        .modifier(FollowCursor(panes: [TutorPane.code], proxy: proxy))
-                        .onAppear { if let l = lit { proxy.scrollTo(TutorScroll.id(TutorPane.code, "L:\(l.0)"), anchor: .center) } }
-                        .onChange(of: p) { _, np in if let l = np.lit { proxy.scrollTo(TutorScroll.id(TutorPane.code, "L:\(l.0)"), anchor: .center) } }
-                    }
-                } else {
-                    Text("reading \(p.path)…").font(Theme.mono(12)).foregroundStyle(theme.inkFaint).padding(14)
-                }
-            }
-            .background(theme.diffBg)
-            .tutorPane(TutorPane.code)
-            .overlay(alignment: .bottom) { TypesPopView() }
+            let ref = t.code?.ref ?? ""
+            CodePaneView(handle: t.codeCanvas, pane: TutorPane.code, path: p.path, refLabel: ref.isEmpty ? "…" : Self.short(ref),
+                         text: t.code?.text, err: t.code?.err, lit: p.lit.map { $0.0...max($0.0, $0.1) }, repo: "", sha: ref)
+                .tutorPane(TutorPane.code)
+                .overlay(alignment: .bottom) { TypesPopView() }
         }
     }
 

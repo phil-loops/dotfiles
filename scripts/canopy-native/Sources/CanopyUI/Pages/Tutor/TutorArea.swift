@@ -140,7 +140,7 @@ enum TutorRows {
 
     static func codeLines(_ t: TutorState) -> [String] {
         guard t.pin != nil, let c = t.code, c.err == nil, let text = c.text else { return [] }
-        return lines(text).indices.map { "L:\($0 + 1)" }
+        return lines(text).indices.map { "s:\($0 + 1)" }
     }
 
     static func lines(_ text: String) -> [String] {
