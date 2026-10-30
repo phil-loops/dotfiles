@@ -154,39 +154,5 @@ public enum ShipSeam {
     }
 }
 
-/// Where a branch stands on its way to main, as far as Ship needs it (ship.ts stand/baseFor):
-/// whether ↵ means "go to the PR", and the compare form's base. Area A's ForestModel holds the full
-/// stand; this is the narrow part, read straight from the store so Ship runs without it.
-@MainActor
-public enum ShipStand {
-    public enum Ship: String { case local, green, pushed, review, approved, landed }
-
-    public static func shipOf(_ b: Branch, _ pr: Pr?) -> Ship {
-        if pr?.state == "MERGED" { return .landed }
-        if pr?.state == "OPEN" { return pr?.review == "APPROVED" ? .approved : .review }
-        if b.pushed == .synced && b.commits > 0 { return .pushed }
-        return b.gates == .green && b.commits > 0 ? .green : .local
-    }
-
-    /// ↵ on the branch goes to its PR (or the prefilled compare form): pushed, in review or approved.
-    public static func prAction(_ app: AppModel, _ id: String?) -> Bool {
-        guard let id, let b = app.store.view(Branch.self, id) else { return false }
-        let s = shipOf(b, app.store.view(Pr.self, id))
-        return s == .pushed || s == .review || s == .approved
-    }
-
-    /// The compare form's base: the parent's branch while it's unlanded, else trunk.
-    public static func base(_ app: AppModel, _ b: Branch) -> String {
-        let trunk = app.store.view(Repo.self, b.repo)?.main ?? "main"
-        guard let pid = b.parentId, let p = app.store.view(Branch.self, pid) else { return trunk }
-        return shipOf(p, app.store.view(Pr.self, pid)) == .landed ? trunk : p.name
-    }
-
-    /// GET /packet-compare: a 302 to GitHub's compare-and-create form, the PR body prefilled.
-    public static func compareURL(_ app: AppModel, _ b: Branch) -> URL {
-        app.transport.url(app.transport.atRepo(b.repo, "/packet-compare?branch=\(b.name.uriComponent)&base=\(base(app, b).uriComponent)"))
-    }
-}
-
 /// A branch's leaf name ("forest/queries" → "queries").
 func shipLeaf(_ name: String) -> String { name.split(separator: "/").last.map(String.init) ?? name }

@@ -20,7 +20,7 @@ struct StoryView: View {
                 heading("Landed", s.landed.count)
                 ForEach(Array(s.landed.enumerated()), id: \.element.id) { i, l in
                     let k = RowKey.landed(l.id)
-                    Chapter(n: i + 1, key: k, line: StoryText.bare(l.title), side: "#\(l.pr) · merged \(StoryText.day(l.at))", dim: true,
+                    Chapter(n: i + 1, key: k, line: OutlineHints.bare(l.title), side: "#\(l.pr) · merged \(StoryText.day(l.at))", dim: true,
                             cursor: cursor == k, selected: selection.contains(k)) {
                         if m.wordsOpen.contains(k) { LandedWhy(l: l) }
                     }
@@ -90,7 +90,7 @@ private struct LandedWhy: View {
     var body: some View {
         Group {
             if let b = body_ {
-                Text(StoryText.stripPlan(b).isEmpty ? "no body" : StoryText.stripPlan(b)).foregroundStyle(theme.inkDim)
+                Text(OutlineHints.stripPlan(b).isEmpty ? "no body" : OutlineHints.stripPlan(b)).foregroundStyle(theme.inkDim)
             } else {
                 Text(loading ? "reading main…" : "not on main yet").foregroundStyle(theme.inkFaint)
             }
@@ -104,45 +104,8 @@ private struct LandedWhy: View {
     }
 }
 
-/// The two outline-text rules the story reads (outlineHints.ts bare / stripPlan).
+/// How the story prints a merge day.
 enum StoryText {
-    static let types = ["feat", "fix", "chore", "refactor", "docs", "test", "perf", "style", "ci", "build", "revert"]
-    static let prefix = try! NSRegularExpression(pattern: "^(\(types.joined(separator: "|")))(\\(([^)]*)\\))?(!)?:\\s*", options: [.caseInsensitive])
-
-    /// The subject with its conventional prefix removed — how a follow-up reads.
-    static func bare(_ subject: String) -> String {
-        let ns = subject as NSString
-        guard let m = prefix.firstMatch(in: subject, range: NSRange(location: 0, length: ns.length)) else { return subject }
-        return ns.substring(from: m.range.length)
-    }
-
-    /// A squash message without the generated "Part of a stack" block or the old fence.
-    static func stripPlan(_ body: String) -> String {
-        let lines = body.components(separatedBy: "\n")
-        let step = try! NSRegularExpression(pattern: #"^\s+\S|^\s*(\d+\.\s|[-*•]\s|\[)"#)
-        func isStep(_ l: String) -> Bool { step.firstMatch(in: l, range: NSRange(location: 0, length: (l as NSString).length)) != nil }
-        var out: [String] = []
-        var i = 0
-        while i < lines.count {
-            defer { i += 1 }
-            if lines[i].trimmingCharacters(in: .whitespaces) == "-- forest --" { continue }
-            if lines[i].hasPrefix("Part of ") {
-                // the block runs to the first blank line that isn't followed by more steps
-                while i + 1 < lines.count {
-                    if !lines[i + 1].trimmingCharacters(in: .whitespaces).isEmpty { i += 1; continue }
-                    var j = i + 1
-                    while j < lines.count && lines[j].trimmingCharacters(in: .whitespaces).isEmpty { j += 1 }
-                    if j < lines.count && isStep(lines[j]) { i = j } else { break }
-                }
-                continue
-            }
-            out.append(lines[i])
-        }
-        var s = out.joined(separator: "\n")
-        while s.contains("\n\n\n") { s = s.replacingOccurrences(of: "\n\n\n", with: "\n\n") }
-        return s.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
     /// "Jun 23".
     static func day(_ iso: String) -> String {
         guard let d = parseISO(iso) else { return iso }

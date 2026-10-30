@@ -91,7 +91,7 @@ public struct ShipStripView: View {
                 Text("diverged · ✗ \(bad.label)").foregroundStyle(theme.ember)
                 Text("· sync carries it on top").foregroundStyle(theme.inkFaint)
             }
-            if !acts && live == nil && app.store.view(Pr.self, branchID) == nil && ShipStand.prAction(app, branchID)
+            if !acts && live == nil && app.store.view(Pr.self, branchID) == nil && app.forestModel.opensPR(branchID)
                 && app.store.view(Warm.self, b.repo)?.prs == true {
                 KeyButton(title: "open the PR ↗", id: "review.finish", target: branchID, gold: true)
             }

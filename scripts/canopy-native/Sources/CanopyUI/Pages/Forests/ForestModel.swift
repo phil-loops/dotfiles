@@ -244,6 +244,12 @@ public final class ForestModel {
     /// Tests and the stub path set a verdict directly.
     func setVerdict(_ pid: String, _ v: IntegrationVerdict) { verdicts[pid] = v }
 
+    /// Whether ↵ on the branch goes to its PR (or the prefilled compare form): pushed, in review or approved.
+    public func opensPR(_ id: String?) -> Bool {
+        guard let id, let b = store.view(Branch.self, id) else { return false }
+        return ShipRules.action(ShipRules.shipOf(b, store.view(Pr.self, id))) == .pr
+    }
+
     /// model.ts compareUrl: GitHub's compare-and-create form for a branch with no PR yet, its body
     /// prefilled by GET /packet-compare (a 302 — opened in the browser, never fetched), on `v.base`.
     public func compareURL(_ v: BranchView) -> URL {
