@@ -8,6 +8,13 @@ if let flag = arguments.firstIndex(of: "--tutor-ask") {
     }
     exit(tutorAsk(arguments[flag + 1], arguments[flag + 2]))
 }
+if let flag = arguments.firstIndex(of: "--tutor-start") {
+    guard flag + 1 < arguments.count else {
+        FileHandle.standardError.write("usage: Show --tutor-start \"re-test <concept>\" | \"<what to learn>\"\n".data(using: .utf8)!)
+        exit(64)
+    }
+    exit(tutorStart(arguments[flag + 1]))
+}
 if let flag = arguments.firstIndex(of: "--tutor-turn") {
     guard flag + 2 < arguments.count else {
         FileHandle.standardError.write("usage: Show --tutor-turn <session.json> <message>\n".data(using: .utf8)!)

@@ -117,6 +117,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         _ = shell.view
         installKeys()
         workspaces.values.forEach { $0.settleColumns() }
+        LearnDue.onChange = { [weak self] in
+            guard let learn = self?.workspaces[.learn] else { return }
+            learn.setEntries(learn.entries)
+        }
+        LearnDue.refresh(sync: snapshotPath != nil)
         refreshLibrary(force: true)
         restore()
         updateTitle()
@@ -197,6 +202,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+
+    func windowDidBecomeKey(_ notification: Notification) {
+        LearnDue.refresh()
+    }
 
     /// Switches to the file's workspace and opens it there.
     func openPath(_ rawPath: String) {

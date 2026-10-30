@@ -177,6 +177,9 @@ extension WorkspaceController {
             stops.append(FocusStop(responder: shelf, column: shelfItem.viewController.view))
         }
         if let tutor, current != nil {
+            if let list = tutor.viewController.splitViewItems.first, !list.isCollapsed {
+                stops.append(FocusStop(responder: tutor.sidebar.table, column: list.viewController.view))
+            }
             stops += tutor.fields.map { FocusStop(responder: $0, column: tutor.scroll) }
             stops.append(FocusStop(responder: tutor.composer, column: tutor.composer.superview?.superview ?? tutor.composer))
         } else if let deck = currentDeck {
@@ -379,6 +382,8 @@ extension AppDelegate {
             if let next = stops.first(where: { $0.responder !== controller.shelf }) {
                 focus(next.responder)
             }
+        } else if table === controller.tutor?.sidebar.table, controller.tutor?.sidebar.activateSelected() == true {
+            return
         } else if let index = stops.firstIndex(where: { $0.responder === table }), index + 1 < stops.count {
             focus(stops[index + 1].responder)
         }
