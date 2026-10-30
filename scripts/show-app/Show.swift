@@ -100,6 +100,30 @@ enum Row {
     case item(Int)
 }
 
+/// A forest deck's reading order: sections with no `rank` (the merge story, live pages) first in file order,
+/// then branches by rank, parent and file order, numbered by rank (tied siblings share a number) and nested under a parent in the deck.
+struct ForestOrder {
+    let overview: [Int]
+    let branches: [(index: Int, number: Int, depth: Int)]
+
+    init(_ deck: Deck) {
+        let sections = deck.sections
+        overview = sections.indices.filter { sections[$0].rank == nil }
+        let ranked = sections.indices.filter { sections[$0].rank != nil }
+            .sorted { a, b in
+                let (x, y) = (sections[a], sections[b])
+                return (x.rank ?? 0, x.parent ?? "", a) < (y.rank ?? 0, y.parent ?? "", b)
+            }
+        let numbers = Dictionary(uniqueKeysWithValues: Set(ranked.compactMap { sections[$0].rank }).sorted().enumerated().map { ($1, $0 + 1) })
+        let byID = Dictionary(ranked.map { (sections[$0].key, $0) }, uniquingKeysWith: { first, _ in first })
+        func depth(_ index: Int, _ seen: Set<Int> = []) -> Int {
+            guard let parent = sections[index].parent, let up = byID[parent], up != index, !seen.contains(up) else { return 0 }
+            return depth(up, seen.union([index])) + 1
+        }
+        branches = ranked.map { ($0, numbers[sections[$0].rank ?? 0] ?? 0, depth($0)) }
+    }
+}
+
 final class Renderer {
     let base = NSFont.systemFont(ofSize: 14)
     let mono = NSFont.monospacedSystemFont(ofSize: 12.5, weight: .regular)
@@ -438,6 +462,8 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
 
     var window: NSWindow? { viewController.view.window }
     var title: String { deck.title }
+    /// In a forest deck, each branch section's merge number and nesting depth.
+    private var branchPlaces: [Int: (number: Int, depth: Int)] = [:]
     private var settled = false
 
     /// Gives the section list its 250pt column the first time the deck is shown; after that the divider stays where it's dragged.
@@ -499,13 +525,29 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
     private func apply(_ deck: Deck, keepingSelection key: String?) {
         self.deck = deck
         rows = []
-        var lastGroup: String?
-        for (i, section) in deck.sections.enumerated() {
-            if section.group != lastGroup {
-                rows.append(.header(section.group))
-                lastGroup = section.group
+        branchPlaces = [:]
+        if deck.isForest {
+            let order = ForestOrder(deck)
+            if !order.overview.isEmpty {
+                rows.append(.header("Overview"))
+                rows += order.overview.map(Row.item)
             }
-            rows.append(.item(i))
+            if !order.branches.isEmpty {
+                rows.append(.header("Merge order"))
+                for branch in order.branches {
+                    rows.append(.item(branch.index))
+                    branchPlaces[branch.index] = (branch.number, branch.depth)
+                }
+            }
+        } else {
+            var lastGroup: String?
+            for (i, section) in deck.sections.enumerated() {
+                if section.group != lastGroup {
+                    rows.append(.header(section.group))
+                    lastGroup = section.group
+                }
+                rows.append(.item(i))
+            }
         }
         table.reloadData()
         let kept = rows.firstIndex { if case .item(let i) = $0 { return deck.sections[i].key == key } else { return false } }
@@ -753,11 +795,12 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
         case .item(let i):
             let section = deck.sections[i]
             let title = NSTextField(labelWithString: "")
-            title.attributedStringValue = sectionMark(section, selected: row == table.selectedRow)
+            let place = branchPlaces[i]
+            let number = place.map { NSAttributedString(string: "\($0.number)  ", attributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: 11.5, weight: .medium), .foregroundColor: NSColor.secondaryLabelColor]) } ?? NSAttributedString()
+            title.attributedStringValue = number + sectionMark(section, selected: row == table.selectedRow)
                 + NSAttributedString(string: section.title, attributes: [.font: NSFont.systemFont(ofSize: 13, weight: .medium), .foregroundColor: NSColor.labelColor])
             title.maximumNumberOfLines = 1
             title.cell?.truncatesLastVisibleLine = true
-            title.font = .systemFont(ofSize: 13, weight: .medium)
             title.lineBreakMode = .byTruncatingTail
             let stack = NSStackView(views: [title])
             stack.orientation = .vertical
@@ -770,16 +813,17 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
                 sub.lineBreakMode = .byTruncatingTail
                 stack.addArrangedSubview(sub)
             }
+            let indent = 8 + CGFloat(min(place?.depth ?? 0, 6)) * 12
             let cell = NSTableCellView()
             stack.translatesAutoresizingMaskIntoConstraints = false
             cell.addSubview(stack)
             NSLayoutConstraint.activate([
-                stack.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 8),
+                stack.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: indent),
                 stack.trailingAnchor.constraint(lessThanOrEqualTo: cell.trailingAnchor, constant: -8),
                 stack.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
             ])
             for view in stack.arrangedSubviews {
-                view.widthAnchor.constraint(lessThanOrEqualTo: cell.widthAnchor, constant: -16).isActive = true
+                view.widthAnchor.constraint(lessThanOrEqualTo: cell.widthAnchor, constant: -8 - indent).isActive = true
             }
             return cell
         }
@@ -3560,6 +3604,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
     }
 
+    /// ⌘⇧O: the selected branch's page in canopy, the native forest viewer, for its diff.
+    @objc func openInCanopy(_ sender: Any?) {
+        guard let controller = workspaces[active] else { return }
+        guard active == .forest else {
+            controller.say("⌘⇧O opens a branch in canopy from the Forest workspace")
+            return
+        }
+        guard let deck = controller.currentDeck, let section = deck.selectedSection else {
+            controller.say("Open a forest and pick a branch first")
+            return
+        }
+        guard let command = canopyCommand(deck.deck, section) else {
+            controller.say(section.rank == nil ? "“\(section.title)” isn't a branch, so canopy has no page for it" : "This forest deck names no repo, so canopy can't find the branch")
+            return
+        }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: command[0])
+        process.arguments = Array(command.dropFirst())
+        let errors = Pipe()
+        process.standardError = errors
+        process.standardOutput = FileHandle.nullDevice
+        process.terminationHandler = { [weak controller] finished in
+            let detail = String(data: errors.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines).split(separator: "\n").last.map(String.init) ?? ""
+            guard finished.terminationStatus != 0 else { return }
+            DispatchQueue.main.async {
+                controller?.say("canopy failed (exit \(finished.terminationStatus))" + (detail.isEmpty ? "" : ": \(detail)"))
+            }
+        }
+        do {
+            try process.run()
+            controller.say("Opening \(section.key) in canopy")
+        } catch {
+            controller.say("Couldn't run canopy: \(error.localizedDescription)")
+        }
+    }
+
     @objc func goBack(_ sender: Any?) {
         workspaces[active]?.goBack()
     }
@@ -3621,6 +3702,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         openFile.keyEquivalentModifierMask = [.command, .option]
         openFile.target = self
         libraryMenu.addItem(withTitle: "Back", action: #selector(goBack), keyEquivalent: "[").target = self
+        libraryMenu.addItem(withTitle: "Open Branch in Canopy", action: #selector(openInCanopy), keyEquivalent: "O").target = self
         libraryMenu.addItem(.separator())
         libraryMenu.addItem(withTitle: "Archive Shelf Row (⌫ on the shelf)", action: #selector(archiveSelected), keyEquivalent: "").target = self
         libraryMenu.addItem(withTitle: "Reload", action: #selector(reloadCurrent), keyEquivalent: "r").target = self
@@ -3704,6 +3786,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         controller?.currentDeck?.prepareSnapshot()
         shell.view.layoutSubtreeIfNeeded()
         controller?.currentDeck?.table.layoutSubtreeIfNeeded()
+        if environment["SHOW_SNAPSHOT_CANOPY"] != nil {
+            openInCanopy(nil)
+            RunLoop.main.run(until: Date().addingTimeInterval(1))
+            print("status: \(controller?.statusLabel.stringValue ?? "-")")
+        }
         let stem = (output as NSString).deletingPathExtension
         writeComposite(shell.view, to: output)
         writePNG(shell.rail, to: stem + "-rail.png")
@@ -3724,6 +3811,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     }
 }
 
+/// The command ⌘⇧O runs for a branch section: `canopy /v2/b/<repo>/<branch>` (`SHOW_CANOPY` swaps the binary); nil for a non-branch.
+func canopyCommand(_ deck: Deck, _ section: Section) -> [String]? {
+    guard section.rank != nil, let repo = deck.repo, !repo.isEmpty else { return nil }
+    let binary = ProcessInfo.processInfo.environment["SHOW_CANOPY"] ?? ("~/.dotfiles/scripts/canopy" as NSString).expandingTildeInPath
+    return [binary, "/v2/b/\(repo)/\(section.key)"]
+}
+
 /// `--check-routing`: print which workspace a file opens in, and why.
 func checkRouting(_ raw: String) -> Int32 {
     let path = URL(fileURLWithPath: (raw as NSString).expandingTildeInPath).standardizedFileURL.path
@@ -3737,6 +3831,22 @@ func checkRouting(_ raw: String) -> Int32 {
         print("shelf: \(entry.state) · \(entry.title) · \(entry.progress)")
     } else {
         print("shelf: unreadable as a \(route.workspace.name) document")
+    }
+    guard route.workspace == .forest, let deck = try? loadDeck(path) else { return 0 }
+    let order = ForestOrder(deck)
+    print("forest: project \(deck.project ?? "-") · repo \(deck.repo ?? "-")")
+    print("overview:")
+    for i in order.overview {
+        print("     \(deck.sections[i].key)  —  \(deck.sections[i].title)")
+    }
+    print("merge order:")
+    for branch in order.branches {
+        let section = deck.sections[branch.index]
+        let indent = String(repeating: "  ", count: branch.depth)
+        print("  \(String(format: "%2d", branch.number))  \(indent)\(section.key)  (rank \(section.rank ?? 0), parent \(section.parent ?? "-"))")
+    }
+    if let first = order.branches.first, let command = canopyCommand(deck, deck.sections[first.index]) {
+        print("⌘⇧O on \(deck.sections[first.index].key): \((command[0] as NSString).abbreviatingWithTildeInPath) \(command[1])")
     }
     return 0
 }

@@ -53,6 +53,16 @@ Open documents reload by themselves when their file changes on disk, keeping the
 3. Open it: `show ~/.dotfiles/show/<name>.json`. After regenerating a deck, run the same command again: it reloads the open tab instead of opening a second window. Give every deck a distinct `title`, since that is the tab label.
 4. Tell Phil it's open and how sign-off works. Then wait. **Submit** (⌘↩) sends `claude-say <replyTo>` a line naming the sign-off file; read `<name>.signoff.json` when it arrives, or when he says he's been through it, and treat every note as pushback to address. Set `replyTo` to this session's id prefix (`$CLAUDE_CODE_SESSION_ID`, first 8 characters); without it, Submit only marks the deck done.
 
+## Forest workspace
+
+A Forest file is a deck with top-level `"mode": "forest"`, `"project"` and `"repo"` (the branch-deck skill writes them). Each branch section adds `"rank"` (Int, from `stack-merge-rank`) and `"parent"` (the branch's stack-parent), and its `id` is the branch name. Show never shells out to git for any of it.
+
+- The shelf has one row per forest deck (project).
+- The section list puts sections without a `rank` (the merge-story overview, `url` live pages) in an **Overview** group on top, in file order; the overview opens first. **Merge order** follows: branches sorted by rank, then parent, then file order, numbered by rank (tied siblings share a number) and indented under their parent when the parent is in the deck.
+- Sign-off, `<deck>.signoff.json` and Submit → `claude-say <replyTo>` work exactly as for decks.
+- **⌘⇧O** runs `~/.dotfiles/scripts/canopy /v2/b/<repo>/<branch>` for the selected branch. On a non-branch section it does nothing and says why at the foot of the shelf. `SHOW_CANOPY=<path>` swaps the binary for testing.
+- `show --check-routing <deck>` prints the overview and the numbered merge order.
+
 ## Learn workspace
 
 The Learn workspace (⌘3) runs a `/tutor` session as a worksheet: one rung at a time, answered in place.
@@ -119,4 +129,4 @@ The tutor's loop, whether it's the headless tutor or you via `replyTo`:
 
 ## Verifying
 
-**Never drive or capture his screen** — no `osascript`/System Events keystrokes, no `screencapture`. A clean compile is the check. `show --snapshot <file> <out.png>` renders the whole window offscreen in-process (`<out>.png`, a composite with the lists painted in) and never touches the running app or its saved state. It also writes `<out>-rail.png` (the workspace rail), `<out>-detail.png` (the rendered section at full height) and `<out>-sidebar.png` (the section list), and for a tutor session `<out>-worksheet.png`, the full worksheet column. It writes `<out>-shelf.png` (the workspace's shelf) too and prints the shelf and back history. `SHOW_SNAPSHOT_SECTION=<id>` picks the section, `SHOW_SNAPSHOT_WORKSPACE=<name>` brings another workspace forward, `SHOW_SNAPSHOT_FINDER=<query>` opens the finder on a query, `SHOW_SNAPSHOT_BACK=1` goes back once, `SHOW_SNAPSHOT_ARCHIVE=<path>` archives that shelf row (fixtures only), and `SHOW_DIR=<dir>` points the library at fixtures instead of `~/.dotfiles/show`. If something looks wrong, ask Phil.
+**Never drive or capture his screen** — no `osascript`/System Events keystrokes, no `screencapture`. A clean compile is the check. `show --snapshot <file> <out.png>` renders the whole window offscreen in-process (`<out>.png`, a composite with the lists painted in) and never touches the running app or its saved state. It also writes `<out>-rail.png` (the workspace rail), `<out>-detail.png` (the rendered section at full height) and `<out>-sidebar.png` (the section list), and for a tutor session `<out>-worksheet.png`, the full worksheet column. It writes `<out>-shelf.png` (the workspace's shelf) too and prints the shelf and back history. `SHOW_SNAPSHOT_SECTION=<id>` picks the section, `SHOW_SNAPSHOT_WORKSPACE=<name>` brings another workspace forward, `SHOW_SNAPSHOT_FINDER=<query>` opens the finder on a query, `SHOW_SNAPSHOT_BACK=1` goes back once, `SHOW_SNAPSHOT_ARCHIVE=<path>` archives that shelf row (fixtures only), `SHOW_SNAPSHOT_CANOPY=1` presses ⌘⇧O and prints the status line, and `SHOW_DIR=<dir>` points the library at fixtures instead of `~/.dotfiles/show`. If something looks wrong, ask Phil.
