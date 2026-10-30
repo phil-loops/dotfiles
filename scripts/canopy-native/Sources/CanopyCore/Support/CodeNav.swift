@@ -73,7 +73,9 @@ public final class CodeNav {
     /// nil: go to the item's place, through the jumplist.
     @ObservationIgnored private var chooser: ((Int) -> Void)?
     /// The last picker closed, with its query, for "reopen the last picker" (Helix `space '`).
-    @ObservationIgnored private var last: (title: String, items: [PickItem], filter: String, chooser: ((Int) -> Void)?)?
+    /// How the opener orders the items for a query (indices into `items`); nil: fuzzy, ties in order.
+    @ObservationIgnored private var ranker: ((String) -> [Int])?
+    @ObservationIgnored private var last: (title: String, items: [PickItem], filter: String, chooser: ((Int) -> Void)?, ranker: ((String) -> [Int])?)?
     /// The picker opened / closed: the shell raises and drops the `picker` key layer with it.
     @ObservationIgnored public var onPickerChange: ((Bool) -> Void)?
     @ObservationIgnored private var surface: Attached?
@@ -131,13 +133,14 @@ public final class CodeNav {
 
     /// Open the picker on places in code; choosing one goes there through the jumplist.
     public func pick(_ title: String, _ items: [PickItem]) {
-        open(title, items, filter: "", chooser: nil)
+        open(title, items, filter: "", chooser: nil, ranker: nil)
     }
 
     /// Open the picker on anything: `choose` gets the picked item's index in `items`. Any area can
     /// feed it (branches, pages, sessions); the picker layer's keys and view are the same.
-    public func pick(_ title: String, _ items: [PickItem], choose: @escaping (Int) -> Void) {
-        open(title, items, filter: "", chooser: choose)
+    /// `rank`, when given, orders the items for each query (indices into `items`) — e.g. fuzzy × frecency.
+    public func pick(_ title: String, _ items: [PickItem], rank: ((String) -> [Int])? = nil, choose: @escaping (Int) -> Void) {
+        open(title, items, filter: "", chooser: choose, ranker: rank)
     }
 
     public var canReopen: Bool { last != nil }
@@ -146,11 +149,12 @@ public final class CodeNav {
     @discardableResult
     public func reopen() -> Bool {
         guard let l = last else { return false }
-        open(l.title, l.items, filter: l.filter, chooser: l.chooser)
+        open(l.title, l.items, filter: l.filter, chooser: l.chooser, ranker: l.ranker)
         return true
     }
 
-    private func open(_ title: String, _ items: [PickItem], filter f: String, chooser c: ((Int) -> Void)?) {
+    private func open(_ title: String, _ items: [PickItem], filter f: String, chooser c: ((Int) -> Void)?, ranker r: ((String) -> [Int])?) {
+        ranker = r
         filter = f
         index = 0
         chooser = c
@@ -159,7 +163,7 @@ public final class CodeNav {
     }
 
     private func remember() {
-        if let p = picker { last = (p.title, p.items, filter, chooser) }
+        if let p = picker { last = (p.title, p.items, filter, chooser, ranker) }
     }
 
     /// Fill a row's source line once its file arrives.
@@ -177,6 +181,7 @@ public final class CodeNav {
     /// `shown` as indices into the picker's items.
     public var shownIndices: [Int] {
         guard let p = picker else { return [] }
+        if let ranker { return ranker(filter).filter { p.items.indices.contains($0) } }
         return ranked(Array(p.items.indices), filter) { "\(p.items[$0].label) \(p.items[$0].text ?? "")" }
     }
 

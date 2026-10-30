@@ -287,6 +287,17 @@ import Testing
         #expect(a.frecency.entries["loops:add-email-reading-format"]?.rank == 2, "the visit counts")
     }
 
+    @Test func spaceBKeepsFrecencyWhileYouType() throws {
+        let a = try app()
+        a.frecency.visit("loops:add-hankles-limited-label")
+        press(a, "space b")
+        a.nav.typed("m")   // both names hold an "m"; add-email-reading-format's comes sooner
+        #expect(a.nav.shown.map(\.label) == ["add-hankles-limited-label", "add-email-reading-format"], "among close matches, the visited branch leads")
+        a.keys.handle("esc")
+        press(a, "space '")
+        #expect(a.nav.shown.first?.label == "add-hankles-limited-label", "reopening keeps the ranking")
+    }
+
     @Test func spaceQuoteReopensTheLastPicker() throws {
         let a = try app()
         press(a, "space b")
