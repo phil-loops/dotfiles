@@ -1,0 +1,92 @@
+{
+  "title": "Domain enforcement — vision",
+  "subtitle": "Vision · kernels · mockups · path",
+  "sections": [
+    {
+      "id": "vision",
+      "group": "Vision",
+      "title": "The question we can always answer",
+      "body": "> At any moment we can answer: why can't this team send, who decided that, and what would change it?\n\nToday a reviewer rebuilds that answer from a disabled flag, a pile of suspicious-activity rows and thousands of notice cards. The answer should come from one place and reach three audiences in their own words.\n\n- **The sender** sees which domain is paused, the reason in plain words, and what happens next. The API returns the same reason.\n- **Support** reads the reason the sender saw, plus the decider and the evidence.\n- **The reviewer** sees what is keeping the domain disabled, lifts exactly that, and says whether the check was wrong or the sender fixed it."
+    },
+    {
+      "id": "k-1",
+      "group": "Kernels",
+      "title": "1 · A restriction is a claim with a reason and a decider",
+      "body": "```\nevery Restriction has\n  category\n  ∧ (ruleId ∨ decider = person)\n  ∧ decider ∈ { person, automation@version }\n```\n\n**Breaks when** a domain is disabled and nobody can say which check or person did it.\n\n**Caught by** NOT NULL and CHECK constraints on the table, and every disable call site going through one model function that takes the claim.",
+      "tag": "signed off as rule-1"
+    },
+    {
+      "id": "k-2",
+      "group": "Kernels",
+      "title": "2 · The remedy matches the finding",
+      "body": "```\nlift(restriction) and allow(selector) act at the grain\nthe finding was made: an email, a word, a rule, a team\n```\n\n**Breaks when** approving one flagged email re-enables a domain that was disabled for a bounce spike.\n\nThat break is live today. It's the first fix on the path, and it needs no new tables.",
+      "tag": "signed off as rule-2"
+    },
+    {
+      "id": "k-3",
+      "group": "Kernels",
+      "title": "3 · Detectors are provisional, people are binding",
+      "body": "```\nlift      needs  person ∧ verdict ∈ { wrong, fixed } ∧ note\nallowance needs  person ∧ until\n```\n\n**Breaks when** a reviewer re-enables with no record of whether the detector misfired. Without the verdict we can't measure a detector's false-positive rate or tune it.",
+      "tag": "signed off as rule-3"
+    },
+    {
+      "id": "k-4",
+      "group": "Kernels",
+      "title": "4 · Write once, compute everything else",
+      "body": "```\nsendingDomain.disabled  ⇔  ∃ restriction in effect on (domain ∨ team)\nonly restrict() and lift() change it\n```\n\n**Breaks when** any code path flips `disabled` directly, or edits a past row.\n\nThe timeline, the \"keeping it disabled\" panel, the sender's banner and the API reason are all reads over the same rows.",
+      "tag": "signed off as rule-4"
+    },
+    {
+      "id": "nouns",
+      "group": "Kernels",
+      "title": "Three nouns, nothing else",
+      "body": "A new noun needs a real case these three can't express.\n\n| Noun        | Holds                                                        | Changes by                         |\n|-------------|--------------------------------------------------------------|------------------------------------|\n| Restriction | team, domain (empty = team), category, ruleId, findingKey,   | written once; lifted once with     |\n|             | decider                                                      | verdict + note                     |\n| Allowance   | one selector: finding (word:acme) | rule | category | all;   | granted, expires, or revoked       |\n|             | until, granted by, note                                      |                                    |\n| Registry    | categories + rules with sender-facing copy                   | a code change                      |"
+    },
+    {
+      "id": "m-chart",
+      "group": "Mockups",
+      "title": "Reviewer · notice chart (built)",
+      "body": "**Today** one card per 15-minute reading. A week is ~670 cards per type, mostly Info, and they push the content findings off the page.\n\n```\n┌ Spam · Info        0.09% · Oct 28 14:07 ┐\n┌ Bounce · Info      0.61% · Oct 28 14:22 ┐\n┌ Spam · Info        0.11% · Oct 28 14:37 ┐\n┌ ApplePrivateRelay · Info  0.02% · 14:52 ┐\n┌ Spam · Error       0.41% · Oct 28 15:07 ┐   ← the one that matters\n┌ Bounce · Info      0.58% · Oct 28 15:22 ┐\n  … 2,000 more\n```\n\n**After** one chart per type, labelled with what the rate is out of. A type that reached Error turns red.\n\n```\n╔ Spam complaints  per non-Gmail delivery  [Error] ═══ peak 0.41% · 6 h at Error ╗\n║                                          ●●                                     ║\n║                                        ●●  ●●                                   ║\n║ ─────────────────────────────────────╱──────╲────────────────────────────────── ║\n╚═════════════════════════════════════════════════════════════════════ ▸ Hourly ══╝\n┌ Hard bounces  per delivery ─────────────────────── peak 1.80% · 4 h at Warning ┐\n│              ○○                                                                 │\n│ ────────────╱──╲─────────────────────────────────────────────────────────────── │\n└────────────────────────────────────────────────────────────────────── ▸ Hourly ─┘\n```\n\nFive stacked PRs, gates-green, yours to push. It's a read over rows we already write, so it doesn't wait on the new tables.",
+      "tag": "built · 5 PRs"
+    },
+    {
+      "id": "m-why",
+      "group": "Mockups",
+      "title": "Reviewer · what keeps this domain disabled",
+      "body": "```\nadmin › domain review › mail.acme-example.com\n┌──────────────────────────────────────────────────────────────────┐\n│ ■ Disabled — 2 restrictions in effect. Lifting both re-enables.  │\n├──────────────────────────────────────────────────────────────────┤\n│ Possible phishing in \"Reset your password\"     [Lift…] [Email]   │\n│ content.phishing · phishing_classifier · automation@v14 · Oct 28 │\n├──────────────────────────────────────────────────────────────────┤\n│ Complaint rate 0.41% over 24h                  [Lift…] [Chart]   │\n│ behavior.complaint_rate · health_complaint_limit · automation    │\n├──────────────────────────────────────────────────────────────────┤\n│ ░ Banned word \"bitcoin\" in \"Weekly digest\"            lifted     │\n│ ░ Dana R. · wrong · \"crypto newsletter\" · allow word:bitcoin     │\n│ ░ until Jan 27                                                   │\n└──────────────────────────────────────────────────────────────────┘\n```\n\nLifting the phishing restriction leaves the complaint-rate one in place, so the domain stays disabled. That's kernel 2.",
+      "tag": "after restrictions exist"
+    },
+    {
+      "id": "m-lift",
+      "group": "Mockups",
+      "title": "Reviewer · lift dialog and timeline",
+      "body": "```\nLift: Possible phishing in \"Reset your password\"\n\n  (●) The check was wrong         ( ) The sender fixed it\n      Email is legitimate.            Finding was right;\n      Counts against the detector.    the content changed.\n\n  Note (required)\n  ┌────────────────────────────────────────────────────────┐\n  │ Password reset for their own app, links to their site. │\n  └────────────────────────────────────────────────────────┘\n                                          [Cancel] [Lift]\n```\n\nThe timeline is computed from the rows, never written separately:\n\n```\nOct 27 09:12  Restricted  banned word \"bitcoin\"   automation@banned-words\nOct 27 11:40  Lifted      wrong · Dana R. · allowance until Jan 27\nOct 28 14:07  Restricted  possible phishing       automation@v14\nOct 28 15:52  Restricted  complaint rate 0.41%    automation@health\n```",
+      "tag": "after restrictions exist"
+    },
+    {
+      "id": "m-sender",
+      "group": "Mockups",
+      "title": "Sender · in-app banner and API",
+      "body": "```\napp › campaigns\n┌─────────────────────────────────────────────────────────────┐\n│ ⚠ Sending from mail.acme-example.com is paused              │\n│   One of your emails, \"Reset your password\", looked like    │\n│   phishing to our automated checks. We're reviewing it and  │\n│   will email you by the end of the next business day.       │\n│   Other domains on your team can still send.                │\n└─────────────────────────────────────────────────────────────┘\n```\n\n```\nPOST /api/v1/transactional  → 403\n{\n  \"success\": false,\n  \"message\": \"Sending from mail.acme-example.com is paused.\",\n  \"reason\": {\n    \"category\": \"content.phishing\",\n    \"summary\": \"An email looked like phishing to our automated checks.\",\n    \"next\": \"under_review\"\n  }\n}\n```\n\nThe banner, the API and support all use the same registry copy. All copy here is a draft.",
+      "tag": "LOO-6235 · 6236"
+    },
+    {
+      "id": "p-improve",
+      "group": "Path",
+      "title": "Improve what we have",
+      "body": "Each step is its own PR off main, and none needs new tables.\n\n1. **Chart the account limit notices**: built, 5 PRs gates-green. *reviewer signal*\n2. **Approving a flagged email re-enables only when nothing else holds the domain**: next; the live bug. *kernel 2*\n3. **The phishing check keeps its reason**: next. isSafe returns a tag that today's code throws away. *kernel 1*\n4. **Workflow preflight disables the failing email's domain**: candidate, needs a check. Today it disables the team's first sending domain. *kernel 2*\n5. **Collapse notice runs in the team feed**: candidate. It's the same deluge, on the team page. *reviewer signal*"
+    },
+    {
+      "id": "p-new",
+      "group": "Path",
+      "title": "Then add the new thing",
+      "body": "A spine in ladder order, sliced from the local spike (41 passing tests).\n\n1. **Add the Restriction and Allowance tables and the registry**: CHECKs enforce \"exactly one selector\" and \"lift fields written together\". *kernels 1 · 3*\n2. **Every disable writes a restriction**: all ten call sites pass a claim, and `disabled` is set only by restrict() and lift(). *kernel 4*\n3. **Lift with a verdict, allow with an expiry**: an admin block picker, the lift dialog, and detectors that check allowances. *kernels 2 · 3*\n4. **Show what keeps the domain disabled**: the reviewer mockup. *kernel 4*\n5. **Give the sender and the API the reason**: the sender mockup. *kernel 4*"
+    },
+    {
+      "id": "open",
+      "group": "Open",
+      "title": "Still to decide",
+      "body": "- Sender-facing copy per category, and who owns it: support or product.\n- Is \"hold a publish\" (LOO-6309) a restriction on one email, or its own thing? Kernel 2 points to a restriction with an email finding.\n- The complaint rate excludes only exact `@gmail.com`. Workspace and googlemail recipients still count. Fix the denominator or label it as it is."
+    }
+  ]
+}
