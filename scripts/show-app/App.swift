@@ -327,10 +327,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         guard menuItem.action == #selector(runBinding), let id = menuItem.representedObject as? String, let binding = KeyTable.binding(id) else { return true }
-        let enabled = isEnabled(binding)
-        let reason = enabled ? nil : binding.reason(self)
-        menuItem.title = binding.title + (reason.map { " — \($0)" } ?? "")
-        return enabled
+        return isEnabled(binding)
     }
 
     @objc func openOther(_ sender: Any?) {

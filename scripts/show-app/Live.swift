@@ -107,7 +107,9 @@ extension KeyedDecodingContainer {
 
 /// Signal: needs your eyes (disagree, flagged, stale).
 let signalColor = NSColor.systemOrange
-let signalTint = NSColor.systemOrange.withAlphaComponent(0.14)
+let signalTint = NSColor(name: "show.signalTint") { appearance in
+    NSColor.systemOrange.withAlphaComponent(appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? 0.3 : 0.14)
+}
 
 // MARK: the list
 
