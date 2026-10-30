@@ -40,7 +40,7 @@ enum BranchCommands {
         let t = app.transport
 
         r.register(Command(
-            id: "branch.push", title: "Push to origin", scope: .branch, keys: ["p"], label: "push",
+            id: "branch.push", title: "Push to origin", scope: .branch, verb: .push, label: "push",
             route: { id in pushRoute(id, app).map { RouteTo($0, target: id) } }))
 
         func gatesWrite(_ v: BranchView, skip: [String]) -> Write {
@@ -117,7 +117,7 @@ enum BranchCommands {
             }))
 
         r.register(Command(
-            id: "branch.open", title: "Open the branch", scope: .branch, keys: ["l", "right"], label: "open",
+            id: "branch.open", title: "Open the branch", scope: .branch, verb: .into, label: "open",
             available: { m.branchView($0) != nil },
             local: { id, _ in
                 guard let b = m.branchView(id)?.b else { return }
@@ -141,7 +141,7 @@ enum BranchCommands {
                     inverse: { _ in Inverse(id: "branch.describe", target: id, arg: before) })
             }))
         r.register(Command(
-            id: "branch.describe.edit", title: "Edit the branch's description in place", scope: .branch, keys: ["i"], label: "describe",
+            id: "branch.describe.edit", title: "Edit the branch's description in place", scope: .branch, verb: .write, label: "describe",
             available: { id in app.router.surface.id == "forest" && m.face == .branches && m.branchView(id) != nil },
             local: { id, _ in
                 guard let id, let b = s.view(Branch.self, id) else { return }
@@ -150,7 +150,7 @@ enum BranchCommands {
                 app.beginInsert(describeField)
             }))
         r.register(Command(
-            id: "branch.describe.save", title: "Save the description you're typing", scope: .forest, keys: ["ret"], modes: [.insert],
+            id: "branch.describe.save", title: "Save the description you're typing", scope: .forest, verb: .send, modes: [.insert],
             label: "save", quiet: true,
             available: { _ in m.describing != nil && app.insertField == describeField },
             local: { _, _ in
@@ -186,14 +186,14 @@ enum BranchCommands {
                 inverse: { _ in Inverse(id: until != nil ? "hold.release" : "hold.morning", target: row, arg: ids) })
         }
         r.register(Command(
-            id: "hold.morning", title: "Hold for the morning", scope: .row, budget: .configWrite, keys: ["b"], label: "hold", v1: ["outbox-hold"],
+            id: "hold.morning", title: "Hold for the morning", scope: .row, budget: .configWrite, leader: LocalKey(",b"), label: "hold", v1: ["outbox-hold"],
             available: { row in holdable(row).contains { $0.b.holdUntil == nil } },
             write: { row, arg in
                 let ids = arg as? [String] ?? holdable(row).filter { $0.b.holdUntil == nil }.map(\.b.id)
                 return holdWrite(row, ids, until: isoString(PushWindow.nextMorning(m.now)))
             }))
         r.register(Command(
-            id: "hold.release", title: "Release the hold", scope: .row, budget: .configWrite, keys: ["B"], label: "unhold",
+            id: "hold.release", title: "Release the hold", scope: .row, budget: .configWrite, leader: LocalKey(",B"), label: "unhold",
             available: { row in holdable(row).contains { $0.b.holdUntil != nil } },
             write: { row, arg in
                 let ids = arg as? [String] ?? holdable(row).filter { $0.b.holdUntil != nil }.map(\.b.id)

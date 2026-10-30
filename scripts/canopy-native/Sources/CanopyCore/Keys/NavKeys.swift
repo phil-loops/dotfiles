@@ -6,12 +6,6 @@ import Foundation
 /// before they run — the registry sets `recordsJump` for them, you don't have to.
 public enum NavKeys {
     public static let reserved: [String: [String]] = [
-        // Forests (A): `f` is the label layer now, so focusing a forest moves to `F`
-        "project.focus": ["F"],
-        "forests.find": ["space f"],
-        "forest.find": ["space f"],
-        "forest.branch.next": ["J"], "forest.branch.prev": ["K"],
-        "forest.parent": ["g k"], "forest.child": ["g j"], "forest.root": ["g K"], "forest.tip": ["g J"],
         // Review (B): `v` is select everywhere; `m` marks viewed and advances, `M` unmarks; `/` is search
         "review.viewed": ["m"], "review.unviewed": ["M"],
         "review.filter": ["space f"],

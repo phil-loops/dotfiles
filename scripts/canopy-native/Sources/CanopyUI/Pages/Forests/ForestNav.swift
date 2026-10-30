@@ -52,7 +52,7 @@ enum ForestNav {
         let onBranch: (String?) -> Bool = { _ in here(app) != nil }
 
         r.register(Command(
-            id: "forest.branch.next", title: "Next branch in merge order", scope: .forest, keys: NavKeys.keys("forest.branch.next"), label: "branch", pair: "forest.branch.prev",
+            id: "forest.branch.next", title: "Next branch in merge order", scope: .forest, verb: .nextSibling, label: "branch", pair: "forest.branch.prev",
             available: { _ in !mergeOrder(app).isEmpty },
             local: { _, _ in
                 let order = mergeOrder(app)
@@ -63,7 +63,7 @@ enum ForestNav {
                 go(order[next], app)
             }))
         r.register(Command(
-            id: "forest.branch.prev", title: "Previous branch in merge order", scope: .forest, keys: NavKeys.keys("forest.branch.prev"), label: "branch",
+            id: "forest.branch.prev", title: "Previous branch in merge order", scope: .forest, verb: .previousSibling, label: "branch",
             available: { _ in !mergeOrder(app).isEmpty },
             local: { _, _ in
                 let order = mergeOrder(app)
@@ -74,7 +74,7 @@ enum ForestNav {
                 go(order[prev], app)
             }))
         r.register(Command(
-            id: "forest.parent", title: "Go to the branch's parent", scope: .forest, keys: NavKeys.keys("forest.parent"), label: "parent", pair: "forest.child",
+            id: "forest.parent", title: "Go to the branch's parent", scope: .forest, verb: .parent, label: "parent", pair: "forest.child",
             available: onBranch,
             local: { _, _ in
                 guard let v = here(app) else { return }
@@ -82,7 +82,7 @@ enum ForestNav {
                 go(p, app)
             }))
         r.register(Command(
-            id: "forest.child", title: "Go to the branch's child (labels at a fork)", scope: .forest, keys: NavKeys.keys("forest.child"), label: "child",
+            id: "forest.child", title: "Go to the branch's child (labels at a fork)", scope: .forest, verb: .child, label: "child",
             available: onBranch,
             local: { _, _ in
                 guard let v = here(app) else { return }
@@ -98,7 +98,7 @@ enum ForestNav {
                 }
             }))
         r.register(Command(
-            id: "forest.root", title: "Go to the root of the branch's stack", scope: .forest, keys: NavKeys.keys("forest.root"), label: "root", pair: "forest.tip",
+            id: "forest.root", title: "Go to the root of the branch's stack", scope: .forest, verb: .root, label: "root", pair: "forest.tip",
             available: onBranch,
             local: { _, _ in
                 guard var v = here(app) else { return }
@@ -107,7 +107,7 @@ enum ForestNav {
                 go(v, app)
             }))
         r.register(Command(
-            id: "forest.tip", title: "Go to the tip of the branch's stack", scope: .forest, keys: NavKeys.keys("forest.tip"), label: "tip",
+            id: "forest.tip", title: "Go to the tip of the branch's stack", scope: .forest, verb: .tip, label: "tip",
             available: onBranch,
             local: { _, _ in
                 guard let v = here(app) else { return }
@@ -138,10 +138,10 @@ enum ForestNav {
             app.nav.pick(title, items) { i in app.jump { app.setCursor(rows[i]) } }
         }
         r.register(Command(
-            id: "forests.find", title: "Find a forest on this page", scope: .forests, keys: NavKeys.keys("forests.find"), label: "find",
+            id: "forests.find", title: "Find a forest on this page", scope: .forests, verb: .find, label: "find",
             local: { _, _ in try find("find a forest") }))
         r.register(Command(
-            id: "forest.find", title: "Find a branch on this forest", scope: .forest, keys: NavKeys.keys("forest.find"), label: "find",
+            id: "forest.find", title: "Find a branch on this forest", scope: .forest, verb: .find, label: "find",
             local: { _, _ in try find("find a branch") }))
     }
 }
