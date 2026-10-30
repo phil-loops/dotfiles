@@ -73,11 +73,17 @@ public final class ShipState {
     public var commitScope: String?
     public var historyFocus: HistoryFocus = .list
 
-    @ObservationIgnored let defaults = UserDefaults.standard
+    /// Where unsent words are kept across launches; the keytutor's practice app keeps its own.
+    @ObservationIgnored public var defaults = UserDefaults.standard
     /// Every command Ship registered, for its keyboard-rule test.
     @ObservationIgnored public internal(set) var commandIDs: [String] = []
     /// Opens a URL in the browser (GitHub, the compare form, a preview). Tests swap it out.
     @ObservationIgnored public var openURL: (URL) -> Void = { NSWorkspace.shared.open($0) }
+    /// Puts text on the clipboard (`y`). The keytutor's practice app swaps it.
+    @ObservationIgnored public var copyText: (String) -> Void = { s in
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(s, forType: .string)
+    }
     /// A branch's description as it's being typed, by branch id (saved on leaving insert).
     public var describing: [String: String] = [:]
 

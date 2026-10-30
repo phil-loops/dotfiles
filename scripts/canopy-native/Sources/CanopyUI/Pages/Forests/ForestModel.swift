@@ -66,8 +66,10 @@ public final class ForestModel {
     public var gateShown: String?
     /// a forest page's face: its branches as they stand, or the feature's story (remembered)
     public var face: Face = ForestModel.savedFace {
-        didSet { UserDefaults.standard.set(face.rawValue, forKey: Self.faceKey) }
+        didSet { defaults.set(face.rawValue, forKey: Self.faceKey) }
     }
+    /// Where the face is remembered; the keytutor's practice app keeps its own.
+    @ObservationIgnored public var defaults = UserDefaults.standard
     /// the clock stands use to decide whether a hold came due; the pages tick it
     public var now = Date()
     /// g j at a fork: the children the label layer offers, for the one `showLabels` call that reads them

@@ -117,8 +117,10 @@ public final class ReviewPageState: ShipHost {
     /// "conversation" | "commits" | "files" (ShipHost's tab)
     public var tab = "files" { didSet { if tab != oldValue { tabMoved(oldValue) } } }
     public var split = false {
-        didSet { UserDefaults.standard.set(split ? "1" : nil, forKey: "v2.review.split") }
+        didSet { defaults.set(split ? "1" : nil, forKey: "v2.review.split") }
     }
+    /// Where split ⇄ unified is remembered; the keytutor's practice app keeps its own.
+    @ObservationIgnored public var defaults = UserDefaults.standard
     public var showOutdated = false
     /// where `x` dropped its mark (the other end of a range comment)
     public var mark: String?

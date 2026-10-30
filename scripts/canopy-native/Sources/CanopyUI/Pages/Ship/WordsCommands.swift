@@ -144,8 +144,7 @@ enum WordsCommands {
                 guard let app, let id = branchOf(app, nil) else { return }
                 let w = words.prValue(id)
                 let part = row == "w|title" ? "title" : "body"
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(part == "title" ? w.subject : w.body, forType: .string)
+                ShipState.of(app).copyText(part == "title" ? w.subject : w.body)
                 app.runner.say("copied the PR \(part)")
             }))
 

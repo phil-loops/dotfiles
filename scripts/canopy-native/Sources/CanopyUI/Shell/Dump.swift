@@ -97,6 +97,7 @@ public enum Dump {
             "modal": .object(modal.merging(["modeAfterEsc": .string(modeAfterEsc), "colonCompletion": .string(completion),
                                             "afterColon": .string(afterColon)]) { $1 }),
             "keyboardRule": .array(KeyboardRule.violations(app).map(JSONValue.string)),
+            "extras": .object(app.dumpExtras.mapValues { $0() }),
             "fonts": ["registered": .bool(Fonts.registered),
                       "plexMono": .bool(NSFont(name: "IBMPlexMono-Regular", size: 13) != nil && NSFont(name: "IBMPlexMono-SemiBold", size: 13) != nil),
                       "fraunces": .bool(NSFont(name: "FrauncesSoftWonky-Italic", size: 17) != nil)],
