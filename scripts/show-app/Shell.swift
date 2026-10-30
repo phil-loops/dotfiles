@@ -745,6 +745,9 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
     func open(_ path: String, remember: Bool = true) {
         _ = view
         prefs.set(Date(), forKey: "opened." + path)
+        if workspace == .runs {
+            recordLiveRun(path)
+        }
         if path == current {
             reload()
             return
