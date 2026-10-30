@@ -231,6 +231,13 @@ func loadDeck(_ path: String) throws -> Deck {
     try JSONDecoder().decode(Deck.self, from: Data(contentsOf: URL(fileURLWithPath: path)))
 }
 
+func modificationDate(_ path: String) -> Date? {
+    (try? FileManager.default.attributesOfItem(atPath: path))?[.modificationDate] as? Date
+}
+
+/// The launcher writes this after a successful build, so a change means a newer Show is ready.
+let buildStamp = ((Bundle.main.bundlePath as NSString).deletingLastPathComponent as NSString).appendingPathComponent("source.sha")
+
 let decksDirectory = ("~/.dotfiles/show" as NSString).expandingTildeInPath
 
 /// One deck in one window; windows share a tab group, so each deck is a labelled tab.
@@ -254,6 +261,7 @@ final class DeckController: NSObject, NSWindowDelegate, NSTableViewDataSource, N
     let progress = NSTextField(labelWithString: "")
     let submit = NSButton(title: "Submit", target: nil, action: nil)
     var onClose: (() -> Void)?
+    var deckModified: Date?
 
     init(path: String, deck: Deck) {
         self.path = path
@@ -276,8 +284,11 @@ final class DeckController: NSObject, NSWindowDelegate, NSTableViewDataSource, N
         split.addSplitViewItem(NSSplitViewItem(viewController: detailController()))
         window.contentViewController = split
         window.setContentSize(NSSize(width: 1180, height: 780))
-        apply(deck, keepingSelection: nil)
+        deckModified = modificationDate(path)
+        apply(deck, keepingSelection: UserDefaults.standard.string(forKey: selectionKey))
     }
+
+    var selectionKey: String { "selected." + path }
 
     var selectedSection: Section? {
         guard table.selectedRow >= 0, table.selectedRow < rows.count, case .item(let i) = rows[table.selectedRow] else { return nil }
@@ -286,6 +297,7 @@ final class DeckController: NSObject, NSWindowDelegate, NSTableViewDataSource, N
 
     /// Re-reads the deck and its sign-offs from disk, keeping the selected section when it still exists.
     func reload() {
+        deckModified = modificationDate(path)
         guard let fresh = try? loadDeck(path) else { return }
         store = SignOffStore(deckPath: path)
         apply(fresh, keepingSelection: selectedSection?.key)
@@ -419,7 +431,7 @@ final class DeckController: NSObject, NSWindowDelegate, NSTableViewDataSource, N
         reloadSelectedRow()
     }
 
-    @objc private func saveNote() {
+    @objc func saveNote() {
         guard let section = selectedSection else { return }
         let value = note.stringValue
         guard (store.entries[section.key]?.note ?? "") != value else { return }
@@ -546,6 +558,7 @@ final class DeckController: NSObject, NSWindowDelegate, NSTableViewDataSource, N
 
     func tableViewSelectionDidChange(_ notification: Notification) {
         guard let section = selectedSection else { return }
+        UserDefaults.standard.set(section.key, forKey: selectionKey)
         if let address = section.url, let url = URL(string: address) {
             textScroll.isHidden = true
             web.isHidden = false
@@ -574,10 +587,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         self.launchPaths = launchPaths
     }
 
+    var watcher: Timer?
+    let launchedBuild = modificationDate(buildStamp)
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         buildMenu()
         launchPaths.forEach(openDeck)
         NSApp.activate(ignoringOtherApps: true)
+        watcher = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.stayCurrent() }
+    }
+
+    /// Reloads decks edited on disk, and relaunches into a newer build once the launcher finishes one.
+    private func stayCurrent() {
+        for controller in open.values where modificationDate(controller.path) != controller.deckModified {
+            controller.reload()
+        }
+        if let built = modificationDate(buildStamp), built != launchedBuild {
+            relaunch()
+        }
+    }
+
+    private func relaunch() {
+        watcher?.invalidate()
+        let tabs = (NSApp.keyWindow?.tabbedWindows ?? NSApp.orderedWindows).compactMap { window in
+            open.values.first { $0.window === window }
+        }
+        let ordered = tabs + open.values.filter { controller in !tabs.contains { $0 === controller } }
+        ordered.forEach { $0.saveNote() }
+        let key = open.values.first { $0.window.isKeyWindow }?.path
+        let paths = ordered.map(\.path).filter { $0 != key } + [key].compactMap { $0 }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", "sleep 0.7; open -a \"$0\" \"$@\"", Bundle.main.bundlePath] + paths
+        try? process.run()
+        NSApp.terminate(nil)
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
