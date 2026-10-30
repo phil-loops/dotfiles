@@ -139,7 +139,7 @@ let learningFixture = #"""
         a.setCursor("dl:0:dead-holder-blocks-forever")
         a.keys.handle("ret")
         #expect(t.drawer == "dead-holder-blocks-forever")
-        // the credit's keys: m toggles hit/miss as a write (the write itself is checked below)
+        // the credit's keys (, o hit/miss, , l level …) are writes as a write (the write itself is checked below)
         a.setCursor("e:ev2")
         #expect(a.liveScopes().first == .credit)
         a.keys.handle("esc")
@@ -235,10 +235,10 @@ let learningFixture = #"""
         a.setCursor("x:2:5:1")
         a.keys.handle("ret")
         #expect(t.draft == "both" && a.insertField == "tutor.draft")
-        // ⌥2 rates while typing; the first ret without a rating would flag the chips instead
-        a.keys.handle("A-2")
-        #expect(t.confidence == "medium")
+        // insert keeps its fixed set, so rating is normal mode's: esc, then 2 (the 2nd chip)
         a.keys.handle("esc")
+        a.keys.handle("2")
+        #expect(t.confidence == "medium")
 
         // the earlier rungs fold
         a.setCursor("hist")

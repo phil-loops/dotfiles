@@ -824,7 +824,7 @@ struct EvidenceRow: View {
                 Text("\(e.at)\(e.rung == "invent" ? " · invent" : "")\(e.via.map { $0.isEmpty ? "" : " · via \(t.nameOf($0))" } ?? "")")
                     .font(Theme.mono(10.5)).foregroundStyle(theme.inkFaint)
                 Spacer()
-                if arming { Text("X again cuts it").foregroundStyle(theme.del).font(Theme.mono(11)) }
+                if arming { Text("\(app.registry.keyOf("tutor.evidence.cut")) again cuts it").foregroundStyle(theme.del).font(Theme.mono(11)) }
             }
             .font(Theme.mono(12))
             if on {
