@@ -110,7 +110,7 @@ public enum Verbs {
         v(.nextThread, .nav, ["n"], jump: true, "the next conversation (open ones first)"),
         v(.previousThread, .nav, ["N"], jump: true, "the previous conversation (open ones first)"),
         v(.face, .nav, ["tab"], "the page's other face (story ⇄ branches, the next tab, web ⇄ jobs)"),
-        v(.labels, .nav, ["f", "g w"], "label everything on screen; type a label to go there"),
+        v(.labels, .nav, ["g w", "f"], "label everything on screen; type a label to go there"),
         v(.find, .nav, ["space f"], "find something on this page by name"),
         v(.search, .nav, ["/"], "search this page's text"),
         v(.map, .nav, ["space m"], "the map around what you're on"),
