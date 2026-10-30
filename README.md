@@ -81,6 +81,7 @@ hx --health typescript         # language server found via volta
 | `.zshenv`, `.zshrc` | PATH lives in `.zshenv` so non-interactive shells get it; everything else in `.zshrc` |
 | `scripts/` | every command; on PATH via `.zshenv`. `stack-*` is the forest tooling, `loops-*` the dev-stack tooling |
 | `scripts/srv/`, `scripts/viewer-solid/` | the forest viewer: python server + Solid frontend (`stack web`) |
+| `scripts/canopy-native/` | the forest viewer as a native macOS app on the same server (`canopy`) |
 | `helix/`, `nvim/`, `tmux.conf`, `starship.toml` | editor and terminal config |
 | `hooks/` | git hooks installed into the loops checkout |
 | `launchd/` | background agents (CI mail watch, PR sweep, build notify) |

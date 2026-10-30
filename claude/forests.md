@@ -39,6 +39,7 @@ Conflicts: resolve them yourself, honestly; a real overlapping-logic conflict �
 
 ## Reviewing
 
-- **`stack web [<project>]`** — the primary review surface (canopy, in the browser; per-repo port from `stack-review-port`; reads git config live). Its pages are `/v2/p/<repo>/<project>` (a forest) and `/v2/b/<repo>/<branch>` (a branch); old `/forests/…` links redirect there. This is where Phil reviews.
+- **`stack web [<project>]`** — starts the review server (canopy; per-repo port from `stack-review-port`; reads git config live) and opens it in the browser. Its pages are `/v2/p/<repo>/<project>` (a forest) and `/v2/b/<repo>/<branch>` (a branch); old `/forests/…` links redirect there. This is where Phil reviews.
+- **`canopy [/v2/…]`** — the same pages as a native macOS app on that server, mouseless and modal (`scripts/canopy-native/`; keys in `NAV.md`, overrides in `~/.dotfiles/canopy/keys-native.toml`, `:keytutor` teaches them). Route "open it in canopy / the native viewer" here — e.g. `canopy /v2/b/loops/<branch>`; it needs `stack web`'s server running and refuses without one.
 - **`wt [base]`** — cross-worktree, single-branch cumulative diff picker.
 - The viewer also has mutating endpoints (`/sync`, `/prep-push`, `/push-origin`, `/restack`, `/squash`, …). Bouncing the server is safe and free — state is durable (gates verdicts in git config keyed by tree SHA; detached runs re-adopted via sidecar). The two hard taboos (probe mutating routes only with `__probe__`, never hand-write `gates-green-tree`) live in the spine.

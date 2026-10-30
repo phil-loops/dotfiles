@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# canopy — the native canopy app; see canopy-native/canopy for flags.
+exec "$(dirname "${BASH_SOURCE[0]}")/canopy-native/canopy" "$@"
