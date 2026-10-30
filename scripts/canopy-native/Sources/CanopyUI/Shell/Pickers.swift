@@ -56,10 +56,8 @@ extension AppModel {
         }
     }
 
-    /// The focus lane, in its hand-made order: `g 1`…`g 9`.
-    var focusLane: [Project] {
-        store.list(Project.self).filter { $0.state == .focus }.sorted { ($0.rank ?? 0, $0.name) < ($1.rank ?? 0, $1.name) }
-    }
+    /// The focus lane as the forests home shows it (rank, then name, then repo; shelved ones out): `g 1`…`g 9`.
+    var focusLane: [Project] { forestModel.projects().focus }
 
     /// `g N`: the Nth focus forest, at the branch you last had open in it (else its page).
     func goSlot(_ n: Int) throws {
