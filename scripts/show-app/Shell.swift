@@ -559,6 +559,8 @@ func shelfEntry(_ path: String) -> ShelfEntry? {
         let counts = live.status.flatMap { status in status.done.flatMap { done in status.total.map { "\(done) of \($0)" } } }
         let progress = [counts, live.status?.state].compactMap { $0 }.joined(separator: " · ")
         return ShelfEntry(path: path, workspace: workspace, title: live.title, state: state, progress: progress, touched: touched)
+    case .api:
+        return nil
     case .forest, .review:
         guard let deck = try? loadDeck(path) else { return nil }
         let store = SignOffStore(deckPath: path)
@@ -699,6 +701,7 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
     private var doneExpanded = false
     private var syncingSelection = false
     let tutor: TutorController?
+    let console: ConsoleController?
     let split = NSSplitViewController()
     let shelf = ShelfTable()
     let statusLabel = NSTextField(labelWithString: "")
@@ -712,6 +715,7 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
     init(workspace: Workspace) {
         self.workspace = workspace
         tutor = workspace == .learn ? TutorController() : nil
+        console = workspace == .api ? ConsoleController() : nil
         super.init(nibName: nil, bundle: nil)
         tutor?.onTitleChange = { [weak self] in self?.onTitleChange?() }
         tutor?.onStartRetest = { [weak self] concept in self?.startTutor(.retest(concept: concept)) }
@@ -775,6 +779,10 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
     /// Puts the dividers where they read best at 1180pt: a 210pt shelf, then the open document's own columns.
     func settleColumns() {
         split.view.layoutSubtreeIfNeeded()
+        if console != nil {
+            split.splitViewItems.first?.isCollapsed = true
+            return
+        }
         split.splitView.setPosition(210, ofDividerAt: 0)
     }
 
@@ -793,6 +801,10 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
     /// Opens `path` here, or reloads it when it's already the open document. The document it replaces goes on the back history.
     func open(_ path: String, remember: Bool = true) {
         _ = view
+        if let console {
+            console.start()
+            return
+        }
         prefs.set(Date(), forKey: "opened." + path)
         if workspace == .runs {
             recordLiveRun(path)
@@ -814,6 +826,8 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
         switch workspace {
         case .learn:
             tutor?.show(path: path)
+        case .api:
+            return
         case .forest, .review, .runs:
             let controller: DeckController
             if let existing = decks[path] {
@@ -871,6 +885,8 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
             tutor?.showEmpty(entries.isEmpty
                 ? "No tutor sessions in `~/.dotfiles/show/tutor` yet. Claude starts one with `show --tutor <file>`."
                 : "Nothing open. Pick a session from the shelf, or press ⌘O.")
+        case .api:
+            if let console { display(console) }
         case .runs:
             display(emptyState("No live runs yet", "A live run shows here while it's going."))
         case .forest:
@@ -897,6 +913,8 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
     func reload() {
         if let tutor {
             tutor.reload()
+        } else if let console {
+            console.reload()
         } else {
             currentDeck?.reload()
         }

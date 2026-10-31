@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # show [<file.json>…] — open files in the one Show window, each in its workspace (Forest ⌘1, Review ⌘2, Learn ⌘3, Runs ⌘4;
 # no args: bring Show to the front, or start it back on the last workspace and documents), rebuilding it when any show-app/*.swift changes. Re-showing an open file reloads it.
+# show --api — the API workspace (⌘5): the loops-postman console, started when it isn't up.
 # show --build — just (re)build. show --snapshot <file.json> <out.png> [--appearance light|dark] — render the window offscreen, no window shown.
 # show --selftest — drive the app's own offscreen window through every workspace on scratch fixtures; non-zero exit on a failed step.
 # show --check-routing <file.json> — print the workspace a file opens in (and a forest's merge order). show --check-live <deck.json> — print a live deck's header, groups and compare diffs.
@@ -50,8 +51,14 @@ PLIST
 
 case "${1:-}" in
   -h|--help)
-    echo "usage: show [<file.json>…] | show --build | show --snapshot <file.json> <out.png> [--appearance light|dark] | show --selftest | show --check-routing <file.json> | show --check-live <deck.json> | show --tutor [<session.json>] | show --tutor-check <session.json> | show --tutor-ask <session.json> <message>" >&2
+    echo "usage: show [<file.json>…] | show --api | show --build | show --snapshot <file.json> <out.png> [--appearance light|dark] | show --selftest | show --check-routing <file.json> | show --check-live <deck.json> | show --tutor [<session.json>] | show --tutor-check <session.json> | show --tutor-ask <session.json> <message>" >&2
     exit 64
+    ;;
+  --api)
+    # A file naming the workspace routes there in a running Show too, where launch flags never reach.
+    build
+    printf '{"workspace": "api"}\n' > "$cache/api.json"
+    open -a "$app" "$cache/api.json"
     ;;
   --build)
     build

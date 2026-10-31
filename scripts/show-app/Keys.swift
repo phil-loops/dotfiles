@@ -1,4 +1,5 @@
 import AppKit
+import WebKit
 
 /// When a key does anything, beyond its workspace: whatever has focus, outside text fields, or with a list focused.
 enum KeyWhen {
@@ -127,6 +128,7 @@ enum KeyTable {
         KeyBinding(id: "workspace.review", menu: "Workspace", title: "Review", key: "2", modifiers: .command, overOverlay: true) { $0.switchTo(.review) },
         KeyBinding(id: "workspace.learn", menu: "Workspace", title: "Learn", key: "3", modifiers: .command, overOverlay: true) { $0.switchTo(.learn) },
         KeyBinding(id: "workspace.runs", menu: "Workspace", title: "Runs", key: "4", modifiers: .command, overOverlay: true) { $0.switchTo(.runs) },
+        KeyBinding(id: "workspace.api", menu: "Workspace", title: "API", key: "5", modifiers: .command, overOverlay: true) { $0.switchTo(.api) },
 
         KeyBinding(id: "tutor.send", menu: "Tutor", title: "Send", key: "\r", modifiers: .command, workspaces: [.learn]) { $0.tutor?.sendFocused() },
         KeyBinding(id: "tutor.guessing", menu: "Tutor", title: confidenceLevels[0].1, key: "1", modifiers: .control, workspaces: [.learn],
@@ -225,6 +227,9 @@ extension AppDelegate {
 
     /// Whether keystrokes are going into a text field, where `j` and `/` are just letters.
     var isTyping: Bool {
+        if let view = window.firstResponder as? NSView, sequence(first: view, next: \.superview).contains(where: { $0 is WKWebView }) {
+            return true
+        }
         guard let responder = window.firstResponder as? NSTextView else { return false }
         return responder.isEditable
     }
