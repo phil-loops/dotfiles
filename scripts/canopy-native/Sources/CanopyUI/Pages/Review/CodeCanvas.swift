@@ -82,6 +82,8 @@ struct CanvasMarks: Equatable {
     var cursor: String?
     /// split: the half the cursor reads (nil: the whole row)
     var column: Side?
+    /// the selected name: its row's stop and its UTF-16 range from the row's start
+    var word: (stop: String, at: Range<Int>)?
     /// the range `x` marked, or the lines the selected conversation covers: path, side, from…to
     var range: (path: String, side: Side, from: Int, to: Int)?
     /// "<path>#<hunk>" whose changes are all viewed (dimmed)
@@ -94,7 +96,7 @@ struct CanvasMarks: Equatable {
     var focused = true
 
     static func == (a: CanvasMarks, b: CanvasMarks) -> Bool {
-        a.cursor == b.cursor && a.column == b.column && a.range?.path == b.range?.path && a.range?.side == b.range?.side && a.range?.from == b.range?.from &&
+        a.cursor == b.cursor && a.column == b.column && a.word?.stop == b.word?.stop && a.word?.at == b.word?.at && a.range?.path == b.range?.path && a.range?.side == b.range?.side && a.range?.from == b.range?.from &&
             a.range?.to == b.range?.to && a.seen == b.seen && a.selection == b.selection && a.lit == b.lit && a.focused == b.focused
     }
 }
@@ -176,6 +178,17 @@ final class CanvasTextView: NSTextView {
             guard let inf = ts.attribute(.rvRow, at: ci, effectiveRange: nil) as? RowInfo else { return }
             let band = NSRect(x: 0, y: frag.minY + origin.y, width: w, height: frag.height)
             self.drawBand(inf, band, x0: x0, colors)
+            if let word = self.marks.word, inf.stop == word.stop {
+                let row = (ts.string as NSString).paragraphRange(for: NSRange(location: ci, length: 0))
+                let chars = NSRange(location: row.location + word.at.lowerBound, length: word.at.count)
+                let g = lm.glyphRange(forCharacterRange: chars, actualCharacterRange: nil)
+                guard NSLocationInRange(g.location, gr) else { return }
+                let r = lm.boundingRect(forGlyphRange: g, in: tc).offsetBy(dx: origin.x, dy: origin.y)
+                colors.gold.withAlphaComponent(0.22).setFill()
+                NSBezierPath(roundedRect: r.insetBy(dx: -1, dy: 1), xRadius: 2, yRadius: 2).fill()
+                colors.gold.setFill()
+                NSRect(x: r.minX, y: r.maxY - 2, width: r.width, height: 1.5).fill()
+            }
         }
     }
 

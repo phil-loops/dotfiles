@@ -140,17 +140,17 @@ import Testing
 
     /// Steps want verbs, not keys: move mark and the step's text shows the new key, and the new key finishes it.
     @Test func reboundVerbRendersItsNewKeyAndStillFinishesTheStep() async throws {
-        let (a, t, _) = try host(keys: ["mark": ["b"]])
+        let (a, t, _) = try host(keys: ["mark": ["Z"]])
         let sb = try #require(t.sandbox)
         let review = try #require(KeyTutor.lessons.firstIndex { $0.id == "review" })
         let markStep = try #require(KeyTutor.lessons[review].steps.firstIndex { $0.wants == [.mark] })
         t.go(lesson: review, step: markStep)
         _ = await until("ready") { t.ready }
-        #expect(t.render(t.step!.text).contains(KeyTutorPiece(text: "b", key: true)))
+        #expect(t.render(t.step!.text).contains(KeyTutorPiece(text: "⇧z", key: true)))
         #expect(!t.plain(t.step!.text).contains(" m "))
         press(a, "m")
         #expect(t.stepIndex == markStep, "the old key is nothing now")
-        press(a, "b")
+        press(a, "Z")
         #expect(t.stepIndex == markStep + 1)
         // a miss or two, and the hint names the verb and your key for it
         press(a, "q"); press(a, "q")

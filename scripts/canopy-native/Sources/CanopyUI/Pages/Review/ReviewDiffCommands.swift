@@ -303,6 +303,38 @@ enum DiffCommands {
                                if half() == .left, pg.here?.row?.right?.new != nil { pg.column = .right; return }
                                if !app.focus(.right) { throw Refusal("nothing to the right") }
                            }))
+        // ── w / b: name to name, across lines — the name g d and space k then ask about ──
+
+        /// The names on a line stop's current half (the old half only as far as it's drawn).
+        func names(_ s: Stop) -> (side: Side, names: [Range<Int>])? {
+            guard s.kind == .line, let row = s.row else { return nil }
+            let side = sideLine(row, prefer: pg.column).side
+            guard let text = (side == .left ? row.left : row.right)?.text else { return nil }
+            let all = CodeLookup.names(text)
+            return (side, side == .left ? all.filter { $0.upperBound < pg.splitWidth } : all)
+        }
+        func step(_ d: Int) throws {
+            guard app.pane?.id == reviewDiffPane, var i = pg.here.flatMap({ pg.stopIndex[$0.key] }) else { throw Refusal("names are in the diff") }
+            var from = pg.hereWord
+            while i >= 0 && i < pg.stops.count {
+                let s = pg.stops[i]
+                if let (side, ns) = names(s) {
+                    let pick = d > 0 ? ns.first { from == nil || $0.lowerBound > from!.lowerBound } : ns.last { from == nil || $0.lowerBound < from!.lowerBound }
+                    if let pick {
+                        if s.key != pg.here?.key { pg.setCursor(s.key) }
+                        pg.word = (s.key, side, pick)
+                        return
+                    }
+                }
+                from = nil
+                i += d
+            }
+            throw Refusal(d > 0 ? "no more names below" : "no more names above")
+        }
+        r.register(Command(id: "review.word.next", title: "The next name", scope: .review, verb: .nextWord, quiet: true,
+                           local: { _, _ in try step(1) }))
+        r.register(Command(id: "review.word.previous", title: "The previous name", scope: .review, verb: .previousWord, quiet: true,
+                           local: { _, _ in try step(-1) }))
         r.register(Command(id: "review.back", title: "Back out", scope: .review, verb: .cancel, label: "back", quiet: true,
                            local: { _, _ in
                                if ShipSeam.backOut(app) { return }
@@ -333,7 +365,8 @@ enum DiffCommands {
             guard let h = pg.here, h.kind == .line, let row = h.row else { return (nil, w) }
             let old = sideLine(row, prefer: pg.column).side == .left
             let l = (old ? row.left : row.right)!
-            let pos = CodeLookup.position(path: h.path, line: (old ? l.old : l.new) ?? 1, text: l.text, side: old ? "old" : "new")
+            let pos = pg.hereWord.flatMap { CodeLookup.position(path: h.path, line: (old ? l.old : l.new) ?? 1, text: l.text, at: $0.lowerBound, side: old ? "old" : "new") }
+                ?? CodeLookup.position(path: h.path, line: (old ? l.old : l.new) ?? 1, text: l.text, side: old ? "old" : "new")
             if pg.scoped, let sha = pg.commitScope { return (pos, .commit(repo: t.repo, sha: sha)) }
             return (pos, w)
         }

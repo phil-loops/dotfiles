@@ -230,6 +230,10 @@ private struct DiffPane: View {
         let here = pg.here
         let focused = app.isFocused(reviewDiffPane)
         var marks = CanvasMarks(cursor: here?.key, column: pg.column, focused: focused)
+        if let w = pg.hereWord, let k = here?.key, let row = here?.row {
+            let start = sideLine(row, prefer: pg.column).side == .left ? 6 : pg.splitWidth + 13
+            marks.word = (k, (start + w.lowerBound)..<(start + w.upperBound))
+        }
         // the range x selected, or the lines the selected conversation covers
         if here?.kind == .thread, let t = here?.id.flatMap({ app.store.view(CanopyCore.Thread.self, $0) }), let l = t.local, let s = l.startLine {
             marks.range = (t.path, t.side, s, l.line)
@@ -254,6 +258,15 @@ private struct DiffPane: View {
                                   pg.pointer = (p, pg.cursorMoved, pg.here?.key)
                               }
                           })
+            .background(GeometryReader { g in
+                Color.clear.onAppear { measure(pg, g.size.width) }.onChange(of: g.size.width) { _, w in measure(pg, w) }
+            })
+    }
+
+    /// Characters across the diff, rounded down to an even count so a resize by a pixel doesn't relayout.
+    private func measure(_ pg: ReviewPageState, _ width: CGFloat) {
+        let cols = Int((width - 24) / DocFont.charWidth) & ~1
+        if cols != pg.diffColumns { pg.diffColumns = cols }
     }
 
     @ViewBuilder private func pop(_ pg: ReviewPageState) -> some View {

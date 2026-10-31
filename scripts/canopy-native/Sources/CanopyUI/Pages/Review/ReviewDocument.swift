@@ -110,7 +110,7 @@ enum ReviewDocument {
             var anchorsSig = fv.threadsAt.keys.sorted().map { "\($0):\(extrasSig(fv.threadsAt[$0]!))" }.joined(separator: "|")
             anchorsSig += "#" + fv.pendingAt.keys.sorted().map { "\($0):\(fv.pendingAt[$0]!.map(\.key).joined(separator: ","))" }.joined(separator: "|")
             let comp = composer.flatMap { $0.path == path ? "\($0.side.rawValue):\($0.line)" : nil } ?? ""
-            let bk = "b|\(salt)|\(split)|\(path)|\(ctxSig)|\(fv.gaps.map { "\($0.at):\($0.first):\($0.last ?? -1)" }.joined(separator: ","))|a:\(extrasSig(aside))|\(anchorsSig)|\(comp)"
+            let bk = "b|\(salt)|\(split)|\(pg.diffColumns)|\(path)|\(ctxSig)|\(fv.gaps.map { "\($0.at):\($0.first):\($0.last ?? -1)" }.joined(separator: ","))|a:\(extrasSig(aside))|\(anchorsSig)|\(comp)"
             out.append(Segment(key: bk) { body(fv, aside: aside, split: split, composer: composer, open: open, replies: replies, pg, app, c) })
         }
         let elsewhere = pg.elsewhere
@@ -154,8 +154,7 @@ enum ReviewDocument {
             }
         }
         let gapAt = Dictionary(fv.gaps.map { ($0.at, $0) }, uniquingKeysWith: { a, _ in a })
-        // split: the left half is as wide as its longest line, within reason
-        let W = split ? min(90, max(24, fv.rows.reduce(0) { max($0, $1.left?.text.count ?? 0) })) : 0
+        let W = split ? pg.splitWidth : 0
         let unified = Para.row(indent: gutter + 2)
         let splitPara = Para.row(indent: W + 13)
         var composed = false

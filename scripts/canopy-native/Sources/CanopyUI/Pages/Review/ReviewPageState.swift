@@ -119,6 +119,18 @@ public final class ReviewPageState: ShipHost {
     public var tab = "files" { didSet { if tab != oldValue { tabMoved(oldValue) } } }
     /// Diffs are always side by side.
     public let split = true
+    /// How many characters fit across the diff, so a split line gives each half the same width (0: not measured yet).
+    public var diffColumns = 0
+    /// Characters each half of a split line gets.
+    public var splitWidth: Int { diffColumns > 0 ? max(24, (diffColumns - 13) / 2) : 60 }
+    /// The name `w` / `b` put the cursor on: its row, half and UTF-16 range in that half's text. It
+    /// counts only while the cursor is still on that row and half.
+    public var word: (key: String, side: Side, at: Range<Int>)?
+    /// The selected name, when it's still under the cursor.
+    public var hereWord: Range<Int>? {
+        guard let w = word, let h = here, h.key == w.key, let row = h.row, sideLine(row, prefer: column).side == w.side else { return nil }
+        return w.at
+    }
     /// The half of the split the cursor reads, kept as it moves up and down; `h` / `l` switch it.
     public var column: Side = .right
     public var showOutdated = false

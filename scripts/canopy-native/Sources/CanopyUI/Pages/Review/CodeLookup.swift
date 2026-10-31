@@ -96,6 +96,23 @@ public final class CodeLookup {
 
     /// The first name on a line worth asking about (keywords skipped) — what K points at from the
     /// keyboard. nil when the line has none.
+    /// Every name on a line worth asking about, as UTF-16 ranges, in order (what `w` / `b` step through).
+    nonisolated public static func names(_ text: String) -> [Range<Int>] {
+        let u = Array(text.utf16)
+        var out: [Range<Int>] = []
+        var i = 0
+        while i < u.count {
+            let c = u[i]
+            let start = (c >= 0x41 && c <= 0x5A) || (c >= 0x61 && c <= 0x7A) || c == 0x5F || c == 0x24
+            if !start { i += 1; continue }
+            var j = i + 1
+            while j < u.count, isWord(u[j]) { j += 1 }
+            if !skip.contains(String(utf16CodeUnits: Array(u[i..<j]), count: j - i)) { out.append(i..<j) }
+            i = j
+        }
+        return out
+    }
+
     nonisolated public static func position(path: String, line: Int, text: String, side: String = "new") -> Position? {
         let u = Array(text.utf16)
         var i = 0
