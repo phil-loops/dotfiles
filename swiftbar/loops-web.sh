@@ -1,10 +1,10 @@
 #!/bin/zsh
 # SwiftBar plugin — loops-web: one click to launch (or reuse) the loops stack
-# forest viewer and open it in Chrome. The menu-bar item
+# forest viewer and open it in canopy. The menu-bar item
 # is green when the viewer is live, grey when it's down.
 #
 # <bitbar.title>stack web</bitbar.title>
-# <bitbar.desc>Launch/reuse the stack web viewer (:62333) and open it in Chrome.</bitbar.desc>
+# <bitbar.desc>Launch/reuse the stack web viewer (:62333) and open it in canopy.</bitbar.desc>
 # <bitbar.author>phil</bitbar.author>
 # <swiftbar.refreshOnOpen>true</swiftbar.refreshOnOpen>
 # <swiftbar.hideAbout>true</swiftbar.hideAbout>
@@ -20,20 +20,18 @@ repo="$HOME/coding/loops"
 serve="$HOME/.dotfiles/scripts/stack-review-serve"
 port="${STACK_REVIEW_PORT:-62333}"
 base="http://127.0.0.1:${port}"
-chrome="Google Chrome"
+canopy="$HOME/.dotfiles/scripts/canopy"
 
 is_up() { curl -sf --max-time 1 "$base/sig" >/dev/null 2>&1; }
 poke()  { open -g "swiftbar://refreshplugin?name=loops-web" 2>/dev/null; }
 
 case "${1:-}" in
   --open)
-    # Warm: server already live → open it directly in Chrome (explicit, so it's
-    # Chrome even if the default browser changes). Cold: start the build+server
-    # detached; the serve script opens the URL itself, and since the default
-    # browser is Chrome that lands in Chrome too. Detach so it survives SwiftBar
-    # reaping the click process.
+    # Warm: server already live → open canopy on it. Cold: start the server
+    # detached; the serve script opens canopy itself. Detach so it survives
+    # SwiftBar reaping the click process.
     if is_up; then
-      open -a "$chrome" "${base}/v2${2:+/p/${repo:t}/$2}"
+      "$canopy" --repo "$repo" --port "$port" "/v2${2:+/p/${repo:t}/$2}"
     else
       ( cd "$repo" && nohup "$serve" "${2:-}" >/dev/null 2>&1 </dev/null & )
     fi
@@ -51,8 +49,8 @@ esac
 if is_up; then
   echo "● | color=#3fb950"
   echo "---"
-  echo "● viewer live · :${port} | color=#3fb950 href=${base}/"
-  echo "Open in Chrome | bash=\"$self\" param1=--open terminal=false"
+  echo "● viewer live · :${port} | color=#3fb950"
+  echo "Open in canopy | bash=\"$self\" param1=--open terminal=false"
   echo "---"
   echo "Restart server | bash=\"$self\" param1=--restart terminal=false"
   echo "Stop server | bash=\"$self\" param1=--stop terminal=false color=#d36a36"
@@ -60,7 +58,7 @@ else
   echo "○ | color=#8b949e"
   echo "---"
   echo "○ viewer down | color=#8b949e"
-  echo "Launch & open in Chrome | bash=\"$self\" param1=--open terminal=false color=#3fb950"
+  echo "Launch & open in canopy | bash=\"$self\" param1=--open terminal=false color=#3fb950"
 fi
 echo "---"
 echo "Repo · ~/coding/loops | color=gray"

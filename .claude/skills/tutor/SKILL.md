@@ -186,7 +186,6 @@ the prediction is an outcome plus a reason, not a term.
 ## Invocation
 
 `/tutor <PR# | branch | file | concept>` — or any trigger phrase. No argument: ask what to dig into.
-Works on a GitHub PR, a local branch, a file, or a pure concept. Tutor tab: `stack web` → Tutor —
-the map, depth per concept, auditable evidence and the learner's questions, in the browser
-(or natively: `canopy /v2/tutor`).
+Works on a GitHub PR, a local branch, a file, or a pure concept. Tutor tab: `canopy /v2/tutor` —
+the map, depth per concept, auditable evidence and the learner's questions.
 A session can also run in Show's Tutor space, with rungs answered in a native worksheet; for the file format and the loop, see the show skill (`~/.dotfiles/.claude/skills/show/SKILL.md`, "Tutor space").

@@ -11,7 +11,7 @@ Request logging (method path status ms) is default-on: stderr + a size-capped du
 $STACK_REVIEW_LOG=0 silences both.
 The page is same-origin with the server, so its API calls are plain relative fetches.
 """
-import sys, os, json, re, socket, subprocess, threading, time, hashlib, shlex
+import sys, os, json, re, socket, subprocess, threading, time, hashlib, shlex, html
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
@@ -44,7 +44,6 @@ from srv import viewed   # own line: same reason
 from srv import story   # own line: same reason
 state.ASSET = lambda: asset_sig()   # tabs on an older build reload (srv/state.py)
 srvctx.CWD = CWD   # set the default repo before any run() fires (run reads srvctx.repo_cwd())
-DIST = os.path.join(SCRIPTS, "viewer-solid", "dist")   # the built Solid app served at /
 
 
 def _ext_origins():
@@ -64,12 +63,10 @@ EXT_ORIGINS = _ext_origins()
 IDLE = 900   # self-reap after 15min idle (was 90s — too eager; cold restarts pay a
              # fresh python boot + an uncached stack-forest git fan-out on the next /model)
 last = [time.time()]
-_render_lock = threading.Lock()
 _pulse = {"sig": "", "asset": "", "world": "", "procs": ""}  # model+asset+remote-world fingerprints, refreshed ~1/s by pulse()
 _pulse_subs = srvctx.PULSE_SUBS    # open /events streams — pulse() only runs while this is > 0
 _pulse_subs_lock = threading.Lock()
 _pulse_wake = threading.Event()
-_index_cache = {}  # (asset_sig, assembled html) of dist/v2/index.html
 LOG = os.environ.get("STACK_REVIEW_LOG", "1") not in ("", "0")   # default-on; STACK_REVIEW_LOG=0 silences
 _log_lock = threading.Lock()
 # Durable sink beside stderr: the servedir log dies with the server (mktemp, reaped on bounce),
@@ -180,22 +177,13 @@ srvctx.init(run=run, ROOT=ROOT, SCRIPTS=SCRIPTS, CWD=CWD, MAIN_WT=MAIN_WT, repos
 
 
 def asset_sig():
-    # fingerprint the built Solid app (dist/) so a fresh `npm run build` reloads open tabs.
-    # dist/v2/index.html names hashed asset files, so its mtime alone moves on a rebuild; we
-    # hash the assets dir too to be safe.
-    parts = [os.path.join(DIST, "v2", "index.html"), keymap.PATH]   # saving your keys reloads tabs too
-    adir = os.path.join(DIST, "assets")
+    # the signature canopy-native watches (hello / asset): it moves when keys.toml is saved, so the
+    # app reloads its keymap.
     try:
-        parts += [os.path.join(adir, f) for f in sorted(os.listdir(adir))]
+        mtime = os.path.getmtime(keymap.PATH)
     except OSError:
-        pass
-
-    def mt(p):
-        try:
-            return os.path.getmtime(p)
-        except OSError:
-            return 0
-    return hashlib.sha1(",".join(str(mt(p)) for p in parts).encode()).hexdigest()
+        mtime = 0
+    return hashlib.sha1(str(mtime).encode()).hexdigest()
 
 
 def _pulse_refresh():
@@ -307,27 +295,13 @@ class H(BaseHTTPRequestHandler):
         finally:
             srvctx.clear_repo()
 
-    def _send_app_shell(self):
-        # The built Solid app (scripts/viewer-solid/dist/v2/index.html), served for every /v2/…
-        # client route: path-based routing (History API) means a deep-link/refresh hits the
-        # server, which must return index.html (SPA fallback) so the client can route it.
-        # Cached in-process, re-read only when asset_sig moves (a fresh `npm run build`).
-        # Same-origin with this server, so the app's /state, /node… are plain relative fetches.
-        sig = asset_sig()
-        page = "v2"
-        with _render_lock:
-            hit = _index_cache.get(page)
-            if hit is None or hit[0] != sig:
-                try:
-                    html = open(os.path.join(DIST, "v2", "index.html"), "rb").read()
-                except OSError:
-                    self._send(503, "viewer not built — run `npm run build` in scripts/viewer-solid", "text/plain")
-                    return
-                # Inject the registry repo names so the client can pin an API call to its repo.
-                keys = json.dumps(keymap.load()).replace("</", "<\\/")
-                inject = f"<script>window.__VIEWER_REPOS__={json.dumps(list(REPOS))};window.__CANOPY_KEYS__={keys};window.__CANOPY_ASSET__={json.dumps(sig)}</script>".encode()
-                hit = _index_cache[page] = (sig, html.replace(b"<head>", b"<head>" + inject, 1))
-            body = hit[1]
+    def _send_open_in_canopy(self, route):
+        # The web viewer is retired; its /v2/… addresses now name a canopy-native page.
+        cmd = html.escape(f"canopy {route}")
+        link = html.escape(f"canopy://{route.lstrip('/')}", quote=True)
+        body = (f"<!doctype html><meta charset=utf-8><title>canopy</title>"
+                f"<p>This page is in the canopy app now: <a href=\"{link}\">open it in canopy</a>, or run</p>"
+                f"<pre>{cmd}</pre>").encode()
         self._send(200, body, "text/html; charset=utf-8")
 
     def _redirect(self, to):
@@ -339,29 +313,10 @@ class H(BaseHTTPRequestHandler):
 
     def _dispatch_get(self, u):
         if u.path == "/v2" or (u.path.startswith("/v2/") and u.path != "/v2/events"):
-            return self._send_app_shell()
+            return self._send_open_in_canopy(u.path + (f"?{u.query}" if u.query else ""))
         if (u.path in ("/", "/index.html", "/work", "/forests", "/watching", "/wiki", "/machine", "/tutor", "/outbox")
                 or u.path.startswith(("/forests/", "/branch/", "/review/", "/push/", "/wiki/", "/tutor/", "/outbox/"))):
             return self._redirect(v1redirect.target(u))   # v1's page URLs (and /) → their v2 page
-        elif u.path.startswith("/assets/"):
-            # hashed, immutable build assets (JS/CSS). basename-only + a fixed dir, so the
-            # path can't escape dist/assets. Cache hard — the filename changes on rebuild.
-            name = os.path.basename(u.path)
-            fp = os.path.join(DIST, "assets", name)
-            if not os.path.isfile(fp):
-                return self._send(404, "{}")
-            ctype = ("text/css" if name.endswith(".css")
-                     else "application/javascript" if name.endswith(".js")
-                     else "font/woff2" if name.endswith(".woff2")
-                     else "application/octet-stream")
-            with open(fp, "rb") as fh:
-                data = fh.read()
-            self.send_response(200)
-            self.send_header("Content-Type", ctype if ctype.startswith("font/") else ctype + "; charset=utf-8")
-            self.send_header("Content-Length", str(len(data)))
-            self.send_header("Cache-Control", "public, max-age=31536000, immutable")
-            self.end_headers()
-            self.wfile.write(data)
         elif u.path == "/model":          return review.model(self, u)
         elif u.path == "/sig":   # cheap change-detector for live polling (no stack-forest)
             # repo + pid let stack-review-serve detect a foreign-repo squatter on the

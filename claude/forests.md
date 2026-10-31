@@ -39,7 +39,7 @@ Conflicts: resolve them yourself, honestly; a real overlapping-logic conflict �
 
 ## Reviewing
 
-- **`stack web [<project>]`** — starts the review server (canopy; per-repo port from `stack-review-port`; reads git config live) and opens it in the browser. Its pages are `/v2/p/<repo>/<project>` (a forest) and `/v2/b/<repo>/<branch>` (a branch); old `/forests/…` links redirect there. This is where Phil reviews.
-- **`canopy [/v2/…]`** — the same pages as a native macOS app on that server, mouseless and modal (`scripts/canopy-native/`; keys in `NAV.md`, overrides in `~/.dotfiles/canopy/keys-native.toml`, `:keytutor` teaches them). Route "open it in canopy / the native viewer" here — e.g. `canopy /v2/b/loops/<branch>`; it needs `stack web`'s server running and refuses without one.
+- **`stack web [<project>]`** — starts the review server (per-repo port from `stack-review-port`; reads git config live) and opens **canopy**, the native macOS viewer, on it. This is where Phil reviews.
+- **`canopy [/v2/…]`** — opens canopy on a page: `/v2/p/<repo>/<project>` (a forest) or `/v2/b/<repo>/<branch>` (a branch). Mouseless and modal (`scripts/canopy-native/`; keys in `NAV.md`, overrides in `~/.dotfiles/canopy/keys-native.toml`, `:keytutor` teaches them); needs the server running. In a browser page link to `canopy://v2/…`. There is no web viewer (`viewer-solid` retired 2026-10-31): the server's `/v2/…` URLs only answer "open this in canopy".
 - **`wt [base]`** — cross-worktree, single-branch cumulative diff picker.
 - The viewer also has mutating endpoints (`/sync`, `/prep-push`, `/push-origin`, `/restack`, `/squash`, …). Bouncing the server is safe and free — state is durable (gates verdicts in git config keyed by tree SHA; detached runs re-adopted via sidecar). The two hard taboos (probe mutating routes only with `__probe__`, never hand-write `gates-green-tree`) live in the spine.
