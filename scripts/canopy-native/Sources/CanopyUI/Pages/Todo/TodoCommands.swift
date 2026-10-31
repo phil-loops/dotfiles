@@ -2,11 +2,13 @@ import CanopyCore
 import Foundation
 import Observation
 
-/// The tracker page's own state (ui.ts todoOpen): which items show their notes.
+/// The tracker page's own state (ui.ts todoOpen): which items show their notes, and which list
+/// the page shows — a forest's id, or nil for the viewer's own.
 @MainActor
 @Observable
 final class TrackerUI {
     var open: Set<String> = []
+    var list: String?
 }
 
 /// What `todo.state` puts back (the inverse of start/done/drop).
@@ -47,6 +49,29 @@ enum TodoCommands {
                                guard let ui, let id else { return }
                                if ui.open.contains(id) { ui.open.remove(id) } else { ui.open.insert(id) }
                            }))
+        r.register(Command(id: "todo.list", title: "Show another todo list — the viewer's or a forest's", scope: .todo, leader: LocalKey(",p"), label: "list",
+                           local: { [weak app, weak ui] _, _ in
+                               guard let app, let ui else { return }
+                               let all = app.store.trackerItems()
+                               let lists: [String?] = [nil] + Tracker.lists(all)
+                               guard lists.count > 1 else { throw Refusal("only the viewer's list has open items") }
+                               let items = lists.map { l in
+                                   PickItem(label: l.map { app.store.view(Project.self, $0)?.name ?? $0 } ?? "viewer",
+                                            text: "\(Tracker.queue(Tracker.onList(all, l)).reduce(0) { $0 + $1.items.count }) open")
+                               }
+                               app.nav.pick("todo lists", items) { [weak app, weak ui] i in
+                                   ui?.list = lists[i]
+                                   if let first = app?.panes.first?.rows.first { app?.setCursor(first) }
+                               }
+                           }))
+        r.register(Command(id: "todo.show", title: "Show an item on its list", scope: .global, needsArg: true, quiet: true,
+                           local: { [weak app, weak ui] _, arg in
+                               guard let app, let ui, let id = arg as? String, let t = app.store.trackerItem(id) else { throw Refusal("no such item") }
+                               ui.list = t.project
+                               ui.open.insert(id)
+                               app.go(.todo)
+                               app.setCursor(RowKey.todo(id))
+                           }))
         r.register(Command(id: "todo.start", title: "Start the item", scope: .item, budget: .configWrite, leader: LocalKey(",s"), label: "start",
                            available: { [weak s] id in id.flatMap { s?.trackerItem($0) }?.state == "open" },
                            write: moveTo("doing")))
@@ -80,7 +105,7 @@ enum TodoCommands {
         }
 
         func move(_ id: String, by: Int) -> Write? {
-            let items = s.trackerItems()
+            let items = s.trackerItems(on: ui.list)
             guard let me = s.trackerItem(id), let section = Tracker.sectionOf(me),
                   let at = Tracker.queue(items).first(where: { $0.section == section })?.items.firstIndex(where: { $0.id == id }),
                   let ranks = Tracker.rerank(items, id: id, to: at + by)

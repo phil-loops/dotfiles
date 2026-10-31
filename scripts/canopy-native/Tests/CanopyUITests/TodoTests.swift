@@ -148,6 +148,58 @@ import Testing
         #expect(next.prefix(2) == ["fix-o-key-line-by-line", "honest-command-timing"])
     }
 
+    // ── a forest's own list ──
+
+    static let lists = #"""
+    {"epoch": "e1", "versions": {"git": 1, "remote": 1, "review": 1, "todo": 1}, "entities": {"todo": {
+      "viewer-item": {"id": "viewer-item", "title": "A viewer item", "kind": "build", "state": "open", "area": "review", "size": "S", "why": "w", "rank": 1, "body": ""},
+      "forest-call": {"id": "forest-call", "title": "A forest decision", "kind": "decide", "state": "open", "area": "design", "project": "loops:domain-enforcement", "size": "S", "why": "w", "body": ""},
+      "forest-a": {"id": "forest-a", "title": "Forest A", "kind": "build", "state": "open", "area": "data", "project": "loops:domain-enforcement", "size": "M", "why": "w", "rank": 1, "body": ""},
+      "forest-b": {"id": "forest-b", "title": "Forest B", "kind": "build", "state": "open", "area": "data", "project": "loops:domain-enforcement", "size": "M", "why": "w", "rank": 2, "body": ""}}}}
+    """#
+
+    func listsApp() throws -> AppModel {
+        var c = AppConfig()
+        c.route = .todo
+        let a = AppModel(config: c, port: 1, telemetry: false)
+        a.store.hydrate(try Snapshot.decode(Data(Self.lists.utf8)))
+        return a
+    }
+
+    @Test func theViewersListLeavesForestItemsOut() throws {
+        let a = try listsApp()
+        #expect(a.rows == [RowKey.todo("viewer-item")])
+        #expect(a.store.trackerItem("forest-a")?.project == "loops:domain-enforcement")
+        #expect(Tracker.lists(a.store.trackerItems()) == ["loops:domain-enforcement"])
+    }
+
+    @Test func leaderPSwitchesToAForestsList() throws {
+        let a = try listsApp()
+        a.keys.handle(","); a.keys.handle("p")
+        #expect(a.nav.picker?.items.map(\.label) == ["viewer", "loops:domain-enforcement"])
+        #expect(a.nav.choose(1))
+        #expect(a.state { TrackerUI() }.list == "loops:domain-enforcement")
+        #expect(a.rows == [RowKey.todo("forest-call"), RowKey.todo("forest-a"), RowKey.todo("forest-b")])
+        #expect(a.selected == RowKey.todo("forest-call"))
+    }
+
+    @Test func movingRanksWithinTheShownListOnly() throws {
+        let a = try listsApp()
+        a.state { TrackerUI() }.list = "loops:domain-enforcement"
+        a.setCursor(RowKey.todo("forest-b"))
+        a.keys.handle("C-k")
+        #expect(a.store.trackerItem("forest-b")?.rank == 1 && a.store.trackerItem("forest-a")?.rank == 2)
+        #expect(a.store.trackerItem("viewer-item")?.rank == 1, "the viewer's queue keeps its ranks")
+    }
+
+    @Test func showOpensAnItemOnItsList() throws {
+        let a = try listsApp()
+        a.runner.dispatch("todo.show", via: .key, arg: "forest-a")
+        let ui = a.state { TrackerUI() }
+        #expect(ui.list == "loops:domain-enforcement" && ui.open == ["forest-a"])
+        #expect(a.selected == RowKey.todo("forest-a"))
+    }
+
     @Test func keyboardRule() throws {
         let a = try app()
         #expect(KeyboardRule.violations(a) { $0.hasPrefix("todo.") }.isEmpty, "\(KeyboardRule.violations(a) { $0.hasPrefix("todo.") })")

@@ -302,6 +302,8 @@ public struct TodoItem: Entity {
     public var kind: String
     public var state: TodoState
     public var area: String
+    /// "<repo>:<stack-project>" when the item is on a forest's own list; nil = the viewer's list
+    public var project: String?
     /// "S" | "M" | "L"
     public var size: String
     public var why: String
@@ -314,15 +316,15 @@ public struct TodoItem: Entity {
     public var body: String
     public var problems: [String]?
 
-    public init(id: String, title: String? = nil, kind: String = "build", state: TodoState = .open, area: String = "x", size: String = "S",
-                why: String = "", waiting: String? = nil, blocked_by: [String]? = nil, links: [String]? = nil, rank: Int? = nil,
+    public init(id: String, title: String? = nil, kind: String = "build", state: TodoState = .open, area: String = "x", project: String? = nil,
+                size: String = "S", why: String = "", waiting: String? = nil, blocked_by: [String]? = nil, links: [String]? = nil, rank: Int? = nil,
                 created: String? = nil, updated: String? = nil, body: String = "", problems: [String]? = nil) {
-        self.id = id; self.title = title ?? id; self.kind = kind; self.state = state; self.area = area; self.size = size
+        self.id = id; self.title = title ?? id; self.kind = kind; self.state = state; self.area = area; self.project = project; self.size = size
         self.why = why; self.waiting = waiting; self.blocked_by = blocked_by; self.links = links; self.rank = rank
         self.created = created; self.updated = updated; self.body = body; self.problems = problems
     }
 
-    enum K: String, CodingKey { case id, title, kind, state, area, size, why, waiting, blocked_by, links, rank, created, updated, body, problems }
+    enum K: String, CodingKey { case id, title, kind, state, area, project, size, why, waiting, blocked_by, links, rank, created, updated, body, problems }
 
     /// A file srv/todo.py can't parse arrives as `{id, title, state: "broken", problems, body}`
     /// with no kind/area/size/why; it still decodes, so the tracker's "Can't read" section shows it.
@@ -333,6 +335,7 @@ public struct TodoItem: Entity {
         kind = (try? c.decode(String.self, forKey: .kind)) ?? ""
         state = (try? c.decode(TodoState.self, forKey: .state)) ?? .broken
         area = (try? c.decode(String.self, forKey: .area)) ?? ""
+        project = try? c.decode(String.self, forKey: .project)
         size = (try? c.decode(String.self, forKey: .size)) ?? ""
         why = (try? c.decode(String.self, forKey: .why)) ?? ""
         waiting = try? c.decode(String.self, forKey: .waiting)

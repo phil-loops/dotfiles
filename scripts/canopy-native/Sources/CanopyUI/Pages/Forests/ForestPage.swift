@@ -45,6 +45,7 @@ struct ForestPage: View {
                         ForEach(f.branches, id: \.b.id) { v in
                             ForestBranchView(v: v, cursor: cursor == RowKey.branch(v.b.id), selected: selection.contains(RowKey.branch(v.b.id)))
                         }
+                        ForestTodoList(items: Self.todoItems(app))
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -52,6 +53,7 @@ struct ForestPage: View {
             }
             .labelPane("main")
             .onChange(of: cursor) { _, k in if let k { proxy.scrollTo(k) } }
+            .onChange(of: app.selected) { _, k in if let k, app.isFocused("todo") { proxy.scrollTo(k) } }
         }
         // does every branch merge onto main at once — asked when the page opens and whenever a tip moves
         .task(id: m.integratable(p.id) ? m.stampOf(p.id) : "") {
@@ -105,6 +107,12 @@ struct ForestPage: View {
         .contentShape(Rectangle())
         .onTapGesture { app.runner.dispatch("forest.face", via: .click) }
         .labelTarget(pane: "controls", key: "forest.face", title: face == .story ? "branches" : "story", run: RouteTo("forest.face"))
+    }
+
+    /// The forest's open todo items in queue order — empty on the story face.
+    static func todoItems(_ app: AppModel) -> [TodoItem] {
+        guard app.forestModel.face == .branches, let pid = app.forestModel.pageProject else { return [] }
+        return Tracker.queue(app.store.trackerItems(on: pid)).flatMap(\.items)
     }
 
     static let merge: [IntegrationVerdict.State: String] = [
@@ -162,5 +170,32 @@ private struct ForestBranchView: View {
         let n = app.store.list(CanopyCore.Thread.self).filter { $0.repo == v.b.repo && $0.branch == v.b.name && !$0.resolved && !$0.outdated }.count
         if n > 0 { out.append("\(n) open") }
         return out
+    }
+}
+
+/// The forest's todo list under its branches: a title per row, kind and size to the right; `ret`
+/// opens the item on the tracker.
+private struct ForestTodoList: View {
+    @Environment(\.theme) private var theme
+    let items: [TodoItem]
+
+    var body: some View {
+        if !items.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                SectionHead(text: "todo · \(items.count)").padding(.leading, 52).padding(.bottom, 4)
+                ForEach(items, id: \.id) { t in
+                    CursorRow(pane: "todo", key: RowKey.todo(t.id)) { on in
+                        HStack(alignment: .firstTextBaseline, spacing: 12) {
+                            Text(t.title).foregroundStyle(on ? theme.goldLeaf : t.kind == "decide" ? theme.ink : theme.inkDim).lineLimit(1)
+                            Spacer(minLength: 8)
+                            Text("\(t.state == "waiting" ? "waiting" : t.kind) · \(t.size)").font(Theme.mono(11)).foregroundStyle(theme.inkFaint)
+                        }
+                        .frame(minHeight: 28)
+                        .padding(.leading, 52).padding(.trailing, 20)
+                    }
+                }
+            }
+            .padding(.top, 28)
+        }
     }
 }

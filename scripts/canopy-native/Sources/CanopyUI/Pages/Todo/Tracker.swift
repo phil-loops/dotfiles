@@ -25,6 +25,16 @@ enum Tracker {
         return a.id < b.id
     }
 
+    /// One list's items: a forest's (`project` is its id) or, for nil, the viewer's own.
+    static func onList(_ items: [TodoItem], _ project: String?) -> [TodoItem] {
+        items.filter { $0.project == project }
+    }
+
+    /// The forests with open items, by id.
+    static func lists(_ items: [TodoItem]) -> [String] {
+        Set(items.filter { sectionOf($0) != nil }.compactMap(\.project)).sorted()
+    }
+
     /// Open items by section, each in rank order (unranked after, oldest first); empty sections left out.
     static func queue(_ items: [TodoItem]) -> [(section: Section, items: [TodoItem])] {
         Section.allCases.map { s in (s, items.filter { sectionOf($0) == s }.sorted(by: byQueue)) }.filter { !$0.1.isEmpty }
@@ -58,6 +68,9 @@ enum Tracker {
 extension Store {
     /// Every tracker item as the user should see it (the overlay applied), broken files included.
     func trackerItems() -> [TodoItem] { list(TodoItem.self) }
+
+    /// One list's items (`Tracker.onList`).
+    func trackerItems(on project: String?) -> [TodoItem] { Tracker.onList(trackerItems(), project) }
 
     func trackerItem(_ id: String) -> TodoItem? { view(TodoItem.self, id) }
 

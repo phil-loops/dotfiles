@@ -1,8 +1,9 @@
 import CanopyCore
 import SwiftUI
 
-/// The tracker (/v2/todo): the viewer's own feature queue from the `todo` store domain
-/// (srv/todo.py, ~/.dotfiles/canopy/todo). Needs you → doing → the ranked queue → waiting.
+/// The tracker (/v2/todo): the `todo` store domain (srv/todo.py, ~/.dotfiles/canopy/todo) — the
+/// viewer's own feature queue, or a forest's todo list (`, p` switches). Needs you → doing → the
+/// ranked queue → waiting.
 enum TodoArea: PageArea {
     static let name = "todo"
     static func install(_ app: AppModel) {
@@ -18,7 +19,8 @@ struct TodoSurface: SurfaceProvider {
 
     /// model.ts rows on the tracker: its items, section by section.
     func rows(_ app: AppModel) -> [String] {
-        Tracker.queue(app.store.trackerItems()).flatMap { $0.items.map { RowKey.todo($0.id) } }
+        let list = app.state { TrackerUI() }.list
+        return Tracker.queue(app.store.trackerItems(on: list)).flatMap { $0.items.map { RowKey.todo($0.id) } }
     }
 
     func panes(_ app: AppModel) -> [Pane] { [Pane(id: "main", title: "tracker", rows: rows(app))] }
@@ -28,10 +30,11 @@ struct TodoSurface: SurfaceProvider {
     }
 
     func scopes(_ app: AppModel) -> [Scope] {
-        target(for: .item, app) != nil ? [.item] : []
+        target(for: .item, app) != nil ? [.item, .todo] : [.todo]
     }
 
     func target(for scope: Scope, _ app: AppModel) -> String? {
+        if scope == .todo { return "tracker" }
         guard scope == .item, let id = RowKey.id(app.selected, "t"), app.store.trackerItem(id) != nil else { return nil }
         return id
     }
@@ -46,15 +49,15 @@ struct TodoPage: View {
     @Environment(\.theme) private var theme
 
     var body: some View {
-        let sections = Tracker.queue(app.store.trackerItems())
+        let list = app.state { TrackerUI() }.list
+        let sections = Tracker.queue(app.store.trackerItems(on: list))
         let open = sections.reduce(0) { $0 + $1.items.count }
         if !app.store.ready {
             Text("reading the tracker…").foregroundStyle(theme.inkFaint).padding(.horizontal, 44)
         } else {
             FollowScroll(panes: ["main"]) {
                 VStack(alignment: .leading, spacing: 0) {
-                    (Text("\(open) open · ") + Text("/next").foregroundColor(theme.inkFaint) + Text(" ranks"))
-                        .foregroundStyle(theme.inkDim).padding(.leading, 44).padding(.bottom, 20)
+                    heading(list, open).foregroundStyle(theme.inkDim).padding(.leading, 44).padding(.bottom, 20)
                     if sections.isEmpty { Text("nothing tracked").foregroundStyle(theme.inkFaint).padding(.leading, 44) }
                     ForEach(sections, id: \.section) { s in
                         VStack(alignment: .leading, spacing: 0) {
@@ -70,6 +73,11 @@ struct TodoPage: View {
             .paneRing("main")
             .padding(.horizontal, 16).padding(.bottom, 8)
         }
+    }
+
+    private func heading(_ list: String?, _ open: Int) -> Text {
+        guard let list else { return Text("\(open) open · ") + Text("/next").foregroundColor(theme.inkFaint) + Text(" ranks") }
+        return Text(app.store.view(Project.self, list)?.name ?? list).foregroundColor(theme.ink) + Text(" · \(open) open")
     }
 }
 
