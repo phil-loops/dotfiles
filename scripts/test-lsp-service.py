@@ -63,5 +63,28 @@ with tempfile.TemporaryDirectory() as d:
         json.dump({"fileNames": ["../node_modules/zod/index.d.ts", "lib.es5.d.ts", "../trpc/root.ts", "../models/Team.ts"]}, f)
     check("gen inputs are the tree's own files, case-folded", lsp.gen_inputs(root), ["models/team.ts", "trpc/root.ts"])
 
+# ── rename: positions, edits and what a WorkspaceEdit may touch ──
+text = "const a = 1;\nlet 😀b = a + a;\n"
+check("offset: line 0", lsp._offset(text, 0, 6), 6)
+check("offset: an astral char counts two UTF-16 units", lsp._offset(text, 1, 6), text.index("b"))
+def edit(l0, c0, l1, c1, new):
+    return {"range": {"start": {"line": l0, "character": c0}, "end": {"line": l1, "character": c1}}, "newText": new}
+check("edits apply back to front", lsp._apply_edits(text, [edit(0, 6, 0, 7, "count"), edit(1, 10, 1, 11, "count"), edit(1, 14, 1, 15, "count")]),
+      "const count = 1;\nlet 😀b = count + count;\n")
+root = "/t/tree"
+check("workspace edits by repo path", sorted(lsp._workspace_edits({"changes": {"file:///t/tree/a.ts": [1], "file:///t/tree/lib/b.ts": [2]}}, root)),
+      ["a.ts", "lib/b.ts"])
+check("documentChanges read too", list(lsp._workspace_edits({"documentChanges": [{"textDocument": {"uri": "file:///t/tree/a.ts"}, "edits": [1]}]}, root)), ["a.ts"])
+for name, we in [("outside the tree", {"changes": {"file:///elsewhere/x.ts": [1]}}),
+                 ("a dependency", {"changes": {"file:///t/tree/node_modules/z/x.d.ts": [1]}}),
+                 ("a file rename", {"documentChanges": [{"kind": "rename", "oldUri": "a", "newUri": "b"}]})]:
+    try:
+        lsp._workspace_edits(we, root)
+        check(f"refuses {name}", "accepted", "refused")
+    except ValueError:
+        check(f"refuses {name}", "refused", "refused")
+check("a name", bool(lsp._NAME.match("pageSize")), True)
+check("not a name", bool(lsp._NAME.match("page size")), False)
+
 print("ok" if not fails else f"{fails} failed")
 sys.exit(1 if fails else 0)
