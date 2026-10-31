@@ -40,13 +40,17 @@ final class RowInfo: NSObject {
     let rightCodeStart: Int
     /// an extras block's hosted view
     let extra: ExtraSpec?
+    /// split: the words that changed between a paired old and new line, UTF-16 ranges from each half's code start
+    let leftHot: [NSRange]
+    let rightHot: [NSRange]
 
     init(kind: Kind, stop: String?, stops: [String] = [], path: String = "", hunk: Int = -1, left: LineKind? = nil, right: LineKind? = nil,
          oldLine: Int? = nil, newLine: Int? = nil, threaded: Bool = false, splitCol: Int = 0, codeStart: Int = 0, rightCodeStart: Int = 0,
-         extra: ExtraSpec? = nil) {
+         extra: ExtraSpec? = nil, leftHot: [NSRange] = [], rightHot: [NSRange] = []) {
         self.kind = kind; self.stop = stop; self.stops = stops.isEmpty ? (stop.map { [$0] } ?? []) : stops; self.path = path; self.hunk = hunk
         self.left = left; self.right = right; self.oldLine = oldLine; self.newLine = newLine; self.threaded = threaded; self.splitCol = splitCol
         self.codeStart = codeStart; self.rightCodeStart = rightCodeStart; self.extra = extra
+        self.leftHot = leftHot; self.rightHot = rightHot
     }
 }
 
@@ -54,7 +58,9 @@ final class RowInfo: NSObject {
 final class ExtraSpec {
     let id: String
     let view: () -> AnyView
-    init(id: String, view: @escaping () -> AnyView) { self.id = id; self.view = view }
+    /// the column (in characters) the view starts at — a margin note under its half; nil: the usual indent
+    let column: Int?
+    init(id: String, column: Int? = nil, view: @escaping () -> AnyView) { self.id = id; self.column = column; self.view = view }
 }
 
 /// One cached piece of the canvas's text.
@@ -180,6 +186,17 @@ final class CanvasTextView: NSTextView {
             guard let inf = ts.attribute(.rvRow, at: ci, effectiveRange: nil) as? RowInfo else { return }
             let band = NSRect(x: 0, y: frag.minY + origin.y, width: w, height: frag.height)
             self.drawBand(inf, band, x0: x0, colors)
+            if inf.kind == .line, !inf.leftHot.isEmpty || !inf.rightHot.isEmpty {
+                let line = (ts.string as NSString).paragraphRange(for: NSRange(location: ci, length: 0))
+                for (hot, start, color) in [(inf.leftHot, inf.codeStart, colors.del), (inf.rightHot, inf.rightCodeStart, colors.add)] {
+                    for h in hot {
+                        let g = lm.glyphRange(forCharacterRange: NSRange(location: line.location + start + h.location, length: h.length), actualCharacterRange: nil)
+                        guard NSLocationInRange(g.location, gr) else { continue }
+                        color.withAlphaComponent(0.24).setFill()
+                        lm.boundingRect(forGlyphRange: g, in: tc).offsetBy(dx: origin.x, dy: origin.y).fill()
+                    }
+                }
+            }
             if let q = self.marks.search, !q.isEmpty, inf.kind == .line {
                 let line = (ts.string as NSString).paragraphRange(for: NSRange(location: ci, length: 0))
                 let text = (ts.string as NSString).substring(with: line) as NSString
@@ -220,24 +237,38 @@ final class CanvasTextView: NSTextView {
         case .gap:
             c.patina.withAlphaComponent(inf.stop == marks.cursor ? 0.12 : 0.06).setFill(); band.fill()
         case .extras:
-            c.night.setFill(); band.fill()
-            c.edge.setFill()
-            NSRect(x: 0, y: band.minY, width: band.width, height: 1).fill()
-            NSRect(x: 0, y: band.maxY - 1, width: band.width, height: 1).fill()
+            if let col = inf.extra?.column {
+                // a margin note: the code's ground carries on beside it, the split's divider too
+                if inf.splitCol > 0 {
+                    c.rule.withAlphaComponent(0.5).setFill()
+                    NSRect(x: x0 + charWidth * CGFloat(inf.splitCol) - 1, y: band.minY, width: 1, height: band.height).fill()
+                }
+                c.gold.withAlphaComponent(0.35).setFill()
+                NSRect(x: x0 + charWidth * CGFloat(col) - 10, y: band.minY + 6, width: 1.5, height: band.height - 12).fill()
+            } else {
+                c.night.setFill(); band.fill()
+                c.edge.setFill()
+                NSRect(x: 0, y: band.minY, width: band.width, height: 1).fill()
+                NSRect(x: 0, y: band.maxY - 1, width: band.width, height: 1).fill()
+            }
         case .line:
             if inf.splitCol > 0 {
                 let mid = x0 + charWidth * CGFloat(inf.splitCol)
                 if let l = inf.left, l != .ctx { (l == .del ? c.delBg : c.addBg).setFill(); NSRect(x: 0, y: band.minY, width: mid, height: band.height).fill() }
-                if inf.left == nil { c.ink.withAlphaComponent(0.02).setFill(); NSRect(x: gutter, y: band.minY, width: mid - gutter, height: band.height).fill() }
+
                 if let r = inf.right, r != .ctx { (r == .add ? c.addBg : c.delBg).setFill(); NSRect(x: mid, y: band.minY, width: band.width - mid, height: band.height).fill() }
-                if inf.right == nil { c.ink.withAlphaComponent(0.02).setFill(); NSRect(x: mid, y: band.minY, width: band.width - mid, height: band.height).fill() }
+
                 c.rule.withAlphaComponent(0.5).setFill(); NSRect(x: mid - 1, y: band.minY, width: 1, height: band.height).fill()
             } else if inf.left == nil, inf.right == .add {
                 c.addBg.setFill(); band.fill()
             } else if inf.right == nil, inf.left == .del {
                 c.delBg.setFill(); band.fill()
             }
-            if inf.threaded { c.ember.setFill(); NSRect(x: x0 + charWidth * 5.5, y: band.minY, width: 2, height: band.height).fill() }
+            if inf.threaded {
+                // beside the gutter of the half the thread is on: the new half when the row has one
+                let col = inf.splitCol > 0 && inf.right != nil ? CGFloat(inf.splitCol) + 5.5 : 5.5
+                c.ember.setFill(); NSRect(x: x0 + charWidth * col, y: band.minY, width: 2, height: band.height).fill()
+            }
             if let r = marks.range, r.path == inf.path {
                 let n = r.side == .right ? inf.newLine : inf.oldLine
                 if let n, n >= r.from, n <= r.to {
@@ -495,9 +526,9 @@ final class Canvas: NSObject {
         let extras = extrasRanges()
         let live = Set(extras.map(\.0.id))
         for (id, v) in hosted where !live.contains(id) { v.removeFromSuperview(); hosted[id] = nil }
-        let indent = text.charWidth * 12 + 8
-        let width = max(200, text.bounds.width - indent - 16)
         for (e, r) in extras {
+            let indent = e.column.map { text.textContainerOrigin.x + text.charWidth * CGFloat($0) } ?? text.charWidth * 12 + 8
+            let width = max(200, text.bounds.width - indent - 16)
             guard let rect = text.rect(for: NSRange(location: r.location, length: 1)) else { continue }
             let root = AnyView(
                 e.view()
