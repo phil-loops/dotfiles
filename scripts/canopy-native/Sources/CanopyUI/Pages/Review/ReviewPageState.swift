@@ -121,6 +121,13 @@ public final class ReviewPageState: ShipHost {
     public let split = true
     /// How many characters fit across the diff, so a split line gives each half the same width (0: not measured yet).
     public var diffColumns = 0
+    /// The files list earns its column only when there's more than one file to move between (or a filter typed into it).
+    public var showsTree: Bool { views.count > 1 || !filter.isEmpty }
+    /// As wide as the longest file name needs, within reason.
+    public var treeWidth: CGFloat {
+        let longest = views.map { ($0.file.path as NSString).lastPathComponent.count }.max() ?? 20
+        return min(280, max(170, CGFloat(longest) * DocFont.charWidth + 76))
+    }
     /// Characters each half of a split line gets.
     public var splitWidth: Int { diffColumns > 0 ? max(24, (diffColumns - 13) / 2) : 60 }
     /// The name `w` / `b` put the cursor on: its row, half and UTF-16 range in that half's text. It

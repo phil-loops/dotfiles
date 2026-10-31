@@ -33,8 +33,9 @@ struct ReviewPage: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 default:
                     HStack(alignment: .top, spacing: 0) {
-                        FileTree().frame(width: 280)
+                        if pg.showsTree { FileTree().frame(width: pg.treeWidth) }
                         DiffPane(empty: pg.base == .outgoing ? "nothing to push" : "no changes").frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .padding(.leading, pg.showsTree ? 0 : 12)
                         if pg.side != nil { SidePane().frame(width: 520) }
                     }
                 }
@@ -54,46 +55,49 @@ private struct ReviewHeader: View {
         let pg = ReviewPageState.of(app)
         let c = pg.conv
         let b = pg.branch
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                if let c {
-                    Text(c.title).font(Theme.display(22)).foregroundStyle(theme.ink).lineLimit(1)
-                    Text("#" + String(c.number)).foregroundStyle(theme.inkFaint)
-                } else if let p = pg.integration {
-                    Text("✦ \(app.store.view(Project.self, p)?.name ?? p) — every branch merged onto main").font(Theme.display(22)).foregroundStyle(theme.ink)
-                } else {
-                    Text(b.map { $0.description.isEmpty ? $0.name : $0.description } ?? pg.target?.name ?? "").font(Theme.display(22)).foregroundStyle(theme.ink).lineLimit(1)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Group {
+                    if let c {
+                        Text(c.title)
+                    } else if let p = pg.integration {
+                        Text("✦ \(app.store.view(Project.self, p)?.name ?? p) — every branch merged onto main")
+                    } else {
+                        Text(b.map { $0.description.isEmpty ? $0.name : $0.description } ?? pg.target?.name ?? "")
+                    }
                 }
-                Spacer(minLength: 24)
+                .font(Theme.display(17)).foregroundStyle(theme.ink).lineLimit(1).layoutPriority(1)
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    if let c {
+                        Text("#" + String(c.number))
+                        Text("→ \(c.base)")
+                        Text(c.author)
+                        ForEach(latest(c), id: \.0) { who, st in
+                            Text("\(st == "APPROVED" ? "✓" : "✗") \(who)").foregroundStyle(st == "APPROVED" ? theme.patina : theme.ember)
+                        }
+                        if c.mapping == .behind {
+                            Text("\(c.behind) on GitHub not here").foregroundStyle(theme.ember)
+                        }
+                        let waiting = pg.items.filter { $0.state == .waiting }.count
+                        if waiting > 0 { Text("\(waiting) waiting to push").foregroundStyle(theme.goldLeaf) }
+                        let drafts = pg.items.filter { $0.state == .draft }.count
+                        if drafts > 0 { Text("\(drafts) draft\(drafts == 1 ? "" : "s")").foregroundStyle(theme.goldLeaf) }
+                        if let n = c.pending?.count, n > 0 { Text("\(n) pending").foregroundStyle(theme.goldLeaf) }
+                    } else if app.store.ready, b?.pushed != .local {
+                        Text(noPR(pg))
+                    }
+                }
+                .font(Theme.mono(11)).foregroundStyle(theme.inkFaint).lineLimit(1)
+                Spacer(minLength: 16)
                 if pg.integration == nil {
+                    ShipStripView(branchID: pg.id)
                     LoopStripView(branchID: pg.id, words: loopWords(pg.id), size: 11)
                         .task(id: b.map { "\($0.id)@\($0.tip)" }) { WordsState.of(app).load(app, pg.id) }
                 }
             }
-            HStack(alignment: .firstTextBaseline, spacing: 14) {
-                if let c {
-                    Text("→ \(c.base)")
-                    Text(c.author)
-                    ForEach(latest(c), id: \.0) { who, st in
-                        Text("\(st == "APPROVED" ? "✓" : "✗") \(who)").foregroundStyle(st == "APPROVED" ? theme.patina : theme.ember)
-                    }
-                    if c.mapping == .behind {
-                        Text("\(c.behind) commit\(c.behind == 1 ? "" : "s") on GitHub not here — pull to review what's there").foregroundStyle(theme.ember)
-                    }
-                    let waiting = pg.items.filter { $0.state == .waiting }.count
-                    if waiting > 0 { Text("\(waiting) draft\(waiting == 1 ? " waits" : "s wait") for a push").foregroundStyle(theme.goldLeaf) }
-                    let drafts = pg.items.filter { $0.state == .draft }.count
-                    if drafts > 0 { Text("\(drafts) draft\(drafts == 1 ? "" : "s") · \(app.registry.keyOf("review.send.all")) sends").foregroundStyle(theme.goldLeaf) }
-                    if let n = c.pending?.count, n > 0 { Text("\(n) pending · \(app.registry.keyOf("review.finish")) submit").foregroundStyle(theme.goldLeaf) }
-                } else if app.store.ready, b?.pushed != .local {
-                    Text(noPR(pg)).foregroundStyle(theme.inkFaint)
-                }
-                if pg.integration == nil { ShipStripView(branchID: pg.id) }
-            }
-            .font(Theme.mono(11)).foregroundStyle(theme.inkFaint)
             Tabs()
         }
-        .padding(.horizontal, 20).padding(.top, 2).padding(.bottom, 10)
+        .padding(.horizontal, 16).padding(.top, 2).padding(.bottom, 6)
     }
 
     /// The PR form's title and body hints, for the loop strip's words step (LoopStrip.tsx words);
@@ -144,7 +148,6 @@ private struct Tabs: View {
             Text("\(pg.branchViewed)/\(pg.branchFiles.count) viewed").foregroundStyle(theme.inkFaint)
         }
         .font(Theme.mono(12))
-        .padding(.top, 6)
     }
 
     @ViewBuilder private func tab(_ name: String, count: String, extra: String? = nil) -> some View {
@@ -221,7 +224,7 @@ private struct DiffPane: View {
                 canvas(pg)
             }
         }
-        .overlay { Rectangle().stroke(app.isFocused(reviewDiffPane) ? theme.goldDeep : theme.rule.opacity(0.5), lineWidth: 1) }
+        .paneRing(reviewDiffPane)
         .overlay(alignment: .topLeading) { pop(pg) }
     }
 
@@ -345,6 +348,6 @@ public struct CodePaneView: View {
             Spacer(minLength: 0)
         }
         .background(theme.diffBg)
-        .overlay { Rectangle().stroke(focused ? theme.goldDeep : theme.rule.opacity(0.5), lineWidth: 1) }
+        .paneRing(pane)
     }
 }

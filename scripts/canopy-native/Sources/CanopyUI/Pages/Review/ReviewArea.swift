@@ -58,8 +58,8 @@ struct ReviewSurface: SurfaceProvider {
             let n = guest.map(\.column).max().map { $0 + 1 } ?? 0
             return guest + (pg.scoped ? [Pane(id: reviewDiffPane, title: "commit", rows: pg.stopKeys, column: n, pageSize: 20)] : [])
         default:
-            var out = [Pane(id: reviewTreePane, title: "files", rows: ReviewPage.treeRows(pg), column: 0, pageSize: 12),
-                       Pane(id: reviewDiffPane, title: "diff", rows: pg.stopKeys, column: 1, pageSize: 20)]
+            var out = (pg.showsTree ? [Pane(id: reviewTreePane, title: "files", rows: ReviewPage.treeRows(pg), column: 0, pageSize: 12)] : [])
+                + [Pane(id: reviewDiffPane, title: "diff", rows: pg.stopKeys, column: 1, pageSize: 20)]
             if pg.side != nil { out.append(Pane(id: reviewCodePane, title: pg.side.map { shortPath($0.path) } ?? "code", rows: pg.sideRows, column: 2, pageSize: 20)) }
             return out
         }
