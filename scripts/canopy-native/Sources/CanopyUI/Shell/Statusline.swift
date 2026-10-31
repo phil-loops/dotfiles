@@ -19,6 +19,8 @@ struct Statusline: View {
                     .background(badgeColor)
                 if app.keys.mode == .command && app.keys.layer == nil {
                     CommandLine()
+                } else if PageSearch.of(app).typing {
+                    SearchLine()
                 } else {
                     if !app.keys.pendingKeys.isEmpty { Text(glyph(app.keys.pendingKeys)).foregroundStyle(theme.goldLeaf) }
                     if let l = app.labeling { Text("label \(l.typed)…").foregroundStyle(theme.goldLeaf) }
@@ -27,6 +29,12 @@ struct Statusline: View {
                         let at = app.selected.flatMap { p.rows.firstIndex(of: $0) }.map { $0 + 1 } ?? 0
                         Text("\(p.title.isEmpty ? p.id : p.title) \(at)/\(n)").foregroundStyle(theme.inkFaint)
                         if app.keys.mode == .select { Text("\(app.selection.count) selected").foregroundStyle(theme.goldLeaf) }
+                    }
+                    let search = PageSearch.of(app)
+                    if search.active {
+                        let ms = search.matches(app)
+                        let at = app.selected.flatMap { ms.firstIndex(of: $0) }.map { "\($0 + 1)/" } ?? ""
+                        Text("/\(search.query)  \(at)\(ms.count)").foregroundStyle(ms.isEmpty ? theme.ember : theme.goldLeaf)
                     }
                     if let note = app.runner.note {
                         Text(note).foregroundStyle(theme.inkDim).lineLimit(1).accessibilityAddTraits(.updatesFrequently)
@@ -54,6 +62,26 @@ struct Statusline: View {
 }
 
 /// The `:` field. Its keys are the engine's first (ret runs, tab/C-n/C-p choose); typing goes here.
+/// `/`'s line: what you type moves the page as you type it.
+private struct SearchLine: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.theme) private var theme
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        let search = PageSearch.of(app)
+        let n = search.matches(app).count
+        HStack(spacing: 2) {
+            Text("/").foregroundStyle(theme.goldLeaf)
+            TextField("", text: Binding(get: { search.query }, set: { search.typed(app, $0) }))
+                .textFieldStyle(.plain)
+                .focused($focused)
+            if !search.query.isEmpty { Text("\(n)").foregroundStyle(n == 0 ? theme.ember : theme.inkFaint) }
+        }
+        .onAppear { focused = true }
+    }
+}
+
 private struct CommandLine: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme

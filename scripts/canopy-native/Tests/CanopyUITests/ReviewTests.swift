@@ -455,10 +455,18 @@ import Testing
         let (a, _) = try await app()
         #expect(ReviewSurface().title(for: "l|a.ts|R:3", a) == "a.ts:3 new two")
         keys(a, "/")
-        #expect(a.nav.picker != nil)
-        a.nav.typed("new two")
+        #expect(a.nav.picker == nil, "no modal")
+        PageSearch.of(a).typed(a, "new two")
+        #expect(ReviewPageState.of(a).here?.key == "l|a.ts|R:3", "the cursor follows the typing")
         keys(a, "ret")
-        #expect(ReviewPageState.of(a).here?.key == "l|a.ts|R:3")
+        keys(a, "g", "g")
+        keys(a, "n")
+        #expect(ReviewPageState.of(a).here?.key == "l|a.ts|R:3", "n goes to the match, not a thread, while the search is kept")
+        keys(a, "esc")
+        keys(a, "/")
+        PageSearch.of(a).typed(a, "zzz-nothing")
+        keys(a, "esc")
+        #expect(!PageSearch.of(a).active, "esc while typing drops it")
     }
 
     /// Ship's half, by key on the real page: `x` marks a range, `c` opens Ship's comment box on it.

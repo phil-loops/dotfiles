@@ -148,7 +148,10 @@ public final class AppModel: CommandContext {
         surfaces[p.surfaceID] = p
     }
 
-    public func addCloser(isOpen: @escaping () -> Bool, close: @escaping () -> Void) { closers.append((isOpen, close)) }
+    /// `first`: it closes before anything added earlier (the most transient thing on screen).
+    public func addCloser(first: Bool = false, isOpen: @escaping () -> Bool, close: @escaping () -> Void) {
+        if first { closers.insert((isOpen, close), at: 0) } else { closers.append((isOpen, close)) }
+    }
 
     /// An area's own state object, made once on first ask and kept for the window's life.
     public func state<T: AnyObject>(_ make: () -> T) -> T {
@@ -184,6 +187,7 @@ public final class AppModel: CommandContext {
         if from == .select && keys.mode != .select { anchors[paneKey] = nil }
         if from == .picker { nav.close() }
         if from == .labels { labeling = nil }
+        if from == .search, PageSearch.of(self).typing { PageSearch.of(self).cancel(self) }
         if to == .command { cmdline = ""; cmdIndex = 0 }
     }
 
