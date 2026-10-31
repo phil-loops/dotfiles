@@ -151,7 +151,7 @@ private struct Servers: View {
                 Text("\(app.registry.keyOf("machine.port")) edits").foregroundStyle(theme.inkFaint)
             }
         }
-        .font(Theme.mono(12))
+        .font(Theme.text(12))
         .foregroundStyle(theme.inkFaint)
     }
 }
@@ -173,19 +173,19 @@ private struct ServerRow: View {
                     HStack(alignment: .center, spacing: 12) {
                         Dot(color: theme[keyPath: h.dot], breathe: h.breathe || !doing.isEmpty)
                         Text(s.label).font(Theme.display(17)).foregroundStyle(on ? theme.goldLeaf : theme.ink).lineLimit(1)
-                        if !s.owned { Text("unmanaged").font(Theme.mono(11)).foregroundStyle(theme.ember) }
+                        if !s.owned { Text("unmanaged").font(Theme.text(11)).foregroundStyle(theme.ember) }
                         Spacer(minLength: 8)
                         Text(doing.isEmpty ? "\(h.word)\(s.latency.map { " · \(Int($0))ms" } ?? "")" : doing)
-                            .font(Theme.mono(11)).foregroundStyle(doing.isEmpty ? theme[keyPath: h.text] : theme.inkDim)
-                        Text(":\(s.port)").font(Theme.mono(11)).foregroundStyle(theme.inkFaint).frame(width: 52, alignment: .trailing)
-                        Text(s.age).font(Theme.mono(11)).foregroundStyle(theme.inkFaint).frame(width: 52, alignment: .trailing)
+                            .font(Theme.text(11)).foregroundStyle(doing.isEmpty ? theme[keyPath: h.text] : theme.inkDim)
+                        Text(":\(s.port)").font(Theme.text(11)).foregroundStyle(theme.inkFaint).frame(width: 52, alignment: .trailing)
+                        Text(s.age).font(Theme.text(11)).foregroundStyle(theme.inkFaint).frame(width: 52, alignment: .trailing)
                     }
                     .frame(minHeight: 36)
                     .padding(.leading, 28).padding(.trailing, 16)
                     .opacity(h.faded || !doing.isEmpty ? 0.6 : 1)
                     if s.error != nil || s.servesMismatch == true {
                         Text(s.servesMismatch == true ? "⚠ the port serves \(s.serves ?? "")" : s.error ?? "")
-                            .font(Theme.mono(12)).foregroundStyle(theme.del).lineLimit(on ? nil : 1)
+                            .font(Theme.text(12)).foregroundStyle(theme.del).lineLimit(on ? nil : 1)
                             .padding(.leading, 48).padding(.trailing, 16)
                     }
                     if on { levers(m, id: id, armed: armed) }
@@ -222,7 +222,7 @@ private struct ServerRow: View {
                 Text("the checkout it serves trails origin/main — healthy means answering, not fresh").foregroundStyle(theme.inkFaint.opacity(0.8))
             }
         }
-        .font(Theme.mono(12))
+        .font(Theme.text(12))
         .foregroundStyle(theme.inkFaint)
         .padding(.leading, 48).padding(.trailing, 16).padding(.bottom, 8)
     }
@@ -247,7 +247,7 @@ private struct LogView: View {
                     Text("jobs worker").foregroundStyle(m.logSrc == .jobs ? theme.ink : theme.inkFaint)
                     Lever(id: "machine.log.jobs", target: s.sid, word: "switch")
                 }
-                .font(Theme.mono(11))
+                .font(Theme.text(11))
             }
             ScrollViewReader { proxy in
                 ScrollView {
@@ -263,7 +263,7 @@ private struct LogView: View {
                                 .id(key)
                         }
                     }
-                    .font(Theme.mono(11.5))
+                    .font(Theme.text(11.5))
                     .textSelection(.enabled)
                     .padding(.horizontal, 12).padding(.vertical, 8)
                 }
@@ -273,7 +273,7 @@ private struct LogView: View {
             .frame(height: 440)
             .background(theme.diffBg)
             .paneRing("log")
-            if focused { Text("j/k move · G follows · h hides · C-w k back to the servers").font(Theme.mono(11)).foregroundStyle(theme.inkFaint) }
+            if focused { Text("j/k move · G follows · h hides · C-w k back to the servers").font(Theme.text(11)).foregroundStyle(theme.inkFaint) }
         }
         .padding(.leading, 48).padding(.trailing, 16).padding(.top, 4).padding(.bottom, 12)
     }
@@ -326,12 +326,12 @@ private struct StackSection: View {
                         }
                     }
                 }
-                .font(Theme.mono(12))
+                .font(Theme.text(12))
             } else {
                 HStack { SectionHead(text: "stack"); Text("…").foregroundStyle(theme.inkFaint) }
             }
         }
-        .font(Theme.mono(12))
+        .font(Theme.text(12))
         .padding(.leading, 28).padding(.trailing, 16)
     }
 }
@@ -343,7 +343,7 @@ private struct FlowChips: View {
     var body: some View {
         WrapLayout(spacing: 4) {
             ForEach(Array(items.enumerated()), id: \.offset) { _, it in
-                Text(it.0).font(Theme.mono(11))
+                Text(it.0).font(Theme.text(11))
                     .padding(.horizontal, 6)
                     .foregroundStyle(it.1 == 0 ? theme.inkDim : it.1 == 1 ? theme.inkFaint : theme.del)
                     .opacity(it.1 == 1 ? 0.7 : 1)
@@ -402,7 +402,7 @@ private struct FootprintSection: View {
                     }
                 }
                 MemoryBar(m: mc)
-                Text("wired · active · compressed · inactive (reclaimable) · free").font(Theme.mono(10.5)).foregroundStyle(theme.inkFaint.opacity(0.8))
+                Text("wired · active · compressed · inactive (reclaimable) · free").font(Theme.text(10.5)).foregroundStyle(theme.inkFaint.opacity(0.8))
                 HStack(alignment: .top, spacing: 32) {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(Array(mc.top.prefix(6).enumerated()), id: \.offset) { _, p in
@@ -423,7 +423,7 @@ private struct FootprintSection: View {
                 SectionHead(text: "footprint · …")
             }
         }
-        .font(Theme.mono(12))
+        .font(Theme.text(12))
         .padding(.leading, 28).padding(.trailing, 16)
     }
 

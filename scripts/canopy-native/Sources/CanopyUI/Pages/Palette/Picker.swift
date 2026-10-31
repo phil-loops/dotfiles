@@ -18,12 +18,12 @@ struct PickerView: View {
             let shown = nav.shown
             VStack(alignment: .leading, spacing: 0) {
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    Text(p.title).font(Theme.mono(11)).foregroundStyle(theme.inkFaint)
+                    Text(p.title).font(Theme.text(11)).foregroundStyle(theme.inkFaint)
                     TextField("filter", text: Binding(get: { nav.filter }, set: { nav.typed($0) }))
                         .textFieldStyle(.plain)
-                        .font(Theme.mono(13))
+                        .font(Theme.text(13))
                         .focused($focused)
-                    Text("\(shown.count)/\(p.items.count)").font(Theme.mono(11)).foregroundStyle(theme.inkFaint)
+                    Text("\(shown.count)/\(p.items.count)").font(Theme.text(11)).foregroundStyle(theme.inkFaint)
                 }
                 .padding(.horizontal, 12).padding(.vertical, 8)
                 .overlay(alignment: .bottom) { theme.rule.frame(height: 1) }
@@ -51,7 +51,7 @@ struct PickerView: View {
                     .onChange(of: nav.index, initial: true) { _, i in proxy.scrollTo(i) }
                 }
             }
-            .font(Theme.mono(11.5))
+            .font(Theme.text(11.5))
             .frame(maxWidth: 860, maxHeight: 520)
             .background(theme.vellumRaise)
             .overlay { Rectangle().stroke(theme.goldDeep, lineWidth: 1) }

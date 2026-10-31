@@ -297,7 +297,7 @@ public struct TypesPopView: View {
                     .frame(maxHeight: 260)
                 }
             }
-            .font(Theme.mono(12))
+            .font(Theme.text(12))
             .padding(.horizontal, 10).padding(.vertical, 6)
             .frame(maxWidth: 560, alignment: .leading)
             .fixedSize(horizontal: false, vertical: true)

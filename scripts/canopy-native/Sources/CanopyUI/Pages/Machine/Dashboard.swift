@@ -154,7 +154,7 @@ struct DashboardSurface: SurfaceProvider {
     }
 }
 
-private let TH: (String) -> Text = { Text($0.uppercased()).font(Theme.mono(10.5)).tracking(1) }
+private let TH: (String) -> Text = { Text($0.uppercased()).font(Theme.text(10.5)).tracking(1) }
 
 struct DashboardPage: View {
     @Environment(AppModel.self) private var app
@@ -347,7 +347,7 @@ private struct Panel<Content: View>: View {
             }
             .paneRing(pane)
         }
-        .font(Theme.mono(12))
+        .font(Theme.text(12))
     }
 }
 

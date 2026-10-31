@@ -86,7 +86,7 @@ struct ForestsPage: View {
         let views = projects.compactMap { fs[$0.id] }.filter { !m.readyOnly || !$0.ready.isEmpty }
         if !m.readyOnly || !views.isEmpty {
             VStack(alignment: .leading, spacing: 0) {
-                Text(title.uppercased()).font(Theme.mono(11)).tracking(1.5).foregroundStyle(theme.inkFaint)
+                Text(title.uppercased()).font(Theme.text(11)).tracking(1.5).foregroundStyle(theme.inkFaint)
                     .padding(.leading, 44).padding(.bottom, 4)
                 if views.isEmpty {
                     Text("empty").foregroundStyle(theme.inkFaint).padding(.leading, 44).padding(.vertical, 8)
@@ -151,7 +151,7 @@ private struct ForestRowView: View {
                 Text(p.name).font(Theme.display(17))
                     .foregroundStyle(cursor ? theme.goldLeaf : f.closed ? theme.inkFaint : theme.ink)
                     .lineLimit(1).truncationMode(.tail)
-                if verdict?.state == .conflicts { Text("✕").font(Theme.mono(11)).foregroundStyle(theme.del) }
+                if verdict?.state == .conflicts { Text("✕").font(Theme.text(11)).foregroundStyle(theme.del) }
             }
             .frame(width: nameWidth, alignment: .leading)
             if closing || f.closed {
@@ -160,7 +160,7 @@ private struct ForestRowView: View {
             } else {
                 Text(p.summary).foregroundStyle(theme.inkDim).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
             }
-            if cursor, !meta(verdict).isEmpty { Text(meta(verdict)).font(Theme.mono(11)).foregroundStyle(theme.inkFaint).fixedSize() }
+            if cursor, !meta(verdict).isEmpty { Text(meta(verdict)).font(Theme.text(11)).foregroundStyle(theme.inkFaint).fixedSize() }
             if !f.closed && !f.branches.isEmpty {
                 // one dot per branch in merge order: landed, ready to act on, still in the works
                 HStack(spacing: 4) {
@@ -212,7 +212,7 @@ private struct BranchRowView: View {
         let live = v.b.pending != nil || armed
         let word = shipWord(m)
         HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text(v.b.order < 999 ? "\(v.b.order)" : "").font(Theme.mono(11)).foregroundStyle(theme.inkFaint).frame(width: 16, alignment: .trailing)
+            Text(v.b.order < 999 ? "\(v.b.order)" : "").font(Theme.text(11)).foregroundStyle(theme.inkFaint).frame(width: 16, alignment: .trailing)
             Text(leaf(v.b.name)).foregroundStyle(cursor ? theme.goldLeaf : theme.ink).lineLimit(1).frame(width: 172, alignment: .leading)
             Text(v.b.description == summary ? "" : v.b.description).foregroundStyle(theme.inkDim).lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -222,7 +222,7 @@ private struct BranchRowView: View {
                 .fixedSize()
                 .settles("\(v.st.ship.rawValue)|\(word)", reduced: reduced)
             if cursor, !meta.isEmpty {
-                Text(meta).font(Theme.mono(11)).foregroundStyle(v.b.gates == .red && v.pr == nil ? theme.del : theme.inkFaint).fixedSize()
+                Text(meta).font(Theme.text(11)).foregroundStyle(v.b.gates == .red && v.pr == nil ? theme.del : theme.inkFaint).fixedSize()
             }
             if m.armed == v.b.id { Text(hint(m)).foregroundStyle(theme.goldLeaf).fixedSize() }
         }
@@ -280,7 +280,7 @@ private struct LaunchLine: View {
             if done < live.count { Text("\(done)/\(live.count) on GitHub").foregroundStyle(theme.inkDim) }
             else { Text("✦ all on GitHub").font(Theme.display(13)).foregroundStyle(theme.goldLeaf) }
         }
-        .font(Theme.mono(12))
+        .font(Theme.text(12))
         .padding(.leading, 40).padding(.vertical, 6)
     }
 }

@@ -70,7 +70,7 @@ struct ForestPage: View {
         return VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 Text(p.name).font(Theme.display(26)).foregroundStyle(theme.ink)
-                if let t = p.ticket { Text(t).font(Theme.mono(12)).foregroundStyle(theme.inkFaint) }
+                if let t = p.ticket { Text(t).font(Theme.text(12)).foregroundStyle(theme.inkFaint) }
                 Spacer()
                 faceTabs
             }
@@ -87,10 +87,10 @@ struct ForestPage: View {
                         .help(v.state == .conflicts ? "the branches don't merge onto main together\n\(v.detail)" : v.state == .clean ? "every branch merged onto main at once, cleanly" : v.detail)
                 }
             }
-            .font(Theme.mono(12))
+            .font(Theme.text(12))
             if let v = m.verdict(p.id), v.state == .conflicts, !v.detail.isEmpty {
                 // the leaves that conflict, on the page itself — never only in a tooltip
-                Text(v.detail).font(Theme.mono(11)).foregroundStyle(theme.del.opacity(0.8)).lineLimit(3)
+                Text(v.detail).font(Theme.text(11)).foregroundStyle(theme.del.opacity(0.8)).lineLimit(3)
             }
         }
         .padding(.leading, 52).padding(.trailing, 20).padding(.top, 4).padding(.bottom, 20)
@@ -103,7 +103,7 @@ struct ForestPage: View {
             Text("story").foregroundStyle(face == .story ? theme.goldLeaf : theme.inkFaint)
             KeyHint(id: "forest.face")
         }
-        .font(Theme.mono(11))
+        .font(Theme.text(11))
         .contentShape(Rectangle())
         .onTapGesture { app.runner.dispatch("forest.face", via: .click) }
         .labelTarget(pane: "controls", key: "forest.face", title: face == .story ? "branches" : "story", run: RouteTo("forest.face"))
@@ -134,10 +134,10 @@ private struct ForestBranchView: View {
         let b = v.b
         VStack(alignment: .leading, spacing: 3) {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
-                Text(b.order < 999 ? "\(b.order)" : "").font(Theme.mono(11)).foregroundStyle(theme.inkFaint).frame(width: 20, alignment: .trailing)
+                Text(b.order < 999 ? "\(b.order)" : "").font(Theme.text(11)).foregroundStyle(theme.inkFaint).frame(width: 20, alignment: .trailing)
                 Text(leaf(b.name)).font(Theme.display(17)).foregroundStyle(cursor ? theme.goldLeaf : theme.ink).lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                if !facts.isEmpty { Text(facts.joined(separator: "  ")).font(Theme.mono(11)).foregroundStyle(theme.inkFaint).fixedSize() }
+                if !facts.isEmpty { Text(facts.joined(separator: "  ")).font(Theme.text(11)).foregroundStyle(theme.inkFaint).fixedSize() }
                 LoopStripView(branchID: b.id, size: 11).fixedSize()
             }
             VStack(alignment: .leading, spacing: 6) {
@@ -146,7 +146,7 @@ private struct ForestBranchView: View {
                         .foregroundStyle(theme.ink)
                         .padding(4)
                         .background(theme.vellumRaise)
-                    Text("\(app.registry.keyOf("branch.describe.save")) saves · esc leaves it").font(Theme.mono(11)).foregroundStyle(theme.inkFaint)
+                    Text("\(app.registry.keyOf("branch.describe.save")) saves · esc leaves it").font(Theme.text(11)).foregroundStyle(theme.inkFaint)
                 } else {
                     Text(b.description.isEmpty ? "no description" : b.description)
                         .foregroundStyle(b.description.isEmpty ? theme.inkFaint : theme.inkDim)
@@ -154,7 +154,7 @@ private struct ForestBranchView: View {
                         .lineLimit(1)
                 }
                 if m.wordsOpen.contains(b.id) {
-                    CommitWords(branchID: b.id).font(Theme.mono(12))
+                    CommitWords(branchID: b.id).font(Theme.text(12))
                 }
             }
             .padding(.leading, 32)
@@ -188,7 +188,7 @@ private struct ForestTodoList: View {
                         HStack(alignment: .firstTextBaseline, spacing: 12) {
                             Text(t.title).foregroundStyle(on ? theme.goldLeaf : t.kind == "decide" ? theme.ink : theme.inkDim).lineLimit(1)
                             Spacer(minLength: 8)
-                            Text("\(t.state == "waiting" ? "waiting" : t.kind) · \(t.size)").font(Theme.mono(11)).foregroundStyle(theme.inkFaint)
+                            Text("\(t.state == "waiting" ? "waiting" : t.kind) · \(t.size)").font(Theme.text(11)).foregroundStyle(theme.inkFaint)
                         }
                         .frame(minHeight: 28)
                         .padding(.leading, 52).padding(.trailing, 20)

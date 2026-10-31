@@ -47,7 +47,7 @@ struct StoryView: View {
     }
 
     private func heading(_ title: String, _ n: Int) -> some View {
-        Text("\(title.uppercased()) · \(n)").font(Theme.mono(11)).tracking(1.5).foregroundStyle(theme.inkFaint)
+        Text("\(title.uppercased()) · \(n)").font(Theme.text(11)).tracking(1.5).foregroundStyle(theme.inkFaint)
             .padding(.leading, 44).padding(.top, 24).padding(.bottom, 4)
     }
 }
@@ -66,11 +66,11 @@ private struct Chapter<Extra: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
-                Text("\(n)").font(Theme.mono(11)).foregroundStyle(theme.inkFaint).frame(width: 20, alignment: .trailing)
+                Text("\(n)").font(Theme.text(11)).foregroundStyle(theme.inkFaint).frame(width: 20, alignment: .trailing)
                 Text(line).foregroundStyle(cursor ? theme.goldLeaf : dim ? theme.inkDim : theme.ink).frame(maxWidth: .infinity, alignment: .leading)
-                Text(side).font(Theme.mono(11)).foregroundStyle(theme.inkFaint).fixedSize()
+                Text(side).font(Theme.text(11)).foregroundStyle(theme.inkFaint).fixedSize()
             }
-            extra().font(Theme.mono(12)).padding(.leading, 32)
+            extra().font(Theme.text(12)).padding(.leading, 32)
         }
         .padding(.vertical, 8).padding(.leading, 40).padding(.trailing, 16)
         .rowChrome(key, cursor: cursor, selected: selected)

@@ -92,20 +92,20 @@ struct TodoRow: View {
         CursorRow(pane: "main", key: RowKey.todo(t.id)) { on in
             VStack(alignment: .leading, spacing: 0) {
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    Text(t.rank.map(String.init) ?? "").font(Theme.mono(11)).foregroundStyle(theme.inkFaint).frame(width: 28, alignment: .trailing)
+                    Text(t.rank.map(String.init) ?? "").font(Theme.text(11)).foregroundStyle(theme.inkFaint).frame(width: 28, alignment: .trailing)
                     HStack(spacing: 8) {
                         Text(t.title).font(Theme.display(17)).foregroundStyle(on ? theme.goldLeaf : theme.ink).lineLimit(1)
-                        if !(t.problems ?? []).isEmpty { Text("⚠").font(Theme.mono(12)).foregroundStyle(theme.ember) }
+                        if !(t.problems ?? []).isEmpty { Text("⚠").font(Theme.text(12)).foregroundStyle(theme.ember) }
                     }
                     Spacer(minLength: 8)
-                    Text("\(KIND[t.kind] ?? t.kind) · \(t.area) · \(t.size)").font(Theme.mono(11)).foregroundStyle(theme.inkFaint)
+                    Text("\(KIND[t.kind] ?? t.kind) · \(t.area) · \(t.size)").font(Theme.text(11)).foregroundStyle(theme.inkFaint)
                 }
                 .frame(minHeight: 34)
                 .padding(.leading, 28).padding(.trailing, 16)
                 if on && !open {
                     let line = t.state == "waiting" ? "⏳ \(t.waiting ?? "")" : !(t.problems ?? []).isEmpty ? t.problems!.joined(separator: " · ") : t.why
                     if !line.isEmpty {
-                        Text(line).font(Theme.mono(12.5)).foregroundStyle(t.state == "broken" ? theme.ember : theme.inkDim)
+                        Text(line).font(Theme.text(12.5)).foregroundStyle(t.state == "broken" ? theme.ember : theme.inkDim)
                             .padding(.leading, 68).padding(.trailing, 16).padding(.bottom, 8)
                     }
                 }
@@ -121,9 +121,9 @@ struct TodoRow: View {
             if let b = t.blocked_by, !b.isEmpty { Text("after: \(b.joined(separator: ", "))") }
             if !t.body.isEmpty { MarkdownView(t.body, size: 13) }
             if let l = t.links, !l.isEmpty { Text(l.joined(separator: " · ")).foregroundStyle(theme.inkFaint) }
-            Text("\(t.id) · since \(t.created ?? "?") · /next \(t.id)").font(Theme.mono(11)).foregroundStyle(theme.inkFaint)
+            Text("\(t.id) · since \(t.created ?? "?") · /next \(t.id)").font(Theme.text(11)).foregroundStyle(theme.inkFaint)
         }
-        .font(Theme.mono(13))
+        .font(Theme.text(13))
         .foregroundStyle(theme.inkDim)
         .textSelection(.enabled)
         .padding(.leading, 16)

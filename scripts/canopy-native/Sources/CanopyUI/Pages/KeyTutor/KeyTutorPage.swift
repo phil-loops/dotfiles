@@ -27,7 +27,7 @@ struct KeyTutorPage: View {
     @ViewBuilder private func practice(_ t: KeyTutor) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("practice — nothing here reaches git, the server or GitHub")
-                .font(Theme.mono(10.5)).foregroundStyle(theme.inkFaint).padding(.horizontal, 16).padding(.vertical, 4)
+                .font(Theme.text(10.5)).foregroundStyle(theme.inkFaint).padding(.horizontal, 16).padding(.vertical, 4)
             if let sb = t.sandbox {
                 RootView()
                     .environment(sb)
@@ -50,7 +50,7 @@ struct KeyTutorPage: View {
                             Text(t.done.contains(l.id) ? "✓" : i == t.lessonIndex ? "▸" : " ").frame(width: 12)
                             Text(l.title)
                         }
-                        .font(Theme.mono(11.5))
+                        .font(Theme.text(11.5))
                         .foregroundStyle(i == t.lessonIndex ? theme.ink : t.done.contains(l.id) ? theme.inkDim : theme.inkFaint)
                     }
                 }
@@ -65,20 +65,20 @@ struct KeyTutorPage: View {
                             Text(t.keyOf(.next)).foregroundStyle(theme.goldLeaf)
                             Text(" goes on").foregroundStyle(theme.inkFaint)
                         }
-                        .font(Theme.mono(11))
+                        .font(Theme.text(11))
                     }
                 } else if let s = t.step {
-                    Text("\(t.lesson.title) · \(t.stepIndex + 1)/\(t.lesson.steps.count)").font(Theme.mono(11)).foregroundStyle(theme.inkFaint)
+                    Text("\(t.lesson.title) · \(t.stepIndex + 1)/\(t.lesson.steps.count)").font(Theme.text(11)).foregroundStyle(theme.inkFaint)
                     pieces(t.render(s.text))
                     if let h = t.hint {
-                        Text(h).font(Theme.mono(11.5)).foregroundStyle(theme.goldLeaf)
+                        Text(h).font(Theme.text(11.5)).foregroundStyle(theme.goldLeaf)
                     }
-                    if !t.ready { Text("setting the scene…").font(Theme.mono(11)).foregroundStyle(theme.inkFaint) }
+                    if !t.ready { Text("setting the scene…").font(Theme.text(11)).foregroundStyle(theme.inkFaint) }
                 }
-                if let said = t.said { Text(said).font(Theme.mono(11)).foregroundStyle(theme.patina).lineLimit(2) }
+                if let said = t.said { Text(said).font(Theme.text(11)).foregroundStyle(theme.patina).lineLimit(2) }
                 Rectangle().fill(theme.rule).frame(height: 1)
                 pieces(t.render("{leader} k s skips a step · {leader} k n / p next / previous lesson · {leader} k l lessons · esc with nothing to cancel leaves"))
-                    .font(Theme.mono(10.5)).foregroundStyle(theme.inkFaint)
+                    .font(Theme.text(10.5)).foregroundStyle(theme.inkFaint)
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -90,6 +90,6 @@ struct KeyTutorPage: View {
         ps.reduce(Text("")) { acc, p in
             acc + (p.key ? Text(" \(p.text) ").foregroundColor(theme.goldLeaf).bold() : Text(p.text).foregroundColor(theme.ink))
         }
-        .font(Theme.mono(13))
+        .font(Theme.text(13))
     }
 }

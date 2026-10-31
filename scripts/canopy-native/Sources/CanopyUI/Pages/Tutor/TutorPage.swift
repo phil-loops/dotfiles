@@ -46,7 +46,7 @@ struct TutorLabel: View {
     @Environment(\.theme) private var theme
     let text: String
     init(_ text: String) { self.text = text }
-    var body: some View { Text(text.uppercased()).font(Theme.mono(10)).tracking(1.4).foregroundStyle(theme.inkFaint) }
+    var body: some View { Text(text.uppercased()).font(Theme.text(10)).tracking(1.4).foregroundStyle(theme.inkFaint) }
 }
 
 /// A key the way the hint lines show it (Key.tsx).
@@ -56,7 +56,7 @@ struct TutorKey: View {
     let id: String
     var body: some View {
         if let k = app.registry.command(id)?.keys.first {
-            Text(glyph(k)).font(Theme.mono(10)).foregroundStyle(theme.goldDeep)
+            Text(glyph(k)).font(Theme.text(10)).foregroundStyle(theme.goldDeep)
                 .padding(.horizontal, 3).overlay(RoundedRectangle(cornerRadius: 2).stroke(theme.rule))
         }
     }
@@ -159,10 +159,10 @@ struct ConceptChip: View {
             Pips(m: c?.mastery)
             Text(t.nameOf(id)).foregroundStyle(here || on ? theme.ink : theme.inkDim).lineLimit(2)
             if let b = c?.blocked_by, !b.isEmpty {
-                Text("⊘").font(Theme.mono(11)).foregroundStyle(theme.inkFaint)
+                Text("⊘").font(Theme.text(11)).foregroundStyle(theme.inkFaint)
             }
         }
-        .font(Theme.mono(12))
+        .font(Theme.text(12))
         .padding(.horizontal, 6).padding(.vertical, 2)
         .background(here ? theme.goldWash : .clear)
         .overlay(RoundedRectangle(cornerRadius: 1).stroke(here ? theme.goldLeaf : on ? theme.inkFaint : theme.rule))
@@ -192,16 +192,16 @@ struct TutorHome: View {
                         if let s = t.recent.first { ContinueCard(s: s).padding(.bottom, 28) }
                         Text("What do you want to dig into?").font(Theme.display(26)).foregroundStyle(theme.ink).padding(.bottom, 12)
                         ModalTextField(TutorCommands.insertField.target, prompt: "a PR number, a branch, a file, or a concept", text: $t.target)
-                            .font(Theme.mono(14)).padding(.horizontal, 10).padding(.vertical, 7)
+                            .font(Theme.text(14)).padding(.horizontal, 10).padding(.vertical, 7)
                             .background(theme.vellumRaise)
                             .overlay(Rectangle().stroke(app.insertField == TutorCommands.insertField.target ? theme.goldDeep : theme.rule))
                         HStack(spacing: 6) {
                             TutorKey(id: "tutor.write")
-                            Text("types here · ↵ starts — the tutor reads the code first").font(Theme.mono(11)).foregroundStyle(theme.inkFaint)
+                            Text("types here · ↵ starts — the tutor reads the code first").font(Theme.text(11)).foregroundStyle(theme.inkFaint)
                         }
                         .padding(.top, 6).padding(.bottom, 28)
                         if !(t.error.isEmpty && t.learnErr.isEmpty) {
-                            Text(t.error.isEmpty ? t.learnErr : t.error).font(Theme.mono(12)).foregroundStyle(theme.del).padding(.bottom, 20)
+                            Text(t.error.isEmpty ? t.learnErr : t.error).font(Theme.text(12)).foregroundStyle(theme.del).padding(.bottom, 20)
                         }
                         DueSection().padding(.bottom, 28)
                         TopicsSection()
@@ -238,16 +238,16 @@ struct ContinueCard: View {
             HStack(alignment: .firstTextBaseline) {
                 Text(t.titleOf(s)).font(Theme.display(20)).foregroundStyle(theme.ink).lineLimit(1)
                 Spacer()
-                Text("rung \(s.msgs.filter { $0.role == "tutor" }.count) · \(Lesson.ago(s.touched))").font(Theme.mono(11)).foregroundStyle(theme.inkFaint)
+                Text("rung \(s.msgs.filter { $0.role == "tutor" }.count) · \(Lesson.ago(s.touched))").font(Theme.text(11)).foregroundStyle(theme.inkFaint)
             }
             if let here { ConceptChip(id: here, here: true) }
             if let last {
-                (Text(waiting ? "WAITING ON YOU · " : "LAST QUESTION · ").font(Theme.mono(10)).foregroundColor(theme.inkFaint)
+                (Text(waiting ? "WAITING ON YOU · " : "LAST QUESTION · ").font(Theme.text(10)).foregroundColor(theme.inkFaint)
                     + Text(Lesson.questionOf(last.text)).font(.system(size: 15, design: .serif)).foregroundColor(theme.inkDim))
                     .fixedSize(horizontal: false, vertical: true)
             }
             HStack(spacing: 6) {
-                Text("continue: the session's row in Sessions, then").font(Theme.mono(11)).foregroundStyle(theme.inkFaint)
+                Text("continue: the session's row in Sessions, then").font(Theme.text(11)).foregroundStyle(theme.inkFaint)
                 TutorKey(id: "tutor.open")
             }
         }
@@ -266,10 +266,10 @@ struct DueSection: View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 Text("Due").font(Theme.display(19)).foregroundStyle(theme.ink)
-                Text("\(t.due.count) concepts").font(Theme.mono(11)).foregroundStyle(theme.inkFaint)
+                Text("\(t.due.count) concepts").font(Theme.text(11)).foregroundStyle(theme.inkFaint)
             }
             Text("open misconceptions first, then what you've shown only with help, then whatever's gone longest unchecked")
-                .font(Theme.mono(12)).foregroundStyle(theme.inkFaint).padding(.bottom, 6)
+                .font(Theme.text(12)).foregroundStyle(theme.inkFaint).padding(.bottom, 6)
             VStack(spacing: 0) {
                 ForEach(t.shownDue, id: \.self) { id in
                     TutorRow(pane: TutorPane.due, key: RowKey.concept(id)) { on in
@@ -277,16 +277,16 @@ struct DueSection: View {
                         HStack(spacing: 12) {
                             Pips(m: c?.mastery)
                             VStack(alignment: .leading, spacing: 1) {
-                                Text(t.nameOf(id)).font(Theme.mono(14)).foregroundStyle(on ? theme.goldLeaf : theme.ink).lineLimit(1)
+                                Text(t.nameOf(id)).font(Theme.text(14)).foregroundStyle(on ? theme.goldLeaf : theme.ink).lineLimit(1)
                                 HStack(spacing: 0) {
                                     if c?.mastery.miss_confidence == "high" { Text("confident miss · ").foregroundStyle(theme.del) }
                                     Text(c?.mastery.reason ?? "").foregroundStyle(theme.inkFaint)
                                 }
-                                .font(Theme.mono(11.5)).lineLimit(1)
+                                .font(Theme.text(11.5)).lineLimit(1)
                             }
                             Spacer()
                             if on {
-                                HStack(spacing: 4) { TutorKey(id: "tutor.retest"); Text("re-test cold") }.font(Theme.mono(11)).foregroundStyle(theme.ember)
+                                HStack(spacing: 4) { TutorKey(id: "tutor.retest"); Text("re-test cold") }.font(Theme.text(11)).foregroundStyle(theme.ember)
                             }
                         }
                     }
@@ -294,7 +294,7 @@ struct DueSection: View {
             }
             .tutorPane(TutorPane.due)
             if t.due.count > 8 {
-                Text(t.allDue ? ":tutor.due.all — fewer" : ":tutor.due.all — all \(t.due.count)").font(Theme.mono(11)).foregroundStyle(theme.inkFaint).padding(.top, 6)
+                Text(t.allDue ? ":tutor.due.all — fewer" : ":tutor.due.all — all \(t.due.count)").font(Theme.text(11)).foregroundStyle(theme.inkFaint).padding(.top, 6)
             }
         }
     }
@@ -309,7 +309,7 @@ struct TopicsSection: View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Topics").font(Theme.display(19)).foregroundStyle(theme.ink)
             Text("paths through one graph — the same idea met in two topics is one concept, linked as an analog")
-                .font(Theme.mono(12)).foregroundStyle(theme.inkFaint).padding(.bottom, 10)
+                .font(Theme.text(12)).foregroundStyle(theme.inkFaint).padding(.bottom, 10)
             VStack(alignment: .leading, spacing: 14) {
                 ForEach(t.topicsByUpdate, id: \.id) { tp in
                     VStack(alignment: .leading, spacing: 6) {
@@ -318,14 +318,14 @@ struct TopicsSection: View {
                                 Text(tp.title).font(Theme.display(16)).foregroundStyle(on ? theme.goldLeaf : theme.ink).lineLimit(1)
                                 Spacer()
                                 Text("\(tp.progress.held) held · \(tp.progress.shown ?? tp.progress.held) shown / \(tp.progress.total)")
-                                    .font(Theme.mono(11)).foregroundStyle(theme.inkFaint)
-                                if on { Text("↵ continue").font(Theme.mono(11)).foregroundStyle(theme.ember) }
+                                    .font(Theme.text(11)).foregroundStyle(theme.inkFaint)
+                                if on { Text("↵ continue").font(Theme.text(11)).foregroundStyle(theme.ember) }
                             }
                         }
                         ProgressBar(held: tp.progress.held, shown: tp.progress.shown ?? tp.progress.held, total: tp.progress.total).padding(.horizontal, 8)
                         ForEach(Array(tp.stages.enumerated()), id: \.offset) { _, st in
                             HStack(alignment: .top, spacing: 12) {
-                                Text(st.name).font(Theme.mono(11.5)).foregroundStyle(theme.inkFaint).frame(width: 140, alignment: .leading).padding(.top, 4)
+                                Text(st.name).font(Theme.text(11.5)).foregroundStyle(theme.inkFaint).frame(width: 140, alignment: .leading).padding(.top, 4)
                                 VStack(alignment: .leading, spacing: 0) {
                                     ForEach(st.concepts, id: \.self) { id in
                                         TutorRow(pane: TutorPane.topics, key: "tc:\(tp.id)|\(id)") { on in ConceptChip(id: id, on: on) }
@@ -334,7 +334,7 @@ struct TopicsSection: View {
                             }
                             .padding(.leading, 8)
                         }
-                        if !tp.source.isEmpty { Text(tp.source).font(Theme.mono(10.5)).foregroundStyle(theme.inkFaint).padding(.leading, 8) }
+                        if !tp.source.isEmpty { Text(tp.source).font(Theme.text(10.5)).foregroundStyle(theme.inkFaint).padding(.leading, 8) }
                     }
                     .padding(.vertical, 10)
                     .overlay(Rectangle().stroke(theme.rule))
@@ -369,13 +369,13 @@ struct QuestionsSection: View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Your open questions").font(Theme.display(17)).foregroundStyle(theme.ink)
             if t.openQuestions.isEmpty {
-                Text("none open — ask one from any concept").font(Theme.mono(12)).foregroundStyle(theme.inkFaint)
+                Text("none open — ask one from any concept").font(Theme.text(12)).foregroundStyle(theme.inkFaint)
             }
             VStack(spacing: 0) {
                 ForEach(t.openQuestions, id: \.id) { q in
                     TutorRow(pane: TutorPane.questions, key: "q:\(q.id)") { on in
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(q.text).font(Theme.mono(13)).foregroundStyle(theme.ink).fixedSize(horizontal: false, vertical: true)
+                            Text(q.text).font(Theme.text(13)).foregroundStyle(theme.ink).fixedSize(horizontal: false, vertical: true)
                             HStack(spacing: 10) {
                                 if !q.concept.isEmpty { Text(t.nameOf(q.concept)).foregroundStyle(theme.inkFaint) }
                                 if on {
@@ -383,7 +383,7 @@ struct QuestionsSection: View {
                                     HStack(spacing: 3) { TutorKey(id: "tutor.question.toggle"); Text("answered") }.foregroundStyle(theme.inkFaint)
                                 }
                             }
-                            .font(Theme.mono(11))
+                            .font(Theme.text(11))
                         }
                     }
                 }
@@ -406,12 +406,12 @@ struct SessionsSection: View {
                     TutorRow(pane: TutorPane.sessions, key: RowKey.lesson(s.id)) { on in
                         let arming = t.armed == "forget \(s.id)"
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Text(t.titleOf(s)).font(Theme.mono(12.5)).foregroundStyle(on ? theme.goldLeaf : theme.inkDim).lineLimit(1)
+                            Text(t.titleOf(s)).font(Theme.text(12.5)).foregroundStyle(on ? theme.goldLeaf : theme.inkDim).lineLimit(1)
                             Spacer()
-                            Text("\(s.msgs.filter { $0.role == "tutor" }.count) · \(Lesson.ago(s.touched))").font(Theme.mono(10.5)).foregroundStyle(theme.inkFaint)
+                            Text("\(s.msgs.filter { $0.role == "tutor" }.count) · \(Lesson.ago(s.touched))").font(Theme.text(10.5)).foregroundStyle(theme.inkFaint)
                             if on {
                                 HStack(spacing: 3) { TutorKey(id: "tutor.forget"); Text(arming ? "again forgets it" : "forget") }
-                                    .font(Theme.mono(11)).foregroundStyle(arming ? theme.del : theme.inkFaint)
+                                    .font(Theme.text(11)).foregroundStyle(arming ? theme.del : theme.inkFaint)
                             }
                         }
                     }
@@ -430,13 +430,13 @@ struct PickupSection: View {
         let t = TutorArea.state(app)
         VStack(alignment: .leading, spacing: 4) {
             Text("Pick up from the terminal").font(Theme.display(17)).foregroundStyle(theme.ink)
-            Text("continues here as a copy; the terminal session is left alone").font(Theme.mono(11.5)).foregroundStyle(theme.inkFaint)
+            Text("continues here as a copy; the terminal session is left alone").font(Theme.text(11.5)).foregroundStyle(theme.inkFaint)
             VStack(spacing: 0) {
                 ForEach(t.pickable, id: \.session) { s in
                     TutorRow(pane: TutorPane.pickup, key: "tm:\(s.session)") { on in
                         VStack(alignment: .leading, spacing: 1) {
-                            Text(s.target.isEmpty ? TutorState.worktreeName(s.cwd) : s.target).font(Theme.mono(13)).foregroundStyle(on ? theme.goldLeaf : theme.ink).lineLimit(1)
-                            Text("\(TutorState.worktreeName(s.cwd)) · \(s.answers) answers").font(Theme.mono(11)).foregroundStyle(theme.inkFaint)
+                            Text(s.target.isEmpty ? TutorState.worktreeName(s.cwd) : s.target).font(Theme.text(13)).foregroundStyle(on ? theme.goldLeaf : theme.ink).lineLimit(1)
+                            Text("\(TutorState.worktreeName(s.cwd)) · \(s.answers) answers").font(Theme.text(11)).foregroundStyle(theme.inkFaint)
                         }
                     }
                 }
@@ -510,16 +510,16 @@ struct SessionMap: View {
                             TutorLabel("map").padding(.bottom, 4)
                             Text(topic.title).font(Theme.display(15)).foregroundStyle(theme.ink).padding(.bottom, 2)
                             Text("\(topic.progress.held) held · \(topic.progress.shown ?? topic.progress.held) shown / \(topic.progress.total)")
-                                .font(Theme.mono(10.5)).foregroundStyle(theme.inkFaint).padding(.bottom, 14)
+                                .font(Theme.text(10.5)).foregroundStyle(theme.inkFaint).padding(.bottom, 14)
                             ForEach(Array(topic.stages.enumerated()), id: \.offset) { _, st in
-                                Text(st.name).font(Theme.mono(11)).foregroundStyle(theme.inkFaint).padding(.bottom, 4)
+                                Text(st.name).font(Theme.text(11)).foregroundStyle(theme.inkFaint).padding(.bottom, 4)
                                 ForEach(st.concepts, id: \.self) { id in
                                     TutorRow(pane: TutorPane.map, key: RowKey.concept(id)) { on in ConceptChip(id: id, here: t.here == id, on: on) }
                                 }
                                 Spacer().frame(height: 12)
                             }
                         } else {
-                            Text("no map yet — the tutor draws one once it has read the material").font(Theme.mono(12)).foregroundStyle(theme.inkFaint)
+                            Text("no map yet — the tutor draws one once it has read the material").font(Theme.text(12)).foregroundStyle(theme.inkFaint)
                         }
                     }
                     .padding(.horizontal, 12).padding(.vertical, 10)
@@ -534,7 +534,7 @@ struct SessionMap: View {
                 Text("solid held (two days) · faint shown once · outline only with help · red an open misconception · ⊘ needs a prerequisite first")
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .font(Theme.mono(10)).foregroundStyle(theme.inkFaint).padding(12)
+            .font(Theme.text(10)).foregroundStyle(theme.inkFaint).padding(12)
         }
         .tutorPane(TutorPane.map)
     }
@@ -563,7 +563,7 @@ struct SessionCenter: View {
                 HStack(spacing: 3) { Text("evidence · \(mine.count)"); TutorKey(id: "tutor.evidence") }.foregroundStyle(t.evidenceOpen ? theme.goldLeaf : theme.inkFaint)
                 HStack(spacing: 3) { Text("wrap up"); TutorKey(id: "tutor.wrap") }.foregroundStyle(t.streaming ? theme.inkFaint.opacity(0.4) : theme.inkFaint)
             }
-            .font(Theme.mono(11))
+            .font(Theme.text(11))
             .padding(.horizontal, 20).padding(.vertical, 8)
             theme.rule.frame(height: 1)
 
@@ -572,7 +572,7 @@ struct SessionCenter: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 0) {
                             TutorLabel("recorded this session — correct or cut anything over-credited").padding(.bottom, 6)
-                            if mine.isEmpty { Text("nothing yet — evidence lands after each answer").font(Theme.mono(12)).foregroundStyle(theme.inkFaint) }
+                            if mine.isEmpty { Text("nothing yet — evidence lands after each answer").font(Theme.text(12)).foregroundStyle(theme.inkFaint) }
                             ForEach(mine, id: \.id) { e in
                                 TutorRow(pane: TutorPane.credits, key: "e:\(e.id)") { on in EvidenceRow(e: e, showConcept: true, on: on) }
                             }
@@ -593,7 +593,7 @@ struct SessionCenter: View {
                         if !earlier.isEmpty {
                             TutorRow(pane: TutorPane.turn, key: "hist") { _ in
                                 Text("\(t.historyOpen ? "▾" : "▸") \(earlier.count) earlier \(earlier.count == 1 ? "rung" : "rungs")")
-                                    .font(Theme.mono(11)).foregroundStyle(theme.inkFaint)
+                                    .font(Theme.text(11)).foregroundStyle(theme.inkFaint)
                             }
                             if t.historyOpen {
                                 ForEach(earlier, id: \.tutorIdx) { r in
@@ -605,12 +605,12 @@ struct SessionCenter: View {
                                                 if let a = r.answer { Text("→ \(Lesson.spoken(a))").foregroundStyle(theme.ink).lineLimit(1) }
                                             }
                                         }
-                                        .font(Theme.mono(12.5))
+                                        .font(Theme.text(12.5))
                                     }
                                     if t.expanded == r.tutorIdx {
                                         VStack(alignment: .leading, spacing: 0) {
                                             TurnView(msgIdx: r.tutorIdx, text: s.msgs[r.tutorIdx].text, latest: false)
-                                            if let a = r.answer { Said(text: "you: \(a)").font(Theme.mono(12.5)).foregroundStyle(theme.inkDim) }
+                                            if let a = r.answer { Said(text: "you: \(a)").font(Theme.text(12.5)).foregroundStyle(theme.inkDim) }
                                         }
                                         .padding(.leading, 16).overlay(alignment: .leading) { theme.goldDeep.frame(width: 2) }
                                         .padding(.horizontal, 20).padding(.bottom, 10)
@@ -623,16 +623,16 @@ struct SessionCenter: View {
                             if !prevAnswer.isEmpty {
                                 VStack(alignment: .leading, spacing: 2) {
                                     TutorLabel("you said")
-                                    Said(text: prevAnswer).font(Theme.mono(12.5)).foregroundStyle(theme.inkDim)
+                                    Said(text: prevAnswer).font(Theme.text(12.5)).foregroundStyle(theme.inkDim)
                                 }
                                 .padding(.leading, 12).overlay(alignment: .leading) { theme.rule.frame(width: 2) }
                                 .padding(.bottom, 16)
                             }
                             if let c = current { TurnView(msgIdx: c.tutorIdx, text: s.msgs[c.tutorIdx].text, latest: true).id("turn-top-\(c.tutorIdx)") }
                             if t.streaming && !t.status.isEmpty {
-                                Text("\(t.status)…").font(Theme.mono(11)).foregroundStyle(theme.inkFaint).lineLimit(1)
+                                Text("\(t.status)…").font(Theme.text(11)).foregroundStyle(theme.inkFaint).lineLimit(1)
                             }
-                            if let e = s.error { Text(e).font(Theme.mono(12)).foregroundStyle(theme.del).padding(.top, 8) }
+                            if let e = s.error { Text(e).font(Theme.text(12)).foregroundStyle(theme.del).padding(.top, 8) }
                         }
                         .padding(20)
                     }
@@ -675,7 +675,7 @@ struct AnswerBox: View {
                             .overlay(Rectangle().stroke(t.confidence == c ? theme.goldLeaf : theme.rule))
                     }
                 }
-                .font(Theme.mono(11))
+                .font(Theme.text(11))
             }
             HStack {
                 HStack(spacing: 4) {
@@ -685,7 +685,7 @@ struct AnswerBox: View {
                 Spacer()
                 if t.streaming { HStack(spacing: 3) { Text("■ stop"); TutorKey(id: "tutor.stop") } }
             }
-            .font(Theme.mono(10.5)).foregroundStyle(theme.inkFaint)
+            .font(Theme.text(10.5)).foregroundStyle(theme.inkFaint)
         }
         .padding(16)
     }
@@ -715,7 +715,7 @@ struct TurnView: View {
                             if let l = pin.lit { Text("L\(l.0)–\(l.1)").foregroundStyle(theme.inkFaint) }
                             if on { Text("↵ show").foregroundStyle(theme.ember) }
                         }
-                        .font(Theme.mono(11)).foregroundStyle(on ? theme.goldLeaf : theme.inkDim)
+                        .font(Theme.text(11)).foregroundStyle(on ? theme.goldLeaf : theme.inkDim)
                         .padding(.horizontal, 6).padding(.vertical, 2).overlay(Rectangle().stroke(theme.rule))
                     }
                 case .options(let os):
@@ -734,7 +734,7 @@ struct TurnView: View {
                             Pips(m: t.concept(c)?.mastery)
                             Text("testing \(t.nameOf(c)) · \(level)\(rung == "invent" ? " · invent the rule" : "")\(via.isEmpty ? "" : " · via \(t.nameOf(via))")\(contrastOf.isEmpty ? "" : " · contrast re-test of a miss")\(conf ? " · rate your confidence" : "")")
                         }
-                        .font(Theme.mono(10.5)).foregroundStyle(on ? theme.goldLeaf : theme.inkFaint)
+                        .font(Theme.text(10.5)).foregroundStyle(on ? theme.goldLeaf : theme.inkFaint)
                     }
                 case .evidence(let items):
                     VStack(alignment: .leading, spacing: 0) {
@@ -746,19 +746,19 @@ struct TurnView: View {
                                     if !e.note.isEmpty { Text("— \(e.note)").foregroundStyle(theme.inkFaint) }
                                     if !e.contrast.isEmpty { Text("re-test with: \(e.contrast)").foregroundStyle(theme.inkFaint) }
                                 }
-                                .font(Theme.mono(11))
+                                .font(Theme.text(11))
                             }
                         }
                     }
                 case .map(let title, let count):
-                    Text("map drawn · \(count) concepts in \(title)").font(Theme.mono(10.5)).foregroundStyle(theme.inkFaint)
+                    Text("map drawn · \(count) concepts in \(title)").font(Theme.text(10.5)).foregroundStyle(theme.inkFaint)
                 case .restate(let c, let said):
                     TutorRow(pane: TutorPane.turn, key: "\(k):0") { _ in
-                        (Text("IN YOUR WORDS · \(t.nameOf(c).uppercased()) ").font(Theme.mono(10)).foregroundColor(theme.inkFaint)
-                            + Text("“\(said)”").font(Theme.mono(13.5)).foregroundColor(theme.goldLeaf))
+                        (Text("IN YOUR WORDS · \(t.nameOf(c).uppercased()) ").font(Theme.text(10)).foregroundColor(theme.inkFaint)
+                            + Text("“\(said)”").font(Theme.text(13.5)).foregroundColor(theme.goldLeaf))
                     }
                 case .question(let c, let q):
-                    Text("? your question, kept open\(c.isEmpty ? "" : " on \(t.nameOf(c))"): \(q)").font(Theme.mono(11)).foregroundStyle(theme.inkFaint)
+                    Text("? your question, kept open\(c.isEmpty ? "" : " on \(t.nameOf(c))"): \(q)").font(Theme.text(11)).foregroundStyle(theme.inkFaint)
                 case .sim(let scenario, let off):
                     SimFrozen(scenario: scenario, off: off)
                 case .simResult(let scenario, let off, _, _):
@@ -780,9 +780,9 @@ struct OptionChip: View {
     var body: some View {
         HStack(spacing: 8) {
             Text(text).foregroundStyle(theme.ink)
-            if on { Text("↵ into the box — then say why").foregroundStyle(theme.ember).font(Theme.mono(11)) }
+            if on { Text("↵ into the box — then say why").foregroundStyle(theme.ember).font(Theme.text(11)) }
         }
-        .font(Theme.mono(13))
+        .font(Theme.text(13))
         .padding(.horizontal, 10).padding(.vertical, 4)
         .background(theme.goldWash)
         .overlay(Rectangle().stroke(on ? theme.goldLeaf : theme.goldDeep))
@@ -822,21 +822,21 @@ struct EvidenceRow: View {
                 Field(value: e.credit)
                 Field(value: (e.confidence ?? "").isEmpty ? "no rating" : e.confidence!)
                 Text("\(e.at)\(e.rung == "invent" ? " · invent" : "")\(e.via.map { $0.isEmpty ? "" : " · via \(t.nameOf($0))" } ?? "")")
-                    .font(Theme.mono(10.5)).foregroundStyle(theme.inkFaint)
+                    .font(Theme.text(10.5)).foregroundStyle(theme.inkFaint)
                 Spacer()
-                if arming { Text("\(app.registry.keyOf("tutor.evidence.cut")) again cuts it").foregroundStyle(theme.del).font(Theme.mono(11)) }
+                if arming { Text("\(app.registry.keyOf("tutor.evidence.cut")) again cuts it").foregroundStyle(theme.del).font(Theme.text(11)) }
             }
-            .font(Theme.mono(12))
+            .font(Theme.text(12))
             if on {
                 HStack(spacing: 10) {
                     ForEach(["tutor.evidence.outcome", "tutor.evidence.level", "tutor.evidence.credit", "tutor.evidence.confidence", "tutor.evidence.cut"], id: \.self) { id in
                         HStack(spacing: 3) { TutorKey(id: id); Text(app.registry.command(id)?.label ?? "") }
                     }
                 }
-                .font(Theme.mono(10.5)).foregroundStyle(theme.inkFaint)
+                .font(Theme.text(10.5)).foregroundStyle(theme.inkFaint)
             }
-            if !e.note.isEmpty { Text(e.note).font(Theme.mono(12.5)).foregroundStyle(theme.inkDim).fixedSize(horizontal: false, vertical: true) }
-            if let c = e.contrast, !c.isEmpty { Text("re-test with: \(c)").font(Theme.mono(12)).foregroundStyle(theme.inkFaint) }
+            if !e.note.isEmpty { Text(e.note).font(Theme.text(12.5)).foregroundStyle(theme.inkDim).fixedSize(horizontal: false, vertical: true) }
+            if let c = e.contrast, !c.isEmpty { Text("re-test with: \(c)").font(Theme.text(12)).foregroundStyle(theme.inkFaint) }
         }
     }
 
@@ -844,7 +844,7 @@ struct EvidenceRow: View {
         @Environment(\.theme) private var theme
         let value: String
         var body: some View {
-            Text(value).font(Theme.mono(11)).foregroundStyle(theme.inkDim).padding(.horizontal, 4).padding(.vertical, 1).overlay(Rectangle().stroke(theme.rule))
+            Text(value).font(Theme.text(11)).foregroundStyle(theme.inkDim).padding(.horizontal, 4).padding(.vertical, 1).overlay(Rectangle().stroke(theme.rule))
         }
     }
 }
@@ -889,7 +889,7 @@ struct TutorDrawer: View {
                                 HStack {
                                     TutorLabel(c.kind == "convention" ? "convention · told, then tested" : "principle · derivable")
                                     Spacer()
-                                    HStack(spacing: 3) { TutorKey(id: "tutor.back"); Text("✕") }.font(Theme.mono(11)).foregroundStyle(theme.inkFaint)
+                                    HStack(spacing: 3) { TutorKey(id: "tutor.back"); Text("✕") }.font(Theme.text(11)).foregroundStyle(theme.inkFaint)
                                 }
                                 Text(c.name).font(Theme.display(22)).foregroundStyle(theme.ink)
                                 if let mine = c.statement_learner, !mine.isEmpty {
@@ -904,7 +904,7 @@ struct TutorDrawer: View {
                                         .foregroundStyle(t.streaming ? theme.inkFaint : theme.goldLeaf)
                                     Text(":tutor.teach — teach me this").foregroundStyle(theme.inkFaint)
                                 }
-                                .font(Theme.mono(12))
+                                .font(Theme.text(12))
                             }
                         }
                         .padding(.bottom, 8)
@@ -919,7 +919,7 @@ struct TutorDrawer: View {
                         }
                         if !c.topics.isEmpty {
                             Text("in: \(c.topics.map { t.learn?.topics[$0]?.title ?? $0 }.joined(separator: " · "))")
-                                .font(Theme.mono(10.5)).foregroundStyle(theme.inkFaint).padding(8)
+                                .font(Theme.text(10.5)).foregroundStyle(theme.inkFaint).padding(8)
                         }
                         if !c.code.isEmpty {
                             TutorLabel("code").padding(.horizontal, 8).padding(.top, 8)
@@ -929,7 +929,7 @@ struct TutorDrawer: View {
                                         Text("\(r.path)\(r.lines.map { $0.isEmpty ? "" : " L\($0[0])–\($0.count > 1 ? $0[1] : $0[0])" } ?? "")").lineLimit(1)
                                         if on { Text(t.active != nil ? "↵ show in the code pane" : "open a session to see code").foregroundStyle(theme.ember) }
                                     }
-                                    .font(Theme.mono(11)).foregroundStyle(theme.inkDim)
+                                    .font(Theme.text(11)).foregroundStyle(theme.inkDim)
                                 }
                             }
                         }
@@ -942,26 +942,26 @@ struct TutorDrawer: View {
                                     Spacer()
                                     if on { HStack(spacing: 3) { TutorKey(id: "tutor.question.toggle"); Text(q.status == "open" ? "answered" : "reopen") }.foregroundStyle(theme.inkFaint) }
                                 }
-                                .font(Theme.mono(12.5))
+                                .font(Theme.text(12.5))
                             }
                         }
                         TutorRow(pane: P, key: "ask") { on in
                             VStack(alignment: .leading, spacing: 3) {
                                 ModalTextField(TutorCommands.insertField.question, prompt: t.active != nil ? "ask the tutor about this…" : "ask — starts a session on it", text: $t.question)
-                                    .font(Theme.mono(12.5)).padding(.horizontal, 8).padding(.vertical, 4)
+                                    .font(Theme.text(12.5)).padding(.horizontal, 8).padding(.vertical, 4)
                                     .background(theme.vellumNight)
                                     .overlay(Rectangle().stroke(app.insertField == TutorCommands.insertField.question ? theme.goldDeep : theme.rule))
                                 if on || app.insertField == TutorCommands.insertField.question {
-                                    HStack(spacing: 3) { TutorKey(id: "tutor.write"); Text("types · ↵ asks") }.font(Theme.mono(10.5)).foregroundStyle(theme.inkFaint)
+                                    HStack(spacing: 3) { TutorKey(id: "tutor.write"); Text("types · ↵ asks") }.font(Theme.text(10.5)).foregroundStyle(theme.inkFaint)
                                 }
                             }
                         }
 
                         TutorLabel("evidence · newest first").padding(.horizontal, 8).padding(.top, 12)
                         Text("depth comes only from this — toggle hit/miss, change level or credit, or cut a row")
-                            .font(Theme.mono(11.5)).foregroundStyle(theme.inkFaint).padding(.horizontal, 8).padding(.bottom, 4)
+                            .font(Theme.text(11.5)).foregroundStyle(theme.inkFaint).padding(.horizontal, 8).padding(.bottom, 4)
                         let ev = TutorRows.drawerEvidence(t, id)
-                        if ev.isEmpty { Text("none yet").font(Theme.mono(12)).foregroundStyle(theme.inkFaint).padding(.horizontal, 8) }
+                        if ev.isEmpty { Text("none yet").font(Theme.text(12)).foregroundStyle(theme.inkFaint).padding(.horizontal, 8) }
                         ForEach(ev, id: \.id) { e in
                             TutorRow(pane: P, key: "e:\(e.id)") { on in EvidenceRow(e: e, on: on) }
                         }
@@ -992,18 +992,18 @@ struct DepthBox: View {
                 Text((m.held ?? 0) != 0
                      ? "held at \(m.held_level ?? "")\(m.depth > (m.held ?? 0) ? " · shown once at \(m.level)" : "")"
                      : !m.level.isEmpty ? "shown once at \(m.level) — a second day makes it held" : "not yet shown unaided")
-                    .font(Theme.mono(12.5)).foregroundStyle(theme.ink)
+                    .font(Theme.text(12.5)).foregroundStyle(theme.ink)
             }
             Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 1) {
                 ForEach(Lesson.levels, id: \.self) { l in
                     GridRow { Text(l).frame(width: 72, alignment: .leading); Text(Lesson.levelHint[l] ?? "") }
                 }
             }
-            .font(Theme.mono(10.5)).foregroundStyle(theme.inkFaint)
+            .font(Theme.text(10.5)).foregroundStyle(theme.inkFaint)
             if m.due {
-                Text("due\(m.miss_confidence == "high" ? " (a confident miss — re-test first)" : ""): \(m.reason)").font(Theme.mono(12)).foregroundStyle(theme.ember)
+                Text("due\(m.miss_confidence == "high" ? " (a confident miss — re-test first)" : ""): \(m.reason)").font(Theme.text(12)).foregroundStyle(theme.ember)
             }
-            if let ct = m.contrast, !ct.isEmpty { Text("re-test with the contrast: \(ct)").font(Theme.mono(12)).foregroundStyle(theme.inkDim) }
+            if let ct = m.contrast, !ct.isEmpty { Text("re-test with the contrast: \(ct)").font(Theme.text(12)).foregroundStyle(theme.inkDim) }
         }
         .padding(12)
         .background(theme.vellumNight)

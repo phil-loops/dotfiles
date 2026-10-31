@@ -28,7 +28,7 @@ struct Chip: View {
     var gold = false
     var ok = false
     var body: some View {
-        Text(text).font(Theme.mono(10.5))
+        Text(text).font(Theme.text(10.5))
             .foregroundStyle(gold ? theme.goldLeaf : ok ? theme.patina : theme.inkDim)
             .padding(.horizontal, 2)
     }
@@ -64,11 +64,11 @@ public struct ThreadView: View {
                     if t.applying == true { Chip(text: "applying…", gold: true) }
                     if let n = t.note { Chip(text: "2nd: \(verdictWord[n.verdict.rawValue] ?? n.verdict.rawValue)", gold: n.verdict == .wrong) }
                     Spacer(minLength: 0)
-                    if selected { Text(hints(t)).font(Theme.mono(10.5)).foregroundStyle(theme.inkFaint) }
+                    if selected { Text(hints(t)).font(Theme.text(10.5)).foregroundStyle(theme.inkFaint) }
                 }
                 if open {
                     if t.outdated, let h = first?.hunk {
-                        Text(h.components(separatedBy: "\n").suffix(4).joined(separator: "\n")).font(Theme.mono(11)).foregroundStyle(theme.diffInk)
+                        Text(h.components(separatedBy: "\n").suffix(4).joined(separator: "\n")).font(Theme.text(11)).foregroundStyle(theme.diffInk)
                             .padding(4).frame(maxWidth: .infinity, alignment: .leading).background(theme.diffBg)
                     }
                     let replaces = linesOf(t)
@@ -182,7 +182,7 @@ public struct PendingView: View {
                 if item.kind == "comment", let s = item.startLine, let l = item.line { Text("lines \(s)–\(l)").foregroundStyle(theme.inkFaint) }
                 if let e = item.err { Text(e).foregroundStyle(theme.ember) }
                 Spacer(minLength: 0)
-                if selected { Text(hint).font(Theme.mono(10.5)).foregroundStyle(theme.inkFaint) }
+                if selected { Text(hint).font(Theme.text(10.5)).foregroundStyle(theme.inkFaint) }
             }
             MarkdownView(Self.withFix(item, threads: app.store.list(CanopyCore.Thread.self)))
         }
@@ -242,7 +242,7 @@ public struct ComposerView: View {
                                   id: "review.compose.send", gold: true)
                     }
                 }
-                .font(Theme.mono(11))
+                .font(Theme.text(11))
             }
             .padding(6)
             .overlay(Rectangle().stroke(app.insertField == ReviewCommands.composeField ? theme.goldDeep : theme.rule, lineWidth: 1))
@@ -266,7 +266,7 @@ public struct ShipTextEditor: View {
         ZStack(alignment: .topLeading) {
             if text.isEmpty { Text(placeholder).foregroundStyle(theme.inkFaint).padding(.leading, 5) }
             TextEditor(text: $text)
-                .font(Theme.mono(12.5))
+                .font(Theme.text(12.5))
                 .scrollContentBackground(.hidden)
                 .focused($focused)
                 .frame(minHeight: 44, maxHeight: 220)

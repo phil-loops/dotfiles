@@ -94,7 +94,7 @@ public struct InlineDiffView: View {
                 Text("+\(file.add)").foregroundStyle(theme.add)
                 Text("−\(file.del)").foregroundStyle(theme.del)
             }
-            .font(Theme.mono(12)).padding(.horizontal, 8).padding(.vertical, 4)
+            .font(Theme.text(12)).padding(.horizontal, 8).padding(.vertical, 4)
             .frame(maxWidth: .infinity, alignment: .leading).background(theme.vellumRaise)
             CanvasView(handle: handle, segments: [Segment(key: key) {
                 ReviewDocument.body(fv, aside: [], split: pg.split, composer: nil, open: [], replies: [:], pg, app, c)

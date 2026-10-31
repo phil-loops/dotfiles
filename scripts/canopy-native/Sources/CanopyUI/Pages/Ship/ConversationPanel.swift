@@ -58,10 +58,10 @@ public struct ConversationPanel: View {
                     Spacer(minLength: 0)
                 }
             }
-            .font(Theme.mono(12))
+            .font(Theme.text(12))
             .padding(.horizontal, 10).padding(.bottom, 8)
         } else {
-            Text("no PR").font(Theme.mono(12)).foregroundStyle(theme.inkFaint).padding(.horizontal, 16)
+            Text("no PR").font(Theme.text(12)).foregroundStyle(theme.inkFaint).padding(.horizontal, 16)
         }
     }
 

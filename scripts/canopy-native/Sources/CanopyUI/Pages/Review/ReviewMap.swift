@@ -48,7 +48,7 @@ struct MapOverlay: View {
                 Spacer()
                 Text("j/k · ↵ open · p page · esc").foregroundStyle(theme.inkFaint)
             }
-            .font(Theme.mono(11)).padding(.bottom, 6)
+            .font(Theme.text(11)).padding(.bottom, 6)
             if rows.isEmpty { Text("nothing else").foregroundStyle(theme.inkFaint) }
             ScrollViewReader { proxy in
                 ScrollView {
@@ -72,7 +72,7 @@ struct MapOverlay: View {
                 .onChange(of: pg.mapIndex) { _, i in proxy.scrollTo(i) }
             }
         }
-        .font(Theme.mono(12))
+        .font(Theme.text(12))
         .padding(14)
         .frame(width: 520)
         .frame(maxHeight: 520)

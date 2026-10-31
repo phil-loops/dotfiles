@@ -13,7 +13,7 @@ struct Statusline: View {
             if app.keys.mode == .command && app.keys.layer == nil { Completions() }
             HStack(spacing: 10) {
                 Text(app.keys.active.badge)
-                    .font(Theme.mono(11, weight: .semibold))
+                    .font(Theme.text(11, weight: .semibold))
                     .foregroundStyle(theme.vellumNight)
                     .padding(.horizontal, 6).padding(.vertical, 1)
                     .background(badgeColor)
@@ -37,7 +37,7 @@ struct Statusline: View {
                     }
                 }
             }
-            .font(Theme.mono(11))
+            .font(Theme.text(11))
             .padding(.horizontal, 10).padding(.vertical, 4)
         }
     }
@@ -97,7 +97,7 @@ private struct Completions: View {
             if all.count > 12 { Text("\(app.cmdIndex + 1)/\(all.count)").foregroundStyle(theme.inkFaint).padding(.horizontal, 10) }
             if cs.isEmpty { Text("no command matches").foregroundStyle(theme.inkFaint).padding(.horizontal, 10) }
         }
-        .font(Theme.mono(11.5))
+        .font(Theme.text(11.5))
         .padding(.vertical, 4)
         .background(theme.vellumRaise)
         .overlay(alignment: .top) { theme.rule.frame(height: 1) }
