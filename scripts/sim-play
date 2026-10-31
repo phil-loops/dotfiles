@@ -3,10 +3,10 @@
 # named kernels switched off: the setup the learner predicts from, then the reveal and the result.
 # sim-play --list  — every scenario with its standard, concepts and the kernel its contrast flips.
 set -euo pipefail
-cd "$(dirname "$0")/viewer-solid"
+cd "$(dirname "$0")/tutor-sim"
 exec node --input-type=module -e '
-const { createSim } = await import("./src/v2/sim.ts");
-const { scenario, scenarios } = await import("./src/v2/simScenarios.ts");
+const { createSim } = await import("./sim.ts");
+const { scenario, scenarios } = await import("./simScenarios.ts");
 const [id, off] = process.argv.slice(1);
 if (!id || id === "--list") {
   for (const s of scenarios) console.log(`${s.id}  [${s.standard}]  kernel: ${s.kernel ?? "none"}  concepts: ${s.concepts.join(", ")}`);
