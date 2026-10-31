@@ -1,4 +1,4 @@
-// Show — one native window with four workspaces on a rail: Forest (⌘1), Review (⌘2), Learn (⌘3), Runs (⌘4).
+// Show — one native window with five workspaces on a rail: Forest (⌘1), Review (⌘2), Learn (⌘3), Runs (⌘4), API (⌘5).
 // A file goes to the workspace its optional "workspace" key names, otherwise to the one its "mode" implies (forest, deck, tutor, live).
 // Decks: { "title", "subtitle"?, "sections": [{ "id"?, "group", "title", "tag"?, "body" (markdown), "url"? (a live page shown instead of the body) }] }
 // Sign-offs and notes save beside the deck as <deck>.signoff.json; "replyTo" names the claude-say session that Submit notifies.
@@ -17,9 +17,9 @@ var prefs = UserDefaults.standard
 
 /// The workspaces on the rail, top to bottom; the nth answers to ⌘n. Nothing crosses between them except the rail's waiting badges.
 enum Workspace: String, CaseIterable {
-    case forest, review, learn, runs
+    case forest, review, learn, runs, api
 
-    var name: String { rawValue.capitalized }
+    var name: String { self == .api ? "API" : rawValue.capitalized }
 
     var symbol: String {
         switch self {
@@ -27,6 +27,7 @@ enum Workspace: String, CaseIterable {
         case .review: return "rectangle.stack"
         case .learn: return "graduationcap"
         case .runs: return "dot.radiowaves.left.and.right"
+        case .api: return "bolt"
         }
     }
 
@@ -39,6 +40,7 @@ enum Workspace: String, CaseIterable {
         case .review: return .secondaryLabelColor
         case .learn: return inkColor
         case .runs: return running ? .systemOrange : .secondaryLabelColor
+        case .api: return .secondaryLabelColor
         }
     }
 
@@ -139,6 +141,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             exit(runSelfTest(selfTest))
         }
         window.makeKeyAndOrderFront(nil)
+        workspaces[active]?.console?.start()
         workspaces[active]?.restoreFocus(in: window)
         NSApp.activate(ignoringOtherApps: true)
         refreshLibrary(force: true)
@@ -242,6 +245,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     /// Brings a workspace forward in the same window: its view swaps in, nothing else moves.
     func switchTo(_ workspace: Workspace) {
+        if snapshotPath == nil && selfTest == nil {
+            workspaces[workspace]?.console?.start()
+        }
         guard workspace != active else { return }
         shell.hideFinder()
         workspaces[active]?.rememberFocus(in: window)
