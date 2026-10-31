@@ -32,6 +32,7 @@ logs="$HOME/.dotfiles/scripts/loops-logs"
 lgport=3900; lgbase="http://127.0.0.1:${lgport}"
 
 poke() { open -g "swiftbar://refreshplugin?name=blessed" 2>/dev/null; }
+notify() { osascript -e "display notification \"${1//\"/'}\" with title \"canopy\"" 2>/dev/null; }
 # Detach (nohup + subshell) so the server survives SwiftBar reaping the click process.
 bg()   { ( cd "$repo" && nohup "$@" >/dev/null 2>&1 </dev/null & ); }
 
@@ -45,10 +46,17 @@ case "${1:-}" in
     lsof -ti "tcp:${port}" 2>/dev/null | xargs kill 2>/dev/null
     bg "$serve" --no-open; poke; exit 0 ;;
   --canopy)      # the native viewer. It refuses without a live server, so a cold click starts one
-    # first and waits for it — detached, since a cold build takes a while.
+    # first and waits for it — detached, since a cold build takes a while. A rebuild runs about a
+    # minute with no window, so it says so in a notification, and so does a failure.
     ( { curl -sf --max-time 1 "$base/sig" >/dev/null 2>&1 || { cd "$repo" && nohup "$serve" --no-open >/dev/null 2>&1 </dev/null &
           for _ in $(seq 1 120); do curl -sf --max-time 1 "$base/sig" >/dev/null 2>&1 && break; sleep 0.5; done; }; }
-      cd "$repo" && nohup "$canopy" >/dev/null 2>&1 </dev/null ) &
+      cd "$repo"
+      "$canopy" 2>&1 </dev/null | while IFS= read -r line; do
+        [[ "$line" == "canopy: building"* ]] && notify "building — it opens when done"
+        last="$line"
+      done
+      (( ${pipestatus[1]} )) && notify "didn't open: ${last}"
+    ) >/dev/null 2>&1 &
     poke; exit 0 ;;
   --postman)     # the API console, in Show's API workspace, which starts the server when it's down.
     ( nohup "$show" --api >/dev/null 2>&1 </dev/null & )
@@ -103,6 +111,7 @@ else
   echo "▷ Start (background) | bash=\"$self\" param1=--start terminal=false"
   echo "▷ Start + open in Chrome | color=#3fb950 bash=\"$self\" param1=--open terminal=false"
 fi
+echo "🌲 Canopy | bash=\"$self\" param1=--canopy terminal=false"
 echo "⚡ Postman console · :${pmport} | bash=\"$self\" param1=--postman terminal=false"
 if (( mmup )); then
   echo "📬 Mail map · :${mmport} — open | color=#3fb950 bash=\"$self\" param1=--mailmap terminal=false"
@@ -112,7 +121,6 @@ fi
 if (( bsup )); then
   echo "📚 Bookshelf · :${bsport} — open | color=#3fb950 bash=\"$self\" param1=--bookshelf terminal=false"
 else
-echo "🌲 Canopy | bash=\"$self\" param1=--canopy terminal=false"
   echo "📚 Bookshelf · :${bsport} | bash=\"$self\" param1=--bookshelf terminal=false"
 fi
 if (( lgup )); then
