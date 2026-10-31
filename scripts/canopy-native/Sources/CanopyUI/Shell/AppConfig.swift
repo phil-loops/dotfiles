@@ -7,7 +7,10 @@ import Foundation
 ///   --repo <path>         a repo the server serves; `stack-review-port` there gives the port
 ///   --appearance <a>      dark (default, as the web app) | light | system
 ///   --dump                headless: hydrate, hold the event stream, print the world as JSON, exit
-///   --dump-wait <s>       how long --dump listens for patches (default 4)
+///   --dump-wait <s>       how long --dump listens for patches (default 4); --shoot settles this long per shot
+///   --shoot <dir>         headless: draw each --shot offscreen into <dir>/<name>.png (see Shoot)
+///   --shot <name>=<route> [keys…]   one shot; repeatable
+///   --size <w>x<h>        the --shoot window (default 1280x800)
 ///   /v2/... | canopy://…  the first route
 public struct AppConfig: Sendable {
     public var port: Int?
@@ -18,6 +21,10 @@ public struct AppConfig: Sendable {
     public var appearance = "dark"
     public var dump = false
     public var dumpWait: Double = 4
+    public var shootDir = ""
+    public var shots: [String] = []
+    public var shootWidth: Double = 1280
+    public var shootHeight: Double = 800
 
     public init() {}
 
@@ -33,6 +40,11 @@ public struct AppConfig: Sendable {
             case "--appearance": c.appearance = next() ?? c.appearance
             case "--dump": c.dump = true
             case "--dump-wait": c.dumpWait = next().flatMap(Double.init) ?? c.dumpWait
+            case "--shoot": c.shootDir = next() ?? ""
+            case "--shot": if let s = next() { c.shots.append(s) }
+            case "--size":
+                let wh = (next() ?? "").split(separator: "x").compactMap { Double($0) }
+                if wh.count == 2 { c.shootWidth = wh[0]; c.shootHeight = wh[1] }
             default:
                 if a.hasPrefix("/v2") || a.hasPrefix("canopy:") { c.route = Route(a); c.query = Route.query(a) }
                 // AppKit's own launch args (-NSDocumentRevisionsDebugMode YES, -psn_…) pass through
