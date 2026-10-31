@@ -1,6 +1,6 @@
 {
   "title": "Enforcement — design",
-  "subtitle": "Idea · model · invariants · functions · mockups · path",
+  "subtitle": "Idea · model · invariants · functions · mockups · dashboard · path",
   "replyTo": "ddabd63a",
   "sections": [
     {
@@ -76,6 +76,43 @@
       "body": "```\nWorkflow › Onboarding › Email 3 \"Reset your password\"\n┌─────────────────────────────────────────────────────────────┐\n│ ⏸ This email is held for review — it won't send.            │\n│   The rest of your workflow keeps running.                  │\n└─────────────────────────────────────────────────────────────┘\n\nCampaign \"Black Friday\" → [Publish]\n┌─────────────────────────────────────────────────────────────┐\n│ ⏸ Publishing is held for review. Your edits are saved;      │\n│   we'll publish them once they're reviewed.  (LOO-6309)    │\n└─────────────────────────────────────────────────────────────┘\n```\nSame table, scope `email`, effect `send` or `publish`. Same reviewer panel, same Lift."
     },
     {
+      "id": "d-why",
+      "group": "Dashboard",
+      "title": "The guiding question, for the whole fleet",
+      "body": "> Across every team: what's blocked, why, who decided, and are our decisions right?\n\nThe sender, support and reviewer views answer it for **one** team, and they come free from the kernel. The dashboard answers it for **all** of them, and it's the only place the last part — *are we right?* — can be seen.\n\n**It is only reads.** Every number is a query over restrictions, evidence and allowances (rule 4). No counters, no nightly rollups that can drift; a slow query gets a cache keyed by the rows, never a second source of truth. `stateAt(rows, t)` makes every panel answerable at any past moment, so \"last Tuesday\" is a parameter, not a snapshot someone remembered to take."
+    },
+    {
+      "id": "d-layout",
+      "group": "Dashboard",
+      "title": "One page: the queue, the fleet, the detectors",
+      "body": "```\nadmin › Enforcement                                   [ Last 7 days ▾ ]\n┌──────────────┬──────────────┬──────────────┬──────────────┐\n│ Blocked now  │ Waiting      │ Unexplained  │ Lifted as    │\n│ 412 domains  │ 37 · oldest  │ 1,204 legacy │ wrong: 18%   │\n│  38 teams    │ 3d 4h        │ ↓ 96 this wk │ ↑ from 11%   │\n└──────────────┴──────────────┴──────────────┴──────────────┘\n\nWaiting for review, oldest first                                    37\n  3d 4h  acme-mail.com      content.phishing   scan-v14   2 evidence  →\n  2d 1h  shoply.io          behavior.complaint health-v3  1 evidence  →\n  …\n\nDetectors                    blocks  upheld  wrong  fixed  waiting  to decide\n  scan-v14 (phishing)            41     22     12      3        4   9h\n  health-v3 (complaints)         88     70      4     11        3   5h\n  banned-words                   19      6     11 ⚠    1        1   2h\n  signup-review (people)         64     64      —      —        0    —\n\nBlocks started and lifted per day, by category      (small multiples)\n  content.phishing   ▁▂▁▃▂▁▂   lifted ▁▁▂▁▁▂▁\n  behavior.complaint ▂▃▅▂▂▃▂   lifted ▁▂▃▂▁▁▂\n  …\n\nAllowances ending this week: 3                                     →\n```\nEvery row opens what it counts: a queue row opens the reviewer panel; a detector row opens its blocks, filtered."
+    },
+    {
+      "id": "d-detectors",
+      "group": "Dashboard",
+      "title": "Detector scorecards: where 'are we right' lives",
+      "body": "Each lift records a verdict, so each rule gets a measured record:\n\n| Column | Query over restrictions with this `ruleId` |\n|---|---|\n| blocks | started in the window |\n| upheld | a person agreed (`upheldAt`) |\n| wrong | lifted with verdict `wrong` — the false-positive rate |\n| fixed | lifted with verdict `fixed` — the detector was right, the sender changed |\n| waiting | still in effect, nobody decided |\n| to decide | median time from start to upheld/lifted |\n\n**⚠** when `wrong / decided` passes a threshold, or jumps against the previous window. That's the signal to tune or retire a rule, and it's the evidence for the change.\n\nGrouped by `decidedBy` version too (`scan-v13` vs `scan-v14`), so a detector change shows whether it got better."
+    },
+    {
+      "id": "d-v0",
+      "group": "Dashboard",
+      "title": "v0: what today's data can already show",
+      "body": "Before any new table, the same page can run on what we store now, each panel labeled **inferred**:\n\n| Panel | From today's tables |\n|---|---|\n| Blocked now | `SendingDomain.disabled`, split by latest `DisableDomainEvent.decision` (the 2,746 table) |\n| Waiting | `DisableDomainEvent` Pending, oldest first (436 today) |\n| Unexplained | disabled with no event, or no admin record (1,966 today) |\n| Flagged emails waiting | `EmailMessage.safetyClassification = \"phishing\"`, not reviewed |\n| Health trips | `AccountLimitNotice` at Error per day, fleet-wide (the chart, for every team) |\n| Signup blocks | `AdminPanelInteraction` \"New Signups bulk action\" per day, per admin |\n\nWhat v0 **can't** show: per-detector wrong rates (re-enables carry no verdict) and per-reason state. That gap, on the page in plain words, is the argument for the restriction tables.\n\nv0 also sets the baseline: when v1 ships, the same tiles compare against what v0 measured.",
+      "tag": "improve what we have"
+    },
+    {
+      "id": "d-alerts",
+      "group": "Dashboard",
+      "title": "Alerts: three things that should page",
+      "body": "1. **Unexplained went up.** After step 3 nothing is blocked without a reason; an increase means something wrote `disabled` around `restrict()`. The nightly check names the domain.\n2. **The queue is older than the promise.** Oldest waiting block past the review time we tell senders (\"end of the next business day\").\n3. **A detector's wrong rate jumped.** Against its previous window, on enough decisions to mean it.\n\nThe page shows the same three at the top when they're firing. Alerting itself goes through our existing observability, as Terraform, not a script."
+    },
+    {
+      "id": "d-where",
+      "group": "Dashboard",
+      "title": "Where it lives",
+      "body": "**A tab in the Loops admin** (\"Enforcement\"), next to Disabled Domains and the team page. It's for the people who review, it links straight into the reviewer panel and the team page, and it uses the same tRPC + query/model layering as everything else.\n\nBranch shape, ladder order:\n1. queries: one per panel, each a single read with its test\n2. model: the scorecard math and the \"dragging / ⚠\" thresholds, fake deps\n3. wiring: one admin route returning the page\n4. UI: the tab — stat tiles, the queue, the scorecard table, small-multiple sparklines\n\nv0 is that forest on today's tables; v1 swaps each query onto restrictions, panel by panel."
+    },
+    {
       "id": "migrate",
       "group": "Path",
       "title": "Backfill: recover reasons we already wrote down",
@@ -91,7 +128,7 @@
       "id": "open",
       "group": "Open",
       "title": "Still to decide",
-      "body": "- **The reason list.** What do admins actually block for? Support likely knows better than the code.\n- **Evidence links.** Any URL, or only our support tool (so the panel can say \"support thread\")?\n- **Upheld** as its own state — I'd keep it; it's today's BlockDomain and rule 3.\n- **Publish for workflows.** Does a team-wide publish hold stop editing a live workflow's email, or only new ones?\n- **`skipSafetyChecks`** as an allowance needs an expiry and a note. Which teams have it, and who set it?\n- **Complaint-rate denominator** excludes only exact `@gmail.com`; fix it or label it."
+      "body": "- **Review promise.** What review time do we tell senders? The queue alert keys off it.\n- **Reviewer view.** Show decisions per reviewer on the dashboard, or keep that out to avoid it reading as surveillance?\n- **The reason list.** What do admins actually block for? Support likely knows better than the code.\n- **Evidence links.** Any URL, or only our support tool (so the panel can say \"support thread\")?\n- **Upheld** as its own state — I'd keep it; it's today's BlockDomain and rule 3.\n- **Publish for workflows.** Does a team-wide publish hold stop editing a live workflow's email, or only new ones?\n- **`skipSafetyChecks`** as an allowance needs an expiry and a note. Which teams have it, and who set it?\n- **Complaint-rate denominator** excludes only exact `@gmail.com`; fix it or label it."
     }
   ]
 }
