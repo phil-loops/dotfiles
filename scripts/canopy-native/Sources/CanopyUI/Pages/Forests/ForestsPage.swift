@@ -18,7 +18,7 @@ struct ForestsPage: View {
         let cursor = focused ? app.selected : nil
         let selection = focused ? Set(app.selection) : []
         let shown = p.focus + p.workbench + (m.showArchive ? p.archive : [])
-        let nameWidth = CGFloat(min(26, max(14, (shown.map { $0.name.count + 2 }.max() ?? 14)))) * 8.4
+        let nameWidth = CGFloat(min(32, max(14, (shown.map { $0.name.count + 2 }.max() ?? 14)))) * 8.4
         Group {
             if !app.store.ready {
                 Text("reading the forests…").foregroundStyle(theme.inkFaint).padding(.leading, 44)
@@ -56,14 +56,13 @@ struct ForestsPage: View {
                                 }
                             }
                         }
-                        .frame(maxWidth: 980, alignment: .leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.vertical, 4)
                         .glides(rows, reduced: reduced)
                     }
                     .labelPane("main")
                     .onChange(of: cursor) { _, k in if let k { proxy.scrollTo(k) } }
                 }
-                .overlay { Rectangle().stroke(focused ? theme.goldDeep : theme.rule.opacity(0.5), lineWidth: 1) }
             }
         }
         .padding(.horizontal, 16).padding(.bottom, 8)
@@ -152,7 +151,6 @@ private struct ForestRowView: View {
                 Text(p.name).font(Theme.display(17))
                     .foregroundStyle(cursor ? theme.goldLeaf : f.closed ? theme.inkFaint : theme.ink)
                     .lineLimit(1).truncationMode(.tail)
-                if !f.ready.isEmpty && !m.readyOnly { Text("●").font(.system(size: 9)).foregroundStyle(theme.goldLeaf) }
                 if verdict?.state == .conflicts { Text("✕").font(Theme.mono(11)).foregroundStyle(theme.del) }
             }
             .frame(width: nameWidth, alignment: .leading)
@@ -163,7 +161,16 @@ private struct ForestRowView: View {
                 Text(p.summary).foregroundStyle(theme.inkDim).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
             }
             if cursor, !meta(verdict).isEmpty { Text(meta(verdict)).font(Theme.mono(11)).foregroundStyle(theme.inkFaint).fixedSize() }
-            if cursor, !hint.isEmpty { Text(hint).foregroundStyle(theme.goldLeaf).fixedSize() }
+            if !f.closed && !f.branches.isEmpty {
+                // one dot per branch in merge order: landed, ready to act on, still in the works
+                HStack(spacing: 4) {
+                    ForEach(f.branches, id: \.b.id) { v in
+                        Circle().fill(v.st.ship == .landed ? theme.patina : v.st.ready ? theme.goldLeaf : theme.inkFaint.opacity(0.45))
+                            .frame(width: 6, height: 6)
+                    }
+                }
+                .frame(minWidth: 60, alignment: .trailing)
+            }
         }
         .frame(height: 38)
         .padding(.horizontal, 16)
@@ -217,7 +224,7 @@ private struct BranchRowView: View {
             if cursor, !meta.isEmpty {
                 Text(meta).font(Theme.mono(11)).foregroundStyle(v.b.gates == .red && v.pr == nil ? theme.del : theme.inkFaint).fixedSize()
             }
-            if cursor, !hint(m).isEmpty { Text(hint(m)).foregroundStyle(theme.goldLeaf).fixedSize() }
+            if m.armed == v.b.id { Text(hint(m)).foregroundStyle(theme.goldLeaf).fixedSize() }
         }
         .frame(height: 32)
         .padding(.leading, 40).padding(.trailing, 16)

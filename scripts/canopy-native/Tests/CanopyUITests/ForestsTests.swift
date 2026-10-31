@@ -113,7 +113,7 @@ private let NOW = iso("2026-10-22T18:00:00Z") // Thu 11:00 PT
         #expect(at(br()) == "gates not run")
         #expect(at(br(["gates": "running"])) == "gates running")
         #expect(at(br(["gates": "red", "redGates": ["typecheck"]])) == "gates typecheck")
-        #expect(at(br(["gates": "green"])) == "push 1 local")
+        #expect(at(br(["gates": "green"])) == "push")
         #expect(at(br(["gates": "green", "pushed": "synced"])) == "pr open it")
         #expect(at(br(["gates": "green", "pushed": "synced"]), pr()) == "review waiting")
         #expect(at(br(["gates": "green", "pushed": "synced"]), pr(["review": "APPROVED"])) == "merged you — merge it")
@@ -122,14 +122,14 @@ private let NOW = iso("2026-10-22T18:00:00Z") // Thu 11:00 PT
 
     @Test func newCommitsOnAnOpenPRSendTheLoopBackToGates() {
         #expect(at(br(["pushed": "ahead", "ahead": 2, "gates": "stale"]), pr()) == "gates stale")
-        #expect(at(br(["pushed": "ahead", "ahead": 2, "gates": "green"]), pr()) == "push 2 to push")
+        #expect(at(br(["pushed": "ahead", "ahead": 2, "gates": "green"]), pr()) == "push")
     }
 
     @Test func wordsFlagWithoutBlocking() {
         let scope = [LoopWord(id: "scope", tone: "warn")]
         func words(_ b: Branch, _ p: Pr? = nil) -> LoopStep { Loop.steps(b, p, ShipRules.stand(b, p, nil, now: NOW), words: scope)[0] }
         #expect(words(br(["gates": "green"])) == LoopStep(id: .words, state: .now, note: "scope", flag: true))
-        #expect(at(br(["gates": "green"])) == "push 1 local")
+        #expect(at(br(["gates": "green"])) == "push")
         #expect(words(br(["pushed": "synced"]), pr()).state == .done)
     }
 

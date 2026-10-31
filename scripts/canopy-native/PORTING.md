@@ -83,6 +83,8 @@ swift test                      # all suites; must stay green at every commit
 ./canopy                        # release build (if sources changed) → ~/.cache/canopy-native/Canopy.app → open
 ./canopy /v2/b/loops/<branch>   # open on a route; a running app is routed through canopy://
 ./canopy --dump [--dump-wait 5] # headless: hydrate + listen + exercise keys, JSON on stdout, exit 1 if no hello
+./canopy --build >/dev/null; .build/debug/Canopy --shoot <dir> --shot "name=/v2/b/loops/<b> 2 k" [--size 1280x800]
+                                # headless: draw each shot offscreen into <dir>/name.png (keys after the route; never a write key)
 ./canopy --repo ~/coding/monotoad --appearance light
 tail -f ~/.cache/canopy-native/canopy.log   # what the running app is doing (hydrate, events, nav, key problems)
 ```
@@ -90,6 +92,17 @@ tail -f ~/.cache/canopy-native/canopy.log   # what the running app is doing (hyd
 Port discovery: `--port` takes priority. Otherwise the launcher runs `stack-review-port` in `--repo`, or in the current git repo if a
 server is listening there, or in `~/coding/loops` (62497 today). Deep links: `canopy://v2/p/loops/x`, `canopy:///v2/...`,
 `canopy://open?path=/v2/...`, or a bare `/v2/...` argument.
+
+## 2½. The look
+
+Calm ledger, not a control panel. Check a change by `--shoot`ing it, never by guessing.
+- **No boxes.** Panes, pages and chips carry no stroked border; focus shows as the lit cursor row (PaneList) or a 1pt
+  goldDeep hairline on the focused pane's leading edge. Floating layers (picker, menu, sheet, which-key) keep their edge.
+- **Use the width.** No `maxWidth` caps on lists; put secondary facts right-aligned on the row. Reading prose may cap.
+- **Minimal text.** No key-hint prose in content (`↵ open · e words`); keys live in which-key, `?` and on KeyButtons.
+  Say a fact once (the loop rail names only the step in the way; the push button carries the count).
+- **Buttons are washes**, not outlines: `KeyButton` / `Lever` fill vellumRaise (goldWash when it's the next move).
+- **Order follows the work.** Lists read the way the work happened (commits oldest first, their sum at the foot).
 
 ## 3. The page contract
 

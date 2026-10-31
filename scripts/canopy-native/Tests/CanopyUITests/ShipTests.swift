@@ -295,7 +295,7 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
         let b = try #require(a.store.view(Branch.self, Self.branch))
         ship.putHistory(b, [HistoryCommit(sha: "aaa1111", subject: "rename"), HistoryCommit(sha: "bbb2222", subject: "fail louder"),
                             HistoryCommit(sha: "ccc3333", subject: "someone else's", own: false)])
-        #expect(ShipRows.history(a, Self.branch) == ["h|", "h|aaa1111", "h|bbb2222"])
+        #expect(ShipRows.history(a, Self.branch) == ["h|bbb2222", "h|aaa1111", "h|"])
         a.runner.dispatch("history.select", via: .key, arg: "bbb2222")
         #expect(ship.commitScope == "bbb2222" && ship.host.tab == "commits")
         a.runner.dispatch("history.exit", via: .key)

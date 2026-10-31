@@ -47,13 +47,12 @@ struct ForestPage: View {
                         }
                     }
                 }
-                .frame(maxWidth: 980, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .glides(rows, reduced: reduced)
             }
             .labelPane("main")
             .onChange(of: cursor) { _, k in if let k { proxy.scrollTo(k) } }
         }
-        .overlay { Rectangle().stroke(focused ? theme.goldDeep : theme.rule.opacity(0.5), lineWidth: 1) }
         // does every branch merge onto main at once — asked when the page opens and whenever a tip moves
         .task(id: m.integratable(p.id) ? m.stampOf(p.id) : "") {
             if m.integratable(p.id) { await m.checkIntegration(p.id) }
@@ -92,7 +91,7 @@ struct ForestPage: View {
                 Text(v.detail).font(Theme.mono(11)).foregroundStyle(theme.del.opacity(0.8)).lineLimit(3)
             }
         }
-        .padding(.leading, 44).padding(.trailing, 16).padding(.bottom, 24)
+        .padding(.leading, 52).padding(.trailing, 20).padding(.top, 4).padding(.bottom, 20)
     }
 
     private var faceTabs: some View {
@@ -125,42 +124,34 @@ private struct ForestBranchView: View {
     var body: some View {
         @Bindable var m = app.forestModel
         let b = v.b
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 3) {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 Text(b.order < 999 ? "\(b.order)" : "").font(Theme.mono(11)).foregroundStyle(theme.inkFaint).frame(width: 20, alignment: .trailing)
                 Text(leaf(b.name)).font(Theme.display(17)).foregroundStyle(cursor ? theme.goldLeaf : theme.ink).lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                if cursor { Text(caption).font(Theme.mono(11)).foregroundStyle(theme.inkFaint).fixedSize() }
+                if !facts.isEmpty { Text(facts.joined(separator: "  ")).font(Theme.mono(11)).foregroundStyle(theme.inkFaint).fixedSize() }
+                LoopStripView(branchID: b.id, size: 11).fixedSize()
             }
             VStack(alignment: .leading, spacing: 6) {
                 if m.describing == b.id {
                     ModalTextField(BranchCommands.describeField, prompt: "one line: what the branch does", text: $m.draft)
                         .foregroundStyle(theme.ink)
                         .padding(4)
-                        .overlay { Rectangle().stroke(theme.goldDeep, lineWidth: 1) }
+                        .background(theme.vellumRaise)
                     Text("\(app.registry.keyOf("branch.describe.save")) saves · esc leaves it").font(Theme.mono(11)).foregroundStyle(theme.inkFaint)
                 } else {
                     Text(b.description.isEmpty ? "no description" : b.description)
                         .foregroundStyle(b.description.isEmpty ? theme.inkFaint : theme.inkDim)
                         .italic(b.description.isEmpty)
+                        .lineLimit(1)
                 }
                 if m.wordsOpen.contains(b.id) {
                     CommitWords(branchID: b.id).font(Theme.mono(12))
-                } else if !b.outline.isEmpty {
-                    VStack(alignment: .leading, spacing: 1) {
-                        ForEach(Array(b.outline.enumerated()), id: \.offset) { _, s in
-                            Text("· \(s)").font(Theme.mono(12)).foregroundStyle(theme.inkFaint).lineLimit(1)
-                        }
-                    }
-                }
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    LoopStripView(branchID: b.id, size: 11)
-                    if !facts.isEmpty { Text(facts.joined(separator: " · ")).font(Theme.mono(11)).foregroundStyle(theme.inkFaint) }
                 }
             }
             .padding(.leading, 32)
         }
-        .padding(.vertical, 12).padding(.leading, 40).padding(.trailing, 16)
+        .padding(.vertical, 9).padding(.leading, 20).padding(.trailing, 20)
         .opacity(v.st.ship == .landed ? 0.6 : 1)
         .rowChrome(RowKey.branch(b.id), cursor: cursor, selected: selected)
     }
@@ -171,14 +162,5 @@ private struct ForestBranchView: View {
         let n = app.store.list(CanopyCore.Thread.self).filter { $0.repo == v.b.repo && $0.branch == v.b.name && !$0.resolved && !$0.outdated }.count
         if n > 0 { out.append("\(n) open") }
         return out
-    }
-
-    /// The keys for the row under the cursor: ↵ does its next step, l always opens it.
-    private var caption: String {
-        let k = app.registry.keyOf
-        let act = v.st.action
-        let go = act == .push ? "push" : act == .pr ? "open the PR" : "open"
-        return ["\(k("row.primary")) \(go)", act == .push || act == .pr ? "\(k("branch.open")) open" : "",
-                "\(k("forest.words")) words", "\(k("branch.describe.edit")) describe"].filter { !$0.isEmpty }.joined(separator: " · ")
     }
 }

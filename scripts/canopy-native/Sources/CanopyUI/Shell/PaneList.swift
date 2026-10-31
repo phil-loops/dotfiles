@@ -25,7 +25,7 @@ public struct PaneList<Row: View>: View {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(rows, id: \.self) { key in
                         row(key, key == cursor)
-                            .padding(.vertical, 2).padding(.horizontal, 6)
+                            .padding(.vertical, 5).padding(.horizontal, 10)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .background(key == cursor ? theme.goldWash : selection.contains(key) ? theme.emberWash : .clear)
                             .overlay(alignment: .leading) { if key == cursor { theme.goldLeaf.frame(width: 2) } }
@@ -33,12 +33,10 @@ public struct PaneList<Row: View>: View {
                             .id(key)
                     }
                 }
-                .padding(4)
             }
             .onChange(of: cursor) { _, k in if let k { proxy.scrollTo(k) } }
         }
         .labelPane(pane)
-        .overlay { Rectangle().stroke(focused ? theme.goldDeep : theme.rule.opacity(0.5), lineWidth: 1) }
     }
 }
 

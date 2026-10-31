@@ -56,7 +56,7 @@ struct PaneRing: ViewModifier {
     @Environment(\.theme) private var theme
     let pane: String
     func body(content: Content) -> some View {
-        content.overlay { Rectangle().stroke(app.isFocused(pane) ? theme.goldDeep : theme.rule.opacity(0.4), lineWidth: 1) }
+        content.overlay(alignment: .leading) { (app.isFocused(pane) ? theme.goldDeep : .clear).frame(width: 1) }
     }
 }
 
@@ -80,9 +80,9 @@ struct Lever: View {
                 Text(word)
             }
             .font(Theme.mono(11))
-            .padding(.horizontal, 7).padding(.vertical, 1)
+            .padding(.horizontal, 8).padding(.vertical, 2)
             .foregroundStyle(danger ? theme.del : theme.inkDim)
-            .overlay { RoundedRectangle(cornerRadius: 5).stroke(danger ? theme.del.opacity(0.7) : theme.rule, lineWidth: 1) }
+            .background(RoundedRectangle(cornerRadius: 4).fill(danger ? theme.delBg : theme.vellumRaise))
         }
         .buttonStyle(.plain)
     }

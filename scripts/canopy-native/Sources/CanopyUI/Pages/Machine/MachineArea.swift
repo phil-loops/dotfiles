@@ -86,7 +86,7 @@ struct MachinePage: View {
                         StackSection()
                         FootprintSection()
                     }
-                    .frame(maxWidth: 1080, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.top, 8)
                 }
             }
@@ -143,7 +143,7 @@ private struct Servers: View {
                 ModalTextField(MachinePage.portField, text: $m.mainPort)
                     .frame(width: 52)
                     .padding(.horizontal, 4)
-                    .overlay { Rectangle().stroke(app.insertField == MachinePage.portField ? theme.inkFaint : theme.rule, lineWidth: 1) }
+                    .background(theme.vellumRaise)
                     .onChange(of: m.mainPort) { _, v in
                         let digits = v.filter(\.isNumber)
                         if digits != v { m.mainPort = digits }
@@ -347,7 +347,7 @@ private struct FlowChips: View {
                     .padding(.horizontal, 6)
                     .foregroundStyle(it.1 == 0 ? theme.inkDim : it.1 == 1 ? theme.inkFaint : theme.del)
                     .opacity(it.1 == 1 ? 0.7 : 1)
-                    .overlay { Rectangle().stroke(it.1 == 2 ? theme.del.opacity(0.7) : theme.rule, lineWidth: 1) }
+
             }
         }
     }

@@ -1,9 +1,10 @@
 import CanopyCore
 import SwiftUI
 
-/// LoopStrip.tsx: a branch's place in the dev loop, one strip — each step done, in the way, or later;
-/// the one in the way says what it waits on. The review page passes its words (the PR form's title
-/// and body hints) and the words step opens the commits tab; a forest row leaves words out.
+/// LoopStrip.tsx as a rail: a branch's place in the dev loop — words ▸ gates ▸ push ▸ PR ▸ review ▸
+/// merged — one short bar per step (done, later), only the step in the way named with what it waits
+/// on. The review page passes its words (the PR form's title and body hints) and the words step opens
+/// the commits tab; a forest row leaves words out.
 public struct LoopStripView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme
@@ -18,30 +19,35 @@ public struct LoopStripView: View {
     public var body: some View {
         if let v = app.forestModel.branchView(branchID) {
             let steps = Loop.steps(v.b, v.pr, v.st, words: words)
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                ForEach(Array(steps.enumerated()), id: \.element.id) { i, s in
-                    if i > 0 { Text("▸").foregroundStyle(theme.inkFaint) }
-                    if s.id == .words {
-                        Button { app.runner.dispatch("review.tab.commits", via: .click) } label: {
-                            (Text("\(s.flag == true ? "" : "✓ ")words").foregroundColor(s.flag == true ? theme.goldLeaf : theme.patina)
-                                + Text(s.note.map { " \($0)" } ?? "").foregroundColor(theme.inkDim))
-                        }
-                        .buttonStyle(.plain)
-                    } else if s.state == .now, let cmd = Loop.command(s.id) {
-                        // the step in the way is something to do: a label runs its next move
-                        stepText(s).labelTarget(pane: "loop", key: "step:\(branchID):\(s.id.rawValue)", title: s.word, run: RouteTo(cmd, target: branchID))
+            HStack(alignment: .center, spacing: 4) {
+                ForEach(steps, id: \.id) { s in
+                    if s.state == .now || s.flag == true {
+                        named(s).padding(.horizontal, 4)
                     } else {
-                        stepText(s)
+                        Capsule().fill(color(s.state).opacity(s.state == .later ? 0.35 : 0.8))
+                            .frame(width: size * 1.6, height: 3)
+                            .help(s.word)
                     }
+                }
+                if steps.allSatisfy({ $0.state == .done }) {
+                    Text("merged").foregroundStyle(theme.patina).padding(.leading, 4)
                 }
             }
             .font(Theme.mono(size))
         }
     }
 
-    private func stepText(_ s: LoopStep) -> Text {
-                        (Text("\(s.state == .done ? "✓ " : "")\(s.word)").foregroundColor(color(s.state))
-                            + Text(s.state == .now ? s.note.map { " \($0)" } ?? "" : "").foregroundColor(theme.inkDim))
+    @ViewBuilder private func named(_ s: LoopStep) -> some View {
+        let text = Text(s.word).foregroundColor(s.flag == true ? theme.goldLeaf : color(s.state))
+            + Text(s.note.map { " \($0)" } ?? "").foregroundColor(theme.inkDim)
+        if s.id == .words {
+            Button { app.runner.dispatch("review.tab.commits", via: .click) } label: { text }.buttonStyle(.plain)
+        } else if let cmd = Loop.command(s.id) {
+            // the step in the way is something to do: a label runs its next move
+            text.labelTarget(pane: "loop", key: "step:\(branchID):\(s.id.rawValue)", title: s.word, run: RouteTo(cmd, target: branchID))
+        } else {
+            text
+        }
     }
 
     private func color(_ s: LoopStep.State) -> Color {

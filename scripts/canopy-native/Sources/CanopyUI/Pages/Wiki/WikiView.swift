@@ -85,7 +85,7 @@ struct WikiList: View {
             }
             .onChange(of: cursor, initial: true) { _, k in if let k { proxy.scrollTo(k) } }
         }
-        .overlay { Rectangle().stroke(focused ? theme.goldDeep : theme.rule.opacity(0.5), lineWidth: 1) }
+        .overlay(alignment: .leading) { (focused ? theme.goldDeep : .clear).frame(width: 1) }
     }
 }
 
@@ -163,7 +163,7 @@ struct WikiArticle: View {
             }
             .onChange(of: page.slug) { proxy.scrollTo("top", anchor: .top) }
         }
-        .overlay { Rectangle().stroke(focused ? theme.goldDeep : .clear, lineWidth: 1) }
+        .overlay(alignment: .leading) { (focused ? theme.goldDeep : .clear).frame(width: 1) }
     }
 }
 
@@ -222,7 +222,7 @@ struct WikiSource: View {
             }
         }
         .background(theme.diffBg)
-        .overlay { Rectangle().stroke(focused ? theme.goldDeep : theme.rule, lineWidth: 1) }
+        .overlay(alignment: .leading) { (focused ? theme.goldDeep : .clear).frame(width: 1) }
         .padding(.leading, 16).padding(.trailing, 12)
     }
 

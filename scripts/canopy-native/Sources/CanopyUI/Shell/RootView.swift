@@ -57,18 +57,12 @@ struct Header: View {
                 }
             }
             Spacer()
-            if app.store.conn != .live {
-                Circle()
-                    .fill(app.store.conn == .down ? theme.ember : theme.inkFaint)
-                    .frame(width: 7, height: 7)
-                    .help(app.store.conn == .down ? "reconnecting to the server" : "connecting")
-            }
         }
         .font(Theme.mono(12))
         .foregroundStyle(theme.inkFaint)
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 20)
         .padding(.top, 12)
-        .padding(.bottom, 16)
+        .padding(.bottom, 10)
     }
 
     private var crumbs: [Crumb] {
