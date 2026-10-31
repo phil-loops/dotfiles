@@ -385,6 +385,26 @@ import Testing
         #expect(pg.hereWord == nil, "the name belongs to its line")
     }
 
+    /// i on a new line edits it in place; ⌃↵ commits it to the branch; esc, then esc again, drops it.
+    @Test func iEditsTheLineInPlaceAndCtrlReturnCommitsIt() async throws {
+        let (a, p) = try await app()
+        let pg = ReviewPageState.of(a)
+        ShipStub.answer(p, "POST", "/loops/review-edit", #"{"ok":true,"sha":"abc1234"}"#)
+        keys(a, "j")
+        keys(a, "i")
+        let e = try #require(pg.edit)
+        #expect(e.path == "a.ts" && e.start == 2 && e.end == 2 && a.keys.mode == .insert)
+        pg.edit?.text = e.text + " // tidied"
+        keys(a, "C-ret")
+        await until("the post") { ShipStub.posts(p).contains { $0.path == "/loops/review-edit" } }
+        let post = try #require(ShipStub.posts(p).last { $0.path == "/loops/review-edit" })
+        #expect(post.body["path"] == .string("a.ts") && post.body["start"] == .number(2) && post.body["text"] == .string(e.text + " // tidied"))
+        keys(a, "i")
+        keys(a, "esc")
+        keys(a, "esc")
+        #expect(pg.edit == nil, "esc out of the field, then esc drops the edit")
+    }
+
     /// space c puts the conversation where the diff was; esc brings the diff back.
     @Test func spaceCIsALayerOverTheDiff() async throws {
         let (a, _) = try await app()
