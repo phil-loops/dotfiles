@@ -208,7 +208,7 @@ app.registry.register(Command(
   `recordsJump` from the verb. `mark` on Review marks viewed **and advances**; `J`/`K` on Review stay on
   review (same tab, same file if present).
 - **Esc only cancels.** A page change while esc runs is refused (logged); with nothing to cancel, esc says
-  "h goes up · C-o goes back". Your `esc` command closes things; `h` climbs.
+  "- goes up · C-o goes back". Your `esc` command closes things; `-` climbs.
 - **Pickers**: feed `app.nav.pick(title, items) { index in … }` with `PickItem(label:text:)`; picks that
   navigate record a jump through the router. Wrap a pick that only moves the cursor in `app.jump { … }`.
 

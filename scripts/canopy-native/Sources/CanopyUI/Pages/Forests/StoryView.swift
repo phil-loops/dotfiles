@@ -4,7 +4,7 @@ import SwiftUI
 /// Story.tsx: a forest's story (the forest page's other face, `tab`) — the feature told top to bottom:
 /// every chapter in merge order, what already landed included, then what's in flight, then what's
 /// left. One plain line each; `e` opens a chapter's why (a landed PR's squash message on main, a
-/// live branch's commit messages), `l` a live chapter's review page.
+/// live branch's commit messages), `ret` a live chapter's review page.
 struct StoryView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme

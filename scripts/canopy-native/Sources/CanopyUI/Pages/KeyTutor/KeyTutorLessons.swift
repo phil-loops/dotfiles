@@ -147,16 +147,15 @@ enum KeyLessons {
             KeyStep("{half-up} comes back up half a page.", [.halfUp]),
         ], recap: "{next} / {previous} a line, {first} / {last} the ends (jumps: the jumplist remembers), {half-down} / {half-up} half a page."),
 
-        KeyLesson(id: "ladder", title: "The zoom ladder", steps: [
-            KeyStep("One axis, in and out: forests → forest → branch → file → line. On the greetings forest, {in} goes one level in — its branches open in place.",
-                    [.into], setup: P.forests()),
-            KeyStep("{main} does the thing's main action: on a forest, open its page.", [.main],
-                    setup: P.forests(), check: { P.onForest($0, "greetings") }),
-            KeyStep("On a branch, {in} opens it for review.", [.into],
+        KeyLesson(id: "ladder", title: "In and out", steps: [
+            KeyStep("{main} goes in: forests → forest → branch → file → line. On the greetings forest, its branches open in place.",
+                    [.main], setup: P.forests()),
+            KeyStep("{main} again: the forest's own page.", [.main], check: { P.onForest($0, "greetings") }),
+            KeyStep("On a branch, {main} opens it for review.", [.main],
                     setup: P.forest(cursor: RowKey.branch(S.id(S.root))), check: { P.onBranch($0, S.root) }),
-            KeyStep("{out} climbs back to the forest, the branch still under the cursor.", [.out], check: { P.onForest($0, "greetings") }),
+            KeyStep("{out} goes up a level: the forest, the branch still under the cursor.", [.out], check: { P.onForest($0, "greetings") }),
             KeyStep("{out} once more: Forests.", [.out], check: { $0.router.route == .forests }),
-        ], recap: "{in} and {out} walk the ladder; {main} is the main action of whatever's under the cursor."),
+        ], recap: "{main} goes in and {out} comes back up; {left} / {right} only ever move across what you see."),
 
         KeyLesson(id: "labels", title: "Labels", steps: [
             KeyStep("To go to something you can see, don't step to it: {labels} labels everything on screen.",
@@ -200,8 +199,10 @@ enum KeyLessons {
                     setup: P.forests(), check: { $0.router.route == .tutor(session: nil) }),
             KeyStep("{pane-down} focuses the pane below.", [.paneDown], setup: P.tutorPage(), check: { $0.pane?.id == TutorPane.topics }),
             KeyStep("{pane-up} the pane above.", [.paneUp], check: { $0.pane?.id == TutorPane.due }),
-            KeyStep("{pane-right} the pane to the right.", [.paneRight], check: { $0.pane?.id != TutorPane.due }),
-            KeyStep("{pane-left} back to the left.", [.paneLeft], check: { $0.pane?.id == TutorPane.due }),
+            KeyStep("{right} moves right in what you see: here, the pane to the right.", [.right], check: { $0.pane?.id != TutorPane.due }),
+            KeyStep("{left} back to the left.", [.left], check: { $0.pane?.id == TutorPane.due }),
+            KeyStep("{pane-right} always means the pane, even where {right} has something nearer to move to.", [.paneRight], check: { $0.pane?.id != TutorPane.due }),
+            KeyStep("{pane-left} back.", [.paneLeft], check: { $0.pane?.id == TutorPane.due }),
             KeyStep("{pane-next} cycles through them.", [.paneNext]),
             KeyStep("{go-dashboard}: the dashboard.", [.goDashboard], check: { $0.router.route == .dashboard }),
             KeyStep("{go-machine}: the machine.", [.goMachine], check: { $0.router.route == .machine }),

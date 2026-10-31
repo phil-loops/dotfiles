@@ -62,7 +62,7 @@ import Testing
 
     @Test func theLogIsAPaneOfItsOwn() throws {
         let (a, m) = try app()
-        a.keys.handle("l")
+        a.keys.handle(","); a.keys.handle("l")
         #expect(m.logFor == "3001")
         #expect(a.registry.command("machine.log.jobs")!.available!("3001"), "this server has a jobs worker")
         a.keys.handle("tab")
@@ -74,7 +74,7 @@ import Testing
         a.keys.handle("G")
         #expect(a.selected == "log:2")
         #expect(a.target(for: .server) == "3001", "in the log, server keys act on its server")
-        a.keys.handle("h")
+        a.keys.handle("-")
         #expect(m.logFor == nil && a.pane?.id == "servers")
         a.keys.handle("j"); a.keys.handle("j")
         #expect(!a.registry.command("machine.log")!.available!("3009"), "an unmanaged server has no log here")

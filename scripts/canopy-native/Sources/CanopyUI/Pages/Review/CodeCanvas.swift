@@ -80,6 +80,8 @@ struct CanvasColors {
 /// What the canvas lights at draw time.
 struct CanvasMarks: Equatable {
     var cursor: String?
+    /// split: the half the cursor reads (nil: the whole row)
+    var column: Side?
     /// the range `x` marked, or the lines the selected conversation covers: path, side, from…to
     var range: (path: String, side: Side, from: Int, to: Int)?
     /// "<path>#<hunk>" whose changes are all viewed (dimmed)
@@ -92,7 +94,7 @@ struct CanvasMarks: Equatable {
     var focused = true
 
     static func == (a: CanvasMarks, b: CanvasMarks) -> Bool {
-        a.cursor == b.cursor && a.range?.path == b.range?.path && a.range?.side == b.range?.side && a.range?.from == b.range?.from &&
+        a.cursor == b.cursor && a.column == b.column && a.range?.path == b.range?.path && a.range?.side == b.range?.side && a.range?.from == b.range?.from &&
             a.range?.to == b.range?.to && a.seen == b.seen && a.selection == b.selection && a.lit == b.lit && a.focused == b.focused
     }
 }
@@ -219,9 +221,15 @@ final class CanvasTextView: NSTextView {
             c.ember.withAlphaComponent(0.12).setFill(); band.fill()
         }
         if let cur = marks.cursor, inf.stops.contains(cur) {
-            c.goldWash.setFill(); band.fill()
+            var lit = band
+            if inf.kind == .line, inf.splitCol > 0, let col = marks.column {
+                let mid = x0 + charWidth * CGFloat(inf.splitCol)
+                let left = col == .left ? inf.left != nil : inf.right == nil
+                lit = left ? NSRect(x: 0, y: band.minY, width: mid, height: band.height) : NSRect(x: mid, y: band.minY, width: band.width - mid, height: band.height)
+            }
+            c.goldWash.setFill(); lit.fill()
             (marks.focused ? c.gold : c.goldDeep).setFill()
-            NSRect(x: 0, y: band.minY, width: 2, height: band.height).fill()
+            NSRect(x: lit.minX, y: band.minY, width: 2, height: band.height).fill()
         }
     }
 

@@ -330,11 +330,32 @@ import Testing
         #expect(a.router.route == .review(repo: "loops", branch: "add-hankles-limited-label"))
     }
 
-    @Test func hClimbsToTheForestWithTheBranchUnderTheCursor() async throws {
+    @Test func minusClimbsToTheForestWithTheBranchUnderTheCursor() async throws {
         let (a, _) = try await app()
-        keys(a, "h")
+        keys(a, "-")
         #expect(a.router.route == .forest(repo: "loops", project: "hankles-limited-label"))
         #expect(a.selected == RowKey.branch(Self.branch))
+    }
+
+    /// h / l move across what you see: the old and new halves of a split line, then the pane beside.
+    @Test func hAndLCrossTheSplitThenThePanes() async throws {
+        let (a, _) = try await app()
+        let pg = ReviewPageState.of(a)
+        keys(a, "j")
+        #expect(pg.here?.key == "l|a.ts|R:2" && pg.range?.side == .right)
+        keys(a, "h")
+        #expect(pg.column == .left && pg.range?.side == .left && a.pane?.id == reviewDiffPane, "the old half of the same row")
+        keys(a, "h")
+        #expect(pg.column == .left && a.pane?.id == reviewTreePane, "past the old half, the files list to its left")
+        keys(a, "l")
+        #expect(pg.column == .left && a.pane?.id == reviewDiffPane, "back on the old half")
+        keys(a, "l")
+        #expect(pg.column == .right && pg.range?.side == .right)
+        pg.open(Loc(repo: "loops", sha: "zzz", path: "other.ts", line: 4))
+        keys(a, "h")
+        #expect(a.pane?.id == reviewDiffPane, "from the code beside the diff, h is the diff")
+        keys(a, "l")
+        #expect(a.pane?.id == reviewCodePane, "past the new half, l is the code beside it")
     }
 
     @Test func escOnlyCancels() async throws {

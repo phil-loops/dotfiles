@@ -117,7 +117,7 @@ enum BranchCommands {
             }))
 
         r.register(Command(
-            id: "branch.open", title: "Open the branch", scope: .branch, verb: .into, label: "open",
+            id: "branch.open", title: "Open the branch", scope: .branch, verb: .main, label: "open",
             available: { m.branchView($0) != nil },
             local: { id, _ in
                 guard let b = m.branchView(id)?.b else { return }

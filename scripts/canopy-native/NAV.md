@@ -1,5 +1,7 @@
 # Navigation model
 
+> **Decided 2026-10-31 (supersedes the zoom-ladder h/l below):** hjkl move the cursor in what you see; structure has its own keys. `h`/`l` are left/right — the old/new half of a split diff line, else the pane to that side. `ret` goes in, `-` goes up a level (vim-vinegar's parent), `C-o` retraces time, `esc` cancels. The old rule borrowed Miller columns' h/l without Miller columns' layout: canopy's levels are pages that replace each other, so "out" was never to the left of anything, and on the pages that do have a left and a right (a split diff, list ⇄ detail) h/l meant something you couldn't see.
+>
 > **Decided 2026-10-29:** Phil adopted every recommendation below (Q1–Q5) and both stated assumptions (one app-wide jumplist; `M-h/j/k/l` pane alias). This file is binding for every area; change it only by coordination.
 
 ## Keys by verb (decided 2026-10-29; binding)
@@ -8,7 +10,7 @@
 
 **Tiers, each with a fixed owner**
 
-1. **Nav** — `f`, `g …`, `space …`, h/l, J/K, C-o/C-i, `:`, `/`, `?`, esc, and the review moves (`]`/`[`, `}`/`{`, `n`/`N`). Owned by the nav core and the same on every page. A page may *implement* a nav verb on its own things (Review's `next-sibling`, the map's `next`), never rebind one.
+1. **Nav** — `f`, `g …`, `space …`, h/l, `-`, J/K, C-o/C-i, `:`, `/`, `?`, esc, and the review moves (`]`/`[`, `}`/`{`, `n`/`N`). Owned by the nav core and the same on every page. A page may *implement* a nav verb on its own things (Review's `next-sibling`, the map's `next`), never rebind one.
 2. **Shared verbs** — bare letters (and C-k/C-j, the digits). A page implements the ones that fit; it never invents one. A new shared verb is a change to the table, by coordination.
 3. **The page leader `,`** — an action with no general verb is the page's own: `, <key>`. The leader's namespace is per page (a surface and all its scopes), so it can't collide with another page's or a future global. Pick its keys mnemonically; a chord is fine (`, b p`). `,` alone opens which-key titled "this page's keys".
 4. **Insert** — a fixed set: `esc` stops writing, `⌃↵` always sends or finishes what's typed, `⌥↵` is a newline (the field does it). Plain `↵` depends on the field: it finishes a one-line field (`:`, the menu, a picker, a filter, a description, a subject) and is a newline in a many-line box (a comment, a PR or commit body) — where the frequent act is a new line, sending must be deliberate. A field declares its kind (`app.beginInsert(id, lines: .multi)`) and the engine routes `↵` by it; no page decides per key. Everything else goes to the field. No page adds to it; a page action wanted mid-typing is esc, then its key.
@@ -21,7 +23,8 @@
 | next / previous | `j` `↓` / `k` `↑` (typing in `:`, the menu, a picker: `↓` `C-n` `C-j` `⇥` / `↑` `C-p` `C-k`) | the next / previous row, line or item |
 | first / last | `g g` / `G` | the first / last row (jumps) |
 | half-down / half-up | `C-d` / `C-u` | half a page |
-| in / out | `l` `→` / `h` `←` | one level in / out on the zoom ladder (forests → forest → branch → file → line) |
+| left / right | `h` `←` / `l` `→` | across what you see: the old / new half of a split line, else the pane to that side |
+| in / out | `ret` / `-` | one level in / up on the ladder (forests → forest → branch → file → line) |
 | cancel | `esc` | close the innermost transient thing — never changes page |
 | next-sibling / previous-sibling | `J` / `K` | the next / previous branch in merge order, staying on this kind of page (jumps) |
 | parent / child / root / tip | `g k` / `g j` / `g K` / `g J` | the branch's parent, child (labels at a fork), its stack's root, tip (jumps) |
@@ -96,7 +99,7 @@
 ## 0. The headline
 
 1. **Most of the missing ergonomics come from one gap: targeting a specific thing you can see.** v2's keyboard already handles stepping (`j`/`k`) well. When Phil wanted a particular row, file, commit or tab, he clicked. That gap is closed by **labels** (Vimium/flash/Helix `gw`), not by more step keys.
-2. **One zoom axis, three ways back.** `l`/`ret` goes in and `h` goes out along a fixed ladder (Forests → Forest → Branch → File → Hunk → Line/Thread). `C-o`/`C-i` move through time. `esc` only cancels transient state. Each of these does one thing and they never overlap.
+2. **One zoom axis, three ways back.** `ret` goes in and `-` goes up along a fixed ladder (Forests → Forest → Branch → File → Hunk → Line/Thread). `C-o`/`C-i` move through time. `esc` only cancels transient state. Each of these does one thing and they never overlap.
 3. **Walk the stack without leaving it.** `J`/`K` move to the next or previous branch in merge order *from the review page itself*. Today that takes `h`, then `j`, then `l`, plus two page paints.
 4. **The novice path is the expert path.** `space` (which-key), `:` (palette), `?` (sheet) and labels all show the actual key sequence. Pressing through the menu rehearses the shortcut.
 5. **A key means one thing everywhere, and frequent moves cost one home-row key.** v2 already enforces the first rule with a test. canopy-native keeps that test and adds frequency-to-cost discipline.
@@ -181,7 +184,7 @@ Caveat: this is 6 days of one user while v2 was still being built, so treat it a
 2. **Step for neighbors, label for targets.** Relative keys for "the next one". Labels for "that one, which I can see". A picker for "the one named X, which I can't see". All three, always.
 3. **One meaning per key, everywhere.** The only exceptions are the *same-move* families (`next`, `in`, `out`, `main action`…) that v2's `bindings.ts` already declares and tests. lazygit's per-panel meanings are the counterexample.
 4. **Rehearsal: the novice path is the expert path.** The which-key infobox, the `:` palette, the `?` sheet and labels all print the real key sequence. The palette always shows the key.
-5. **Separate structure, time and cancel.** `h`/`l` move along the zoom ladder (structure). `C-o`/`C-i` move through what you visited (time). `esc` drops transient state (cancel). v2 already mostly does this (`review.leave` = `h`, `review.back` = esc closes things). Make it a rule.
+5. **Separate space, structure, time and cancel.** `h`/`l` move across the screen (space). `ret`/`-` move along the ladder (structure). `C-o`/`C-i` move through what you visited (time). `esc` drops transient state (cancel). v2 already mostly does this (`review.leave` = `h`, `review.back` = esc closes things). Make it a rule.
 6. **Few modes, always visible, layers close themselves.** Normal, select, insert and command, with the mode in the statusline. `space`, `g`, labels, menu and picker are layers that close after one action.
 7. **Everything is instant and nothing moves.** No smooth scroll (Phil already killed it in v1 as "painful"). Labels and layouts are computed once and stay put. A DAG restack must not reshuffle positions while you're navigating.
 8. **Defined jump membership and stack semantics.** Spelled out in §4.4.
@@ -189,7 +192,7 @@ Caveat: this is 6 days of one user while v2 was still being built, so treat it a
 
 ### Anti-patterns to avoid
 - The same key meaning different things depending on focused pane (lazygit).
-- Esc that changes page or loses work (that's `h`'s job). Esc only ever cancels.
+- Esc that changes page or loses work (that's `-`'s job). Esc only ever cancels.
 - Spatial `h/j/k/l` over a *drawn DAG*: it's ambiguous at fan-in and fan-out, and node positions change on restack. Use merge order plus explicit parent/child moves.
 - Jumplists where you can't predict what got recorded, or tree-shaped history.
 - Frequent actions on the number row or behind modifiers (the tabs).
@@ -209,9 +212,9 @@ Caveat: this is 6 days of one user while v2 was still being built, so treat it a
 Forests ─l→ Forest ─l→ Branch(review) ─l→ File ─l→ Hunk ─l→ Line / Thread
         ←h─        ←h─                ←h─      ←h─      ←h─
 ```
-- `l` / `ret` / `→` go in one level. `ret` keeps v2's "the thing's main action" meaning: on a branch row that's open, on a thread it's fold, and so on.
-- `h` / `←` go out one level. This is **deterministic**: `h` on a review page always lands on its forest with the cursor on that branch, however you got there (v2 `review.leave` already does this).
-- Miller-column behavior: if the next level is visible as a pane (a detail pane), `l` moves focus into it, and `h` returns focus to the list without changing the selection.
+- `ret` goes in one level. `ret` keeps v2's "the thing's main action" meaning: on a branch row that's open, on a thread it's fold, and so on.
+- `-` goes up one level. This is **deterministic**: `-` on a review page always lands on its forest with the cursor on that branch, however you got there (v2 `review.leave` already does this).
+- A detail pane beside a list is space, not structure: `l` moves focus right into it and `h` back to the list, without changing the selection.
 
 ### 4.2 Movement grammar by scale
 
@@ -245,10 +248,10 @@ Forests ─l→ Forest ─l→ Branch(review) ─l→ File ─l→ Hunk ─l→ 
 ### 4.4 History: back/forward semantics
 
 - **`C-o` / `C-i`** form one **app-wide** stack covering both pages and code places. Extend `nav.ts`'s code-only jumplist to cover surface changes.
-- **What records a jump** (written into the `?` sheet): any page change, label pick, picker pick, `g`-goto, `J`/`K`/`g k`/`g j`, `]`/`[`, `n`/`N`, `g g`/`G`. **What doesn't**: `j`/`k`, `{`/`}`, `C-d`/`C-u`, `h`/`l` *within* a page, and opening layers. `C-s` saves a position by hand, as in Helix.
+- **What records a jump** (written into the `?` sheet): any page change, label pick, picker pick, `g`-goto, `J`/`K`/`g k`/`g j`, `]`/`[`, `n`/`N`, `g g`/`G`. **What doesn't**: `j`/`k`, `{`/`}`, `C-d`/`C-u`, `h`/`l`, and opening layers. `C-s` saves a position by hand, as in Helix.
 - **Stack semantics:** a new jump after going back truncates the forward list (v2 already does this). Two consecutive identical entries collapse into one. Each entry stores page, cursor key, tab, base and scroll, and is **restored exactly**.
 - **`C-i` ≠ `tab`**: AppKit sees them as distinct key events, unlike a terminal, so `tab` keeps "the page's other face".
-- **`h` is not history.** `h` climbs structure. `C-o` retraces time. `esc` cancels. This split is the main defense against the vim complaints.
+- **`-` is not history.** `-` climbs structure. `C-o` retraces time. `esc` cancels. This split is the main defense against the vim complaints.
 
 ### 4.5 Esc: cancel only (the v2 rule, made universal)
 Esc unwinds exactly one level: pending chord → layer (label/space/g/menu/picker/sheet) → mode (insert/select/command → normal) → page transient (composer, overlay, filter, armed push, range mark). **It never changes page.** If there's nothing to unwind, it does nothing and shows a quiet line: "h goes up · C-o goes back". This keeps v2's `review.back`/`overlay.close` behavior and pulls `history.exit`/`commit.exit` in under the same rule: they close a sub-view, which counts as a layer.
@@ -270,7 +273,7 @@ Esc unwinds exactly one level: pending chord → layer (label/space/g/menu/picke
 | key | command | status | why |
 |---|---|---|---|
 | `j` `k` `↓` `↑` | next / previous row (same-move family) | **keep** | 37% of all commands; home row |
-| `h` `l` `←` `→` | out / in on the zoom ladder | **keep**, made a rule | already the v2 same-move "in/out" |
+| `h` `l` `←` `→` | left / right in what you see | **changed 2026-10-31** | in/out moved to `ret` / `-` |
 | `ret` | the thing's main action | **keep** | |
 | `g g` / `G` | top / bottom | **keep** (shell) | |
 | `C-d` / `C-u` | half page | **keep** (shell) | |
@@ -317,7 +320,7 @@ Esc unwinds exactly one level: pending chord → layer (label/space/g/menu/picke
 
 1. **Single-key labels?** Options: `g w` only (pure Helix), or also a one-key alias. **Recommend `f`** as the alias (Vimium's key, left index finger, and it would be the most-used key after j/k), moving `project.focus` to `F`. Fallback if you'd rather not move focus: `'`.
 2. **`v` conflict.** The shell binds `v` = select mode (Helix), but v2 review binds `v` = mark viewed. **Recommend `v` = select everywhere and `m` = "mark viewed and advance to next unviewed"** (`M` unmarks). Advancing on the same key turns per-file review into `m m m`, the way blessing used to work, and stays per-file with no bless-all.
-3. **Esc never changes page?** **Recommend yes**: esc cancels only, `h` climbs, `C-o` retraces. k9s-style "esc goes up a level" saves a key, but it mixes cancel with navigate and turns an over-pressed esc into a page change.
+3. **Esc never changes page?** **Recommend yes**: esc cancels only, `-` climbs, `C-o` retraces. k9s-style "esc goes up a level" saves a key, but it mixes cancel with navigate and turns an over-pressed esc into a page change.
 4. **What `J`/`K` do on the review page.** Either stay on Review and hop to the neighbor branch (same tab, same file if present), or bounce up to the Forest. **Recommend staying on Review**, the "parallel move". It removes the h→j→l loop telemetry shows is the core path. Neighbor order is merge order, the same total order the forest page shows.
 5. **Quick slots for the working set.** Options: `g 1–9` = Nth focus forest (opening the branch you last had open in it), `M-1–9`, or none (pickers only). **Recommend `g 1–9` bound to the focus lane.** You already hand-order it, so it costs no new state, and it's harpoon's 4–10-item sweet spot. Skip named marks (`m`+letter) for v1.
 

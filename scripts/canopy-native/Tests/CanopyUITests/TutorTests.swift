@@ -250,7 +250,7 @@ let learningFixture = #"""
         #expect(t.expanded == 0)
 
         // h goes home
-        a.keys.handle("h")
+        a.keys.handle("-")
         #expect(a.router.route == .tutor(session: nil))
     }
 
