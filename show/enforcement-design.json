@@ -1,0 +1,97 @@
+{
+  "title": "Enforcement — design",
+  "subtitle": "Idea · model · invariants · functions · mockups · path",
+  "replyTo": "ddabd63a",
+  "sections": [
+    {
+      "id": "idea",
+      "group": "Idea",
+      "title": "A block is a written decision, not a flag",
+      "body": "> At any moment we can answer: why can't this team send, who decided that, and what would change it?\n\nToday the reason almost always exists for a moment and is never written next to the block:\n\n- `handleDisableNewDomain` receives `disableCriterion` and only logs it.\n- The New Signups bulk action wrote its decision to `AdminPanelInteraction`, not to the domain.\n- The health cron writes a notice row, then flips `disabled` with no link back.\n\n**The design:** every reason something can't send or publish is a row, written once at the moment of the decision, saying what was found, who decided, and on what evidence. \"Disabled\" is just whether any of those rows are still in effect."
+    },
+    {
+      "id": "today",
+      "group": "Idea",
+      "title": "Today: 2,746 disabled domains, none with a reason",
+      "body": "Production, Oct 31. The latest `DisableDomainEvent` for each disabled domain:\n\n| Latest event | Domains | Means |\n|---|---|---|\n| none | 1,966 | no record on the domain (mostly the old New Signups bulk action, to confirm) |\n| Pending | 436 | someone acted, nobody decided — the real backlog |\n| BlockDomain | 330 | a person upheld it, reason unknown |\n| Reenable / Unleash | 14 | record says enabled, domain is disabled |\n\nDeletion-requested teams are only 74 of these.\n\nThe same idea also lives in four other fields, each with its own switch and no decider:\n\n| Field | Is really |\n|---|---|\n| `SendingDomain.disabled` | a block on a domain |\n| `EmailMessage.safetyClassification = \"phishing\"` | a block on one email |\n| `safetyClassification = <override>` | an exception for that email, no who/why/expiry |\n| `Team.skipSafetyChecks` | a permanent team-wide exception, no who/why/expiry |\n| `CampaignContent.isSafeContent` | a detector's verdict — evidence, not a decision |"
+    },
+    {
+      "id": "model",
+      "group": "Model",
+      "title": "Three tables and a list in code",
+      "body": "```\nRestriction                         one reason something is blocked\n  teamId\n  scope       team | sendingDomain | email      + sendingDomainId? / emailMessageId?\n  effect      send | publish\n  category    \"content.phishing\", \"list.purchased\", \"signup.review_blocked\"…  (registry)\n  ruleId?     which detector rule; empty for a person\n  findingKey? \"email:clx…\" · \"word:bitcoin\" · \"notice:clx…\"\n  decidedBy   \"automation@health-v3\" | userId\n  note?       required when a person decided                       CHECK\n  createdAt\n  upheldBy?, upheldAt?                a person looked and agreed\n  liftedBy?, liftedAt?, verdict?, liftNote?    all or none          CHECK\n     verdict: wrong | fixed  (+ reclassified, legacy rows only)\n\nRestrictionEvidence                 what inspired it\n  restrictionId, kind (notice | email | suspiciousActivity | adminInteraction | url), ref\n\nAllowance                           \"don't flag this again\", until a date\n  teamId, selector (finding | rule | category), grantedBy, until, note, revokedAt?\n```\n\n**Registry** (code, not schema): each category's default scope and effect, and the words a sender sees. Adding a reason is a code change with a test, never a migration.\n\n**Fixed by the database:** who it applies to, what it stops, who decided, lifted all-or-nothing, a note when a person decided. **Grows without a migration:** categories, rules, finding kinds, evidence kinds. **Never:** a JSON details column, or a status column someone writes by hand."
+    },
+    {
+      "id": "scope",
+      "group": "Model",
+      "title": "Scope × effect covers every block we have",
+      "body": "**Send** = nothing goes out. **Publish** = no new or edited content goes live; what's already live keeps sending.\n\n| You want to… | scope | effect |\n|---|---|---|\n| Stop all sending for a team (SES suspension, ban) | team | send |\n| Disable one domain (today's case) | sendingDomain | send |\n| Hold one flagged email, the rest keep sending | email | send |\n| New account: nothing new goes live until reviewed | team | publish |\n| Hold one publish for review (LOO-6309) | email | publish |\n\nA team covers its domains and emails; a domain covers emails sent from it. No precedence: anything in the way blocks, and each reason is lifted on its own.\n\n**Not restrictions:** `campaignSizeLimit`, `maxPreviewsPerDay`, rate limits, `trustLevel`. A restriction is a decision about a finding; a setting is how much of something a team gets."
+    },
+    {
+      "id": "invariants",
+      "group": "Invariants",
+      "title": "What must always be true",
+      "body": "1. **Every restriction has a reason and a decider.** `category` ∧ (`ruleId` ∨ person) ∧ `decidedBy`.\n   *Breaks when* something is blocked and nobody can say which check or person did it.\n2. **The remedy matches the finding.** Lift and allow act on one restriction or one finding, never \"the domain\".\n   *Breaks when* approving one email re-enables a domain blocked for a complaint spike — live today.\n3. **Detectors are provisional, people are binding.** Only a person lifts, with a verdict and a note; allowances expire.\n   *Breaks when* a re-enable leaves no record of whether the detector misfired.\n4. **Write once, compute everything else.** Only `restrict()` and `lift()` change anything; status, timeline, banner and API are reads.\n   *Breaks when* any code writes `disabled` directly, or edits a past row.\n5. **Evidence explains, never decides.** State reads restrictions only; notices, emails and links are attached, not consulted.\n   *Breaks when* \"is it blocked\" and \"why\" can disagree."
+    },
+    {
+      "id": "check",
+      "group": "Functions",
+      "title": "check(): the one definition of blocked",
+      "body": "```ts\n/** Whether `action` may happen to `target` at `at`, and every restriction in the way. */\nexport function check({ action, target, restrictions, at }: {\n  action: \"send\" | \"publish\";\n  target: { teamId: string; sendingDomainId?: string; emailMessageId?: string };\n  restrictions: Restriction[];\n  at: Date;\n}) {\n  const blocking = restrictions.filter(\n    (r) => inEffect(r, at) && r.effect === action && covers(r, target)\n  );\n  return { allowed: blocking.length === 0, blocking };\n}\n\nconst inEffect = (r, at) =>\n  r.createdAt <= at && (r.liftedAt === null || r.liftedAt > at);\n```\n\n- **Pure.** No DB, no clock — the model wrapper loads rows and passes `now`.\n- **Time is a parameter.** The timeline is `check` at each row's start and end; tests are a table of rows and a moment.\n- **Status per target:** none blocking → *sending*; any not upheld → *waiting for review*; all upheld → *confirmed*.\n- **Allowances don't appear.** They never unblock anything; they stop detectors writing a new restriction."
+    },
+    {
+      "id": "writers",
+      "group": "Functions",
+      "title": "restrict() and lift(): the only writers",
+      "body": "```ts\n/** Writes a restriction, then sets each covered domain's `disabled` from check(), in one transaction. */\nrestrict({ teamId, scope, effect, category, ruleId?, findingKey?, decidedBy, note?, evidence[] })\n\n/** Records a person's verdict on one restriction, then recomputes; re-enables only if nothing else is in effect. */\nlift({ restrictionId, liftedBy, verdict: \"wrong\" | \"fixed\", note, allow?: { until } })\n\nuphold({ restrictionId, upheldBy })\n```\n\n`SendingDomain.disabled` stays as a **cached copy** for the send path. Only these functions write it, always from `check()` after the row lands. A nightly job compares the copy with the rows and alerts on any mismatch.\n\nAll of today's writes already go through three query functions in `queries/sending-domain.ts` (since #11090–#11131), so locking them behind `restrict`/`lift` is small."
+    },
+    {
+      "id": "m-review",
+      "group": "Mockups",
+      "title": "Reviewer · what keeps this blocked",
+      "body": "```\nadmin › team › acme                                  mail.acme-example.com\n┌──────────────────────────────────────────────────────────────────────┐\n│ ■ Can't send — 2 reasons. Lifting both re-enables.                   │\n├──────────────────────────────────────────────────────────────────────┤\n│ Possible phishing · \"Reset your password\"     waiting   [Uphold][Lift…]│\n│ email · send · automation@scan-v14 · Oct 28 14:07                    │\n│ Evidence: AI verdict · the email ↗                                   │\n├──────────────────────────────────────────────────────────────────────┤\n│ Complaint rate 0.41% over 24h                 waiting   [Uphold][Lift…]│\n│ domain · send · automation@health-v3 · Oct 28 15:52                  │\n│ Evidence: Spam notice at Error ↗ (chart)                             │\n├──────────────────────────────────────────────────────────────────────┤\n│ ░ Banned word \"bitcoin\" · \"Weekly digest\"                    lifted  │\n│ ░ Dana R. · wrong · \"crypto newsletter\" · allowed until Jan 27       │\n└──────────────────────────────────────────────────────────────────────┘\n```\nEach row is one restriction. The header is `check()`; it can't disagree with the rows."
+    },
+    {
+      "id": "m-lift",
+      "group": "Mockups",
+      "title": "Reviewer · lift, and how you know it's no longer blocking",
+      "body": "**Lift** = \"this reason no longer blocks\". It's today's Re-enable, aimed at one reason. Nothing is deleted.\n\n```\nLift: Possible phishing · \"Reset your password\"\n\n  (●) The check was wrong          ( ) The sender fixed it\n  [✓] Don't flag this email again until [ Jan 27 ]\n\n  Note  ┌──────────────────────────────────────────────┐\n        │ Their own app's reset email, links to them.  │\n        └──────────────────────────────────────────────┘\n                                         [Cancel] [Lift]\n```\n\nAfter Lift, the panel answers \"is it still blocked?\" directly:\n\n```\n┌──────────────────────────────────────────────────────────────────────┐\n│ ■ Can't send — 1 reason left.                                        │\n│ Complaint rate 0.41% over 24h        waiting   [Uphold][Lift…]       │\n│ ░ Possible phishing · lifted just now · You · wrong                  │\n└──────────────────────────────────────────────────────────────────────┘\ntoast: \"Lifted. mail.acme still can't send: complaint rate (Oct 28 15:52).\"\n```\nLift the last one and the header turns to **Sending**, and `disabled` flips in the same transaction."
+    },
+    {
+      "id": "m-block",
+      "group": "Mockups",
+      "title": "Admin · block by hand, with off-platform evidence",
+      "body": "```\nBlock acme\n──────────────────────────────────────────────────────────────\nApplies to   ( ) Team   (●) mail.acme-example.com   ( ) One email…\nStops        (●) Sending   ( ) Publishing\nReason       [ Purchased or scraped list              ▾ ]\n               the sender is told this one, in our words\n\nEvidence     ☑ Spam complaints at Error · Oct 28 15:52\n             ☐ Flagged email \"Reset your password\" · Oct 28\n             + Link  https://support…/thread/8812\n\nNote         ┌──────────────────────────────────────────────┐\n(internal)   │ Replied to support admitting a bought list.  │\n             └──────────────────────────────────────────────┘\n                                         [Cancel]  [Block]\n```\nReason and note required; evidence optional. Off-platform evidence is a link plus the note — customer messages stay in the support tool."
+    },
+    {
+      "id": "m-sender",
+      "group": "Mockups",
+      "title": "Sender · banner and API",
+      "body": "```\napp › campaigns\n┌─────────────────────────────────────────────────────────────┐\n│ ⚠ Sending from mail.acme-example.com is paused              │\n│   One of your emails, \"Reset your password\", looked like    │\n│   phishing to our automated checks. We're reviewing it and  │\n│   will email you by the end of the next business day.       │\n└─────────────────────────────────────────────────────────────┘\n```\n```\nPOST /api/v1/transactional  → 403\n{ \"success\": false,\n  \"message\": \"Sending from mail.acme-example.com is paused.\",\n  \"reason\": { \"category\": \"content.phishing\",\n              \"summary\": \"An email looked like phishing to our automated checks.\",\n              \"next\": \"under_review\" } }\n```\nBoth read `check().blocking` and the registry's words. Notes never reach the sender."
+    },
+    {
+      "id": "m-email",
+      "group": "Mockups",
+      "title": "Holding one email or one publish",
+      "body": "```\nWorkflow › Onboarding › Email 3 \"Reset your password\"\n┌─────────────────────────────────────────────────────────────┐\n│ ⏸ This email is held for review — it won't send.            │\n│   The rest of your workflow keeps running.                  │\n└─────────────────────────────────────────────────────────────┘\n\nCampaign \"Black Friday\" → [Publish]\n┌─────────────────────────────────────────────────────────────┐\n│ ⏸ Publishing is held for review. Your edits are saved;      │\n│   we'll publish them once they're reviewed.  (LOO-6309)    │\n└─────────────────────────────────────────────────────────────┘\n```\nSame table, scope `email`, effect `send` or `publish`. Same reviewer panel, same Lift."
+    },
+    {
+      "id": "migrate",
+      "group": "Path",
+      "title": "Backfill: recover reasons we already wrote down",
+      "body": "Every disabled domain needs a restriction on day one, or computing `disabled` would re-enable it.\n\n| Domain today | Becomes |\n|---|---|\n| has an `AdminPanelInteraction` decision (e.g. New Signups bulk) | `signup.review_blocked`, decided by that admin, upheld then |\n| latest event `BlockDomain`, no admin record | `legacy.unrecorded`, upheld (by unknown — allowed on legacy only) |\n| latest event `Pending`, or nothing | `legacy.unrecorded`, waiting for review, nearby signals attached as evidence |\n| latest event `Reenable`/`Unleash` (14) | same, **and** listed for a look before anything ships |\n\nReviewers clear legacy rows with **Reclassify** (write the real reason, lift the legacy row as `reclassified`) or **Lift**.\n\n**The number:** legacy restrictions in effect on active teams. It starts near 2,700 and can only go down, because after step 2 nothing is blocked without a reason."
+    },
+    {
+      "id": "path",
+      "group": "Path",
+      "title": "Order of work",
+      "body": "1. **Improve what we have** (no new tables) — notice chart ✓ built; replace the notice-card flood with a link to it.\n2. **Tables + registry.** No behavior change.\n3. **Every disable writes a restriction** with its real reason, alongside today's write. New blocks are explained from this deploy on.\n4. **Backfill** current blocks (recover from admin records first), then turn on the nightly check.\n5. **Lock writers**: only `restrict`/`lift` touch `disabled`.\n6. **Reviewer panel, lift, uphold, allowances** — fixes approve-re-enables-everything for real.\n7. **Sender banner + API reason.**\n8. **Email scope and publish effect**: phishing classification, override constant, `skipSafetyChecks`, LOO-6309 — one old field at a time: write rows for current values, move readers to `check()`, stop writing the field."
+    },
+    {
+      "id": "open",
+      "group": "Open",
+      "title": "Still to decide",
+      "body": "- **The reason list.** What do admins actually block for? Support likely knows better than the code.\n- **Evidence links.** Any URL, or only our support tool (so the panel can say \"support thread\")?\n- **Upheld** as its own state — I'd keep it; it's today's BlockDomain and rule 3.\n- **Publish for workflows.** Does a team-wide publish hold stop editing a live workflow's email, or only new ones?\n- **`skipSafetyChecks`** as an allowance needs an expiry and a note. Which teams have it, and who set it?\n- **Complaint-rate denominator** excludes only exact `@gmail.com`; fix it or label it."
+    }
+  ]
+}
