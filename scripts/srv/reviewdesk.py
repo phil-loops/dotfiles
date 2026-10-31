@@ -597,17 +597,23 @@ def _git(args, **kw):
 
 
 def _commit_file(tip, path, content, message):
-    ls = _git(["ls-tree", tip, "--", path]).stdout.split()
-    mode = ls[0] if ls else "100644"
-    blob = _git(["hash-object", "-w", "--stdin", "--path", path], input=content).stdout.strip()
+    return _commit_files(tip, {path: content}, message)
+
+
+def _commit_files(tip, contents, message):
+    """A commit on `tip` with each path's content replaced, made without a worktree."""
     fd, index = tempfile.mkstemp(prefix="rv-index-")
     os.close(fd)
     try:
         env = {**os.environ, "GIT_INDEX_FILE": index}
         if _git(["read-tree", tip], env=env).returncode != 0:
             raise ghreview.Refused("couldn't read the tip's tree")
-        if _git(["update-index", "--cacheinfo", f"{mode},{blob},{path}"], env=env).returncode != 0:
-            raise ghreview.Refused("couldn't stage the suggestion")
+        for path, content in contents.items():
+            ls = _git(["ls-tree", tip, "--", path]).stdout.split()
+            mode = ls[0] if ls else "100644"
+            blob = _git(["hash-object", "-w", "--stdin", "--path", path], input=content).stdout.strip()
+            if _git(["update-index", "--cacheinfo", f"{mode},{blob},{path}"], env=env).returncode != 0:
+                raise ghreview.Refused(f"couldn't stage {path}")
         tree = _git(["write-tree"], env=env).stdout.strip()
     finally:
         os.unlink(index)
@@ -617,8 +623,10 @@ def _commit_file(tip, path, content, message):
     return r.stdout.strip()
 
 
-def _land(branch, tip, new, path):
-    """Move the branch from tip to new, in its worktree when one holds it."""
+def _land(branch, tip, new, paths):
+    """Move the branch from tip to new, in its worktree when one holds it. `paths` (one or a
+    list) must have no unsaved edits there."""
+    paths = [paths] if isinstance(paths, str) else list(paths)
     from . import push, review
     run = push.gate_run(branch)
     if run and run.alive():
@@ -627,8 +635,9 @@ def _land(branch, tip, new, path):
     if wt:
         if _git(["-C", wt, "rev-parse", "HEAD"]).stdout.strip() != tip:
             raise ghreview.Refused("the branch's worktree isn't at the branch tip")
-        if _git(["-C", wt, "status", "--porcelain", "--", path]).stdout.strip():
-            raise ghreview.Refused(f"{path} has unsaved edits in {wt} — apply it there by hand")
+        dirty = _git(["-C", wt, "status", "--porcelain", "--", *paths]).stdout.strip()
+        if dirty:
+            raise ghreview.Refused(f"{dirty.split()[-1]} has unsaved edits in {wt} — do it there by hand")
         r = _git(["-C", wt, "reset", "--keep", new])
         if r.returncode != 0:
             raise ghreview.Refused((r.stderr or "reset failed").strip()[:200])

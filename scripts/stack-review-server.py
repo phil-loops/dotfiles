@@ -533,6 +533,8 @@ class H(BaseHTTPRequestHandler):
             return lsp.references(self, raw)
         if self.path == "/lsp/symbols":
             return lsp.symbols(self, raw)
+        if self.path == "/lsp/rename":       # rename a name across the program at the branch tip: preview, then one commit
+            return lsp.rename(self, raw)
         if self.path == "/lsp/prepare":      # move the type trees to a branch page's tip + base (no tsgo)
             return lsp.prepare(self, raw)
         if self.path == "/tutor-stop":

@@ -32,6 +32,9 @@
 #   POST /lsp/type-definition, /lsp/implementation, /lsp/references (same) → the same locations
 #   POST /lsp/symbols    {branch | sha, path} → {ok, sha, side, symbols: [{name, kind, line, endLine, depth}]}
 #        either one       → {ok: false, state: "loading" | "refused" | "error", message}
+#   POST /lsp/rename     {branch, path, line, character, newName, apply?, sha?}
+#                          → {ok, sha, old, files: [{path, edits}], diff}; with apply (and the previewed
+#                            sha) it commits the edits on the branch → {ok, sha: <new commit>, files}
 #   POST /lsp/prepare    {branch, base?} → move the trees there in the background (no tsgo)
 #   GET  /lsp/status                    → {state, branch, trees, pid, rssMB, memLevel, …}
 #   GET  /lsp/src        ?path=&sha=    → {path, text} — a definition target, at that commit
@@ -49,10 +52,12 @@
 # STACK_LSP_GOMEMLIMIT (tsgo's soft heap limit, 3000MiB), STACK_LSP_FRESH_CHECKER (0 trades the
 # canonical hover text for warm-checker speed; see Server.ask).
 import collections
+import difflib
 import glob
 import hashlib
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -635,7 +640,7 @@ class Server:
                 self.notify("textDocument/didChange", {"textDocument": {"uri": "file://" + p, "version": self.opened[p]},
                                                        "contentChanges": [{"text": text}]})
 
-    def ask(self, method, full, line0, character):
+    def ask(self, method, full, line0, character, extra=None):
         """One answer, canonical: what a fresh tsgo gives for this file at this commit, whatever
         was asked before. Two things in tsgo would otherwise leak earlier asks into it:
           - a file no tsconfig includes joins the session's ONE inferred program, whose roots are
@@ -660,6 +665,7 @@ class Server:
             params["position"] = {"line": line0, "character": character}
         if method == "textDocument/references":
             params["context"] = {"includeDeclaration": False}
+        params.update(extra or {})
         return self.request(method, params)
 
     def _touch(self, full):
@@ -847,10 +853,10 @@ class Engine:
         self.state, self.message = "loading", "loading types"
         return self.server
 
-    def answer(self, repo, slot, sha, method, rel, line, character):
+    def answer(self, repo, slot, sha, method, rel, line, character, extra=None):
         """(raw LSP result, the root it was read under) for a position at `sha`."""
         dkey = donor_key(self.donor(repo))
-        akey = (repo, sha, json.dumps(dkey), method, rel, line, character)
+        akey = (repo, sha, json.dumps(dkey), method, rel, line, character, json.dumps(extra, sort_keys=True))
         if ANSWER_CACHE and akey in self.answers:
             self.answers.move_to_end(akey)
             return self.answers[akey]
@@ -860,7 +866,7 @@ class Engine:
         if not os.path.isfile(full):
             raise RuntimeError(f"{rel} isn't in {sha[:9]}")
         s = self._ensure_server(repo)
-        pend = s.ask(method, full, line - 1, character)
+        pend = s.ask(method, full, line - 1, character, extra)
         while not pend.event.wait(1):
             if not s.alive():
                 raise RuntimeError("tsgo exited")
@@ -1064,6 +1070,124 @@ def references(req, raw):
 def symbols(req, raw):
     """The file's symbols — a path, no position."""
     return _ask(req, raw, "textDocument/documentSymbol")
+
+
+_NAME = re.compile(r"^[A-Za-z_$][A-Za-z0-9_$]*$")
+
+
+def _offset(text, line0, character):
+    """A 0-based (line, UTF-16 character) position as an index into `text`."""
+    at = 0
+    for _ in range(line0):
+        nl = text.find("\n", at)
+        if nl < 0:
+            raise ValueError(f"line {line0 + 1} is past the end")
+        at = nl + 1
+    units = 0
+    while units < character and at < len(text) and text[at] != "\n":
+        units += 2 if ord(text[at]) > 0xFFFF else 1
+        at += 1
+    return at
+
+
+def _workspace_edits(result, root):
+    """A WorkspaceEdit as {repo-relative path: [TextEdit]}; refuses file creates, renames and
+    anything outside the tree (node_modules, a library's types)."""
+    by_uri = {}
+    for uri, edits in ((result or {}).get("changes") or {}).items():
+        by_uri.setdefault(uri, []).extend(edits)
+    for dc in (result or {}).get("documentChanges") or []:
+        if "kind" in dc:
+            raise ValueError(f"the rename would {dc['kind']} a file — do it in Helix")
+        by_uri.setdefault(dc["textDocument"]["uri"], []).extend(dc.get("edits") or [])
+    out = {}
+    for uri, edits in by_uri.items():
+        path = unquote(urlparse(uri).path)
+        if not path.startswith(root + os.sep):
+            raise ValueError(f"the rename reaches outside the repo ({path}) — do it in Helix")
+        rel = os.path.relpath(path, root)
+        if rel.startswith("node_modules/") or "/node_modules/" in rel:
+            raise ValueError(f"the rename reaches a dependency ({rel}) — do it in Helix")
+        out[rel] = edits
+    return out
+
+
+def _apply_edits(text, edits):
+    spans = sorted(((_offset(text, e["range"]["start"]["line"], e["range"]["start"]["character"]),
+                     _offset(text, e["range"]["end"]["line"], e["range"]["end"]["character"]), e["newText"]) for e in edits),
+                   reverse=True)
+    for a, b, new in spans:
+        text = text[:a] + new + text[b:]
+    return text
+
+
+def rename(req, raw):
+    """Rename the name at a position across the program, at the branch tip: a preview first
+    (the edits as a diff), then, asked again with apply and the previewed sha, one commit on the
+    branch through reviewdesk's plumbing — so it lands the way an applied suggestion does."""
+    from . import ghreview, reviewdesk
+    try:
+        d = json.loads(raw or "{}")
+        branch, rel, new_name = str(d["branch"]), str(d["path"]), str(d["newName"])
+        line, character = int(d.get("line", 1)), int(d.get("character", 0))
+        apply, seen = bool(d.get("apply")), str(d.get("sha") or "")
+    except (ValueError, KeyError, TypeError):
+        return req._send(400, json.dumps({"ok": False, "state": "error", "message": "want {branch, path, line, character, newName}"}))
+    if not _NAME.match(new_name):
+        return req._send(200, json.dumps({"ok": False, "state": "refused", "message": f"“{new_name}” isn't a name"}))
+    if os.path.isabs(rel) or ".." in rel.split("/") or line < 1 or character < 0:
+        return req._send(400, json.dumps({"ok": False, "state": "error", "message": f"bad position {rel}:{line}:{character}"}))
+    if os.path.splitext(rel)[1] not in LANGS:
+        return req._send(200, json.dumps({"ok": False, "state": "error", "message": "no language server for this file"}))
+    repo = ctx.repo_cwd()
+    tip = _tip(repo, branch)
+    if not tip:
+        return req._send(200, json.dumps({"ok": False, "state": "error", "message": f"no branch {branch}"}))
+    if apply and seen != tip:
+        return req._send(200, json.dumps({"ok": False, "state": "refused", "message": "the branch moved since the preview — preview it again"}))
+    e = _engine
+    _start_idle()
+    e.last_req = time.time()
+    e.branch["new"] = branch
+    extra = {"newName": new_name}
+    job = e.submit("ask", ("ask", repo, "new", tip, "textDocument/rename", rel, line, character, new_name),
+                   lambda: e.answer(repo, "new", tip, "textDocument/rename", rel, line, character, extra))
+    if not job.event.wait(WAIT_S):
+        return req._send(200, json.dumps(_loading(e)))
+    if job.error:
+        return req._send(200, json.dumps({"ok": False, "state": "error", "message": job.error}))
+    result, root = job.result
+    try:
+        edits = _workspace_edits(result, root)
+        if not edits:
+            raise ValueError("nothing to rename here")
+        before, after = {}, {}
+        for path, es in edits.items():
+            shown = _git(repo, "show", f"{tip}:{path}")
+            if shown.returncode != 0:
+                raise ValueError(f"the rename touches {path}, which isn't tracked — do it in Helix")
+            before[path] = shown.stdout
+            after[path] = _apply_edits(shown.stdout, es)
+        here = edits.get(rel) or []
+        cur = _offset(before.get(rel, ""), line - 1, character) if rel in before else -1
+        old = next((before[rel][_offset(before[rel], x["range"]["start"]["line"], x["range"]["start"]["character"]):
+                                _offset(before[rel], x["range"]["end"]["line"], x["range"]["end"]["character"])]
+                    for x in here
+                    if _offset(before[rel], x["range"]["start"]["line"], x["range"]["start"]["character"]) <= cur
+                    <= _offset(before[rel], x["range"]["end"]["line"], x["range"]["end"]["character"])), "")
+    except ValueError as ex:
+        return req._send(200, json.dumps({"ok": False, "state": "refused", "message": str(ex)}))
+    files = [{"path": p, "edits": len(es)} for p, es in sorted(edits.items())]
+    if not apply:
+        diff = "".join("".join(difflib.unified_diff(before[p].splitlines(True), after[p].splitlines(True), f"a/{p}", f"b/{p}"))
+                       for p in sorted(edits))
+        return req._send(200, json.dumps({"ok": True, "sha": tip, "old": old, "files": files, "diff": diff}))
+    try:
+        commit = reviewdesk._commit_files(tip, after, f"rename {old or 'it'} to {new_name}\n")
+        reviewdesk._land(branch, tip, commit, sorted(after))
+    except ghreview.Refused as ex:
+        return req._send(200, json.dumps({"ok": False, "state": "refused", "message": str(ex)}))
+    req._send(200, json.dumps({"ok": True, "sha": commit, "old": old, "files": files}))
 
 
 def prepare(req, raw):
