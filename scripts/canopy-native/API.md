@@ -1,9 +1,9 @@
 # canopy HTTP contract (v2 frontend ↔ Python server)
 
-For porting `scripts/viewer-solid/src/v2/` to a native macOS client that talks to the unchanged
-`scripts/stack-review-server.py`. Sources read 2026-10-29; shapes marked *(live)* were confirmed with a
-GET against a running server. Everything else is read from the handler code (file:function given).
-Full TS types for the store entities live in `viewer-solid/src/v2/types.ts`; read that alongside this.
+What canopy-native expects of `scripts/stack-review-server.py`. Sources read 2026-10-29; shapes marked
+*(live)* were confirmed with a GET against a running server. Everything else is read from the handler
+code (file:function given). The store entities' Swift types are in `Sources/CanopyCore`; the retired
+SolidJS app's `viewer-solid/src/v2/types.ts` (git history, before 37e9eca) was the original reference.
 
 ## Basics
 

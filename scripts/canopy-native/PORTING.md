@@ -1,14 +1,14 @@
 # Porting canopy v2 to canopy-native
 
-Phase 1 built the foundation. In phase 2, each agent ports one **area** of the SolidJS app
-(`scripts/viewer-solid/src/v2/`) into its own folder here. The app talks to the same, unchanged
-Python server. Its HTTP contract is in [API.md](API.md).
+canopy-native is the forest viewer's only frontend: the SolidJS app it was ported from
+(`scripts/viewer-solid/`) was retired on 2026-10-31 (37e9eca) and is in git history only. The app
+talks to the Python server. Its HTTP contract is in [API.md](API.md).
 
 ## 0. Hard rules
 
 **Safety (non-negotiable)**
-- Edit only under `scripts/canopy-native/`. `scripts/viewer-solid/` and `scripts/srv/` belong to another
-  live session: read them, never modify them.
+- Edit only under `scripts/canopy-native/`. `scripts/srv/` belongs to the viewer lane: read it, never
+  modify it.
 - GET reads against the live server are fine. **Never POST to a mutating endpoint with a real branch
   name** (sync, prep-push, push-origin, restack, squash, seal, gates, outline, review-*, project-state,
   focus, todo-item, viewed, preview*, anything that writes). To exercise a write path, use branch
