@@ -1,11 +1,13 @@
-"""The viewer's own feature tracker: ~/.dotfiles/canopy/todo/<id>.md, one item per file.
+"""The tracker: ~/.dotfiles/canopy/todo/<id>.md, one item per file. Items without a project are
+the viewer's own feature list; items with one are that forest's todo list.
 
 An item is TOML frontmatter between `+++` lines, then a markdown body (context; `/next` writes a
 `## Next steps` section). Fields:
   title      verb-first, one line
   kind       build | fix | decide | look        (decide = needs Phil; look = a question to answer)
   state      open | doing | waiting | done | dropped
-  area       which part of the viewer (review, forests, keys, server, gen, ...)
+  area       which part of the viewer (review, forests, keys, server, gen, ...), or of the project
+  project    "<repo>:<stack-project>" for a forest's own list (the viewer's project id); empty = the viewer
   size       S | M | L
   why        what it's worth, one line
   waiting    what it waits on, for state "waiting"
@@ -24,7 +26,7 @@ DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 KINDS = ("build", "fix", "decide", "look")
 STATES = ("open", "doing", "waiting", "done", "dropped")
 SIZES = ("S", "M", "L")
-FIELDS = ("title", "kind", "state", "area", "size", "why", "waiting", "blocked_by", "links", "rank", "created", "updated")
+FIELDS = ("title", "kind", "state", "area", "project", "size", "why", "waiting", "blocked_by", "links", "rank", "created", "updated")
 
 
 def slug(title):
@@ -56,6 +58,8 @@ def check(meta):
     for k, allowed in (("kind", KINDS), ("state", STATES), ("size", SIZES)):
         if meta.get(k) not in allowed:
             bad.append(f"{k} {meta.get(k)!r} is not one of {', '.join(allowed)}")
+    if meta.get("project") and not re.fullmatch(r"[^:\s]+:[^:\s]+", meta["project"]):
+        bad.append(f"project {meta['project']!r} is not <repo>:<stack-project>")
     if meta.get("state") == "waiting" and not meta.get("waiting"):
         bad.append("waiting on nothing — say what")
     for k in meta:

@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
-"""canopy-todo — the viewer's feature tracker (~/.dotfiles/canopy/todo/, one file per item).
+"""canopy-todo — the tracker (~/.dotfiles/canopy/todo/, one file per item): the viewer's own feature
+list, plus a todo list per forest (items with --project <repo>:<stack-project>, or a bare
+<stack-project> in the current repo). Without --project every command works on the viewer's list.
 
   canopy-todo add "Fix the o key in line-by-line view" --kind fix --area review --size S \\
       --why "opens Helix on the wrong line" [--link wiki/loops/x.md] [--waiting "…"] [--body -]
-  canopy-todo ls [--all] [--json]       open work in rank order (--all adds done/dropped)
+  canopy-todo ls [--all] [--json] [--project P|all]   open work in rank order (--all adds done/dropped)
   canopy-todo show <id>
   canopy-todo set <id> key=value …      e.g. state=doing size=M blocked_by=a,b
   canopy-todo done <id> [note]          a note is appended under "## Done"
   canopy-todo drop <id> [why]
-  canopy-todo rank <id> <id> …          the open queue, best first; everything else unranked
+  canopy-todo rank [--project P] <id> …  that list's open queue, best first; the rest of it unranked
   canopy-todo steps <id> < steps.md     replace the item's "## Next steps"
   canopy-todo check                     every item's problems; exit 1 if any
 """
@@ -36,6 +38,23 @@ def line(it):
     return f"{rank} {it.get('state', '?'):<8} {it.get('kind', '?'):<6} {it.get('size', '?')} {it.get('area', ''):<10} {it['id']}{flag}{wait}"
 
 
+def project_id(name):
+    """A --project value as the viewer's project id: <repo>:<stack-project>, the repo defaulting to
+    the current repo's main worktree name."""
+    if not name or name == "all" or ":" in name:
+        return name
+    import subprocess
+    try:
+        out = subprocess.check_output(["git", "worktree", "list", "--porcelain"], text=True, stderr=subprocess.DEVNULL)
+    except (OSError, subprocess.CalledProcessError):
+        raise ValueError(f"--project {name}: not in a git repo, so say <repo>:{name}")
+    return f"{os.path.basename(out.splitlines()[0].removeprefix('worktree '))}:{name}"
+
+
+def in_list(it, project):
+    return project == "all" or (it.get("project") or None) == (project or None)
+
+
 def with_section(body, heading, text, replace):
     pat = re.compile(rf"^## {re.escape(heading)}\n.*?(?=^## |\Z)", re.S | re.M)
     block = f"## {heading}\n{text.strip()}\n"
@@ -51,6 +70,7 @@ def main():
     a.add_argument("title")
     a.add_argument("--kind", required=True, choices=todo.KINDS)
     a.add_argument("--area", required=True)
+    a.add_argument("--project")
     a.add_argument("--size", default="M", choices=todo.SIZES)
     a.add_argument("--why", required=True)
     a.add_argument("--state", default="open", choices=todo.STATES)
@@ -62,6 +82,7 @@ def main():
     ls = sub.add_parser("ls")
     ls.add_argument("--all", action="store_true")
     ls.add_argument("--json", action="store_true")
+    ls.add_argument("--project")
     sub.add_parser("show").add_argument("id")
     s = sub.add_parser("set")
     s.add_argument("id")
@@ -70,7 +91,9 @@ def main():
         d = sub.add_parser(name)
         d.add_argument("id")
         d.add_argument("note", nargs="?")
-    sub.add_parser("rank").add_argument("ids", nargs="+")
+    r = sub.add_parser("rank")
+    r.add_argument("--project")
+    r.add_argument("ids", nargs="+")
     sub.add_parser("steps").add_argument("id")
     sub.add_parser("check")
     args = ap.parse_args()
@@ -80,13 +103,16 @@ def main():
         if os.path.exists(todo.path(item_id)):
             sys.exit(f"canopy-todo: {item_id} exists — `canopy-todo show {item_id}`")
         body = sys.stdin.read() if args.body == "-" else (args.body or "")
-        meta = {"title": args.title, "kind": args.kind, "state": args.state, "area": args.area, "size": args.size,
+        meta = {"title": args.title, "kind": args.kind, "state": args.state, "area": args.area,
+                "project": project_id(args.project), "size": args.size,
                 "why": args.why, "waiting": args.waiting, "blocked_by": args.blocked_by, "links": args.link,
                 "created": todo.today(), "updated": todo.today()}
         todo.write(item_id, {k: v for k, v in meta.items() if v not in (None, "", [])}, body)
         print(item_id)
     elif args.cmd == "ls":
-        items = queue(it for it in todo.all_items() if args.all or it.get("state") not in ("done", "dropped"))
+        project = project_id(args.project)
+        items = queue(it for it in todo.all_items()
+                      if in_list(it, project) and (args.all or it.get("state") not in ("done", "dropped")))
         if args.json:
             print(json.dumps(items, indent=1))
         else:
@@ -106,14 +132,18 @@ def main():
         body = with_section(it["body"], "Done" if args.cmd == "done" else "Dropped", f"{todo.today()} — {args.note}", False) if args.note else it["body"]
         print(line(todo.update(args.id, state="done" if args.cmd == "done" else "dropped", rank=None, body=body)))
     elif args.cmd == "rank":
+        project = project_id(args.project)
         for i in args.ids:
-            todo.read(i)
+            if not in_list(todo.read(i), project):
+                raise ValueError(f"{i} isn't on {project or 'the viewer'}'s list")
         for it in todo.all_items():
+            if not in_list(it, project):
+                continue
             want = args.ids.index(it["id"]) + 1 if it["id"] in args.ids else None
             if it.get("rank") != want and it.get("state") != "broken":
                 todo.update(it["id"], rank=want)
         for it in queue(todo.all_items()):
-            if it.get("rank"):
+            if it.get("rank") and in_list(it, project):
                 print(line(it))
     elif args.cmd == "steps":
         it = todo.read(args.id)
