@@ -354,7 +354,7 @@ import Testing
         keys(a, "h")
         #expect(pg.column == .left && pg.range?.side == .left && a.pane?.id == reviewDiffPane, "the old half of the same row")
         keys(a, "h")
-        #expect(pg.column == .left && a.pane?.id == reviewTreePane, "past the old half, the files list to its left")
+        #expect(pg.column == .left && a.pane?.id == (pg.showsHistory ? ShipSeam.historyPane : reviewTreePane), "past the old half, the outline to its left")
         keys(a, "l")
         #expect(pg.column == .left && a.pane?.id == reviewDiffPane, "back on the old half")
         keys(a, "l")
@@ -383,6 +383,16 @@ import Testing
         #expect(pg.here?.key == first.key && pg.hereWord == names.last, "back to the last name of the line before")
         keys(a, "j")
         #expect(pg.hereWord == nil, "the name belongs to its line")
+    }
+
+    /// space c puts the conversation where the diff was; esc brings the diff back.
+    @Test func spaceCIsALayerOverTheDiff() async throws {
+        let (a, _) = try await app()
+        let pg = ReviewPageState.of(a)
+        keys(a, "space", "c")
+        #expect(pg.tab == "conversation")
+        keys(a, "esc")
+        #expect(pg.tab == "files" && a.pane?.id == reviewDiffPane)
     }
 
     /// space r on a name asks for the new one; esc lets it go without a request.
@@ -511,7 +521,9 @@ import Testing
         pg.focusDiff(a, true)
         #expect(pg.here?.key == "l|c.ts|R:1")
         keys(a, "3")
-        #expect(pg.scoped == false && pg.files.map(\.path) == ["a.ts", "b.ts"])
+        #expect(pg.scoped && pg.files.map(\.path) == ["c.ts"], "the outline's scope carries into the files view")
+        ShipState.of(a).showCommit(nil)
+        #expect(pg.scoped == false && pg.files.map(\.path) == ["a.ts", "b.ts"], "= on main: the whole branch again")
     }
 
     @Test func theDiffsKeysKeepTheRules() async throws {

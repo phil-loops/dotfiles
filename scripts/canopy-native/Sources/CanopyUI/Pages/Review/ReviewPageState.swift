@@ -121,6 +121,11 @@ public final class ReviewPageState: ShipHost {
     public let split = true
     /// How many characters fit across the diff, so a split line gives each half the same width (0: not measured yet).
     public var diffColumns = 0
+    /// The commits earn the outline when there's more than one to step through.
+    public var showsHistory: Bool { integration == nil && (branch?.commits ?? 0) > 1 }
+    /// The left margin: the commits, the files, or both.
+    public var showsOutline: Bool { showsHistory || showsTree }
+    public var outlineWidth: CGFloat { showsHistory ? 270 : treeWidth }
     /// The files list earns its column only when there's more than one file to move between (or a filter typed into it).
     public var showsTree: Bool { views.count > 1 || !filter.isEmpty }
     /// As wide as the longest file name needs, within reason.
@@ -385,7 +390,7 @@ public final class ReviewPageState: ShipHost {
     }
 
     private func tabMoved(_ from: String) {
-        if tab != "commits" && commitScope != nil { commitScope = nil }
+        if tab == "conversation" && commitScope != nil { commitScope = nil }
         guard let app, case .review = app.router.route else { return }
         if tab == "files" { app.focus(pane: reviewDiffPane) }
         if tab == "commits" {

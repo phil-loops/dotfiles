@@ -340,6 +340,14 @@ enum DiffCommands {
                            local: { _, _ in try step(1) }))
         r.register(Command(id: "review.word.previous", title: "The previous name", scope: .review, verb: .previousWord, quiet: true,
                            local: { _, _ in try step(-1) }))
+        r.register(Command(id: "review.conversation", title: "The conversation, in place of the diff (esc brings the diff back)", scope: .review,
+                           verb: .conversation, label: "conversation", available: { _ in pg.integration == nil },
+                           local: { _, _ in
+                               if pg.tab == "conversation" { pg.tab = "files"; return app.focus(pane: reviewDiffPane) }
+                               PageSearch.of(app).clear()   // a search belongs to what it searched
+                               pg.tab = "conversation"
+                               if let first = app.panes.first { app.focus(pane: first.id) }
+                           }))
         r.register(Command(id: "review.back", title: "Back out", scope: .review, verb: .cancel, label: "back", quiet: true,
                            local: { _, _ in
                                if ShipSeam.backOut(app) { return }
@@ -347,6 +355,7 @@ enum DiffCommands {
                                if look.pop != nil { return look.dismiss() }
                                if app.nav.picker != nil { return app.nav.close() }
                                if PageSearch.of(app).active { return PageSearch.of(app).clear() }
+                               if pg.tab != "files" { pg.tab = "files"; return app.focus(pane: reviewDiffPane) }
                                if pg.side != nil { return pg.closeSide() }
                                if !pg.filter.isEmpty { pg.filter = ""; return }
                                if pg.mark != nil { pg.mark = nil; return }

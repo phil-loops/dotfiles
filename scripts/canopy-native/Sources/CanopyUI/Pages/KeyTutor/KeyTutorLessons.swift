@@ -244,6 +244,8 @@ enum KeyLessons {
             KeyStep("{next-thread} goes to the next match while a search is kept; {cancel} clears it.", [.nextThread]),
             KeyStep("{map}: the map of the stack around you.", [.map], check: { $0.keys.layer == .map }),
             KeyStep("{cancel} closes it.", [.cancel], check: { $0.keys.layer == nil }),
+            KeyStep("{conversation} puts the conversation where the diff was; {cancel} brings the diff back.", [.conversation],
+                    check: { P.pg($0).tab == "conversation" }),
             KeyStep("{next-word} puts the cursor on the next name, line after line.", [.nextWord], setup: P.review(at: "l|greet.ts|R:2"),
                     check: { P.pg($0).hereWord != nil }),
             KeyStep("{previous-word} the name before it.", [.previousWord]),
