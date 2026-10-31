@@ -86,7 +86,7 @@ import Testing
             #expect(a.registry.command(id)?.keys == ["D"], "\(id)")
         }
         #expect(a.registry.command("project.focus")?.keys == ["; f"])
-        #expect(a.registry.command("review.split")?.keys == ["; s"])
+        #expect(a.registry.command("forest.integration")?.keys == ["; i"])
         #expect(a.registry.customized == [.putAway, .leader])
         // onto a key another verb holds: the table says so
         a.registry.applyUserKeys(["put-away": ["m"]])

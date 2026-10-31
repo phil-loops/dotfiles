@@ -108,7 +108,6 @@ public final class ReviewPageState: ShipHost {
 
     init(_ app: AppModel) {
         self.app = app
-        split = UserDefaults.standard.string(forKey: "v2.review.split") == "1"
         _ = app.store.onChange { [weak self] in self?.storeMoved() }
     }
 
@@ -116,11 +115,8 @@ public final class ReviewPageState: ShipHost {
 
     /// "conversation" | "commits" | "files" (ShipHost's tab)
     public var tab = "files" { didSet { if tab != oldValue { tabMoved(oldValue) } } }
-    public var split = false {
-        didSet { defaults.set(split ? "1" : nil, forKey: "v2.review.split") }
-    }
-    /// Where split ⇄ unified is remembered; the keytutor's practice app keeps its own.
-    @ObservationIgnored public var defaults = UserDefaults.standard
+    /// Diffs are always side by side.
+    public let split = true
     public var showOutdated = false
     /// where `x` dropped its mark (the other end of a range comment)
     public var mark: String?

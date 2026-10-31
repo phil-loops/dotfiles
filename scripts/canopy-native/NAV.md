@@ -72,7 +72,7 @@
 |---|---|
 | Forests (home) | `f` focus · `w` workbench · `i` the whole forest's diff · `l` launch · `b` / `B` hold / release · `r` only what's ready · `a` the archive |
 | a forest | `f` · `w` · `i` · `l` · `b` / `B` (as home) · `n` next ready branch · `e` every branch's words |
-| Review | `s` split ⇄ unified · `o` outdated threads · `b p` / `b m` / `b o` diff against parent / main / origin · `h` history · `g` gate output · `p` send every draft · `a` address a thread · `r` resolve · `n` the second reader's note · `d` save the comment as a draft · `S` insert a suggestion · in the address layer, `l` list the commits |
+| Review | `o` outdated threads · `b p` / `b m` / `b o` diff against parent / main / origin · `h` history · `g` gate output · `p` send every draft · `a` address a thread · `r` resolve · `n` the second reader's note · `d` save the comment as a draft · `S` insert a suggestion · in the address layer, `l` list the commits |
 | Tutor | `t` re-test · `q` wrap up · `s` stop the tutor's turn · `v` the session's evidence · `o` / `l` / `h` / `c` a credit's hit-miss / level / help / confidence |
 | Machine | `r` restart · `w` swap the port's build · `x` kill every server · `c` reap orphans · `m` run main · `u` the Docker stack |
 | Dashboard | `r` the range |

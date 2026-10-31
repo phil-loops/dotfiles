@@ -255,11 +255,11 @@ import Testing
         let (a, _) = try await app()
         let pg = ReviewPageState.of(a)
         keys(a, "j")
-        #expect(pg.here?.key == "l|a.ts|L:2")
+        #expect(pg.here?.key == "l|a.ts|R:2", "split: the changed pair is one row, keyed by its new line")
         keys(a, "}")
-        #expect(pg.here?.key == "l|a.ts|L:21", "the next hunk's first changed line")
+        #expect(pg.here?.key == "l|a.ts|R:22", "the next hunk's first changed line")
         keys(a, "{")
-        #expect(pg.here?.key == "l|a.ts|L:2")
+        #expect(pg.here?.key == "l|a.ts|R:2")
         keys(a, "]")
         #expect(pg.here?.key == "f|b.ts")
         keys(a, "[")
@@ -291,7 +291,7 @@ import Testing
         let hunk0 = pg.fileOf("a.ts")!.blocks.filter { $0.hunk == 0 }.map(\.key)
         keys(a, "m")
         #expect(hunk0.allSatisfy(pg.isSeen))
-        #expect(pg.here?.key == "l|a.ts|L:21", "on to the next unviewed hunk")
+        #expect(pg.here?.key == "l|a.ts|R:22", "on to the next unviewed hunk")
         await until("the post") { ShipStub.posts(p).contains { $0.path == "/loops/viewed" } }
         let post = ShipStub.posts(p).last { $0.path == "/loops/viewed" }!
         #expect(post.body["on"] == .bool(true))
@@ -414,7 +414,7 @@ import Testing
     /// Ship's half, by key on the real page: `x` marks a range, `c` opens Ship's comment box on it.
     @Test func aShipCommandRunsByKeyOnTheReviewPage() async throws {
         let (a, _) = try await app()
-        keys(a, "j", "j")     // a.ts R:2 (new one)
+        keys(a, "j")          // a.ts R:2 (new one), paired with what it replaced
         let pg = ReviewPageState.of(a)
         #expect(pg.here?.key == "l|a.ts|R:2")
         keys(a, "x", "x")
