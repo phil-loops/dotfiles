@@ -43,7 +43,7 @@ struct WikiView: View {
     }
 }
 
-private let label = Theme.mono(10.5)
+private let label = Theme.text(10.5)
 
 /// The page list, section by section; the cursor row lit, the open page in gold.
 struct WikiList: View {
@@ -67,10 +67,10 @@ struct WikiList: View {
                             HStack(alignment: .firstTextBaseline, spacing: 8) {
                                 Text(p.title).lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
                                 if p.isPlan {
-                                    Text("PLAN").font(Theme.mono(9.5)).foregroundStyle(theme.ember).help("a plan for \(p.project)")
+                                    Text("PLAN").font(Theme.text(9.5)).foregroundStyle(theme.ember).help("a plan for \(p.project)")
                                 }
                             }
-                            .font(Theme.mono(12.5))
+                            .font(Theme.text(12.5))
                             .foregroundStyle(current == p.slug ? theme.goldLeaf : theme.inkDim)
                             .padding(.vertical, 3).padding(.leading, 10).padding(.trailing, 8)
                             .background(on ? theme.goldWash : .clear)
@@ -137,7 +137,7 @@ struct WikiArticle: View {
                         }
                         Text(page.title).font(Theme.display(26)).foregroundStyle(theme.ink)
                         if !page.lede.isEmpty {
-                            Text(page.lede).font(Theme.mono(14)).lineSpacing(4).foregroundStyle(theme.inkDim)
+                            Text(page.lede).font(Theme.text(14)).lineSpacing(4).foregroundStyle(theme.inkDim)
                         }
                     }
                     .padding(.bottom, 16)
@@ -149,7 +149,7 @@ struct WikiArticle: View {
                         Text("\(page.words) words")
                         if page.kind == "map" { Text(" · citations resolve against \(wiki.read?.ref ?? "")") }
                     }
-                    .font(Theme.mono(11)).foregroundStyle(theme.inkFaint)
+                    .font(Theme.text(11)).foregroundStyle(theme.inkFaint)
                     .padding(.top, 12)
                     .overlay(alignment: .top) { theme.rule.frame(height: 1) }
                     .padding(.top, 32)
@@ -184,13 +184,13 @@ struct WikiSource: View {
                 Spacer(minLength: 8)
                 Text(cite.src.map { $0.err != nil ? "unresolved" : "\($0.start)–\($0.end) · \($0.ref)" } ?? "…").foregroundStyle(theme.inkFaint)
             }
-            .font(Theme.mono(11))
+            .font(Theme.text(11))
             .padding(.horizontal, 12).padding(.vertical, 6)
             .background(theme.vellumRaise)
             .overlay(alignment: .bottom) { theme.rule.frame(height: 1) }
             if let s = cite.src {
                 if let err = s.err {
-                    Text(err).font(Theme.mono(12)).foregroundStyle(theme.del).padding(.horizontal, 12).padding(.vertical, 8)
+                    Text(err).font(Theme.text(12)).foregroundStyle(theme.del).padding(.horizontal, 12).padding(.vertical, 8)
                 } else {
                     ScrollViewReader { proxy in
                         ScrollView([.vertical, .horizontal]) {
@@ -205,7 +205,7 @@ struct WikiSource: View {
                                         Text("\(n)").foregroundStyle(theme.inkFaint).frame(width: 44, alignment: .trailing).padding(.trailing, 12)
                                         Text(Self.highlighted(text, lang, colors)).foregroundStyle(lit ? theme.ink : theme.inkDim).fixedSize()
                                     }
-                                    .font(Theme.mono(11.5))
+                                    .font(Theme.text(11.5))
                                     .padding(.vertical, 1)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                     .background(key == cursor ? theme.goldWash : lit ? theme.goldWash.opacity(0.5) : .clear)

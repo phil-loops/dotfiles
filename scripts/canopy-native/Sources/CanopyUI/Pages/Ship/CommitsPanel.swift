@@ -32,7 +32,7 @@ public struct CommitsPanel: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .overlay(alignment: .leading) { theme.rule.opacity(0.5).frame(width: 1) }
         }
-        .font(Theme.mono(12))
+        .font(Theme.text(12))
         .padding(.leading, 10)
         .task(id: app.store.view(Branch.self, branchID).map(ShipState.historyKey)) {
             ship.loadHistory(app, branchID)
@@ -59,7 +59,7 @@ struct HistoryList: View {
                 if key == "h|" {
                     VStack(alignment: .leading, spacing: 1) {
                         Text("= " + (landing ?? "—")).foregroundStyle(scoped ? theme.goldLeaf : theme.ink).lineLimit(2)
-                        Text("on main\(conv.map { " · #" + String($0.number) } ?? "")").font(Theme.mono(10.5)).foregroundStyle(theme.inkFaint)
+                        Text("on main\(conv.map { " · #" + String($0.number) } ?? "")").font(Theme.text(10.5)).foregroundStyle(theme.inkFaint)
                     }
                     .padding(.top, 6)
                     .overlay(alignment: .top) { theme.rule.opacity(0.6).frame(height: 1).offset(y: -2) }
@@ -72,8 +72,8 @@ struct HistoryList: View {
                             if c.pushed == false { Text("● local").foregroundStyle(theme.goldLeaf) }
                         }
                         .foregroundStyle(theme.inkFaint)
-                        .font(Theme.mono(10.5))
-                        ForEach(addresses(c.sha), id: \.self) { a in Text("→ \(a)").font(Theme.mono(10.5)).foregroundStyle(theme.goldLeaf) }
+                        .font(Theme.text(10.5))
+                        ForEach(addresses(c.sha), id: \.self) { a in Text("→ \(a)").font(Theme.text(10.5)).foregroundStyle(theme.goldLeaf) }
                     }
                 }
             }
@@ -105,7 +105,7 @@ struct CommitHead: View {
                 Text(c?.date ?? "").foregroundStyle(theme.inkFaint)
                 if editable { Text("\(app.registry.keyOf("words.edit")) edit").foregroundStyle(theme.goldLeaf.opacity(0.8)) }
             }
-            .font(Theme.mono(11))
+            .font(Theme.text(11))
             if editable {
                 WordsEditor(branchID: branchID, landing: false, landingOnly: false)
             } else {
@@ -154,7 +154,7 @@ public struct WordsEditor: View {
                             + Text(x.hint.fix.map { " \($0.label)" } ?? "").foregroundStyle(theme.inkFaint))
                     }
                 }
-                .font(Theme.mono(11))
+                .font(Theme.text(11))
             }
             PaneList(pane: ShipSeam.wordsPane, rows: rows) { key, on in row(key, on: on) }
             let pending = w.pending(branchID)
@@ -214,7 +214,7 @@ public struct WordsEditor: View {
             let field = r.field(branchID)
             let writing = app.insertField == field
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(label(r, o)).font(Theme.mono(10.5)).foregroundStyle(theme.inkFaint).frame(width: 84, alignment: .leading)
+                Text(label(r, o)).font(Theme.text(10.5)).foregroundStyle(theme.inkFaint).frame(width: 84, alignment: .leading)
                 VStack(alignment: .leading, spacing: 2) {
                     switch r {
                     case .desc:
@@ -229,7 +229,7 @@ public struct WordsEditor: View {
                         HStack(spacing: 8) {
                             if text.range(of: " and ", options: .caseInsensitive) != nil { Text("“and” · a split point?").foregroundStyle(theme.goldLeaf) }
                         }
-                        .font(Theme.mono(10.5)).foregroundStyle(theme.inkFaint)
+                        .font(Theme.text(10.5)).foregroundStyle(theme.inkFaint)
                     case .title:
                         let v = w.prValue(branchID)
                         if writing {
@@ -246,7 +246,7 @@ public struct WordsEditor: View {
                                     w.editPr(branchID, MessageWords(subject: cur.subject, body: OutlineHints.joinTemplate(own, OutlineHints.splitTemplate(cur.body).template)))
                                 }))
                         } else { Text(parts.own.isEmpty ? "why — a line or three" : parts.own).foregroundStyle(parts.own.isEmpty ? theme.inkFaint : theme.inkDim) }
-                        if !parts.template.isEmpty { Text("＋ the repo's PR template").font(Theme.mono(10.5)).foregroundStyle(theme.inkFaint) }
+                        if !parts.template.isEmpty { Text("＋ the repo's PR template").font(Theme.text(10.5)).foregroundStyle(theme.inkFaint) }
                     case .subject(let sha), .commitBody(let sha):
                         if let c = o?.commits.first(where: { $0.sha == sha }) {
                             let v = w.valueOf(branchID, c)
@@ -260,11 +260,11 @@ public struct WordsEditor: View {
                             } else if isSubject {
                                 HStack(spacing: 6) {
                                     Text(v.subject).foregroundStyle(c.locked.isEmpty ? theme.ink : theme.inkDim)
-                                    if w.changed(branchID).contains(where: { $0.sha == c.sha }) { Text("edited").font(Theme.mono(10.5)).foregroundStyle(theme.goldLeaf) }
-                                    if !c.locked.isEmpty { Text(c.locked).font(Theme.mono(10.5)).foregroundStyle(theme.inkFaint) }
+                                    if w.changed(branchID).contains(where: { $0.sha == c.sha }) { Text("edited").font(Theme.text(10.5)).foregroundStyle(theme.goldLeaf) }
+                                    if !c.locked.isEmpty { Text(c.locked).font(Theme.text(10.5)).foregroundStyle(theme.inkFaint) }
                                     else if !v.body.trimmingCharacters(in: .whitespaces).isEmpty && !rowsShowBody(sha) { Text("¶").foregroundStyle(theme.inkFaint) }
                                 }
-                                ForEach(addresses(v.body), id: \.self) { a in Text("addresses \(a)").font(Theme.mono(10.5)).foregroundStyle(theme.goldLeaf) }
+                                ForEach(addresses(v.body), id: \.self) { a in Text("addresses \(a)").font(Theme.text(10.5)).foregroundStyle(theme.goldLeaf) }
                             } else {
                                 Text(v.body.isEmpty ? "why" : v.body).foregroundStyle(v.body.isEmpty ? theme.inkFaint : theme.inkDim)
                             }
@@ -275,7 +275,7 @@ public struct WordsEditor: View {
             .overlay(alignment: .trailing) {
                 if on && !writing && WordsCommands.editable(app, branchID, r) {
                     Text("\(app.registry.keyOf("words.edit")) write\(WordsCommands.fixes(app, branchID, key).isEmpty ? "" : " · \(app.registry.keyOf("words.fix")) fix")")
-                        .font(Theme.mono(10.5)).foregroundStyle(theme.inkFaint)
+                        .font(Theme.text(10.5)).foregroundStyle(theme.inkFaint)
                 }
             }
         }

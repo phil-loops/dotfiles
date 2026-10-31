@@ -27,12 +27,12 @@ public struct Theme: Equatable, Sendable {
     public var diffBg: Color
 
     public static let dark = Theme(
-        vellumNight: .hex(0x14110A), vellumRaise: .hex(0x1C180F), vellumEdge: .hex(0x221C11),
-        ink: .hex(0xE8DCC4), inkDim: .hex(0x9A8E78), inkFaint: .hex(0x847A63),
-        goldLeaf: .hex(0xE6B64E), goldDeep: .hex(0x6E521D), goldWash: .hex(0xE6B64E, 0.08),
-        ember: .hex(0xD2732A), emberWash: .hex(0xD2732A, 0.12), patina: .hex(0x7FA093), rule: .hex(0x3D3421),
+        vellumNight: .hex(0x121315), vellumRaise: .hex(0x1A1B1E), vellumEdge: .hex(0x222327),
+        ink: .hex(0xE4E4E1), inkDim: .hex(0x9C9C98), inkFaint: .hex(0x74746F),
+        goldLeaf: .hex(0xE6B64E), goldDeep: .hex(0x6E5A2C), goldWash: .hex(0xE6B64E, 0.07),
+        ember: .hex(0xD2732A), emberWash: .hex(0xD2732A, 0.10), patina: .hex(0x7FA093), rule: .hex(0x2B2C30),
         add: .hex(0x8FAE7A), addBg: .hex(0x8FAE7A, 0.09), del: .hex(0xC87A55), delBg: .hex(0xC87A55, 0.09),
-        diffInk: .hex(0xECD35A), diffBg: .hex(0x0A0A0D))
+        diffInk: .hex(0xECD35A), diffBg: .hex(0x0E0F11))
 
     public static let light = Theme(
         vellumNight: .hex(0xF6F0E2), vellumRaise: .hex(0xFFFAF0), vellumEdge: .hex(0xEAE1CD),
@@ -55,8 +55,19 @@ public struct Theme: Equatable, Sendable {
         return Fonts.registered ? .custom(name, size: size) : .system(size: size, weight: weight, design: .monospaced)
     }
 
-    /// Fraunces italic (SOFT 50, WONK 1), the display face of the crumbs and page titles.
+    /// Words: the system sans — titles, tabs, descriptions, meta, prose. Mono is for code, line
+    /// numbers, SHAs and keys only.
+    public static func text(_ size: CGFloat = bodySize, weight: Font.Weight = .regular) -> Font {
+        .system(size: size, weight: weight)
+    }
+
+    /// A page or row title: the sans, semibold, a touch smaller than the old display face's size.
     public static func display(_ size: CGFloat = 17) -> Font {
+        .system(size: (size * 0.82).rounded(), weight: .semibold)
+    }
+
+    /// Fraunces italic (SOFT 50, WONK 1): the wordmark only.
+    public static func wordmark(_ size: CGFloat = 17) -> Font {
         Fonts.registered ? .custom("FrauncesSoftWonky-Italic", size: size) : .system(size: size, design: .serif).italic()
     }
 

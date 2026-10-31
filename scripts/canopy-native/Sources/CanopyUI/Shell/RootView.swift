@@ -24,7 +24,7 @@ public struct RootView: View {
         .overlay { LabelsView() }
         .background(theme.vellumNight)
         .foregroundStyle(theme.ink)
-        .font(Theme.mono())
+        .font(Theme.text())
         .environment(\.theme, theme)
     }
 
@@ -45,7 +45,7 @@ struct Header: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Button { app.runner.dispatch("nav.forests", via: .click) } label: {
-                Text("canopy").font(Theme.display(17)).foregroundStyle(theme.goldLeaf)
+                Text("canopy").font(Theme.wordmark(17)).foregroundStyle(theme.goldLeaf)
             }
             .buttonStyle(.plain)
             ForEach(Array(crumbs.enumerated()), id: \.offset) { i, c in
@@ -58,7 +58,7 @@ struct Header: View {
             }
             Spacer()
         }
-        .font(Theme.mono(12))
+        .font(Theme.text(12))
         .foregroundStyle(theme.inkFaint)
         .padding(.horizontal, 16)
         .padding(.top, 8)
@@ -119,7 +119,7 @@ public struct PlaceholderPage: View {
                     Text(p.notes[Int(key.dropFirst(5)) ?? 0]).foregroundStyle(theme.inkDim).lineLimit(1)
                 }
                 PaneList(pane: "sources", rows: p.sourceRows) { key, _ in
-                    Text("viewer-solid/src/v2/\(key.dropFirst(4))").foregroundStyle(theme.inkFaint).font(Theme.mono(11))
+                    Text("viewer-solid/src/v2/\(key.dropFirst(4))").foregroundStyle(theme.inkFaint).font(Theme.text(11))
                 }
             }
         }

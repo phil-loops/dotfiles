@@ -79,7 +79,7 @@ struct Lever: View {
                 Text(app.registry.keyOf(id)).foregroundStyle(danger ? theme.del : theme.goldDeep)
                 Text(word)
             }
-            .font(Theme.mono(11))
+            .font(Theme.text(11))
             .padding(.horizontal, 8).padding(.vertical, 2)
             .foregroundStyle(danger ? theme.del : theme.inkDim)
             .background(RoundedRectangle(cornerRadius: 4).fill(danger ? theme.delBg : theme.vellumRaise))
@@ -94,7 +94,7 @@ struct SectionHead: View {
     let text: String
     var gold = false
     var body: some View {
-        Text(text.uppercased()).font(Theme.mono(11)).tracking(1.5).foregroundStyle(gold ? theme.goldLeaf : theme.inkFaint)
+        Text(text.uppercased()).font(Theme.text(11)).tracking(1.5).foregroundStyle(gold ? theme.goldLeaf : theme.inkFaint)
     }
 }
 

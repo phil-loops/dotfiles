@@ -47,7 +47,7 @@ struct ProseBlockView: View {
             t.rule.frame(height: 1)
         case .code(let s):
             ScrollView(.horizontal) {
-                Text(s).font(Theme.mono(12.5)).lineSpacing(3).foregroundStyle(t.diffInk).fixedSize().padding(.horizontal, 14).padding(.vertical, 12)
+                Text(s).font(Theme.text(12.5)).lineSpacing(3).foregroundStyle(t.diffInk).fixedSize().padding(.horizontal, 14).padding(.vertical, 12)
             }
             .background(t.diffBg)
             .overlay { Rectangle().stroke(t.rule, lineWidth: 1) }
@@ -75,7 +75,7 @@ struct ProseBlockView: View {
             Grid(alignment: .topLeading, horizontalSpacing: 10, verticalSpacing: 5) {
                 GridRow {
                     ForEach(Array(head.enumerated()), id: \.offset) { _, c in
-                        Text(Prose.text(c).uppercased()).font(Theme.mono(11)).tracking(1.1).foregroundStyle(t.inkFaint)
+                        Text(Prose.text(c).uppercased()).font(Theme.text(11)).tracking(1.1).foregroundStyle(t.inkFaint)
                     }
                 }
                 Divider().overlay(t.rule)
@@ -90,7 +90,7 @@ struct ProseBlockView: View {
             }
         case .suggestion(let lines):
             VStack(alignment: .leading, spacing: 0) {
-                Text("Suggested change").font(Theme.mono(11)).foregroundStyle(t.inkFaint).padding(.horizontal, 8).padding(.vertical, 3)
+                Text("Suggested change").font(Theme.text(11)).foregroundStyle(t.inkFaint).padding(.horizontal, 8).padding(.vertical, 3)
                     .frame(maxWidth: .infinity, alignment: .leading).background(t.vellumEdge)
                 if lines.isEmpty { Text("(removes the lines)").foregroundStyle(t.inkFaint).padding(.horizontal, 8) }
                 ForEach(Array(lines.enumerated()), id: \.offset) { _, l in
@@ -98,7 +98,7 @@ struct ProseBlockView: View {
                         Text(l.sign).foregroundStyle(t.inkFaint).frame(width: 18)
                         Text(l.text)
                     }
-                    .font(Theme.mono(12))
+                    .font(Theme.text(12))
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(l.sign == "-" ? t.delBg : t.addBg)
                 }
@@ -132,7 +132,7 @@ enum ProseText {
             case .text(let s, let st):
                 var a = AttributedString(s)
                 let all = st.union(style)
-                var f = all.contains(.code) ? Theme.mono(look.size * 0.82) : font
+                var f = all.contains(.code) ? Theme.text(look.size * 0.82) : font
                 if all.contains(.bold) { f = f.weight(.semibold) }
                 if all.contains(.italic) { f = f.italic() }
                 a.font = f

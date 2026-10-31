@@ -33,7 +33,7 @@ public struct LoopStripView: View {
                     Text("merged").foregroundStyle(theme.patina).padding(.leading, 4)
                 }
             }
-            .font(Theme.mono(size))
+            .font(Theme.text(size))
         }
     }
 

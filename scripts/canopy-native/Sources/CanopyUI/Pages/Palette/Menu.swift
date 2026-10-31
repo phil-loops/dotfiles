@@ -150,7 +150,7 @@ struct CommandMenuView: View {
                 VStack(spacing: 0) {
                     TextField("run a command, or find a branch, a page, a concept…", text: $menu.query)
                         .textFieldStyle(.plain)
-                        .font(Theme.mono(13))
+                        .font(Theme.text(13))
                         .padding(.horizontal, 16).padding(.vertical, 12)
                         .focused($focused)
                         .onChange(of: menu.query) { menu.index = 0 }
@@ -161,7 +161,7 @@ struct CommandMenuView: View {
                                 if rows.isEmpty { Text("no match").foregroundStyle(theme.inkFaint).padding(.horizontal, 12).padding(.vertical, 8) }
                                 ForEach(Array(rows.enumerated()), id: \.offset) { i, r in
                                     if i == 0 || rows[i - 1].group != r.group {
-                                        Text(r.group.uppercased()).font(Theme.mono(10.5)).tracking(1.2).foregroundStyle(theme.inkFaint)
+                                        Text(r.group.uppercased()).font(Theme.text(10.5)).tracking(1.2).foregroundStyle(theme.inkFaint)
                                             .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 2)
                                     }
                                     HStack(spacing: 12) {
@@ -189,7 +189,7 @@ struct CommandMenuView: View {
                 .shadow(color: .black.opacity(0.4), radius: 24, y: 12)
                 .padding(.top, 90)
             }
-            .font(Theme.mono(12.5))
+            .font(Theme.text(12.5))
             .onAppear { menu.opened(app); focused = true }
         }
     }

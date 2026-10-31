@@ -29,25 +29,25 @@ public struct MarkdownView: View {
     @ViewBuilder private func block(_ b: MdBlock) -> some View {
         switch b {
         case .paragraph(let lines):
-            Text(Self.attributed(lines, theme: theme, size: size)).font(Theme.mono(size)).foregroundStyle(theme.ink).textSelection(.enabled)
+            Text(Self.attributed(lines, theme: theme, size: size)).font(Theme.text(size)).foregroundStyle(theme.ink).textSelection(.enabled)
         case .heading(let level, let line):
-            Text(Self.attributed([line], theme: theme, size: size)).font(Theme.mono(size + CGFloat(max(0, 4 - level)) * 1.5, weight: .semibold))
+            Text(Self.attributed([line], theme: theme, size: size)).font(Theme.text(size + CGFloat(max(0, 4 - level)) * 1.5, weight: .semibold))
                 .foregroundStyle(theme.ink)
         case .code(_, let lines):
-            Text(lines.joined(separator: "\n")).font(Theme.mono(size - 0.5)).foregroundStyle(theme.diffInk)
+            Text(lines.joined(separator: "\n")).font(Theme.text(size - 0.5)).foregroundStyle(theme.diffInk)
                 .padding(6).frame(maxWidth: .infinity, alignment: .leading).background(theme.diffBg).textSelection(.enabled)
         case .suggestion(let removes, let adds):
             VStack(alignment: .leading, spacing: 0) {
-                Text("Suggested change").font(Theme.mono(size - 1.5)).foregroundStyle(theme.inkFaint).padding(.bottom, 2)
+                Text("Suggested change").font(Theme.text(size - 1.5)).foregroundStyle(theme.inkFaint).padding(.bottom, 2)
                 ForEach(Array(removes.enumerated()), id: \.offset) { _, l in
-                    Text("- \(l.isEmpty ? " " : l)").font(Theme.mono(size - 0.5)).foregroundStyle(theme.del)
+                    Text("- \(l.isEmpty ? " " : l)").font(Theme.text(size - 0.5)).foregroundStyle(theme.del)
                         .frame(maxWidth: .infinity, alignment: .leading).background(theme.delBg)
                 }
                 ForEach(Array(adds.enumerated()), id: \.offset) { _, l in
-                    Text("+ \(l.isEmpty ? " " : l)").font(Theme.mono(size - 0.5)).foregroundStyle(theme.add)
+                    Text("+ \(l.isEmpty ? " " : l)").font(Theme.text(size - 0.5)).foregroundStyle(theme.add)
                         .frame(maxWidth: .infinity, alignment: .leading).background(theme.addBg)
                 }
-                if adds.isEmpty { Text("(removes the lines)").font(Theme.mono(size - 1.5)).foregroundStyle(theme.inkFaint) }
+                if adds.isEmpty { Text("(removes the lines)").font(Theme.text(size - 1.5)).foregroundStyle(theme.inkFaint) }
             }
             .padding(6).overlay(Rectangle().stroke(theme.rule, lineWidth: 1))
         case .rule:
@@ -59,9 +59,9 @@ public struct MarkdownView: View {
             }
         case .table(let head, let rows):
             Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 3) {
-                GridRow { ForEach(Array(head.enumerated()), id: \.offset) { _, c in Text(Self.attributed([c], theme: theme, size: size)).font(Theme.mono(size, weight: .semibold)) } }
+                GridRow { ForEach(Array(head.enumerated()), id: \.offset) { _, c in Text(Self.attributed([c], theme: theme, size: size)).font(Theme.text(size, weight: .semibold)) } }
                 ForEach(Array(rows.enumerated()), id: \.offset) { _, r in
-                    GridRow { ForEach(Array(r.enumerated()), id: \.offset) { _, c in Text(Self.attributed([c], theme: theme, size: size)).font(Theme.mono(size)) } }
+                    GridRow { ForEach(Array(r.enumerated()), id: \.offset) { _, c in Text(Self.attributed([c], theme: theme, size: size)).font(Theme.text(size)) } }
                 }
             }
             .foregroundStyle(theme.ink)
@@ -70,9 +70,9 @@ public struct MarkdownView: View {
                 ForEach(Array(items.enumerated()), id: \.offset) { i, it in
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Text(it.task.map { $0 ? "☑" : "☐" } ?? (ordered ? "\(start + i)." : "•"))
-                            .font(Theme.mono(size)).foregroundStyle(theme.inkFaint)
+                            .font(Theme.text(size)).foregroundStyle(theme.inkFaint)
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(Self.attributed([it.text], theme: theme, size: size)).font(Theme.mono(size)).foregroundStyle(theme.ink)
+                            Text(Self.attributed([it.text], theme: theme, size: size)).font(Theme.text(size)).foregroundStyle(theme.ink)
                             if !it.children.isEmpty { MarkdownView(blocks: it.children, size: size) }
                         }
                     }
@@ -88,7 +88,7 @@ public struct MarkdownView: View {
             if n > 0 { out.append(AttributedString("\n")) }
             for s in line {
                 var a = AttributedString(s.text)
-                var font = Theme.mono(size, weight: s.bold ? .semibold : .regular)
+                var font = Theme.text(size, weight: s.bold ? .semibold : .regular)
                 if s.italic { font = font.italic() }
                 a.font = font
                 if s.strike { a.strikethroughStyle = .single }

@@ -110,7 +110,7 @@ struct LabelsView: View {
                             Text(String(it.label.prefix(s.typed.count))).foregroundStyle(theme.inkFaint)
                             Text(String(it.label.dropFirst(s.typed.count))).foregroundStyle(theme.vellumNight)
                         }
-                        .font(Theme.mono(10.5, weight: .semibold))
+                        .font(Theme.text(10.5, weight: .semibold))
                         .padding(.horizontal, 3)
                         .background(live ? theme.goldLeaf : theme.inkFaint.opacity(0.4))
                         .fixedSize()

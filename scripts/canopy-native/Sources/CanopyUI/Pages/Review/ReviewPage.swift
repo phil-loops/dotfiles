@@ -87,7 +87,7 @@ private struct ReviewHeader: View {
                         Text(noPR(pg))
                     }
                 }
-                .font(Theme.mono(11)).foregroundStyle(theme.inkFaint).lineLimit(1)
+                .font(Theme.text(11)).foregroundStyle(theme.inkFaint).lineLimit(1)
                 Spacer(minLength: 16)
                 if pg.integration == nil {
                     ShipStripView(branchID: pg.id)
@@ -147,7 +147,7 @@ private struct Tabs: View {
             if openThreads > 0 { Text("\(openThreads) open").foregroundStyle(theme.ember) }
             Text("\(pg.branchViewed)/\(pg.branchFiles.count) viewed").foregroundStyle(theme.inkFaint)
         }
-        .font(Theme.mono(12))
+        .font(Theme.text(12))
     }
 
     @ViewBuilder private func tab(_ name: String, count: String, extra: String? = nil) -> some View {
@@ -182,7 +182,7 @@ private struct FileTree: View {
                     Text("find").foregroundStyle(theme.goldLeaf)
                     ModalTextField(ReviewPage.filterField, prompt: "filter files…", text: $pg.filter)
                 }
-                .font(Theme.mono(12)).padding(6).background(theme.vellumRaise)
+                .font(Theme.text(12)).padding(6).background(theme.vellumRaise)
             }
             PaneList(pane: reviewTreePane, rows: ReviewPage.treeRows(pg)) { key, _ in
                 let path = String(key.dropFirst(2))
@@ -196,7 +196,7 @@ private struct FileTree: View {
                         Text("+\(v.file.add)").foregroundStyle(theme.add)
                         Text("−\(v.file.del)").foregroundStyle(theme.del)
                     }
-                    .font(Theme.mono(11.5))
+                    .font(Theme.text(11.5))
                     .help(path)
                 }
             }
@@ -331,7 +331,7 @@ public struct CodePaneView: View {
                         .labelTarget(pane: "\(pane).close", key: "close", title: "close", run: RouteTo(close))
                 }
             }
-            .font(Theme.mono(11)).padding(.horizontal, 12).padding(.vertical, 6).background(theme.vellumRaise)
+            .font(Theme.text(11)).padding(.horizontal, 12).padding(.vertical, 6).background(theme.vellumRaise)
             if let err {
                 Text(err).foregroundStyle(theme.del).padding(12)
             } else if let text {

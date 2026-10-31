@@ -33,7 +33,7 @@ public struct ShipStripView: View {
                     if app.keys.layer == .address, ship.addressing != nil { AddressSheet(branchID: branchID) }
                 }
             }
-            .font(Theme.mono(11))
+            .font(Theme.text(11))
             .task(id: readKey(b, m)) { ship.readFacts(app, b, key: readKey(b, m)) }
             .task(id: "\(b.tip)|\(b.gates.rawValue)|\(shown ?? "")") { ship.readProgress(app, b, key: "\(b.tip)|\(b.gates.rawValue)|\(shown ?? "")", gate: shown) }
             .task(id: "\(b.diverged)|\(ShipState.scopeKey(b))") { if b.diverged { ship.readForceScope(app, branchID) } }
@@ -157,7 +157,7 @@ struct KeyButton: View {
                 Text(title)
                 if !busy {
                     Text(keys.first.map(glyph) ?? (quiet ? ":\(id)" : ""))
-                        .font(Theme.mono(10.5)).foregroundStyle(theme.inkFaint)
+                        .font(Theme.text(10.5)).foregroundStyle(theme.inkFaint)
                 }
             }
             .padding(.horizontal, 8).padding(.vertical, 2)
@@ -234,7 +234,7 @@ struct DirtDiff: View {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(lines.enumerated()), id: \.offset) { _, l in
                     let add = l.hasPrefix("+") && !l.hasPrefix("+++"), del = l.hasPrefix("-") && !l.hasPrefix("---")
-                    Text(l.isEmpty ? " " : l).font(Theme.mono(11.5))
+                    Text(l.isEmpty ? " " : l).font(Theme.text(11.5))
                         .foregroundStyle(add ? theme.add : del ? theme.del : l.hasPrefix("@@") ? theme.inkFaint : theme.diffInk)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(add ? theme.addBg : del ? theme.delBg : .clear)
@@ -278,11 +278,11 @@ struct GatesStrip: View {
             }
             if let t = progress?.tail {
                 Text("\(t.gate) · \(rows.first { $0.name == t.gate }?.state == .running ? "output so far" : "output")")
-                    .font(Theme.mono(11)).foregroundStyle(theme.inkFaint)
+                    .font(Theme.text(11)).foregroundStyle(theme.inkFaint)
                 ScrollViewReader { proxy in
                     ScrollView {
                         Text(t.lines.isEmpty ? "(no output yet)" : t.lines.joined(separator: "\n"))
-                            .font(Theme.mono(11)).foregroundStyle(theme.diffInk).textSelection(.enabled)
+                            .font(Theme.text(11)).foregroundStyle(theme.diffInk).textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
                         Color.clear.frame(height: 1).id("end")
                     }
@@ -370,7 +370,7 @@ struct AddressSheet: View {
                 if c.isEmpty { Text("no unpushed commits").foregroundStyle(theme.inkFaint) }
                 ForEach(Array(c.enumerated()), id: \.offset) { i, x in row("\(i + 1)", "\(x.short.prefix(7)) \(x.subject)") }
             }
-            Text("esc closes").font(Theme.mono(10.5)).foregroundStyle(theme.inkFaint)
+            Text("esc closes").font(Theme.text(10.5)).foregroundStyle(theme.inkFaint)
         }
         .padding(8)
         .background(theme.vellumRaise)

@@ -36,7 +36,7 @@ struct KeyHint: View {
         let fired = app.runner.fired.map { $0.ok && $0.id == id } ?? false
         let armed = !app.keys.pendingKeys.isEmpty && key.hasPrefix("\(glyph(app.keys.pendingKeys)) ")
         Text(key)
-            .font(Theme.mono(11))
+            .font(Theme.text(11))
             .padding(.horizontal, 3)
             .foregroundStyle(fired || armed ? theme.goldLeaf : theme.inkFaint)
             .background(fired ? theme.goldWash : .clear, in: RoundedRectangle(cornerRadius: 3))

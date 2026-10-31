@@ -38,11 +38,11 @@ private struct SimStateView: View {
                 Text("t\(s.clock)").foregroundStyle(theme.inkDim)
             }
         }
-        .font(Theme.mono(11.5))
+        .font(Theme.text(11.5))
     }
 
     private func label(_ s: String) -> some View {
-        Text(s.uppercased()).font(Theme.mono(10)).tracking(0.8).foregroundStyle(theme.inkFaint)
+        Text(s.uppercased()).font(Theme.text(10)).tracking(0.8).foregroundStyle(theme.inkFaint)
     }
 
     /// Items laid out left to right, wrapping (flex-wrap).
@@ -61,7 +61,7 @@ private struct OffLine: View {
     let off: [String]
     var body: some View {
         Text(off.isEmpty ? "every safeguard on" : "safeguard off: \(off.map { Kernel(rawValue: $0)?.title ?? $0 }.joined(separator: " · "))")
-            .font(Theme.mono(11)).foregroundStyle(theme.inkFaint)
+            .font(Theme.text(11)).foregroundStyle(theme.inkFaint)
     }
 }
 
@@ -75,12 +75,12 @@ struct SimFrozen: View {
         if let sim = SimScenarios.sim(scenario, off: off) {
             let frozen = sim.toReveal()
             VStack(alignment: .leading, spacing: 6) {
-                Text("SIM · FROZEN BEFORE THE REVEAL").font(Theme.mono(10)).tracking(0.8).foregroundStyle(theme.inkFaint)
+                Text("SIM · FROZEN BEFORE THE REVEAL").font(Theme.text(10)).tracking(0.8).foregroundStyle(theme.inkFaint)
                 Text(sim.scenario.title).font(Theme.display(15)).foregroundStyle(theme.ink)
                 OffLine(off: off)
-                Text(sim.scenario.situation).font(Theme.mono(13)).foregroundStyle(theme.inkDim).fixedSize(horizontal: false, vertical: true)
+                Text(sim.scenario.situation).font(Theme.text(13)).foregroundStyle(theme.inkDim).fixedSize(horizontal: false, vertical: true)
                 SimStateView(s: frozen)
-                Text(sim.scenario.question).font(Theme.mono(13)).foregroundStyle(theme.goldLeaf).fixedSize(horizontal: false, vertical: true)
+                Text(sim.scenario.question).font(Theme.text(13)).foregroundStyle(theme.goldLeaf).fixedSize(horizontal: false, vertical: true)
             }
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -88,7 +88,7 @@ struct SimFrozen: View {
             .overlay(Rectangle().stroke(theme.rule))
             .padding(.vertical, 6)
         } else {
-            Text("no sim scenario \(scenario)").font(Theme.mono(12)).foregroundStyle(theme.del).padding(.vertical, 6)
+            Text("no sim scenario \(scenario)").font(Theme.text(12)).foregroundStyle(theme.del).padding(.vertical, 6)
         }
     }
 }
@@ -121,14 +121,14 @@ struct SimPlayed: View {
             let green = r.result.outcome == "green"
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text("SIM · PLAYED").font(Theme.mono(10)).tracking(0.8).foregroundStyle(theme.inkFaint)
+                    Text("SIM · PLAYED").font(Theme.text(10)).tracking(0.8).foregroundStyle(theme.inkFaint)
                     Text(green ? "✓ every event counted once" : "✗ \(r.result.divergence.map { "\($0.event) \($0.kind)" }.joined(separator: " · "))")
-                        .font(Theme.mono(12)).foregroundStyle(green ? theme.add : theme.del)
+                        .font(Theme.text(12)).foregroundStyle(green ? theme.add : theme.del)
                     Spacer()
                     Text("counted \(r.result.actual) of \(r.result.truth)\(r.result.busy > 0 ? " · \(r.result.busy) pages waited on the lock" : "")")
-                        .font(Theme.mono(11)).foregroundStyle(theme.inkFaint)
+                        .font(Theme.text(11)).foregroundStyle(theme.inkFaint)
                 }
-                Text(r.title).font(Theme.mono(13)).foregroundStyle(theme.ink)
+                Text(r.title).font(Theme.text(13)).foregroundStyle(theme.ink)
                 OffLine(off: off)
                 VStack(alignment: .leading, spacing: 1) {
                     ForEach(Array(r.steps.enumerated()), id: \.offset) { i, line in
