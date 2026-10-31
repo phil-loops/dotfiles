@@ -26,6 +26,14 @@ import Testing
 
     """
 
+    @Test func changedWordsAreTheOnesThatDiffer() {
+        let (l, r) = changedWords("for (let i = 0; i < 101; i++) {", "for (let i = 0; i < 2 * SIZE - 3; i++) {")
+        let ns = "for (let i = 0; i < 2 * SIZE - 3; i++) {" as NSString
+        #expect(l.map { ("for (let i = 0; i < 101; i++) {" as NSString).substring(with: $0) } == ["101"])
+        #expect(r.map { ns.substring(with: $0) } == ["2", "*", "SIZE", "-", "3"])
+        #expect(changedWords("alpha beta", "gamma delta") == ([], []), "nothing shared: the band says it, no word lights")
+    }
+
     @Test func aPatchParsesIntoNumberedLines() {
         let f = parsePatch("x.ts", Self.patch)
         #expect(f.add == 3 && f.del == 2)
