@@ -35,7 +35,7 @@ public final class KeyEngine {
     /// True while esc runs a page's own back-out: esc only ever cancels (NAV.md §4.5), so the
     /// shell refuses any page change made meanwhile.
     public private(set) var cancelling = false
-    public static let nothingToCancel = "h goes up · C-o goes back"
+    public static let nothingToCancel = "- goes up · C-o goes back"
 
     /// Every finished key sequence as the verb it is here (the keytutor watches these).
     @ObservationIgnored public var onVerb: ((VerbEvent) -> Void)?

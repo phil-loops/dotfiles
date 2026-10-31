@@ -33,7 +33,7 @@ enum WikiArea: PageArea {
                                guard let app else { return }
                                if wiki.cite != nil { wiki.closeCite(app) }
                                else if let c = app.closers.first(where: { $0.isOpen() }) { c.close() }
-                               else { throw Refusal("h goes up · C-o goes back") }
+                               else { throw Refusal("- goes up · C-o goes back") }
                            }))
         r.register(Command(id: "wiki.forest", title: "Go to the forest this plan describes", scope: .wiki,
                            available: { [weak app] _ in app.map { wiki.planForest($0) != nil } ?? false },

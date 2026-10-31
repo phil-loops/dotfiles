@@ -124,7 +124,7 @@ enum DiffCommands {
                                    }
                                }
                            }))
-        r.register(Command(id: "review.in", title: "Into the diff at the file", scope: .review, verb: .into, label: "in",
+        r.register(Command(id: "review.in", title: "Into the diff at the file", scope: .review, verb: .main, label: "in",
                            available: { _ in app.pane?.id == reviewTreePane && onFiles(nil) },
                            route: { _ in
                                guard let row = app.selected, row.hasPrefix("f|") else { return nil }
@@ -247,7 +247,7 @@ enum DiffCommands {
                            local: { _, _ in pg.mapIndex = min(max(0, ReviewMap.rows(app).count - 1), pg.mapIndex + 1) }))
         r.register(Command(id: "review.map.up", title: "Previous branch on the map", scope: .review, verb: .previous, modes: [.map], quiet: true,
                            local: { _, _ in pg.mapIndex = max(0, pg.mapIndex - 1) }))
-        r.register(Command(id: "review.map.open", title: "Open the branch under the map's cursor", scope: .review, verbs: [.main, .into], modes: [.map], quiet: true,
+        r.register(Command(id: "review.map.open", title: "Open the branch under the map's cursor", scope: .review, verbs: [.main], modes: [.map], quiet: true,
                            route: { _ in
                                let rows = ReviewMap.rows(app)
                                return rows.indices.contains(pg.mapIndex) ? RouteTo("review.map.go", arg: rows[pg.mapIndex].id) : nil
@@ -279,14 +279,29 @@ enum DiffCommands {
 
         // ── out, and back out ──
 
-        r.register(Command(id: "review.leave", title: "Go back to its forest (from the code beside the diff: to the diff)", scope: .review, verb: .out, label: "back",
+        r.register(Command(id: "review.leave", title: "Go back to its forest", scope: .review, verb: .out, label: "back",
                            local: { _, _ in
-                               if app.pane?.id == reviewCodePane && pg.side != nil { return app.focus(pane: reviewDiffPane) }
                                let pid = pg.branch?.project ?? pg.integration
                                guard let pid, let p = app.store.view(Project.self, pid) else { return app.go(.forests) }
                                let id = pg.id
                                app.go(.forest(repo: p.repo, project: p.name))
                                if pg.integration == nil { app.setCursor(RowKey.branch(id)) }
+                           }))
+        // ── left and right: the halves of a split line, then the panes beside ──
+
+        func half() -> Side? {
+            guard app.pane?.id == reviewDiffPane, let h = pg.here, h.kind == .line, let row = h.row else { return nil }
+            return sideLine(row, prefer: pg.column).side
+        }
+        r.register(Command(id: "review.left", title: "The old side of the line, else the pane to the left", scope: .review, verb: .left, quiet: true,
+                           local: { _, _ in
+                               if half() == .right, pg.here?.row?.left?.old != nil { pg.column = .left; return }
+                               if !app.focus(.left) { throw Refusal("nothing to the left") }
+                           }))
+        r.register(Command(id: "review.right", title: "The new side of the line, else the pane to the right", scope: .review, verb: .right, quiet: true,
+                           local: { _, _ in
+                               if half() == .left, pg.here?.row?.right?.new != nil { pg.column = .right; return }
+                               if !app.focus(.right) { throw Refusal("nothing to the right") }
                            }))
         r.register(Command(id: "review.back", title: "Back out", scope: .review, verb: .cancel, label: "back", quiet: true,
                            local: { _, _ in
@@ -316,8 +331,8 @@ enum DiffCommands {
                 return (p.pos, w)
             }
             guard let h = pg.here, h.kind == .line, let row = h.row else { return (nil, w) }
-            let old = row.right == nil
-            let l = (row.right ?? row.left)!
+            let old = sideLine(row, prefer: pg.column).side == .left
+            let l = (old ? row.left : row.right)!
             let pos = CodeLookup.position(path: h.path, line: (old ? l.old : l.new) ?? 1, text: l.text, side: old ? "old" : "new")
             if pg.scoped, let sha = pg.commitScope { return (pos, .commit(repo: t.repo, sha: sha)) }
             return (pos, w)

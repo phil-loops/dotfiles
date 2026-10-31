@@ -10,7 +10,7 @@ public enum Verb: String, CaseIterable, Sendable, Comparable {
     // ── nav: owned by the nav core, the same on every page ──
     case next, previous, first, last
     case halfDown = "half-down", halfUp = "half-up"
-    case into = "in", out
+    case left, right, out
     case cancel
     case nextSibling = "next-sibling", previousSibling = "previous-sibling"
     case parent, child, root, tip
@@ -94,8 +94,9 @@ public enum Verbs {
         v(.last, .nav, ["G"], jump: true, "the last row"),
         v(.halfDown, .nav, ["C-d"], "down half a page"),
         v(.halfUp, .nav, ["C-u"], "up half a page"),
-        v(.into, .nav, ["l", "right"], "one level in on the zoom ladder (forests → forest → branch → file → line)"),
-        v(.out, .nav, ["h", "left"], "one level out on the zoom ladder"),
+        v(.left, .nav, ["h", "left"], "left in what you see: the old side of a split diff, else the pane to the left"),
+        v(.right, .nav, ["l", "right"], "right in what you see: the new side of a split diff, else the pane to the right"),
+        v(.out, .nav, ["-"], "up a level: line → file → branch → forest → forests (↵ goes in)"),
         v(.cancel, .nav, ["esc"], "close the innermost transient thing — never changes page"),
         v(.nextSibling, .nav, ["J"], jump: true, "the next branch in merge order, staying on this kind of page"),
         v(.previousSibling, .nav, ["K"], jump: true, "the previous branch in merge order, staying on this kind of page"),

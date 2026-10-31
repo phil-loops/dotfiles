@@ -229,7 +229,7 @@ private struct DiffPane: View {
         let colors = CanvasColors(theme)
         let here = pg.here
         let focused = app.isFocused(reviewDiffPane)
-        var marks = CanvasMarks(cursor: here?.key, focused: focused)
+        var marks = CanvasMarks(cursor: here?.key, column: pg.column, focused: focused)
         // the range x selected, or the lines the selected conversation covers
         if here?.kind == .thread, let t = here?.id.flatMap({ app.store.view(CanopyCore.Thread.self, $0) }), let l = t.local, let s = l.startLine {
             marks.range = (t.path, t.side, s, l.line)

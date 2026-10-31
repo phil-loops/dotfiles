@@ -108,7 +108,7 @@ enum ProjectCommands {
         func hasBranches(_ id: String?) -> Bool { !(m.forest(id)?.branches.isEmpty ?? true) }
 
         r.register(Command(
-            id: "forest.expand", title: "Show the forest's branches (open again: its page)", scope: .project, verb: .into, label: "open",
+            id: "forest.expand", title: "Show the forest's branches (open again: its page)", scope: .project, verb: .main, label: "open",
             available: { [unowned app] id in exists(id) && app.router.surface.id == "forests" },
             local: { [unowned app] id, _ in
                 guard let id else { return }
@@ -188,7 +188,7 @@ enum ProjectCommands {
         r.register(Command(
             id: "forest.leave", title: "Go back to Forests", scope: .forest, verb: .out, label: "back",
             local: { [unowned app] _, _ in
-                // `h` is deterministic (NAV.md §4.1): Forests, with the cursor on this forest
+                // `-` is deterministic (NAV.md §4.1): Forests, with the cursor on this forest
                 let pid = m.pageProject
                 if let pid, s.view(Project.self, pid)?.state == .archive || m.shelved.contains(pid) { m.showArchive = true }
                 app.go(.forests)

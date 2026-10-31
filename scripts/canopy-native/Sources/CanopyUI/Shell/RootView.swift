@@ -37,7 +37,7 @@ public struct RootView: View {
     }
 }
 
-/// Where you are, as the ladder `h` climbs: canopy › forest › branch.
+/// Where you are, as the ladder `-` climbs: canopy › forest › branch.
 struct Header: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme

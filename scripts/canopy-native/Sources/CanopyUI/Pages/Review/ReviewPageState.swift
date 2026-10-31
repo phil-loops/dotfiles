@@ -85,8 +85,10 @@ public struct ReviewLineRange: Equatable, Sendable {
     public var startLine: Int?
 }
 
-/// The side and line number a row is commented on: its new line when it has one.
-public func sideLine(_ r: DiffRow) -> (side: Side, line: Int) {
+/// The side and line number a row is commented on: the `prefer`red half when the row has a line
+/// there, else the half it has.
+public func sideLine(_ r: DiffRow, prefer: Side = .right) -> (side: Side, line: Int) {
+    if prefer == .left, let o = r.left?.old { return (.left, o) }
     if let n = r.right?.new { return (.right, n) }
     return (.left, r.left?.old ?? 0)
 }
@@ -117,6 +119,8 @@ public final class ReviewPageState: ShipHost {
     public var tab = "files" { didSet { if tab != oldValue { tabMoved(oldValue) } } }
     /// Diffs are always side by side.
     public let split = true
+    /// The half of the split the cursor reads, kept as it moves up and down; `h` / `l` switch it.
+    public var column: Side = .right
     public var showOutdated = false
     /// where `x` dropped its mark (the other end of a range comment)
     public var mark: String?
@@ -670,10 +674,10 @@ public final class ReviewPageState: ShipHost {
     /// The commentable line range under the cursor (and the mark `x` dropped).
     public var range: ReviewLineRange? {
         guard let h = here, h.kind == .line, let row = h.row else { return nil }
-        let end = sideLine(row)
+        let end = sideLine(row, prefer: column)
         let m = mark.flatMap { stopIndex[$0] }.map { stops[$0] }
         guard let m, m.kind == .line, m.path == h.path, let mrow = m.row else { return ReviewLineRange(path: h.path, side: end.side, line: end.line) }
-        let start = sideLine(mrow)
+        let start = sideLine(mrow, prefer: column)
         if start.side != end.side { return ReviewLineRange(path: h.path, side: end.side, line: end.line) }
         let (a, b) = start.line <= end.line ? (start.line, end.line) : (end.line, start.line)
         return ReviewLineRange(path: h.path, side: end.side, line: b, startLine: a == b ? nil : a)

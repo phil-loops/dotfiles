@@ -3,7 +3,7 @@ import SwiftUI
 
 /// Forest.tsx: one forest's page (/v2/p/<repo>/<project>) — every branch in merge order with what it
 /// does in full (its description and commit outline) and where it stands (ship state, gates, PR, open
-/// threads). `l` opens a branch's review page, `h` goes back to Forests, `tab` turns to the story.
+/// threads). `ret` opens a branch's review page, `-` goes back to Forests, `tab` turns to the story.
 struct ForestPage: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme

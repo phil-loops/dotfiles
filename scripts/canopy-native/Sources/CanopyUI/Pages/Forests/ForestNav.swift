@@ -1,7 +1,7 @@
 import CanopyCore
 import Foundation
 
-/// Navigation on the forest pages, NAV.md's way: `ret`/`l` in and `h` out on one zoom axis, `J`/`K`
+/// Navigation on the forest pages, NAV.md's way: `ret` in and `-` out on one zoom axis, `J`/`K`
 /// through merge order, `g k`/`g j` along the DAG (labels over the children at a fork), `g K`/`g J`
 /// to the stack's root and tip, `space f` to find on the page. (`g 1–9` is the shell's.)
 @MainActor

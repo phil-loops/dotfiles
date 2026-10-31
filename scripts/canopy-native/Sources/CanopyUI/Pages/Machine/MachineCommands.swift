@@ -18,7 +18,7 @@ enum MachineCommands {
                                guard let m, let u = m.server(id)?.url, let url = URL(string: u) else { throw Refusal("no url") }
                                m.openURL(url)
                            }))
-        r.register(Command(id: "machine.log", title: "Show the server's log", scope: .server, verb: .into, label: "log", v1: ["click:log"],
+        r.register(Command(id: "machine.log", title: "Show the server's log", scope: .server, leader: LocalKey(",l"), label: "log", v1: ["click:log"],
                            available: { [weak m] id in owned(id) && m?.logFor != id },
                            local: { [weak m] id, _ in m?.showLog(id) }))
         r.register(Command(id: "machine.log.close", title: "Hide the log", scope: .server, verb: .out, label: "log", v1: ["click:hide log"],
