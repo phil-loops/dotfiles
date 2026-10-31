@@ -371,6 +371,13 @@ enum DiffCommands {
             return (pos, w)
         }
         let codeOK: (String?) -> Bool = { _ in onFiles(nil) || app.pane?.id == reviewCodePane || pg.scoped }
+        r.register(Command(id: "review.rename", title: "Rename the name under the cursor (a commit you see first)", scope: .review, verb: .rename, label: "rename",
+                           available: { _ in onFiles(nil) && !pg.scoped && pg.integration == nil && app.pane?.id == reviewDiffPane },
+                           local: { _, _ in
+                               guard let t = pg.target else { return }
+                               let (p, _) = position()
+                               CodeLookup.of(app).rename(p, branch: t.name, repo: t.repo)
+                           }))
         r.register(Command(id: "review.types", title: "Show the type (hover)", scope: .review, verb: .type, label: "type", available: codeOK,
                            local: { _, _ in let (p, w) = position(); CodeLookup.of(app).hover(p, w) }))
         for (id, kind, verb, title, label) in [("review.definition", LSPGoto.definition, Verb.definition, "Go to the definition — in the diff when it's there, else beside it", "def"),
@@ -445,9 +452,14 @@ enum DiffCommands {
     static func openHere(_ pg: ReviewPageState) -> Write? {
         guard let h = pg.here, h.kind != .file, let t = pg.target, let app = pg.app else { return nil }
         var line: JSONValue = .null
-        if h.kind == .line, let row = h.row { line = .number(Double(sideLine(row).line)) }
+        if h.kind == .line, let row = h.row {
+            let at = sideLine(row, prefer: pg.column)
+            line = .number(Double(at.line))
+            // on a name in the new half: Helix lands on it (stack-open's "<line>:<col>")
+            if at.side == .right, let w = pg.hereWord { line = .string("\(at.line):\(w.lowerBound + 1)") }
+        }
         else if h.kind == .thread, let l = h.id.flatMap({ app.store.view(CanopyCore.Thread.self, $0) })?.local?.line { line = .number(Double(l)) }
-        return Write(path: pg.repoPath("/open"), body: ["branch": .string(t.name), "path": .string(h.path), "line": line],
+        return Write(path: pg.repoPath("/open"), body: ["branch": .string(t.name), "path": .string(h.path), "pos": line],
                      settled: { true }, failed: "couldn't open it in Helix")
     }
 

@@ -159,7 +159,7 @@ public final class CodeLookup {
     }
 
     /// Ask until the answer settles: nil when a newer ask took over.
-    private func asking<T: Decodable & Settles>(_ route: String, _ w: Where, _ body: Body, _ t: T.Type) async -> T? {
+    private func asking<T: Decodable & Settles, B: Encodable>(_ route: String, _ w: Where, _ body: B, _ t: T.Type) async -> T? {
         seq += 1
         let mine = seq
         let t0 = Date()
@@ -263,6 +263,56 @@ public final class CodeLookup {
         }
     }
 
+    private struct RenameBody: Encodable {
+        var branch: String
+        var path: String
+        var line: Int
+        var character: Int
+        var newName: String
+        var apply: Bool
+        var sha: String?
+    }
+
+    /// space r: the new name (typed into the picker), the edits as a diff in `pop`, and on ↵ one
+    /// commit on the branch — the server refuses anything that reaches past the repo or a moved tip.
+    public func rename(_ p: Position?, branch: String?, repo: String) {
+        guard let app else { return }
+        guard let p, p.side == "new", let branch else { pop = .note("rename works on the branch's own code, at a name"); return }
+        app.nav.pick("rename to…", [PickItem(label: "type the new name · ↵ shows what changes")], rank: { _ in [0] }) { [weak self, weak app] _ in
+            guard let self, let app else { return }
+            let name = app.nav.filter.trimmingCharacters(in: .whitespaces)
+            guard !name.isEmpty else { return }
+            self.previewRename(RenameBody(branch: branch, path: p.path, line: p.line, character: p.character, newName: name, apply: false), repo: repo)
+        }
+    }
+
+    private func previewRename(_ b: RenameBody, repo: String) {
+        pop = .wait("asking tsgo what renaming changes…")
+        Task { @MainActor in
+            guard let r = await asking("/lsp/rename", .branch(repo: repo, name: b.branch, base: nil), b, LSPRename.self) else { return }
+            guard r.ok, let sha = r.sha, let files = r.files else {
+                pop = .note(Self.plainNote(r.message).isEmpty ? "couldn't rename here" : Self.plainNote(r.message))
+                return
+            }
+            let edits = files.reduce(0) { $0 + $1.edits }
+            pop = .hover("```diff\n\(r.diff ?? "")\n```")
+            var apply = b
+            apply.apply = true
+            apply.sha = sha
+            app?.nav.pick("rename \(r.old ?? "it") to \(b.newName)?", [PickItem(label: "↵ commit it", text: "\(edits) edit\(edits == 1 ? "" : "s") in \(files.count) file\(files.count == 1 ? "" : "s")")]) { [weak self] _ in
+                self?.applyRename(apply, repo: repo)
+            }
+        }
+    }
+
+    private func applyRename(_ b: RenameBody, repo: String) {
+        pop = .wait("renaming…")
+        Task { @MainActor in
+            guard let r = await asking("/lsp/rename", .branch(repo: repo, name: b.branch, base: nil), b, LSPRename.self) else { return }
+            pop = .note(r.ok ? "renamed in \(String((r.sha ?? "").prefix(7)))" : Self.plainNote(r.message).isEmpty ? "couldn't rename" : Self.plainNote(r.message))
+        }
+    }
+
     public func dismiss() {
         seq += 1
         if pop != nil { pop = nil }
@@ -278,6 +328,18 @@ protocol Settles {
 extension LSPHover: Settles {}
 extension LSPLocations: Settles {}
 extension LSPSymbols: Settles {}
+
+/// /lsp/rename's answer: the preview (old name, files, diff) or the new commit.
+struct LSPRename: Decodable, Settles {
+    struct File: Decodable { var path: String; var edits: Int }
+    var ok: Bool
+    var state: String?
+    var message: String?
+    var sha: String?
+    var old: String?
+    var files: [File]?
+    var diff: String?
+}
 
 /// The `space k` popover (TypesPop.tsx): the type, or what tsgo is doing. Place it where the code
 /// is; it draws nothing while there's nothing to say.
