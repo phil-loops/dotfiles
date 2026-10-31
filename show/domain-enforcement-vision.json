@@ -79,13 +79,6 @@
       "url": "http://localhost:3010/admin"
     },
     {
-      "id": "live-branch",
-      "group": "Live",
-      "title": "Branch · disable markers in the viewer",
-      "tag": "mark-domain-disables-on-notice-chart",
-      "url": "http://localhost:62497/v2/b/loops/mark-domain-disables-on-notice-chart"
-    },
-    {
       "id": "p-improve",
       "group": "Path",
       "title": "Improve what we have",
