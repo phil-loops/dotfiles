@@ -358,6 +358,25 @@ import Testing
         #expect(a.pane?.id == reviewCodePane, "past the new half, l is the code beside it")
     }
 
+    /// w / b step name to name, crossing lines, and g d / space k ask about the name they land on.
+    @Test func wAndBStepNameToNameAcrossLines() async throws {
+        let (a, _) = try await app()
+        let pg = ReviewPageState.of(a)
+        keys(a, "w")
+        let first = try #require(pg.here)
+        let names = CodeLookup.names(first.row?.right?.text ?? "")
+        #expect(pg.hereWord == names.first)
+        var presses = 0
+        while pg.here?.key == first.key && presses < 20 { keys(a, "w"); presses += 1 }
+        #expect(presses == names.count, "every name on the line, then the next line's")
+        let next = try #require(pg.here)
+        #expect(next.key != first.key && pg.hereWord == CodeLookup.names(next.row?.right?.text ?? "").first)
+        keys(a, "b")
+        #expect(pg.here?.key == first.key && pg.hereWord == names.last, "back to the last name of the line before")
+        keys(a, "j")
+        #expect(pg.hereWord == nil, "the name belongs to its line")
+    }
+
     @Test func escOnlyCancels() async throws {
         let (a, _) = try await app()
         let pg = ReviewPageState.of(a)

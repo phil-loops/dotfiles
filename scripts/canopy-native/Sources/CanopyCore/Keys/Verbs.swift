@@ -11,6 +11,7 @@ public enum Verb: String, CaseIterable, Sendable, Comparable {
     case next, previous, first, last
     case halfDown = "half-down", halfUp = "half-up"
     case left, right, out
+    case nextWord = "next-word", previousWord = "previous-word"
     case cancel
     case nextSibling = "next-sibling", previousSibling = "previous-sibling"
     case parent, child, root, tip
@@ -96,6 +97,8 @@ public enum Verbs {
         v(.halfUp, .nav, ["C-u"], "up half a page"),
         v(.left, .nav, ["h", "left"], "left in what you see: the old side of a split diff, else the pane to the left"),
         v(.right, .nav, ["l", "right"], "right in what you see: the new side of a split diff, else the pane to the right"),
+        v(.nextWord, .nav, ["w"], "the next name in the code, across lines — what g d and space k ask about"),
+        v(.previousWord, .nav, ["b"], "the previous name in the code"),
         v(.out, .nav, ["-"], "up a level: line → file → branch → forest → forests (↵ goes in)"),
         v(.cancel, .nav, ["esc"], "close the innermost transient thing — never changes page"),
         v(.nextSibling, .nav, ["J"], jump: true, "the next branch in merge order, staying on this kind of page"),
