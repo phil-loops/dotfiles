@@ -460,8 +460,8 @@ def _refresher():
 threading.Thread(target=_refresher, daemon=True).start()
 
 
-# The built app's signature (the server sets it to its asset_sig): sent in hello and again when a
-# rebuild moves it, so an open tab running an older bundle reloads itself instead of going stale.
+# The server's asset_sig (it moves when keys.toml is saved): sent in hello and again when it
+# moves, so canopy reloads its keymap.
 ASSET = lambda: ""   # noqa: E731
 
 

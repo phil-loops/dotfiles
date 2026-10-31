@@ -86,10 +86,9 @@ port=$("$HOME/.dotfiles/scripts/stack-review-port" "$dir" 2>/dev/null || true)
 # registry names it.
 main_wt=$(git -C "$dir" worktree list --porcelain | sed -n '1s/^worktree //p')
 route="/v2/b/${main_wt:t}/${branch}"
-url="http://127.0.0.1:${port}${route}"
 
 if (( dry )); then
-  echo "branch $branch → $url"
+  echo "branch $branch → canopy $route"
   exit 0
 fi
 
@@ -121,39 +120,11 @@ else
   gates="  ⚠ viewer not reachable"
 fi
 
-# Land on THE NODE, never on "whatever Chrome was showing". Focus a tab already on this route;
-# failing that `open` the URL, which both creates the tab and raises the browser — deterministic
-# whether or not a viewer tab exists, which a bare `open -a "Google Chrome"` never was.
-landed=""
-if pgrep -xq "Google Chrome" 2>/dev/null; then
-  hit=$(osascript \
-    -e 'on run argv' \
-    -e 'set needle to item 1 of argv' \
-    -e 'tell application "Google Chrome"' \
-    -e 'repeat with w in windows' \
-    -e 'set i to 0' \
-    -e 'repeat with t in (tabs of w)' \
-    -e 'set i to i + 1' \
-    -e 'if (URL of t contains needle) then' \
-    -e 'set active tab index of w to i' \
-    -e 'set index of w to 1' \
-    -e 'return "1"' \
-    -e 'end if' \
-    -e 'end repeat' \
-    -e 'end repeat' \
-    -e 'return ""' \
-    -e 'end tell' \
-    -e 'end run' \
-    ":${port}${route}" 2>/dev/null) || true
-  # Apple events are denied to a detached tmux (-1743), so a miss here means "couldn't ask",
-  # not "no such tab" — `open` is the guaranteed path either way.
-  if [[ "${hit:-}" == *1* ]]; then
-    open -a "Google Chrome" 2>/dev/null || true
-    landed="↩ viewer"
-  fi
-fi
-if [[ -z "$landed" ]]; then
-  if open "$url" >/dev/null 2>&1; then landed="↗ $route"; else landed="$url (no browser)"; fi
+# Land on THE NODE: canopy reuses its window and moves it to the route.
+if "$HOME/.dotfiles/scripts/canopy" --repo "$root" --port "$port" "$route" >/dev/null 2>&1; then
+  landed="↗ $route"
+else
+  landed="canopy $route (didn't open)"
 fi
 
 note "${committed}${gates}  ${landed}"

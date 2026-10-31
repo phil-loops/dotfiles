@@ -138,7 +138,7 @@ stack() {
         *)
             echo "Usage: stack <command>        (loops is the Loops CLI again — no longer shadowed)"
             echo ""
-            echo "  stack web [project|branch]       live forest review in the browser"
+            echo "  stack web [project|branch]       live forest review in canopy"
             echo "  stack list [--pick]              list registered stack-projects"
             echo "  stack integrate <project>        build virtual integration ref"
             echo "  stack restack <project> [--plan] rebase whole project onto fresh origin/main"
@@ -159,7 +159,7 @@ _stack() {
     if (( CURRENT == 2 )); then
         _values 'subcommand' \
             'review[review stack in nvim diffview]' \
-            'web[live forest review in the browser]' \
+            'web[live forest review in canopy]' \
             'list[list registered stack-projects]' \
             'integrate[build virtual integration ref]' \
             'restack[rebase project onto fresh origin/main]' \

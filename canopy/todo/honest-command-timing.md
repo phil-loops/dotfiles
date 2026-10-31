@@ -5,10 +5,10 @@ state = "open"
 area = "dashboard"
 size = "S"
 why = "the dashboard says clicking a row takes 895 ms; the real number is unknown, so it points work at the wrong place"
-links = ["scripts/viewer-solid/src/v2/telemetry.ts"]
+links = ["[\"scripts/canopy-native/Sources/CanopyCore/Runner/Telemetry.swift\"]"]
 rank = 2
 created = "2026-10-25"
-updated = "2026-10-25"
+updated = "2026-10-31"
 +++
 
 Telemetry, 30 days: `cursor.set` p95 895 ms (n=5) against a 16.7 ms feedback budget, `cursor.down/up` 33–36 ms.
