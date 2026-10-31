@@ -106,7 +106,7 @@ public enum ShipSeam {
         if row.hasPrefix("p|") { out.append(.pending) }
         if row.hasPrefix("w|") { out.append(.words) }
         let ship = ShipState.of(app)
-        if ship.host.tab == "commits" {
+        if ship.host.tab == "commits" || ship.host.tab == "files" {
             if app.pane?.id == historyPane { out.append(.history) }
             else if ship.commitScope != nil { out.append(.commit) }
         }

@@ -19,7 +19,7 @@ public enum Verb: String, CaseIterable, Sendable, Comparable {
     case nextHunk = "next-hunk", previousHunk = "previous-hunk"
     case nextThread = "next-thread", previousThread = "previous-thread"
     case face
-    case labels, find, search, map
+    case labels, find, search, map, conversation
     case type, definition, typeDefinition = "type-definition", implementations, references, symbols
     case github, preview
     case goForests = "go-forests", goDashboard = "go-dashboard", goTodo = "go-todo"
@@ -118,6 +118,7 @@ public enum Verbs {
         v(.find, .nav, ["space f"], "find something on this page by name"),
         v(.search, .nav, ["/"], "search this page's text"),
         v(.map, .nav, ["space m"], "the map around what you're on"),
+        v(.conversation, .nav, ["space c"], "the conversation, in place of what you're reading; esc brings it back"),
         v(.type, .nav, ["space k"], "the type under the cursor (hover)"),
         v(.definition, .nav, ["g d"], "go to the definition"),
         v(.typeDefinition, .nav, ["g y"], "go to the definition of its type"),

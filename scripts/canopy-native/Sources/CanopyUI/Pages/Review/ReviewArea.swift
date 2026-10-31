@@ -14,6 +14,12 @@ enum ReviewArea: PageArea {
         let pg = ReviewPageState.of(app)
         ShipState.of(app).host = pg
         _ = app.nav.attach(CodeNav.Attached(open: { [weak pg] l in pg?.open(l) }, here: { [weak pg] in pg?.herePlace() }))
+        // space c's conversation is a layer over the diff: esc takes it away before anything older
+        app.addCloser(first: true, isOpen: { [weak app, weak pg] in app?.router.route.surfaceID == "review" && pg?.tab == "conversation" },
+                      close: { [weak app, weak pg] in
+                          pg?.tab = "files"
+                          app?.focus(pane: reviewDiffPane)
+                      })
         watch(app, pg)
     }
 
@@ -58,8 +64,12 @@ struct ReviewSurface: SurfaceProvider {
             let n = guest.map(\.column).max().map { $0 + 1 } ?? 0
             return guest + (pg.scoped ? [Pane(id: reviewDiffPane, title: "commit", rows: pg.stopKeys, column: n, pageSize: 20)] : [])
         default:
-            var out = (pg.showsTree ? [Pane(id: reviewTreePane, title: "files", rows: ReviewPage.treeRows(pg), column: 0, pageSize: 12)] : [])
-                + [Pane(id: reviewDiffPane, title: "diff", rows: pg.stopKeys, column: 1, pageSize: 20)]
+            var out: [Pane] = []
+            if pg.showsHistory, let id = ShipSeam.branchID(app) {
+                out.append(Pane(id: ShipSeam.historyPane, title: "commits", rows: ShipRows.history(app, id), column: 0, row: 0, pageSize: 10))
+            }
+            if pg.showsTree { out.append(Pane(id: reviewTreePane, title: "files", rows: ReviewPage.treeRows(pg), column: 0, row: 1, pageSize: 12)) }
+            out.append(Pane(id: reviewDiffPane, title: "diff", rows: pg.stopKeys, column: 1, pageSize: 20))
             if pg.side != nil { out.append(Pane(id: reviewCodePane, title: pg.side.map { shortPath($0.path) } ?? "code", rows: pg.sideRows, column: 2, pageSize: 20)) }
             return out
         }

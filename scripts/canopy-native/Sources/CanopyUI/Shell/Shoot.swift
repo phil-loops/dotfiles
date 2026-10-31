@@ -27,6 +27,7 @@ public enum Shoot {
         let host = NSHostingView(rootView: AnyView(RootView().environment(app)
                 .preferredColorScheme(config.appearance == "light" ? .light : .dark)))
         host.frame = NSRect(origin: .zero, size: size)
+        host.sizingOptions = []   // a real window is the size its person made it; content never grows it
         window.contentView = host
         window.orderBack(nil)
         Task { @MainActor in

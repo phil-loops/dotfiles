@@ -33,10 +33,23 @@ struct ReviewPage: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 default:
                     HStack(alignment: .top, spacing: 0) {
-                        if pg.showsTree { FileTree().frame(width: pg.treeWidth) }
-                        DiffPane(empty: pg.base == .outgoing ? "nothing to push" : "no changes").frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .padding(.leading, pg.showsTree ? 0 : 12)
+                        if pg.showsOutline { Outline().frame(width: pg.outlineWidth) }
+                        VStack(alignment: .leading, spacing: 8) {
+                            if let sha = ShipState.of(app).commitScope {
+                                CommitHead(branchID: pg.id, sha: sha).padding(.horizontal, 16).padding(.top, 4)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            DiffPane(empty: pg.base == .outgoing ? "nothing to push" : "no changes").frame(maxWidth: .infinity, maxHeight: .infinity)
+                        }
+                        .frame(minHeight: 0, maxHeight: .infinity, alignment: .top)
+                        .padding(.leading, pg.showsOutline ? 0 : 12)
                         if pg.side != nil { SidePane().frame(width: 520) }
+                    }
+                    .onChange(of: app.cursors["review/\(ShipSeam.historyPane)"]) { _, k in
+                        // the outline's cursor is the diff's scope: a commit, or "= on main" for the whole branch
+                        guard let k, k.hasPrefix("h|"), app.pane?.id == ShipSeam.historyPane else { return }
+                        let sha = String(k.dropFirst(2))
+                        if ShipState.of(app).commitScope != (sha.isEmpty ? nil : sha) { ShipState.of(app).showCommit(sha.isEmpty ? nil : sha) }
                     }
                 }
             }
@@ -89,15 +102,21 @@ private struct ReviewHeader: View {
                 }
                 .font(Theme.text(11)).foregroundStyle(theme.inkFaint).lineLimit(1)
                 Spacer(minLength: 16)
+                let openThreads = pg.threads.filter { !$0.resolved && !$0.outdated }.count
+                Group {
+                    if openThreads > 0 { Text("\(openThreads) open").foregroundStyle(theme.ember) }
+                    if pg.tab == "conversation" { Text("conversation").foregroundStyle(theme.goldLeaf) }
+                    else if pg.branchFiles.count > 1 { Text("\(pg.branchViewed)/\(pg.branchFiles.count) viewed").foregroundStyle(theme.inkFaint) }
+                }
+                .font(Theme.text(11))
                 if pg.integration == nil {
                     ShipStripView(branchID: pg.id)
                     LoopStripView(branchID: pg.id, words: loopWords(pg.id), size: 11)
                         .task(id: b.map { "\($0.id)@\($0.tip)" }) { WordsState.of(app).load(app, pg.id) }
                 }
             }
-            Tabs()
         }
-        .padding(.horizontal, 16).padding(.top, 2).padding(.bottom, 6)
+        .padding(.horizontal, 16).padding(.top, 2).padding(.bottom, 8)
     }
 
     /// The PR form's title and body hints, for the loop strip's words step (LoopStrip.tsx words);
@@ -123,51 +142,30 @@ private struct ReviewHeader: View {
     }
 }
 
-/// conversation · commits · files, each a label target; the base and the viewed count on the right.
-private struct Tabs: View {
+
+/// The file tree: a pane of the diff's files with viewed boxes, its filter on top while finding.
+/// The review's table of contents, down the left margin: the branch's commits oldest first with
+/// what they land as at the foot (the cursor there scopes the diff), then its files when there are
+/// several. Two panes, one above the other: "history" and "files".
+private struct Outline: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme
 
     var body: some View {
         let pg = ReviewPageState.of(app)
-        let c = pg.conv
-        let b = pg.branch
-        let openThreads = pg.threads.filter { !$0.resolved && !$0.outdated }.count
-        HStack(spacing: 16) {
-            tab("conversation", count: "\((c?.comments.count ?? 0) + (c?.reviews.filter { !$0.body.isEmpty }.count ?? 0) + pg.threads.count)")
-            tab("commits", count: b.map { "\($0.commits)" } ?? "")
-            tab("files", count: "\(pg.branchFiles.count)")
-            Spacer()
-            if pg.tab == "files" && pg.integration == nil {
-                Text("vs").foregroundStyle(theme.inkFaint)
-                Button(pg.base.word) { app.runner.dispatch("review.base.next", via: .click) }
-                    .buttonStyle(.plain).foregroundStyle(theme.goldLeaf)
-                    .labelTarget(pane: "tabs", key: "base", title: "base", run: RouteTo("review.base.next"))
-            }
-            if openThreads > 0 { Text("\(openThreads) open").foregroundStyle(theme.ember) }
-            Text("\(pg.branchViewed)/\(pg.branchFiles.count) viewed").foregroundStyle(theme.inkFaint)
+        VStack(alignment: .leading, spacing: 14) {
+            if pg.showsHistory { HistoryList(branchID: pg.id).fixedSize(horizontal: false, vertical: true) }
+            if pg.showsTree { FileTree() }
         }
         .font(Theme.text(12))
-    }
-
-    @ViewBuilder private func tab(_ name: String, count: String, extra: String? = nil) -> some View {
-        let pg = ReviewPageState.of(app)
-        let on = pg.tab == name
-        Button { app.runner.dispatch("review.tab.\(name)", via: .click) } label: {
-            HStack(spacing: 5) {
-                Text(name).foregroundStyle(on ? theme.goldLeaf : theme.inkDim)
-                Text(count).foregroundStyle(theme.inkFaint)
-                if let extra { Text(extra).foregroundStyle(theme.goldLeaf) }
-            }
-            .padding(.bottom, 4)
-            .overlay(alignment: .bottom) { if on { theme.goldLeaf.frame(height: 1.5).offset(y: 2) } }
+        .padding(.leading, 6)
+        .task(id: app.store.view(Branch.self, pg.id).map(ShipState.historyKey)) {
+            ShipState.of(app).loadHistory(app, pg.id)
+            WordsState.of(app).load(app, pg.id)
         }
-        .buttonStyle(.plain)
-        .labelTarget(pane: "tabs", key: "tab:\(name)", title: name, run: RouteTo("review.tab.\(name)"))
     }
 }
 
-/// The file tree: a pane of the diff's files with viewed boxes, its filter on top while finding.
 private struct FileTree: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme
