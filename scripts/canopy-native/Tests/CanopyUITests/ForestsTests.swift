@@ -157,7 +157,7 @@ private let NOW = iso("2026-10-22T18:00:00Z") // Thu 11:00 PT
 /// A small world: two focus forests (the first a fork: a → b, a → c, c → d), one on the workbench,
 /// one archived, one whose every PR landed.
 @MainActor
-private func world(_ route: Route = .forests) -> AppModel {
+private func world(_ route: Route = .forests, todo: [String: Any] = [:]) -> AppModel {
     var c = AppConfig()
     c.route = route
     let a = AppModel(config: c, port: 1, telemetry: false)
@@ -192,7 +192,7 @@ private func world(_ route: Route = .forests) -> AppModel {
     let landed: [String: Any] = ["r:tree#9": ["id": "r:tree#9", "repo": "r", "project": "r:tree", "pr": 9, "title": "feat: the ground", "branch": "z", "at": "2026-10-01T10:00:00Z"]]
     let state: [String: Any] = [
         "epoch": "e", "versions": ["git": 1, "remote": 1, "review": 1, "todo": 1],
-        "entities": ["repo": ["r": ["id": "r", "name": "r", "main": "main", "trunk": "abc"]], "project": projects, "branch": branches, "pr": prs, "landed": landed],
+        "entities": ["repo": ["r": ["id": "r", "name": "r", "main": "main", "trunk": "abc"]], "project": projects, "branch": branches, "pr": prs, "landed": landed, "todo": todo],
     ]
     a.store.hydrate(try! Snapshot.decode(JSONSerialization.data(withJSONObject: state)))
     a.forestModel.now = NOW
@@ -343,6 +343,21 @@ private func showRows(_ a: AppModel) {
 
 @MainActor @Suite(.serialized) struct ForestPageNavTests {
     func page() -> AppModel { world(.forest(repo: "r", project: "tree")) }
+
+    @Test func theForestsTodoListIsAPaneUnderItsBranches() {
+        func item(_ id: String, _ project: String?, rank: Int) -> (String, [String: Any]) {
+            (id, ["id": id, "title": id, "kind": "build", "state": "open", "area": "x", "size": "S", "why": "w", "rank": rank, "body": "",
+                  "project": project as Any? ?? NSNull()])
+        }
+        let a = world(.forest(repo: "r", project: "tree"),
+                      todo: Dictionary(uniqueKeysWithValues: [item("t2", "r:tree", rank: 2), item("t1", "r:tree", rank: 1), item("other", "r:solo", rank: 1), item("viewer", nil, rank: 1)]))
+        #expect(a.panes.map(\.id) == ["main", "todo"])
+        #expect(a.panes.last?.rows == [RowKey.todo("t1"), RowKey.todo("t2")])
+        #expect(a.provider?.primary(for: RowKey.todo("t1"), a)?.id == "todo.show")
+        a.forestModel.face = .story
+        #expect(a.panes.map(\.id) == ["main"], "the story face shows no todo list")
+        #expect(world(.forest(repo: "r", project: "solo")).panes.map(\.id) == ["main"], "a forest with no items has no pane")
+    }
 
     @Test func jAndKWalkMergeOrderAndRecordJumps() {
         let a = page()

@@ -54,7 +54,18 @@ struct ForestSurface: SurfaceProvider {
     /// The forest's branches in merge order — or the story's chapters, on that face.
     func rows(_ app: AppModel) -> [String] { app.forestModel.forestRows(app.forestModel.pageProject) }
 
-    func primary(for row: String, _ app: AppModel) -> RouteTo? { ForestNav.primary(for: row, app) }
+    /// The branches, and below them the forest's open todo items (its list on the tracker).
+    func panes(_ app: AppModel) -> [Pane] {
+        var out = [Pane(id: "main", rows: rows(app))]
+        let todo = ForestPage.todoItems(app).map { RowKey.todo($0.id) }
+        if !todo.isEmpty { out.append(Pane(id: "todo", title: "todo", rows: todo, row: 1)) }
+        return out
+    }
+
+    func primary(for row: String, _ app: AppModel) -> RouteTo? {
+        if let id = RowKey.id(row, "t") { return RouteTo("todo.show", arg: id) }
+        return ForestNav.primary(for: row, app)
+    }
 
     func scopes(_ app: AppModel) -> [Scope] {
         var out: [Scope] = []
@@ -91,6 +102,7 @@ struct ForestSurface: SurfaceProvider {
     func title(for row: String, _ app: AppModel) -> String? {
         if let id = RowKey.id(row, "b"), let b = app.store.view(Branch.self, id) { return "\(leaf(b.name)) \(b.description)" }
         if let id = RowKey.id(row, "d"), let l = app.store.view(Landed.self, id) { return "#\(l.pr) \(OutlineHints.bare(l.title))" }
+        if let id = RowKey.id(row, "t"), let t = app.store.trackerItem(id) { return t.title }
         return app.guessTitle(row)
     }
 
