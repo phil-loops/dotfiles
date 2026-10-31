@@ -129,6 +129,7 @@ enum KeyTable {
         KeyBinding(id: "workspace.learn", menu: "Workspace", title: "Learn", key: "3", modifiers: .command, overOverlay: true) { $0.switchTo(.learn) },
         KeyBinding(id: "workspace.runs", menu: "Workspace", title: "Runs", key: "4", modifiers: .command, overOverlay: true) { $0.switchTo(.runs) },
         KeyBinding(id: "workspace.api", menu: "Workspace", title: "API", key: "5", modifiers: .command, overOverlay: true) { $0.switchTo(.api) },
+        KeyBinding(id: "workspace.canopy", menu: "Workspace", title: "Canopy", key: "6", modifiers: .command, overOverlay: true) { $0.switchTo(.canopy) },
 
         KeyBinding(id: "tutor.send", menu: "Tutor", title: "Send", key: "\r", modifiers: .command, workspaces: [.learn]) { $0.tutor?.sendFocused() },
         KeyBinding(id: "tutor.guessing", menu: "Tutor", title: confidenceLevels[0].1, key: "1", modifiers: .control, workspaces: [.learn],
@@ -242,6 +243,8 @@ extension AppDelegate {
 
     func isEnabled(_ binding: KeyBinding) -> Bool {
         guard binding.applies(in: active) else { return false }
+        // in the Canopy workspace every bare key is canopy's; Show keeps only its ⌘ shortcuts
+        if active == .canopy && !binding.modifiers.contains(.command) { return false }
         if shell.overlay != nil || shell.finder != nil, !binding.overOverlay { return false }
         switch binding.when {
         case .always: break

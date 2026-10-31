@@ -30,11 +30,10 @@ let forestTint = NSColor(name: "show.forest") { appearance in
         : NSColor(srgbRed: 0x5A / 255, green: 0x75 / 255, blue: 0x66 / 255, alpha: 1)
 }
 
-/// The command ⌘⇧O runs for a branch section: `canopy /v2/b/<repo>/<branch>` (`SHOW_CANOPY` swaps the binary); nil for a non-branch.
-func canopyCommand(_ deck: Deck, _ section: Section) -> [String]? {
+/// The Canopy workspace page ⌘⇧O opens for a branch section, `/v2/b/<repo>/<branch>`; nil for a non-branch.
+func canopyRoute(_ deck: Deck, _ section: Section) -> String? {
     guard section.rank != nil, let repo = deck.repo, !repo.isEmpty else { return nil }
-    let binary = ProcessInfo.processInfo.environment["SHOW_CANOPY"] ?? ("~/.dotfiles/scripts/canopy" as NSString).expandingTildeInPath
-    return [binary, "/v2/b/\(repo)/\(section.key)"]
+    return "/v2/b/\(repo)/\(section.key)"
 }
 
 /// Where a forest deck's repo is checked out: its `repoPath`, else `~/coding/loops` for `"repo": "loops"`.

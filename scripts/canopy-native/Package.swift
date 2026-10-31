@@ -6,6 +6,7 @@ let package = Package(
     platforms: [.macOS(.v14)],
     products: [
         .executable(name: "Canopy", targets: ["Canopy"]),
+        .library(name: "CanopyUI", targets: ["CanopyUI", "CanopyCore"]),
     ],
     targets: [
         // No UI: transport, event stream, store, models, router, keys, runner. Fully unit-tested.

@@ -125,6 +125,10 @@ extension AppDelegate {
             workspaces[.learn]?.startTutor(opening.hasPrefix("re-test ") ? .retest(concept: String(opening.dropFirst(8))) : .topic(opening))
             RunLoop.main.run(until: Date().addingTimeInterval(2))
         }
+        if active == .canopy {
+            // canopy hydrates from its server over a few hundred ms; draw what it settles on
+            RunLoop.main.run(until: Date().addingTimeInterval(Double(environment["SHOW_SNAPSHOT_WAIT"] ?? "") ?? 4))
+        }
         if let text = environment["SHOW_SNAPSHOT_TUTOR_NEW"] {
             askNewTutorSession()
             (shell.overlay as? NewSessionOverlay)?.field.stringValue = text
@@ -210,8 +214,8 @@ func checkRouting(_ raw: String) -> Int32 {
         let indent = String(repeating: "  ", count: branch.depth)
         print("  \(String(format: "%2d", branch.number))  \(indent)\(section.key)  (rank \(section.rank ?? 0), parent \(section.parent ?? "-"))")
     }
-    if let first = order.branches.first, let command = canopyCommand(deck, deck.sections[first.index]) {
-        print("⌘⇧O on \(deck.sections[first.index].key): \((command[0] as NSString).abbreviatingWithTildeInPath) \(command[1])")
+    if let first = order.branches.first, let route = canopyRoute(deck, deck.sections[first.index]) {
+        print("⌘⇧O on \(deck.sections[first.index].key): the Canopy workspace at \(route)")
     }
     return 0
 }

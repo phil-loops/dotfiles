@@ -559,7 +559,7 @@ func shelfEntry(_ path: String) -> ShelfEntry? {
         let counts = live.status.flatMap { status in status.done.flatMap { done in status.total.map { "\(done) of \($0)" } } }
         let progress = [counts, live.status?.state].compactMap { $0 }.joined(separator: " · ")
         return ShelfEntry(path: path, workspace: workspace, title: live.title, state: state, progress: progress, touched: touched)
-    case .api:
+    case .api, .canopy:
         return nil
     case .forest, .review:
         guard let deck = try? loadDeck(path) else { return nil }
@@ -702,6 +702,7 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
     private var syncingSelection = false
     let tutor: TutorController?
     let console: ConsoleController?
+    let canopy: CanopyHost?
     let split = NSSplitViewController()
     let shelf = ShelfTable()
     let statusLabel = NSTextField(labelWithString: "")
@@ -716,6 +717,7 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
         self.workspace = workspace
         tutor = workspace == .learn ? TutorController() : nil
         console = workspace == .api ? ConsoleController() : nil
+        canopy = workspace == .canopy ? CanopyHost() : nil
         super.init(nibName: nil, bundle: nil)
         tutor?.onTitleChange = { [weak self] in self?.onTitleChange?() }
         tutor?.onStartRetest = { [weak self] concept in self?.startTutor(.retest(concept: concept)) }
@@ -779,7 +781,7 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
     /// Puts the dividers where they read best at 1180pt: a 210pt shelf, then the open document's own columns.
     func settleColumns() {
         split.view.layoutSubtreeIfNeeded()
-        if console != nil {
+        if console != nil || canopy != nil {
             split.splitViewItems.first?.isCollapsed = true
             return
         }
@@ -805,6 +807,11 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
             console.start()
             return
         }
+        if let canopy {
+            let route = (try? JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: path)))) as? [String: Any]
+            canopy.start(route: (route?["route"] as? String).flatMap { $0.isEmpty ? nil : $0 })
+            return
+        }
         prefs.set(Date(), forKey: "opened." + path)
         if workspace == .runs {
             recordLiveRun(path)
@@ -826,7 +833,7 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
         switch workspace {
         case .learn:
             tutor?.show(path: path)
-        case .api:
+        case .api, .canopy:
             return
         case .forest, .review, .runs:
             let controller: DeckController
@@ -887,6 +894,8 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
                 : "Nothing open. Pick a session from the shelf, or press ⌘O.")
         case .api:
             if let console { display(console) }
+        case .canopy:
+            if let canopy { display(canopy) }
         case .runs:
             display(emptyState("No live runs yet", "A live run shows here while it's going."))
         case .forest:
@@ -915,6 +924,8 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
             tutor.reload()
         } else if let console {
             console.reload()
+        } else if let canopy {
+            canopy.start()
         } else {
             currentDeck?.reload()
         }
