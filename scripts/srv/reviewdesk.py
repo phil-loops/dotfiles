@@ -36,6 +36,8 @@
 #                                                         worktree, the prompt drafted unsent, and
 #                                                         draft the reply to wait for its fix
 #                        {branch, undo: key}              take both back (outline undo + the draft)
+#   POST /review-edit   {branch, path, start, end, text, sha}  your own edit of lines start–end (new side)
+#                                                        as a LOCAL commit — refused if the branch moved from sha
 #   POST /review-apply  {branch, thread}                 apply a suggestion as a LOCAL commit — git
 #                                                         only, landed the way /revert-commit lands
 #                                                         one (reset --keep in the branch's worktree,
@@ -675,6 +677,38 @@ def apply(req, d):
     leaf = t["path"].rsplit("/", 1)[-1]
     new = _commit_file(tip, t["path"], text, f"fix{scope}: apply {src['author']}'s suggestion in {leaf}\n\n{src['url']}\n")
     _land(branch, tip, new, t["path"])
+    _send(req, 200, {"ok": True, "sha": new})
+
+
+@_guarded
+def edit(req, d):
+    """Your own edit of a few lines, made in the diff: lines start–end of path, at the tip you saw,
+    become `text` in one commit on the branch — the same plumbing an applied suggestion uses."""
+    branch, path = d.get("branch") or "", d.get("path") or ""
+    try:
+        start, end = int(d.get("start")), int(d.get("end"))
+    except (TypeError, ValueError):
+        raise ghreview.Refused("want {branch, path, start, end, text, sha}")
+    text, seen = d.get("text"), d.get("sha") or ""
+    if not branch or not path or text is None or ".." in path.split("/") or path.startswith("/"):
+        raise ghreview.Refused("want {branch, path, start, end, text, sha}")
+    tip = _git(["rev-parse", "--verify", "-q", f"refs/heads/{branch}"]).stdout.strip()
+    if not tip:
+        raise ghreview.Refused(f"no branch {branch}")
+    if seen and not tip.startswith(seen):
+        raise ghreview.Refused("the branch moved since you started — your text is kept, look again")
+    shown = _git(["show", f"{tip}:{path}"])
+    if shown.returncode != 0:
+        raise ghreview.Refused(f"{path} isn't on the tip")
+    lines = text.split("\n")
+    if lines and lines[-1] == "" and len(lines) > 1:
+        lines = lines[:-1]
+    new_text = replace_lines(shown.stdout, start, end, lines)
+    if new_text == shown.stdout:
+        raise ghreview.Refused("nothing changed")
+    leaf = path.rsplit("/", 1)[-1]
+    new = _commit_file(tip, path, new_text, f"edit {leaf}\n")
+    _land(branch, tip, new, path)
     _send(req, 200, {"ok": True, "sha": new})
 
 
