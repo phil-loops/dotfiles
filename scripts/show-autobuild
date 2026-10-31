@@ -1,0 +1,146 @@
+#!/usr/bin/env python3
+"""show-autobuild — rebuild Show whenever its source settles, so the running app relaunches into it.
+
+  show-autobuild            watch forever (the launchd agent com.philbrockman.show-autobuild runs this)
+  show-autobuild --status   the recent builds, their times, and whether builds are dragging
+
+Watches the same files `show --build` fingerprints (show-app/*.swift, its Package.swift, and
+canopy-native's Package.swift + Sources, since Show links canopy). A change waits until nothing has
+moved for QUIET seconds — other sessions save files in bursts — then runs `show --build` under a
+heavy-turn slot; the running Show sees the new build stamp and relaunches itself. A build that
+fails because a file moved mid-build waits for quiet again; a real compile error waits for the
+next change.
+
+Every build appends a row to ~/.cache/show/autobuild.tsv:
+  at, result, wait s (queued for a heavy-turn slot), build s, files compiled, trigger files, note
+and keeps its full output in ~/.cache/show/autobuild/<at>.log (the newest KEEP). When builds drag,
+--status says whether it's the queue (machine busy) or the compile (more files, slower compiler).
+"""
+import os
+import statistics
+import subprocess
+import sys
+import time
+
+DOTFILES = os.path.expanduser("~/.dotfiles")
+SCRIPTS = os.path.join(DOTFILES, "scripts")
+CACHE = os.path.join(os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache")), "show")
+JOURNAL = os.path.join(CACHE, "autobuild.tsv")
+LOGS = os.path.join(CACHE, "autobuild")
+QUIET = float(os.environ.get("SHOW_AUTOBUILD_QUIET", "4"))
+POLL = 1.0
+KEEP = 50
+DRAG = 2.0   # a build this many times the recent median is dragging
+
+
+def watched():
+    """path -> (mtime, size) for every file `show --build` fingerprints."""
+    out = {}
+    app = os.path.join(SCRIPTS, "show-app")
+    for name in os.listdir(app):
+        if name.endswith(".swift") or name == "Package.swift":
+            out[os.path.join(app, name)] = None
+    canopy = os.path.join(SCRIPTS, "canopy-native")
+    out[os.path.join(canopy, "Package.swift")] = None
+    for root, _, files in os.walk(os.path.join(canopy, "Sources")):
+        for f in files:
+            out[os.path.join(root, f)] = None
+    for p in out:
+        try:
+            st = os.stat(p)
+            out[p] = (st.st_mtime_ns, st.st_size)
+        except OSError:
+            out[p] = None
+    return out
+
+
+def changed(before, after):
+    return sorted(os.path.relpath(p, SCRIPTS) for p in set(before) | set(after) if before.get(p) != after.get(p))
+
+
+def build(trigger):
+    at = time.strftime("%Y-%m-%dT%H:%M:%S")
+    os.makedirs(LOGS, exist_ok=True)
+    log_path = os.path.join(LOGS, f"{at}.log")
+    t0 = time.monotonic()
+    ticket = subprocess.run(["heavy-turn", "--acquire", "--class", "show-build", "--owner", str(os.getpid())],
+                            capture_output=True, text=True).stdout.strip()
+    waited = time.monotonic() - t0
+    t1 = time.monotonic()
+    env = dict(os.environ, HEAVY_TURN_HELD="1") if ticket else os.environ
+    with open(log_path, "w") as log:
+        proc = subprocess.run([os.path.join(SCRIPTS, "show"), "--build"], stdout=log, stderr=subprocess.STDOUT, env=env)
+    built = time.monotonic() - t1
+    if ticket:
+        subprocess.run(["heavy-turn", "--release", ticket], capture_output=True)
+    text = open(log_path).read()
+    compiled = text.count("Compiling ")
+    if proc.returncode == 0:
+        result, note = ("built" if "building" in text else "unchanged"), ""
+    elif "was modified during the build" in text:
+        result, note = "raced", "a file moved mid-build; waiting for quiet"
+    else:
+        result = "failed"
+        note = next((l.strip() for l in text.splitlines() if "error:" in l), "exit %d" % proc.returncode)[:200]
+    with open(JOURNAL, "a") as j:
+        j.write("\t".join([at, result, f"{waited:.1f}", f"{built:.1f}", str(compiled), " ".join(trigger[:5]) + (" …" if len(trigger) > 5 else ""), note]) + "\n")
+    for old in sorted(os.listdir(LOGS))[:-KEEP]:
+        os.remove(os.path.join(LOGS, old))
+    return result
+
+
+def watch():
+    os.makedirs(CACHE, exist_ok=True)
+    seen = watched()
+    pending = []
+    last_move = None
+    build(["(start)"])
+    while True:
+        time.sleep(POLL)
+        now = watched()
+        moved = changed(seen, now)
+        seen = now
+        if moved:
+            pending = sorted(set(pending) | set(moved))
+            last_move = time.monotonic()
+            continue
+        if pending and time.monotonic() - last_move >= QUIET:
+            result = build(pending)
+            if result == "raced":
+                last_move = time.monotonic()
+            else:
+                pending = []
+
+
+def status():
+    try:
+        rows = [l.rstrip("\n").split("\t") for l in open(JOURNAL) if l.strip()]
+    except FileNotFoundError:
+        sys.exit("show-autobuild: no builds yet")
+    built = [r for r in rows if r[1] == "built"]
+    print(f"{'at':<20} {'result':<9} {'wait':>6} {'build':>6} {'files':>5}  trigger / note")
+    for r in rows[-12:]:
+        at, result, wait, secs, files, trigger, note = (r + [""] * 7)[:7]
+        print(f"{at:<20} {result:<9} {wait:>5}s {secs:>5}s {files:>5}  {note or trigger}")
+    if len(built) >= 3:
+        times = [float(r[3]) for r in built]
+        waits = [float(r[2]) for r in built]
+        recent = statistics.median(times[-11:-1]) if len(times) > 3 else statistics.median(times)
+        last = times[-1]
+        print(f"\nbuilds: {len(built)} · build median {statistics.median(times):.1f}s, p90 {sorted(times)[int(len(times) * 0.9) - 1]:.1f}s"
+              f" · queue median {statistics.median(waits):.1f}s")
+        if last > DRAG * recent:
+            print(f"⚠ dragging: the last build took {last:.1f}s against a recent median of {recent:.1f}s"
+                  f" — {built[-1][4]} files compiled, {built[-1][2]}s queued; log in {LOGS}/{built[-1][0]}.log")
+    fails = [r for r in rows[-20:] if r[1] == "failed"]
+    if fails:
+        print(f"\n{len(fails)} failed of the last 20 — latest: {fails[-1][0]}  {fails[-1][6]}")
+
+
+if __name__ == "__main__":
+    if sys.argv[1:] == ["--status"]:
+        status()
+    elif sys.argv[1:]:
+        sys.exit(__doc__)
+    else:
+        watch()
