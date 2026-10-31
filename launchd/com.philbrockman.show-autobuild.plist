@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.philbrockman.show-autobuild</string>
+  <key>ProgramArguments</key>
+  <array><string>/usr/bin/env</string><string>python3</string><string>/Users/philbrockman/.dotfiles/scripts/show-autobuild</string></array>
+  <key>EnvironmentVariables</key>
+  <dict><key>PATH</key><string>/Users/philbrockman/.dotfiles/scripts:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string></dict>
+  <key>KeepAlive</key><true/>
+  <key>RunAtLoad</key><true/>
+  <key>ProcessType</key><string>Standard</string>
+  <key>StandardOutPath</key><string>/Users/philbrockman/.cache/show/autobuild.agent.log</string>
+  <key>StandardErrorPath</key><string>/Users/philbrockman/.cache/show/autobuild.agent.log</string>
+</dict>
+</plist>
