@@ -377,6 +377,16 @@ import Testing
         #expect(pg.hereWord == nil, "the name belongs to its line")
     }
 
+    /// space r on a name asks for the new one; esc lets it go without a request.
+    @Test func spaceRAsksForTheNewName() async throws {
+        let (a, _) = try await app()
+        keys(a, "w")
+        keys(a, "space", "r")
+        #expect(a.nav.picker?.title == "rename to…")
+        keys(a, "esc")
+        #expect(a.nav.picker == nil)
+    }
+
     @Test func escOnlyCancels() async throws {
         let (a, _) = try await app()
         let pg = ReviewPageState.of(a)

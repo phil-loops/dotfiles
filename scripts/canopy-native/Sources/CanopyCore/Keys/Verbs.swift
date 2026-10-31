@@ -37,7 +37,7 @@ public enum Verb: String, CaseIterable, Sendable, Comparable {
     case write
     case mark, unmark
     case putAway = "put-away"
-    case apply, copy, push, sync, words, editor, comment, reply, extend, undo
+    case apply, copy, push, sync, words, editor, comment, reply, extend, undo, rename
     case moveUp = "move-up", moveDown = "move-down"
     case nth1 = "nth-1", nth2 = "nth-2", nth3 = "nth-3", nth4 = "nth-4", nth5 = "nth-5"
     case nth6 = "nth-6", nth7 = "nth-7", nth8 = "nth-8", nth9 = "nth-9"
@@ -164,6 +164,7 @@ public enum Verbs {
         v(.sync, .shared, ["s"], "sync it: fold or stash dirt, rebase onto its parent, shape the commits"),
         v(.words, .shared, ["e"], "the words: what's written about it, in full"),
         v(.editor, .shared, ["o"], "open it in Helix"),
+        v(.rename, .shared, ["space r"], "rename the name under the cursor across the program: a commit you see first"),
         v(.comment, .shared, ["c"], "comment on it"),
         v(.reply, .shared, ["r"], "reply to it"),
         v(.extend, .shared, ["x"], "extend the selection a line"),

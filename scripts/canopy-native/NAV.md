@@ -1,5 +1,7 @@
 # Navigation model
 
+> **Decided 2026-10-31 — what canopy writes:** canopy reads and talks; Helix writes code by hand (`o` opens it at the cursor's line and name). canopy may make an edit that is one decision — apply a suggestion (`A`), rename (`space r`) — and it always lands as a commit you see first, never as loose changes in a worktree.
+>
 > **Decided 2026-10-31 (supersedes the zoom-ladder h/l below):** hjkl move the cursor in what you see; structure has its own keys. `h`/`l` are left/right — the old/new half of a split diff line, else the pane to that side. `ret` goes in, `-` goes up a level (vim-vinegar's parent), `C-o` retraces time, `esc` cancels. The old rule borrowed Miller columns' h/l without Miller columns' layout: canopy's levels are pages that replace each other, so "out" was never to the left of anything, and on the pages that do have a left and a right (a split diff, list ⇄ detail) h/l meant something you couldn't see.
 >
 > **Decided 2026-10-29:** Phil adopted every recommendation below (Q1–Q5) and both stated assumptions (one app-wide jumplist; `M-h/j/k/l` pane alias). This file is binding for every area; change it only by coordination.

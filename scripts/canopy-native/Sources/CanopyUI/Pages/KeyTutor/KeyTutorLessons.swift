@@ -251,6 +251,8 @@ enum KeyLessons {
             KeyStep("{implementations}: its implementations.", [.implementations]),
             KeyStep("{references}: everything that refers to it.", [.references], check: { $0.nav.picker != nil }),
             KeyStep("{cancel} closes whatever's open.", [.cancel], check: { $0.nav.picker == nil }),
+            KeyStep("{rename} renames the name everywhere: type the new name, see the diff, ↵ commits it.", [.rename], check: { $0.nav.picker != nil }),
+            KeyStep("{cancel} — not today.", [.cancel], check: { $0.nav.picker == nil }),
             KeyStep("{symbols}: the file's symbols.", [.symbols], check: { $0.nav.picker != nil }),
             KeyStep("{cancel}.", [.cancel], check: { $0.nav.picker == nil }),
             KeyStep("{github} opens it on GitHub — practice, so nothing opens.", [.github], setup: P.review()),
