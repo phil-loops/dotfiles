@@ -20,6 +20,8 @@ public struct PaneList<Row: View>: View {
         let focused = app.isFocused(pane)
         let cursor = focused ? app.selected : nil
         let selection = focused ? Set(app.selection) : []
+        let search = PageSearch.of(app)
+        let hits = search.active && search.pane == pane ? Set(search.matches(app)) : []
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
@@ -27,7 +29,7 @@ public struct PaneList<Row: View>: View {
                         row(key, key == cursor)
                             .padding(.vertical, 5).padding(.horizontal, 10)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(key == cursor ? theme.goldWash : selection.contains(key) ? theme.emberWash : .clear)
+                            .background(key == cursor ? theme.goldWash : selection.contains(key) ? theme.emberWash : hits.contains(key) ? theme.goldWash.opacity(0.5) : .clear)
                             .overlay(alignment: .leading) { if key == cursor { theme.goldLeaf.frame(width: 2) } }
                             .labelTarget(pane: pane, key: key)
                             .id(key)

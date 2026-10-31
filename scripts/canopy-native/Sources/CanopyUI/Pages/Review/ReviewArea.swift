@@ -98,6 +98,15 @@ struct ReviewSurface: SurfaceProvider {
         return nil
     }
 
+    /// A line matches on its code, both halves; everything else on its title.
+    func searchText(for row: String, _ app: AppModel) -> String? {
+        let pg = ReviewPageState.of(app)
+        if let i = pg.stopIndex[row], pg.stops[i].kind == .line, let r = pg.stops[i].row {
+            return [r.left?.text, r.right?.text].compactMap { $0 }.joined(separator: "\n")
+        }
+        return title(for: row, app)
+    }
+
     func title(for row: String, _ app: AppModel) -> String? {
         let pg = ReviewPageState.of(app)
         if row.hasPrefix("f|") { return String(row.dropFirst(2)) }

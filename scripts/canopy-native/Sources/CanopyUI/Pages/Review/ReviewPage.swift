@@ -233,6 +233,8 @@ private struct DiffPane: View {
         let here = pg.here
         let focused = app.isFocused(reviewDiffPane)
         var marks = CanvasMarks(cursor: here?.key, column: pg.column, focused: focused)
+        let search = PageSearch.of(app)
+        if search.active && search.pane == reviewDiffPane { marks.search = search.query }
         if let w = pg.hereWord, let k = here?.key, let row = here?.row {
             let start = sideLine(row, prefer: pg.column).side == .left ? 6 : pg.splitWidth + 13
             marks.word = (k, (start + w.lowerBound)..<(start + w.upperBound))

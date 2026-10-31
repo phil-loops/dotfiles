@@ -42,6 +42,8 @@ public protocol SurfaceProvider {
     /// A row's text, for `/` (search the page) and the label layer. Default: the shell's guess from
     /// the store (a branch's or forest's name, a wiki slug) or the key itself.
     func title(for row: String, _ app: AppModel) -> String?
+    /// What `/` matches a row against. Default: its title.
+    func searchText(for row: String, _ app: AppModel) -> String?
     /// Fill in what the jumplist keeps beyond route, pane and cursor (which the shell fills):
     /// `place.tab`, `place.scroll`. Default: nothing. (`place.loc` comes from `app.nav` itself.)
     func remember(_ place: inout Place, _ app: AppModel)
@@ -60,6 +62,7 @@ public extension SurfaceProvider {
     func crumbs(_ app: AppModel, route: Route) -> [Crumb]? { nil }
     func targets(_ app: AppModel) -> [LabelTarget] { app.visibleTargets() }
     func title(for row: String, _ app: AppModel) -> String? { app.guessTitle(row) }
+    func searchText(for row: String, _ app: AppModel) -> String? { title(for: row, app) }
     func remember(_ place: inout Place, _ app: AppModel) {}
     func restore(_ place: Place, _ app: AppModel) {}
 }

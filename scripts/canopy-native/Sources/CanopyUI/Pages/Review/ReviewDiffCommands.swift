@@ -96,6 +96,11 @@ enum DiffCommands {
                 guard s.kind == .thread, let t = s.id.flatMap({ app.store.view(CanopyCore.Thread.self, $0) }) else { return false }
                 return !t.resolved && !t.outdated
             }
+            let search = PageSearch.of(app)
+            if search.active && !search.typing {
+                if !search.step(app, dir) { throw Refusal("no matches") }
+                return
+            }
             if (try? seek(dir, openOne)) != nil { return }
             try seek(dir) { $0.kind == .thread }
         }
@@ -341,6 +346,7 @@ enum DiffCommands {
                                let look = CodeLookup.of(app)
                                if look.pop != nil { return look.dismiss() }
                                if app.nav.picker != nil { return app.nav.close() }
+                               if PageSearch.of(app).active { return PageSearch.of(app).clear() }
                                if pg.side != nil { return pg.closeSide() }
                                if !pg.filter.isEmpty { pg.filter = ""; return }
                                if pg.mark != nil { pg.mark = nil; return }

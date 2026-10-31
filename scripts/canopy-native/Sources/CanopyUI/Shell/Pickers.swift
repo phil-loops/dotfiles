@@ -74,21 +74,14 @@ extension AppModel {
 
     /// `/`: search the page's rows by their text; picking one moves the cursor there (a jump).
     func searchPage() throws {
-        let rows = panes.flatMap { p in p.rows.map { (p.id, $0) } }
-        guard !rows.isEmpty else { throw Refusal("nothing on this page to search") }
-        let items = rows.map { PickItem(label: provider?.title(for: $0.1, self) ?? guessTitle($0.1), text: panes.count > 1 ? $0.0 : nil) }
-        nav.pick("search this page", items) { [weak self] i in
-            guard let self else { return }
-            self.jump {
-                self.focus(pane: rows[i].0)
-                self.setCursor(rows[i].1)
-            }
-        }
+        guard pane != nil, !panes.isEmpty else { throw Refusal("nothing on this page to search") }
+        PageSearch.of(self).start(self)
     }
 }
 
 extension NavCommands {
     static func installPickers(_ app: AppModel) {
+        KeyMode.textEntry.insert(.search)
         let r = app.registry
         r.register(Command(id: "nav.branches", title: "Find a branch — every forest, most visited first", scope: .global, verb: .branches, label: "branches",
                            local: { [weak app] _, _ in try app?.pickBranch() }))
@@ -97,8 +90,20 @@ extension NavCommands {
         r.register(Command(id: "nav.picker.last", title: "Reopen the last picker, query and all", scope: .global, verb: .lastPicker, label: "last picker",
                            available: { [weak app] _ in app?.nav.canReopen ?? false },
                            local: { [weak app] _, _ in app?.nav.reopen() }))
-        r.register(Command(id: "page.search", title: "Search this page", scope: .global, verb: .search, label: "search",
+        r.register(Command(id: "page.search", title: "Search this page in place", scope: .global, verb: .search, label: "search",
                            local: { [weak app] _, _ in try app?.searchPage() }))
+        let typing: (String?) -> Bool = { [weak app] _ in app.map { PageSearch.of($0).typing } ?? false }
+        r.register(Command(id: "page.search.keep", title: "Keep the search (n / N step its matches)", scope: .global, verb: .send, modes: [.search], quiet: true,
+                           available: typing, local: { [weak app] _, _ in app.map { PageSearch.of($0).keep($0) } }))
+        r.register(Command(id: "page.search.cancel", title: "Drop the search, back where it began", scope: .global, verb: .cancel, modes: [.search], quiet: true,
+                           available: typing, local: { [weak app] _, _ in app.map { PageSearch.of($0).cancel($0) } }))
+        let searching: (String?) -> Bool = { [weak app] _ in app.map { PageSearch.of($0).active && !PageSearch.of($0).typing } ?? false }
+        r.register(Command(id: "page.search.next", title: "The next match", scope: .global, verb: .nextThread, quiet: true,
+                           available: searching, local: { [weak app] _, _ in if let app, !PageSearch.of(app).step(app, 1) { throw Refusal("no matches") } }))
+        r.register(Command(id: "page.search.prev", title: "The previous match", scope: .global, verb: .previousThread, quiet: true,
+                           available: searching, local: { [weak app] _, _ in if let app, !PageSearch.of(app).step(app, -1) { throw Refusal("no matches") } }))
+        app.addCloser(first: true, isOpen: { [weak app] in app.map { PageSearch.of($0).active } ?? false },
+                      close: { [weak app] in app.map { PageSearch.of($0).clear() } })
         for n in 1...9 {
             r.register(Command(id: "nav.slot.\(n)", title: "Go to focus forest \(n) (where you left it)", scope: .global, verb: .slot(n),
                                quiet: n > 1, recordsJump: true,

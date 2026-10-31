@@ -338,11 +338,14 @@ import Testing
     @Test func slashSearchesThePage() throws {
         let a = try app()
         press(a, "/")
-        #expect(a.keys.active == .picker)
-        a.nav.typed("email")
+        #expect(a.keys.active == .search)
+        PageSearch.of(a).typed(a, "email")
+        #expect(a.selected == RowKey.project("loops:email-destinations"), "the cursor follows the typing")
         a.keys.handle("ret")
-        #expect(a.selected == RowKey.project("loops:email-destinations"))
+        #expect(a.keys.active == .normal && PageSearch.of(a).active, "↵ keeps the search")
         #expect(a.router.route == .forests && a.jumps.back.count == 1)
+        press(a, "esc")
+        #expect(!PageSearch.of(a).active, "esc clears it")
     }
 }
 
