@@ -143,6 +143,9 @@ public final class ReviewPageState: ShipHost {
         guard let w = word, let h = here, h.key == w.key, let row = h.row, sideLine(row, prefer: column).side == w.side else { return nil }
         return w.at
     }
+    /// An edit in place under the cursor's line(s), until ⌃↵ commits it or esc drops it.
+    public var edit: InlineEdit?
+    static let editField = "review.edit"
     /// The half of the split the cursor reads, kept as it moves up and down; `h` / `l` switch it.
     public var column: Side = .right
     public var showOutdated = false
@@ -815,4 +818,42 @@ public extension ReviewPageState {
     /// history.enter / commit.back: focus moves between the history list and the commit's diff.
     func focusDiff(_ app: AppModel, _ on: Bool) { app.focus(pane: on ? reviewDiffPane : ShipSeam.historyPane) }
     func clearMark() { mark = nil }
+
+    func beginEdit(_ app: AppModel) -> Bool {
+        if edit != nil { app.beginInsert(Self.editField, lines: .multi); return true }
+        guard app.pane?.id == reviewDiffPane, !scoped, integration == nil, let h = here, h.kind == .line, let row = h.row else { return false }
+        let r = range
+        let at = sideLine(row, prefer: column)
+        guard at.side == .right else { return false }
+        let from = r.flatMap { $0.side == .right ? $0.startLine : nil } ?? at.line
+        let to = r.flatMap { $0.side == .right ? $0.line : nil } ?? at.line
+        edit = InlineEdit(path: h.path, start: from, end: to, text: newLines(path: h.path, from: from, to: to).joined(separator: "\n"), tip: tip)
+        mark = nil
+        app.beginInsert(Self.editField, lines: .multi)
+        return true
+    }
+
+    var editing: Bool { edit != nil }
+
+    func editWrite(_ app: AppModel) -> Write? {
+        guard let e = edit, let t = target else { return nil }
+        return Write(path: repoPath("/review-edit"),
+                     body: ["branch": .string(t.name), "path": .string(e.path), "start": .number(Double(e.start)), "end": .number(Double(e.end)),
+                            "text": .string(e.text), "sha": .string(e.tip)],
+                     settled: { [weak self] in self?.edit == nil || self?.tip != e.tip },
+                     said: "committed the edit to \(t.name)", failed: "the edit didn't commit — your text is kept",
+                     answered: { [weak self] ok, _ in if ok { self?.edit = nil } })
+    }
+
+    func cancelEdit() { edit = nil }
+}
+
+/// Your own edit of a few new-side lines, made in the diff: committed to the branch on ⌃↵.
+public struct InlineEdit: Equatable {
+    public var path: String
+    public var start: Int
+    public var end: Int
+    public var text: String
+    /// the branch tip it was made against (the server refuses if the branch moved)
+    public var tip: String
 }

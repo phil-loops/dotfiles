@@ -296,8 +296,12 @@ enum ReviewCommands {
         let composing: (String?) -> Bool = { _ in ship.composer != nil }
         r.register(Command(
             id: "review.compose.send", title: "Add to your pending review on GitHub (or hand a commit's note to Claude)", scope: .review, budget: .slowIO,
-            verb: .send, modes: [.normal, .insert], label: "send", available: composing,
+            verb: .send, modes: [.normal, .insert], label: "send", available: { _ in ship.composer != nil || ship.host.editing },
             write: { _, _ in
+                if ship.composer == nil, let app = weakApp, let w = ship.host.editWrite(app) {
+                    app.keys.setMode(.normal)
+                    return w
+                }
                 let w = noting() ? try handNote() : try addItem(true)
                 weakApp?.keys.setMode(.normal)
                 return w
@@ -319,9 +323,14 @@ enum ReviewCommands {
                 if weakApp?.insertField == composeField { weakApp?.keys.setMode(.normal) }
             }))
         r.register(Command(
-            id: "review.compose.edit", title: "Go back to writing the comment", scope: .review, verb: .write, label: "write",
-            available: { _ in ship.composer != nil && weakApp?.keys.mode != .insert },
-            local: { _, _ in weakApp?.beginInsert(composeField, lines: .multi) }))
+            id: "review.compose.edit", title: "Write: the comment you're composing, else the line under the cursor in place", scope: .review,
+            verb: .write, label: "write",
+            available: { _ in weakApp?.keys.mode != .insert },
+            local: { _, _ in
+                guard let app = weakApp else { return }
+                if ship.composer != nil { return app.beginInsert(composeField, lines: .multi) }
+                if !ship.host.beginEdit(app) { throw Refusal("edit a line of the branch's own new code") }
+            }))
         r.register(Command(
             id: "review.compose.suggest", title: "Insert a suggestion", scope: .review, leader: LocalKey(",S"), label: "suggest",
             available: { _ in ship.composer != nil && !noting() },

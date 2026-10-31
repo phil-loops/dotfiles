@@ -142,7 +142,7 @@ enum ReviewDocument {
             var anchorsSig = fv.threadsAt.keys.sorted().map { "\($0):\(extrasSig(fv.threadsAt[$0]!))" }.joined(separator: "|")
             anchorsSig += "#" + fv.pendingAt.keys.sorted().map { "\($0):\(fv.pendingAt[$0]!.map(\.key).joined(separator: ","))" }.joined(separator: "|")
             let comp = composer.flatMap { $0.path == path ? "\($0.side.rawValue):\($0.line)" : nil } ?? ""
-            let bk = "b|\(salt)|\(split)|\(pg.diffColumns)|\(path)|\(ctxSig)|\(fv.gaps.map { "\($0.at):\($0.first):\($0.last ?? -1)" }.joined(separator: ","))|a:\(extrasSig(aside))|\(anchorsSig)|\(comp)"
+            let bk = "b|\(salt)|\(pg.edit.map { "e\($0.path):\($0.start)-\($0.end)" } ?? "")|\(split)|\(pg.diffColumns)|\(path)|\(ctxSig)|\(fv.gaps.map { "\($0.at):\($0.first):\($0.last ?? -1)" }.joined(separator: ","))|a:\(extrasSig(aside))|\(anchorsSig)|\(comp)"
             out.append(Segment(key: bk) { body(fv, aside: aside, split: split, composer: composer, open: open, replies: replies, pg, app, c) })
         }
         let elsewhere = pg.elsewhere
@@ -218,6 +218,12 @@ enum ReviewDocument {
                 b.tokens(line.text, lang, at: start, c.code)
                 b.endRow(RowInfo(kind: .line, stop: key, path: path, hunk: r.hunk, left: r.left?.kind, right: r.right?.kind,
                                  oldLine: r.left?.old, newLine: r.right?.new, threaded: threaded, codeStart: gutter + 2), unified)
+            }
+            if let e = pg.edit, e.path == path, r.right?.new == e.end {
+                extras(b, id: "x|\(path)|edit|\(e.start)", stops: [], path: path, column: split ? W + 13 : gutter + 2, splitCol: split ? W + 7 : 0) { [weak app] in
+                    guard let app else { return AnyView(EmptyView()) }
+                    return AnyView(InlineEditView().environment(app))
+                }
             }
             // what hangs under the row: its conversations, pending comments, and the comment box (under
             // the first row showing its line)
