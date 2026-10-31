@@ -919,6 +919,10 @@ final class TutorController: NSObject, NSTextViewDelegate {
             agentRow.removeFromSuperview()
             self.agentRow = nil
         }
+        if let above = agentRowAbove {
+            column.setCustomSpacing(agentRowAboveGap, after: above)
+            agentRowAbove = nil
+        }
         guard let agent else { return }
         let row = NSStackView()
         row.orientation = .vertical
@@ -931,13 +935,18 @@ final class TutorController: NSObject, NSTextViewDelegate {
             retry.bezelStyle = .rounded
             [label, detail, retry].forEach(row.addArrangedSubview)
         } else if agent.isBusy {
-            row.addArrangedSubview(quiet("Tutor is typing…"))
+            row.addArrangedSubview(TypingDots())
             let text = agent.preview.trimmingCharacters(in: .whitespacesAndNewlines)
             if !text.isEmpty {
                 row.addArrangedSubview(tutorText(NSAttributedString(string: text, attributes: [.font: renderer.base, .foregroundColor: NSColor.tertiaryLabelColor]), width: Self.column))
             }
         } else {
             return
+        }
+        if let above = column.arrangedSubviews.last {
+            agentRowAbove = above
+            agentRowAboveGap = column.customSpacing(after: above)
+            column.setCustomSpacing(14, after: above)
         }
         column.addArrangedSubview(row)
         agentRow = row
@@ -1106,15 +1115,27 @@ final class TutorController: NSObject, NSTextViewDelegate {
             hint = note
             add(note, after: 0)
         } else if let answer {
-            if let level = confidenceLevels.first(where: { $0.0 == answer.confidence }) {
-                add(quiet("Confidence: \(level.1)"), after: 8)
-            }
-            if rung.reveal == nil {
-                add(quiet("Sent. Waiting for Claude's reveal."), after: 0)
+            let level = confidenceLevels.first(where: { $0.0 == answer.confidence })?.1
+            let waiting = rung.reveal == nil && agent?.isBusy != true
+            if level != nil || waiting {
+                let line = NSStackView()
+                line.orientation = .horizontal
+                line.spacing = 10
+                if let level {
+                    line.addArrangedSubview(NSTextField(labelWithAttributedString: NSAttributedString(string: level.uppercased(), attributes: [.font: NSFont.systemFont(ofSize: 10.5, weight: .semibold), .foregroundColor: NSColor.tertiaryLabelColor, .kern: 0.6])))
+                }
+                if waiting {
+                    line.addArrangedSubview(TypingDots())
+                }
+                add(line, after: 0)
             }
         }
         return stack
     }
+
+    /// The view the agent row sits under, and its usual gap, which the row tightens while it's there.
+    private weak var agentRowAbove: NSView?
+    private var agentRowAboveGap: CGFloat = 0
 
     private func quiet(_ text: String) -> NSTextField {
         let label = NSTextField(labelWithString: text)
@@ -1263,4 +1284,41 @@ func streamTutorTurn(_ path: String, _ message: String) -> Int32 {
     agent.send(message)
     RunLoop.main.run()
     return 0
+}
+
+/// Three dots breathing in turn: the tutor is working on its reply. It says nothing in words, since the place it sits says what it's for.
+final class TypingDots: NSView {
+    override init(frame: NSRect) {
+        super.init(frame: NSRect(x: 0, y: 0, width: 30, height: 12))
+        wantsLayer = true
+        for i in 0..<3 {
+            let dot = CALayer()
+            dot.frame = CGRect(x: CGFloat(i) * 10, y: 3, width: 6, height: 6)
+            dot.cornerRadius = 3
+            dot.opacity = 0.25
+            let pulse = CABasicAnimation(keyPath: "opacity")
+            pulse.fromValue = 0.25
+            pulse.toValue = 0.9
+            pulse.duration = 0.6
+            pulse.autoreverses = true
+            pulse.repeatCount = .infinity
+            pulse.beginTime = CACurrentMediaTime() + Double(i) * 0.2
+            dot.add(pulse, forKey: "pulse")
+            layer?.addSublayer(dot)
+        }
+        translatesAutoresizingMaskIntoConstraints = false
+        widthAnchor.constraint(equalToConstant: 26).isActive = true
+        heightAnchor.constraint(equalToConstant: 12).isActive = true
+    }
+
+    convenience init() { self.init(frame: .zero) }
+
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    override func updateLayer() {
+        let color = NSColor.secondaryLabelColor.cgColor
+        layer?.sublayers?.forEach { $0.backgroundColor = color }
+    }
+
+    override var wantsUpdateLayer: Bool { true }
 }
