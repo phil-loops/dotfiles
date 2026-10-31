@@ -35,6 +35,15 @@ struct ForestPage: View {
         let focused = app.isFocused("main")
         let cursor = focused ? app.selected : nil
         let selection = focused ? Set(app.selection) : []
+        let previewed = m.face == .story ? nil : RowKey.id(app.cursors["forest/main"] ?? cursor, "b").flatMap { id in f.branches.first { $0.b.id == id } }
+        return HStack(alignment: .top, spacing: 0) {
+            list(p, f, rows: rows, cursor: cursor, selection: selection)
+            if let v = previewed { BranchPreview(v: v).frame(width: 420) }
+        }
+    }
+
+    private func list(_ p: Project, _ f: ForestView, rows: [String], cursor: String?, selection: Set<String>) -> some View {
+        let m = app.forestModel
         return ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
@@ -58,6 +67,45 @@ struct ForestPage: View {
         // does every branch merge onto main at once — asked when the page opens and whenever a tip moves
         .task(id: m.integratable(p.id) ? m.stampOf(p.id) : "") {
             if m.integratable(p.id) { await m.checkIntegration(p.id) }
+        }
+    }
+
+    /// The branch under the cursor, read before you open it: what it does, where it is in the loop,
+    /// its commits. ↵ opens its review.
+    private struct BranchPreview: View {
+        @Environment(AppModel.self) private var app
+        @Environment(\.theme) private var theme
+        let v: BranchView
+
+        var body: some View {
+            let ship = ShipState.of(app)
+            let commits = ship.historyRows(v.b.id) ?? []
+            VStack(alignment: .leading, spacing: 10) {
+                Text(leaf(v.b.name)).font(Theme.mono(13, weight: .semibold)).foregroundStyle(theme.ink)
+                if !v.b.description.isEmpty {
+                    Text(v.b.description).font(Theme.text(13)).foregroundStyle(theme.inkDim).fixedSize(horizontal: false, vertical: true)
+                }
+                LoopStripView(branchID: v.b.id, words: nil, size: 11)
+                HStack(spacing: 12) {
+                    Text("\(v.b.commits) commit\(v.b.commits == 1 ? "" : "s")")
+                    if let pr = v.pr { Text("#" + String(pr.number)) }
+                    if v.b.pushed == .local { Text("local").foregroundStyle(theme.goldLeaf) }
+                }
+                .font(Theme.text(11)).foregroundStyle(theme.inkFaint)
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(commits, id: \.sha) { c in
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text(c.sha.prefix(7)).font(Theme.mono(11)).foregroundStyle(theme.inkFaint)
+                            Text(c.subject).font(Theme.text(12)).foregroundStyle(theme.ink).lineLimit(1)
+                        }
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 20).padding(.top, 12)
+            .frame(maxHeight: .infinity, alignment: .top)
+            .overlay(alignment: .leading) { theme.rule.opacity(0.6).frame(width: 1) }
+            .task(id: v.b.id + "@" + v.b.tip) { ShipState.of(app).loadHistory(app, v.b.id) }
         }
     }
 
