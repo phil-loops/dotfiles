@@ -5,7 +5,7 @@ description: Present a design, plan or walkthrough as a native macOS app (Swift 
 
 # show — a native walkthrough Phil can sign off on
 
-`show <file.json>` opens a file in the one Show window (section list, rendered markdown, a **Signed off** checkbox and a note field per section). The window never multiplies: a rail on its left edge switches between four **workspaces**, and each keeps its own open document, typed text and scroll while another is in front.
+`show <file.json>` opens a file in the one Show window (section list, rendered markdown, a **Signed off** checkbox and a note field per section). The window never multiplies: a rail on its left edge switches between six **workspaces**, and each keeps its own open document, typed text and scroll while another is in front.
 
 | Workspace | Key | Opens files with | Holds |
 |---|---|---|---|
@@ -13,6 +13,8 @@ description: Present a design, plan or walkthrough as a native macOS app (Swift 
 | Review | ⌘2 | `"mode": "deck"` or no mode | plans and designs to sign off |
 | Learn | ⌘3 | `"mode": "tutor"` | tutor sessions |
 | Runs | ⌘4 | `"mode": "live"` | live runs, read-only |
+| API | ⌘5 | `show --api` | the loops-postman console (:7070), started when it's down |
+| Canopy | ⌘6 | `show --canopy [/v2/…]` | the forest viewer (canopy) inside Show, with canopy's own keys; Show keeps only its ⌘ shortcuts there |
 
 An optional top-level `"workspace": "forest" | "review" | "learn" | "runs"` overrides the mode. `show <file>` switches to that file's workspace and opens it there; `show --check-routing <file>` prints where a file goes without opening anything. The only thing that crosses between workspaces is the count of documents waiting on Phil, a badge on each rail icon. The title band shows the document's title and, in the workspace's quiet tint, its progress.
 
@@ -26,9 +28,9 @@ An optional top-level `"workspace": "forest" | "review" | "learn" | "runs"` over
 
 Open documents reload by themselves when their file changes on disk, keeping the selected section, scroll and cursor. When the launcher finishes a new build, the running app saves notes and relaunches into it, each workspace back on its document. So rewriting a deck or editing the Swift source and then running `show --build` is all it takes. A bare `show` brings a running Show to the front as it was; when Show isn't running it starts it back on the last workspace with each workspace's document (the newest document, the very first time). Sign-offs and notes save to `<deck>.signoff.json` beside the deck, which is how Phil's verdicts come back to you.
 
-- Launcher: `~/.dotfiles/scripts/show` (on PATH). Source: `~/.dotfiles/scripts/show-app/*.swift`. It compiles every file there into `~/.cache/show/Show.app` whenever any of their hashes changes (`show --build` to just build).
+- Launcher: `~/.dotfiles/scripts/show` (on PATH). Source: `~/.dotfiles/scripts/show-app/*.swift`, a Swift package (`show-app/Package.swift`) that links canopy-native's `CanopyUI` for the Canopy workspace. It rebuilds `~/.cache/show/Show.app` whenever a show-app or canopy-native source changes (`show --build` to just build).
 
-**Source layout** (`scripts/show-app/`, one file per area): `App.swift` is the AppDelegate, launch, menus, the one window and `Workspace` routing; `main.swift` parses the command line and starts the app (Swift only runs top-level code from `main.swift`). `Shell.swift` holds the rail, `WorkspaceController`, the shelf/library and the ⌘O finder; `Render.swift` the markdown renderer (tables, code, images); `Decks.swift` `DeckController` with sign-off, the section thread's composer and Submit (`claude-say`); `Thread.swift` the `.thread.json` sidecar, `ThreadDelivery` (live author or headless) and the deck's headless `DeckAgent`; `Forest.swift` the merge-order `ForestOrder`, the forest tint, ⌘⇧O's canopy command, `BranchFreshness` (the moved-branch check) and ⌘⇧R; `Tutor.swift` the Learn session types, sidecar, headless `TutorAgent`, worksheet and `--tutor-ask`; `TutorSidebar.swift` the open session's stations and due re-tests; `LearnStart.swift` the Due shelf group, new sessions from the template, ⌘N and `--tutor-start`; `Live.swift` the Live view (status header, status-grouped list, compare/data/source rendering, Stop after this round, `--check-live`, the live-runs registry); `Keys.swift` the `KeyTable` (one list that generates the menus and the `?` sheet; other areas add keys with `KeyTable.register([...])`), the key router, the focus order and its outline; `Snapshot.swift` `--snapshot` plus `--check-routing` / `--tutor-check`; `Model.swift` the shared `Deck` / `Section` / `SignOff` types.
+**Source layout** (`scripts/show-app/`, one file per area): `App.swift` is the AppDelegate, launch, menus, the one window and `Workspace` routing; `main.swift` parses the command line and starts the app (Swift only runs top-level code from `main.swift`). `Shell.swift` holds the rail, `WorkspaceController`, the shelf/library and the ⌘O finder; `Render.swift` the markdown renderer (tables, code, images); `Decks.swift` `DeckController` with sign-off, the section thread's composer and Submit (`claude-say`); `Thread.swift` the `.thread.json` sidecar, `ThreadDelivery` (live author or headless) and the deck's headless `DeckAgent`; `Forest.swift` the merge-order `ForestOrder`, the forest tint, ⌘⇧O's canopy route, `BranchFreshness` (the moved-branch check) and ⌘⇧R; `Tutor.swift` the Learn session types, sidecar, headless `TutorAgent`, worksheet and `--tutor-ask`; `TutorSidebar.swift` the open session's stations and due re-tests; `LearnStart.swift` the Due shelf group, new sessions from the template, ⌘N and `--tutor-start`; `Live.swift` the Live view (status header, status-grouped list, compare/data/source rendering, Stop after this round, `--check-live`, the live-runs registry); `Keys.swift` the `KeyTable` (one list that generates the menus and the `?` sheet; other areas add keys with `KeyTable.register([...])`), the key router, the focus order and its outline; `Snapshot.swift` `--snapshot` plus `--check-routing` / `--tutor-check`; `Model.swift` the shared `Deck` / `Section` / `SignOff` types; `Console.swift` the API workspace; `Canopy.swift` the Canopy workspace (`CanopyHost`, which starts the viewer server when it's down).
 - Decks live in `~/.dotfiles/show/<name>.json`.
 
 ## Deck format
@@ -84,7 +86,7 @@ A Forest file is a deck with top-level `"mode": "forest"`, `"project"` and `"rep
 - The shelf has one row per forest deck (project).
 - The section list puts sections without a `rank` (the merge-story overview, `url` live pages) in an **Overview** group on top, in file order; the overview opens first. **Merge order** follows: branches sorted by rank, then parent, then file order, numbered by rank (tied siblings share a number) and indented under their parent when the parent is in the deck.
 - Sign-off, `<deck>.signoff.json` and Submit → `claude-say <replyTo>` work exactly as for decks.
-- **⌘⇧O** runs `~/.dotfiles/scripts/canopy /v2/b/<repo>/<branch>` for the selected branch. On a non-branch section it does nothing and says why at the foot of the shelf. `SHOW_CANOPY=<path>` swaps the binary for testing.
+- **⌘⇧O** opens the selected branch's page (`/v2/b/<repo>/<branch>`) in the Canopy workspace. On a non-branch section it does nothing and says why at the foot of the shelf.
 - `show --check-routing <deck>` prints the overview and the numbered merge order.
 
 ## Learn workspace
