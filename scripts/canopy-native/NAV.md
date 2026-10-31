@@ -24,6 +24,7 @@
 | first / last | `g g` / `G` | the first / last row (jumps) |
 | half-down / half-up | `C-d` / `C-u` | half a page |
 | left / right | `h` `←` / `l` `→` | across what you see: the old / new half of a split line, else the pane to that side |
+| next / previous name | `w` / `b` | the next / previous name in the code, across lines; `g d`, `space k` and friends ask about it |
 | in / out | `ret` / `-` | one level in / up on the ladder (forests → forest → branch → file → line) |
 | cancel | `esc` | close the innermost transient thing — never changes page |
 | next-sibling / previous-sibling | `J` / `K` | the next / previous branch in merge order, staying on this kind of page (jumps) |
