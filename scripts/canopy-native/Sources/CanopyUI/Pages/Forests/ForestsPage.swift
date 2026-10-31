@@ -27,6 +27,9 @@ struct ForestsPage: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 0) {
                             WindowLine(fs: fs, now: m.now)
+                            if !m.readyOnly, let next = p.focus.compactMap({ fs[$0.id] }).first(where: { !$0.ready.isEmpty }) {
+                                NextMove(f: next)
+                            }
                             if m.readyOnly {
                                 let n = fs.values.filter { $0.p.state != .archive }.reduce(0) { $0 + $1.ready.count }
                                 HStack(spacing: 6) {
@@ -86,8 +89,10 @@ struct ForestsPage: View {
         let views = projects.compactMap { fs[$0.id] }.filter { !m.readyOnly || !$0.ready.isEmpty }
         if !m.readyOnly || !views.isEmpty {
             VStack(alignment: .leading, spacing: 0) {
-                Text(title.uppercased()).font(Theme.text(11)).tracking(1.5).foregroundStyle(theme.inkFaint)
-                    .padding(.leading, 44).padding(.bottom, 4)
+                if title != "Focus" {
+                    Text(title.lowercased()).font(Theme.text(11)).foregroundStyle(theme.inkFaint)
+                        .padding(.leading, 44).padding(.bottom, 4)
+                }
                 if views.isEmpty {
                     Text("empty").foregroundStyle(theme.inkFaint).padding(.leading, 44).padding(.vertical, 8)
                 }
@@ -109,6 +114,26 @@ struct ForestsPage: View {
             m.now = Date()
             try? await Task.sleep(nanoseconds: 30_000_000_000)
         }
+    }
+}
+
+/// What to do next, in words: the first focus forest with branches waiting on you. A label target
+/// that opens it, so `f` and a key get there without a click.
+private struct NextMove: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.theme) private var theme
+    let f: ForestView
+
+    var body: some View {
+        let n = f.ready.count
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text("next").foregroundStyle(theme.inkFaint)
+            Text(f.p.name).foregroundStyle(theme.goldLeaf).font(Theme.text(14, weight: .semibold))
+            Text("\(n) branch\(n == 1 ? "" : "es") ready for you").foregroundStyle(theme.inkDim)
+        }
+        .font(Theme.text(13))
+        .padding(.leading, 44).padding(.bottom, 22)
+        .labelTarget(pane: "controls", key: "next:\(f.p.id)", title: f.p.name, run: RouteTo("forest.page", target: f.p.id))
     }
 }
 
@@ -172,7 +197,7 @@ private struct ForestRowView: View {
                 .frame(minWidth: 60, alignment: .trailing)
             }
         }
-        .frame(height: 38)
+        .frame(height: 30)
         .padding(.horizontal, 16)
         .rowChrome(RowKey.project(p.id), cursor: cursor, selected: selected)
     }
