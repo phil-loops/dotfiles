@@ -63,7 +63,7 @@ public enum Loop {
             case .stale: return "stale"
             default: return "not run"
             }
-        case .push: return b.pushed == .ahead ? "\(b.ahead) to push" : "\(b.commits) local"
+        case .push: return nil
         case .pr: return "open it"
         case .review: return pr?.review == "CHANGES_REQUESTED" ? "changes requested" : pr?.draft == true ? "draft" : "waiting"
         case .merged: return st.waiting.first?.label

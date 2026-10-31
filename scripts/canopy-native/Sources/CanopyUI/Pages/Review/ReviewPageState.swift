@@ -369,6 +369,10 @@ public final class ReviewPageState: ShipHost {
         if tab != "commits" && commitScope != nil { commitScope = nil }
         guard let app, case .review = app.router.route else { return }
         if tab == "files" { app.focus(pane: reviewDiffPane) }
+        if tab == "commits" {
+            app.focus(pane: ShipSeam.historyPane)
+            app.setCursor("h|\(commitScope ?? "")")
+        }
     }
 
     // ── context ──

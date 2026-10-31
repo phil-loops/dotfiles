@@ -30,7 +30,7 @@ struct Chip: View {
     var body: some View {
         Text(text).font(Theme.mono(10.5))
             .foregroundStyle(gold ? theme.goldLeaf : ok ? theme.patina : theme.inkDim)
-            .padding(.horizontal, 5).overlay(RoundedRectangle(cornerRadius: 3).stroke(gold ? theme.goldDeep : theme.rule, lineWidth: 1))
+            .padding(.horizontal, 2)
     }
 }
 

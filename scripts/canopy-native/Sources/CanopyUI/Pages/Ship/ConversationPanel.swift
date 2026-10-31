@@ -43,13 +43,13 @@ public struct ConversationPanel: View {
                         HStack { Text("second reader").foregroundStyle(theme.goldDeep); Text("what no one flagged").foregroundStyle(theme.inkFaint) }
                         ForEach(Array(u.items.enumerated()), id: \.offset) { _, x in Text("\(x.path):\(x.line) — \(x.why)").foregroundStyle(theme.inkDim) }
                     }
-                    .padding(6).overlay(Rectangle().stroke(theme.rule, lineWidth: 1))
+                    .padding(.horizontal, 10).padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(theme.vellumRaise)
                 }
                 HStack(spacing: 8) {
                     if let n = c.pending?.count, n > 0 {
                         Text("\(n) comment\(n == 1 ? "" : "s") in your pending review —").foregroundStyle(theme.ink)
-                    } else {
-                        Text("no pending comments").foregroundStyle(theme.inkFaint)
                     }
                     KeyButton(title: "submit on GitHub", id: "review.finish", target: branchID, gold: true)
                     if (app.store.view(Draft.self, branchID)?.items ?? []).contains(where: { $0.state == .draft }) {
@@ -59,7 +59,7 @@ public struct ConversationPanel: View {
                 }
             }
             .font(Theme.mono(12))
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 10).padding(.bottom, 8)
         } else {
             Text("no PR").font(Theme.mono(12)).foregroundStyle(theme.inkFaint).padding(.horizontal, 16)
         }
@@ -67,7 +67,7 @@ public struct ConversationPanel: View {
 
     private func card(author: String, meta: String, body: String, tint: Color? = nil) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 6) {
+            HStack(spacing: 8) {
                 Text(author).foregroundStyle(theme.goldLeaf)
                 Text(meta).foregroundStyle(tint ?? theme.inkFaint)
             }

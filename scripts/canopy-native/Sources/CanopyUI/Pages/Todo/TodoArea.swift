@@ -65,7 +65,7 @@ struct TodoPage: View {
                         .padding(.bottom, 26)
                     }
                 }
-                .frame(maxWidth: 1080, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .paneRing("main")
             .padding(.horizontal, 16).padding(.bottom, 8)

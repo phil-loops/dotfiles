@@ -1,32 +1,39 @@
 import CanopyCore
 import SwiftUI
 
-/// The commits tab (Review.tsx History + Commits.tsx): the branch's commits down the side, newest
-/// first — j/k step through them, the diff shows only that one (area B draws it); "lands on main"
-/// first, where the PR's title and why are written. Two panes: "history" and "words" (`C-w l`).
+/// The commits tab (Review.tsx History + Commits.tsx): the branch's commits down the side in the
+/// order they were written, and what they land on main as at the foot — the sum of them. j/k step
+/// through; a commit's words sit over its own diff (`diff`, area B's). Two panes: "history" and
+/// "words" (`C-w l`).
 public struct CommitsPanel: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme
     let branchID: String
+    let diff: AnyView?
 
-    public init(branchID: String) { self.branchID = branchID }
+    public init(branchID: String, diff: AnyView? = nil) { self.branchID = branchID; self.diff = diff }
 
     public var body: some View {
         let ship = ShipState.of(app)
-        HStack(alignment: .top, spacing: 12) {
-            HistoryList(branchID: branchID).frame(width: 320)
-            VStack(alignment: .leading, spacing: 6) {
-                if let sha = ship.commitScope {
-                    CommitHead(branchID: branchID, sha: sha)
-                } else {
-                    WordsEditor(branchID: branchID, landing: true, landingOnly: true)
-                    Text("its diff is the whole branch: the files tab").foregroundStyle(theme.inkFaint)
+        HStack(alignment: .top, spacing: 0) {
+            HistoryList(branchID: branchID).frame(width: 300)
+            VStack(alignment: .leading, spacing: 10) {
+                Group {
+                    if let sha = ship.commitScope {
+                        CommitHead(branchID: branchID, sha: sha)
+                    } else {
+                        WordsEditor(branchID: branchID, landing: true, landingOnly: true)
+                    }
                 }
+                .padding(.horizontal, 20)
+                .fixedSize(horizontal: false, vertical: true)
+                if let diff { diff.frame(maxWidth: .infinity, maxHeight: .infinity) }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .overlay(alignment: .leading) { theme.rule.opacity(0.5).frame(width: 1) }
         }
         .font(Theme.mono(12))
-        .padding(.horizontal, 16)
+        .padding(.leading, 10)
         .task(id: app.store.view(Branch.self, branchID).map(ShipState.historyKey)) {
             ship.loadHistory(app, branchID)
             WordsState.of(app).load(app, branchID)
@@ -34,7 +41,7 @@ public struct CommitsPanel: View {
     }
 }
 
-/// The history list: the landing commit, then the branch's own commits newest first.
+/// The history list: the branch's own commits oldest first, then what they land as.
 struct HistoryList: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme
@@ -51,17 +58,20 @@ struct HistoryList: View {
                 let scoped = key == "h|\(ship.commitScope ?? "")"
                 if key == "h|" {
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(landing ?? "—").foregroundStyle(scoped ? theme.goldLeaf : theme.ink).lineLimit(2)
-                        Text("lands on main\(conv.map { " · #\($0.number)" } ?? "")").font(Theme.mono(10.5)).foregroundStyle(theme.inkFaint)
+                        Text("= " + (landing ?? "—")).foregroundStyle(scoped ? theme.goldLeaf : theme.ink).lineLimit(2)
+                        Text("on main\(conv.map { " · #" + String($0.number) } ?? "")").font(Theme.mono(10.5)).foregroundStyle(theme.inkFaint)
                     }
+                    .padding(.top, 6)
+                    .overlay(alignment: .top) { theme.rule.opacity(0.6).frame(height: 1).offset(y: -2) }
                 } else if let c = byKey[key] {
                     VStack(alignment: .leading, spacing: 1) {
                         Text(c.subject).foregroundStyle(scoped ? theme.goldLeaf : theme.ink).lineLimit(2)
-                        HStack(spacing: 4) {
-                            Text(c.sha.prefix(7)).foregroundStyle(c.pushed == false ? theme.goldLeaf : theme.inkFaint)
-                            Text("· \(c.date.replacingOccurrences(of: "^\\d{4}-", with: "", options: .regularExpression))\(c.pushed == false ? " · local" : "")")
-                                .foregroundStyle(theme.inkFaint)
+                        HStack(spacing: 6) {
+                            Text(c.sha.prefix(7))
+                            Text(c.date.replacingOccurrences(of: "^\\d{4}-", with: "", options: .regularExpression))
+                            if c.pushed == false { Text("● local").foregroundStyle(theme.goldLeaf) }
                         }
+                        .foregroundStyle(theme.inkFaint)
                         .font(Theme.mono(10.5))
                         ForEach(addresses(c.sha), id: \.self) { a in Text("→ \(a)").font(Theme.mono(10.5)).foregroundStyle(theme.goldLeaf) }
                     }
@@ -91,7 +101,11 @@ struct CommitHead: View {
         let c = ship.historyRows(branchID)?.first { $0.sha == sha }
         let editable = WordsState.of(app).shown[branchID]?.commits.first { $0.sha.hasPrefix(sha) }?.locked.isEmpty == true
         VStack(alignment: .leading, spacing: 4) {
-            Text("\(sha.prefix(7)) · \(c?.date ?? "")\(c?.pushed == false ? " · local" : "")").font(Theme.mono(11)).foregroundStyle(theme.inkFaint)
+            HStack(spacing: 10) {
+                Text(c?.date ?? "").foregroundStyle(theme.inkFaint)
+                if editable { Text("\(app.registry.keyOf("words.edit")) edit").foregroundStyle(theme.goldLeaf.opacity(0.8)) }
+            }
+            .font(Theme.mono(11))
             if editable {
                 WordsEditor(branchID: branchID, landing: false, landingOnly: false)
             } else {
@@ -99,9 +113,6 @@ struct CommitHead: View {
                 let why = (c?.body ?? "").replacingOccurrences(of: "(?m)^Addresses:.*$", with: "", options: .regularExpression)
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 if !why.isEmpty { Text(why).foregroundStyle(theme.inkDim) }
-            }
-            if ship.host is StandInHost {
-                Text("the commit's diff is the review page's (area B)").foregroundStyle(theme.inkFaint)
             }
         }
     }
@@ -216,7 +227,6 @@ public struct WordsEditor: View {
                         }
                         let text = ship.describing[branchID] ?? saved
                         HStack(spacing: 8) {
-                            Text("\(Self.oneLine(text).count)")
                             if text.range(of: " and ", options: .caseInsensitive) != nil { Text("“and” · a split point?").foregroundStyle(theme.goldLeaf) }
                         }
                         .font(Theme.mono(10.5)).foregroundStyle(theme.inkFaint)

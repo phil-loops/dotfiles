@@ -33,8 +33,7 @@ public struct ShipStripView: View {
                     if app.keys.layer == .address, ship.addressing != nil { AddressSheet(branchID: branchID) }
                 }
             }
-            .font(Theme.mono(12))
-            .padding(.horizontal, 16)
+            .font(Theme.mono(11))
             .task(id: readKey(b, m)) { ship.readFacts(app, b, key: readKey(b, m)) }
             .task(id: "\(b.tip)|\(b.gates.rawValue)|\(shown ?? "")") { ship.readProgress(app, b, key: "\(b.tip)|\(b.gates.rawValue)|\(shown ?? "")", gate: shown) }
             .task(id: "\(b.diverged)|\(ShipState.scopeKey(b))") { if b.diverged { ship.readForceScope(app, branchID) } }
@@ -161,9 +160,9 @@ struct KeyButton: View {
                         .font(Theme.mono(10.5)).foregroundStyle(theme.inkFaint)
                 }
             }
-            .padding(.horizontal, 7).padding(.vertical, 1)
+            .padding(.horizontal, 8).padding(.vertical, 2)
             .foregroundStyle(failed ? theme.ember : gold ? theme.goldLeaf : theme.ink)
-            .overlay(RoundedRectangle(cornerRadius: 3).stroke(gold ? theme.goldDeep : theme.rule, lineWidth: 1))
+            .background(RoundedRectangle(cornerRadius: 4).fill(failed ? theme.emberWash : gold ? theme.goldWash.opacity(2) : theme.vellumRaise))
             .opacity(busy ? 0.7 : 1)
         }
         .buttonStyle(.plain)

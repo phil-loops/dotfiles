@@ -119,7 +119,7 @@ struct TutorPaneFrame: ViewModifier {
     @Environment(\.theme) private var theme
     let pane: String
     func body(content: Content) -> some View {
-        content.overlay { Rectangle().stroke(app.isFocused(pane) ? theme.goldDeep : .clear, lineWidth: 1) }
+        content.overlay(alignment: .leading) { (app.isFocused(pane) ? theme.goldDeep : .clear).frame(width: 1) }
     }
 }
 

@@ -204,7 +204,7 @@ struct DashboardPage: View {
                         }
                         Text("summary computed in \(DashText.ms(s.ms))").foregroundStyle(theme.inkFaint)
                     }
-                    .frame(maxWidth: 1100, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.bottom, 16)
                 }
             } else {

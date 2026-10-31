@@ -21,7 +21,6 @@ struct Statusline: View {
                     CommandLine()
                 } else {
                     if !app.keys.pendingKeys.isEmpty { Text(glyph(app.keys.pendingKeys)).foregroundStyle(theme.goldLeaf) }
-                    if !app.jumps.back.isEmpty || !app.jumps.fwd.isEmpty { Text("◀\(app.jumps.back.count) ▶\(app.jumps.fwd.count)").foregroundStyle(theme.inkFaint) }
                     if let l = app.labeling { Text("label \(l.typed)…").foregroundStyle(theme.goldLeaf) }
                     if let p = app.pane {
                         let n = p.rows.count
@@ -33,14 +32,13 @@ struct Statusline: View {
                         Text(note).foregroundStyle(theme.inkDim).lineLimit(1).accessibilityAddTraits(.updatesFrequently)
                     }
                     Spacer(minLength: 8)
-                    Text(app.router.route.path).foregroundStyle(theme.inkFaint).lineLimit(1).truncationMode(.middle)
-                    Text(app.store.conn.rawValue).foregroundStyle(app.store.conn == .live ? theme.patina : app.store.conn == .down ? theme.ember : theme.inkFaint)
+                    if app.store.conn != .live {
+                        Text(app.store.conn.rawValue).foregroundStyle(app.store.conn == .down ? theme.ember : theme.inkFaint)
+                    }
                 }
             }
             .font(Theme.mono(11))
             .padding(.horizontal, 10).padding(.vertical, 4)
-            .background(theme.vellumRaise)
-            .overlay(alignment: .top) { theme.rule.frame(height: 1) }
         }
     }
 
