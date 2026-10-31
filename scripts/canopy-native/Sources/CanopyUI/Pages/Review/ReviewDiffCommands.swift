@@ -281,9 +281,9 @@ enum DiffCommands {
 
         // ── out, and back out ──
 
-        r.register(Command(id: "review.leave", title: "Go back to its forest", scope: .review, verb: .out, label: "back",
-                           available: { _ in app.pane?.id != reviewCodePane || pg.side == nil },
+        r.register(Command(id: "review.leave", title: "Go back to its forest (from the code beside the diff: to the diff)", scope: .review, verb: .out, label: "back",
                            local: { _, _ in
+                               if app.pane?.id == reviewCodePane && pg.side != nil { return app.focus(pane: reviewDiffPane) }
                                let pid = pg.branch?.project ?? pg.integration
                                guard let pid, let p = app.store.view(Project.self, pid) else { return app.go(.forests) }
                                let id = pg.id
