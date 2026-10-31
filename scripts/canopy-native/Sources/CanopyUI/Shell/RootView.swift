@@ -60,9 +60,9 @@ struct Header: View {
         }
         .font(Theme.mono(12))
         .foregroundStyle(theme.inkFaint)
-        .padding(.horizontal, 20)
-        .padding(.top, 12)
-        .padding(.bottom, 10)
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 2)
     }
 
     private var crumbs: [Crumb] {
