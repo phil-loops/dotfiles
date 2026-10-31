@@ -203,8 +203,6 @@ enum DiffCommands {
             r.register(Command(id: "review.tab.\(t)", title: "Show the \(t) tab", scope: .review, verb: .nth(i + 1), label: t,
                                local: { _, _ in pg.tab = t }))
         }
-        r.register(Command(id: "review.split", title: "Switch between split and unified diff", scope: .review, leader: LocalKey(",s"), label: "split",
-                           local: { _, _ in pg.split.toggle() }))
         r.register(Command(id: "review.outdated", title: "Show or hide outdated conversations", scope: .review, leader: LocalKey(",o"), label: "outdated",
                            local: { _, _ in pg.showOutdated.toggle() }))
 

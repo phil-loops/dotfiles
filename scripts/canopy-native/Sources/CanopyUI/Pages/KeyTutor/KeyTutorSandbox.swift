@@ -42,7 +42,6 @@ enum KeyTutorSandbox {
         let fm = app.forestModel
         fm.defaults = MemoryDefaults()
         fm.face = .branches
-        ReviewPageState.of(app).defaults = MemoryDefaults()
         app.state { Workstation(app: app) }.openURL = { u in KeyTutorStub.note(port, "open \(u.absoluteString)") }
         let tutor = TutorArea.state(app)
         tutor.sessionsFile = nil
@@ -285,7 +284,7 @@ final class KeyTutorStub: URLProtocol, @unchecked Sendable {
     override func stopLoading() {}
 }
 
-/// UserDefaults that live in memory only: the practice app's remembered face, split and unsent words.
+/// UserDefaults that live in memory only: the practice app's remembered face and unsent words.
 final class MemoryDefaults: UserDefaults, @unchecked Sendable {
     private var values: [String: Any] = [:]
 
