@@ -12,13 +12,15 @@ import CanopyCore
 final class KeyMonitor {
     private var token: Any?
     private weak var app: AppModel?
+    /// Inside a host app: whether this event is canopy's at all (nil: every event is).
+    private let owns: ((NSEvent) -> Bool)?
 
-    init(app: AppModel) { self.app = app }
+    init(app: AppModel, owns: ((NSEvent) -> Bool)? = nil) { self.app = app; self.owns = owns }
 
     func install() {
         guard token == nil else { return }
         token = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown]) { [weak self] e in
-            guard let self, let app = self.app else { return e }
+            guard let self, let app = self.app, self.owns?(e) ?? true else { return e }
             if e.type == .leftMouseDown {
                 app.keys.reset()
                 return e

@@ -1,6 +1,6 @@
 #!/bin/zsh
 # SwiftBar plugin — blessed: menu-bar launcher for the blessing-ledger review viewer.
-# Verbs — Start (background, no browser), Start + open in Chrome, canopy (the native viewer), the
+# Verbs — Start (background, no browser), Start + open in Chrome, canopy (the forest viewer, in Show), the
 # loops API Postman console (:7070, in Show's API workspace), the mail-map pipeline wiki (:62555), and the bookshelf (:62556). The
 # badge ✦ is green when the viewer is live, grey when down.
 #
@@ -21,7 +21,6 @@ repo="$HOME/coding/loops"
 port="$("$HOME/.dotfiles/scripts/stack-review-port" "$repo" 2>/dev/null || echo 62333)"
 base="http://127.0.0.1:${port}"
 serve="$HOME/.dotfiles/scripts/stack-review-serve"
-canopy="$HOME/.dotfiles/scripts/canopy"
 show="$HOME/.dotfiles/scripts/show"
 pmport=7070
 mailmap="$HOME/.dotfiles/scripts/mail-map-serve"
@@ -45,14 +44,10 @@ case "${1:-}" in
   --restart)     # bounce the server, stay in the background
     lsof -ti "tcp:${port}" 2>/dev/null | xargs kill 2>/dev/null
     bg "$serve" --no-open; poke; exit 0 ;;
-  --canopy)      # the native viewer. It refuses without a live server, so a cold click starts one
-    # first and waits for it — detached, since a cold build takes a while. A rebuild runs about a
-    # minute with no window, so it says so in a notification, and so does a failure.
-    ( { curl -sf --max-time 1 "$base/sig" >/dev/null 2>&1 || { cd "$repo" && nohup "$serve" --no-open >/dev/null 2>&1 </dev/null &
-          for _ in $(seq 1 120); do curl -sf --max-time 1 "$base/sig" >/dev/null 2>&1 && break; sleep 0.5; done; }; }
-      cd "$repo"
-      "$canopy" 2>&1 </dev/null | while IFS= read -r line; do
-        [[ "$line" == "canopy: building"* ]] && notify "building — it opens when done"
+  --canopy)      # the forest viewer, in Show's Canopy workspace (which starts the server when it's down).
+    # A rebuild runs a minute or so with no window, so it says so in a notification, and so does a failure.
+    ( "$show" --canopy 2>&1 </dev/null | while IFS= read -r line; do
+        [[ "$line" == *": building"* ]] && notify "building — it opens when done"
         last="$line"
       done
       (( ${pipestatus[1]} )) && notify "didn't open: ${last}"

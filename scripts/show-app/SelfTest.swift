@@ -29,7 +29,7 @@ var selfTest: SelfTestMode?
 let selfTestSuite = "com.philbrockman.show.selftest"
 
 /// Points every path Show writes at the scratch directory before anything reads them: the library, live-runs.json, prefs,
-/// the learning graph, and stubs for `claude` and `canopy`.
+/// the learning graph, and a stub for `claude`.
 func prepareSelfTest(_ mode: SelfTestMode) {
     setvbuf(stdout, nil, _IOLBF, 0)
     DispatchQueue.global().asyncAfter(deadline: .now() + 90) {
@@ -41,7 +41,6 @@ func prepareSelfTest(_ mode: SelfTestMode) {
     setenv("SHOW_DIR", library, 1)
     setenv("SHOW_LIVE_RUNS", (scratch as NSString).appendingPathComponent("live-runs.json"), 1)
     setenv("SHOW_CLAUDE", (scratch as NSString).appendingPathComponent("claude-stub"), 1)
-    setenv("SHOW_CANOPY", "/usr/bin/true", 1)
     setenv("LEARNING_GRAPH", (scratch as NSString).appendingPathComponent("graph.json"), 1)
     setenv("LEARNING_MEMORY", "0", 1)
     if case .run = mode {

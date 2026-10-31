@@ -1,4 +1,4 @@
-// Show — one native window with five workspaces on a rail: Forest (⌘1), Review (⌘2), Learn (⌘3), Runs (⌘4), API (⌘5).
+// Show — one native window with five workspaces on a rail: Forest (⌘1), Review (⌘2), Learn (⌘3), Runs (⌘4), API (⌘5), Canopy (⌘6).
 // A file goes to the workspace its optional "workspace" key names, otherwise to the one its "mode" implies (forest, deck, tutor, live).
 // Decks: { "title", "subtitle"?, "sections": [{ "id"?, "group", "title", "tag"?, "body" (markdown), "url"? (a live page shown instead of the body) }] }
 // Sign-offs and notes save beside the deck as <deck>.signoff.json; "replyTo" names the claude-say session that Submit notifies.
@@ -17,7 +17,7 @@ var prefs = UserDefaults.standard
 
 /// The workspaces on the rail, top to bottom; the nth answers to ⌘n. Nothing crosses between them except the rail's waiting badges.
 enum Workspace: String, CaseIterable {
-    case forest, review, learn, runs, api
+    case forest, review, learn, runs, api, canopy
 
     var name: String { self == .api ? "API" : rawValue.capitalized }
 
@@ -28,6 +28,7 @@ enum Workspace: String, CaseIterable {
         case .learn: return "graduationcap"
         case .runs: return "dot.radiowaves.left.and.right"
         case .api: return "bolt"
+        case .canopy: return "leaf"
         }
     }
 
@@ -41,6 +42,7 @@ enum Workspace: String, CaseIterable {
         case .learn: return inkColor
         case .runs: return running ? .systemOrange : .secondaryLabelColor
         case .api: return .secondaryLabelColor
+        case .canopy: return forestTint
         }
     }
 
@@ -99,6 +101,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             }
             workspaces[workspace] = controller
         }
+        workspaces[.canopy]?.canopy?.isActive = { [weak self] in self?.active == .canopy && self?.shell.finder == nil && self?.shell.overlay == nil }
         shell = ShellController(workspaces: workspaces, active: start)
         shell.onPick = { [weak self] in self?.switchTo($0) }
         window = ShowWindow(contentRect: NSRect(x: 0, y: 0, width: 1180, height: 780),
@@ -142,6 +145,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
         window.makeKeyAndOrderFront(nil)
         workspaces[active]?.console?.start()
+        workspaces[active]?.canopy?.start()
         workspaces[active]?.restoreFocus(in: window)
         NSApp.activate(ignoringOtherApps: true)
         refreshLibrary(force: true)
@@ -247,6 +251,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     func switchTo(_ workspace: Workspace) {
         if snapshotPath == nil && selfTest == nil {
             workspaces[workspace]?.console?.start()
+            workspaces[workspace]?.canopy?.start()
         }
         guard workspace != active else { return }
         shell.hideFinder()
@@ -281,7 +286,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
     }
 
-    /// ⌘⇧O: the selected branch's page in canopy, the native forest viewer, for its diff.
+    /// ⌘⇧O: the selected branch's page in the Canopy workspace, for its diff.
     @objc func openInCanopy(_ sender: Any?) {
         guard let controller = workspaces[active] else { return }
         guard active == .forest else {
@@ -292,30 +297,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             controller.say("Open a forest and pick a branch first")
             return
         }
-        guard let command = canopyCommand(deck.deck, section) else {
+        guard let route = canopyRoute(deck.deck, section) else {
             controller.say(section.rank == nil ? "“\(section.title)” isn't a branch, so canopy has no page for it" : "This forest deck names no repo, so canopy can't find the branch")
             return
         }
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: command[0])
-        process.arguments = Array(command.dropFirst())
-        let errors = Pipe()
-        process.standardError = errors
-        process.standardOutput = FileHandle.nullDevice
-        process.terminationHandler = { [weak controller] finished in
-            let detail = String(data: errors.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines).split(separator: "\n").last.map(String.init) ?? ""
-            guard finished.terminationStatus != 0 else { return }
-            DispatchQueue.main.async {
-                controller?.say("canopy failed (exit \(finished.terminationStatus))" + (detail.isEmpty ? "" : ": \(detail)"))
-            }
-        }
-        do {
-            try process.run()
-            controller.say("Opening \(section.key) in canopy")
-        } catch {
-            controller.say("Couldn't run canopy: \(error.localizedDescription)")
-        }
+        switchTo(.canopy)
+        workspaces[.canopy]?.canopy?.start(route: route)
     }
 
     @objc func goBack(_ sender: Any?) {
