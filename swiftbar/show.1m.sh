@@ -2,6 +2,7 @@
 # SwiftBar plugin — show: menu-bar launcher for the Show app. The badge counts documents
 # waiting on you (unsigned deck sections, unanswered tutor rungs); the menu opens any of
 # them in its workspace. Runs lists the live decks Show has opened (Application Support/Show/live-runs.json).
+# A Show or Canopy crash since the last "seen" (app-crashes) puts ⚠ on the icon and a line on top.
 #
 # <bitbar.title>Show launcher</bitbar.title>
 # <bitbar.desc>Open Show, or jump to a deck or tutor session waiting on you.</bitbar.desc>
@@ -13,8 +14,9 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PA
 show="$HOME/.dotfiles/scripts/show"
 
 /usr/bin/python3 - "$show" <<'PY'
-import json, os, sys, pathlib, time
+import json, os, sys, pathlib, subprocess, time
 show = sys.argv[1]
+crashes_cmd = str(pathlib.Path.home() / ".dotfiles/scripts/app-crashes")
 root = pathlib.Path.home() / ".dotfiles/show"
 runs = pathlib.Path(os.environ.get("SHOW_LIVE_RUNS") or pathlib.Path.home() / "Library/Application Support/Show/live-runs.json")
 
@@ -54,9 +56,19 @@ for r in load(runs) or []:
     count = f" · {st['done']} of {st['total']}" if st.get("done") is not None and st.get("total") is not None else ""
     groups["Runs"].append((state == "failed", f"{d.get('title', p.stem)} — {state}{count} · {ago(p)}", p, state))
 
+try:
+    crashes = json.loads(subprocess.run([crashes_cmd, "--new", "--json"], capture_output=True, text=True, timeout=20).stdout or "[]")
+except (OSError, ValueError, subprocess.TimeoutExpired):
+    crashes = []
+
 waiting = sum(1 for ws, g in groups.items() if ws != "Runs" for left, *_ in g if left)
-print(f"{waiting}" if waiting else "", "| sfimage=rectangle.stack")
+print(("⚠ " if crashes else "") + (f"{waiting}" if waiting else ""), "| sfimage=rectangle.stack")
 print("---")
+if crashes:
+    for c in crashes[:5]:
+        print(f"⚠ {c['app']} crashed {c['at'][5:16].replace('T', ' ')} — {c['where'][:70]} | bash=/usr/bin/open param1=-a param2=Console param3={c['path']} terminal=false")
+    print(f"Mark crashes seen | bash={crashes_cmd} param1=--seen terminal=false refresh=true")
+    print("---")
 print(f"Open Show | bash={show} terminal=false")
 for ws, rows in groups.items():
     if not rows: continue

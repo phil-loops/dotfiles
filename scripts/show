@@ -28,7 +28,10 @@ build() {
   local out
   out="$(cd "$here/show-app" && swift build -c release --show-bin-path)"
   mkdir -p "$app/Contents/Resources"
-  cp "$out/Show" "$app/Contents/MacOS/Show"
+  # beside, then renamed in: a running Show keeps its own file (writing over it in place gets it
+  # killed for an invalid code signature)
+  cp "$out/Show" "$app/Contents/MacOS/Show.new"
+  mv -f "$app/Contents/MacOS/Show.new" "$app/Contents/MacOS/Show"
   rm -rf "$app/Contents/Resources/canopy-native_CanopyUI.bundle"
   cp -R "$out/canopy-native_CanopyUI.bundle" "$app/Contents/Resources/"
   cat > "$app/Contents/Info.plist" <<'PLIST'

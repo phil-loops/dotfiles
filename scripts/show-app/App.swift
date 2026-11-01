@@ -78,6 +78,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     var watcher: Timer?
     var signature = ""
     let launchedBuild = modificationDate(buildStamp)
+    /// Files macOS asked to open before the window existed (a launch by opening a file can do that);
+    /// opened once launching finishes. nil from then on.
+    private var openedEarly: [String]? = []
 
     init(launchPaths: [String], snapshotPath: String? = nil) {
         self.launchPaths = launchPaths
@@ -130,8 +133,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         refreshLibrary(force: true)
         restore()
         updateTitle()
-        launchPaths.forEach(openPath)
-        if launchPaths.isEmpty, snapshotPath == nil, selfTest == nil, workspaces.values.allSatisfy({ $0.current == nil }) {
+        let early = openedEarly ?? []
+        openedEarly = nil
+        (launchPaths + early).forEach(openPath)
+        if launchPaths.isEmpty, early.isEmpty, snapshotPath == nil, selfTest == nil, workspaces.values.allSatisfy({ $0.current == nil }) {
             openNewest()
         }
         if let snapshotPath {
@@ -204,6 +209,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
+        if openedEarly != nil {
+            openedEarly?.append(contentsOf: urls.map(\.path))
+            return
+        }
         urls.map(\.path).forEach(openPath)
         NSApp.activate(ignoringOtherApps: true)
     }
