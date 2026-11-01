@@ -1,4 +1,5 @@
 import AppKit
+import CanopyCore
 
 struct TutorSession: Decodable {
     let mode: String?
@@ -297,8 +298,8 @@ final class TutorAgent {
             process.executableURL = URL(fileURLWithPath: override)
             process.arguments = arguments
         } else {
-            process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-            process.arguments = ["-lc", exports + "export PATH=\"$HOME/.local/bin:$PATH\"; exec claude \"$@\"", "claude"] + arguments
+            process.executableURL = URL(fileURLWithPath: Zsh.path)
+            process.arguments = Zsh.arguments(exports + "exec claude \"$@\"", ["claude"] + arguments)
         }
         process.currentDirectoryURL = URL(fileURLWithPath: Self.workingDirectory)
         let output = Pipe()

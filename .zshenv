@@ -12,4 +12,7 @@
 # still outranks the homebrew node that .zprofile adds after us.
 export VOLTA_HOME="$HOME/.volta"
 typeset -U path
-path=("$VOLTA_HOME/bin" "$HOME/.local/bin" "$HOME/.dotfiles/scripts" $path)
+# Homebrew too: an app launched from the Dock (Show, canopy) starts tools with `zsh -c` from a
+# bare system PATH, and .zprofile's brew shellenv only runs for login shells — which also load
+# nvm's node 18 over volta's, so those apps must not use `-l`.
+path=("$VOLTA_HOME/bin" "$HOME/.local/bin" "$HOME/.dotfiles/scripts" /opt/homebrew/bin /opt/homebrew/sbin $path)

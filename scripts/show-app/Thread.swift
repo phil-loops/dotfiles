@@ -1,4 +1,5 @@
 import AppKit
+import CanopyCore
 
 /// One line of a section's conversation in `<deck>.thread.json`: Show appends Phil's, the deck's author appends Claude's.
 struct ThreadMessage: Codable {
@@ -40,12 +41,7 @@ var claudeSayPath: String {
 
 /// Whether `replyTo` resolves to one live, deliverable Claude session, by `claude-say <who> --check` (it sends nothing).
 func claudeSessionReachable(_ replyTo: String) -> Bool {
-    let process = Process()
-    process.executableURL = URL(fileURLWithPath: claudeSayPath)
-    process.arguments = [replyTo, "--check"]
-    var environment = ProcessInfo.processInfo.environment
-    environment["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:" + (environment["PATH"] ?? "")
-    process.environment = environment
+    let process = Zsh.process("exec \"$0\" \"$@\"", [claudeSayPath, replyTo, "--check"])
     process.standardOutput = FileHandle.nullDevice
     process.standardError = FileHandle.nullDevice
     do {
@@ -229,8 +225,8 @@ final class DeckAgent {
             process.executableURL = URL(fileURLWithPath: override)
             process.arguments = arguments
         } else {
-            process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-            process.arguments = ["-lc", "export PATH=\"$HOME/.local/bin:$PATH\"; exec claude \"$@\"", "claude"] + arguments
+            process.executableURL = URL(fileURLWithPath: Zsh.path)
+            process.arguments = Zsh.arguments("exec claude \"$@\"", ["claude"] + arguments)
         }
         process.currentDirectoryURL = URL(fileURLWithPath: ("~/.dotfiles" as NSString).expandingTildeInPath)
         let output = Pipe()

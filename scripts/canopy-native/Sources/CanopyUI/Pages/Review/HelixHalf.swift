@@ -70,8 +70,7 @@ struct HelixHalf: NSViewRepresentable {
         var env = ProcessInfo.processInfo.environment
         env["TERM"] = "xterm-256color"
         env["COLORTERM"] = "truecolor"
-        env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:" + (env["PATH"] ?? "/usr/bin:/bin")
-        t.startProcess(executable: "/bin/zsh", args: ["-lc", "exec hx \"$0\"", "\(open.path):\(open.line):\(open.col)"],
+        t.startProcess(executable: Zsh.path, args: Zsh.arguments("exec hx \"$0\"", ["\(open.path):\(open.line):\(open.col)"]),
                        environment: env.map { "\($0)=\($1)" }, currentDirectory: dir)
         DispatchQueue.main.async { t.window?.makeFirstResponder(t) }
         return t

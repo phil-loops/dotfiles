@@ -1,4 +1,5 @@
 import AppKit
+import CanopyCore
 
 /// ⌘N: a small "New…" prompt, routed per workspace. Review and Forest hand the request to a headless Claude that writes the deck
 /// and opens it with `show`; Learn has its own (`tutor.new`); Runs has nothing to make.
@@ -33,8 +34,8 @@ enum NewRequest {
             process.executableURL = URL(fileURLWithPath: override)
             process.arguments = arguments
         } else {
-            process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-            process.arguments = ["-lc", "export PATH=\"$HOME/.local/bin:$PATH\"; exec claude \"$@\"", "claude"] + arguments
+            process.executableURL = URL(fileURLWithPath: Zsh.path)
+            process.arguments = Zsh.arguments("exec claude \"$@\"", ["claude"] + arguments)
         }
         process.currentDirectoryURL = URL(fileURLWithPath: ("~/.dotfiles" as NSString).expandingTildeInPath)
         let log = stem + ".log"

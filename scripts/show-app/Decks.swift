@@ -1,4 +1,5 @@
 import AppKit
+import CanopyCore
 import WebKit
 
 final class SignOffStore {
@@ -654,12 +655,7 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
 
 /// Runs `claude-say <replyTo> <message>`; returns what went wrong, or nil once it's delivered.
 func claudeSay(_ replyTo: String, _ message: String) -> String? {
-    let process = Process()
-    process.executableURL = URL(fileURLWithPath: claudeSayPath)
-    process.arguments = [replyTo, message]
-    var environment = ProcessInfo.processInfo.environment
-    environment["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:" + (environment["PATH"] ?? "")
-    process.environment = environment
+    let process = Zsh.process("exec \"$0\" \"$@\"", [claudeSayPath, replyTo, message])
     let errors = Pipe()
     process.standardError = errors
     process.standardOutput = errors
