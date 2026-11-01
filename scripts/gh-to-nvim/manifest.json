@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "GitHub → nvim",
-  "version": "0.3.20",
-  "description": "Open the current GitHub page (PR / blob / commit) in the local forest viewer's warm nvim. URL-only: no page access.",
+  "name": "GitHub → canopy",
+  "version": "0.3.26",
+  "description": "Open the GitHub PR you're on in canopy at the line you selected, or the page's file in Helix. URL-only: no page access.",
   "permissions": [
     "management",
     "storage",
@@ -23,7 +23,7 @@
     "128": "icons/fresh-128.png"
   },
   "action": {
-    "default_title": "GitHub → nvim",
+    "default_title": "GitHub → canopy",
     "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/fresh-16.png",
@@ -38,14 +38,14 @@
         "default": "Ctrl+Shift+O",
         "mac": "Command+Shift+O"
       },
-      "description": "Open this GitHub page in nvim (selected line, else whole-PR Diffview)"
+      "description": "Open this GitHub page's file in Helix (the selected line, else the whole PR)"
     },
     "open-in-viewer": {
       "suggested_key": {
         "default": "Ctrl+Shift+U",
         "mac": "Command+Shift+U"
       },
-      "description": "Open this PR in the forest viewer"
+      "description": "Open this PR in canopy, at the selected line"
     }
   },
   "background": {
