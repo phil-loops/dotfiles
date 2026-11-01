@@ -36,8 +36,10 @@
 #                                                         worktree, the prompt drafted unsent, and
 #                                                         draft the reply to wait for its fix
 #                        {branch, undo: key}              take both back (outline undo + the draft)
-#   POST /review-edit   {branch, path, start, end, text, sha}  your own edit of lines start–end (new side)
-#                                                        as a LOCAL commit — refused if the branch moved from sha
+#   POST /review-helix  {branch, op: where}  → {dir, sha}: the branch's diff-view checkout, for Helix
+#                       {branch, op: land, dir, sha}  → {sha, message, files} | {nothing}: commit what
+#                       changed in dir since sha — a fixup of the commit that wrote it while unpushed,
+#                       as a LOCAL commit; refused if the branch moved from sha
 #   POST /review-apply  {branch, thread}                 apply a suggestion as a LOCAL commit — git
 #                                                         only, landed the way /revert-commit lands
 #                                                         one (reset --keep in the branch's worktree,
@@ -603,7 +605,7 @@ def _commit_file(tip, path, content, message):
 
 
 def _commit_files(tip, contents, message):
-    """A commit on `tip` with each path's content replaced, made without a worktree."""
+    """A commit on `tip` with each path's content replaced (None removes it), made without a worktree."""
     fd, index = tempfile.mkstemp(prefix="rv-index-")
     os.close(fd)
     try:
@@ -611,10 +613,13 @@ def _commit_files(tip, contents, message):
         if _git(["read-tree", tip], env=env).returncode != 0:
             raise ghreview.Refused("couldn't read the tip's tree")
         for path, content in contents.items():
+            if content is None:
+                _git(["update-index", "--force-remove", "--", path], env=env)
+                continue
             ls = _git(["ls-tree", tip, "--", path]).stdout.split()
             mode = ls[0] if ls else "100644"
             blob = _git(["hash-object", "-w", "--stdin", "--path", path], input=content).stdout.strip()
-            if _git(["update-index", "--cacheinfo", f"{mode},{blob},{path}"], env=env).returncode != 0:
+            if _git(["update-index", "--add", "--cacheinfo", f"{mode},{blob},{path}"], env=env).returncode != 0:
                 raise ghreview.Refused(f"couldn't stage {path}")
         tree = _git(["write-tree"], env=env).stdout.strip()
     finally:
@@ -681,35 +686,58 @@ def apply(req, d):
 
 
 @_guarded
-def edit(req, d):
-    """Your own edit of a few lines, made in the diff: lines start–end of path, at the tip you saw,
-    become `text` in one commit on the branch — the same plumbing an applied suggestion uses."""
-    branch, path = d.get("branch") or "", d.get("path") or ""
-    try:
-        start, end = int(d.get("start")), int(d.get("end"))
-    except (TypeError, ValueError):
-        raise ghreview.Refused("want {branch, path, start, end, text, sha}")
-    text, seen = d.get("text"), d.get("sha") or ""
-    if not branch or not path or text is None or ".." in path.split("/") or path.startswith("/"):
-        raise ghreview.Refused("want {branch, path, start, end, text, sha}")
-    tip = _git(["rev-parse", "--verify", "-q", f"refs/heads/{branch}"]).stdout.strip()
+def helix(req, d):
+    """Helix in the diff's new half. `where` makes the branch's diff-view checkout (HEAD the
+    parent, files the tip) for Helix to open; `land`, once Helix quits, commits whatever changed
+    there since the tip it opened at."""
+    branch = d.get("branch") or ""
+    tip = _git(["rev-parse", "--verify", "-q", f"refs/heads/{branch}"]).stdout.strip() if branch else ""
     if not tip:
         raise ghreview.Refused(f"no branch {branch}")
+    if d.get("op") == "where":
+        r = subprocess.run([os.path.join(ctx.SCRIPTS, "stack-open"), "--diff-path", branch], cwd=ctx.repo_cwd(),
+                           capture_output=True, text=True, timeout=120)
+        lines = r.stdout.strip().splitlines()
+        if r.returncode != 0 or not lines or not os.path.isdir(lines[-1]):
+            raise ghreview.Refused((r.stderr or "couldn't check the branch out for Helix").strip()[-200:])
+        return _send(req, 200, {"ok": True, "dir": lines[-1], "sha": tip})
+    wt, seen = d.get("dir") or "", d.get("sha") or ""
+    if not wt or _git(["-C", wt, "rev-parse", "--git-common-dir"]).returncode != 0 \
+            or _git(["-C", wt, "symbolic-ref", "-q", "HEAD"]).returncode == 0:
+        raise ghreview.Refused("want {branch, op: land, dir, sha} with dir the diff-view checkout")
     if seen and not tip.startswith(seen):
-        raise ghreview.Refused("the branch moved since you started — your text is kept, look again")
-    shown = _git(["show", f"{tip}:{path}"])
-    if shown.returncode != 0:
-        raise ghreview.Refused(f"{path} isn't on the tip")
-    lines = text.split("\n")
-    if lines and lines[-1] == "" and len(lines) > 1:
-        lines = lines[:-1]
-    new_text = replace_lines(shown.stdout, start, end, lines)
-    if new_text == shown.stdout:
-        raise ghreview.Refused("nothing changed")
+        raise ghreview.Refused(f"the branch moved while you edited — your edits are saved in {wt}")
+    changed = [p for p in _git(["-C", wt, "diff", "--name-only", "-z", tip]).stdout.split("\0") if p]
+    changed += [p for p in _git(["-C", wt, "ls-files", "--others", "--exclude-standard", "-z"]).stdout.split("\0") if p]
+    if not changed:
+        return _send(req, 200, {"ok": True, "nothing": True})
+    contents = {}
+    for p in changed:
+        f = os.path.join(wt, p)
+        contents[p] = open(f, encoding="utf-8", newline="").read() if os.path.isfile(f) else None
+    message = _edit_message(branch, tip, wt, changed[0])
+    new = _commit_files(tip, contents, message)
+    _land(branch, tip, new, changed)
+    _send(req, 200, {"ok": True, "sha": new, "message": message.strip(), "files": changed})
+
+
+def _edit_message(branch, tip, wt, path):
+    """`fixup! <subject>` of the branch's own unpushed commit that wrote the first line the edit
+    touches, so sealing folds it in; else `edit <file>`."""
     leaf = path.rsplit("/", 1)[-1]
-    new = _commit_file(tip, path, new_text, f"edit {leaf}\n")
-    _land(branch, tip, new, path)
-    _send(req, 200, {"ok": True, "sha": new})
+    hunk = re.search(r"^@@ -(\d+)", _git(["-C", wt, "diff", "-U0", tip, "--", path]).stdout, re.M)
+    if not hunk:
+        return f"edit {leaf}\n"
+    line = max(1, int(hunk.group(1)))
+    blame = _git(["blame", "--porcelain", "-L", f"{line},{line}", tip, "--", path]).stdout.split()
+    sha = blame[0] if blame else ""
+    parent = _git(["config", f"branch.{branch}.stack-parent"]).stdout.strip() or "main"
+    own = sha and sha in _git(["rev-list", f"{parent}..{tip}"]).stdout.split()
+    pushed = own and _git(["for-each-ref", "--count=1", "--contains", sha, "refs/remotes"]).stdout.strip()
+    if not own or pushed:
+        return f"edit {leaf}\n"
+    subject = _git(["log", "-1", "--format=%s", sha]).stdout.strip()
+    return f"{subject if subject.startswith('fixup! ') else 'fixup! ' + subject}\n"
 
 
 # ── address: declare a commit the thread's fix ───────────────────────────
