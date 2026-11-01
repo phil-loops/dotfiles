@@ -259,11 +259,7 @@ public final class ReviewPageState: ShipHost {
     /// (the old one stays up until the new one lands). Views call it on appear and on change.
     public func sync() {
         guard let t = target else { return }
-        if shownID != t.id {
-            let first = shownID.isEmpty
-            shownID = t.id
-            if !first || payload != nil { resetForNewBranch(t.id) }
-        }
+        arrive()
         let key = keyOf
         if payload?.key == key { return }
         if let hit = cache[key] { return land(key, hit) }
@@ -284,8 +280,18 @@ public final class ReviewPageState: ShipHost {
         }
     }
 
+    /// The page is on a new branch: start it fresh, once, whichever comes first — the view's sync or
+    /// a prefetched diff landing.
+    private func arrive() {
+        guard let t = target, shownID != t.id else { return }
+        let first = shownID.isEmpty
+        shownID = t.id
+        if !first || payload != nil { resetForNewBranch(t.id) }
+    }
+
     /// Take a diff as read (tests hand one in directly).
     public func land(_ key: String, _ data: NodePayload) {
+        arrive()
         cache[key] = data
         payload = (key, data)
         payloadGen &+= 1
