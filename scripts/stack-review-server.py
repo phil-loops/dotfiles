@@ -296,12 +296,13 @@ class H(BaseHTTPRequestHandler):
             srvctx.clear_repo()
 
     def _send_open_in_canopy(self, route):
-        # The web viewer is retired; its /v2/… addresses now name a canopy-native page.
-        cmd = html.escape(f"canopy {route}")
-        link = html.escape(f"canopy://{route.lstrip('/')}", quote=True)
+        # The web viewer is retired; its /v2/… addresses name a canopy-native page, so the page hands
+        # itself to canopy and stays only as the way back if the browser asks first.
+        cmd = html.escape(f"canopy '{route}'")
+        link = f"canopy://{route.lstrip('/')}"
         body = (f"<!doctype html><meta charset=utf-8><title>canopy</title>"
-                f"<p>This page is in the canopy app now: <a href=\"{link}\">open it in canopy</a>, or run</p>"
-                f"<pre>{cmd}</pre>").encode()
+                f"<p>Opening in canopy… <a href=\"{html.escape(link, quote=True)}\">open it</a> if nothing happened, or run</p>"
+                f"<pre>{cmd}</pre><script>location.replace({json.dumps(link)})</script>").encode()
         self._send(200, body, "text/html; charset=utf-8")
 
     def _redirect(self, to):

@@ -10,7 +10,7 @@ import subprocess
 import tempfile
 import threading
 import time
-from urllib.parse import parse_qs, quote, unquote
+from urllib.parse import parse_qs, quote, unquote, urlencode
 
 from srv import ctx
 from . import stackcfg
@@ -223,6 +223,16 @@ def _open_pr(req, d):   # via open_url (POST /open-url) — Chrome ext: open a P
             d["path"], d["line"] = hit, d.get("hashline")
         else:
             d["view"] = "gm"   # unresolvable hash — the whole-PR view beats a wrong jump
+    if d.get("open") == "viewer":
+        if not local and not refreshed:
+            _refresh_review_branch(num)   # canopy reads the head GitHub shows, not a stale fetch
+        # canopy's address names the spot: the file, and the line when it's on the head's side
+        spot = {"file": d["path"]} if d.get("path") else {}
+        if spot and d.get("hashside") == "R" and d.get("line"):
+            spot["line"] = d["line"]
+        at = "?" + urlencode(spot, safe="/", quote_via=quote) if spot else ""
+        req._send(200, json.dumps({"ok": True, "branch": branch, "path": route + at, "opened": False, "local": local}))
+        return
     if d.get("view") == "gm":   # whole-PR Diffview (<leader>gm) — no specific file/line
         code, _out, err = picker.review_on_branch(branch)
         req._send(200 if code == 0 else (504 if code == 504 else 500),
@@ -266,6 +276,7 @@ _GH_COMMIT = re.compile(r"^https://github\.com/([^/]+/[^/]+)/commit/([0-9a-f]+)"
 _GH_COMPARE = re.compile(r"^https://github\.com/([^/]+/[^/]+)/compare/([^?#]+)")
 _GH_REPO = re.compile(r"^https://github\.com/([^/]+/[^/]+)")
 _DIFF_HASH = re.compile(r"#diff-([0-9a-f]+)[RL](\d+)")
+_DIFF_SIDE = re.compile(r"#diff-[0-9a-f]+([RL])\d+")
 _LINE_HASH = re.compile(r"#L(\d+)")
 
 
@@ -295,9 +306,14 @@ def open_url(req, raw):   # POST /open-url {url, open?} — Chrome ext (URL-only
     if m:
         p = {"repo": m.group(1), "number": m.group(2)}
         if d.get("open") in ("viewer", "prewarm"):
-            # Both are path-less: import the head + build the worktree, open nothing, return the
-            # route. "viewer" means the ext will open that route in a tab; "prewarm" means it won't
-            # — it's just landing on the PR page, paying the cold cost now so the jump is warm.
+            # Neither opens Helix: import the head + build the worktree, return the route. "viewer"
+            # means the ext opens that route in canopy, at the line selected on GitHub if there is
+            # one; "prewarm" means it won't — it's just landing on the PR page, paying the cold cost
+            # now so the jump is warm.
+            h = _DIFF_HASH.search(url) if d["open"] == "viewer" else None
+            if h:
+                p["diffhash"], p["hashline"], p["hashside"] = h.group(1), int(h.group(2)), _DIFF_SIDE.search(url).group(1)
+            p["open"] = d["open"]
             return _open_pr(req, p)
         h = _DIFF_HASH.search(url)
         if h:
