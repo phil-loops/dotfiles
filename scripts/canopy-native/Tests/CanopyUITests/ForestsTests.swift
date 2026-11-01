@@ -157,7 +157,7 @@ private let NOW = iso("2026-10-22T18:00:00Z") // Thu 11:00 PT
 /// A small world: two focus forests (the first a fork: a → b, a → c, c → d), one on the workbench,
 /// one archived, one whose every PR landed.
 @MainActor
-private func world(_ route: Route = .forests, todo: [String: Any] = [:]) -> AppModel {
+func world(_ route: Route = .forests, todo: [String: Any] = [:]) -> AppModel {
     var c = AppConfig()
     c.route = route
     let a = AppModel(config: c, port: 1, telemetry: false)

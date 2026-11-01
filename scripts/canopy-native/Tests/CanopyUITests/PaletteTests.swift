@@ -168,14 +168,15 @@ import Testing
         #expect(!a.menuOpen)
     }
 
+    /// The store holds archived forests too, so the finder reaches their branches by name or PR number.
     @Test func whatTheMenuFindsRunsWithItsArgument() {
-        let a = app()
+        let a = world()
         a.state { WikiState() }.seed(PagesReply(pages: [WikiPage(slug: "canopy-v2-keys", title: "Keys like Helix", section: "Canopy v2")]))
         a.menuOpen = true
         let menu = a.state { MenuState() }
-        menu.archived = FindWorld(branches: [.init(id: "loops:old/thing", name: "old/thing", project: "loops:old")], prs: [.init(id: "loops:old/thing", number: 4242)])
-        menu.query = "4242"
-        #expect(menu.rows(a).last == MenuRow(id: "find.branch", arg: "loops:old/thing", title: "old/thing", side: "#4242", group: "branches"))
+        #expect(menu.world(a).branches.contains { $0.id == "r:o" }, "the archived forest's branch")
+        menu.query = "12"
+        #expect(menu.rows(a).last == MenuRow(id: "find.branch", arg: "r:x", title: "x", side: "#12 · done", group: "branches"))
         menu.query = "keys like"
         let r = menu.rows(a).first { $0.group == "wiki pages" }
         #expect(r?.arg == "canopy-v2-keys")

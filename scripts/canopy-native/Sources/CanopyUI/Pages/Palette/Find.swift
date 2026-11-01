@@ -11,8 +11,7 @@ struct Find: Equatable {
     var sub: String
 }
 
-/// The world the finder searches: just the fields it reads, so archived forests' branches (from
-/// `/state?archived=1`) and the live store feed it alike.
+/// The world the finder searches: just the fields it reads.
 struct FindWorld {
     struct Branch: Equatable { var id: String; var name: String; var project: String }
     struct Project: Equatable { var id: String; var name: String; var archived: Bool }

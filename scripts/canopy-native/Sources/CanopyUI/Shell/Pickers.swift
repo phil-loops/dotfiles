@@ -10,11 +10,11 @@ extension AppModel {
         return router.route.branchID.flatMap { store.view(Branch.self, $0)?.project }
     }
 
-    /// `space b`: every branch in every forest, the ones you visit most and most recently first,
-    /// twice as strongly in the forest you're in; typing filters fuzzily.
+    /// `space b`: every branch in every forest not archived, the ones you visit most and most
+    /// recently first, twice as strongly in the forest you're in; typing filters fuzzily.
     func pickBranch() throws {
         let here = currentForest
-        let all = store.list(Branch.self)
+        let all = store.list(Branch.self).filter { store.view(Project.self, $0.project)?.state != .archive }
         guard !all.isEmpty else { throw Refusal("no branches yet") }
         let boost: (Branch) -> Double = { $0.project == here ? 2 : 1 }
         let ordered = frecency.rank(all, "", id: \.id, text: \.name, boost: boost)
