@@ -1,0 +1,88 @@
+#!/usr/bin/env python3
+"""app-crashes — the crash reports macOS kept for Show and Canopy, newest first, each with the
+line of our own code it died in.
+
+  app-crashes                 every report: when, app, why, where
+  app-crashes --new           only those since the last --seen (exit 1 when there are none)
+  app-crashes --seen          mark everything so far as seen
+  app-crashes --json          the same rows as JSON
+
+Reads ~/Library/Logs/DiagnosticReports and its Retired/ folder (where macOS moves older reports).
+"""
+import json
+import os
+import pathlib
+import re
+import subprocess
+import sys
+
+APPS = ("Show", "Canopy")
+DIRS = [pathlib.Path.home() / "Library/Logs/DiagnosticReports", pathlib.Path.home() / "Library/Logs/DiagnosticReports/Retired"]
+STAMP = pathlib.Path.home() / ".cache/app-crashes-seen"
+
+
+def reports():
+    out = []
+    for d in DIRS:
+        for p in d.glob("*.ips") if d.is_dir() else []:
+            app = p.name.split("-", 1)[0]
+            if app in APPS:
+                out.append(p)
+    return sorted(out, key=lambda p: p.stat().st_mtime, reverse=True)
+
+
+def read(p):
+    try:
+        head, body = p.read_text().split("\n", 1)
+        d = json.loads(body)
+    except (OSError, ValueError):
+        return None
+    exc = d.get("exception") or {}
+    why = exc.get("signal") or exc.get("type") or "?"
+    asi = d.get("asi") or {}
+    note = next((m for msgs in asi.values() for m in msgs), "")
+    imgs = d.get("usedImages") or []
+    app = p.name.split("-", 1)[0]
+    where = ""
+    for bt in d.get("asiBacktraces") or []:   # an Objective-C exception: its own backtrace names our frame
+        m = re.search(rf"^\d+\s+{app}\s+0x[0-9a-f]+ (\S+)", bt, re.M)
+        if m:
+            where = demangle(m.group(1))
+            break
+    for f in [] if where else (d.get("threads") or [{}])[d.get("faultingThread", 0)].get("frames", []):
+        im = imgs[f["imageIndex"]] if f.get("imageIndex", -1) < len(imgs) else {}
+        if im.get("name") == app and f.get("symbol"):
+            line = f" ({f['sourceFile']}:{f.get('sourceLine', '?')})" if f.get("sourceFile") else ""
+            where = f["symbol"] + line
+            break
+    return {"path": str(p), "app": app, "at": json.loads(head).get("timestamp", "")[:19], "why": why,
+            "note": note, "where": where or "(no frame of ours)", "mtime": p.stat().st_mtime}
+
+
+def demangle(sym):
+    try:
+        out = subprocess.run(["xcrun", "swift-demangle", "--simplified", sym], capture_output=True, text=True, timeout=5).stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        return sym
+    return out.split(" ---> ")[-1] or sym
+
+
+def main(argv):
+    rows = [r for r in map(read, reports()) if r]
+    if "--seen" in argv:
+        STAMP.parent.mkdir(parents=True, exist_ok=True)
+        STAMP.write_text(str(max([r["mtime"] for r in rows] or [0])))
+        return 0
+    if "--new" in argv:
+        since = float(STAMP.read_text()) if STAMP.exists() else 0
+        rows = [r for r in rows if r["mtime"] > since]
+    if "--json" in argv:
+        print(json.dumps(rows, indent=1))
+    else:
+        for r in rows:
+            print(f"{r['at']}  {r['app']:<6} {r['why']:<8} {r['where']}" + (f"  — {r['note']}" if r["note"] else ""))
+    return 1 if "--new" in argv and not rows else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
