@@ -9,6 +9,11 @@ length prefix, then that many bytes of UTF-8 JSON, both directions.
 Message in:  {"action": "launch", "repo": "<abs path>"?}   (repo defaults to ~/coding/loops)
 Message out: {"ok": bool, "started": bool, "err": str?}
 
+Message in:  {"action": "canopy", "route": "/v2/b/<repo>/<branch>?file=…&line=…"}
+Message out: {"ok": bool, "err": str?}
+  opens canopy at that address (its launcher builds it if needed, or hands the address to the
+  running app) — so the extension never needs a browser tab for it.
+
 `stack-review-serve` is idempotent (a live server on the repo's port is reused),
 so a launch while already-up is a harmless no-op.
 """
@@ -21,6 +26,8 @@ import sys
 
 DEFAULT_REPO = os.path.expanduser("~/coding/loops")
 SERVE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stack-review-serve")
+CANOPY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "canopy")
+LOG = os.path.expanduser("~/Library/Logs/gh-to-nvim-host.log")
 
 
 def read_message():
@@ -46,7 +53,7 @@ def launch(repo):
     # Detach fully: the host process exits as soon as it replies, and Chrome would
     # otherwise reap the child. start_new_session + non-tty stdio = survives our exit.
     # Output goes to a log, not DEVNULL — a launch that dies mid-build was undiagnosable.
-    log_path = os.path.expanduser("~/Library/Logs/gh-to-nvim-host.log")
+    log_path = LOG
     with open(log_path, "ab") as log:
         log.write(f"\n── launch {repo} @ {datetime.datetime.now():%Y-%m-%d %H:%M:%S} ──\n".encode())
         subprocess.Popen(
@@ -60,12 +67,26 @@ def launch(repo):
     return {"ok": True, "started": True, "log": log_path}
 
 
+def canopy(route):
+    if not isinstance(route, str) or not route.startswith("/v2"):
+        return {"ok": False, "err": f"not a canopy address: {route!r}"}
+    # zsh -c reads only ~/.zshenv, the PATH a Dock-launched tool gets (swift, git, the dotfiles
+    # scripts); detached like launch(), so canopy outlives this host.
+    with open(LOG, "ab") as log:
+        log.write(f"\n── canopy {route} @ {datetime.datetime.now():%Y-%m-%d %H:%M:%S} ──\n".encode())
+        subprocess.Popen(["/bin/zsh", "-c", 'exec "$0" "$@"', CANOPY, route],
+                         stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)
+    return {"ok": True}
+
+
 def main():
     msg = read_message()
     if not msg:
         return
     if msg.get("action") == "launch":
         send_message(launch(msg.get("repo") or DEFAULT_REPO))
+    elif msg.get("action") == "canopy":
+        send_message(canopy(msg.get("route")))
     else:
         send_message({"ok": False, "err": f"unknown action: {msg.get('action')}"})
 

@@ -38,6 +38,25 @@ function launchViewer() {
   });
 }
 
+// canopy is the viewer: the native host runs its launcher with the address, so the PR opens in the
+// app at its line rather than in a tab. Without the host, the tab's /v2 page hands itself over.
+function openCanopy(route) {
+  return new Promise((resolve) => {
+    const tab = () => chrome.tabs.create({ url: `${VIEWER_URL}${route}` });
+    try {
+      chrome.runtime.sendNativeMessage(HOST, { action: "canopy", route }, (res) => {
+        if (chrome.runtime.lastError || !res?.ok) {
+          tab();
+        }
+        resolve();
+      });
+    } catch {
+      tab();
+      resolve();
+    }
+  });
+}
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function waitForViewer(timeoutMs) {
@@ -132,7 +151,7 @@ async function openActiveTab(target) {
     return;
   }
   if (target === "viewer" && res.body.path) {
-    chrome.tabs.create({ url: `${VIEWER_URL}${res.body.path}` });
+    await openCanopy(res.body.path === "/" ? "/v2" : res.body.path);
   }
   // a success can still carry a warning — the stack-open stale/force-push backstop landed the
   // cursor at EOF because this checkout differs from GitHub; never let that be a silent wrong jump
@@ -220,6 +239,10 @@ chrome.tabs.onUpdated.addListener((_id, info, tab) => {
 // The popup's "→ nvim this page" button routes here — opening the popup is itself the
 // activeTab gesture, so the tab URL is readable for the click that follows.
 chrome.runtime.onMessage.addListener((msg, _s, respond) => {
+  if (msg?.type === "open-canopy") {
+    openCanopy(msg.route || "/v2").then(() => respond({ ok: true }));
+    return true;
+  }
   if (msg?.type !== "open-url") {
     return;
   }
