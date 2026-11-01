@@ -336,6 +336,77 @@ class Fake(unittest.TestCase):
             self.gh.mutate("addPullRequestReviewThreadReply", {"pullRequestReviewThreadId": "PRRT_1", "pullRequestReviewId": "nope", "body": "x"})
 
 
+class HelixLand(unittest.TestCase):
+    """What Helix changed in the diff-view checkout lands as one commit on the branch."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="helix-land-")
+        self.repo = os.path.join(self.tmp, "repo")
+        self.cwd, self.run = ctx.CWD, ctx.run
+        ctx.CWD = self.repo
+        ctx.run = lambda args, timeout=None: subprocess.run(args, cwd=self.repo, capture_output=True, text=True)
+        self.gate = reviewdesk.push.gate_run if hasattr(reviewdesk, "push") else None
+        os.makedirs(self.repo)
+        self.git("init", "-q", "-b", "main")
+        self.git("config", "user.email", "t@t")
+        self.git("config", "user.name", "t")
+        self.write(self.repo, "a.ts", "one\ntwo\n")
+        self.git("add", ".")
+        self.git("commit", "-qm", "base")
+        self.git("checkout", "-qb", "b")
+        self.git("config", "branch.b.stack-parent", "main")
+        self.write(self.repo, "a.ts", "one\ntwo\nthree\n")
+        self.git("commit", "-qam", "feat: add three")
+        self.git("checkout", "-q", "main")
+        self.tip = self.git("rev-parse", "b")
+        self.wt = os.path.join(self.tmp, "b.diffbase")
+        self.git("worktree", "add", "-q", "--detach", self.wt, "main")
+        subprocess.run(["git", "-C", self.wt, "checkout", self.tip, "--", "."], check=True)
+
+    def tearDown(self):
+        ctx.CWD, ctx.run = self.cwd, self.run
+
+    def git(self, *a):
+        return subprocess.run(["git", *a], cwd=self.repo, capture_output=True, text=True, check=True).stdout.strip()
+
+    def write(self, d, p, text):
+        with open(os.path.join(d, p), "w") as f:
+            f.write(text)
+
+    def land(self, **kw):
+        a = reviewdesk._Answer()
+        reviewdesk.helix(a, json.dumps({"branch": "b", "op": "land", "dir": self.wt, "sha": self.tip, **kw}))
+        return a.data
+
+    def test_nothing_changed_lands_nothing(self):
+        self.assertTrue(self.land().get("nothing"))
+        self.assertEqual(self.git("rev-parse", "b"), self.tip)
+
+    def test_an_edit_to_the_branchs_own_line_is_a_fixup_of_its_commit(self):
+        self.write(self.wt, "a.ts", "one\ntwo\nTHREE\n")
+        r = self.land()
+        self.assertEqual(r.get("message"), "fixup! feat: add three", r)
+        self.assertEqual(self.git("show", "b:a.ts"), "one\ntwo\nTHREE")
+        self.assertEqual(self.git("rev-parse", "b^"), self.tip)
+
+    def test_an_edit_to_a_line_from_main_is_a_plain_edit(self):
+        self.write(self.wt, "a.ts", "ONE\ntwo\nthree\n")
+        self.assertEqual(self.land().get("message"), "edit a.ts")
+
+    def test_a_new_file_lands_too(self):
+        self.write(self.wt, "b.ts", "x\n")
+        r = self.land()
+        self.assertEqual(r.get("files"), ["b.ts"], r)
+        self.assertEqual(self.git("show", "b:b.ts"), "x")
+
+    def test_a_moved_branch_keeps_the_edits_where_they_are(self):
+        self.write(self.wt, "a.ts", "changed\n")
+        r = self.land(sha="0000000")
+        self.assertFalse(r.get("ok"))
+        self.assertIn("saved in", r.get("err"))
+        self.assertEqual(self.git("rev-parse", "b"), self.tip)
+
+
 class Ledger(unittest.TestCase):
     PR = {"at": 100.0, "threads": [{"node": "T", "comments": [{"id": "c", "state": "PENDING", "body": "x" + ghreview.marker("k")}]}]}
 
