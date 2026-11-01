@@ -186,7 +186,7 @@ enum ReviewDocument {
             }
         }
         let gapAt = Dictionary(fv.gaps.map { ($0.at, $0) }, uniquingKeysWith: { a, _ in a })
-        let W = split ? pg.splitWidth : 0
+        let W = split ? pg.splitWidth(path) : 0
         let unified = Para.row(indent: gutter + 2)
         let splitPara = Para.row(indent: W + 13)
         var composed = false

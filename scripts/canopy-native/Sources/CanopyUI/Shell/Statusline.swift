@@ -27,7 +27,7 @@ struct Statusline: View {
                     if let p = app.pane {
                         let n = p.rows.count
                         let at = app.selected.flatMap { p.rows.firstIndex(of: $0) }.map { $0 + 1 } ?? 0
-                        Text("\(p.title.isEmpty ? p.id : p.title) \(at)/\(n)").foregroundStyle(theme.inkFaint)
+                        Text(app.provider?.position(app) ?? "\(p.title.isEmpty ? p.id : p.title) \(at)/\(n)").foregroundStyle(theme.inkFaint)
                         if app.keys.mode == .select { Text("\(app.selection.count) selected").foregroundStyle(theme.goldLeaf) }
                     }
                     let search = PageSearch.of(app)

@@ -117,6 +117,16 @@ struct ReviewSurface: SurfaceProvider {
         return title(for: row, app)
     }
 
+    func position(_ app: AppModel) -> String? {
+        let pg = ReviewPageState.of(app)
+        guard app.pane?.id == reviewDiffPane, let s = pg.here, let f = pg.files.firstIndex(where: { $0.path == s.path }) else { return nil }
+        var out = pg.files.count > 1 ? "file \(f + 1) of \(pg.files.count)" : shortPath(s.path)
+        let hunks = pg.files[f].hunks.count
+        if let h = s.row?.hunk, hunks > 1 { out += " · change \(h + 1) of \(hunks)" }
+        if let l = s.row.map({ sideLine($0, prefer: pg.column) }) { out += " · line \(l.line)" }
+        return out
+    }
+
     func title(for row: String, _ app: AppModel) -> String? {
         let pg = ReviewPageState.of(app)
         if row.hasPrefix("f|") { return String(row.dropFirst(2)) }

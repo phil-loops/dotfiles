@@ -39,6 +39,7 @@ struct ReviewPage: View {
                                 CommitHead(branchID: pg.id, sha: sha).padding(.horizontal, 16).padding(.top, 4)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
+                            if !pg.files.isEmpty { FileBar().padding(.horizontal, 16) }
                             DiffPane(empty: pg.base == .outgoing ? "nothing to push" : "no changes").frame(maxWidth: .infinity, maxHeight: .infinity)
                         }
                         .frame(minHeight: 0, maxHeight: .infinity, alignment: .top)
@@ -59,7 +60,7 @@ struct ReviewPage: View {
     }
 }
 
-/// The title, the ship strip, who's reviewing, and the tabs.
+/// What the change is: its title and strips, then who and how big, then the PR's why.
 private struct ReviewHeader: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme
@@ -80,27 +81,6 @@ private struct ReviewHeader: View {
                     }
                 }
                 .font(Theme.display(17)).foregroundStyle(theme.ink).lineLimit(1).layoutPriority(1)
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    if let c {
-                        Text("#" + String(c.number))
-                        Text("→ \(c.base)")
-                        Text(c.author)
-                        ForEach(latest(c), id: \.0) { who, st in
-                            Text("\(st == "APPROVED" ? "✓" : "✗") \(who)").foregroundStyle(st == "APPROVED" ? theme.patina : theme.ember)
-                        }
-                        if c.mapping == .behind {
-                            Text("\(c.behind) on GitHub not here").foregroundStyle(theme.ember)
-                        }
-                        let waiting = pg.items.filter { $0.state == .waiting }.count
-                        if waiting > 0 { Text("\(waiting) waiting to push").foregroundStyle(theme.goldLeaf) }
-                        let drafts = pg.items.filter { $0.state == .draft }.count
-                        if drafts > 0 { Text("\(drafts) draft\(drafts == 1 ? "" : "s")").foregroundStyle(theme.goldLeaf) }
-                        if let n = c.pending?.count, n > 0 { Text("\(n) pending").foregroundStyle(theme.goldLeaf) }
-                    } else if app.store.ready, b?.pushed != .local {
-                        Text(noPR(pg))
-                    }
-                }
-                .font(Theme.text(11)).foregroundStyle(theme.inkFaint).lineLimit(1)
                 Spacer(minLength: 16)
                 let openThreads = pg.threads.filter { !$0.resolved && !$0.outdated }.count
                 Group {
@@ -115,8 +95,41 @@ private struct ReviewHeader: View {
                         .task(id: b.map { "\($0.id)@\($0.tip)" }) { WordsState.of(app).load(app, pg.id) }
                 }
             }
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    if let c {
+                        Text(c.author).foregroundStyle(theme.inkDim)
+                        Text("#\(c.number) → \(c.base)")
+                        ForEach(latest(c), id: \.0) { who, st in
+                            Text("\(st == "APPROVED" ? "✓" : "✗") \(who)").foregroundStyle(st == "APPROVED" ? theme.patina : theme.ember)
+                        }
+                        if c.mapping == .behind {
+                            Text("\(c.behind) on GitHub not here").foregroundStyle(theme.ember)
+                        }
+                        let waiting = pg.items.filter { $0.state == .waiting }.count
+                        if waiting > 0 { Text("\(waiting) waiting to push").foregroundStyle(theme.goldLeaf) }
+                        let drafts = pg.items.filter { $0.state == .draft }.count
+                        if drafts > 0 { Text("\(drafts) draft\(drafts == 1 ? "" : "s")").foregroundStyle(theme.goldLeaf) }
+                        if let n = c.pending?.count, n > 0 { Text("\(n) pending").foregroundStyle(theme.goldLeaf) }
+                    } else if app.store.ready, b?.pushed != .local {
+                        Text(noPR(pg))
+                    }
+                    if let n = b?.commits, n > 0 { Text("\(n) commit\(n == 1 ? "" : "s")") }
+                    if !pg.branchFiles.isEmpty { Text("\(pg.branchFiles.count) file\(pg.branchFiles.count == 1 ? "" : "s")") }
+            }
+            .font(Theme.text(11.5)).foregroundStyle(theme.inkFaint).lineLimit(1)
+            if let why = c.flatMap({ Self.why($0.body) }) {
+                Text(why).font(Theme.text(12.5)).foregroundStyle(theme.inkDim).lineLimit(2).frame(maxWidth: 760, alignment: .leading)
+            }
         }
         .padding(.horizontal, 16).padding(.top, 2).padding(.bottom, 8)
+    }
+
+    /// The PR body's opening prose line: what the change is for, ahead of any template below it.
+    static func why(_ body: String) -> String? {
+        let skip: [String] = ["#", "<!--", "|", ">", "- [", "* [", "```", "---"]
+        let line = body.components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+            .first { !$0.isEmpty && !skip.contains(where: $0.hasPrefix) }
+        return line.map { Markdown.plain($0, max: 220) }.flatMap { $0.isEmpty ? nil : $0 }
     }
 
     /// The PR form's title and body hints, for the loop strip's words step (LoopStrip.tsx words);
@@ -187,8 +200,7 @@ private struct FileTree: View {
                 if let v = views[path] {
                     HStack(spacing: 6) {
                         Text(v.viewed ? "☑" : v.seen > 0 ? "◪" : "☐").foregroundStyle(v.viewed ? theme.patina : theme.inkFaint)
-                        Text(shortPath(path)).lineLimit(1).truncationMode(.middle)
-                            .foregroundStyle(current == path ? theme.goldLeaf : v.viewed ? theme.inkFaint : theme.ink)
+                        PathText(path: path, tint: current == path ? theme.goldLeaf : v.viewed ? theme.inkFaint : theme.ink)
                         Spacer(minLength: 4)
                         if v.open > 0 { Text("\(v.open)").foregroundStyle(theme.ember) }
                         Text("+\(v.file.add)").foregroundStyle(theme.add)
@@ -199,6 +211,47 @@ private struct FileTree: View {
                 }
             }
         }
+    }
+}
+
+/// A path as a reader scans it: the folder quiet, the file name in full; a long folder gives way from its start.
+struct PathText: View {
+    @Environment(\.theme) private var theme
+    let path: String
+    let tint: Color
+
+    var body: some View {
+        let cut = path.lastIndex(of: "/").map { path.index(after: $0) } ?? path.startIndex
+        HStack(spacing: 0) {
+            Text(path[..<cut]).foregroundStyle(theme.inkFaint).lineLimit(1).truncationMode(.head)
+            Text(path[cut...]).foregroundStyle(tint).lineLimit(1).layoutPriority(1)
+        }
+    }
+}
+
+/// The file the cursor is in, over the diff, so the path stays in view however far down it reads.
+private struct FileBar: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.theme) private var theme
+
+    var body: some View {
+        let pg = ReviewPageState.of(app)
+        let files = pg.files
+        let path = pg.here?.path ?? files.first?.path ?? ""
+        let i = files.firstIndex { $0.path == path }
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            PathText(path: path, tint: theme.ink).font(Theme.text(12.5, weight: .medium))
+            if let f = i.map({ files[$0] }) {
+                if f.status != .modified { Text(f.status.rawValue).foregroundStyle(theme.inkFaint) }
+                if let o = f.oldPath { Text("from \(o)").foregroundStyle(theme.inkFaint).lineLimit(1) }
+                Text("+\(f.add)").foregroundStyle(theme.add)
+                Text("−\(f.del)").foregroundStyle(theme.del)
+            }
+            Spacer(minLength: 8)
+            if let i, files.count > 1 { Text("file \(i + 1) of \(files.count)").foregroundStyle(theme.inkFaint) }
+        }
+        .font(Theme.text(11.5))
+        .padding(.vertical, 2)
     }
 }
 
@@ -234,7 +287,7 @@ private struct DiffPane: View {
         let search = PageSearch.of(app)
         if search.active && search.pane == reviewDiffPane { marks.search = search.query }
         if let w = pg.hereWord, let k = here?.key, let row = here?.row {
-            let start = sideLine(row, prefer: pg.column).side == .left ? 6 : pg.splitWidth + 13
+            let start = sideLine(row, prefer: pg.column).side == .left ? 6 : pg.splitWidth(here?.path) + 13
             marks.word = (k, (start + w.lowerBound)..<(start + w.upperBound))
         }
         // the range x selected, or the lines the selected conversation covers
