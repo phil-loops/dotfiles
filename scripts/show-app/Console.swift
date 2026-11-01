@@ -1,4 +1,5 @@
 import AppKit
+import CanopyCore
 import WebKit
 
 /// The API workspace: the loops-postman console (:7070) in a web view. Opening the workspace starts the console when it isn't
@@ -79,9 +80,7 @@ final class ConsoleController: NSViewController, WKNavigationDelegate {
     }
 
     private func launch() {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        process.arguments = ["-lc", "exec \"$HOME/.dotfiles/scripts/loops-postman\" serve --spec \"$0\" --no-open", Self.spec]
+        let process = Zsh.process("exec loops-postman serve --spec \"$0\" --no-open", [Self.spec])
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         do {

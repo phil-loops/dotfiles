@@ -1,4 +1,5 @@
 import AppKit
+import CanopyCore
 
 /// One concept due for a re-test, as the learner graph derives it.
 struct DueConcept {
@@ -46,9 +47,7 @@ enum LearnDue {
 
     /// What `learn retest --all` would offer, in its order: every due concept not already tested today.
     static func read() -> Result<[DueConcept], Error> {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: script)
-        process.arguments = ["json"]
+        let process = Zsh.process("exec \"$0\" json", [script])
         var environment = ProcessInfo.processInfo.environment
         environment["LEARNING_MEMORY"] = "0"
         process.environment = environment

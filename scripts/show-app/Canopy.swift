@@ -1,4 +1,5 @@
 import AppKit
+import CanopyCore
 import CanopyUI
 
 /// The Canopy workspace: the forest viewer's pages, canopy's own keys while it's in front. Opening it
@@ -39,9 +40,7 @@ final class CanopyHost: NSViewController {
             guard let self else { return }
             if up { return self.attach() }
             self.say("Starting the forest viewer…")
-            let serve = Process()
-            serve.executableURL = URL(fileURLWithPath: "/bin/zsh")
-            serve.arguments = ["-lc", "cd \(Self.repo) && exec \"$HOME/.dotfiles/scripts/stack-review-serve\" --no-open"]
+            let serve = Zsh.process("cd \(Self.repo) && exec stack-review-serve --no-open")
             serve.standardOutput = FileHandle.nullDevice
             serve.standardError = FileHandle.nullDevice
             try? serve.run()
