@@ -636,7 +636,8 @@ final class TutorController: NSObject, NSTextViewDelegate {
     weak var hint: NSTextField?
     let composer = AnswerField(partID: "__composer", text: "", width: TutorController.column, editable: true)
     var sidecar = Sidecar()
-    var agentRow: NSView?
+    /// The tutor's live row, in its own slot under the thread so a thread redraw never touches it.
+    let agentRow = NSStackView()
     var agent: TutorAgent?
 
     var window: NSWindow? { viewController.view.window }
@@ -661,6 +662,11 @@ final class TutorController: NSObject, NSTextViewDelegate {
         column.spacing = 0
         column.translatesAutoresizingMaskIntoConstraints = false
         document.addSubview(column)
+        agentRow.orientation = .vertical
+        agentRow.alignment = .leading
+        agentRow.spacing = 6
+        agentRow.translatesAutoresizingMaskIntoConstraints = false
+        document.addSubview(agentRow)
         NSLayoutConstraint.activate([
             document.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor),
             document.trailingAnchor.constraint(equalTo: scroll.contentView.trailingAnchor),
@@ -668,7 +674,10 @@ final class TutorController: NSObject, NSTextViewDelegate {
             column.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: Self.margin),
             column.topAnchor.constraint(equalTo: document.topAnchor, constant: 64),
             column.widthAnchor.constraint(equalToConstant: Self.column),
-            document.bottomAnchor.constraint(equalTo: column.bottomAnchor, constant: 160),
+            agentRow.leadingAnchor.constraint(equalTo: column.leadingAnchor),
+            agentRow.topAnchor.constraint(equalTo: column.bottomAnchor, constant: 14),
+            agentRow.widthAnchor.constraint(equalToConstant: Self.column),
+            document.bottomAnchor.constraint(equalTo: agentRow.bottomAnchor, constant: 146),
         ])
         scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 420).isActive = true
         composer.delegate = self
@@ -813,7 +822,7 @@ final class TutorController: NSObject, NSTextViewDelegate {
 
     private func rebuild() {
         column.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        document.subviews.filter { $0 !== column }.forEach { $0.removeFromSuperview() }
+        document.subviews.filter { $0 !== column && $0 !== agentRow }.forEach { $0.removeFromSuperview() }
         fields = []
         focusRungView = nil
         guard let session else { return }
@@ -853,7 +862,6 @@ final class TutorController: NSObject, NSTextViewDelegate {
         if session.rungs.isEmpty, agent?.isBusy != true {
             column.addArrangedSubview(quiet("No rungs yet. Waiting for Claude."))
         }
-        agentRow = nil
         refreshAgentRow()
         document.layoutSubtreeIfNeeded()
         if hasRendered, !fresh.isEmpty, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
@@ -914,43 +922,23 @@ final class TutorController: NSObject, NSTextViewDelegate {
     /// The tutor's live row under the thread: a typing line with the streamed preview, or the last failure with Retry.
     func refreshAgentRow() {
         let atBottom = scroll.contentView.bounds.maxY >= document.bounds.height - 40
-        if let agentRow {
-            column.removeArrangedSubview(agentRow)
-            agentRow.removeFromSuperview()
-            self.agentRow = nil
-        }
-        // the thread may have been redrawn since, taking that view out of the column
-        if let above = agentRowAbove, column.arrangedSubviews.contains(above) {
-            column.setCustomSpacing(agentRowAboveGap, after: above)
-        }
-        agentRowAbove = nil
+        agentRow.arrangedSubviews.forEach { $0.removeFromSuperview() }
         guard let agent else { return }
-        let row = NSStackView()
-        row.orientation = .vertical
-        row.alignment = .leading
-        row.spacing = 6
         if let failure = agent.failure {
             let label = quiet("The tutor stopped with an error:")
             let detail = tutorText(NSAttributedString(string: failure, attributes: [.font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular), .foregroundColor: NSColor.secondaryLabelColor]), width: Self.column)
             let retry = NSButton(title: "Retry", target: self, action: #selector(retryAgent))
             retry.bezelStyle = .rounded
-            [label, detail, retry].forEach(row.addArrangedSubview)
+            [label, detail, retry].forEach(agentRow.addArrangedSubview)
         } else if agent.isBusy {
-            row.addArrangedSubview(TypingDots())
+            agentRow.addArrangedSubview(TypingDots())
             let text = agent.preview.trimmingCharacters(in: .whitespacesAndNewlines)
             if !text.isEmpty {
-                row.addArrangedSubview(tutorText(NSAttributedString(string: text, attributes: [.font: renderer.base, .foregroundColor: NSColor.tertiaryLabelColor]), width: Self.column))
+                agentRow.addArrangedSubview(tutorText(NSAttributedString(string: text, attributes: [.font: renderer.base, .foregroundColor: NSColor.tertiaryLabelColor]), width: Self.column))
             }
         } else {
             return
         }
-        if let above = column.arrangedSubviews.last {
-            agentRowAbove = above
-            agentRowAboveGap = column.customSpacing(after: above)
-            column.setCustomSpacing(14, after: above)
-        }
-        column.addArrangedSubview(row)
-        agentRow = row
         document.layoutSubtreeIfNeeded()
         if atBottom {
             scrollToBottom()
@@ -1135,8 +1123,6 @@ final class TutorController: NSObject, NSTextViewDelegate {
     }
 
     /// The view the agent row sits under, and its usual gap, which the row tightens while it's there.
-    private weak var agentRowAbove: NSView?
-    private var agentRowAboveGap: CGFloat = 0
 
     private func quiet(_ text: String) -> NSTextField {
         let label = NSTextField(labelWithString: text)
