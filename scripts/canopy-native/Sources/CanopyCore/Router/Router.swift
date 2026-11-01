@@ -53,7 +53,12 @@ public final class Router {
     public func navigate(_ address: String) {
         let to = Route(address)
         navigate(to)
-        if route == to { query = Route.query(address) }
+        keep(Route.query(address), at: to)
+    }
+
+    /// Hand an address's query to the page it named, once the router is there.
+    public func keep(_ q: [String: String], at to: Route) {
+        if route == to { query = q }
     }
 
     /// Change the address without a history entry (history.replaceState: the review page's ?base=).

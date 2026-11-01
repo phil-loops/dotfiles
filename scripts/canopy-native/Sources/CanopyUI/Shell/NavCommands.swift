@@ -1,3 +1,4 @@
+import AppKit
 import CanopyCore
 import Foundation
 
@@ -24,6 +25,14 @@ extension NavCommands {
                                guard let app else { return }
                                app.jumps.save(app.here())
                                app.runner.say("saved · C-o comes back here")
+                           }))
+        r.register(Command(id: "nav.link", title: "Copy a link to here — canopy opens it at this spot", scope: .global, verb: .copy, label: "link",
+                           local: { [weak app] _, _ in
+                               guard let app else { return }
+                               let link = app.here().link
+                               NSPasteboard.general.clearContents()
+                               NSPasteboard.general.setString(link, forType: .string)
+                               app.runner.say("copied \(link)")
                            }))
         r.register(Command(id: "nav.alternate", title: "Go to the alternate place (where the last jump left from)", scope: .global, verb: .alternate,
                            label: "alternate",

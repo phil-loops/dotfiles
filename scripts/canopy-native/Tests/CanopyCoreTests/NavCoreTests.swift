@@ -91,6 +91,26 @@ import Testing
         let p = Place(route: .review(repo: "loops", branch: "a/b", base: "main"), tab: "files")
         #expect(p.surface == "review" && p.arg == "loops/a/b" && p.base == "main")
     }
+
+    @Test func anAddressIsAPlaceWrittenOut() {
+        let review = Route.review(repo: "loops", branch: "a/b", base: "main")
+        let line = Place(route: review, pane: "review.diff", tab: "files",
+                         loc: Loc(repo: "loops", sha: "abc", path: "src/x y+z.ts", line: 12, diffKey: "l|src/x y+z.ts|r12"))
+        #expect(line.address == "/v2/b/loops/a/b?base=main&file=src/x%20y%2Bz.ts&line=12")
+        let back = Place(address: line.link)
+        #expect(back.route == review)
+        #expect(back.loc == Loc(repo: "loops", sha: "", path: "src/x y+z.ts", line: 12))
+
+        let beside = Place(route: review, loc: Loc(repo: "loops", sha: "def", path: "a.ts", line: 3))
+        #expect(Place(address: beside.address).loc?.sha == "def", "a line at another commit says which")
+
+        #expect(Place(address: "/v2/b/loops/x?file=a.ts").cursorKey == "f|a.ts")
+        #expect(Place(address: "canopy://v2/b/loops/x?thread=t9").cursorKey == "t|t9")
+        let commits = Place(address: "/v2/b/loops/x?tab=commits&at=c|abc")
+        #expect(commits.tab == "commits" && commits.cursorKey == "c|abc")
+        #expect(commits.address == "/v2/b/loops/x?tab=commits&at=c%7Cabc")
+        #expect(Place(route: .forests).address == "/v2")
+    }
 }
 
 @Suite struct FrecencyTests {

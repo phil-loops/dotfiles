@@ -18,6 +18,8 @@ public struct AppConfig: Sendable {
     public var route: Route = .forests
     /// the launch address's query (`/v2/tutor?concept=x`), handed to the page that opens
     public var query: [String: String] = [:]
+    /// the launch address whole: where on that page to land (`AppModel.open(address:)`)
+    public var address: String?
     public var appearance = "dark"
     public var dump = false
     public var dumpWait: Double = 4
@@ -46,7 +48,7 @@ public struct AppConfig: Sendable {
                 let wh = (next() ?? "").split(separator: "x").compactMap { Double($0) }
                 if wh.count == 2 { c.shootWidth = wh[0]; c.shootHeight = wh[1] }
             default:
-                if a.hasPrefix("/v2") || a.hasPrefix("canopy:") { c.route = Route(a); c.query = Route.query(a) }
+                if a.hasPrefix("/v2") || a.hasPrefix("canopy:") { c.route = Route(a); c.query = Route.query(a); c.address = a }
                 // AppKit's own launch args (-NSDocumentRevisionsDebugMode YES, -psn_…) pass through
             }
             i += 1
