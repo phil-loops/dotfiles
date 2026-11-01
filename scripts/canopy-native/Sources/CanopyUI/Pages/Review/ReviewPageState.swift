@@ -189,8 +189,12 @@ public final class ReviewPageState: ShipHost {
     @ObservationIgnored var carry: (id: String, tab: String, path: String?)?
     /// A jumplist entry to finish restoring once its diff is here.
     @ObservationIgnored var pendingCursor: (id: String, key: String)?
+    /// An address's line on the tip (`?file=…&line=…`), to find once the diff is here.
+    @ObservationIgnored var pendingLoc: (id: String, loc: Loc)?
     /// The branch the page last showed (a new one starts fresh).
     @ObservationIgnored private var shownID = ""
+    /// This branch's diff is here (not the last page's, still showing while this one comes).
+    var diffHere: Bool { payload != nil && shownID == id }
 
     // ── side.ts: a place outside the diff, open beside it ──
 
@@ -316,7 +320,7 @@ public final class ReviewPageState: ShipHost {
         if let c = carry, c.id == newID { tab = c.tab } else { carry = nil; tab = "files" }
         guard let app else { return }
         // a jumplist entry being restored already put its cursor
-        if pendingCursor?.id == newID { return }
+        if pendingCursor?.id == newID || pendingLoc?.id == newID { return }
         let was = app.pane?.id
         app.focus(pane: reviewDiffPane)
         app.setCursor(nil)
@@ -336,6 +340,10 @@ public final class ReviewPageState: ShipHost {
         if let p = pendingCursor, p.id == id, stopIndex[p.key] != nil {
             pendingCursor = nil
             return setCursor(p.key, focus: false)
+        }
+        if let p = pendingLoc, p.id == id {
+            pendingLoc = nil
+            return open(p.loc)
         }
         // a page opening for the first time puts the keyboard in the diff
         let fresh = app?.focusedPane["review"] == nil
@@ -745,6 +753,13 @@ public final class ReviewPageState: ShipHost {
 
     /// Open a place: in the diff when it's a line of it, else beside the diff at its commit.
     public func open(_ l: Loc) {
+        if l.sha.isEmpty, l.repo == target?.repo {
+            // an address's line: on the tip, which only the diff can place
+            guard diffHere, !tip.isEmpty else { pendingLoc = (id, l); return }
+            var at = l
+            at.sha = tip
+            return open(at)
+        }
         if let k = l.diffKey, stopIndex[k] == nil, l.repo == target?.repo {
             // the diff isn't here yet (a jumplist entry on another branch): land there once it is
             pendingCursor = (id, k)

@@ -176,7 +176,9 @@ struct ReviewSurface: SurfaceProvider {
             if let p = place.pane { app.focus(pane: p) }
             if let k = place.cursorKey { app.setCursor(k) }
         }
-        if place.pane == reviewDiffPane, let k = place.cursorKey, pg.stopIndex[k] == nil { pg.pendingCursor = (pg.id, k) }
+        // an address names no pane: what it names is in the diff
+        if place.pane == nil, place.cursorKey != nil { app.focus(pane: reviewDiffPane); app.setCursor(place.cursorKey) }
+        if (place.pane ?? reviewDiffPane) == reviewDiffPane, let k = place.cursorKey, !pg.diffHere || pg.stopIndex[k] == nil { pg.pendingCursor = (pg.id, k) }
         pg.cursorMoved &+= 1
     }
 

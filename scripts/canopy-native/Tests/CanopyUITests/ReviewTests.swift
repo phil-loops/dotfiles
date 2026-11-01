@@ -555,6 +555,24 @@ import Testing
         #expect(pg.scoped == false && pg.files.map(\.path) == ["a.ts", "b.ts"], "= on main: the whole branch again")
     }
 
+    @Test func anAddressLandsOnItsLineOnceTheDiffIsHereAndYCopiesItBack() async throws {
+        let (a, _) = try await app()
+        let pg = ReviewPageState.of(a)
+        a.open(address: "canopy://v2/b/loops/hankles-next?file=b.ts&line=6")
+        #expect(a.router.route == .review(repo: "loops", branch: "hankles-next"))
+        await until("the line") { pg.here?.key == "l|b.ts|R:6" }
+        #expect(a.pane?.id == reviewDiffPane)
+        keys(a, "y")
+        #expect(NSPasteboard.general.string(forType: .string) == "canopy://v2/b/loops/hankles-next?file=b.ts&line=6")
+        keys(a, "C-o")
+        #expect(a.router.route == .review(repo: "loops", branch: "add-hankles-limited-label"), "following a link is a jump")
+        pg.sync()   // the view does on a route change
+        a.open(address: "/v2/b/loops/add-hankles-limited-label?file=b.ts")
+        await until("the file") { a.selected == "f|b.ts" }
+        a.open(address: "/v2/b/loops/add-hankles-limited-label?file=a.ts&line=10")
+        await until("a line the diff hasn't, beside it") { pg.side?.line == 10 && pg.side?.sha == pg.tip }
+    }
+
     @Test func theDiffsKeysKeepTheRules() async throws {
         let (a, _) = try await app()
         #expect(KeyboardRule.violations(a) { $0.hasPrefix("review.") || $0.hasPrefix("inline.") } == [])

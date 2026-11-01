@@ -18,6 +18,16 @@ extension AppModel {
         provider?.restore(p, self)
     }
 
+    /// Go to an address from outside (a canopy:// link, the launch route): a jump like any other, so
+    /// `C-o` comes back. What the address doesn't name about the place, the page decides as usual;
+    /// the query stays for the page to read (the tutor's `?concept=`).
+    public func open(address: String) {
+        recordJump()
+        let p = Place(address: address)
+        restore(p)
+        router.keep(Route.query(address), at: p.route)
+    }
+
     /// `C-o`.
     @discardableResult
     public func jumpBack() -> Bool {

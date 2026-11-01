@@ -58,7 +58,7 @@
 | mark / unmark | `m` / `M` | mark it (viewed, done, answered) and go on / take the mark off |
 | put-away | `X` | put it away: archive, drop, delete, kill, forget, cut |
 | apply | `A` | apply the suggested fix |
-| copy | `y` | copy it |
+| copy | `y` | copy it; where a page has nothing of its own to copy, a link to here (below) |
 | push | `p` | send it out: push to origin, send the draft |
 | sync | `s` | sync it: fold or stash dirt, rebase onto its parent, shape the commits |
 | words | `e` | the words: what's written about it, in full |
@@ -83,6 +83,8 @@
 | Machine | `r` restart · `w` swap the port's build · `x` kill every server · `c` reap orphans · `m` run main · `u` the Docker stack |
 | Dashboard | `r` the range |
 | Tracker | `s` start the item |
+
+**Addresses name a place, not just a page.** An address is a jumplist entry written out (`Place.address`, `CanopyCore/Router/Address.swift`), so a link from anywhere lands where `C-o` would: `/v2/b/<repo>/<branch>?file=<path>&line=<n>` (the line on the tip's side; beside the diff when the diff hasn't it; `&sha=` another commit), `?file=<path>`, `?thread=<id>`, `?tab=<face>`, else `?at=<row key>`. Following one — `canopy <address>`, a `canopy://` link, Show's embed, the browser extension — is a jump, so `C-o` comes back. `y` copies the link to where you are.
 
 **keys-native.toml** (`~/.dotfiles/canopy/keys-native.toml`, this app's own) overrides a verb by name (`mark = "v"`, `put-away = ["D"]`, `leader = ";"`) and every page doing it follows; the table's rules are re-checked after (a key on two verbs is flagged atop `?`). It's a separate file because `keys.toml` is shared with v2, which keys it by command id and would flag a verb line there as "no such command" — and a `[native]` table too, since the server's `keymap.py` reads every top-level entry of `keys.toml` and reports a table as "native: wants a key or a list of keys". v2 never opens `keys-native.toml`. Native still reads `keys.toml` (from the server's bootstrap): its command-id lines are read past with a warning naming the verb to set in `keys-native.toml` (in `--dump` and dim atop `?`); a verb line left there still applies, with a warning to move it, and `keys-native.toml` wins over it. Saving `keys.toml` reloads both files (the server's asset signature moves); after saving `keys-native.toml` alone, `:keys.reload`.
 

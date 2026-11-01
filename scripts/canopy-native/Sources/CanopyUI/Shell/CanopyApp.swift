@@ -38,6 +38,7 @@ public struct CanopyApp: App {
             Log.line("hydrated: \(m.store.counts.filter { $0.value > 0 }.sorted { $0.key < $1.key }.map { "\($0.key) \($0.value)" }.joined(separator: " · "))")
         }
         m.start()
+        if let a = c.address { m.open(address: a) }
         _model = State(initialValue: m)
         monitor = KeyMonitor(app: m)
         NSApplication.shared.activate(ignoringOtherApps: true)
@@ -50,7 +51,7 @@ public struct CanopyApp: App {
                 .frame(minWidth: 640, minHeight: 420)
                 .preferredColorScheme(scheme)
                 .onAppear { monitor.install() }
-                .onOpenURL { url in model.router.navigate(url.absoluteString) }
+                .onOpenURL { url in model.open(address: url.absoluteString) }
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
                     model.telemetry.flushPage(route: model.router.route.path)
                 }

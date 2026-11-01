@@ -19,7 +19,7 @@ public final class CanopyEmbed {
         Fonts.register()
         let m = AppModel(config: c, port: port)
         m.start()
-        if let route { m.router.navigate(route) }
+        if let route { m.open(address: route) }
         model = m
         let host = NSHostingView(rootView: AnyView(RootView().environment(m).preferredColorScheme(.dark)))
         view = host
@@ -27,7 +27,7 @@ public final class CanopyEmbed {
         monitor.install()
     }
 
-    public func navigate(_ route: String) { model.router.navigate(route) }
+    public func navigate(_ route: String) { model.open(address: route) }
 
     /// Whether the forest viewer answers on `port`.
     public nonisolated static func answers(_ port: Int) -> Bool {
