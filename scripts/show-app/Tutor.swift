@@ -919,10 +919,11 @@ final class TutorController: NSObject, NSTextViewDelegate {
             agentRow.removeFromSuperview()
             self.agentRow = nil
         }
-        if let above = agentRowAbove {
+        // the thread may have been redrawn since, taking that view out of the column
+        if let above = agentRowAbove, column.arrangedSubviews.contains(above) {
             column.setCustomSpacing(agentRowAboveGap, after: above)
-            agentRowAbove = nil
         }
+        agentRowAbove = nil
         guard let agent else { return }
         let row = NSStackView()
         row.orientation = .vertical
