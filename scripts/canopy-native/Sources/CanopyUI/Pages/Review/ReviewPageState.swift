@@ -128,13 +128,22 @@ public final class ReviewPageState: ShipHost {
     public var outlineWidth: CGFloat { showsHistory ? 270 : treeWidth }
     /// The files list earns its column only when there's more than one file to move between (or a filter typed into it).
     public var showsTree: Bool { views.count > 1 || !filter.isEmpty }
-    /// As wide as the longest file name needs, within reason.
+    /// As wide as the longest path needs, within reason.
     public var treeWidth: CGFloat {
-        let longest = views.map { ($0.file.path as NSString).lastPathComponent.count }.max() ?? 20
-        return min(280, max(170, CGFloat(longest) * DocFont.charWidth + 76))
+        let longest = files.map(\.path.count).max() ?? 20
+        return min(360, max(200, CGFloat(longest) * 6.6 + 80))
     }
-    /// Characters each half of a split line gets.
-    public var splitWidth: Int { diffColumns > 0 ? max(24, (diffColumns - 13) / 2) : 60 }
+    /// Characters the old half of a split line gets in this file: none for a new file and all of it
+    /// for a deleted one, which have only one side to show; else half, since both halves carry the
+    /// same context lines and a narrower one would wrap them.
+    public func splitWidth(_ path: String?) -> Int {
+        let usable = diffColumns > 0 ? diffColumns - 13 : 120
+        switch files.first(where: { $0.path == path })?.status {
+        case .added: return 0
+        case .deleted: return usable
+        default: return max(24, usable / 2)
+        }
+    }
     /// The name `w` / `b` put the cursor on: its row, half and UTF-16 range in that half's text. It
     /// counts only while the cursor is still on that row and half.
     public var word: (key: String, side: Side, at: Range<Int>)?

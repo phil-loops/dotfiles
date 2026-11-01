@@ -44,6 +44,8 @@ public protocol SurfaceProvider {
     func title(for row: String, _ app: AppModel) -> String?
     /// What `/` matches a row against. Default: its title.
     func searchText(for row: String, _ app: AppModel) -> String?
+    /// Where the cursor is, in the reader's words, for the status line; nil says "<pane> i/n".
+    func position(_ app: AppModel) -> String?
     /// Fill in what the jumplist keeps beyond route, pane and cursor (which the shell fills):
     /// `place.tab`, `place.scroll`. Default: nothing. (`place.loc` comes from `app.nav` itself.)
     func remember(_ place: inout Place, _ app: AppModel)
@@ -63,6 +65,7 @@ public extension SurfaceProvider {
     func targets(_ app: AppModel) -> [LabelTarget] { app.visibleTargets() }
     func title(for row: String, _ app: AppModel) -> String? { app.guessTitle(row) }
     func searchText(for row: String, _ app: AppModel) -> String? { title(for: row, app) }
+    func position(_ app: AppModel) -> String? { nil }
     func remember(_ place: inout Place, _ app: AppModel) {}
     func restore(_ place: Place, _ app: AppModel) {}
 }

@@ -316,7 +316,7 @@ enum DiffCommands {
             let side = sideLine(row, prefer: pg.column).side
             guard let text = (side == .left ? row.left : row.right)?.text else { return nil }
             let all = CodeLookup.names(text)
-            return (side, side == .left ? all.filter { $0.upperBound < pg.splitWidth } : all)
+            return (side, side == .left ? all.filter { $0.upperBound < pg.splitWidth(s.path) } : all)
         }
         func step(_ d: Int) throws {
             guard app.pane?.id == reviewDiffPane, var i = pg.here.flatMap({ pg.stopIndex[$0.key] }) else { throw Refusal("names are in the diff") }
