@@ -351,7 +351,6 @@ enum DiffCommands {
         r.register(Command(id: "review.back", title: "Back out", scope: .review, verb: .cancel, label: "back", quiet: true,
                            local: { _, _ in
                                if ShipSeam.backOut(app) { return }
-                               if pg.edit != nil { return pg.cancelEdit() }
                                let look = CodeLookup.of(app)
                                if look.pop != nil { return look.dismiss() }
                                if app.nav.picker != nil { return app.nav.close() }

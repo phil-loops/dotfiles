@@ -33,21 +33,12 @@ public protocol ShipHost: AnyObject {
     func focusDiff(_ app: AppModel, _ on: Bool)
     /// The cursor's line was commented or written to: drop `x`'s mark.
     func clearMark()
-    /// `i` with no comment open: edit the line (or `x`'s range) under the cursor in place; false: nothing to edit here.
+    /// `i` with no comment open: open Helix on the new-half line under the cursor; false: nothing to edit here.
     func beginEdit(_ app: AppModel) -> Bool
-    /// An edit in place is open.
-    var editing: Bool { get }
-    /// ⌃↵ while editing: the edit as one commit on the branch.
-    func editWrite(_ app: AppModel) -> Write?
-    /// esc past the field: drop the edit.
-    func cancelEdit()
 }
 
 public extension ShipHost {
     func beginEdit(_ app: AppModel) -> Bool { false }
-    var editing: Bool { false }
-    func editWrite(_ app: AppModel) -> Write? { nil }
-    func cancelEdit() {}
 }
 
 public struct ShipLineRange: Equatable, Sendable {

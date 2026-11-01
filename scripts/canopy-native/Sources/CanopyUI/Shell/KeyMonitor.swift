@@ -1,5 +1,6 @@
 import AppKit
 import CanopyCore
+import SwiftTerm
 
 /// The one keyDown listener: every key press becomes a key name for the KeyEngine, which runs it
 /// through the live mode's keymap. Pages never install key handlers of their own.
@@ -7,7 +8,7 @@ import CanopyCore
 /// Text entry (insert, the `:` line, the menu's and picker's filters): the engine gets each key
 /// first and keeps the ones bound in that mode (esc, ret, C-n, …); anything else goes on to the
 /// focused field. Clicking into an editable field enters insert mode. A read-only text view (the
-/// CodeTextView) never owns the keyboard. ⌘ shortcuts are never page keys; they go to the menu bar.
+/// CodeTextView) never owns the keyboard; a terminal always does. ⌘ shortcuts are never page keys; they go to the menu bar.
 @MainActor
 final class KeyMonitor {
     private var token: Any?
@@ -21,6 +22,8 @@ final class KeyMonitor {
         guard token == nil else { return }
         token = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown]) { [weak self] e in
             guard let self, let app = self.app, self.owns?(e) ?? true else { return e }
+            // a terminal (Helix in the new half) takes every key while it has focus
+            if e.window?.firstResponder is TerminalView { return e }
             if e.type == .leftMouseDown {
                 app.keys.reset()
                 return e
