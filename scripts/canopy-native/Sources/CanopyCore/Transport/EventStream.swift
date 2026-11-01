@@ -79,7 +79,7 @@ public final class EventStream {
 
     private func load() async throws {
         let t0 = Date()
-        let data = try await transport.getData("/state")
+        let data = try await transport.getData("/state?archived=1")
         let snap = try Snapshot.decode(data)
         store.hydrate(snap)
         bump("state", Date().timeIntervalSince(t0) * 1000)
@@ -89,7 +89,7 @@ public final class EventStream {
         let v = store.versions
         let domains = Set(v.keys).union([Domain.git, Domain.remote, Domain.review, Domain.todo]).sorted()
         let q = domains.map { "\($0)=\(v[$0] ?? 0)" }.joined(separator: "&")
-        return "/v2/events?epoch=\(store.epoch.uriComponent)&\(q)"
+        return "/v2/events?archived=1&epoch=\(store.epoch.uriComponent)&\(q)"
     }
 
     private func stream() async throws -> End {

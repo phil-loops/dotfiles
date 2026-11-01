@@ -125,7 +125,7 @@ public final class ReviewPageState: ShipHost {
     public var showsHistory: Bool { integration == nil && (branch?.commits ?? 0) > 1 }
     /// The left margin: the commits, the files, or both.
     public var showsOutline: Bool { showsHistory || showsTree }
-    public var outlineWidth: CGFloat { showsHistory ? 270 : treeWidth }
+    public var outlineWidth: CGFloat { showsHistory ? max(270, showsTree ? treeWidth : 0) : treeWidth }
     /// The files list earns its column only when there's more than one file to move between (or a filter typed into it).
     public var showsTree: Bool { views.count > 1 || !filter.isEmpty }
     /// As wide as the longest path needs, within reason.

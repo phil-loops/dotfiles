@@ -38,8 +38,6 @@ struct MenuRow: Equatable {
 final class MenuState {
     var query = ""
     var index = 0
-    /// Every branch and PR, archived forests' too — the live store leaves those out, the finder can't.
-    var archived = FindWorld()
     /// The tutor's concepts (GET /learning-state), when the tutor registers `find.concept`.
     var concepts: [FindWorld.Concept] = []
 
@@ -48,9 +46,6 @@ final class MenuState {
         query = ""
         index = 0
         let t = app.transport
-        Task { @MainActor [weak self] in
-            if let s = try? await t.getJSON("/state?archived=1", as: ArchivedState.self) { self?.archived = s.world }
-        }
         app.state { WikiState() }.load(app)
         if app.registry.command("find.concept") != nil, concepts.isEmpty {
             Task { @MainActor [weak self] in
@@ -81,16 +76,10 @@ final class MenuState {
 
     func world(_ app: AppModel) -> FindWorld {
         let s = app.store
-        func merged<T: Equatable>(_ live: [T], _ more: [T], _ id: (T) -> String) -> [T] {
-            let have = Set(live.map(id))
-            return live + more.filter { !have.contains(id($0)) }
-        }
-        let branches = s.list(Branch.self).map { FindWorld.Branch(id: $0.id, name: $0.name, project: $0.project) }
-        let prs = s.list(Pr.self).map { FindWorld.Pr(id: $0.id, number: $0.number) }
         let wiki = app.state { WikiState() }
-        return FindWorld(branches: merged(branches, archived.branches, \.id),
+        return FindWorld(branches: s.list(Branch.self).map { FindWorld.Branch(id: $0.id, name: $0.name, project: $0.project) },
                          projects: s.list(Project.self).map { FindWorld.Project(id: $0.id, name: $0.name, archived: $0.state == .archive) },
-                         prs: merged(prs, archived.prs, \.id),
+                         prs: s.list(Pr.self).map { FindWorld.Pr(id: $0.id, number: $0.number) },
                          pages: wiki.pages.map { FindWorld.Page(slug: $0.slug, title: $0.title, section: $0.section) },
                          concepts: concepts)
     }
@@ -110,22 +99,6 @@ final class MenuState {
         guard rs.indices.contains(index) else { return }
         let r = rs[index]
         app.runner.dispatch(r.id, via: query.isEmpty ? .menu : .palette, arg: r.arg)
-    }
-}
-
-/// `/state?archived=1`, read for just what the finder needs.
-struct ArchivedState: Decodable {
-    struct B: Decodable { var id: String; var name: String; var project: String? }
-    struct P: Decodable { var id: String; var number: Int? }
-    struct E: Decodable {
-        var branch: [String: B]?
-        var pr: [String: P]?
-    }
-    var entities: E
-
-    var world: FindWorld {
-        FindWorld(branches: (entities.branch ?? [:]).values.map { FindWorld.Branch(id: $0.id, name: $0.name, project: $0.project ?? "") }.sorted { $0.id < $1.id },
-                  prs: (entities.pr ?? [:]).values.compactMap { p in p.number.map { FindWorld.Pr(id: p.id, number: $0) } }.sorted { $0.id < $1.id })
     }
 }
 
