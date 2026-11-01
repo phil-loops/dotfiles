@@ -259,18 +259,14 @@ public struct ShipTextEditor: View {
     let id: String
     let placeholder: String
     @Binding var text: String
-    /// code, not prose: the mono face
-    var code = false
 
-    public init(_ id: String, placeholder: String = "", code: Bool = false, text: Binding<String>) {
-        self.id = id; self.placeholder = placeholder; self.code = code; self._text = text
-    }
+    public init(_ id: String, placeholder: String = "", text: Binding<String>) { self.id = id; self.placeholder = placeholder; self._text = text }
 
     public var body: some View {
         ZStack(alignment: .topLeading) {
             if text.isEmpty { Text(placeholder).foregroundStyle(theme.inkFaint).padding(.leading, 5) }
             TextEditor(text: $text)
-                .font(code ? Theme.mono(12.5) : Theme.text(12.5))
+                .font(Theme.text(12.5))
                 .scrollContentBackground(.hidden)
                 .focused($focused)
                 .frame(minHeight: 44, maxHeight: 220)

@@ -385,24 +385,33 @@ import Testing
         #expect(pg.hereWord == nil, "the name belongs to its line")
     }
 
-    /// i on a new line edits it in place; ⌃↵ commits it to the branch; esc, then esc again, drops it.
-    @Test func iEditsTheLineInPlaceAndCtrlReturnCommitsIt() async throws {
+    /// i on a new line opens Helix there, in the branch's diff checkout; quitting it commits what changed.
+    @Test func iOpensHelixOnTheNewHalfAndQuittingCommits() async throws {
         let (a, p) = try await app()
         let pg = ReviewPageState.of(a)
-        ShipStub.answer(p, "POST", "/loops/review-edit", #"{"ok":true,"sha":"abc1234"}"#)
+        ShipStub.answer(p, "POST", "/loops/review-helix", #"{"ok":true,"dir":"/tmp/x.diffbase","sha":"abc1234","message":"fixup! feat: x"}"#)
         keys(a, "j")
         keys(a, "i")
-        let e = try #require(pg.edit)
-        #expect(e.path == "a.ts" && e.start == 2 && e.end == 2 && a.keys.mode == .insert)
-        pg.edit?.text = e.text + " // tidied"
-        keys(a, "C-ret")
-        await until("the post") { ShipStub.posts(p).contains { $0.path == "/loops/review-edit" } }
-        let post = try #require(ShipStub.posts(p).last { $0.path == "/loops/review-edit" })
-        #expect(post.body["path"] == .string("a.ts") && post.body["start"] == .number(2) && post.body["text"] == .string(e.text + " // tidied"))
+        await until("the checkout") { pg.helix?.dir != nil }
+        let h = try #require(pg.helix)
+        #expect(h.path == "a.ts" && h.line == 2 && h.dir == "/tmp/x.diffbase" && h.sha == "abc1234")
+        let asked = try #require(ShipStub.posts(p).last { $0.path == "/loops/review-helix" })
+        #expect(asked.body["op"] == .string("where"))
+        pg.landHelix(a)
+        #expect(pg.helix == nil, "the diff is back at once")
+        await until("the land") { ShipStub.posts(p).contains { $0.body["op"] == .string("land") } }
+        let land = try #require(ShipStub.posts(p).last { $0.body["op"] == .string("land") })
+        #expect(land.body["dir"] == .string("/tmp/x.diffbase") && land.body["sha"] == .string("abc1234"))
+    }
+
+    /// i on the old half has nothing to edit: that's history.
+    @Test func iOnTheOldHalfOpensNothing() async throws {
+        let (a, _) = try await app()
+        let pg = ReviewPageState.of(a)
+        keys(a, "j")
+        pg.column = .left
         keys(a, "i")
-        keys(a, "esc")
-        keys(a, "esc")
-        #expect(pg.edit == nil, "esc out of the field, then esc drops the edit")
+        #expect(pg.helix == nil)
     }
 
     /// space c puts the conversation where the diff was; esc brings the diff back.
