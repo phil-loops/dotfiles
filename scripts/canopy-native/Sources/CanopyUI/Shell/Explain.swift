@@ -46,17 +46,40 @@ public final class ExplainState {
     }
 }
 
+/// A word canopy shows and what it means, as one value, so the word can't appear without its
+/// meaning and a new state can't be added without one (each Term is an exhaustive switch).
+public protocol Term {
+    var word: String { get }
+    /// one plain line for `?`'s notes; nil when the word says it all
+    var meaning: String? { get }
+}
+
 public extension View {
     /// What this thing on screen is, for `?`'s notes layer — one plain line.
     func explains(_ id: String, _ text: String) -> some View { modifier(ExplainModifier(id: id, text: text)) }
+
+    /// This view shows `term`: its meaning is the note.
+    func explains(_ id: String, _ term: any Term) -> some View { modifier(ExplainModifier(id: id, text: term.meaning)) }
+}
+
+/// A term's word, its meaning registered as the note.
+struct TermText: View {
+    let id: String
+    let term: any Term
+    init(_ id: String, _ term: any Term) { self.id = id; self.term = term }
+    var body: some View { Text(term.word).explains(id, term) }
 }
 
 struct ExplainModifier: ViewModifier {
     @Environment(AppModel.self) private var app
     let id: String
-    let text: String
+    let text: String?
 
-    func body(content: Content) -> some View {
+    @ViewBuilder func body(content: Content) -> some View {
+        if let text { noted(content, text) } else { content }
+    }
+
+    private func noted(_ content: Content, _ text: String) -> some View {
         content.background {
             GeometryReader { g in
                 let rect = g.frame(in: .global)

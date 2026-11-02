@@ -320,19 +320,24 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
         let byKey = ["h|aaa": HistoryCommit(sha: "aaa", subject: "a", pushed: true),
                      "h|bbb": HistoryCommit(sha: "bbb", subject: "b", pushed: true),
                      "h|ccc": HistoryCommit(sha: "ccc", subject: "c", pushed: false)]
-        #expect(keys.map { HistoryList.group($0, keys, byKey, nil) } == [nil, "pushed", nil, "to push"])
+        #expect(keys.map { HistoryList.group($0, keys, byKey, nil) } == [nil, .pushed, nil, .toPush])
         let unknown = ["h|aaa": HistoryCommit(sha: "aaa", subject: "a")]
         #expect(HistoryList.group("h|aaa", ["h|", "h|aaa"], unknown, nil) == nil)
+    }
+
+    @Test func everyGroupAndReachSaysWhatItMeans() {
+        let terms: [any Term] = [HistoryGroup.toPush, HistoryGroup.pushed, HistoryGroup.onPR(7), Reach.onlyHere, Reach.draft, Reach.local, Reach.locked("on origin")]
+        for t in terms { #expect(t.meaning?.hasPrefix(t.word + ":") == true, "\(t.word)'s note names it first") }
     }
 
     @Test func wordsRowsSayWhoCanSeeThem() {
         let o = WordsOutline(branch: "b", head: "h", commits: [OutlineCommit(sha: "aaa", subject: "a"),
                                                               OutlineCommit(sha: "bbb", subject: "b", pushed: true, locked: "on origin")])
-        #expect(WordsEditor.state(.desc, o) == "only here")
-        #expect(WordsEditor.state(.title, o) == "draft")
-        #expect(WordsEditor.state(.subject("aaa"), o) == "local")
-        #expect(WordsEditor.state(.subject("bbb"), o) == "on origin")
-        #expect(WordsEditor.state(.commitBody("aaa"), o) == nil)
+        #expect(WordsEditor.reach(.desc, o) == .onlyHere)
+        #expect(WordsEditor.reach(.title, o) == .draft)
+        #expect(WordsEditor.reach(.subject("aaa"), o) == .local)
+        #expect(WordsEditor.reach(.subject("bbb"), o) == .locked("on origin"))
+        #expect(WordsEditor.reach(.commitBody("aaa"), o) == nil)
     }
 
     @Test func historyStepsSelectOneCommit() throws {

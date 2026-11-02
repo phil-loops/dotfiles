@@ -56,8 +56,7 @@ struct HistoryList: View {
         let keys = ShipRows.history(app, branchID)
         let oneDay = Set((rows ?? []).map { Self.day($0.date) }).count <= 1
         VStack(alignment: .leading, spacing: 4) {
-            PaneList(pane: ShipSeam.historyPane, rows: keys, header: { key in Self.group(key, keys, byKey, conv) },
-                     headerNote: Self.groupNote) { key, _ in
+            PaneList(pane: ShipSeam.historyPane, rows: keys, header: { key in Self.group(key, keys, byKey, conv) }) { key, _ in
                 let scoped = key == "h|\(ship.commitScope ?? "")"
                 if key == "h|" {
                     Text("all changes\(conv.map { " · #" + String($0.number) } ?? "")")
@@ -79,14 +78,6 @@ struct HistoryList: View {
         }
     }
 
-    /// What a group's name means, for `?`'s notes.
-    static func groupNote(_ name: String) -> String? {
-        if name == "to push" { return "to push: commits only on this machine, free to reword" }
-        if name == "pushed" { return "pushed: on origin, no PR yet" }
-        if name.hasPrefix("on #") { return "\(name): in the open PR, so reviewers have seen them — read-only" }
-        return nil
-    }
-
     /// The month-day a commit was written ("11-02"), its year dropped.
     static func day(_ date: String) -> String {
         String(date.replacingOccurrences(of: "^\\d{4}-", with: "", options: .regularExpression).prefix(5))
@@ -94,12 +85,12 @@ struct HistoryList: View {
 
     /// The group a commit row opens, if it's the first of its kind: shared ("on #N", or "pushed"
     /// before a PR exists) or "to push"; nothing when the server didn't say.
-    static func group(_ key: String, _ keys: [String], _ byKey: [String: HistoryCommit], _ conv: Conv?) -> String? {
+    static func group(_ key: String, _ keys: [String], _ byKey: [String: HistoryCommit], _ conv: Conv?) -> HistoryGroup? {
         guard let c = byKey[key], c.pushed != nil, let i = keys.firstIndex(of: key) else { return nil }
         let shared = c.pushed == true
         let prev = i > 0 ? byKey[keys[i - 1]] : nil
         if let prev, (prev.pushed == true) == shared { return nil }
-        return shared ? (conv.map { "on #\($0.number)" } ?? "pushed") : "to push"
+        return shared ? (conv.map { .onPR($0.number) } ?? .pushed) : .toPush
     }
 
     /// The threads a commit declares it addresses, as "author on file:line".
@@ -227,11 +218,10 @@ public struct WordsEditor: View {
             let writing = app.insertField == field
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 VStack(alignment: .leading, spacing: 0) {
-                    Text(label(r, o)).foregroundStyle(theme.inkFaint)
-                        .explains("words|label|\(key)", Self.labelNote(r) ?? label(r, o))
-                    if let st = Self.state(r, o) {
-                        Text(st).foregroundStyle(st == "local" || st == "draft" ? theme.goldLeaf.opacity(0.8) : theme.inkFaint.opacity(0.7))
-                            .explains("words|state|\(key)", Self.stateNote(st))
+                    TermText("words|label|\(key)", Self.label(r, o)).foregroundStyle(theme.inkFaint)
+                    if let reach = Self.reach(r, o) {
+                        TermText("words|reach|\(key)", reach)
+                            .foregroundStyle(reach.editable ? theme.goldLeaf.opacity(0.8) : theme.inkFaint.opacity(0.7))
                     }
                 }
                 .font(Theme.text(10.5)).frame(width: 84, alignment: .leading)
@@ -302,46 +292,24 @@ public struct WordsEditor: View {
 
     private func rowsShowBody(_ sha: String) -> Bool { ShipRows.words(app, branchID, full: landing && !landingOnly).contains("w|b|\(sha)") }
 
-    /// Who can see a row's words yet: "only here" (the description never leaves canopy), "draft"
-    /// (the PR's words before a PR exists), "local" (an unpushed commit, free to reword), or why a
-    /// commit is frozen (it's on a remote, carried from a dep). Nil for a commit's body row.
-    static func state(_ r: WordsRow, _ o: WordsOutline?) -> String? {
+    /// Who can see a row's words yet, and so whether they can still change. Nil for a commit's body row.
+    static func reach(_ r: WordsRow, _ o: WordsOutline?) -> Reach? {
         switch r {
-        case .desc: "only here"
-        case .title, .body: "draft"
-        case .subject(let sha):
-            (o?.commits.first { $0.sha == sha }).map { $0.locked.isEmpty ? "local" : $0.locked }
+        case .desc: .onlyHere
+        case .title, .body: .draft
+        case .subject(let sha): (o?.commits.first { $0.sha == sha }).map { $0.locked.isEmpty ? .local : .locked($0.locked) }
         case .commitBody: nil
         }
     }
 
-    /// What a words row is, for `?`'s notes; nil for a commit's own rows (its state says enough).
-    static func labelNote(_ r: WordsRow) -> String? {
+    /// A words row's name in the label column: what the row is, or the commit's short sha.
+    static func label(_ r: WordsRow, _ o: WordsOutline?) -> RowName {
         switch r {
-        case .desc: "description: the branch's one line, for you and canopy"
-        case .title: "lands as: the PR title, and main's commit subject after the squash"
-        case .body: "why: your lines above the PR template; they land on main with the squash"
-        case .subject, .commitBody: nil
-        }
-    }
-
-    /// What a row's state means, for `?`'s notes.
-    static func stateNote(_ st: String) -> String {
-        switch st {
-        case "only here": "only here: kept in git config, never sent anywhere"
-        case "draft": "draft: becomes the PR's words when you open it"
-        case "local": "local: not pushed yet, so i rewords it"
-        default: "\(st): already shared, so it can't be reworded here"
-        }
-    }
-
-    private func label(_ r: WordsRow, _ o: WordsOutline?) -> String {
-        switch r {
-        case .desc: "description"
-        case .title: "lands as"
-        case .body: "why"
-        case .subject(let sha): String((o?.commits.first { $0.sha == sha }?.short ?? sha).prefix(7))
-        case .commitBody: "  body"
+        case .desc: RowName(word: "description", meaning: "description: the branch's one line, for you and canopy")
+        case .title: RowName(word: "lands as", meaning: "lands as: the PR title, and main's commit subject after the squash")
+        case .body: RowName(word: "why", meaning: "why: your lines above the PR template; they land on main with the squash")
+        case .subject(let sha): RowName(word: String((o?.commits.first { $0.sha == sha }?.short ?? sha).prefix(7)), meaning: nil)
+        case .commitBody: RowName(word: "  body", meaning: nil)
         }
     }
 
@@ -357,4 +325,58 @@ public struct WordsEditor: View {
             return url.replacingOccurrences(of: "https://github.com/", with: "")
         }
     }
+}
+
+/// A group of the history's commits, by who has seen them.
+enum HistoryGroup: Term, Equatable {
+    case toPush, pushed, onPR(Int)
+
+    var word: String {
+        switch self {
+        case .toPush: "to push"
+        case .pushed: "pushed"
+        case .onPR(let n): "on #\(n)"
+        }
+    }
+
+    var meaning: String? {
+        switch self {
+        case .toPush: "to push: commits only on this machine, free to reword"
+        case .pushed: "pushed: on origin, no PR yet"
+        case .onPR(let n): "on #\(n): in the open PR, so reviewers have seen them — read-only"
+        }
+    }
+}
+
+/// Who can see a words row yet: only this machine, the PR once it's opened, or already shared.
+enum Reach: Term, Equatable {
+    case onlyHere, draft, local
+    /// shared already; the server's reason it can't be reworded ("on origin", a merge, carried from a dep)
+    case locked(String)
+
+    var editable: Bool { if case .locked = self { false } else { true } }
+
+    var word: String {
+        switch self {
+        case .onlyHere: "only here"
+        case .draft: "draft"
+        case .local: "local"
+        case .locked(let why): why
+        }
+    }
+
+    var meaning: String? {
+        switch self {
+        case .onlyHere: "only here: kept in git config, never sent anywhere"
+        case .draft: "draft: becomes the PR's words when you open it"
+        case .local: "local: not pushed yet, so i rewords it"
+        case .locked(let why): "\(why): already shared, so it can't be reworded here"
+        }
+    }
+}
+
+/// A words row's name in the label column, and what the row is.
+struct RowName: Term, Equatable {
+    var word: String
+    var meaning: String?
 }
