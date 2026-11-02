@@ -30,8 +30,7 @@ extension NavCommands {
                            local: { [weak app] _, _ in
                                guard let app else { return }
                                let link = app.here().link
-                               NSPasteboard.general.clearContents()
-                               NSPasteboard.general.setString(link, forType: .string)
+                               Clipboard.copy(link)
                                app.runner.say("copied \(link)")
                            }))
         r.register(Command(id: "nav.alternate", title: "Go to the alternate place (where the last jump left from)", scope: .global, verb: .alternate,
