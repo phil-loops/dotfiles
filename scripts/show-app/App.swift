@@ -81,6 +81,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     /// Files macOS asked to open before the window existed (a launch by opening a file can do that);
     /// opened once launching finishes. nil from then on.
     private var openedEarly: [String]? = []
+    private var focusedEarly = Set<String>()
 
     init(launchPaths: [String], snapshotPath: String? = nil) {
         self.launchPaths = launchPaths
@@ -130,13 +131,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             learn.setEntries(learn.entries)
         }
         LearnDue.refresh(sync: snapshotPath != nil)
+        Topics.onChange = { [weak self] in
+            guard let self, self.shell != nil else { return }
+            self.refreshLibrary(force: true)
+        }
+        ArrivalNotices.shared.onOpen = { [weak self] path in
+            self?.openPath(path)
+            NSApp.activate(ignoringOtherApps: true)
+        }
         refreshLibrary(force: true)
         restore()
         updateTitle()
-        let early = openedEarly ?? []
+        let early = (openedEarly ?? []).map(canonicalPath)
         openedEarly = nil
-        (launchPaths + early).forEach(openPath)
-        if launchPaths.isEmpty, early.isEmpty, snapshotPath == nil, selfTest == nil, workspaces.values.allSatisfy({ $0.current == nil }) {
+        let focus = focusedEarly.union(takeFocusRequests())
+        let quiet = early.filter { arrivesQuietly($0, focus: focus) }
+        let loud = early.filter { !quiet.contains($0) }
+        (launchPaths + loud).forEach(openPath)
+        if launchPaths.isEmpty, loud.isEmpty, snapshotPath == nil, selfTest == nil, workspaces.values.allSatisfy({ $0.current == nil }) {
             openNewest()
         }
         if let snapshotPath {
@@ -148,11 +160,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         if let selfTest {
             exit(runSelfTest(selfTest))
         }
-        window.makeKeyAndOrderFront(nil)
+        // Started by a quiet `show <file>` or a relaunch into a new build while Show sat behind: the window waits at the back.
+        let background = CommandLine.arguments.contains("--background") || (!early.isEmpty && loud.isEmpty)
+        if background {
+            window.orderBack(nil)
+        } else {
+            window.makeKeyAndOrderFront(nil)
+        }
         workspaces[active]?.console?.start()
         workspaces[active]?.canopy?.start()
         workspaces[active]?.restoreFocus(in: window)
-        NSApp.activate(ignoringOtherApps: true)
+        if !background {
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        quiet.forEach(arrive)
         refreshLibrary(force: true)
         watcher = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.stayCurrent() }
     }
@@ -198,7 +219,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         saveAll()
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
-        process.arguments = ["-c", "sleep 0.7; open -a \"$0\"", Bundle.main.bundlePath]
+        process.arguments = ["-c", NSApp.isActive ? "sleep 0.7; open -a \"$0\"" : "sleep 0.7; open -g -a \"$0\" --args --background", Bundle.main.bundlePath]
         try? process.run()
         NSApp.terminate(nil)
     }
@@ -208,12 +229,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         prefs.set(active.rawValue, forKey: "workspace.active")
     }
 
+    /// `show <file>`: while Show is frontmost, or for `--focus`, the file opens in its workspace and Show comes forward;
+    /// otherwise it arrives quietly (see `arrive`).
     func application(_ application: NSApplication, open urls: [URL]) {
+        let focus = takeFocusRequests()
         if openedEarly != nil {
             openedEarly?.append(contentsOf: urls.map(\.path))
+            focusedEarly.formUnion(focus)
             return
         }
-        urls.map(\.path).forEach(openPath)
+        let paths = urls.map { canonicalPath($0.path) }
+        let quiet = NSApp.isActive ? [] : paths.filter { arrivesQuietly($0, focus: focus) }
+        quiet.forEach(arrive)
+        let loud = paths.filter { !quiet.contains($0) }
+        guard !loud.isEmpty else { return }
+        loud.forEach(openPath)
         NSApp.activate(ignoringOtherApps: true)
     }
 

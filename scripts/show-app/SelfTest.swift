@@ -41,6 +41,8 @@ func prepareSelfTest(_ mode: SelfTestMode) {
     setenv("SHOW_DIR", library, 1)
     setenv("SHOW_LIVE_RUNS", (scratch as NSString).appendingPathComponent("live-runs.json"), 1)
     setenv("SHOW_CLAUDE", (scratch as NSString).appendingPathComponent("claude-stub"), 1)
+    setenv("SHOW_CLAUDE_SAY", (scratch as NSString).appendingPathComponent("claude-say-stub"), 1)
+    setenv("SHOW_FOCUS_REQUESTS", (scratch as NSString).appendingPathComponent("focus-requests"), 1)
     setenv("LEARNING_GRAPH", (scratch as NSString).appendingPathComponent("graph.json"), 1)
     setenv("LEARNING_MEMORY", "0", 1)
     if case .run = mode {
@@ -85,6 +87,9 @@ func writeSelfTestFixtures(_ scratch: String) {
     let stub = (scratch as NSString).appendingPathComponent("claude-stub")
     try? "#!/bin/sh\nprintf '%s\\n' \"$PWD\" \"$@\" > \"$(dirname \"$0\")/claude-args.txt\"\n".write(toFile: stub, atomically: true, encoding: .utf8)
     chmod(stub, 0o755)
+    let sayStub = (scratch as NSString).appendingPathComponent("claude-say-stub")
+    try? "#!/bin/sh\n[ \"$1\" = --topic ] && [ \"$2\" = abcd1234 ] && echo notice-forest && exit 0\nexit 1\n".write(toFile: sayStub, atomically: true, encoding: .utf8)
+    chmod(sayStub, 0o755)
 }
 
 extension AppDelegate {
@@ -295,6 +300,8 @@ final class SelfTestDriver {
               && FileManager.default.fileExists(atPath: (show as NSString).appendingPathComponent("archive/beta-design.json")))
         check("…and the previous deck comes back", front.current == alpha, front.current ?? "-")
 
+        arrivals()
+
         command("3", code: 20)
         app.focus(front.shelf)
         var learnOrder: [String] = [focusName]
@@ -313,6 +320,43 @@ final class SelfTestDriver {
         relaunchChild()
     }
 
+    /// ⌘[ walks back more than one document; `show <file>` while Show sits behind only lands it on the shelf, with its
+    /// session's topic; a `--focus` request opens it. Leaves Review back on Alpha.
+    func arrivals() {
+        let alpha = at("alpha-plan.json"), gamma = at("gamma-notes.json"), delta = at("delta-notes.json")
+        let quiet = at("epsilon-notes.json"), focused = at("zeta-notes.json")
+        for (path, title) in [(gamma, "Gamma notes"), (delta, "Delta notes"), (quiet, "Epsilon notes"), (focused, "Zeta notes")] {
+            write(["title": title, "replyTo": "abcd1234", "sections": [["id": "s1", "group": "G", "title": "Only", "body": "One."]]], path)
+        }
+        command("2", code: 19)
+        for path in [gamma, alpha, gamma, delta] { app.openPath(path) }
+        var walked: [String] = []
+        for _ in 0..<4 {
+            command("[", code: 33)
+            walked.append(front.current ?? "-")
+        }
+        check("⌘[ walks the whole back stack, revisits included", walked == [gamma, alpha, gamma, alpha],
+              walked.map { ($0 as NSString).lastPathComponent }.joined(separator: " → "))
+
+        command("1", code: 18)
+        app.application(NSApp, open: [URL(fileURLWithPath: quiet)])
+        settle()
+        let review = app.workspaces[.review]!
+        let waiting = review.entries.filter { $0.state == .waiting }.sorted { $0.touched > $1.touched }
+        check("a quiet arrival switches nothing and opens nothing", app.active == .forest && review.current == alpha,
+              "front \(app.active.name), Review open: \(review.current ?? "-")")
+        check("…and lands at the top of Waiting on you", waiting.first?.path == quiet, waiting.map(\.title).joined(separator: ", "))
+        for _ in 0..<40 where review.entries.first(where: { $0.path == quiet })?.topic == nil { settle(0.1) }
+        check("…labelled with its session's topic", review.entries.first { $0.path == quiet }?.topic == "notice-forest",
+              review.entries.first { $0.path == quiet }?.topic ?? "no topic")
+
+        try? (focused + "\n").write(toFile: focusRequestsPath, atomically: true, encoding: .utf8)
+        app.application(NSApp, open: [URL(fileURLWithPath: focused)])
+        settle()
+        check("a --focus request opens it in its workspace", app.active == .review && front.current == focused,
+              "front \(app.active.name), open: \(front.current ?? "-")")
+        command("[", code: 33)
+    }
 
     /// Starts a fresh Show on the same scratch library and prefs, which checks what it restored.
     func relaunchChild() {

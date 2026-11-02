@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# show [<file.json>…] — open files in the one Show window, each in its workspace (Forest ⌘1, Review ⌘2, Learn ⌘3, Runs ⌘4;
+# show [--focus] [<file.json>…] — hand files to the one Show window, each to its workspace (Forest ⌘1, Review ⌘2, Learn ⌘3, Runs ⌘4;
 # no args: bring Show to the front, or start it back on the last workspace and documents), rebuilding it when any show-app/*.swift changes. Re-showing an open file reloads it.
+# A file arrives quietly — top of its shelf, a rail badge and a notification, focus left where it was — unless Show is already
+# frontmost or --focus is given (pass it only when the user asked to see this file now); then it opens and Show comes forward.
 # show --api — the API workspace (⌘5): the loops-postman console, started when it isn't up.
 # show --canopy [/v2/…] — the Canopy workspace (⌘6): the forest viewer, at a page when given one.
 # show --build — just (re)build. show --snapshot <file.json> <out.png> [--appearance light|dark] — render the window offscreen, no window shown.
@@ -60,9 +62,22 @@ PLIST
   echo "$sha" > "$stamp"
 }
 
+# hand_over <focus 0|1> <file>… — --focus files are listed in focus-requests (Show opens those and comes forward); the rest
+# go over with open -g, so handing them to Show never activates it.
+hand_over() {
+  local focus="$1"
+  shift
+  if [[ "$focus" == 1 ]]; then
+    printf '%s\n' "$@" >> "$cache/focus-requests"
+    open -a "$app" "$@"
+  else
+    open -g -a "$app" "$@"
+  fi
+}
+
 case "${1:-}" in
   -h|--help)
-    echo "usage: show [<file.json>…] | show --api | show --canopy [/v2/…] | show --build | show --snapshot <file.json> <out.png> [--appearance light|dark] | show --selftest | show --check-routing <file.json> | show --check-live <deck.json> | show --tutor [<session.json>] | show --tutor-check <session.json> | show --tutor-ask <session.json> <message>" >&2
+    echo "usage: show [--focus] [<file.json>…] | show --api | show --canopy [/v2/…] | show --build | show --snapshot <file.json> <out.png> [--appearance light|dark] | show --selftest | show --check-routing <file.json> | show --check-live <deck.json> | show --tutor [<session.json>] | show --tutor-check <session.json> | show --tutor-ask <session.json> <message>" >&2
     exit 64
     ;;
   --canopy)
@@ -91,9 +106,14 @@ case "${1:-}" in
     "$app/Contents/MacOS/Show" --selftest
     ;;
   --tutor)
-    if [[ $# -ge 2 ]]; then
-      session="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"
+    shift
+    focus=0
+    [[ "${1:-}" == "--focus" ]] && { focus=1; shift; }
+    if [[ $# -ge 1 ]]; then
+      session="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
     else
+      # no file named: the user asked for the newest session, so it comes forward
+      focus=1
       session="$(ls -t "$HOME/.dotfiles/show/tutor/"*.json 2>/dev/null | grep -v '\.answers\.json$' | head -1)"
       [[ -n "$session" ]] || { echo "show: no tutor sessions in ~/.dotfiles/show/tutor" >&2; exit 66; }
     fi
@@ -101,7 +121,7 @@ case "${1:-}" in
     python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d.get("mode", d.get("kind")) == "tutor" and d["title"] and isinstance(d["rungs"], list)' "$session" \
       || { echo "show: $session is not a tutor session (needs mode \"tutor\" + title + rungs)" >&2; exit 65; }
     build
-    open -a "$app" "$session"
+    hand_over "$focus" "$session"
     ;;
   --check-routing)
     [[ $# -eq 2 ]] || { echo "usage: show --check-routing <file.json>" >&2; exit 64; }
@@ -124,6 +144,12 @@ case "${1:-}" in
     "$app/Contents/MacOS/Show" --tutor-check "$2"
     ;;
   *)
+    focus=0
+    args=()
+    for arg in "$@"; do
+      if [[ "$arg" == "--focus" ]]; then focus=1; else args+=("$arg"); fi
+    done
+    set -- ${args[@]+"${args[@]}"}
     if [[ $# -eq 0 ]]; then
       # A running Show comes to the front; a fresh one reopens the last workspace and each workspace's document.
       build
@@ -146,6 +172,6 @@ else:
       decks+=("$deck")
     done
     build
-    open -a "$app" "${decks[@]}"
+    hand_over "$focus" "${decks[@]}"
     ;;
 esac

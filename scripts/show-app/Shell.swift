@@ -465,6 +465,8 @@ struct ShelfEntry {
     let state: ShelfState
     let progress: String
     let touched: Date
+    /// What the session that sent it (its `replyTo`) is working on; nil when it names no session.
+    var topic: String? = nil
 }
 
 /// One spelling per file, so the shelf, the open document and saved state agree (`/tmp` and `/private/tmp` included).
@@ -477,10 +479,10 @@ func sidecarPaths(_ path: String) -> [String] {
     return [stem + ".signoff.json", stem + ".answers.json"]
 }
 
-/// The newest of the file, its sidecars, and when Show last opened it.
+/// The newest of the file, its sidecars, and when Show last opened it or it last arrived.
 func touchedDate(_ path: String) -> Date {
-    let opened = prefs.object(forKey: "opened." + path) as? Date
-    return ([path] + sidecarPaths(path)).compactMap(modificationDate).reduce(opened ?? .distantPast) { max($0, $1) }
+    let marks = ["opened.", "arrived."].compactMap { prefs.object(forKey: $0 + path) as? Date }
+    return ([path] + sidecarPaths(path)).compactMap(modificationDate).reduce(marks.max() ?? .distantPast) { max($0, $1) }
 }
 
 /// Every document Show can open, from `~/.dotfiles/show` and its `tutor/` folder, sidecars left out.
@@ -538,7 +540,8 @@ func shelfEntry(_ path: String) -> ShelfEntry? {
         let answered = session.rungs.filter { answers[$0.id] != nil }.count
         let waiting = currentRung(session, answers) != nil
         let progress = "\(answered) of \(session.rungs.count) answered" + (waiting ? "" : " · Claude's turn")
-        return ShelfEntry(path: path, workspace: workspace, title: session.title, state: waiting ? .waiting : .done, progress: progress, touched: touched)
+        return ShelfEntry(path: path, workspace: workspace, title: session.title, state: waiting ? .waiting : .done, progress: progress, touched: touched,
+                          topic: Topics.cached(session.replyTo))
     case .runs:
         struct Live: Decodable {
             struct Status: Decodable {
@@ -548,6 +551,7 @@ func shelfEntry(_ path: String) -> ShelfEntry? {
             }
             let title: String
             let status: Status?
+            let replyTo: String?
         }
         guard let live = try? JSONDecoder().decode(Live.self, from: Data(contentsOf: URL(fileURLWithPath: path))) else { return nil }
         let state: ShelfState
@@ -558,7 +562,8 @@ func shelfEntry(_ path: String) -> ShelfEntry? {
         }
         let counts = live.status.flatMap { status in status.done.flatMap { done in status.total.map { "\(done) of \($0)" } } }
         let progress = [counts, live.status?.state].compactMap { $0 }.joined(separator: " · ")
-        return ShelfEntry(path: path, workspace: workspace, title: live.title, state: state, progress: progress, touched: touched)
+        return ShelfEntry(path: path, workspace: workspace, title: live.title, state: state, progress: progress, touched: touched,
+                          topic: Topics.cached(live.replyTo))
     case .api, .canopy:
         return nil
     case .forest, .review:
@@ -566,7 +571,7 @@ func shelfEntry(_ path: String) -> ShelfEntry? {
         let store = SignOffStore(deckPath: path)
         let done = deck.sections.filter { store.entries[$0.key]?.signed == true }.count
         return ShelfEntry(path: path, workspace: workspace, title: deck.title, state: done < deck.sections.count ? .waiting : .done,
-                          progress: "\(done) of \(deck.sections.count) signed", touched: touched)
+                          progress: "\(done) of \(deck.sections.count) signed", touched: touched, topic: Topics.cached(deck.replyTo))
     }
 }
 
@@ -800,7 +805,8 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
         return currentDeck?.subtitle ?? ""
     }
 
-    /// Opens `path` here, or reloads it when it's already the open document. The document it replaces goes on the back history.
+    /// Opens `path` here, or reloads it when it's already the open document. The document it replaces is pushed on the back
+    /// stack as is (a revisited document stays deeper in it too), so ⌘[ retraces every step.
     func open(_ path: String, remember: Bool = true) {
         _ = view
         if let console {
@@ -822,8 +828,7 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
         }
         currentDeck?.saveNote()
         tutor?.saveDrafts()
-        if remember, let current {
-            back.removeAll { $0 == current || $0 == path }
+        if remember, let current, back.last != current {
             back.append(current)
             back = Array(back.suffix(50))
             prefs.set(back, forKey: "workspace.\(workspace.rawValue).back")
@@ -862,11 +867,11 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
         onLibraryChange?()
     }
 
-    /// ⌘[: back to the document open before this one, skipping any that were archived or removed.
+    /// ⌘[: back to the document open before this one, skipping any that were archived or removed; pressed again, the one before that.
     func goBack() {
         while let previous = back.popLast() {
             prefs.set(back, forKey: "workspace.\(workspace.rawValue).back")
-            if FileManager.default.fileExists(atPath: previous) {
+            if previous != current, FileManager.default.fileExists(atPath: previous) {
                 open(previous, remember: false)
                 return
             }
@@ -1086,7 +1091,8 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
             let title = NSTextField(labelWithString: entry.title)
             title.font = .systemFont(ofSize: 13, weight: .medium)
             title.lineBreakMode = .byTruncatingTail
-            let detail = NSTextField(labelWithString: [entry.progress, relativeTime(entry.touched)].filter { !$0.isEmpty }.joined(separator: " · "))
+            let parts = entry.topic.map { [$0, relativeTime(entry.touched), entry.progress] } ?? [entry.progress, relativeTime(entry.touched)]
+            let detail = NSTextField(labelWithString: parts.filter { !$0.isEmpty }.joined(separator: " · "))
             detail.font = .systemFont(ofSize: 11)
             detail.textColor = .secondaryLabelColor
             detail.lineBreakMode = .byTruncatingTail
@@ -1159,9 +1165,8 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
         if wasOpen {
             current = nil
             prefs.removeObject(forKey: "workspace.\(workspace.rawValue).open")
-            if let previous = back.last(where: { FileManager.default.fileExists(atPath: $0) }) {
-                back.removeAll { $0 == previous }
-                open(previous, remember: false)
+            if back.contains(where: { FileManager.default.fileExists(atPath: $0) }) {
+                goBack()
             } else {
                 showNothing()
                 onTitleChange?()
