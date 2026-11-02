@@ -1,5 +1,7 @@
 """Durable priority queue sharing tsc-turn's machine-wide slot directories."""
 import argparse
+import re
+from urllib.parse import unquote
 from contextlib import contextmanager
 import fcntl
 import json
@@ -95,6 +97,50 @@ def claim(root, request):
         return slot
 
 
+def branch_of(request_name):
+    """The branch a queue request is for: requests are named after the journal, gates-<repo>-<branch>-<ns>.jsonl."""
+    m = re.fullmatch(r"gates-[^-]+-(.+)-\d+\.jsonl\.queue\.json", request_name)
+    return unquote(m.group(1)) if m else ""
+
+
+def holder_of(pid):
+    """What holds the slot when no queued gates run does — a donor refresh shares it."""
+    out = subprocess.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
+    return os.path.basename(out.split()[0]) if out else ""
+
+
+def standing(root, request):
+    """(place in line, what the slot is busy with) for a queued request, as the chip says it."""
+    with locked(root):
+        queued, running = [], ""
+        for path in root.glob("*.queue.json"):
+            try:
+                record = json.loads(path.read_text())
+            except (OSError, ValueError):
+                continue
+            if not alive(record.get("pid")):
+                continue
+            if record.get("state") == "queued":
+                queued.append((record["priority"], record["created"], str(path)))
+            elif record.get("state") == "running":
+                running = branch_of(path.name)
+        order = [q[2] for q in sorted(queued)]
+        place = order.index(str(request)) + 1 if str(request) in order else 0
+        if not running:
+            try:
+                running = holder_of((root / "slot1" / "pid").read_text().strip())
+            except OSError:
+                running = ""
+        return place, running
+
+
+def setup_event(progress, step, **fields):
+    """Name the step a run is on before its first gate, so a wait says what it waits on."""
+    if progress:
+        with Path(progress).open("a") as output:
+            output.write(json.dumps({"event": "setup", "step": step, "ts": time.time(), **fields}) + "\n")
+
+
 def tree_of(branch):
     result = subprocess.run(["git", "rev-parse", f"{branch}^{{tree}}"],
                             capture_output=True, text=True)
@@ -143,12 +189,17 @@ def main(argv=None):
     signal.signal(signal.SIGTERM, interrupted)
     try:
         checked_at = 0
+        said = None
         while slot is None:
             if time.monotonic() - checked_at >= 2:
                 checked_at = time.monotonic()
                 if not args.tree or tree_of(args.branch) != args.tree:
                     obsolete(progress)
                     return 0
+                now = standing(root, request)
+                if now != said:
+                    said = now
+                    setup_event(progress, "queue", position=now[0], behind=now[1])
             slot = claim(root, request)
             if slot is None:
                 time.sleep(0.2)

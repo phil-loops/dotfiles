@@ -23,7 +23,7 @@ public struct ShipStripView: View {
                 let progress = ship.progressOf(branchID)
                 let rows = GatesRun.rows(progress, now: ctx.date.timeIntervalSince1970)
                 VStack(alignment: .leading, spacing: 4) {
-                    line(b, m, rows, progress)
+                    line(b, m, rows, progress, now: ctx.date.timeIntervalSince1970)
                     if let m { StepsStrip(branchID: branchID, motion: m) }
                     else if !rows.isEmpty, progress?.running == true || rows.contains(where: { $0.state == .red }) || shown != nil {
                         GatesStrip(branchID: branchID, rows: rows, progress: progress, shown: shown)
@@ -46,7 +46,7 @@ public struct ShipStripView: View {
         "\(b.repo)|\(b.name)|\(b.tip)|\(b.pushed.rawValue)|\(b.ahead)|\(b.behind)|\(b.drifted)|\(m?.phase.rawValue ?? "")"
     }
 
-    @ViewBuilder private func line(_ b: Branch, _ m: SyncMotion?, _ rows: [GateRow], _ progress: GateProgress?) -> some View {
+    @ViewBuilder private func line(_ b: Branch, _ m: SyncMotion?, _ rows: [GateRow], _ progress: GateProgress?, now: Double) -> some View {
         let ship = ShipState.of(app)
         let route = ReviewCommands.pushRoute(app, branchID)
         let push = latestPush()
@@ -72,8 +72,8 @@ public struct ShipStripView: View {
             if (acts || waiting) && live == nil {
                 if let g = running {
                     Text("◌ \(g.name) \(GatesRun.secs(g.ms))").foregroundStyle(theme.goldLeaf)
-                } else if let doing = GatesRun.between(rows, inFlight: b.gates == .running || progress?.running == true) {
-                    Text("◌ \(doing)\(progress?.elapsed.map { " · " + GatesRun.secs($0 * 1000) } ?? "")").foregroundStyle(theme.goldLeaf)
+                } else if let w = GatesRun.waiting(progress, rows: rows, inFlight: b.gates == .running || progress?.running == true, now: now) {
+                    Text("◌ \(w.text)\(w.secs.map { " · " + GatesRun.secs($0 * 1000) } ?? "")").foregroundStyle(w.stuck ? theme.ember : theme.goldLeaf)
                 } else if !red.isEmpty {
                     Text("gates ✗").foregroundStyle(theme.ember)
                     ForEach(red, id: \.name) { g in Text(g.name).foregroundStyle(theme.ember) }

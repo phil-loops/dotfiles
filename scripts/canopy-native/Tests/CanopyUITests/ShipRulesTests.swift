@@ -25,6 +25,21 @@ import Testing
         #expect(GatesRun.between([], inFlight: false) == nil)
     }
 
+    @Test func aRunInSetupNamesTheStepAndTurnsStuckAfterFiveMinutes() {
+        let queued = GateProgress(running: true, elapsed: 4452, events: [
+            GateEvent(event: "queued", ts: 0),
+            GateEvent(event: "setup", ts: 10, step: "queue", position: 2, behind: "move-notices-out-of-the-feed")])
+        let w = GatesRun.waiting(queued, rows: GatesRun.rows(queued, now: 70), inFlight: true, now: 70)
+        #expect(w?.text == "#2 in line for gates · move-notices-out-of-the-feed running" && w?.secs == 60 && w?.stuck == false)
+        let checkout = GateProgress(running: true, elapsed: 4452, events: [GateEvent(event: "setup", ts: 0, step: "checkout")])
+        let s = GatesRun.waiting(checkout, rows: GatesRun.rows(checkout, now: 4452), inFlight: true, now: 4452)
+        #expect(s?.text == "stuck preparing the checkout" && s?.stuck == true)
+        let next = GateProgress(running: true, events: [GateEvent(event: "setup", ts: 0, step: "queue", position: 1, behind: "stack-donor")])
+        #expect(GatesRun.waiting(next, rows: [], inFlight: true, now: 1)?.text == "waiting on stack-donor")
+        let planned = GateProgress(running: true, elapsed: 3, events: [GateEvent(event: "setup", ts: 0, step: "env"), plan])
+        #expect(GatesRun.setup(planned) == nil)
+    }
+
     @Test func aRunThatDiedMidGateSaysStopped() {
         let rows = GatesRun.rows(GateProgress(running: false, events: [plan, GateEvent(event: "start", gate: "env", ts: 1)], dead: true), now: 500)
         #expect(rows.map(\.state) == [.stopped, .stopped, .stopped])

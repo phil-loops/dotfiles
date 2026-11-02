@@ -287,5 +287,22 @@ time.sleep(0.05)
         self.assertEqual(self.log.read_text().splitlines(), ["a"])
 
 
+    def test_a_waiting_request_says_its_place_in_line(self):
+        _, _, first = self.start("a")
+        _, _, second = self.start("b")
+        self.wait_for(lambda: second.exists() and '"step": "queue"' in second.read_text())
+        events = [json.loads(line) for line in second.read_text().splitlines()]
+        waiting = [e for e in events if e.get("event") == "setup"]
+        self.assertEqual(waiting[-1]["step"], "queue")
+        self.assertEqual(waiting[-1]["position"], 2)
+        self.release()
+        self.finish()
+
+    def test_branch_of_reads_the_journal_name(self):
+        self.assertEqual(queue.branch_of("gates-0c3553e5-chart-notices-on-team-page-1793658497461662000.jsonl.queue.json"),
+                         "chart-notices-on-team-page")
+        self.assertEqual(queue.branch_of("gates-0c3553e5-review%2Fpr-11332-17936.jsonl.queue.json"), "review/pr-11332")
+        self.assertEqual(queue.branch_of("a.jsonl.queue.json"), "")
+
 if __name__ == "__main__":
     unittest.main()
