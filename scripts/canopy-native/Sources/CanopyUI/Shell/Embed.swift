@@ -11,13 +11,22 @@ public final class CanopyEmbed {
     private let model: AppModel
     private let monitor: KeyMonitor
 
-    /// nil when the repo's server isn't answering; the host starts one and asks again.
-    public init?(repo: String = "~/coding/loops", route: String? = nil, isActive: @escaping () -> Bool) {
+    /// nil when the repo's server isn't answering; the host starts one and asks again. `onNavigate` hears every page
+    /// change (its /v2/… path), the opening route included.
+    public init?(repo: String = "~/coding/loops", route: String? = nil, isActive: @escaping () -> Bool,
+                 onNavigate: ((String) -> Void)? = nil) {
         var c = AppConfig()
         c.repo = repo
         guard let port = c.resolvedPort(), Self.answers(port) else { return nil }
         Fonts.register()
         let m = AppModel(config: c, port: port)
+        if let onNavigate {
+            let telemetry = m.router.onNavigate
+            m.router.onNavigate = { from, to in
+                telemetry?(from, to)
+                onNavigate(to.path)
+            }
+        }
         m.start()
         if let route { m.open(address: route) }
         model = m

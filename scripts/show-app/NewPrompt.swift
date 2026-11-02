@@ -38,6 +38,8 @@ enum NewRequest {
             process.arguments = Zsh.arguments("exec claude \"$@\"", ["claude"] + arguments)
         }
         process.currentDirectoryURL = URL(fileURLWithPath: ("~/.dotfiles" as NSString).expandingTildeInPath)
+        // Phil asked for this deck, so the `show` it ends with brings it forward.
+        process.environment = ProcessInfo.processInfo.environment.merging(["SHOW_FOCUS": "1"]) { _, new in new }
         let log = stem + ".log"
         FileManager.default.createFile(atPath: log, contents: nil)
         let handle = try FileHandle(forWritingTo: URL(fileURLWithPath: log))
