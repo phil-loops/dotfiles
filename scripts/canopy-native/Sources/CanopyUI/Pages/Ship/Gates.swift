@@ -98,6 +98,16 @@ public enum GatesRun {
         }
     }
 
+    /// What an in-flight run is doing while no gate is running: "gates starting" before the first
+    /// gate (the server is readying the checkout or waiting for a slot), "<gate> next" between two.
+    /// Nil when a gate is running, one went red, or nothing is in flight.
+    public static func between(_ rows: [GateRow], inFlight: Bool) -> String? {
+        guard inFlight, !rows.contains(where: { $0.state == .running || $0.state == .red }) else { return nil }
+        guard rows.contains(where: { $0.state == .green || $0.state == .waived }),
+              let next = rows.first(where: { $0.state == .queued }) else { return "gates starting" }
+        return "\(next.name) next"
+    }
+
     /// "42s", "3m 5s" (Ship.tsx secs).
     public static func secs(_ ms: Double?) -> String {
         guard let ms else { return "" }

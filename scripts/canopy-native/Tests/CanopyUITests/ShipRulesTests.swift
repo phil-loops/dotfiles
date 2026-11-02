@@ -14,6 +14,17 @@ import Testing
         #expect(line(rows) == ["env:green:900", "typecheck:running:30000", "tests:queued:null"])
     }
 
+    @Test func aRunWithNoGateRunningSaysWhatItsWaitingOn() {
+        #expect(GatesRun.between([], inFlight: true) == "gates starting")
+        let queued = GatesRun.rows(GateProgress(running: true, events: [plan]), now: 0)
+        #expect(GatesRun.between(queued, inFlight: true) == "gates starting")
+        let gap = GatesRun.rows(GateProgress(running: true, events: [plan, GateEvent(event: "done", gate: "env", ok: true, ms: 900)]), now: 0)
+        #expect(GatesRun.between(gap, inFlight: true) == "typecheck next")
+        let busy = GatesRun.rows(GateProgress(running: true, events: [plan, GateEvent(event: "start", gate: "env", ts: 0)]), now: 1)
+        #expect(GatesRun.between(busy, inFlight: true) == nil)
+        #expect(GatesRun.between([], inFlight: false) == nil)
+    }
+
     @Test func aRunThatDiedMidGateSaysStopped() {
         let rows = GatesRun.rows(GateProgress(running: false, events: [plan, GateEvent(event: "start", gate: "env", ts: 1)], dead: true), now: 500)
         #expect(rows.map(\.state) == [.stopped, .stopped, .stopped])
