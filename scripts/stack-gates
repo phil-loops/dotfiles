@@ -69,10 +69,10 @@ def run_logged(cmd, cwd, log):
         return subprocess.CompletedProcess(cmd, rc, f.read(), "")
 
 
-# The gates that run full tsc programs (2-3 GB apiece) take a machine-wide heavy-turn slot, so a
+# The gates that run full tsc programs (2-3 GB apiece; type-aware oxlint builds them too) take a machine-wide heavy-turn slot, so a
 # gates run waits behind a preview's node_modules clone or a shell typecheck instead of stacking
 # on top of it. STACK_GATES_PRIORITY=background (the viewer's ambient pre-gating) queues as batch.
-HEAVY_GATES = {"typecheck", "tests"}
+HEAVY_GATES = {"typecheck", "lint", "tests"}
 
 
 def gate_argv(name, cmd):
@@ -220,6 +220,14 @@ def default_gates(cwd, branch=""):
             "git diff --name-only \"$base\" HEAD --diff-filter=ACMR -- '*.ts' '*.tsx' "
             f"| xargs -r {oxfmt} --check",
         ))
+    # lint: CI's `task lint` reds on what typecheck and format can't see — an unused import
+    # (#11331, 2026-11-02), an unused export. Mirror its oxlint step via lint:oxlint:entries,
+    # NOT lint:oxlint: that task's deps run `tsc -b packages`, the scratch-tree trap above.
+    lint_tasks = os.path.join(cwd, "tasks/lint/tasks.yml")
+    if os.path.exists(lint_tasks) and "lint:oxlint:entries:" in open(lint_tasks).read():
+        knip = repo_local("knip", cwd)
+        gates.append(("lint", "task lint:oxlint:entries"
+                      + (f" && {knip} --strict --include unlisted --cache" if knip else "")))
     delta_tests = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stack-delta-tests")
     if ts_projects and os.path.exists(delta_tests):
         gates.append(("tests", delta_tests))
