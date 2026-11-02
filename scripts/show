@@ -34,11 +34,23 @@ stage() {
   local head
   head="$(mktemp -d)"
   git -C "$here/.." archive HEAD scripts/canopy-native | tar -x -C "$head"
-  rsync -a --checksum --delete --exclude .build "$head/scripts/canopy-native/" "$src/canopy-native/"
+  # -a minus -t: an archive stamps every file with the commit's time, so copying times would mark the whole tree edited
+  # and rebuild it all; a file is written only when its bytes differ, and only then does its time move
+  rsync -rlpD --checksum --delete --exclude .build "$head/scripts/canopy-native/" "$src/canopy-native/"
   rm -rf "$head"
 }
 
+# One build at a time: a second launch waits for the first and then finds it current, and no launch restages the
+# sources under a build that is reading them.
 build() {
+  mkdir -p "$cache"
+  lockf -k "$cache/build.lock" "$here/show" --build-held >&2
+}
+
+# Incremental release: whole-module optimization recompiles all of CanopyUI for a one-line change (53s); per-file is 20s.
+swiftbuild() { swift build -c release -Xswiftc -no-whole-module-optimization "$@"; }
+
+build_held() {
   local sha
   stage
   # Show links canopy (its Canopy workspace), so a change on either side rebuilds
@@ -48,9 +60,9 @@ build() {
   fi
   echo "show: building…" >&2
   mkdir -p "$app/Contents/MacOS"
-  (cd "$src/show-app" && swift build -c release --product Show >&2)
+  (cd "$src/show-app" && swiftbuild --product Show >&2)
   local out
-  out="$(cd "$src/show-app" && swift build -c release --show-bin-path)"
+  out="$(cd "$src/show-app" && swiftbuild --show-bin-path)"
   mkdir -p "$app/Contents/Resources"
   # beside, then renamed in: a running Show keeps its own file (writing over it in place gets it
   # killed for an invalid code signature)
@@ -163,6 +175,9 @@ PY
   --build)
     build
     echo "$app"
+    ;;
+  --build-held)
+    build_held
     ;;
   --snapshot)
     [[ $# -eq 3 || ( $# -eq 5 && "$4" == "--appearance" && ( "$5" == "light" || "$5" == "dark" ) ) ]] \
