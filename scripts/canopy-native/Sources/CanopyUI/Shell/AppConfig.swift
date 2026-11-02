@@ -10,7 +10,10 @@ import Foundation
 ///   --dump-wait <s>       how long --dump listens for patches (default 4); --shoot settles this long per shot
 ///   --shoot <dir>         headless: draw each --shot offscreen into <dir>/<name>.png (see Shoot)
 ///   --shot <name>=<route> [keys…]   one shot; repeatable
-///   --size <w>x<h>        the --shoot window (default 1280x800)
+///   --size <w>x<h>        the --shoot / --bench window (default 1280x800)
+///   --bench               headless: time every key on every page (or each --page); see Bench
+///   --page <route>        a page for --bench; repeatable
+///   --budget <ms>         --bench's limit per key, redraw included (default 33)
 ///   /v2/... | canopy://…  the first route
 public struct AppConfig: Sendable {
     public var port: Int?
@@ -25,6 +28,9 @@ public struct AppConfig: Sendable {
     public var dumpWait: Double = 4
     public var shootDir = ""
     public var shots: [String] = []
+    public var bench = false
+    public var pages: [String] = []
+    public var budget: Double = 33
     public var shootWidth: Double = 1280
     public var shootHeight: Double = 800
 
@@ -44,6 +50,9 @@ public struct AppConfig: Sendable {
             case "--dump-wait": c.dumpWait = next().flatMap(Double.init) ?? c.dumpWait
             case "--shoot": c.shootDir = next() ?? ""
             case "--shot": if let s = next() { c.shots.append(s) }
+            case "--bench": c.bench = true
+            case "--page": if let p = next() { c.pages.append(p) }
+            case "--budget": c.budget = next().flatMap(Double.init) ?? c.budget
             case "--size":
                 let wh = (next() ?? "").split(separator: "x").compactMap { Double($0) }
                 if wh.count == 2 { c.shootWidth = wh[0]; c.shootHeight = wh[1] }
