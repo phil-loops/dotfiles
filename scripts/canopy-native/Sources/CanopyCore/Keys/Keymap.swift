@@ -51,7 +51,7 @@ public struct Keymap {
 public enum KeyName {
     public static func name(key: String, ctrl: Bool = false, meta: Bool = false, alt: Bool = false) -> String? {
         let named = [" ": "space", "Escape": "esc", "Enter": "ret", "ArrowDown": "down", "ArrowUp": "up",
-                     "ArrowLeft": "left", "ArrowRight": "right", "Tab": "tab"]
+                     "ArrowLeft": "left", "ArrowRight": "right", "Tab": "tab", "Backspace": "backspace"]
         guard let k = named[key] ?? (key.count == 1 ? key : nil) else { return nil }
         if meta { return nil }
         return ctrl ? "C-\(k)" : alt ? "A-\(k)" : k
@@ -60,7 +60,7 @@ public enum KeyName {
     /// macOS virtual key codes for the named keys (Carbon kVK_*).
     public static let codes: [UInt16: String] = [
         49: " ", 53: "Escape", 36: "Enter", 76: "Enter", 48: "Tab",
-        125: "ArrowDown", 126: "ArrowUp", 123: "ArrowLeft", 124: "ArrowRight",
+        125: "ArrowDown", 126: "ArrowUp", 123: "ArrowLeft", 124: "ArrowRight", 51: "Backspace",
     ]
 
     /// From an AppKit key event's parts. `characters` is what the key typed (shift applied);
@@ -105,6 +105,7 @@ public struct SheetCmd: Equatable, Sendable {
 public struct SheetLine: Equatable, Sendable {
     public var key: String
     public var cmd: SheetCmd
+    public init(key: String, cmd: SheetCmd) { self.key = key; self.cmd = cmd }
 }
 
 public func sheetNow(surface: String, live: [String], cmds: [SheetCmd], surfaceScopes: [String: [String]])

@@ -19,6 +19,7 @@ enum PaletteArea: PageArea {
         r.register(Command(id: "menu.run", title: "Run the highlighted command", scope: .global, verb: .send, modes: [.menu], quiet: true,
                            local: { [weak app] _, _ in if let app { menu.run(app) } }))
 
+        app.keys.layerTyping[.sheet] = { [weak app] k in app.map { sheet.type(k, $0) } ?? false }
         r.register(Command(id: "sheet.down", title: "Scroll the key sheet down", scope: .global, verb: .next, modes: [.sheet], quiet: true,
                            local: { [weak app] _, _ in if let app { sheet.move(1, app) } }))
         r.register(Command(id: "sheet.up", title: "Scroll the key sheet up", scope: .global, verb: .previous, modes: [.sheet], quiet: true,
