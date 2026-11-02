@@ -99,8 +99,22 @@ public final class ForestModel {
         )
     }
 
-    /// Every forest with its branches in merge order, each knowing where it stands.
+    /// Every forest with its branches in merge order, each knowing where it stands. Built once per
+    /// store change: the cursor alone asks for it dozens of times a keypress.
     public func forests() -> [String: ForestView] {
+        let key = ForestsKey(epoch: store.epoch, versions: store.versions, ops: store.ops.map(\.seq), now: now)
+        if let memo = forestsMemo, memo.key == key { return memo.value }
+        let value = buildForests()
+        forestsMemo = (key, value)
+        return value
+    }
+
+    private struct ForestsKey: Equatable {
+        var epoch: String, versions: Versions, ops: [Int], now: Date
+    }
+    @ObservationIgnored private var forestsMemo: (key: ForestsKey, value: [String: ForestView])?
+
+    private func buildForests() -> [String: ForestView] {
         var groups: [String: [Branch]] = [:]
         for b in store.list(Branch.self) { groups[b.project, default: []].append(b) }
         let prs = store.table(Pr.self)

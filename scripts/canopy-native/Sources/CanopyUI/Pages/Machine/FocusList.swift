@@ -36,10 +36,12 @@ struct CursorRow<Content: View>: View {
         self.pane = pane; self.key = key; self.content = content
     }
 
+    @Environment(\.cursorMarks) private var given
+
     var body: some View {
-        let focused = app.isFocused(pane)
-        let on = focused && app.selected == key
-        let inRange = focused && !on && app.selection.contains(key)
+        let marks = given?.pane == pane ? given! : app.cursorMarks(pane)
+        let on = marks.on == key
+        let inRange = !on && marks.range.contains(key)
         content(on)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(on ? theme.goldWash : inRange ? theme.emberWash : .clear)
@@ -48,6 +50,40 @@ struct CursorRow<Content: View>: View {
             .onTapGesture { app.runner.dispatch("pane.focus", via: .click, target: pane); app.runner.dispatch("cursor.set", via: .click, target: key) }
             .id(key)
     }
+}
+
+/// Where a pane's cursor and select range sit, worked out once for a whole list of `CursorRow`s
+/// (`.cursorMarks(pane)` on the list) instead of once per row.
+struct CursorMarks {
+    var pane: String
+    var on: String?
+    var range: Set<String>
+}
+
+extension AppModel {
+    func cursorMarks(_ id: String) -> CursorMarks {
+        guard let p = pane, p.id == id else { return CursorMarks(pane: id, on: nil, range: []) }
+        return CursorMarks(pane: id, on: selected(in: p), range: Set(selection(in: p)))
+    }
+}
+
+private struct CursorMarksKey: EnvironmentKey { static let defaultValue: CursorMarks? = nil }
+
+extension EnvironmentValues {
+    var cursorMarks: CursorMarks? {
+        get { self[CursorMarksKey.self] }
+        set { self[CursorMarksKey.self] = newValue }
+    }
+}
+
+private struct ProvideCursorMarks: ViewModifier {
+    @Environment(AppModel.self) private var app
+    let pane: String
+    func body(content: Content) -> some View { content.environment(\.cursorMarks, app.cursorMarks(pane)) }
+}
+
+extension View {
+    func cursorMarks(_ pane: String) -> some View { modifier(ProvideCursorMarks(pane: pane)) }
 }
 
 /// The ring around a focused pane's region.

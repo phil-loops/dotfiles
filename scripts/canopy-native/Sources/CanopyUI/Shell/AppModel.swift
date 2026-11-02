@@ -221,19 +221,24 @@ public final class AppModel: CommandContext {
 
     /// The cursor's row while it's visible, else whatever now sits in its place — so removing a
     /// row leaves the cursor on the next one.
-    public var selected: String? {
-        let r = rows
-        if let c = cursor, r.contains(c) { return c }
-        guard !r.isEmpty else { return nil }
-        return r[max(0, min(cursorIdx, r.count - 1))]
-    }
+    public var selected: String? { pane.flatMap { selected(in: $0) } }
 
     /// The rows a command acts on: in select mode the range from the anchor to the cursor, else
     /// just the selected row. Multi-row commands (archive these, push these) read this.
-    public var selection: [String] {
-        let r = rows
-        guard let sel = selected, let at = r.firstIndex(of: sel) else { return [] }
-        guard keys.mode == .select, let a = anchors[paneKey] else { return [sel] }
+    public var selection: [String] { pane.map { selection(in: $0) } ?? [] }
+
+    /// `selected` for a pane already in hand: a pane's rows can cost a page's whole model to list.
+    func selected(in p: Pane) -> String? {
+        let r = p.rows, k = "\(router.surface.id)/\(p.id)"
+        if let c = cursors[k], r.contains(c) { return c }
+        guard !r.isEmpty else { return nil }
+        return r[max(0, min(cursorIdxs[k] ?? 0, r.count - 1))]
+    }
+
+    func selection(in p: Pane) -> [String] {
+        let r = p.rows
+        guard let sel = selected(in: p), let at = r.firstIndex(of: sel) else { return [] }
+        guard keys.mode == .select, let a = anchors["\(router.surface.id)/\(p.id)"] else { return [sel] }
         let lo = max(0, min(a, at)), hi = min(r.count - 1, max(a, at))
         return Array(r[lo...hi])
     }

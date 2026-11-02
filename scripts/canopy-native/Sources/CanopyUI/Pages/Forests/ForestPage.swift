@@ -170,6 +170,7 @@ private struct ForestTodoList: View {
                     }
                 }
             }
+            .cursorMarks("todo")
             .padding(.top, 28)
         }
     }
