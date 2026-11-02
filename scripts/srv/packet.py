@@ -7,6 +7,7 @@
 #   GET  /packet?branch=B[&guide=auto]   {sections, body, title, label, guide, review}
 #   POST /packet-guide {branch}          (re)draft "How to read it" with headless claude, in the background
 #   GET  /packet-compare?branch=B[&base=X]   302 → the GitHub compare form, title + packet + label prefilled
+#                                            (&json=1: {"url": …} instead, so a client opens GitHub directly)
 #
 # Never writes to GitHub: the compare link opens a form for Phil's hand, and the "copy updated
 # body" the stale check offers is text for him to paste.
@@ -546,6 +547,8 @@ def compare(req, u):
     url = push.compare_url(branch, base)
     if not url:
         return _send(req, 404, {"ok": False, "err": "no GitHub remote"})
+    if (q.get("json", [""]) or [""])[0]:
+        return _send(req, 200, {"ok": True, "url": url})
     req.send_response(302)
     req.send_header("Location", url)
     req.send_header("Content-Length", "0")

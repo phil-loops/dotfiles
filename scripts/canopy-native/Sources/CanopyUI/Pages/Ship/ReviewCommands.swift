@@ -490,7 +490,13 @@ enum ReviewCommands {
             available: { id in weakApp?.forestModel.opensPR(id) ?? false },
             local: { id, _ in
                 guard let app = weakApp, let id, let b = branch(id) else { return }
-                if let pr = store.view(Pr.self, id), let u = URL(string: pr.url) { open(u) } else if let v = app.forestModel.branchView(b.id) { open(app.forestModel.compareURL(v)) }
+                if let pr = store.view(Pr.self, id), let u = URL(string: pr.url) { open(u); return }
+                guard let v = app.forestModel.branchView(b.id) else { return }
+                let fallback = app.forestModel.compareURL(v), path = app.forestModel.comparePath(v) + "&json=1"
+                Task { @MainActor in
+                    let got = try? await tr.getJSON(path, as: CompareLink.self)
+                    open(got.flatMap { URL(string: $0.url) } ?? fallback)
+                }
             }))
         r.register(Command(
             id: "branch.preview", title: "Preview it — a dev server on a side port, opened once it answers", scope: .branch, verb: .preview, label: "preview",
@@ -583,3 +589,6 @@ enum Ledger {
         return f.string(from: d)
     }
 }
+
+/// GET /packet-compare?…&json=1: GitHub's compare form for the branch, title and packet prefilled.
+struct CompareLink: Decodable { var url: String }
