@@ -87,6 +87,16 @@ out="$(cd "$r" && "$gates" --branch child)"
 [[ "$(echo "$out" | field "['ok']")" == "False" ]] && ok "no published ancestor → fresh still reds" || bad "no-waive: $out"
 [[ "$(echo "$out" | field "['gates'][0].get('advisory')")" == "None" ]] && ok "unwaived gate carries no advisory flag" || bad "advisory leak: $out"
 
+# lint: a repo whose Taskfile has CI's oxlint entries gets the lint gate; one without doesn't
+r="$(mkrepo)"
+mkdir -p "$r/tasks/lint"; printf 'tasks:\n  lint:oxlint:entries:\n    cmds: [exit 1]\n' > "$r/tasks/lint/tasks.yml"
+git -C "$r" add . && git -C "$r" commit -qm tasks
+names="$(cd "$r" && "$gates" | field "['gates']" | tr -d "'")"
+[[ "$names" == *"name: lint"* ]] && ok "lint gate when the repo has lint:oxlint:entries" || bad "no lint gate: $names"
+r="$(mkrepo)"
+names="$(cd "$r" && "$gates" | field "['gates']" | tr -d "'")"
+[[ "$names" != *"name: lint"* ]] && ok "no lint gate without it" || bad "stray lint gate: $names"
+
 # gate exit code: process exits 0 (verdict is in JSON, not exit code)
 r="$(mkrepo)"
 git -C "$r" config --add stack-gates.cmd "b::false"
