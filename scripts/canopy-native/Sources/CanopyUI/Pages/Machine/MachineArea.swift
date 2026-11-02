@@ -66,7 +66,7 @@ private let HEALTH: [String: Health] = [
 
 /// Machine.tsx: every dev server this workstation runs, the one shared stack they all read and
 /// write, and what the tooling costs the box. A server row says where it stands in a dot and a
-/// word; its levers show on the cursor row; every kill takes a second press.
+/// word; its actions are under `,`; every kill takes a second press.
 struct MachinePage: View {
     static let portField = "machine.port"
     @Environment(AppModel.self) private var app
@@ -115,10 +115,8 @@ private struct Servers: View {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 SectionHead(text: "serving · \(n)")
                 Spacer()
-                if n > 0 {
-                    Lever(id: "machine.reap", word: m.armed == "reap" ? "again reaps · esc" : "reap orphaned", danger: m.armed == "reap")
-                    Lever(id: "machine.killall", word: m.armed == "kill all" ? "again kills \(n) · esc" : "kill all", danger: true)
-                }
+                if m.armed == "reap" { Lever(id: "machine.reap", word: "again reaps · esc", danger: true) }
+                if m.armed == "kill all" { Lever(id: "machine.killall", word: "again kills \(n) · esc", danger: true) }
             }
             .padding(.leading, 28).padding(.trailing, 16).padding(.bottom, 4)
             if n == 0 { Text("nothing serving").foregroundStyle(theme.inkFaint).padding(.leading, 28) }
@@ -196,10 +194,8 @@ private struct ServerRow: View {
         }
     }
 
-    /// The cursor row's facts and levers. What v2 kept in hover titles is spelled out here.
+    /// The cursor row's facts, and a kill waiting on its second press.
     private func levers(_ m: Workstation, id: String, armed: Bool) -> some View {
-        let back = m.swapped[s.port]
-        let swapWord = back.map { "⇄ back to \($0.label)" } ?? s.swapTo.map { "⇄ \($0)" } ?? ""
         return VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 Text("⌂ \(MachineText.shortDir(s.dir))")
@@ -207,19 +203,7 @@ private struct ServerRow: View {
                 if let b = s.behind, b != "0", !b.isEmpty { Text("\(b) behind main").foregroundStyle(theme.ember) }
                 if let sv = s.serves, s.servesMismatch != true { Text("✓ \(sv.split(separator: " ").first.map(String.init) ?? sv)") }
                 Spacer(minLength: 8)
-                if s.url != nil { Lever(id: "machine.open", target: id, word: "open") }
-                if s.owned {
-                    Lever(id: m.logFor == id ? "machine.log.close" : "machine.log", target: id, word: "log")
-                    Lever(id: "machine.restart", target: id, word: "restart")
-                    if !swapWord.isEmpty { Lever(id: "machine.swap", target: id, word: swapWord) }
-                }
-                Lever(id: "machine.kill", target: id, word: armed ? "again kills it · esc" : "kill", danger: true)
-            }
-            Text(s.dir + (s.owned ? " · its own worktree; main's node_modules and .env; the one stack below"
-                                  : " · a next-dev listener no preview session owns — task dev, or a leftover headless server"))
-                .foregroundStyle(theme.inkFaint.opacity(0.8)).lineLimit(2)
-            if let b = s.behind, b != "0", !b.isEmpty {
-                Text("the checkout it serves trails origin/main — healthy means answering, not fresh").foregroundStyle(theme.inkFaint.opacity(0.8))
+                if armed { Lever(id: "machine.kill", target: id, word: "again kills it · esc", danger: true) }
             }
         }
         .font(Theme.text(12))
@@ -298,7 +282,6 @@ private struct StackSection: View {
                     }
                 }
                 Group {
-                    Text("every server above reads and writes this one stack — swaps isolate code, never data").foregroundStyle(theme.inkFaint)
                     if s.home == false, let dir = s.dir {
                         Text("from \(MachineText.shortDir(dir)) — its own Postgres and ClickHouse, not main's").foregroundStyle(theme.ember)
                     }
@@ -312,18 +295,9 @@ private struct StackSection: View {
                     if s.schema?.pg != nil {
                         let d = MachineText.drift(s.schema)
                         Text(d.isEmpty ? "schema in step with main" : "schema vs main: \(d)").foregroundStyle(d.isEmpty ? theme.inkFaint : theme.ember)
-                        Text("applied heads — pg: \(s.schema?.pg?.head ?? "?") · ch: \(s.schema?.ch?.head ?? "?")").foregroundStyle(theme.inkFaint.opacity(0.8))
                     }
-                    if !s.services.isEmpty {
-                        FlowChips(items: s.services.map { x in
-                            let tail = x.state == "done" ? " · done" : x.state == "failed" ? " · exited" : ""
-                            return (MachineText.service(x.name, project: s.project) + tail, x.up ? 0 : x.state == "done" ? 1 : 2)
-                        })
-                        .padding(.top, 6)
-                        // v2 kept each service's docker status in a hover title; the ones not up say it here
-                        ForEach(s.services.filter { !$0.up }, id: \.name) { x in
-                            Text("\(MachineText.service(x.name, project: s.project)): \(x.status)").foregroundStyle(theme.inkFaint)
-                        }
+                    ForEach(s.services.filter { !$0.up && $0.state != "done" }, id: \.name) { x in
+                        Text("\(MachineText.service(x.name, project: s.project)): \(x.status)").foregroundStyle(theme.del)
                     }
                 }
                 .font(Theme.text(12))
@@ -333,50 +307,6 @@ private struct StackSection: View {
         }
         .font(Theme.text(12))
         .padding(.leading, 28).padding(.trailing, 16)
-    }
-}
-
-/// Service chips (0 up, 1 done, 2 down), wrapped to the width.
-private struct FlowChips: View {
-    @Environment(\.theme) private var theme
-    let items: [(String, Int)]
-    var body: some View {
-        WrapLayout(spacing: 4) {
-            ForEach(Array(items.enumerated()), id: \.offset) { _, it in
-                Text(it.0).font(Theme.text(11))
-                    .padding(.horizontal, 6)
-                    .foregroundStyle(it.1 == 0 ? theme.inkDim : it.1 == 1 ? theme.inkFaint : theme.del)
-                    .opacity(it.1 == 1 ? 0.7 : 1)
-
-            }
-        }
-    }
-}
-
-/// Left-to-right, wrapping rows.
-struct WrapLayout: Layout {
-    var spacing: CGFloat = 4
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let width = proposal.width ?? .infinity
-        var x: CGFloat = 0, y: CGFloat = 0, line: CGFloat = 0, widest: CGFloat = 0
-        for v in subviews {
-            let s = v.sizeThatFits(.unspecified)
-            if x > 0, x + s.width > width { y += line + spacing; x = 0; line = 0 }
-            x += s.width + spacing
-            line = max(line, s.height)
-            widest = max(widest, x)
-        }
-        return CGSize(width: min(width, widest), height: y + line)
-    }
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        var x = bounds.minX, y = bounds.minY, line: CGFloat = 0
-        for v in subviews {
-            let s = v.sizeThatFits(.unspecified)
-            if x > bounds.minX, x + s.width > bounds.maxX { y += line + spacing; x = bounds.minX; line = 0 }
-            v.place(at: CGPoint(x: x, y: y), proposal: .unspecified)
-            x += s.width + spacing
-            line = max(line, s.height)
-        }
     }
 }
 

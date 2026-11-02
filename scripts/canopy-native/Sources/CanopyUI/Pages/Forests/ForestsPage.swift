@@ -137,7 +137,7 @@ private struct NextMove: View {
     }
 }
 
-/// The push window's one line, and the holds that came due overnight.
+/// The holds that came due overnight.
 private struct WindowLine: View {
     @Environment(\.theme) private var theme
     let fs: [String: ForestView]
@@ -145,11 +145,8 @@ private struct WindowLine: View {
 
     var body: some View {
         let due = fs.values.flatMap(\.branches).filter { v in v.pr == nil && (v.b.holdUntil.flatMap(parseISO).map { $0 <= now } ?? false) }.count
-        let text = PushWindow.line(now)
-        let phase = PushWindow.phaseAt(now).phase
-        if !text.isEmpty || due > 0 {
-            (Text(text).foregroundColor(phase == .late || phase == .weekend ? theme.ember : theme.goldLeaf)
-                + Text(due > 0 ? "\(text.isEmpty ? "" : " · ")☀ \(due) held overnight \(due == 1 ? "is" : "are") due" : "").foregroundColor(theme.goldLeaf))
+        if due > 0 {
+            Text("☀ \(due) held overnight \(due == 1 ? "is" : "are") due").foregroundColor(theme.goldLeaf)
                 .font(Theme.display(15))
                 .padding(.leading, 44).padding(.bottom, 24)
         }

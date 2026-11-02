@@ -42,8 +42,8 @@ struct TodoSurface: SurfaceProvider {
 
 private let KIND = ["build": "build", "fix": "fix", "decide": "decide", "look": "look into"]
 
-/// Todo.tsx: an item per row (rank, title, kind · area · size); the cursor row says why (or what
-/// it waits on); `ret` unfolds its notes.
+/// Todo.tsx: an item per row (rank, title); the cursor row adds kind · area · size and says why (or
+/// what it waits on); `ret` unfolds its notes.
 struct TodoPage: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme
@@ -98,7 +98,7 @@ struct TodoRow: View {
                         if !(t.problems ?? []).isEmpty { Text("⚠").font(Theme.text(12)).foregroundStyle(theme.ember) }
                     }
                     Spacer(minLength: 8)
-                    Text("\(KIND[t.kind] ?? t.kind) · \(t.area) · \(t.size)").font(Theme.text(11)).foregroundStyle(theme.inkFaint)
+                    if on { Text("\(KIND[t.kind] ?? t.kind) · \(t.area) · \(t.size)").font(Theme.text(11)).foregroundStyle(theme.inkFaint) }
                 }
                 .frame(minHeight: 34)
                 .padding(.leading, 28).padding(.trailing, 16)
