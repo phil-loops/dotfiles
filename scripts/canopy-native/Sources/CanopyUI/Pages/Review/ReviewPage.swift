@@ -39,7 +39,6 @@ struct ReviewPage: View {
                                 CommitHead(branchID: pg.id, sha: sha).padding(.horizontal, 16).padding(.top, 4)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
-                            if !pg.files.isEmpty { FileBar().padding(.horizontal, 16) }
                             DiffPane(empty: pg.base == .outgoing ? "nothing to push" : "no changes").frame(maxWidth: .infinity, maxHeight: .infinity)
                         }
                         .frame(minHeight: 0, maxHeight: .infinity, alignment: .top)
@@ -60,7 +59,8 @@ struct ReviewPage: View {
     }
 }
 
-/// What the change is: its title and strips, then who and how big, then the PR's why.
+/// What the change is, and what's left to do with it: the title, the ship strip, and only the
+/// conversation's states that wait on you.
 private struct ReviewHeader: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme
@@ -69,7 +69,7 @@ private struct ReviewHeader: View {
         let pg = ReviewPageState.of(app)
         let c = pg.conv
         let b = pg.branch
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 Group {
                     if let c {
@@ -82,76 +82,27 @@ private struct ReviewHeader: View {
                 }
                 .font(Theme.display(17)).foregroundStyle(theme.ink).lineLimit(1).layoutPriority(1)
                 Spacer(minLength: 16)
-                let openThreads = pg.threads.filter { !$0.resolved && !$0.outdated }.count
-                Group {
-                    if openThreads > 0 { Text("\(openThreads) open").foregroundStyle(theme.ember) }
-                    if pg.tab == "conversation" { Text("conversation").foregroundStyle(theme.goldLeaf) }
-                    else if pg.branchFiles.count > 1 { Text("\(pg.branchViewed)/\(pg.branchFiles.count) viewed").foregroundStyle(theme.inkFaint) }
-                }
-                .font(Theme.text(11))
-                if pg.integration == nil {
-                    ShipStripView(branchID: pg.id)
-                    LoopStripView(branchID: pg.id, words: loopWords(pg.id), size: 11)
-                        .task(id: b.map { "\($0.id)@\($0.tip)" }) { WordsState.of(app).load(app, pg.id) }
-                }
+                if pg.integration == nil { ShipStripView(branchID: pg.id) }
             }
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    if let c {
-                        Text(c.author).foregroundStyle(theme.inkDim)
-                        Text("#\(c.number) → \(c.base)")
-                        ForEach(latest(c), id: \.0) { who, st in
-                            Text("\(st == "APPROVED" ? "✓" : "✗") \(who)").foregroundStyle(st == "APPROVED" ? theme.patina : theme.ember)
-                        }
-                        if c.mapping == .behind {
-                            Text("\(c.behind) on GitHub not here").foregroundStyle(theme.ember)
-                        }
-                        let waiting = pg.items.filter { $0.state == .waiting }.count
-                        if waiting > 0 { Text("\(waiting) waiting to push").foregroundStyle(theme.goldLeaf) }
-                        let drafts = pg.items.filter { $0.state == .draft }.count
-                        if drafts > 0 { Text("\(drafts) draft\(drafts == 1 ? "" : "s")").foregroundStyle(theme.goldLeaf) }
-                        if let n = c.pending?.count, n > 0 { Text("\(n) pending").foregroundStyle(theme.goldLeaf) }
-                    } else if app.store.ready, b?.pushed != .local {
-                        Text(noPR(pg))
-                    }
-                    if let n = b?.commits, n > 0 { Text("\(n) commit\(n == 1 ? "" : "s")") }
-                    if !pg.branchFiles.isEmpty { Text("\(pg.branchFiles.count) file\(pg.branchFiles.count == 1 ? "" : "s")") }
-            }
-            .font(Theme.text(11.5)).foregroundStyle(theme.inkFaint).lineLimit(1)
-            if let why = c.flatMap({ Self.why($0.body) }) {
-                Text(why).font(Theme.text(12.5)).foregroundStyle(theme.inkDim).lineLimit(2).frame(maxWidth: 760, alignment: .leading)
+            if let c, !waiting(c, pg).isEmpty {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    ForEach(waiting(c, pg), id: \.self) { Text($0) }
+                }
+                .font(Theme.text(11.5)).foregroundStyle(theme.goldLeaf).lineLimit(1)
             }
         }
         .padding(.horizontal, 16).padding(.top, 2).padding(.bottom, 8)
     }
 
-    /// The PR body's opening prose line: what the change is for, ahead of any template below it.
-    static func why(_ body: String) -> String? {
-        let skip: [String] = ["#", "<!--", "|", ">", "- [", "* [", "```", "---"]
-        let line = body.components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
-            .first { !$0.isEmpty && !skip.contains(where: $0.hasPrefix) }
-        return line.map { Markdown.plain($0, max: 220) }.flatMap { $0.isEmpty ? nil : $0 }
-    }
-
-    /// The PR form's title and body hints, for the loop strip's words step (LoopStrip.tsx words);
-    /// nil until the branch's /outline is read.
-    private func loopWords(_ id: String) -> [LoopWord]? {
-        let w = WordsState.of(app)
-        guard w.shown[id] != nil else { return nil }
-        return w.prHints(id).map { LoopWord(id: $0.id, tone: $0.tone.rawValue) }
-    }
-
-    private func latest(_ c: Conv) -> [(String, String)] {
-        var by: [(String, String)] = []
-        for r in c.reviews where r.state != "COMMENTED" {
-            if let i = by.firstIndex(where: { $0.0 == r.author }) { by[i].1 = r.state } else { by.append((r.author, r.state)) }
-        }
-        return by
-    }
-
-    /// What the header says with no conversation yet: a known PR still loading, GitHub not read yet, or none.
-    private func noPR(_ pg: ReviewPageState) -> String {
-        if let pr = app.store.view(Pr.self, pg.id) { return "#\(pr.number) · loading its conversation…" }
-        return app.store.view(Warm.self, pg.target?.repo ?? "")?.prs == true ? "no PR" : "reading GitHub…"
+    private func waiting(_ c: Conv, _ pg: ReviewPageState) -> [String] {
+        var out: [String] = []
+        if c.mapping == .behind { out.append("\(c.behind) on GitHub not here") }
+        let waiting = pg.items.filter { $0.state == .waiting }.count
+        if waiting > 0 { out.append("\(waiting) waiting to push") }
+        let drafts = pg.items.filter { $0.state == .draft }.count
+        if drafts > 0 { out.append("\(drafts) draft\(drafts == 1 ? "" : "s")") }
+        if let n = c.pending?.count, n > 0 { out.append("\(n) pending") }
+        return out
     }
 }
 
@@ -226,32 +177,6 @@ struct PathText: View {
             Text(path[..<cut]).foregroundStyle(theme.inkFaint).lineLimit(1).truncationMode(.head)
             Text(path[cut...]).foregroundStyle(tint).lineLimit(1).layoutPriority(1)
         }
-    }
-}
-
-/// The file the cursor is in, over the diff, so the path stays in view however far down it reads.
-private struct FileBar: View {
-    @Environment(AppModel.self) private var app
-    @Environment(\.theme) private var theme
-
-    var body: some View {
-        let pg = ReviewPageState.of(app)
-        let files = pg.files
-        let path = pg.here?.path ?? files.first?.path ?? ""
-        let i = files.firstIndex { $0.path == path }
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
-            PathText(path: path, tint: theme.ink).font(Theme.text(12.5, weight: .medium))
-            if let f = i.map({ files[$0] }) {
-                if f.status != .modified { Text(f.status.rawValue).foregroundStyle(theme.inkFaint) }
-                if let o = f.oldPath { Text("from \(o)").foregroundStyle(theme.inkFaint).lineLimit(1) }
-                Text("+\(f.add)").foregroundStyle(theme.add)
-                Text("−\(f.del)").foregroundStyle(theme.del)
-            }
-            Spacer(minLength: 8)
-            if let i, files.count > 1 { Text("file \(i + 1) of \(files.count)").foregroundStyle(theme.inkFaint) }
-        }
-        .font(Theme.text(11.5))
-        .padding(.vertical, 2)
     }
 }
 

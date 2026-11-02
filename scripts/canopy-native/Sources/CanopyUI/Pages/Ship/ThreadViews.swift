@@ -60,9 +60,11 @@ public struct ThreadView: View {
                     if t.resolved { Chip(text: "resolved", ok: true) }
                     if t.outdated { Chip(text: "outdated") }
                     if !t.fixedBy.isEmpty { Chip(text: "fixed in \(t.fixedBy.map(\.short).joined(separator: ", "))", gold: true) }
-                    if let by, !t.outdated, t.fixedBy.isEmpty { Chip(text: "changed in \(by.prefix(7))?", gold: true) }
+                    if let by, !t.outdated, t.fixedBy.isEmpty {
+                        let unpushed = app.store.view(Conv.self, branchOf(t))?.unpushed.contains(by) == true
+                        Chip(text: "your \(by.prefix(7)) changed this\(unpushed ? " · not pushed" : "")", gold: true)
+                    }
                     if t.applying == true { Chip(text: "applying…", gold: true) }
-                    if let n = t.note { Chip(text: "2nd: \(verdictWord[n.verdict.rawValue] ?? n.verdict.rawValue)", gold: n.verdict == .wrong) }
                     Spacer(minLength: 0)
                     if selected { Text(hints(t)).font(Theme.text(10.5)).foregroundStyle(theme.inkFaint) }
                 }
