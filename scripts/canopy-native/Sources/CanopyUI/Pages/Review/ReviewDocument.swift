@@ -124,9 +124,8 @@ enum ReviewDocument {
         var out: [Segment] = []
         for fv in pg.views {
             let path = fv.file.path
-            let hiddenOutdated = fv.aside.filter(\.outdated).count
-            let hk = "h|\(path)|\(fv.viewed)|\(fv.seen)/\(fv.blocks.count)|\(fv.file.add)|\(fv.file.del)|\(fv.file.status.rawValue)|\(hiddenOutdated)|\(pg.showOutdated)|\(pg.scoped)"
-            out.append(Segment(key: hk) { header(fv, hiddenOutdated: hiddenOutdated, showOutdated: pg.showOutdated, scoped: pg.scoped, c) })
+            let hk = "h|\(path)|\(fv.viewed)|\(fv.seen > 0)|\(fv.file.add)|\(fv.file.del)|\(fv.file.status.rawValue)|\(pg.scoped)"
+            out.append(Segment(key: hk) { header(fv, scoped: pg.scoped, c) })
             if fv.viewed {
                 out.append(Segment(key: "b|\(path)|viewed") { NSAttributedString() })
                 continue
@@ -154,7 +153,7 @@ enum ReviewDocument {
 
     static func base(_ c: CanvasColors) -> [NSAttributedString.Key: Any] { [.font: DocFont.font, .foregroundColor: c.ink] }
 
-    static func header(_ fv: FileView, hiddenOutdated: Int, showOutdated: Bool, scoped: Bool, _ c: CanvasColors) -> NSAttributedString {
+    static func header(_ fv: FileView, scoped: Bool, _ c: CanvasColors) -> NSAttributedString {
         let b = DocBuilder()
         let path = fv.file.path
         if !scoped { b.put(fv.viewed ? "☑ " : fv.seen > 0 ? "◪ " : "☐ ", [.foregroundColor: fv.viewed ? c.patina : c.inkFaint]) }
@@ -163,10 +162,6 @@ enum ReviewDocument {
         if let o = fv.file.oldPath { b.put("  ← \(o)", [.foregroundColor: c.inkFaint]) }
         b.put("  +\(fv.file.add)", [.foregroundColor: c.add])
         b.put(" −\(fv.file.del)", [.foregroundColor: c.del])
-        if hiddenOutdated > 0 && !showOutdated { b.put("   \(hiddenOutdated) outdated", [.foregroundColor: c.inkFaint]) }
-        if fv.open > 0 { b.put("   \(fv.open) open", [.foregroundColor: c.ember]) }
-        let v = fv.viewed ? "viewed" : fv.seen > 0 ? "\(fv.seen)/\(fv.blocks.count) viewed" : ""
-        if !v.isEmpty { b.put("   \(v)", [.foregroundColor: c.inkFaint]) }
         b.endRow(RowInfo(kind: .file, stop: "f|\(path)", path: path), Para.row(indent: 2, spacing: 8))
         return b.build(base(c))
     }

@@ -12,11 +12,13 @@ struct Statusline: View {
         VStack(alignment: .leading, spacing: 0) {
             if app.keys.mode == .command && app.keys.layer == nil { Completions() }
             HStack(spacing: 10) {
-                Text(app.keys.active.badge)
-                    .font(Theme.text(11, weight: .semibold))
-                    .foregroundStyle(theme.vellumNight)
-                    .padding(.horizontal, 6).padding(.vertical, 1)
-                    .background(badgeColor)
+                if app.keys.active != .normal {
+                    Text(app.keys.active.badge)
+                        .font(Theme.text(11, weight: .semibold))
+                        .foregroundStyle(theme.vellumNight)
+                        .padding(.horizontal, 6).padding(.vertical, 1)
+                        .background(badgeColor)
+                }
                 if app.keys.mode == .command && app.keys.layer == nil {
                     CommandLine()
                 } else if PageSearch.of(app).typing {
