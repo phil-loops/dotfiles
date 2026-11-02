@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# canopy [--repo <path>] [--port <n>] [/v2/... | canopy://...] — open the native canopy app on a
-# repo's forest-viewer server, rebuilding it when its sources changed.
+# canopy [/v2/... | canopy://...] — open canopy at a page: Show's canopy workspace (⌘6), which also
+# answers every canopy:// link. The headless tools below run the bare canopy binary instead,
+# rebuilt when its sources changed.
 #   canopy --build                 just (re)build; prints the .app path
 #   canopy --dump [--dump-wait s]  headless: hydrate + listen, print the world as JSON, exit
 #   canopy --appearance light|dark|system
-# The server port is per repo: --port wins, else `stack-review-port` in --repo, else the current git
-# repo's when a server listens there, else ~/coding/loops. A running app gets the route through
-# the canopy:// scheme.
+# For those, the server port is per repo: --port wins, else `stack-review-port` in --repo, else the
+# current git repo's when a server listens there, else ~/coding/loops.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -48,13 +48,6 @@ build() {
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSPrincipalClass</key><string>NSApplication</string>
-  <key>CFBundleURLTypes</key>
-  <array>
-    <dict>
-      <key>CFBundleURLName</key><string>com.philbrockman.canopy</string>
-      <key>CFBundleURLSchemes</key><array><string>canopy</string></array>
-    </dict>
-  </array>
 </dict>
 </plist>
 PLIST
@@ -77,6 +70,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+(( dump )) || exec "$here/../show" --canopy "$route"
+
 port_of() { (cd "$1" && "$HOME/.dotfiles/scripts/stack-review-port") 2>/dev/null; }
 listening() { nc -z 127.0.0.1 "$1" >/dev/null 2>&1; }
 
@@ -97,12 +92,4 @@ fi
 build
 args=(--port "$port" ${repo:+--repo "$repo"} ${route:+"$route"} ${pass[@]+"${pass[@]}"})
 
-if (( dump )); then
-  exec "$bin" "${args[@]}"
-fi
-
-if pgrep -xf "$bin.*" >/dev/null 2>&1 && [[ -n "$route" ]]; then
-  case "$route" in canopy:*) open "$route" ;; *) open "canopy://${route#/}" ;; esac
-else
-  open -a "$app" --args "${args[@]}"
-fi
+exec "$bin" "${args[@]}"

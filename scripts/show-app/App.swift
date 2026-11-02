@@ -229,10 +229,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         prefs.set(active.rawValue, forKey: "workspace.active")
     }
 
+    /// A `canopy://` link as the file `show --canopy` hands over: the Canopy workspace at that address, brought forward.
+    private func canopyRequest(_ link: URL) -> URL? {
+        let file = URL(fileURLWithPath: (Bundle.main.bundlePath as NSString).deletingLastPathComponent).appendingPathComponent("canopy.json")
+        guard let data = try? JSONSerialization.data(withJSONObject: ["workspace": "canopy", "route": link.absoluteString]),
+              (try? data.write(to: file, options: .atomic)) != nil else { return nil }
+        return file
+    }
+
     /// `show <file>`: while Show is frontmost, or for `--focus`, the file opens in its workspace and Show comes forward;
     /// otherwise it arrives quietly (see `arrive`).
     func application(_ application: NSApplication, open urls: [URL]) {
-        let focus = takeFocusRequests()
+        let links = urls.filter { $0.scheme == "canopy" }.compactMap(canopyRequest)
+        let urls = urls.filter { $0.scheme != "canopy" } + links
+        let focus = takeFocusRequests().union(links.map { canonicalPath($0.path) })
         if openedEarly != nil {
             openedEarly?.append(contentsOf: urls.map(\.path))
             focusedEarly.formUnion(focus)

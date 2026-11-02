@@ -49,6 +49,11 @@ build() {
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSPrincipalClass</key><string>NSApplication</string>
+  <key>CFBundleURLTypes</key>
+  <array><dict>
+    <key>CFBundleURLName</key><string>com.philbrockman.show.canopy</string>
+    <key>CFBundleURLSchemes</key><array><string>canopy</string></array>
+  </dict></array>
   <key>CFBundleDocumentTypes</key>
   <array><dict>
     <key>CFBundleTypeName</key><string>Show deck</string>
