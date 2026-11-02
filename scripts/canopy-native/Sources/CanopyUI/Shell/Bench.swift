@@ -2,13 +2,14 @@ import AppKit
 import CanopyCore
 import SwiftUI
 
-/// `--bench [--page /v2/…]… [--budget ms]`: no visible window. Walk every page (or the ones named)
+/// `--bench [--page /v2/…]… [--budget ms] [--quick]`: no visible window. Walk every page (or the ones named)
 /// on the live server's data and time what holds up the next key — handling it, then laying the
 /// views out — in four passes: the `script` keys; typing into every filter one character at a time;
 /// the same keys again while server patches pour in; and every write the page offers. Painting is
 /// timed apart and not budgeted — offscreen it's done on the CPU, where a real window hands it to
 /// the GPU. A watchdog also catches the main thread stalling between keys (work a key started that
-/// lands later). Prints the slowest and exits 1 when anything is over budget.
+/// lands later). Prints the slowest and exits 1 when anything is over budget. `--quick` runs the
+/// first and third passes only (what `canopy-benchwatch` runs after each commit).
 /// Keys only move and look — never `g h`, `g p` or anything that leaves the app. Writes run, but
 /// every request that isn't a GET is answered here (`Blackhole`) and never reaches the server.
 @MainActor
@@ -156,8 +157,10 @@ public enum Bench {
                 await open()
                 pass = "keys"; worst[pass] = await press(script)
                 settle()
-                pass = "typing"; worst[pass] = await press(typing)
-                settle()
+                if !config.quick {
+                    pass = "typing"; worst[pass] = await press(typing)
+                    settle()
+                }
 
                 pass = "pressure"
                 var pouring = true
@@ -178,9 +181,8 @@ public enum Bench {
                 settle()
 
                 pass = "writes"
-                await open()
                 var w = 0.0, n = 0
-                for id in writes() {
+                for id in config.quick ? [] : writes() {
                     await open()
                     w = max(w, timed("@\(id)") { app.runner.dispatch(id, via: .key); return true })
                     n += 1
