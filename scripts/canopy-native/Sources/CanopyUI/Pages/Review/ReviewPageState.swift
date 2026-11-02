@@ -460,12 +460,12 @@ public final class ReviewPageState: ShipHost {
 
     // ── threads, drafts, viewed ──
 
-    @ObservationIgnored private var threadsMemo: (sig: String, versions: Versions, ops: [Int], threads: [CanopyCore.Thread])?
+    @ObservationIgnored private var threadsMemo: (sig: String, review: Int, ops: [Int], threads: [CanopyCore.Thread])?
 
     public var threads: [CanopyCore.Thread] {
         guard let app, let t = target else { return [] }
-        let v = app.store.versions, ops = app.store.ops.map(\.seq)
-        if let m = threadsMemo, m.sig == t.id, m.versions == v, m.ops == ops { return m.threads }
+        let v = app.store.versions[Domain.review] ?? 0, ops = app.store.ops.map(\.seq)
+        if let m = threadsMemo, m.sig == t.id, m.review == v, m.ops == ops { return m.threads }
         let out = app.store.table(CanopyCore.Thread.self).values
             .filter { $0.branch == t.name && $0.repo == t.repo }
             .sorted { $0.id < $1.id }
@@ -546,7 +546,8 @@ public final class ReviewPageState: ShipHost {
         var scope: String?
         var scopeLoaded: Bool
         var split: Bool
-        var versions: Versions
+        /// Threads, drafts, viewed marks and convs patch under `review`; a git patch (any branch's tip) leaves the diff as it was.
+        var review: Int
         var ops: [Int]
         var context: Int
         var override: [String: Bool]
@@ -555,7 +556,7 @@ public final class ReviewPageState: ShipHost {
 
     private var viewsSig: ViewsSig {
         ViewsSig(payload: "\(payloadGen)|\(payload?.key ?? "")", scope: commitScope, scopeLoaded: commitFiles?.sha == commitScope, split: split,
-                 versions: app?.store.versions ?? [:], ops: app?.store.ops.map(\.seq) ?? [], context: contextGen,
+                 review: app?.store.versions[Domain.review] ?? 0, ops: app?.store.ops.map(\.seq) ?? [], context: contextGen,
                  override: viewedOverride, showOutdated: showOutdated)
     }
 
