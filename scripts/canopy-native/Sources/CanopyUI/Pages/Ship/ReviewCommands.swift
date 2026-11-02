@@ -96,7 +96,7 @@ enum ReviewCommands {
         }
         r.register(Command(id: "history.open", title: "Read the commit's diff", scope: .history, verb: .main, label: "read",
                            available: { _ in ship.commitScope != nil }, local: enterDiff))
-        r.register(Command(id: "history.exit", title: "Go back to what lands on main", scope: .history, verb: .cancel, label: "back",
+        r.register(Command(id: "history.exit", title: "Back to the whole branch's code", scope: .history, verb: .cancel, label: "back",
                            local: { _, _ in
                                if let app = weakApp, ShipSeam.backOut(app) { return }
                                ship.showCommit(nil)
