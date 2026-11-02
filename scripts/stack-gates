@@ -223,11 +223,12 @@ def default_gates(cwd, branch=""):
     # lint: CI's `task lint` reds on what typecheck and format can't see — an unused import
     # (#11331, 2026-11-02), an unused export. Mirror its oxlint step via lint:oxlint:entries,
     # NOT lint:oxlint: that task's deps run `tsc -b packages`, the scratch-tree trap above.
+    # knip loads prisma.config.ts, whose env("DATABASE_URL") throws in a scratch tree with no .env.
     lint_tasks = os.path.join(cwd, "tasks/lint/tasks.yml")
     if os.path.exists(lint_tasks) and "lint:oxlint:entries:" in open(lint_tasks).read():
         knip = repo_local("knip", cwd)
         gates.append(("lint", "task lint:oxlint:entries"
-                      + (f" && {knip} --strict --include unlisted --cache" if knip else "")))
+                      + (f" && DATABASE_URL=${{DATABASE_URL:-postgresql://knip-unused}} {knip} --strict --include unlisted --cache" if knip else "")))
     delta_tests = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stack-delta-tests")
     if ts_projects and os.path.exists(delta_tests):
         gates.append(("tests", delta_tests))
