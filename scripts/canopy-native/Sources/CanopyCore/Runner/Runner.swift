@@ -44,6 +44,8 @@ public final class Runner {
     @ObservationIgnored public let registry: CommandRegistry
     @ObservationIgnored public let store: Store
     @ObservationIgnored public let transport: Transport
+    /// Each command as it runs (after its availability check): the `?` sheet ranks keys by it.
+    @ObservationIgnored public var onRun: ((String) -> Void)?
     @ObservationIgnored public let telemetry: Telemetry
     @ObservationIgnored public weak var context: CommandContext?
 
@@ -107,6 +109,7 @@ public final class Runner {
         let target = explicit ?? context?.target(for: cmd.scope)
         if let available = cmd.available, !available(target) { return echo(named, via, false) }
         if cmd.recordsJump { context?.willJump(id) }
+        onRun?(id)
         var base: JSONObject = ["type": "cmd", "id": .string(id), "budget": .string(cmd.budget.rawValue), "via": .string(via.rawValue)]
         if let target { base["target"] = .string(target) }
         let feedback = { (extra: JSONObject) in

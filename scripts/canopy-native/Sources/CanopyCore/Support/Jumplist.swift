@@ -158,6 +158,16 @@ public struct Frecency: Sendable {
 
     /// Seed from the usage log (`.git/stack-usage.jsonl`, the router's `nav` events and every
     /// `cmd` aimed at a branch): one visit per run of consecutive events on the same branch.
+    /// Every command run from a key in the usage log, by id: what the `?` sheet ranks by.
+    public mutating func seedCommands(jsonl: String) {
+        for line in jsonl.split(separator: "\n") where line.contains("\"cmd\"") {
+            guard let data = line.data(using: .utf8),
+                  let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  o["type"] as? String == "cmd", o["via"] as? String == "key", let id = o["id"] as? String else { continue }
+            visit(id, at: (o["ts"] as? Double).map { Date(timeIntervalSince1970: $0) } ?? Date.distantPast)
+        }
+    }
+
     public mutating func seed(jsonl: String) {
         var prev: String?
         for line in jsonl.split(separator: "\n") {

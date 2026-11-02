@@ -11,6 +11,7 @@ enum ReviewArea: PageArea {
         app.addSurface(ReviewSurface())
         app.registry.addScopes([.filter], to: "review")
         DiffCommands.install(app)
+        placeInSheet(app.registry)
         let pg = ReviewPageState.of(app)
         ShipState.of(app).host = pg
         _ = app.nav.attach(CodeNav.Attached(open: { [weak pg] l in pg?.open(l) }, here: { [weak pg] in pg?.herePlace() }))
@@ -21,6 +22,15 @@ enum ReviewArea: PageArea {
                           app?.focus(pane: reviewDiffPane)
                       })
         watch(app, pg)
+    }
+
+    /// The page's own keys that no verb places in the `?` sheet (`KeyGroup.of` places the rest).
+    private static func placeInSheet(_ r: CommandRegistry) {
+        r.place(.show, ["review.in", "review.back", "review.history", "review.outdated", "review.base.parent", "review.base.main",
+                        "review.base.outgoing", "review.gates.show", "review.viewed", "review.unviewed"])
+        r.place(.branch, ["review.compose.edit", "review.compose.send", "review.compose.draft", "review.compose.suggest", "review.send.all",
+                          "review.address.claude", "review.address.pick.list"])
+        r.place(.others, ["review.map.open"])
     }
 
     /// Bring the page up to its address whenever the address (or the tip under it) moves.
