@@ -1,10 +1,10 @@
 import CanopyCore
 import SwiftUI
 
-/// LoopStrip.tsx as a rail: a branch's place in the dev loop — words ▸ gates ▸ push ▸ PR ▸ review ▸
-/// merged — one short bar per step (done, later), only the step in the way named with what it waits
-/// on. The review page passes its words (the PR form's title and body hints) and the words step opens
-/// the commits tab; a forest row leaves words out.
+/// LoopStrip.tsx, down to its word: a branch's place in the dev loop — words ▸ gates ▸ push ▸ PR ▸
+/// review ▸ merged — as only the step in the way, named with what it waits on. The review
+/// page passes its words (the PR form's title and body hints) and the words step opens the commits
+/// tab; a forest row leaves words out.
 public struct LoopStripView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme
@@ -21,13 +21,7 @@ public struct LoopStripView: View {
             let steps = Loop.steps(v.b, v.pr, v.st, words: words)
             HStack(alignment: .center, spacing: 4) {
                 ForEach(steps, id: \.id) { s in
-                    if s.state == .now || s.flag == true {
-                        named(s).padding(.horizontal, 4)
-                    } else {
-                        Capsule().fill(color(s.state).opacity(s.state == .later ? 0.35 : 0.8))
-                            .frame(width: size * 1.6, height: 3)
-                            .help(s.word)
-                    }
+                    if s.state == .now || s.flag == true { named(s).padding(.horizontal, 4) }
                 }
                 if steps.allSatisfy({ $0.state == .done }) {
                     Text("merged").foregroundStyle(theme.patina).padding(.leading, 4)

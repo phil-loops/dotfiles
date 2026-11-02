@@ -35,11 +35,7 @@ struct ForestPage: View {
         let focused = app.isFocused("main")
         let cursor = focused ? app.selected : nil
         let selection = focused ? Set(app.selection) : []
-        let previewed = m.face == .story ? nil : RowKey.id(app.cursors["forest/main"] ?? cursor, "b").flatMap { id in f.branches.first { $0.b.id == id } }
-        return HStack(alignment: .top, spacing: 0) {
-            list(p, f, rows: rows, cursor: cursor, selection: selection)
-            if let v = previewed { BranchPreview(v: v).frame(width: 420) }
-        }
+        return list(p, f, rows: rows, cursor: cursor, selection: selection)
     }
 
     private func list(_ p: Project, _ f: ForestView, rows: [String], cursor: String?, selection: Set<String>) -> some View {
@@ -70,63 +66,16 @@ struct ForestPage: View {
         }
     }
 
-    /// The branch under the cursor, read before you open it: what it does, where it is in the loop,
-    /// its commits. ↵ opens its review.
-    private struct BranchPreview: View {
-        @Environment(AppModel.self) private var app
-        @Environment(\.theme) private var theme
-        let v: BranchView
-
-        var body: some View {
-            let ship = ShipState.of(app)
-            let commits = ship.historyRows(v.b.id) ?? []
-            VStack(alignment: .leading, spacing: 10) {
-                Text(leaf(v.b.name)).font(Theme.mono(13, weight: .semibold)).foregroundStyle(theme.ink)
-                if !v.b.description.isEmpty {
-                    Text(v.b.description).font(Theme.text(13)).foregroundStyle(theme.inkDim).fixedSize(horizontal: false, vertical: true)
-                }
-                LoopStripView(branchID: v.b.id, words: nil, size: 11)
-                HStack(spacing: 12) {
-                    Text("\(v.b.commits) commit\(v.b.commits == 1 ? "" : "s")")
-                    if let pr = v.pr { Text("#" + String(pr.number)) }
-                    if v.b.pushed == .local { Text("local").foregroundStyle(theme.goldLeaf) }
-                }
-                .font(Theme.text(11)).foregroundStyle(theme.inkFaint)
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(commits, id: \.sha) { c in
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Text(c.sha.prefix(7)).font(Theme.mono(11)).foregroundStyle(theme.inkFaint)
-                            Text(c.subject).font(Theme.text(12)).foregroundStyle(theme.ink).lineLimit(1)
-                        }
-                    }
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 20).padding(.top, 12)
-            .frame(maxHeight: .infinity, alignment: .top)
-            .overlay(alignment: .leading) { theme.rule.opacity(0.6).frame(width: 1) }
-            .task(id: v.b.id + "@" + v.b.tip) { ShipState.of(app).loadHistory(app, v.b.id) }
-        }
-    }
-
     private func header(_ p: Project, _ f: ForestView) -> some View {
         let m = app.forestModel
-        let by = { (s: ShipStage) in f.branches.filter { $0.st.ship == s }.count }
-        let counts = ["\(f.branches.count) branch\(f.branches.count == 1 ? "" : "es")",
-                      by(.landed) > 0 ? "\(by(.landed)) landed" : "", f.ready.isEmpty ? "" : "\(f.ready.count) ready"]
-            .filter { !$0.isEmpty }.joined(separator: " · ")
         return VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 Text(p.name).font(Theme.display(26)).foregroundStyle(theme.ink)
                 if let t = p.ticket { Text(t).font(Theme.text(12)).foregroundStyle(theme.inkFaint) }
-                Spacer()
-                faceTabs
             }
             if !p.summary.isEmpty { Text(p.summary).foregroundStyle(theme.inkDim) }
             HStack(spacing: 0) {
-                Text("\(p.state.rawValue) · \(counts)").foregroundStyle(theme.inkFaint)
                 if m.integratable(p.id), let v = m.verdict(p.id) {
-                    Text(" · ").foregroundStyle(theme.inkFaint)
                     Button(Self.merge[v.state]!) { app.runner.dispatch("forest.integrate", via: .click, target: p.id) }
                         .buttonStyle(.plain)
                         .foregroundStyle(v.state == .conflicts ? theme.del : theme.inkFaint)
@@ -142,19 +91,6 @@ struct ForestPage: View {
             }
         }
         .padding(.leading, 52).padding(.trailing, 20).padding(.top, 4).padding(.bottom, 20)
-    }
-
-    private var faceTabs: some View {
-        let face = app.forestModel.face
-        return HStack(spacing: 8) {
-            Text("branches").foregroundStyle(face == .branches ? theme.goldLeaf : theme.inkFaint)
-            Text("story").foregroundStyle(face == .story ? theme.goldLeaf : theme.inkFaint)
-            KeyHint(id: "forest.face")
-        }
-        .font(Theme.text(11))
-        .contentShape(Rectangle())
-        .onTapGesture { app.runner.dispatch("forest.face", via: .click) }
-        .labelTarget(pane: "controls", key: "forest.face", title: face == .story ? "branches" : "story", run: RouteTo("forest.face"))
     }
 
     /// The forest's open todo items in queue order — empty on the story face.
@@ -185,7 +121,6 @@ private struct ForestBranchView: View {
                 Text(b.order < 999 ? "\(b.order)" : "").font(Theme.text(11)).foregroundStyle(theme.inkFaint).frame(width: 20, alignment: .trailing)
                 Text(leaf(b.name)).font(Theme.display(17)).foregroundStyle(cursor ? theme.goldLeaf : theme.ink).lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                if !facts.isEmpty { Text(facts.joined(separator: "  ")).font(Theme.text(11)).foregroundStyle(theme.inkFaint).fixedSize() }
                 LoopStripView(branchID: b.id, size: 11).fixedSize()
             }
             VStack(alignment: .leading, spacing: 6) {
@@ -210,14 +145,6 @@ private struct ForestBranchView: View {
         .padding(.vertical, 9).padding(.leading, 20).padding(.trailing, 20)
         .opacity(v.st.ship == .landed ? 0.6 : 1)
         .rowChrome(RowKey.branch(b.id), cursor: cursor, selected: selected)
-    }
-
-    private var facts: [String] {
-        var out: [String] = []
-        if let pr = v.pr { out.append("#\(pr.number)\((pr.approvals ?? 0) > 0 ? " · \(pr.approvals!) approval\(pr.approvals == 1 ? "" : "s")" : "")") }
-        let n = app.store.list(CanopyCore.Thread.self).filter { $0.repo == v.b.repo && $0.branch == v.b.name && !$0.resolved && !$0.outdated }.count
-        if n > 0 { out.append("\(n) open") }
-        return out
     }
 }
 

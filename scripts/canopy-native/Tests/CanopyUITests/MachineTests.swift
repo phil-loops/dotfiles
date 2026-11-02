@@ -156,23 +156,15 @@ import Testing
 
     // ── the dashboard ──
 
-    @Test func dashboardDecodesAndWalksItsTables() throws {
+    @Test func dashboardDecodesItsOneTable() throws {
         var c = AppConfig()
         c.route = .dashboard
         let a = AppModel(config: c, port: 1, telemetry: false)
         let d = a.state { DashboardState(app: a) }
         let s = try JSONDecoder().decode(Summary.self, from: Data(MachineFixtures.summary.utf8))
         d.take(s)
-        #expect(a.panes.map(\.id) == ["commands", "surfaces", "pairs", "most", "never", "weekly", "pages"])
+        #expect(a.panes.map(\.id) == ["commands"])
         #expect(a.rows == ["cmd:0", "cmd:1", "cmd:2"])
-        a.keys.handle("C-w"); a.keys.handle("j")
-        #expect(a.pane?.id == "surfaces")
-        a.keys.handle("C-w"); a.keys.handle("j"); a.keys.handle("C-w"); a.keys.handle("j")
-        #expect(a.pane?.id == "most")
-        a.keys.handle("C-w"); a.keys.handle("l")
-        #expect(a.pane?.id == "never")
-        #expect(DashText.pairP95(s.pairs[0].v1, kind: "cmd") == "—", "a v1 side that never ran")
-        #expect(DashText.pairP95(s.pairs[1].v2, kind: "nav") == DashText.ms(s.surfaces[0].paint?.p95))
     }
 
     @Test func dashboardRangeCycles() throws {
