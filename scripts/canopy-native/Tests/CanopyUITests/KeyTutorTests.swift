@@ -128,7 +128,7 @@ import Testing
         let writes = Set(seen.filter { $0.method == "POST" }.map(\.path))
         let expected: Set<String> = ["/practice/viewed", "/practice/review-draft", "/practice/outline", "/practice/review-apply",
                                      "/practice/review-unapply", "/practice/sync", "/practice/prep-push", "/practice/gates",
-                                     "/practice/delta-tests", "/practice/open", "/practice/todo-item", "/todo-item",
+                                     "/practice/delta-tests", "/practice/review-helix", "/practice/todo-item", "/todo-item",
                                      "/practice/lsp/hover", "/practice/lsp/definition", "/practice/lsp/type-definition",
                                      "/practice/lsp/implementation", "/practice/lsp/references", "/practice/lsp/symbols",
                                      "/practice/push-origin", "/practice/integrate", "/practice/lsp/prepare", "/practice/revert-commit"]

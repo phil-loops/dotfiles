@@ -152,8 +152,10 @@ public final class ReviewPageState: ShipHost {
         guard let w = word, let h = here, h.key == w.key, let row = h.row, sideLine(row, prefer: column).side == w.side else { return nil }
         return w.at
     }
-    /// Helix open in the new half, from `i` until it quits.
+    /// Helix open in the diff, from `i` or `o` until it quits.
     public var helix: HelixOpen?
+    /// "<branch>@<tip>" → its Helix checkout, made ahead of the first `i` or `o`
+    var helixDirs: [String: String] = [:]
     /// The half of the split the cursor reads, kept as it moves up and down; `h` / `l` switch it.
     public var column: Side = .right
     public var showOutdated = false
@@ -854,6 +856,21 @@ public extension ReviewPageState {
         let at = sideLine(row, prefer: column)
         guard at.side == .right else { return false }
         openHelix(app, branch: t.name, path: h.path, line: at.line, col: (hereWord?.lowerBound ?? 0) + 1)
+        return true
+    }
+
+    /// `o`: Helix over the whole diff, on the file and line under the cursor.
+    func openHelixWhole(_ app: AppModel) -> Bool {
+        guard helix == nil, integration == nil, let t = target, let h = here else { return false }
+        var line = 1, col = 1
+        if h.kind == .line, let row = h.row {
+            let at = sideLine(row)
+            line = at.line
+            if at.side == .right, let w = hereWord { col = w.lowerBound + 1 }
+        } else if h.kind == .thread, let l = h.id.flatMap({ app.store.view(CanopyCore.Thread.self, $0) })?.local?.line {
+            line = l
+        }
+        openHelix(app, branch: t.name, path: h.path, line: line, col: col, whole: true)
         return true
     }
 }
