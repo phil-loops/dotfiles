@@ -374,6 +374,7 @@ import Testing
         keys(a, "h", "h")
         #expect(a.pane?.id != reviewDiffPane)
         #expect(!pg.outlineIsStrip(a.pane?.id), "in the outline it opens back to full width")
+        #expect(pg.outlineReserve == pg.stripWidth, "the diff keeps its width: the full outline floats over it")
     }
 
     /// w / b step name to name, crossing lines, and g d / space k ask about the name they land on.
