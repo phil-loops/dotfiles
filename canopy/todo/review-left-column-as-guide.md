@@ -15,4 +15,5 @@ Proposal from session wt-144142: the column becomes a guide to the review. It ho
 
 ## Next steps
 - Design round as a Show deck: what the column is for, a few ASCII layouts (guide / nothing until asked / overlay on demand), and what keys reach each part. Then Phil signs off.
+- Cover the commits list (`,h`) in the same round, since it lives in this column: see `make-the-commits-list-say-what-each-row-is`. On a one-commit branch, the commit row and "= on main" show the same subject, open the same diff, and are both lit at once.
 - Keep ada487b's rule: whatever the column shows, it never changes the diff's width when focus moves (benched by canopy-benchwatch).
