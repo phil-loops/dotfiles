@@ -33,7 +33,10 @@ struct ReviewPage: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 default:
                     HStack(alignment: .top, spacing: 0) {
-                        if pg.showsOutline { Outline().frame(width: pg.outlineWidth) }
+                        if pg.showsOutline {
+                            let strip = pg.outlineIsStrip(app.pane?.id)
+                            Outline(strip: strip).frame(width: strip ? pg.stripWidth : pg.outlineWidth)
+                        }
                         VStack(alignment: .leading, spacing: 8) {
                             if let sha = ShipState.of(app).commitScope {
                                 CommitHead(branchID: pg.id, sha: sha).padding(.horizontal, 16).padding(.top, 4)
@@ -115,12 +118,14 @@ private struct ReviewHeader: View {
 private struct Outline: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme
+    /// the diff has focus: only the files, by name
+    let strip: Bool
 
     var body: some View {
         let pg = ReviewPageState.of(app)
         VStack(alignment: .leading, spacing: 14) {
-            if pg.showsHistory { HistoryList(branchID: pg.id).fixedSize(horizontal: false, vertical: true) }
-            if pg.showsTree { FileTree() }
+            if pg.showsHistory && !strip { HistoryList(branchID: pg.id).fixedSize(horizontal: false, vertical: true) }
+            if pg.showsTree { FileTree(strip: strip) }
         }
         .font(Theme.text(12))
         .padding(.leading, 6)
@@ -134,6 +139,7 @@ private struct Outline: View {
 private struct FileTree: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme
+    let strip: Bool
 
     var body: some View {
         @Bindable var pg = ReviewPageState.of(app)
@@ -152,11 +158,18 @@ private struct FileTree: View {
                 if let v = views[path] {
                     HStack(spacing: 6) {
                         Text(v.viewed ? "☑" : v.seen > 0 ? "◪" : "☐").foregroundStyle(v.viewed ? theme.patina : theme.inkFaint)
-                        PathText(path: path, tint: current == path ? theme.goldLeaf : v.viewed ? theme.inkFaint : theme.ink)
+                        let tint = current == path ? theme.goldLeaf : v.viewed ? theme.inkFaint : theme.ink
+                        if strip {
+                            Text(path.split(separator: "/").last.map(String.init) ?? path).foregroundStyle(tint).lineLimit(1).truncationMode(.middle)
+                        } else {
+                            PathText(path: path, tint: tint)
+                        }
                         Spacer(minLength: 4)
                         if v.open > 0 { Text("\(v.open)").foregroundStyle(theme.ember) }
-                        Text("+\(v.file.add)").foregroundStyle(theme.add)
-                        Text("−\(v.file.del)").foregroundStyle(theme.del)
+                        if !strip {
+                            Text("+\(v.file.add)").foregroundStyle(theme.add)
+                            Text("−\(v.file.del)").foregroundStyle(theme.del)
+                        }
                     }
                     .font(Theme.text(11.5))
                     .help(path)
