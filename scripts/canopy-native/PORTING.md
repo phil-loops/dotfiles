@@ -24,8 +24,8 @@ talks to the Python server. Its HTTP contract is in [API.md](API.md).
 
 canopy-native is a Helix-style modal app, not a click UI with shortcuts added on top.
 1. **Every key goes mode → keymap → command.** Register commands with the modes they bind in. Never
-   install raw `NSEvent` monitors, `.onKeyPress`, `.keyboardShortcut` (⌘ menu-bar items in
-   `CanopyApp` excepted) or `onSubmit` key logic in a page. The shell's `KeyMonitor` is the only key listener.
+   install raw `NSEvent` monitors, `.onKeyPress`, `.keyboardShortcut` (Show's ⌘ menu-bar items
+   excepted) or `onSubmit` key logic in a page. The shell's `KeyMonitor` is the only key listener.
 2. **Every action is reachable by key and discoverable.** Give it a key (shown by which-key and the `?` sheet), or
    leave it keyless and it's still runnable from `:` with fuzzy completion. A command that only runs with
    an argument from another view (`needsArg: true`) must be reached through a keyed route: `ret`/`pane.open`
@@ -68,7 +68,7 @@ canopy-native/
       Theme/               SHARED: Theme (tokens.css dark + light), Fonts (bundled Plex Mono + Fraunces)
       Pages/<Area>/        OWNED: one folder per area, see §8
       Resources/Fonts/     the web app's woff2 latin subsets (OFL); CoreText registers woff2 directly
-    Canopy/main.swift      the executable: --dump → Dump, else CanopyApp
+    Canopy/main.swift      the executable: --shoot → Shoot, --dump → Dump, else hand off to Show
   Tests/
     CanopyCoreTests/       wire/store/route/keys/runner tests + Fixtures/ (a real /state, a real SSE capture)
     CanopyUITests/         ShellTests + ModalTests over the whole installed app; add <Area>Tests.swift here
