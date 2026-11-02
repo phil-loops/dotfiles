@@ -345,7 +345,8 @@ import Testing
         #expect(a.selected == RowKey.branch(Self.branch))
     }
 
-    /// h / l move across what you see: the old and new halves of a split line, then the pane beside.
+    /// h / l move across what you see: the old half of a removed line, then the pane beside; leaving
+    /// the diff forgets the old half, so l comes back on the new one.
     @Test func hAndLCrossTheSplitThenThePanes() async throws {
         let (a, _) = try await app()
         let pg = ReviewPageState.of(a)
@@ -354,11 +355,9 @@ import Testing
         keys(a, "h")
         #expect(pg.column == .left && pg.range?.side == .left && a.pane?.id == reviewDiffPane, "the old half of the same row")
         keys(a, "h")
-        #expect(pg.column == .left && a.pane?.id == (pg.showsHistory ? ShipSeam.historyPane : reviewTreePane), "past the old half, the outline to its left")
+        #expect(pg.column == .right && a.pane?.id == (pg.showsHistory ? ShipSeam.historyPane : reviewTreePane), "past the old half, the outline to its left")
         keys(a, "l")
-        #expect(pg.column == .left && a.pane?.id == reviewDiffPane, "back on the old half")
-        keys(a, "l")
-        #expect(pg.column == .right && pg.range?.side == .right)
+        #expect(pg.column == .right && pg.range?.side == .right && a.pane?.id == reviewDiffPane, "back on the new half")
         pg.open(Loc(repo: "loops", sha: "zzz", path: "other.ts", line: 4))
         keys(a, "h")
         #expect(a.pane?.id == reviewDiffPane, "from the code beside the diff, h is the diff")
