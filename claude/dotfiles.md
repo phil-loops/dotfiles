@@ -9,7 +9,7 @@ Rules first; mechanics below.
 
 ## Concurrent sessions: claim a lane (`own` + `OWNERS`)
 
-Each concurrent session takes ONE lane (see `~/.dotfiles/OWNERS`). Start of dotfiles work: `own claim <your-lane>`; before editing any file: `own who <path>` — your lane → edit directly; another lane (especially ⚠ ACTIVE) → patch protocol below.
+Each concurrent session takes ONE lane (see `~/.dotfiles/OWNERS`). Start of dotfiles work: `own claim <your-lane>`; before editing any file: `own who <path>` — your lane → edit directly; another lane (especially ⚠ ACTIVE) → patch protocol below. Viewer/canopy/Show work also claims its tracker item first (`canopy-todo claim <id>`, refused while a live session owns it) — the tracker is the one list of who is building what. Show builds from its own copy (`~/.cache/show/src`) with canopy pinned to HEAD, so another lane's work reaches it only by commit.
 
 ## Editing a live file → author via patch, never direct
 

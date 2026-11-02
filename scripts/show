@@ -18,18 +18,39 @@ cache="${XDG_CACHE_HOME:-$HOME/.cache}/show"
 app="$cache/Show.app"
 stamp="$cache/source.sha"
 
+# Show builds from its own copy of the sources in $src, never the shared tree other sessions are editing: show-app as
+# it stands (this lane's own work), and canopy-native as last committed — another lane's half-saved file never reaches
+# Show's build, and only canopy commits rebuild (and relaunch) it. SHOW_CANOPY=worktree links the live canopy-native,
+# for work on the seam between them (CanopyUI/Shell/Embed.swift).
+src="$cache/src"
+
+stage() {
+  mkdir -p "$src/show-app" "$src/canopy-native"
+  rsync -a --delete --exclude .build "$here/show-app/" "$src/show-app/"
+  if [[ "${SHOW_CANOPY:-}" == worktree ]]; then
+    rsync -a --checksum --delete --exclude .build "$here/canopy-native/" "$src/canopy-native/"
+    return
+  fi
+  local head
+  head="$(mktemp -d)"
+  git -C "$here/.." archive HEAD scripts/canopy-native | tar -x -C "$head"
+  rsync -a --checksum --delete --exclude .build "$head/scripts/canopy-native/" "$src/canopy-native/"
+  rm -rf "$head"
+}
+
 build() {
   local sha
+  stage
   # Show links canopy (its Canopy workspace), so a change on either side rebuilds
-  sha="$(cd "$here" && { shasum -a 256 show-app/*.swift show-app/Package.swift; find canopy-native/Package.swift canopy-native/Sources -type f -print0 | sort -z | xargs -0 shasum -a 256; } | shasum -a 256 | cut -d' ' -f1)"
+  sha="$(cd "$src" && { shasum -a 256 show-app/*.swift show-app/Package.swift; find canopy-native/Package.swift canopy-native/Sources -type f -print0 | sort -z | xargs -0 shasum -a 256; } | shasum -a 256 | cut -d' ' -f1)"
   if [[ -x "$app/Contents/MacOS/Show" && -f "$stamp" && "$(cat "$stamp")" == "$sha" ]]; then
     return
   fi
   echo "show: building…" >&2
   mkdir -p "$app/Contents/MacOS"
-  (cd "$here/show-app" && swift build -c release --product Show >&2)
+  (cd "$src/show-app" && swift build -c release --product Show >&2)
   local out
-  out="$(cd "$here/show-app" && swift build -c release --show-bin-path)"
+  out="$(cd "$src/show-app" && swift build -c release --show-bin-path)"
   mkdir -p "$app/Contents/Resources"
   # beside, then renamed in: a running Show keeps its own file (writing over it in place gets it
   # killed for an invalid code signature)
