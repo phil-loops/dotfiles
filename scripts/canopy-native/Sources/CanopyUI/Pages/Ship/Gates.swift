@@ -25,13 +25,20 @@ public struct GateEvent: Decodable, Equatable, Sendable {
     public var ts: Double?
     /// a waived gate: green by decision, not by passing (skipped by Phil, or unsatisfiable)
     public var warn: String?
+    /// a setup event's step before the first gate: "queue", "checkout" or "env"
+    public var step: String?
+    /// in the queue: this run's place in line (1 = next), and what the gates slot is busy with
+    public var position: Int?
+    public var behind: String?
 
-    enum K: String, CodingKey { case event, gate, gates, ok, ms, ts, warn }
+    enum K: String, CodingKey { case event, gate, gates, ok, ms, ts, warn, step, position, behind }
 
     public init(event: String, gate: String? = nil, planned: [String]? = nil, verdicts: [Verdict]? = nil,
-                ok: Bool? = nil, ms: Double? = nil, ts: Double? = nil, warn: String? = nil) {
+                ok: Bool? = nil, ms: Double? = nil, ts: Double? = nil, warn: String? = nil,
+                step: String? = nil, position: Int? = nil, behind: String? = nil) {
         self.event = event; self.gate = gate; self.planned = planned; self.verdicts = verdicts
         self.ok = ok; self.ms = ms; self.ts = ts; self.warn = warn
+        self.step = step; self.position = position; self.behind = behind
     }
 
     public init(from d: Decoder) throws {
@@ -44,6 +51,9 @@ public struct GateEvent: Decodable, Equatable, Sendable {
         ms = try? c.decode(Double.self, forKey: .ms)
         ts = try? c.decode(Double.self, forKey: .ts)
         warn = try? c.decode(String.self, forKey: .warn)
+        step = try? c.decode(String.self, forKey: .step)
+        position = try? c.decode(Int.self, forKey: .position)
+        behind = try? c.decode(String.self, forKey: .behind)
     }
 }
 
@@ -101,11 +111,42 @@ public enum GatesRun {
     /// What an in-flight run is doing while no gate is running: "gates starting" before the first
     /// gate (the server is readying the checkout or waiting for a slot), "<gate> next" between two.
     /// Nil when a gate is running, one went red, or nothing is in flight.
-    public static func between(_ rows: [GateRow], inFlight: Bool) -> String? {
+    public static func between(_ rows: [GateRow], inFlight: Bool, setup: GateEvent? = nil) -> String? {
         guard inFlight, !rows.contains(where: { $0.state == .running || $0.state == .red }) else { return nil }
         guard rows.contains(where: { $0.state == .green || $0.state == .waived }),
-              let next = rows.first(where: { $0.state == .queued }) else { return "gates starting" }
+              let next = rows.first(where: { $0.state == .queued }) else { return setup.map(words) ?? "gates starting" }
         return "\(next.name) next"
+    }
+
+    /// The step an in-flight run is on before its first gate, from its latest setup event.
+    public static func setup(_ p: GateProgress?) -> GateEvent? {
+        let ev = p?.events ?? []
+        guard !ev.contains(where: { $0.event == "plan" }) else { return nil }
+        return ev.last { $0.event == "setup" }
+    }
+
+    /// Setup that takes longer than this is stuck, not slow: a run that waits normally gets its slot or its checkout in minutes.
+    public static let stuckAfter: Double = 300
+
+    /// What the chip says between gates, how long it has said it, and whether that's long enough to be stuck.
+    public static func waiting(_ p: GateProgress?, rows: [GateRow], inFlight: Bool, now: Double) -> (text: String, secs: Double?, stuck: Bool)? {
+        let step = setup(p)
+        guard let text = between(rows, inFlight: inFlight, setup: step) else { return nil }
+        guard let since = step?.ts else { return (text, p?.elapsed, false) }
+        let secs = max(0, now - since)
+        return (secs > stuckAfter ? "stuck \(text)" : text, secs, secs > stuckAfter)
+    }
+
+    static func words(_ e: GateEvent) -> String {
+        let busy = e.behind.flatMap { $0.isEmpty ? nil : $0 }
+        switch e.step {
+        case "queue":
+            if let p = e.position, p > 1 { return "#\(p) in line for gates\(busy.map { " · \($0) running" } ?? "")" }
+            return busy.map { "waiting on \($0)" } ?? "waiting for a gates slot"
+        case "checkout": return "preparing the checkout"
+        case "env": return "repairing the environment"
+        default: return "gates starting"
+        }
     }
 
     /// "42s", "3m 5s" (Ship.tsx secs).

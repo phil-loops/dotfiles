@@ -405,6 +405,7 @@ def main():
     if branch:
         wt = worktree_of(branch, cwd)
         if not wt:
+            emit({"event": "setup", "step": "checkout", "ts": time.time()})
             wt, err = scratch_checkout(branch, cwd)
             borrowed = True
             if not wt:
@@ -417,6 +418,7 @@ def main():
                 return 0
         cwd = wt
     t0 = time.time()
+    emit({"event": "setup", "step": "env", "ts": t0})
     env_notes, env_ok = env_repair(cwd)
     env_ms = int((time.time() - t0) * 1000)
     gates = configured_gates(cwd) or default_gates(cwd, branch)
