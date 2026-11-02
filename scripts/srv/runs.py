@@ -117,6 +117,21 @@ def dir_of(kind, key):
     return _dir(kind, key)
 
 
+def _keep_previous(d):
+    """Make `d` empty for a new run, moving the run it held to d/prev (one generation) — a run that hung
+    and was replaced keeps its journal and logs to be read after. The move goes through ROOT/.moving, which
+    every() never lists, so the old run is never seen twice."""
+    if not os.path.isdir(d):
+        os.makedirs(d)
+        return
+    moving = os.path.join(ROOT, ".moving", f"{os.getpid()}-{time.time_ns()}")
+    os.makedirs(os.path.dirname(moving), exist_ok=True)
+    os.rename(d, moving)
+    shutil.rmtree(os.path.join(moving, "prev"), ignore_errors=True)
+    os.makedirs(d)
+    os.rename(moving, os.path.join(d, "prev"))
+
+
 def start(kind, key, argv, cwd, meta=None, out="out.log", err=None, env=None, seed=None):
     """Launch `argv` as the run (kind, key). stdout goes to `out` in the run's directory, stderr to
     `err` (or alongside stdout); `seed` {name: text} files exist before it starts. Raises Busy when
@@ -125,8 +140,7 @@ def start(kind, key, argv, cwd, meta=None, out="out.log", err=None, env=None, se
     old = find(kind, key)
     if old and old.alive():
         raise Busy(f"{kind} {key} is running (pid {old.pid})")
-    shutil.rmtree(d, ignore_errors=True)
-    os.makedirs(d)
+    _keep_previous(d)
     for name, text in (seed or {}).items():
         with open(os.path.join(d, name), "w") as f:
             f.write(text)
