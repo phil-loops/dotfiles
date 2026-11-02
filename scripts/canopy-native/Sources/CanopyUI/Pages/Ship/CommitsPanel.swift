@@ -56,11 +56,13 @@ struct HistoryList: View {
         let keys = ShipRows.history(app, branchID)
         let oneDay = Set((rows ?? []).map { Self.day($0.date) }).count <= 1
         VStack(alignment: .leading, spacing: 4) {
-            PaneList(pane: ShipSeam.historyPane, rows: keys, header: { key in Self.group(key, keys, byKey, conv) }) { key, _ in
+            PaneList(pane: ShipSeam.historyPane, rows: keys, header: { key in Self.group(key, keys, byKey, conv) },
+                     headerNote: Self.groupNote) { key, _ in
                 let scoped = key == "h|\(ship.commitScope ?? "")"
                 if key == "h|" {
                     Text("all changes\(conv.map { " · #" + String($0.number) } ?? "")")
                         .foregroundStyle(scoped ? theme.goldLeaf : theme.ink)
+                        .explains("history|all", "the whole branch: what lands on main when the PR squashes")
                 } else if let c = byKey[key] {
                     VStack(alignment: .leading, spacing: 1) {
                         Text(c.subject).foregroundStyle(scoped ? theme.goldLeaf : theme.ink).lineLimit(2)
@@ -75,6 +77,14 @@ struct HistoryList: View {
             if rows == nil { Text("reading the commits…").foregroundStyle(theme.inkFaint) }
             else if rows?.isEmpty == true { Text("no commits of its own").foregroundStyle(theme.inkFaint) }
         }
+    }
+
+    /// What a group's name means, for `?`'s notes.
+    static func groupNote(_ name: String) -> String? {
+        if name == "to push" { return "to push: commits only on this machine, free to reword" }
+        if name == "pushed" { return "pushed: on origin, no PR yet" }
+        if name.hasPrefix("on #") { return "\(name): in the open PR, so reviewers have seen them — read-only" }
+        return nil
     }
 
     /// The month-day a commit was written ("11-02"), its year dropped.
@@ -218,7 +228,11 @@ public struct WordsEditor: View {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 VStack(alignment: .leading, spacing: 0) {
                     Text(label(r, o)).foregroundStyle(theme.inkFaint)
-                    if let st = Self.state(r, o) { Text(st).foregroundStyle(st == "local" || st == "draft" ? theme.goldLeaf.opacity(0.8) : theme.inkFaint.opacity(0.7)) }
+                        .explains("words|label|\(key)", Self.labelNote(r) ?? label(r, o))
+                    if let st = Self.state(r, o) {
+                        Text(st).foregroundStyle(st == "local" || st == "draft" ? theme.goldLeaf.opacity(0.8) : theme.inkFaint.opacity(0.7))
+                            .explains("words|state|\(key)", Self.stateNote(st))
+                    }
                 }
                 .font(Theme.text(10.5)).frame(width: 84, alignment: .leading)
                 VStack(alignment: .leading, spacing: 2) {
@@ -298,6 +312,26 @@ public struct WordsEditor: View {
         case .subject(let sha):
             (o?.commits.first { $0.sha == sha }).map { $0.locked.isEmpty ? "local" : $0.locked }
         case .commitBody: nil
+        }
+    }
+
+    /// What a words row is, for `?`'s notes; nil for a commit's own rows (its state says enough).
+    static func labelNote(_ r: WordsRow) -> String? {
+        switch r {
+        case .desc: "description: the branch's one line, for you and canopy"
+        case .title: "lands as: the PR title, and main's commit subject after the squash"
+        case .body: "why: your lines above the PR template; they land on main with the squash"
+        case .subject, .commitBody: nil
+        }
+    }
+
+    /// What a row's state means, for `?`'s notes.
+    static func stateNote(_ st: String) -> String {
+        switch st {
+        case "only here": "only here: kept in git config, never sent anywhere"
+        case "draft": "draft: becomes the PR's words when you open it"
+        case "local": "local: not pushed yet, so i rewords it"
+        default: "\(st): already shared, so it can't be reworded here"
         }
     }
 

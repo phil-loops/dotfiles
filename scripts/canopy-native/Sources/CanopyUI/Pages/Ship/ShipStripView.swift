@@ -66,16 +66,20 @@ public struct ShipStripView: View {
                 let needs = Syncing.needs(b, facts: ship.factsOf(branchID), prep: ship.prepOf(branchID))
                 if !needs.isEmpty {
                     KeyButton(title: "⟲ sync", id: "review.sync", target: branchID)
+                        .explains("ship|sync", "sync: the branch is behind its parent or main, or has dirt — it rebases and tidies")
                     Text(needs.joined(separator: " · ")).foregroundStyle(theme.inkFaint)
                 }
             }
             if (acts || waiting) && live == nil {
                 if let g = running {
                     Text("◌ \(g.name) \(GatesRun.secs(g.ms))").foregroundStyle(theme.goldLeaf)
+                        .explains("ship|gates", "the push gates are running on this tree; p pushes once every one is green")
                 } else if let w = GatesRun.waiting(progress, rows: rows, inFlight: b.gates == .running || progress?.running == true, now: now) {
                     Text("◌ \(w.text)\(w.secs.map { " · " + GatesRun.secs($0 * 1000) } ?? "")").foregroundStyle(w.stuck ? theme.ember : theme.goldLeaf)
+                        .explains("ship|gates", w.stuck ? "the gates haven't moved in a while: , g shows what the run is doing" : "the gates are between steps: readying the checkout, or waiting for a slot")
                 } else if !red.isEmpty {
                     Text("gates ✗").foregroundStyle(theme.ember)
+                        .explains("ship|gates", "a gate failed on this tree: , g shows its output, skip waives it for this code")
                     ForEach(red, id: \.name) { g in Text(g.name).foregroundStyle(theme.ember) }
                     KeyButton(title: "skip", id: "review.gates.skip", target: branchID, quiet: true)
                 } else if b.gates == .green && !waived.isEmpty {
@@ -85,6 +89,7 @@ public struct ShipStripView: View {
             if acts || live != nil {
                 KeyButton(title: pushLabel(b, route: route, live: live, forced: push?.forced ?? false), id: "review.push", target: branchID,
                           gold: true, busy: live == .sending || live == .landing, failed: live == .failed)
+                    .explains("ship|push", "p: this branch's next step — run the gates, then push to origin")
             }
             if live == .failed, let err = push?.run.err { Text(err).foregroundStyle(theme.ember).lineLimit(2) }
             if live == nil, b.diverged, case .some(.some(let s)) = ship.forceScopeOf(app, branchID), !s.eligible,

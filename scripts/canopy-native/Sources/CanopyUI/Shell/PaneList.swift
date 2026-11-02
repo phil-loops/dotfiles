@@ -12,11 +12,14 @@ public struct PaneList<Row: View>: View {
     let row: (String, _ cursor: Bool) -> Row
     /// a quiet label drawn above a row, outside its cursor band (a group's name), else nil
     let header: (String) -> String?
+    /// what a header means, for `?`'s notes
+    let headerNote: (String) -> String?
 
     /// `rows` must be the same keys (same order) the surface's `panes()` returns for `pane`.
     public init(pane: String, rows: [String], header: @escaping (String) -> String? = { _ in nil },
+                headerNote: @escaping (String) -> String? = { _ in nil },
                 @ViewBuilder row: @escaping (String, _ cursor: Bool) -> Row) {
-        self.pane = pane; self.rows = rows; self.header = header; self.row = row
+        self.pane = pane; self.rows = rows; self.header = header; self.headerNote = headerNote; self.row = row
     }
 
     public var body: some View {
@@ -32,6 +35,7 @@ public struct PaneList<Row: View>: View {
                         if let h = header(key) {
                             Text(h).font(Theme.text(10.5)).foregroundStyle(theme.inkFaint)
                                 .padding(.horizontal, 10).padding(.top, 10).padding(.bottom, 2)
+                                .explains("\(pane)|header|\(h)", headerNote(h) ?? h)
                         }
                         row(key, key == cursor)
                             .padding(.vertical, 5).padding(.horizontal, 10)
