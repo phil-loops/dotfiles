@@ -357,6 +357,15 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
         #expect(a.insertField == "words.s|\(Self.branch)|c2")
     }
 
+    @Test func iOnALocalCommitInTheHistoryRewordsIt() throws {
+        let (a, _) = try app()
+        WordsState.of(a).setShown(Self.branch, outline())
+        a.runner.dispatch("history.write", via: .key, target: "h|c1")
+        #expect(a.insertField == nil)
+        a.runner.dispatch("history.write", via: .key, target: "h|c2")
+        #expect(a.insertField == "words.s|\(Self.branch)|c2")
+    }
+
     @Test func decodesALiveOutline() throws {
         // GET /loops/outline?branch=add-email-reading-format, 2026-10-29
         let json = #"{"ok": true, "branch": "add-email-reading-format", "parent": "main", "base": "origin/main", "head": "8131570f48b7e92e1e0addfee1cfe5f380b2410d", "description": "converts email HTML into a standard reading format with inline links, buttons and images", "story": "", "ticket": "", "commits": [{"sha": "8131570f48b7e92e1e0addfee1cfe5f380b2410d", "short": "8131570f48", "subject": "feat: add email reading format", "body": "", "author": "Phil Brockman", "date": "2026-10-26", "pushed": false, "merge": false, "carried": false, "locked": "", "files": 2, "add": 283, "del": 0}], "pr": {"exists": false}, "draft": {"title": "feat: add email reading format", "titleSaved": false, "body": "", "bodySaved": false, "derivedBody": null, "bodyPending": true}, "reseat": null, "undo": null}"#

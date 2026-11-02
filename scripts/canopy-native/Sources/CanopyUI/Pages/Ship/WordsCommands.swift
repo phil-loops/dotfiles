@@ -160,6 +160,27 @@ enum WordsCommands {
                 app.setCursor(row)
                 app.beginInsert(w.field(id), lines: w.lines)
             }))
+
+        r.register(Command(
+            id: "history.write", title: "Reword the commit under the cursor, or go on writing an open comment", scope: .history, verb: .write, label: "reword",
+            available: { [weak app] row in
+                guard let app else { return false }
+                if ShipState.of(app).composer != nil { return true }
+                guard let row, let w = WordsRow("w|s|\(row.dropFirst(2))"), let id = branchOf(app, nil) else { return false }
+                return editable(app, id, w)
+            },
+            local: { [weak app] row, _ in
+                guard let app else { return }
+                let ship = ShipState.of(app)
+                if ship.composer != nil { return app.runner.dispatch("review.compose.edit", via: .key) }
+                guard let row, case let sha = String(row.dropFirst(2)), let w = WordsRow("w|s|\(sha)"),
+                      let id = branchOf(app, nil) else { return }
+                if ship.commitScope != sha { ship.showCommit(sha) }
+                ship.historyFocus = .diff
+                app.focus(pane: ShipSeam.wordsPane)
+                app.setCursor("w|s|\(sha)")
+                app.beginInsert(w.field(id), lines: w.lines)
+            }))
     }
 
     /// Whether a words row can be written here: the PR's text until GitHub owns it, a commit until it's locked.
