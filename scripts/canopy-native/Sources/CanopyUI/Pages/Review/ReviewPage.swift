@@ -250,6 +250,10 @@ private struct DiffPane: View {
                               if let p = CodeLookup.position(path: info.path, line: (old ? l.old : l.new) ?? 1, text: l.text, at: offset, side: old ? "old" : "new") {
                                   pg.pointer = (p, pg.cursorMoved, pg.here?.key)
                               }
+                          },
+                          onViewed: { path in
+                              app.focus(pane: reviewDiffPane)
+                              app.runner.dispatch("review.viewed.file", via: .click, arg: path)
                           })
             .background(GeometryReader { g in
                 Color.clear.onAppear { measure(pg, g.size.width) }.onChange(of: g.size.width) { _, w in measure(pg, w) }

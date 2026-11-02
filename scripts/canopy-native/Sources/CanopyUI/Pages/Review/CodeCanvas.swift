@@ -118,6 +118,8 @@ final class CanvasTextView: NSTextView {
     var onClick: ((String, Bool) -> Void)?
     /// the pointer over code: (row info, UTF-16 offset in the row's code, whether on the right half)
     var onPointer: ((RowInfo, Int, Bool) -> Void)?
+    /// a click on a file header's ☐: its path
+    var onViewed: ((String) -> Void)?
 
     override var isOpaque: Bool { false }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
@@ -133,6 +135,10 @@ final class CanvasTextView: NSTextView {
         let p = convert(event.locationInWindow, from: nil)
         let i = characterIndexForInsertion(at: p)
         if let inf = info(at: min(i, max(0, (textStorage?.length ?? 1) - 1))), let s = inf.stop {
+            if inf.kind == .file, let ts = textStorage, onCheckbox(ts.attributedSubstring(from: (ts.string as NSString).paragraphRange(for: NSRange(location: i, length: 0))), x: p.x - textContainerOrigin.x) {
+                onViewed?(inf.path)
+                return
+            }
             onClick?(s, event.modifierFlags.contains(.shift))
         }
         super.mouseDown(with: event)
@@ -312,11 +318,48 @@ final class CanvasTextView: NSTextView {
     }
 }
 
+/// Whether `x` (from the row's left edge) lands on a file header's leading ☐ / ◪ / ☑.
+func onCheckbox(_ header: NSAttributedString, x: CGFloat) -> Bool {
+    guard let first = header.string.first, "☐◪☑".contains(first) else { return false }
+    return x < header.attributedSubstring(from: NSRange(location: 0, length: 2)).size().width
+}
+
+/// The header of the file scrolled under the top edge, pinned there until the next header pushes
+/// it off, so a file can be marked viewed from its last line.
+final class PinnedHeaderView: NSView {
+    var path: String?
+    var header = NSAttributedString()
+    var colors: CanvasColors?
+    var x0: CGFloat = 0
+    /// how far the next header has pushed this one up (≤ 0)
+    var shift: CGFloat = 0
+    var onClick: ((_ path: String, _ checkbox: Bool) -> Void)?
+
+    override var isFlipped: Bool { true }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard let colors else { return }
+        colors.raise.setFill(); bounds.fill()
+        colors.edge.setFill(); NSRect(x: 0, y: bounds.maxY - 1, width: bounds.width, height: 1).fill()
+        header.draw(at: NSPoint(x: x0, y: shift))
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard let path else { return }
+        let p = convert(event.locationInWindow, from: nil)
+        onClick?(path, onCheckbox(header, x: p.x - x0))
+    }
+}
+
 /// The canvas's AppKit side: the text view, its segments, the stop → range map, the hosted extras.
 @MainActor
 final class Canvas: NSObject {
     let scroll: NSScrollView
     let text: CanvasTextView
+    let pin = PinnedHeaderView()
+    /// every file header's paragraph, in order
+    private var headers: [(path: String, range: NSRange)] = []
     private var segments: [(key: String, length: Int)] = []
     private var stopMap: [String: NSRange] = [:]
     private var built: [String: NSAttributedString] = [:]
@@ -357,12 +400,60 @@ final class Canvas: NSObject {
         scroll.hasHorizontalScroller = false
         scroll.drawsBackground = false
         scroll.scrollerStyle = .overlay
+        pin.isHidden = true
+        scroll.addSubview(pin, positioned: .below, relativeTo: scroll.verticalScroller)
         super.init()
         NotificationCenter.default.addObserver(self, selector: #selector(boundsMoved), name: NSView.frameDidChangeNotification, object: text)
         text.postsFrameChangedNotifications = true
+        scroll.contentView.postsBoundsChangedNotifications = true
+        NotificationCenter.default.addObserver(self, selector: #selector(scrolled), name: NSView.boundsDidChangeNotification, object: scroll.contentView)
+        pin.onClick = { [weak self] path, checkbox in
+            if checkbox { self?.text.onViewed?(path) } else { self?.text.onClick?("f|\(path)", false) }
+        }
     }
 
-    @objc private func boundsMoved() { scheduleLayoutExtras() }
+    @objc private func boundsMoved() { scheduleLayoutExtras(); updatePin() }
+    @objc private func scrolled() { updatePin() }
+
+    /// Pin the header of the file under the top edge; the next file's header pushes it up and off.
+    func updatePin() {
+        let v = scroll.contentView.bounds
+        guard let lm = text.layoutManager, let tc = text.textContainer, let ts = text.textStorage, ts.length > 0,
+              let i = headerIndex(lm.characterIndexForGlyph(at: lm.glyphIndex(for: NSPoint(x: 0, y: max(0, v.minY - text.textContainerOrigin.y)), in: tc))),
+              let rect = text.rect(for: headers[i].range), rect.minY < v.minY else {
+            pin.isHidden = true
+            return
+        }
+        let h = rect.height
+        let next = i + 1 < headers.count ? text.rect(for: headers[i + 1].range) : nil
+        let shift = next.map { min(0, $0.minY - v.minY - h) } ?? 0
+        guard h + shift > 0 else { pin.isHidden = true; return }
+        var r = headers[i].range
+        if r.length > 0, (ts.string as NSString).character(at: r.location + r.length - 1) == 10 { r.length -= 1 }
+        let header = ts.attributedSubstring(from: r)
+        let cv = scroll.contentView.frame
+        let frame = NSRect(x: cv.minX, y: scroll.isFlipped ? cv.minY : cv.maxY - h - shift, width: cv.width, height: h + shift)
+        if pin.frame != frame { pin.frame = frame }
+        pin.colors = text.colors
+        if pin.path != headers[i].path || pin.shift != shift || !pin.header.isEqual(to: header) {
+            pin.path = headers[i].path
+            pin.header = header
+            pin.shift = shift
+            pin.x0 = text.textContainerOrigin.x
+            pin.needsDisplay = true
+        }
+        pin.isHidden = false
+    }
+
+    /// The last header at or before a character.
+    private func headerIndex(_ ci: Int) -> Int? {
+        var lo = 0, hi = headers.count - 1, found: Int?
+        while lo <= hi {
+            let mid = (lo + hi) / 2
+            if headers[mid].range.location <= ci { found = mid; lo = mid + 1 } else { hi = mid - 1 }
+        }
+        return found
+    }
 
     var length: Int { text.textStorage?.length ?? 0 }
 
@@ -395,14 +486,17 @@ final class Canvas: NSObject {
         reindex()
         applyHeights()
         scheduleLayoutExtras()
+        updatePin()
     }
 
     /// Stop key → character range, over the whole text.
     private func reindex() {
         stopMap = [:]
+        headers = []
         guard let ts = text.textStorage, ts.length > 0 else { return }
         ts.enumerateAttribute(.rvRow, in: NSRange(location: 0, length: ts.length)) { v, r, _ in
             guard let inf = v as? RowInfo else { return }
+            if inf.kind == .file { headers.append((inf.path, r)) }
             for s in inf.stops {
                 if let have = stopMap[s] { stopMap[s] = NSUnionRange(have, r) } else { stopMap[s] = r }
             }
@@ -578,6 +672,8 @@ struct CanvasView: NSViewRepresentable {
     var centerOn: String?
     var onClick: ((String, Bool) -> Void)?
     var onPointer: ((RowInfo, Int, Bool) -> Void)?
+    /// a click on a file header's ☐ (in place or pinned): its path
+    var onViewed: ((String) -> Void)?
 
     func makeNSView(context: Context) -> NSScrollView {
         let c = handle.canvas
@@ -596,7 +692,9 @@ struct CanvasView: NSViewRepresentable {
         c.text.charWidth = DocFont.charWidth
         c.text.onClick = onClick
         c.text.onPointer = onPointer
+        c.text.onViewed = onViewed
         c.apply(segments)
+        c.updatePin()
         if let on = centerOn, handle.centered != on {
             handle.centered = on
             let stop = String(on.split(separator: "|").first ?? "")
