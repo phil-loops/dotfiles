@@ -238,22 +238,21 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:]) -> AppModel {
         #expect(ForestNav.primary(for: "p:r:done", a)?.id == "project.archive")
     }
 
-    @Test func retOpensTheSpineThenThePageAndMinusFolds() {
+    @Test func retOpensTheForestsPageAndMinusFoldsAnOpenSpine() {
         let a = world()
         a.keys.handle("ret")
-        #expect(a.rows.prefix(5) == ["p:r:tree", "b:r:a", "b:r:b", "b:r:c", "b:r:d"])
-        a.keys.handle("j"); a.keys.handle("j")
-        #expect(a.selected == "b:r:b")
+        #expect(a.router.route == .forest(repo: "r", project: "tree"), "one ret goes straight in")
+        #expect(a.selected == "b:r:a")
+        a.keys.handle("-")
+        a.forestModel.expanded.insert("r:tree")
+        a.setCursor("b:r:b")
         a.keys.handle("-")
         #expect(a.selected == "p:r:tree" && !a.forestModel.expanded.contains("r:tree"))
-        a.keys.handle("ret"); a.keys.handle("ret")
-        #expect(a.router.route == .forest(repo: "r", project: "tree"))
-        #expect(a.selected == "b:r:a")
     }
 
     @Test func retDoesTheRowsThing() {
         let a = world()
-        a.keys.handle("ret"); a.keys.handle("ret")
+        a.keys.handle("ret")
         #expect(a.router.route == .forest(repo: "r", project: "tree"))
         a.keys.handle("-")
         #expect(a.router.route == .forests && a.selected == "p:r:tree", "- lands on Forests with the cursor on this forest")
@@ -268,7 +267,7 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:]) -> AppModel {
 
     @Test func pArmsThenSendsAndEscDisarms() {
         let a = world()
-        a.setCursor("p:r:solo"); a.keys.handle("ret"); a.keys.handle("j")
+        a.setCursor("p:r:solo"); a.keys.handle("ret")
         #expect(a.selected == "b:r:s")
         #expect(BranchCommands.pushRoute("r:s", a) == "branch.push.arm")
         a.keys.handle("p")

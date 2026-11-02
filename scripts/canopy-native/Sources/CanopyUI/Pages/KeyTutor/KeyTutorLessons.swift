@@ -148,9 +148,8 @@ enum KeyLessons {
         ], recap: "{next} / {previous} a line, {first} / {last} the ends (jumps: the jumplist remembers), {half-down} / {half-up} half a page."),
 
         KeyLesson(id: "ladder", title: "In and out", steps: [
-            KeyStep("{main} goes in: forests → forest → branch → file → line. On the greetings forest, its branches open in place.",
-                    [.main], setup: P.forests()),
-            KeyStep("{main} again: the forest's own page.", [.main], check: { P.onForest($0, "greetings") }),
+            KeyStep("{main} goes in: forests → forest → branch → file → line. On the greetings forest, it opens the forest's page.",
+                    [.main], setup: P.forests(), check: { P.onForest($0, "greetings") }),
             KeyStep("On a branch, {main} opens it for review.", [.main],
                     setup: P.forest(cursor: RowKey.branch(S.id(S.root))), check: { P.onBranch($0, S.root) }),
             KeyStep("{out} goes up a level: the forest, the branch still under the cursor.", [.out], check: { P.onForest($0, "greetings") }),

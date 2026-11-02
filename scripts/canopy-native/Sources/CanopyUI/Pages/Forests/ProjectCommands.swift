@@ -108,15 +108,6 @@ enum ProjectCommands {
         func hasBranches(_ id: String?) -> Bool { !(m.forest(id)?.branches.isEmpty ?? true) }
 
         r.register(Command(
-            id: "forest.expand", title: "Show the forest's branches (open again: its page)", scope: .project, verb: .main, label: "open",
-            available: { [unowned app] id in exists(id) && app.router.surface.id == "forests" },
-            local: { [unowned app] id, _ in
-                guard let id else { return }
-                // the zoom ladder (NAV.md §4.1): a folded forest opens inline, an open one goes in to its page
-                if hasBranches(id) && !m.expanded.contains(id) && !m.readyOnly { m.expanded.insert(id) }
-                else { app.runner.dispatch("forest.page", via: .key, target: id) }
-            }))
-        r.register(Command(
             id: "forest.collapse", title: "Hide the forest's branches", scope: .project, verb: .out, label: "fold",
             available: { id in id.map { m.expanded.contains($0) } == true && !m.readyOnly },
             local: { [unowned app] id, _ in
