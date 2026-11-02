@@ -194,6 +194,38 @@ import Testing
         #expect(found == (a.registry.command("find.concept") != nil))
     }
 
+    /// Typing while `?` is up narrows it in place: j/k scroll until something's typed, then type too;
+    /// backspace edits, a synonym finds what the title doesn't say, ↵ runs the first match.
+    @Test func typingFiltersTheSheetInPlace() {
+        let a = app(.todo)
+        a.keys.handle("?")
+        let sheet = a.state { SheetState() }
+        a.keys.handle("j")
+        #expect(sheet.top == 1 && sheet.query.isEmpty, "j still scrolls before anything's typed")
+        for k in ["f", "o", "r", "e"] { a.keys.handle(k) }
+        #expect(sheet.query == "fore" && sheet.top == 0)
+        var m = KeySheet.model(a)
+        #expect(m.everywhere.map(\.cmd.id).contains("nav.forests"))
+        #expect(m.everywhere.allSatisfy { KeySheet.matches("fore", $0) })
+        a.keys.handle("s"); a.keys.handle("t"); a.keys.handle("j")
+        #expect(sheet.query == "forestj", "once filtering, j types")
+        a.keys.handle("backspace")
+        #expect(sheet.query == "forest")
+        let line = { (id: String, title: String, key: String) in
+            SheetLine(key: key, cmd: SheetCmd(id: id, title: title, scope: "review", keys: [key], available: true))
+        }
+        #expect(KeySheet.matches("diff", line("review.tab.files", "Show the code (the files tab)", "3")), "a synonym")
+        #expect(KeySheet.matches("back", line("history.exit", "Back to the whole branch's code", "esc")))
+        #expect(!KeySheet.matches("zzz", line("history.exit", "Back to the whole branch's code", "esc")))
+        for _ in 0..<6 { a.keys.handle("backspace") }
+        for k in ["g", "o", "space", "f", "o", "r", "e", "s", "t", "s"] { a.keys.handle(k) }
+        m = KeySheet.model(a)
+        let first = m.entries.lazy.compactMap { e -> String? in if case .line(let l, false) = e { return l.cmd.id }; return nil }.first
+        #expect(first == "nav.forests", "\(String(describing: first))")
+        a.keys.handle("ret")
+        #expect(!a.sheetOpen && a.router.route == .forests, "↵ ran the first match: g f")
+    }
+
     /// The Review page's own keys each say where they sit in `?` — a group, or a verb that implies
     /// one — so a new command can't fall back into one undifferentiated list.
     @Test func everyReviewKeyHasASheetGroup() {

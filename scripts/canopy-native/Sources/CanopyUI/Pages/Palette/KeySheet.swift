@@ -20,6 +20,8 @@ enum KeySheet {
 
     struct Model: Equatable {
         var here: String
+        /// what's typed into the sheet's filter ("" shows every key)
+        var query: String
         var problems: [String]
         /// keys.toml lines read past (v2's command ids)
         var warnings: [String]
@@ -57,7 +59,25 @@ enum KeySheet {
     }
 
     /// Keys that work anywhere shown, the most used first; `:` finds the rest.
-    static let anywhereShown = 8
+    nonisolated static let anywhereShown = 8
+
+    /// Words people type for a key that its title doesn't say.
+    static let synonyms: [String: [String]] = [
+        "diff": ["code", "files"], "code": ["files", "diff"], "back": ["esc", "cancel", "out"], "close": ["esc", "cancel"],
+        "message": ["reword", "words", "title"], "commit message": ["reword"], "rename": ["reword"], "title": ["words"],
+        "pr": ["github", "words", "push"], "review": ["github", "comment"], "comment": ["reply", "draft"],
+        "copy": ["link", "yank"], "find": ["filter", "search"], "jump": ["go", "back"], "next": ["down"], "prev": ["up", "previous"],
+    ]
+
+    /// A line matches when every typed word (or one of its synonyms) is in its title, id, verb, word or key.
+    static func matches(_ query: String, _ l: SheetLine) -> Bool {
+        let text = "\(l.cmd.title) \(l.cmd.id) \(l.cmd.verb ?? "") \(l.cmd.label ?? "") \(l.key)".lowercased()
+        let q = query.lowercased().trimmingCharacters(in: .whitespaces)
+        if let alts = synonyms[q], alts.contains(where: text.contains) { return true }
+        return q.split(separator: " ").allSatisfy { w in
+            text.contains(w) || (synonyms[String(w)] ?? []).contains(where: text.contains)
+        }
+    }
 
     /// A page-wide group's heading.
     static func groupLabel(_ g: KeyGroup, _ app: AppModel) -> String {
@@ -78,8 +98,13 @@ enum KeySheet {
                      verb: $0.verbs.first?.name, group: $0.sheetGroup?.rawValue, pair: $0.pair, uses: app.keyUses.score($0.id), label: $0.label)
         }
         let surface = app.router.surface.id
-        let sheet = sheetNow(surface: surface, live: live, cmds: cmds,
+        var sheet = sheetNow(surface: surface, live: live, cmds: cmds,
                              surfaceScopes: app.registry.surfaceScopes.mapValues { $0.map(\.rawValue) })
+        let query = app.state { SheetState() }.query
+        if !query.isEmpty {
+            let hit = { (l: SheetLine) in matches(query, l) }
+            sheet = (sheet.now.filter(hit), sheet.everywhere.filter(hit), sheet.notNow.filter(hit))
+        }
         var groups: [Group] = []
         var everywhere: [SheetLine] = []
         var moves: [SheetLine] = []
@@ -94,8 +119,8 @@ enum KeySheet {
         let hints = app.registry.commands.filter { !$0.hint.isEmpty && liveScopes.contains($0.scope) }.map {
             Hint(title: $0.title, keys: $0.hint.joined(separator: " · "))
         }
-        return Model(here: labelOf(liveScopes.first ?? .global, app), problems: app.registry.keyProblems, warnings: app.registry.keyWarnings, now: groups, hints: hints,
-                     everywhere: everywhere, moves: moves, notNow: sheet.notNow, customized: Set(app.registry.commands.filter { $0.verbs.contains(where: app.registry.customized.contains) }.map(\.id)))
+        return Model(here: labelOf(liveScopes.first ?? .global, app), query: query, problems: app.registry.keyProblems, warnings: app.registry.keyWarnings,
+                     now: groups, hints: query.isEmpty ? hints : [], everywhere: everywhere, moves: moves, notNow: sheet.notNow, customized: Set(app.registry.commands.filter { $0.verbs.contains(where: app.registry.customized.contains) }.map(\.id)))
     }
 }
 
@@ -112,15 +137,16 @@ enum SheetEntry: Equatable {
 extension KeySheet.Model {
     var entries: [SheetEntry] {
         var out: [SheetEntry] = []
-        if now.isEmpty && hints.isEmpty { out.append(.empty("nothing under the cursor")) }
+        if now.isEmpty && hints.isEmpty { out.append(.empty(query.isEmpty ? "nothing under the cursor" : "no key here does “\(query)” — : finds any command by name")) }
         for g in now {
             out.append(.heading(g.label, gold: true))
             out += g.lines.map { .line($0, dim: false) }
         }
         out += hints.map { .hint($0) }
-        out.append(.heading("Anywhere", gold: false))
-        out += everywhere.prefix(KeySheet.anywhereShown).map { .line($0, dim: false) }
-        if everywhere.count > KeySheet.anywhereShown {
+        if query.isEmpty || !everywhere.isEmpty { out.append(.heading("Anywhere", gold: false)) }
+        let shown = query.isEmpty ? KeySheet.anywhereShown : everywhere.count
+        out += everywhere.prefix(shown).map { .line($0, dim: false) }
+        if everywhere.count > shown {
             out.append(.empty("\(everywhere.count - KeySheet.anywhereShown) more work anywhere — : finds any of them by name"))
         }
         if !moves.isEmpty {
@@ -140,9 +166,38 @@ extension KeySheet.Model {
 @Observable
 final class SheetState {
     var top = 0
+    /// Typed while the sheet is up: narrows it in place.
+    var query = ""
 
     func move(_ by: Int, _ app: AppModel) {
         top = max(0, min(KeySheet.model(app).entries.count - 1, top + by))
+    }
+
+    /// The sheet's own typing, before its keymap: a letter starts (or goes on) filtering, though
+    /// j, k and ? keep scrolling and closing until something's typed; then backspace edits,
+    /// C-n / C-p scroll and ↵ runs the first key that matches. false hands the key to the keymap.
+    func type(_ key: String, _ app: AppModel) -> Bool {
+        let printable = key.count == 1 && key != "?"
+        if query.isEmpty {
+            guard printable, key != "j", key != "k" else { return false }
+        }
+        switch key {
+        case "backspace": query = String(query.dropLast())
+        case "space": query += " "
+        case "C-n": move(1, app); return true
+        case "C-p": move(-1, app); return true
+        case "ret":
+            guard let first = KeySheet.model(app).entries.lazy.compactMap({ e -> SheetLine? in if case .line(let l, false) = e { return l }; return nil }).first
+            else { return true }
+            app.sheetOpen = false
+            app.runner.dispatch(first.cmd.id, via: .key)
+            return true
+        default:
+            guard printable else { return false }
+            query += key
+        }
+        top = 0
+        return true
     }
 }
 
@@ -163,6 +218,9 @@ struct KeySheetView: View {
                             HStack(alignment: .firstTextBaseline, spacing: 6) {
                                 Text("Right now").foregroundStyle(theme.ink)
                                 Text("· \(m.here)").foregroundStyle(theme.inkFaint)
+                                Spacer(minLength: 8)
+                                Text(m.query.isEmpty ? "type to filter" : "/ \(m.query)").font(Theme.mono(13))
+                                    .foregroundStyle(m.query.isEmpty ? theme.inkFaint : theme.goldLeaf)
                             }
                             .font(Theme.display(20)).padding(.bottom, 12)
                             if !m.problems.isEmpty || !m.warnings.isEmpty {
@@ -183,7 +241,7 @@ struct KeySheetView: View {
                                 Text("canopy/keys-native.toml").foregroundStyle(theme.inkDim)
                                 Text(" (").foregroundStyle(theme.inkFaint)
                                 Text("underlined").underline(pattern: .dot).foregroundStyle(theme.inkFaint)
-                                Text(") · keys belong to verbs · , is this page's own · j/k scroll · ? or esc closes").foregroundStyle(theme.inkFaint)
+                                Text(") · type to filter, ↵ runs the first · ? or esc closes").foregroundStyle(theme.inkFaint)
                             }
                             .font(Theme.mono(11)).padding(.top, 16)
                         }
@@ -197,7 +255,7 @@ struct KeySheetView: View {
                 .overlay { Rectangle().stroke(theme.rule, lineWidth: 1) }
             }
             .font(Theme.mono(12.5))
-            .onAppear { st.top = 0 }
+            .onAppear { st.top = 0; st.query = "" }
         }
     }
 
