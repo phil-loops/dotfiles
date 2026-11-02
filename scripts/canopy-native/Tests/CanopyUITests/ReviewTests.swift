@@ -574,7 +574,7 @@ import Testing
         await until("the line") { pg.here?.key == "l|b.ts|R:6" }
         #expect(a.pane?.id == reviewDiffPane)
         keys(a, "y")
-        #expect(NSPasteboard.general.string(forType: .string) == "canopy://v2/b/loops/hankles-next?file=b.ts&line=6")
+        #expect(Clipboard.text == "canopy://v2/b/loops/hankles-next?file=b.ts&line=6")
         keys(a, "C-o")
         #expect(a.router.route == .review(repo: "loops", branch: "add-hankles-limited-label"), "following a link is a jump")
         pg.sync()   // the view does on a route change
