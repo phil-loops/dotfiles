@@ -124,6 +124,7 @@ enum KeyLessons {
         var out: [Verb: String] = [:]
         for n in 3...9 { out[.slot(n)] = "the same verb as slot-1 and slot-2 with another digit; the practice lane has two forests" }
         for n in 4...9 { out[.nth(n)] = "the same verb as nth-1…nth-3 with another digit; the review page has three tabs" }
+        out[.copyPlace] = "y's place written out for pasting; it puts nothing on screen to practice against"
         return out
     }()
 
