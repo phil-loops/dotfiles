@@ -292,7 +292,9 @@ enum DiffCommands {
                                app.go(.forest(repo: p.repo, project: p.name))
                                if pg.integration == nil { app.setCursor(RowKey.branch(id)) }
                            }))
-        // ── left and right: the halves of a split line, then the panes beside ──
+        // ── left and right: the halves of a split line, then the panes beside. The old half is a
+        // stop only where it differs (a removed line), and leaving the diff forgets it, so `l` back
+        // in lands on the new half and h/l never spend a press on a half that reads the same. ──
 
         func half() -> Side? {
             guard app.pane?.id == reviewDiffPane, let h = pg.here, h.kind == .line, let row = h.row else { return nil }
@@ -300,8 +302,9 @@ enum DiffCommands {
         }
         r.register(Command(id: "review.left", title: "The old side of the line, else the pane to the left", scope: .review, verb: .left, quiet: true,
                            local: { _, _ in
-                               if half() == .right, pg.here?.row?.left?.old != nil { pg.column = .left; return }
+                               if half() == .right, pg.here?.row?.left?.kind == .del { pg.column = .left; return }
                                if !app.focus(.left) { throw Refusal("nothing to the left") }
+                               pg.column = .right
                            }))
         r.register(Command(id: "review.right", title: "The new side of the line, else the pane to the right", scope: .review, verb: .right, quiet: true,
                            local: { _, _ in

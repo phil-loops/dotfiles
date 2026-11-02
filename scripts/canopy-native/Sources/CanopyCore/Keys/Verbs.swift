@@ -95,7 +95,7 @@ public enum Verbs {
         v(.last, .nav, ["G"], jump: true, "the last row"),
         v(.halfDown, .nav, ["C-d"], "down half a page"),
         v(.halfUp, .nav, ["C-u"], "up half a page"),
-        v(.left, .nav, ["h", "left"], "left in what you see: the old side of a split diff, else the pane to the left"),
+        v(.left, .nav, ["h", "left"], "left in what you see: the old half of a removed line, else the pane to the left"),
         v(.right, .nav, ["l", "right"], "right in what you see: the new side of a split diff, else the pane to the right"),
         v(.nextWord, .nav, ["w"], "the next name in the code, across lines — what g d and space k ask about"),
         v(.previousWord, .nav, ["b"], "the previous name in the code"),
