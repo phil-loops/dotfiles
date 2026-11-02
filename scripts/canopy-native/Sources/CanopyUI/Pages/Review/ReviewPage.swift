@@ -56,6 +56,7 @@ struct ReviewPage: View {
         }
         .overlay { if app.keys.layer == .map { MapOverlay() } }
         .onAppear { pg.sync() }
+        .task(id: "\(pg.id)@\(pg.tip)") { pg.warmHelix(app) }
     }
 }
 
@@ -205,12 +206,13 @@ private struct DiffPane: View {
         .overlay(alignment: .topLeading) { helix(pg) }
     }
 
-    /// Helix over the new half, from the column the split puts it at; the old half stays to read against.
+    /// Helix over the diff: `o` covers it all; `i` starts where the split puts the new half, so the
+    /// old half stays to read against.
     @ViewBuilder private func helix(_ pg: ReviewPageState) -> some View {
         if let h = pg.helix, let dir = h.dir {
             HelixHalf(open: h, dir: dir, colors: CanvasColors(theme)) { pg.landHelix(app) }
                 .id("\(dir)|\(h.path)")
-                .padding(.leading, CGFloat(pg.splitWidth(h.path) + 7) * DocFont.charWidth + 1)
+                .padding(.leading, h.whole ? 0 : CGFloat(pg.splitWidth(h.path) + 7) * DocFont.charWidth + 1)
         }
     }
 

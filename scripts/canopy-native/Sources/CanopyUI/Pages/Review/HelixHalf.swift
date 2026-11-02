@@ -3,9 +3,9 @@ import CanopyCore
 import SwiftTerm
 import SwiftUI
 
-/// Helix where the diff's new half was (`i` on a new-half line): the branch's diff-view checkout,
-/// whose files are the tip and whose gutter marks the branch's changes, opened at the cursor's line
-/// and name. `:w` saves there as Helix always does; quitting commits what changed as one commit.
+/// Helix in the diff (`i` over the new half, `o` over the whole of it): the branch's diff-view
+/// checkout, whose files are the tip and whose gutter marks the branch's changes, opened at the
+/// cursor's line and name. `:w` saves there as Helix always does; quitting commits what changed.
 public struct HelixOpen: Equatable {
     public var path: String
     public var line: Int
@@ -14,17 +14,21 @@ public struct HelixOpen: Equatable {
     public var dir: String?
     /// the tip Helix opened at; the commit is refused if the branch moved since
     public var sha: String
+    /// over the whole diff (`o`), not just its new half (`i`)
+    public var whole = false
 }
 
 private struct HelixWhere: Decodable { var ok: Bool; var dir: String?; var sha: String?; var err: String? }
 private struct HelixLanded: Decodable { var ok: Bool; var nothing: Bool?; var message: String?; var err: String? }
 
 extension ReviewPageState {
-    func openHelix(_ app: AppModel, branch: String, path: String, line: Int, col: Int) {
-        helix = HelixOpen(path: path, line: line, col: col, dir: nil, sha: tip)
+    func openHelix(_ app: AppModel, branch: String, path: String, line: Int, col: Int, whole: Bool = false) {
+        let warm = helixDirs["\(branch)@\(tip)"]
+        helix = HelixOpen(path: path, line: line, col: col, dir: warm, sha: tip, whole: whole)
+        if warm != nil { return app.runner.say("Helix on \(branch) · :w saves · quitting commits it") }
         app.runner.say("checking \(branch) out for Helix…")
         Task { @MainActor in
-            let r = await app.transport.ask(repoPath("/review-helix"), ["branch": branch, "op": "where"], as: HelixWhere.self)
+            let r = await askHelixDir(app, branch: branch)
             guard helix?.path == path, helix?.dir == nil else { return }
             guard let r, r.ok, let dir = r.dir else {
                 helix = nil
@@ -34,6 +38,19 @@ extension ReviewPageState {
             helix?.sha = r.sha ?? tip
             app.runner.say("Helix on \(branch) · :w saves · quitting commits it")
         }
+    }
+
+    /// Make the branch's checkout before anyone asks, so `i` and `o` open Helix at once.
+    func warmHelix(_ app: AppModel) {
+        guard let t = target, integration == nil, !tip.isEmpty, helixDirs["\(t.name)@\(tip)"] == nil else { return }
+        Task { @MainActor in _ = await askHelixDir(app, branch: t.name) }
+    }
+
+    private func askHelixDir(_ app: AppModel, branch: String) async -> HelixWhere? {
+        let at = tip
+        let r = await app.transport.ask(repoPath("/review-helix"), ["branch": branch, "op": "where"], as: HelixWhere.self)
+        if let r, r.ok, let dir = r.dir, (r.sha ?? at) == at { helixDirs["\(branch)@\(at)"] = dir }
+        return r
     }
 
     /// Helix quit: commit what it changed, and the diff is back.

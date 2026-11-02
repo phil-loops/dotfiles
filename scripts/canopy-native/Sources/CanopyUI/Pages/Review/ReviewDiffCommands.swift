@@ -411,9 +411,10 @@ enum DiffCommands {
         r.register(Command(id: "review.side.close", title: "Close the code beside the diff", scope: .review, quiet: true,
                            available: { _ in pg.side != nil }, local: { _, _ in pg.closeSide() }))
 
-        r.register(Command(id: "review.open", title: "Open in Helix", scope: .review, budget: .slowIO, verb: .editor, label: "helix",
-                           available: { _ in pg.integration == nil },
-                           write: { _, _ in openHere(pg) }))
+        r.register(Command(id: "review.open", title: "Open the file in Helix, over the diff — quitting commits what changed", scope: .review,
+                           verb: .editor, label: "helix",
+                           available: { _ in pg.integration == nil && pg.helix == nil },
+                           local: { _, _ in if !pg.openHelixWhole(app) { throw Refusal("nothing to open here") } }))
 
         // ── viewed: m marks and moves on, M takes it back ──
 
@@ -463,20 +464,6 @@ enum DiffCommands {
                            }))
     }
 
-    /// Open what the cursor is on in the warm Helix, at its line (POST /open).
-    static func openHere(_ pg: ReviewPageState) -> Write? {
-        guard let h = pg.here, h.kind != .file, let t = pg.target, let app = pg.app else { return nil }
-        var line: JSONValue = .null
-        if h.kind == .line, let row = h.row {
-            let at = sideLine(row, prefer: pg.column)
-            line = .number(Double(at.line))
-            // on a name in the new half: Helix lands on it (stack-open's "<line>:<col>")
-            if at.side == .right, let w = pg.hereWord { line = .string("\(at.line):\(w.lowerBound + 1)") }
-        }
-        else if h.kind == .thread, let l = h.id.flatMap({ app.store.view(CanopyCore.Thread.self, $0) })?.local?.line { line = .number(Double(l)) }
-        return Write(path: pg.repoPath("/open"), body: ["branch": .string(t.name), "path": .string(h.path), "pos": line],
-                     settled: { true }, failed: "couldn't open it in Helix")
-    }
 
     struct ViewedArg { var keys: [String]; var on: Bool }
 
