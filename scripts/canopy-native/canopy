@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# canopy [/v2/... | canopy://...] — open canopy at a page: Show's canopy workspace (⌘6), which also
-# answers every canopy:// link. The headless tools below run the bare canopy binary instead,
-# rebuilt when its sources changed.
-#   canopy --build                 just (re)build; prints the .app path
+# canopy [/v2/... | canopy://...] — open canopy at a page: Show's canopy workspace (⌘6). Show is
+# canopy's only app and window. The headless tools below run the bare canopy binary instead — a
+# plain executable, not an app, so nothing can open it as a second window — rebuilt when its sources changed.
+#   canopy --build                 just (re)build; prints the binary's path
 #   canopy --dump [--dump-wait s]  headless: hydrate + listen, print the world as JSON, exit
+#   canopy --shoot <dir> --shot "<name>=/v2/… [keys…]" [--size WxH]   headless: draw pages to <dir>/<name>.png
 #   canopy --appearance light|dark|system
 # For those, the server port is per repo: --port wins, else `stack-review-port` in --repo, else the
 # current git repo's when a server listens there, else ~/coding/loops.
@@ -11,9 +12,8 @@ set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cache="${XDG_CACHE_HOME:-$HOME/.cache}/canopy-native"
-app="$cache/Canopy.app"
 stamp="$cache/source.sha"
-bin="$app/Contents/MacOS/Canopy"
+bin="$cache/canopy"
 
 sources_sha() {
   (cd "$here" && find Package.swift Sources -type f -print0 | sort -z | xargs -0 shasum -a 256) | shasum -a 256 | cut -d' ' -f1
@@ -29,48 +29,31 @@ build() {
   (cd "$here" && swift build -c release --product Canopy >&2)
   local out
   out="$(cd "$here" && swift build -c release --show-bin-path)"
-  rm -rf "$app"
-  mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
-  cp "$out/Canopy" "$bin"
-  cp -R "$out/canopy-native_CanopyUI.bundle" "$app/Contents/Resources/"
-  cat > "$app/Contents/Info.plist" <<'PLIST'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>CFBundleExecutable</key><string>Canopy</string>
-  <key>CFBundleIdentifier</key><string>com.philbrockman.canopy</string>
-  <key>CFBundleName</key><string>canopy</string>
-  <key>CFBundleDisplayName</key><string>canopy</string>
-  <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.1</string>
-  <key>CFBundleVersion</key><string>1</string>
-  <key>LSMinimumSystemVersion</key><string>14.0</string>
-  <key>NSHighResolutionCapable</key><true/>
-  <key>NSPrincipalClass</key><string>NSApplication</string>
-</dict>
-</plist>
-PLIST
-  codesign --force --sign - "$app" >/dev/null 2>&1 || true
+  mkdir -p "$cache"
+  # the fonts' resource bundle sits beside the binary, where Bundle.module looks
+  rm -rf "$cache/canopy-native_CanopyUI.bundle"
+  cp -R "$out/canopy-native_CanopyUI.bundle" "$cache/"
+  cp "$out/Canopy" "$bin.new" && mv "$bin.new" "$bin"
   echo "$sha" > "$stamp"
 }
 
-port="" repo="" route="" dump=0
+port="" repo="" route="" headless=0
 pass=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    -h|--help) sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    --build) build; echo "$app"; exit 0 ;;
+    -h|--help) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --build) build; echo "$bin"; exit 0 ;;
     --port) port="$2"; shift 2 ;;
     --repo) repo="$2"; shift 2 ;;
-    --dump) dump=1; pass+=("--dump"); shift ;;
-    --dump-wait|--appearance) pass+=("$1" "$2"); shift 2 ;;
+    --dump) headless=1; pass+=("--dump"); shift ;;
+    --shoot) headless=1; pass+=("$1" "$2"); shift 2 ;;
+    --shot|--size|--dump-wait|--appearance) pass+=("$1" "$2"); shift 2 ;;
     /v2*|canopy:*) route="$1"; shift ;;
     *) echo "canopy: unknown argument $1" >&2; exit 64 ;;
   esac
 done
 
-(( dump )) || exec "$here/../show" --canopy "$route"
+(( headless )) || exec "$here/../show" --canopy "$route"
 
 port_of() { (cd "$1" && "$HOME/.dotfiles/scripts/stack-review-port") 2>/dev/null; }
 listening() { nc -z 127.0.0.1 "$1" >/dev/null 2>&1; }
