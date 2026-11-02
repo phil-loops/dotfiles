@@ -102,26 +102,47 @@ final class ArrivalNotices: NSObject, UNUserNotificationCenterDelegate {
 }
 
 extension AppDelegate {
-    /// Whether `show <path>` may only land on the shelf: Phil's own asks (`--api`, `--canopy`) and `--focus` come forward.
+    /// Whether `show <path>` may only land on the shelf: `--api` and `--focus` (and a clicked canopy:// link) come forward.
     func arrivesQuietly(_ path: String, focus: Set<String>) -> Bool {
-        let workspace = Workspace.route(path).workspace
-        return workspace != .api && workspace != .canopy && !focus.contains(path)
+        Workspace.route(path).workspace != .api && !focus.contains(path)
     }
 
     /// A deck a session sent without `--focus` while Show isn't frontmost: it goes to the top of its shelf group (the rail
     /// badge counts it) and a notification names it and its session's topic. Nothing switches, opens or comes forward.
+    /// A canopy page waits instead in `CanopyArrivals`, counted on ⌘6's badge, until ⌘6 or its notification opens it.
     func arrive(_ path: String) {
+        if Workspace.route(path).workspace == .canopy {
+            return arriveInCanopy(path)
+        }
         prefs.set(Date(), forKey: "arrived." + path)
         refreshLibrary(force: true)
-        guard snapshotPath == nil, selfTest == nil, let entry = shelfEntry(path) else { return }
+        guard snapshotPath == nil, let entry = shelfEntry(path) else { return }
         let replyTo = (try? loadDeck(path))?.replyTo ?? (try? loadTutorSession(path))?.replyTo
+        announce(path: path, target: path, title: entry.title, workspace: entry.workspace, replyTo: replyTo)
+    }
+
+    private func arriveInCanopy(_ path: String) {
+        let request = CanopyRequest(path: path)
+        let route = request.route ?? ""
+        CanopyArrivals.add(route)
+        refreshLibrary(force: true)
+        guard snapshotPath == nil else { return }
+        announce(path: path, target: "canopy:" + route, title: canopyTitle(route), workspace: .canopy, replyTo: request.replyTo)
+    }
+
+    /// Records the arrival in History and posts its notification (not under the selftest), naming the sending session's
+    /// topic once it's known.
+    private func announce(path: String, target: String, title: String, workspace: Workspace, replyTo: String?) {
+        let notify = selfTest == nil
         guard let replyTo, !replyTo.isEmpty else {
-            ArrivalNotices.shared.post(path: path, title: entry.title, topic: nil, workspace: entry.workspace)
+            ShowHistory.record(HistoryRecord(kind: .arrived, target: target, workspace: workspace, title: title, topic: nil))
+            if notify { ArrivalNotices.shared.post(path: path, title: title, topic: nil, workspace: workspace) }
             return
         }
         Topics.resolve(replyTo) { [weak self] topic in
             self?.refreshLibrary(force: true)
-            ArrivalNotices.shared.post(path: path, title: entry.title, topic: topic, workspace: entry.workspace)
+            ShowHistory.record(HistoryRecord(kind: .arrived, target: target, workspace: workspace, title: title, topic: topic))
+            if notify { ArrivalNotices.shared.post(path: path, title: title, topic: topic, workspace: workspace) }
         }
     }
 }
