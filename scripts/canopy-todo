@@ -7,6 +7,8 @@ list, plus a todo list per forest (items with --project <repo>:<stack-project>, 
       --why "opens Helix on the wrong line" [--link wiki/loops/x.md] [--waiting "…"] [--body -]
   canopy-todo ls [--all] [--json] [--project P|all]   open work in rank order (--all adds done/dropped)
   canopy-todo show <id>
+  canopy-todo claim <id>                take it before building: state=doing, owner=this session; refused while
+                                        another live session owns it (--force takes it over)
   canopy-todo set <id> key=value …      e.g. state=doing size=M blocked_by=a,b
   canopy-todo done <id> [note]          a note is appended under "## Done"
   canopy-todo drop <id> [why]
@@ -35,7 +37,18 @@ def line(it):
     rank = f"{it['rank']:>3}" if it.get("rank") else "  ·"
     flag = " ⚠" if it.get("problems") else ""
     wait = f"  ⏳ {it['waiting']}" if it.get("state") == "waiting" else ""
-    return f"{rank} {it.get('state', '?'):<8} {it.get('kind', '?'):<6} {it.get('size', '?')} {it.get('area', ''):<10} {it['id']}{flag}{wait}"
+    owner = f"  @{it['owner']}" if it.get("owner") and it.get("state") == "doing" else ""
+    return f"{rank} {it.get('state', '?'):<8} {it.get('kind', '?'):<6} {it.get('size', '?')} {it.get('area', ''):<10} {it['id']}{flag}{wait}{owner}"
+
+
+def me():
+    """This Claude session's id prefix, as claude-say addresses it."""
+    return (os.environ.get("CLAUDE_CODE_SESSION_ID") or "")[:8] or None
+
+
+def alive(session):
+    import subprocess
+    return subprocess.run(["claude-say", session, "--check"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
 
 
 def project_id(name):
@@ -84,6 +97,9 @@ def main():
     ls.add_argument("--json", action="store_true")
     ls.add_argument("--project")
     sub.add_parser("show").add_argument("id")
+    c = sub.add_parser("claim")
+    c.add_argument("id")
+    c.add_argument("--force", action="store_true")
     s = sub.add_parser("set")
     s.add_argument("id")
     s.add_argument("pairs", nargs="+")
@@ -121,6 +137,14 @@ def main():
                 print(f"      {it.get('title', '')}")
     elif args.cmd == "show":
         print(open(todo.path(args.id)).read(), end="")
+    elif args.cmd == "claim":
+        it = todo.read(args.id)
+        owner, session = it.get("owner"), me()
+        if not session:
+            sys.exit("canopy-todo claim: not in a Claude session (no CLAUDE_CODE_SESSION_ID) — use set state=doing")
+        if owner and owner != session and it.get("state") == "doing" and alive(owner) and not args.force:
+            sys.exit(f"canopy-todo: {args.id} is owned by live session {owner} — `claude-say {owner} \"…\"` to coordinate, or --force")
+        print(line(todo.update(args.id, state="doing", owner=session)))
     elif args.cmd == "set":
         fields = {}
         for pair in args.pairs:
@@ -130,7 +154,7 @@ def main():
     elif args.cmd in ("done", "drop"):
         it = todo.read(args.id)
         body = with_section(it["body"], "Done" if args.cmd == "done" else "Dropped", f"{todo.today()} — {args.note}", False) if args.note else it["body"]
-        print(line(todo.update(args.id, state="done" if args.cmd == "done" else "dropped", rank=None, body=body)))
+        print(line(todo.update(args.id, state="done" if args.cmd == "done" else "dropped", owner=None, rank=None, body=body)))
     elif args.cmd == "rank":
         project = project_id(args.project)
         for i in args.ids:

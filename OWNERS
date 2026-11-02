@@ -12,3 +12,5 @@ shell       .zshrc
 docs        CLAUDE.md OWNERS claude/
 learning    learning/ scripts/learning.py scripts/learn scripts/test-learning.py .claude/skills/tutor/ .claude/skills/retest/
 show        scripts/show scripts/show-app/ scripts/claude-say .claude/skills/show/
+# canopy-native/Sources/CanopyUI/Shell/Embed.swift is the seam Show hosts canopy through: a change there tells the show lane.
+canopy      scripts/canopy-native/ scripts/canopy scripts/canopy-todo
