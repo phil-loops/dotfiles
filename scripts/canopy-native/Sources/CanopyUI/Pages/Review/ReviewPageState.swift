@@ -131,6 +131,9 @@ public final class ReviewPageState: ShipHost {
         let longest = files.map { $0.path.split(separator: "/").last?.count ?? 0 }.max() ?? 16
         return min(220, max(140, CGFloat(longest) * 6.6 + 48))
     }
+    /// The width the diff gives up to the outline: the strip's, so folding never re-lays the diff;
+    /// the full outline floats over the diff's left edge instead.
+    public var outlineReserve: CGFloat { showsTree ? stripWidth : outlineWidth }
     /// The outline folds to a strip while the reader is in the diff, when there are files to list.
     public func outlineIsStrip(_ pane: String?) -> Bool { pane == reviewDiffPane && showsTree }
     /// The files list earns its column only when there's more than one file to move between (or a filter typed into it).

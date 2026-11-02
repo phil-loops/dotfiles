@@ -33,10 +33,7 @@ struct ReviewPage: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 default:
                     HStack(alignment: .top, spacing: 0) {
-                        if pg.showsOutline {
-                            let strip = pg.outlineIsStrip(app.pane?.id)
-                            Outline(strip: strip).frame(width: strip ? pg.stripWidth : pg.outlineWidth)
-                        }
+                        if pg.showsOutline { Color.clear.frame(width: pg.outlineReserve) }
                         VStack(alignment: .leading, spacing: 8) {
                             if let sha = ShipState.of(app).commitScope {
                                 CommitHead(branchID: pg.id, sha: sha).padding(.horizontal, 16).padding(.top, 4)
@@ -47,6 +44,18 @@ struct ReviewPage: View {
                         .frame(minHeight: 0, maxHeight: .infinity, alignment: .top)
                         .padding(.leading, pg.showsOutline ? 0 : 12)
                         if pg.side != nil { SidePane().frame(width: 520) }
+                    }
+                    .overlay(alignment: .topLeading) {
+                        if pg.showsOutline {
+                            let strip = pg.outlineIsStrip(app.pane?.id)
+                            Outline(strip: strip)
+                                .frame(width: strip ? pg.stripWidth : pg.outlineWidth)
+                                .frame(maxHeight: .infinity, alignment: .top)
+                                .background(theme.vellumNight)
+                                .overlay(alignment: .trailing) {
+                                    if !strip && pg.outlineWidth > pg.outlineReserve { theme.vellumEdge.frame(width: 1) }
+                                }
+                        }
                     }
                     .onChange(of: app.cursors["review/\(ShipSeam.historyPane)"]) { _, k in
                         // the outline's cursor is the diff's scope: a commit, or "= on main" for the whole branch
