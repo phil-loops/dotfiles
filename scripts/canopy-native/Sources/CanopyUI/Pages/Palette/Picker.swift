@@ -53,9 +53,8 @@ struct PickerView: View {
             }
             .font(Theme.text(11.5))
             .frame(maxWidth: 860, maxHeight: 520)
-            .background(theme.vellumRaise)
+            .background { Rectangle().fill(theme.vellumRaise).shadow(color: .black.opacity(0.5), radius: 24, y: 16) }
             .overlay { Rectangle().stroke(theme.goldDeep, lineWidth: 1) }
-            .shadow(color: .black.opacity(0.5), radius: 24, y: 16)
             .padding(.horizontal, 16).padding(.top, 70)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .onAppear { focused = true }

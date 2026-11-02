@@ -202,8 +202,9 @@ public final class KeyEngine {
         var seen = Set<String>()
         var rows: [WhichKeyRow] = []
         let vk = registry.verbKeys
+        let targets = Self.targets(ctx, live + [.global])
         let cmds = registry.commands
-            .filter { $0.modes.contains(active) && ($0.scope == .global || live.contains($0.scope)) && ($0.available?(ctx.target(for: $0.scope)) ?? true) }
+            .filter { $0.modes.contains(active) && ($0.scope == .global || live.contains($0.scope)) && ($0.available?(targets[$0.scope] ?? nil) ?? true) }
             .enumerated().sorted { (rank($0.element.scope), $0.offset) < (rank($1.element.scope), $1.offset) }.map(\.element)
         for c in cmds {
             for k in c.keysByMode[active] ?? [] where k.hasPrefix(prefix + " ") {
@@ -233,8 +234,9 @@ public final class KeyEngine {
     public func completions(_ typed: String) -> [Command] {
         guard let ctx = runner.context else { return [] }
         let live = ctx.liveScopes()
+        let targets = Self.targets(ctx, live)
         let cmds = registry.commands.filter {
-            !$0.needsArg && live.contains($0.scope) && ($0.available?(ctx.target(for: $0.scope)) ?? true)
+            !$0.needsArg && live.contains($0.scope) && ($0.available?(targets[$0.scope] ?? nil) ?? true)
         }
         let want = typed.trimmingCharacters(in: .whitespaces)
         // "<id> <argument>": the command named exactly, with what follows as its argument
@@ -244,6 +246,14 @@ public final class KeyEngine {
     }
 
     private static func text(_ c: Command) -> String { "\(c.id) \(c.title)" }
+
+    /// Each live scope's target, once: working one out can cost the page's whole row list, and a
+    /// listing asks for hundreds of commands.
+    private static func targets(_ ctx: CommandContext, _ scopes: [Scope]) -> [Scope: String?] {
+        var out: [Scope: String?] = [:]
+        for s in scopes where out[s] == nil { out[s] = .some(ctx.target(for: s)) }
+        return out
+    }
 }
 
 /// A finished key sequence as the verb it is in the mode it was typed in: the command it ran (nil

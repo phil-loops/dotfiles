@@ -157,9 +157,8 @@ struct CommandMenuView: View {
                     .frame(maxHeight: 420)
                 }
                 .frame(width: 560)
-                .background(theme.vellumRaise)
+                .background { Rectangle().fill(theme.vellumRaise).shadow(color: .black.opacity(0.4), radius: 24, y: 12) }
                 .overlay { Rectangle().stroke(theme.rule, lineWidth: 1) }
-                .shadow(color: .black.opacity(0.4), radius: 24, y: 12)
                 .padding(.top, 90)
             }
             .font(Theme.text(12.5))

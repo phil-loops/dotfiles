@@ -125,7 +125,7 @@ struct KeySheetView: View {
                 theme.vellumNight.opacity(0.7).onTapGesture { app.sheetOpen = false }
                 ScrollViewReader { proxy in
                     ScrollView {
-                        VStack(alignment: .leading, spacing: 0) {
+                        LazyVStack(alignment: .leading, spacing: 0) {
                             HStack(alignment: .firstTextBaseline, spacing: 6) {
                                 Text("Right now").foregroundStyle(theme.ink)
                                 Text("· \(m.here)").foregroundStyle(theme.inkFaint)

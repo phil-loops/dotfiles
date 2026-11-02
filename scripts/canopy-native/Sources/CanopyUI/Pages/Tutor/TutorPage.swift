@@ -96,9 +96,9 @@ struct TutorRow<Content: View>: View {
     @ViewBuilder let content: (_ on: Bool) -> Content
 
     var body: some View {
-        let focused = app.isFocused(pane)
-        let on = focused && app.selected == key
-        let inRange = focused && app.selection.count > 1 && app.selection.contains(key)
+        let marks = app.cursorMarks(pane)
+        let on = marks.on == key
+        let inRange = marks.range.count > 1 && marks.range.contains(key)
         content(on)
             .padding(.vertical, 3).padding(.horizontal, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -131,15 +131,20 @@ enum TutorScroll {
     static func id(_ pane: String, _ key: String) -> String { "\(pane)/\(key)" }
 }
 
-/// Keeps the cursor on screen for the panes drawn inside one scroll view.
+/// Keeps the cursor on screen for the panes drawn inside one scroll view. A row inside a lazy
+/// list's item (`group` names it) may not exist yet, so the item comes on screen first.
 struct FollowCursor: ViewModifier {
     @Environment(AppModel.self) private var app
     let panes: Set<String>
     let proxy: ScrollViewProxy
+    var group: (String) -> String? = { _ in nil }
     func body(content: Content) -> some View {
         content.onChange(of: "\(app.pane?.id ?? "")/\(app.selected ?? "")") { _, _ in
             guard let p = app.pane?.id, panes.contains(p), let k = app.selected else { return }
-            withAnimation(.easeOut(duration: 0.12)) { proxy.scrollTo(TutorScroll.id(p, k)) }
+            let row = TutorScroll.id(p, k)
+            guard let g = group(k) else { return withAnimation(.easeOut(duration: 0.12)) { proxy.scrollTo(row) } }
+            proxy.scrollTo(g)
+            DispatchQueue.main.async { withAnimation(.easeOut(duration: 0.12)) { proxy.scrollTo(row) } }
         }
     }
 }
@@ -217,7 +222,8 @@ struct TutorHome: View {
                 .padding(.horizontal, 28).padding(.bottom, 24)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .modifier(FollowCursor(panes: [TutorPane.due, TutorPane.topics, TutorPane.questions, TutorPane.sessions, TutorPane.pickup], proxy: proxy))
+            .modifier(FollowCursor(panes: [TutorPane.due, TutorPane.topics, TutorPane.questions, TutorPane.sessions, TutorPane.pickup], proxy: proxy,
+                                   group: TopicsSection.group))
         }
         .onAppear { t.listTerminal() }
     }
@@ -304,13 +310,19 @@ struct TopicsSection: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme
 
+    /// The topic a topics-pane row ("tp:<topic>", "tc:<topic>|<concept>") sits in: the lazy list's item.
+    static func group(_ key: String) -> String? {
+        guard key.hasPrefix("tp:") || key.hasPrefix("tc:") else { return nil }
+        return "topic:" + String(key.dropFirst(3).prefix { $0 != "|" })
+    }
+
     var body: some View {
         let t = TutorArea.state(app)
         VStack(alignment: .leading, spacing: 4) {
             Text("Topics").font(Theme.display(19)).foregroundStyle(theme.ink)
             Text("paths through one graph — the same idea met in two topics is one concept, linked as an analog")
                 .font(Theme.text(12)).foregroundStyle(theme.inkFaint).padding(.bottom, 10)
-            VStack(alignment: .leading, spacing: 14) {
+            LazyVStack(alignment: .leading, spacing: 14) {
                 ForEach(t.topicsByUpdate, id: \.id) { tp in
                     VStack(alignment: .leading, spacing: 6) {
                         TutorRow(pane: TutorPane.topics, key: "tp:\(tp.id)") { on in
@@ -338,6 +350,7 @@ struct TopicsSection: View {
                     }
                     .padding(.vertical, 10)
                     .overlay(Rectangle().stroke(theme.rule))
+                    .id("topic:\(tp.id)")
                 }
             }
             .tutorPane(TutorPane.topics)
@@ -973,10 +986,9 @@ struct TutorDrawer: View {
             }
             .modifier(FollowCursor(panes: [P], proxy: proxy))
         }
-        .background(theme.vellumRaise)
+        .background { Rectangle().fill(theme.vellumRaise).shadow(color: .black.opacity(0.45), radius: 16, x: -12) }
         .overlay(alignment: .leading) { theme.goldDeep.frame(width: 1) }
         .tutorPane(P)
-        .shadow(color: .black.opacity(0.45), radius: 16, x: -12)
     }
 }
 
