@@ -26,7 +26,7 @@ DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 KINDS = ("build", "fix", "decide", "look")
 STATES = ("open", "doing", "waiting", "done", "dropped")
 SIZES = ("S", "M", "L")
-FIELDS = ("title", "kind", "state", "area", "project", "size", "why", "waiting", "blocked_by", "links", "rank", "created", "updated")
+FIELDS = ("title", "kind", "state", "owner", "area", "project", "size", "why", "waiting", "blocked_by", "links", "rank", "created", "updated")
 
 
 def slug(title):
