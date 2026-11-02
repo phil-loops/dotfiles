@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # show [--focus] [<file.json>…] — hand files to the one Show window, each to its workspace (Forest ⌘1, Review ⌘2, Learn ⌘3, Runs ⌘4;
 # no args: bring Show to the front, or start it back on the last workspace and documents), rebuilding it when any show-app/*.swift changes. Re-showing an open file reloads it.
-# A file arrives quietly — top of its shelf, a rail badge and a notification, focus left where it was — unless Show is already
-# frontmost or --focus is given (pass it only when the user asked to see this file now); then it opens and Show comes forward.
+# Show comes forward only when Phil asked: run from his terminal, or with --focus / SHOW_FOCUS=1 (a session whose user asked to
+# see it now). From a Claude session otherwise it arrives — History (⌘Y), a rail badge, a notification — and nothing moves.
 # show --api — the API workspace (⌘5): the loops-postman console, started when it isn't up.
-# show --canopy [/v2/…] — the Canopy workspace (⌘6): the forest viewer, at a page when given one.
+# show --canopy [--focus] [/v2/…] — the Canopy workspace (⌘6): the forest viewer, at a page when given one.
+# show --status <deck | /v2/…> — whether it's waiting, opened or dismissed, from Show's event log.
 # show --build — just (re)build. show --snapshot <file.json> <out.png> [--appearance light|dark] — render the window offscreen, no window shown.
 # show --selftest — drive the app's own offscreen window through every workspace on scratch fixtures; non-zero exit on a failed step.
 # show --check-routing <file.json> — print the workspace a file opens in (and a forest's merge order). show --check-live <deck.json> — print a live deck's header, groups and compare diffs.
@@ -67,47 +68,76 @@ PLIST
   echo "$sha" > "$stamp"
 }
 
-# hand_over <focus 0|1> <file>… — --focus files are listed in focus-requests (Show opens those and comes forward); the rest
-# go over with open -g, so handing them to Show never activates it.
-hand_over() {
-  local focus="$1"
-  shift
-  if [[ "$focus" == 1 ]]; then
-    printf '%s\n' "$@" >> "$cache/focus-requests"
-    open -a "$app" "$@"
-  else
-    open -g -a "$app" "$@"
+# request <target-json>… — one inbox request per target ({"document": path} | {"canopy": route} | {"api": true}), handed to
+# Show with open -g; Show alone decides whether to come forward. The actor is a session when a Claude session runs this
+# (CLAUDECODE), else Phil; the intent is showNow for --focus or SHOW_FOCUS=1 (a session whose user asked to see it), else
+# deliver: it waits in History with a notification and a badge, and nothing moves.
+request() {
+  local intent=deliver actor=phil session="" inbox="$cache/inbox" files=() n=0 target file
+  [[ "$focus" == 1 || -n "${SHOW_FOCUS:-}" ]] && intent=showNow
+  if [[ -n "${CLAUDECODE:-}" ]]; then
+    actor=session
+    session="${CLAUDE_CODE_SESSION_ID:0:8}"
   fi
+  mkdir -p "$inbox"
+  find "$inbox" -name '*.json' -mmin +1440 -delete 2>/dev/null || true
+  for target in "$@"; do
+    n=$((n + 1))
+    file="$inbox/$(date +%s)-$$-$n.json"
+    python3 -c 'import json, sys; json.dump({"target": json.loads(sys.argv[1]), "actor": sys.argv[2], "session": sys.argv[3] or None, "intent": sys.argv[4]}, open(sys.argv[5], "w"))' \
+      "$target" "$actor" "$session" "$intent" "$file"
+    files+=("$file")
+  done
+  open -g -a "$app" "${files[@]}"
 }
+
+document() { python3 -c 'import json, sys; print(json.dumps({"document": sys.argv[1]}))' "$1"; }
+
+focus=0
 
 case "${1:-}" in
   -h|--help)
-    echo "usage: show [--focus] [<file.json>…] | show --api | show --canopy [--focus] [/v2/…] | show --build | show --snapshot <file.json> <out.png> [--appearance light|dark] | show --selftest | show --check-routing <file.json> | show --check-live <deck.json> | show --tutor [<session.json>] | show --tutor-check <session.json> | show --tutor-ask <session.json> <message>" >&2
+    echo "usage: show [--focus] [<file.json>…] | show --api | show --canopy [--focus] [/v2/…] | show --status <deck | /v2/…> | show --build | show --snapshot <file.json> <out.png> [--appearance light|dark] | show --selftest | show --check-routing <file.json> | show --check-live <deck.json> | show --tutor [<session.json>] | show --tutor-check <session.json> | show --tutor-ask <session.json> <message>" >&2
     exit 64
     ;;
   --canopy)
-    # A page a Claude session sends arrives quietly (a notification, ⌘6's badge) unless it passes --focus or SHOW_FOCUS=1;
-    # anything else (your terminal) comes forward. Each request gets its own file, so queued pages don't overwrite each other.
     shift
-    focus=0 route=""
+    route=""
     for arg in "$@"; do
       if [[ "$arg" == "--focus" ]]; then focus=1; else route="$arg"; fi
     done
-    [[ -n "${SHOW_FOCUS:-}" || -z "${CLAUDECODE:-}" ]] && focus=1
     build
-    requests="$cache/canopy-requests"
-    mkdir -p "$requests"
-    find "$requests" -name '*.json' -mtime +1 -delete 2>/dev/null || true
-    request="$requests/$(date +%s)-$$.json"
-    python3 -c 'import json, sys; json.dump({"workspace": "canopy", "route": sys.argv[1], "replyTo": sys.argv[2]}, open(sys.argv[3], "w"))' \
-      "$route" "${CLAUDE_CODE_SESSION_ID:0:8}" "$request"
-    hand_over "$focus" "$request"
+    request "$(python3 -c 'import json, sys; print(json.dumps({"canopy": sys.argv[1]}))' "$route")"
     ;;
   --api)
-    # A file naming the workspace routes there in a running Show too, where launch flags never reach.
+    shift
+    [[ "${1:-}" == "--focus" ]] && focus=1
     build
-    printf '{"workspace": "api"}\n' > "$cache/api.json"
-    open -a "$app" "$cache/api.json"
+    request '{"api": true}'
+    ;;
+  --status)
+    [[ $# -eq 2 ]] || { echo "usage: show --status <deck path | /v2/… route>" >&2; exit 64; }
+    target="$2"
+    [[ "$target" == /v2* || "$target" == canopy:* ]] || target="$(cd "$(dirname "$target")" && pwd)/$(basename "$target")"
+    python3 - "$target" "${SHOW_EVENTS:-$HOME/Library/Application Support/Show/events.jsonl}" <<'PY'
+import json, sys
+target, path = sys.argv[1], sys.argv[2]
+want = {"canopy": target.removeprefix("canopy:")} if target.startswith(("/v2", "canopy:")) else {"document": target}
+last = None
+try:
+    for line in open(path):
+        event = json.loads(line)
+        if event["target"] == want:
+            last = event
+except FileNotFoundError:
+    pass
+if last is None:
+    print("never arrived or opened")
+elif last["kind"] == "arrived":
+    print(f"waiting since {last['at']} (not opened yet)")
+else:
+    print(f"{last['kind']} {last['at']}")
+PY
     ;;
   --build)
     build
@@ -125,7 +155,6 @@ case "${1:-}" in
     ;;
   --tutor)
     shift
-    focus=0
     [[ "${1:-}" == "--focus" ]] && { focus=1; shift; }
     if [[ $# -ge 1 ]]; then
       session="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
@@ -139,7 +168,7 @@ case "${1:-}" in
     python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d.get("mode", d.get("kind")) == "tutor" and d["title"] and isinstance(d["rungs"], list)' "$session" \
       || { echo "show: $session is not a tutor session (needs mode \"tutor\" + title + rungs)" >&2; exit 65; }
     build
-    hand_over "$focus" "$session"
+    request "$(document "$session")"
     ;;
   --check-routing)
     [[ $# -eq 2 ]] || { echo "usage: show --check-routing <file.json>" >&2; exit 64; }
@@ -162,7 +191,6 @@ case "${1:-}" in
     "$app/Contents/MacOS/Show" --tutor-check "$2"
     ;;
   *)
-    focus=0
     args=()
     for arg in "$@"; do
       if [[ "$arg" == "--focus" ]]; then focus=1; else args+=("$arg"); fi
@@ -190,6 +218,8 @@ else:
       decks+=("$deck")
     done
     build
-    hand_over "$focus" "${decks[@]}"
+    targets=()
+    for deck in "${decks[@]}"; do targets+=("$(document "$deck")"); done
+    request "${targets[@]}"
     ;;
 esac

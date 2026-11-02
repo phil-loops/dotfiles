@@ -78,10 +78,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     var watcher: Timer?
     var signature = ""
     let launchedBuild = modificationDate(buildStamp)
-    /// Files macOS asked to open before the window existed (a launch by opening a file can do that);
-    /// opened once launching finishes. nil from then on.
-    private var openedEarly: [String]? = []
-    private var focusedEarly = Set<String>()
+    /// Requests that came in before the window existed (a launch by opening a file can do that);
+    /// handled once launching finishes. nil from then on.
+    private var openedEarly: [ShowRequest]? = []
 
     init(launchPaths: [String], snapshotPath: String? = nil) {
         self.launchPaths = launchPaths
@@ -135,19 +134,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             guard let self, self.shell != nil else { return }
             self.refreshLibrary(force: true)
         }
-        ArrivalNotices.shared.onOpen = { [weak self] path in
-            self?.openPath(path)
-            NSApp.activate(ignoringOtherApps: true)
+        ArrivalNotices.shared.onOpen = { [weak self] target in
+            self?.handle(.phil(target))
+        }
+        workspaces[.canopy]?.canopy?.onNavigate = { route in
+            showEvents.append(ShowEvent(kind: .opened, target: .canopy(route), workspace: .canopy, title: canopyTitle(route)))
         }
         refreshLibrary(force: true)
         restore()
         updateTitle()
-        let early = (openedEarly ?? []).map(canonicalPath)
+        let early = openedEarly ?? []
         openedEarly = nil
-        let focus = focusedEarly.union(takeFocusRequests())
-        let quiet = early.filter { arrivesQuietly($0, focus: focus) }
-        let loud = early.filter { !quiet.contains($0) }
-        (launchPaths + loud).forEach(openPath)
+        let loud = early.filter(comesForward)
+        launchPaths.forEach(openPath)
+        loud.forEach { open($0.target) }
         if launchPaths.isEmpty, loud.isEmpty, snapshotPath == nil, selfTest == nil, workspaces.values.allSatisfy({ $0.current == nil }) {
             openNewest()
         }
@@ -173,15 +173,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         if !background {
             NSApp.activate(ignoringOtherApps: true)
         }
-        quiet.forEach(arrive)
+        early.filter { !comesForward($0) }.forEach(arrive)
         refreshLibrary(force: true)
         watcher = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.stayCurrent() }
     }
 
-    /// Reopens each workspace's last document, so a relaunch into a new build comes back where it was.
+    /// Reopens each workspace's last document from the event log, so a relaunch into a new build comes back where it was.
     private func restore() {
         for (workspace, controller) in workspaces {
-            if let path = prefs.string(forKey: "workspace.\(workspace.rawValue).open"), FileManager.default.fileExists(atPath: path),
+            if case .document(let path)? = showEvents.state.current[workspace], FileManager.default.fileExists(atPath: path),
                Workspace.route(path).workspace == workspace {
                 controller.open(path)
             } else {
@@ -211,7 +211,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         for entry in entries where entry.state == .waiting {
             counts[entry.workspace, default: 0] += 1
         }
-        counts[.canopy] = CanopyArrivals.pending.count
+        counts[.canopy] = showEvents.state.waiting.filter { $0.workspace == .canopy }.count
         shell.setBadges(counts)
     }
 
@@ -230,32 +230,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         prefs.set(active.rawValue, forKey: "workspace.active")
     }
 
-    /// A `canopy://` link as the file `show --canopy` hands over: the Canopy workspace at that address, brought forward.
-    private func canopyRequest(_ link: URL) -> URL? {
-        let file = URL(fileURLWithPath: (Bundle.main.bundlePath as NSString).deletingLastPathComponent).appendingPathComponent("canopy.json")
-        guard let data = try? JSONSerialization.data(withJSONObject: ["workspace": "canopy", "route": link.absoluteString]),
-              (try? data.write(to: file, options: .atomic)) != nil else { return nil }
-        return file
-    }
-
-    /// `show <file>`: while Show is frontmost, or for `--focus`, the file opens in its workspace and Show comes forward;
-    /// otherwise it arrives quietly (see `arrive`).
+    /// Every door into Show lands here: a launcher's inbox file carries its own request; a canopy:// link or any other file
+    /// (Finder, `open`) is Phil's own and comes forward.
     func application(_ application: NSApplication, open urls: [URL]) {
-        let links = urls.filter { $0.scheme == "canopy" }.compactMap(canopyRequest)
-        let urls = urls.filter { $0.scheme != "canopy" } + links
-        let focus = takeFocusRequests().union(links.map { canonicalPath($0.path) })
+        let requests = urls.compactMap { url -> ShowRequest? in
+            if url.scheme == "canopy" {
+                return .phil(Target(canopyLink: url))
+            }
+            return takeInboxRequest(url.path) ?? .phil(.document(canonicalPath(url.path)))
+        }
         if openedEarly != nil {
-            openedEarly?.append(contentsOf: urls.map(\.path))
-            focusedEarly.formUnion(focus)
+            openedEarly?.append(contentsOf: requests)
             return
         }
-        let paths = urls.map { canonicalPath($0.path) }
-        let quiet = NSApp.isActive ? [] : paths.filter { arrivesQuietly($0, focus: focus) }
-        quiet.forEach(arrive)
-        let loud = paths.filter { !quiet.contains($0) }
-        guard !loud.isEmpty else { return }
-        loud.forEach(openPath)
-        NSApp.activate(ignoringOtherApps: true)
+        requests.forEach(handle)
+    }
+
+    /// Puts `target` in front: its workspace, opened there.
+    func open(_ target: Target) {
+        switch target {
+        case .document(let path):
+            openPath(path)
+        case .canopy(let route):
+            switchTo(.canopy)
+            workspaces[.canopy]?.canopy?.start(route: route.isEmpty ? nil : route)
+        case .api:
+            switchTo(.api)
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -297,16 +298,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
     }
 
-    /// Brings a workspace forward in the same window: its view swaps in, nothing else moves. Canopy goes to the newest page
-    /// a session sent while you were elsewhere.
+    /// Brings a workspace forward in the same window: its view swaps in, nothing else moves.
     func switchTo(_ workspace: Workspace) {
         if snapshotPath == nil && selfTest == nil {
             workspaces[workspace]?.console?.start()
-            if let canopy = workspaces[workspace]?.canopy {
-                let waiting = CanopyArrivals.take()
-                canopy.start(route: waiting.flatMap { $0.isEmpty ? nil : $0 })
-                if waiting != nil { refreshLibrary(force: true) }
-            }
+            workspaces[workspace]?.canopy?.start()
         }
         guard workspace != active else { return }
         shell.hideFinder()
@@ -374,24 +370,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             return
         }
         controller.rememberFocus(in: window)
-        shell.showFinder(entries: ShowHistory.entries(), placeholder: "History", searchesDetail: true) { [weak self] entry in
-            self?.openHistory(entry.path)
+        shell.showFinder(entries: historyEntries(showEvents), placeholder: "History", searchesDetail: true) { [weak self] entry in
+            self?.openHistory(Target(key: entry.path))
         }
     }
 
-    private func openHistory(_ target: String) {
-        if target.hasPrefix("canopy:") {
-            let route = String(target.dropFirst("canopy:".count))
-            CanopyArrivals.remove(route)
-            switchTo(.canopy)
-            workspaces[.canopy]?.canopy?.start(route: route.isEmpty ? nil : route)
+    private func openHistory(_ target: Target) {
+        if case .document(let path) = target, !FileManager.default.fileExists(atPath: path) {
+            workspaces[active]?.say("\((path as NSString).lastPathComponent) is gone (archived or removed)")
             return
         }
-        guard FileManager.default.fileExists(atPath: target) else {
-            workspaces[active]?.say("\((target as NSString).lastPathComponent) is gone (archived or removed)")
-            return
-        }
-        openPath(target)
+        open(target)
     }
 
     @objc func archiveSelected(_ sender: Any?) {

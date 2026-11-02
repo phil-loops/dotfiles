@@ -485,7 +485,7 @@ func sidecarPaths(_ path: String) -> [String] {
 
 /// The newest of the file, its sidecars, and when Show last opened it or it last arrived.
 func touchedDate(_ path: String) -> Date {
-    let marks = ["opened.", "arrived."].compactMap { prefs.object(forKey: $0 + path) as? Date }
+    let marks = [showEvents.state.touched[.document(path)]].compactMap { $0 }
     return ([path] + sidecarPaths(path)).compactMap(modificationDate).reduce(marks.max() ?? .distantPast) { max($0, $1) }
 }
 
@@ -704,7 +704,6 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
     let workspace: Workspace
     private(set) var current: String?
     private(set) var decks: [String: DeckController] = [:]
-    private(set) var back: [String] = []
     private(set) var entries: [ShelfEntry] = []
     private var rows: [ShelfRow] = []
     private var doneExpanded = false
@@ -730,7 +729,6 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
         super.init(nibName: nil, bundle: nil)
         tutor?.onTitleChange = { [weak self] in self?.onTitleChange?() }
         tutor?.onStartRetest = { [weak self] concept in self?.startTutor(.retest(concept: concept)) }
-        back = prefs.stringArray(forKey: "workspace.\(workspace.rawValue).back") ?? []
     }
 
     required init?(coder: NSCoder) { fatalError("unused") }
@@ -818,12 +816,9 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
             return
         }
         if let canopy {
-            let route = CanopyRequest(path: path).route
-            route.map(CanopyArrivals.remove)
-            canopy.start(route: route)
+            canopy.start()
             return
         }
-        prefs.set(Date(), forKey: "opened." + path)
         if workspace == .runs {
             recordLiveRun(path)
         }
@@ -833,13 +828,7 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
         }
         currentDeck?.saveNote()
         tutor?.saveDrafts()
-        if remember, let current, back.last != current {
-            back.append(current)
-            back = Array(back.suffix(50))
-            prefs.set(back, forKey: "workspace.\(workspace.rawValue).back")
-        }
         current = path
-        prefs.set(path, forKey: "workspace.\(workspace.rawValue).open")
         switch workspace {
         case .learn:
             tutor?.show(path: path)
@@ -867,22 +856,26 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
             controller.settleColumns()
             controller.window?.makeFirstResponder(controller.table)
         }
-        ShowHistory.record(HistoryRecord(kind: .opened, target: path, workspace: workspace, title: documentTitle, topic: nil))
+        showEvents.append(ShowEvent(kind: .opened, target: .document(path), workspace: workspace, title: documentTitle, back: remember ? nil : true))
         syncShelfSelection()
         onTitleChange?()
         onLibraryChange?()
     }
 
+    /// The documents ⌘[ walks back through, newest last: the event log's back stack for this workspace.
+    var back: [String] {
+        (showEvents.state.back[workspace] ?? []).compactMap { target in
+            guard case .document(let path) = target else { return nil }
+            return path
+        }
+    }
+
     /// ⌘[: back to the document open before this one, skipping any that were archived or removed; pressed again, the one before that.
     func goBack() {
-        while let previous = back.popLast() {
-            prefs.set(back, forKey: "workspace.\(workspace.rawValue).back")
-            if previous != current, FileManager.default.fileExists(atPath: previous) {
-                open(previous, remember: false)
-                return
-            }
+        guard let previous = back.last(where: { $0 != current && FileManager.default.fileExists(atPath: $0) }) else {
+            return say("Nothing to go back to in \(workspace.name)")
         }
-        say("Nothing to go back to in \(workspace.name)")
+        open(previous, remember: false)
     }
 
     private func loadOrComplain(_ path: String) -> Deck? {
@@ -1166,11 +1159,9 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
             return
         }
         decks[entry.path] = nil
-        back.removeAll { $0 == entry.path }
-        prefs.set(back, forKey: "workspace.\(workspace.rawValue).back")
+        showEvents.append(ShowEvent(kind: .dismissed, target: .document(entry.path), workspace: workspace, title: entry.title))
         if wasOpen {
             current = nil
-            prefs.removeObject(forKey: "workspace.\(workspace.rawValue).open")
             if back.contains(where: { FileManager.default.fileExists(atPath: $0) }) {
                 goBack()
             } else {

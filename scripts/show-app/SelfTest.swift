@@ -42,7 +42,8 @@ func prepareSelfTest(_ mode: SelfTestMode) {
     setenv("SHOW_LIVE_RUNS", (scratch as NSString).appendingPathComponent("live-runs.json"), 1)
     setenv("SHOW_CLAUDE", (scratch as NSString).appendingPathComponent("claude-stub"), 1)
     setenv("SHOW_CLAUDE_SAY", (scratch as NSString).appendingPathComponent("claude-say-stub"), 1)
-    setenv("SHOW_FOCUS_REQUESTS", (scratch as NSString).appendingPathComponent("focus-requests"), 1)
+    setenv("SHOW_EVENTS", (scratch as NSString).appendingPathComponent("events.jsonl"), 1)
+    setenv("SHOW_INBOX", (scratch as NSString).appendingPathComponent("inbox"), 1)
     setenv("LEARNING_GRAPH", (scratch as NSString).appendingPathComponent("graph.json"), 1)
     setenv("LEARNING_MEMORY", "0", 1)
     if case .run = mode {
@@ -301,6 +302,7 @@ final class SelfTestDriver {
         check("…and the previous deck comes back", front.current == alpha, front.current ?? "-")
 
         arrivals()
+        fold()
 
         command("3", code: 20)
         app.focus(front.shelf)
@@ -339,29 +341,36 @@ final class SelfTestDriver {
               walked.map { ($0 as NSString).lastPathComponent }.joined(separator: " → "))
 
         command("1", code: 18)
-        app.application(NSApp, open: [URL(fileURLWithPath: quiet)])
+        app.application(NSApp, open: [inbox(.document(quiet))])
         settle()
         let review = app.workspaces[.review]!
         let waiting = review.entries.filter { $0.state == .waiting }.sorted { $0.touched > $1.touched }
-        check("a quiet arrival switches nothing and opens nothing", app.active == .forest && review.current == alpha,
+        check("a session's deck arrives: nothing switches or opens", app.active == .forest && review.current == alpha,
               "front \(app.active.name), Review open: \(review.current ?? "-")")
         check("…and lands at the top of Waiting on you", waiting.first?.path == quiet, waiting.map(\.title).joined(separator: ", "))
+        check("…its inbox file is used up", ((try? FileManager.default.contentsOfDirectory(atPath: inboxDirectory)) ?? []).isEmpty)
         for _ in 0..<40 where review.entries.first(where: { $0.path == quiet })?.topic == nil { settle(0.1) }
         check("…labelled with its session's topic", review.entries.first { $0.path == quiet }?.topic == "notice-forest",
               review.entries.first { $0.path == quiet }?.topic ?? "no topic")
 
-        try? (focused + "\n").write(toFile: focusRequestsPath, atomically: true, encoding: .utf8)
+        app.application(NSApp, open: [inbox(.document(focused), intent: .showNow)])
+        settle()
+        check("a session's showNow request opens it in its workspace", app.active == .review && front.current == focused,
+              "front \(app.active.name), open: \(front.current ?? "-")")
+        command("[", code: 33)
+        command("1", code: 18)
         app.application(NSApp, open: [URL(fileURLWithPath: focused)])
         settle()
-        check("a --focus request opens it in its workspace", app.active == .review && front.current == focused,
+        check("a file Phil opens himself comes forward", app.active == .review && front.current == focused,
               "front \(app.active.name), open: \(front.current ?? "-")")
 
-        let canopyRequest = at("canopy-request.json")
-        try? #"{"workspace": "canopy", "route": "/v2/p/loops/zeta-forest", "replyTo": ""}"#.write(toFile: canopyRequest, atomically: true, encoding: .utf8)
-        app.application(NSApp, open: [URL(fileURLWithPath: canopyRequest)])
+        app.application(NSApp, open: [inbox(.canopy("/v2/p/loops/zeta-forest"))])
         settle()
-        check("a session's canopy page waits instead of switching", app.active == .review && CanopyArrivals.pending == ["/v2/p/loops/zeta-forest"],
-              "front \(app.active.name), waiting \(CanopyArrivals.pending)")
+        check("a session's canopy page waits instead of switching", app.active == .review && showEvents.state.waiting.contains(.canopy("/v2/p/loops/zeta-forest")),
+              "front \(app.active.name), waiting \(showEvents.state.waiting.map(\.key))")
+        command("6", code: 22)
+        check("⌘6 stays where it was: the page still waits", showEvents.state.waiting.contains(.canopy("/v2/p/loops/zeta-forest")))
+        command("2", code: 19)
 
         command("y", code: 16)
         let history = app.shell.finder?.matches ?? []
@@ -371,10 +380,34 @@ final class SelfTestDriver {
               && history.contains { $0.path == quiet && $0.state == .waiting })
         type("epsilon")
         enter()
-        check("↵ on a History row opens it", app.active == .review && front.current == quiet && app.shell.finder == nil,
-              "front \(app.active.name), open: \(front.current ?? "-")")
+        check("↵ on a History row opens it, and it stops waiting", app.active == .review && front.current == quiet && app.shell.finder == nil
+              && !showEvents.state.waiting.contains(.document(quiet)), "front \(app.active.name), open: \(front.current ?? "-")")
+        check("the log replays to the state the app holds", ShowState.fold(showEvents.events) == showEvents.state)
         command("[", code: 33)
         command("[", code: 33)
+    }
+
+    /// A launcher's request, written to the inbox the way `show` writes it.
+    func inbox(_ target: Target, intent: ShowRequest.Intent = .deliver) -> URL {
+        let file = (inboxDirectory as NSString).appendingPathComponent("\(UUID().uuidString).json")
+        try? FileManager.default.createDirectory(atPath: inboxDirectory, withIntermediateDirectories: true)
+        let request = ShowRequest(target: target, actor: .session, session: nil, intent: intent)
+        try? JSONEncoder().encode(request).write(to: URL(fileURLWithPath: file))
+        return URL(fileURLWithPath: file)
+    }
+
+    /// The fold alone, no window: back stacks, waiting, dismissal.
+    func fold() {
+        let a = Target.document("/a.json"), b = Target.document("/b.json"), c = Target.document("/c.json")
+        func opened(_ t: Target, back: Bool? = nil) -> ShowEvent { ShowEvent(kind: .opened, target: t, workspace: .review, title: "", back: back) }
+        let walk = ShowState.fold([opened(a), opened(b), opened(c), opened(b, back: true)])
+        check("fold: ⌘[ steps down the back stack", walk.current[.review] == b && walk.back[.review] == [a], "\(walk.back[.review] ?? [])")
+        let arrived = ShowState.fold([ShowEvent(kind: .arrived, target: c, workspace: .review, title: ""), opened(a)])
+        check("fold: an arrival waits until it's opened", arrived.waiting == [c] && ShowState.fold([ShowEvent(kind: .arrived, target: c, workspace: .review, title: ""), opened(c)]).waiting.isEmpty)
+        let dismissed = ShowState.fold([opened(a), opened(b), ShowEvent(kind: .dismissed, target: a, workspace: .review, title: "")])
+        check("fold: a dismissed document leaves the back stack", dismissed.back[.review] == [] && dismissed.current[.review] == b)
+        let canopy = ShowState.fold([opened(a), ShowEvent(kind: .opened, target: .canopy("/v2"), workspace: .canopy, title: "")])
+        check("fold: canopy pages never enter a back stack", canopy.back[.canopy] ?? [] == [])
     }
 
     /// Starts a fresh Show on the same scratch library and prefs, which checks what it restored.

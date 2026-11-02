@@ -69,6 +69,9 @@ if let mode = SelfTestMode(arguments) {
     let suite = "com.philbrockman.show.snapshot"
     UserDefaults.standard.removePersistentDomain(forName: suite)
     prefs = UserDefaults(suiteName: suite) ?? .standard
+    let events = (NSTemporaryDirectory() as NSString).appendingPathComponent("show-snapshot-events-\(ProcessInfo.processInfo.processIdentifier).jsonl")
+    try? FileManager.default.removeItem(atPath: events)
+    setenv("SHOW_EVENTS", events, 1)
     app.setActivationPolicy(.prohibited)
     delegate = AppDelegate(launchPaths: deckPaths, snapshotPath: snapshotPath)
 } else {

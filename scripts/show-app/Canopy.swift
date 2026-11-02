@@ -7,6 +7,8 @@ import CanopyUI
 final class CanopyHost: NSViewController {
     static let repo = "~/coding/loops"
     var isActive: () -> Bool = { false }
+    /// Every page canopy goes to, by any key or link: its /v2/… address.
+    var onNavigate: ((String) -> Void)?
     private var embed: CanopyEmbed?
     private var pendingRoute: String?
     private var starting = false
@@ -28,10 +30,7 @@ final class CanopyHost: NSViewController {
     /// Brings canopy up on its first visit, and goes to `route` (a /v2/… path) once it's there.
     func start(route: String? = nil) {
         _ = view
-        if let route {
-            pendingRoute = route
-            ShowHistory.record(HistoryRecord(kind: .opened, target: "canopy:" + route, workspace: .canopy, title: canopyTitle(route), topic: nil))
-        }
+        if let route { pendingRoute = route }
         if let embed {
             if let r = pendingRoute { embed.navigate(r); pendingRoute = nil }
             view.window?.makeFirstResponder(embed.view)
@@ -72,7 +71,8 @@ final class CanopyHost: NSViewController {
 
     private func attach() {
         starting = false
-        guard let embed = CanopyEmbed(repo: Self.repo, route: pendingRoute, isActive: { [weak self] in self?.isActive() ?? false }) else {
+        guard let embed = CanopyEmbed(repo: Self.repo, route: pendingRoute, isActive: { [weak self] in self?.isActive() ?? false },
+                                      onNavigate: { [weak self] route in self?.onNavigate?(route) }) else {
             return say("The forest viewer stopped answering. ⌘R tries again.")
         }
         pendingRoute = nil
