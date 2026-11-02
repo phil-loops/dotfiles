@@ -205,7 +205,7 @@ enum DiffCommands {
         r.register(Command(id: "review.tab", title: "Cycle the tabs", scope: .review, verb: .face, label: "tab",
                            local: { _, _ in pg.tab = tabs[((tabs.firstIndex(of: pg.tab) ?? 2) + 1) % tabs.count] }))
         for (i, t) in tabs.enumerated() {
-            r.register(Command(id: "review.tab.\(t)", title: "Show the \(t) tab", scope: .review, verb: .nth(i + 1), label: t,
+            r.register(Command(id: "review.tab.\(t)", title: t == "files" ? "Show the code (the files tab)" : "Show the \(t) tab", scope: .review, verb: .nth(i + 1), label: t,
                                local: { _, _ in pg.tab = t }))
         }
         r.register(Command(id: "review.outdated", title: "Show or hide outdated conversations", scope: .review, leader: LocalKey(",o"), label: "outdated",
