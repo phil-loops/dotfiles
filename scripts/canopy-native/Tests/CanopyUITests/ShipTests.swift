@@ -287,6 +287,32 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
         #expect(opened?.absoluteString.hasSuffix("/loops/preview-wait?branch=add-hankles-limited-label") == true)
     }
 
+    @Test func withNoPRgoToThePROpensGitHubsCompareFormDirectly() async throws {
+        let (a, p) = try app { s in
+            var ents = s["entities"]!.object!; var prs = ents["pr"]!.object!
+            prs[Self.branch] = nil; ents["pr"] = .object(prs); s["entities"] = .object(ents)
+        }
+        var opened: URL?
+        ShipState.of(a).openURL = { opened = $0 }
+        let github = "https://github.com/loops-so/loops/compare/main...add-hankles-limited-label?expand=1"
+        ShipStub.answer(p, "GET", "/loops/packet-compare", "{\"ok\": true, \"url\": \"\(github)\"}")
+        a.runner.dispatch("branch.pr", via: .key, target: Self.branch)
+        await until("the compare form") { opened != nil }
+        #expect(opened?.absoluteString == github)
+    }
+
+    @Test func withNoPRAndNoAnswerGoToThePRFallsBackToTheServersRedirect() async throws {
+        let (a, _) = try app { s in
+            var ents = s["entities"]!.object!; var prs = ents["pr"]!.object!
+            prs[Self.branch] = nil; ents["pr"] = .object(prs); s["entities"] = .object(ents)
+        }
+        var opened: URL?
+        ShipState.of(a).openURL = { opened = $0 }
+        a.runner.dispatch("branch.pr", via: .key, target: Self.branch)
+        await until("the redirect") { opened != nil }
+        #expect(opened?.path == "/loops/packet-compare" && opened?.query?.contains("json") == false)
+    }
+
     // ── the history and the words ──
 
     @Test func historyGroupsCommitsByWhetherTheyreShared() {

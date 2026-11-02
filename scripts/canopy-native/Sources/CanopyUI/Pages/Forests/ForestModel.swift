@@ -267,9 +267,13 @@ public final class ForestModel {
     }
 
     /// model.ts compareUrl: GitHub's compare-and-create form for a branch with no PR yet, its body
-    /// prefilled by GET /packet-compare (a 302 — opened in the browser, never fetched), on `v.base`.
-    public func compareURL(_ v: BranchView) -> URL {
-        transport.url(transport.atRepo(v.b.repo, "/packet-compare?branch=\(v.b.name.uriComponent)&base=\(v.base.uriComponent)"))
+    /// prefilled by GET /packet-compare (a 302 to it), on `v.base`. `branch.pr` asks the server for
+    /// GitHub's URL first and opens this only when that fails.
+    public func compareURL(_ v: BranchView) -> URL { transport.url(comparePath(v)) }
+
+    /// The server path that builds the compare form; `&json=1` answers with GitHub's URL instead of a redirect.
+    public func comparePath(_ v: BranchView) -> String {
+        transport.atRepo(v.b.repo, "/packet-compare?branch=\(v.b.name.uriComponent)&base=\(v.base.uriComponent)")
     }
 }
 
