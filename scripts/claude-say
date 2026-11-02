@@ -20,6 +20,9 @@ Empty, --list, ambiguous, or no-match → prints the addressable sessions.
 for machine callers (the viewer's ✦ session picker).
 --check (with <who>, no message) → resolve <who> exactly as a send would, print the target,
 and exit 0 only if a note would be delivered; sends nothing (Show uses it to pick a reply path).
+--topic <session-id prefix> → print what that session is working on (its stack-project, else its
+branch, else its worktree's name) and exit 0; exit 1 when no record matches. Ended sessions whose
+record is still on disk count too (Show labels each deck with the topic of the session that sent it).
 
 A live pid is necessary but NOT sufficient for reachability: a session idle for a
 day still has a healthy process, and a note typed into its pane just sits unread.
@@ -106,6 +109,33 @@ def area(r):
     return r.get("branch", "") or "—"
 
 
+def topic(r):
+    """What a session is working on, untyped: its branch's stack-project, else the branch (main/master
+    don't count), else the worktree's directory name."""
+    top = r.get("repo") or r.get("cwd") or ""
+    where = r.get("cwd") or top
+    branch = ""
+    if where and os.path.isdir(where):
+        branch = sh(["git", "-C", where, "branch", "--show-current"]).strip()
+    branch = branch or r.get("branch") or ""
+    if branch in ("main", "master"):
+        branch = ""
+    if branch:
+        project = sh(["git", "-C", where, "config", "branch.%s.stack-project" % branch]).strip() if where else ""
+        return project or branch
+    return os.path.basename(top.rstrip("/"))
+
+
+def all_records():
+    out = []
+    for f in glob.glob(os.path.join(DIR, "*.json")):
+        try:
+            out.append(json.load(open(f)))
+        except Exception:
+            pass
+    return out
+
+
 def pid_under_pane(pid, pane):
     """Is the session's process a descendant of the pane's own shell?"""
     if not pid or not pane:
@@ -158,14 +188,27 @@ def show(sessions, stream=sys.stdout, me=None):
         tail = "  (you)" if r.get("pid") == me else ""
         if idle >= STALE_WINDOW:
             tail += "  ⚠ STALE — likely unattended"
-        print(("  %-10s %-28s %-18s idle %-5s%s" % (
-            r.get("session_id", "")[:8], area(r), r.get("repo_name", ""), ago(idle), tail)).rstrip(), file=stream)
+        print(("  %-10s %-24s %-28s %-18s idle %-5s%s" % (
+            r.get("session_id", "")[:8], topic(r)[:24], area(r), r.get("repo_name", ""), ago(idle), tail)).rstrip(), file=stream)
 
 
 def main():
     flags = {a for a in sys.argv[1:] if a.startswith("--")}
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     send = not ({"--draft", "--no-send"} & flags)   # submit by default; --draft keeps draft-only
+
+    if "--topic" in flags:
+        if len(args) != 1 or len(args[0]) < 4:
+            print("usage: claude-say --topic <session-id prefix, 4+ chars>", file=sys.stderr)
+            return 2
+        hits = [r for r in all_records() if r.get("session_id", "").startswith(args[0])]
+        if not hits:
+            return 1
+        name = topic(max(hits, key=lambda r: (pid_alive(r.get("pid"), r.get("start_time", "")), r.get("last_active") or 0)))
+        if not name:
+            return 1
+        print(name)
+        return 0
 
     me = self_pid()
     everyone = live_sessions()
@@ -184,6 +227,7 @@ def main():
                 "repo_name": r.get("repo_name", ""),
                 "branch": r.get("branch", "") or "",
                 "area": area(r),
+                "topic": topic(r),
                 "pane": pane,
                 "addr": addr,
                 "idle_s": idle_of(r),
