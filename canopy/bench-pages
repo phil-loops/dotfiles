@@ -1,0 +1,7 @@
+# Pages canopy-benchwatch benches after each canopy commit (one /v2 route per line).
+# Keep a big review here: a slowdown that scales with the diff only shows on one.
+/v2
+/v2/todo
+/v2/p/loops/hankles-limited-label
+/v2/b/loops/review/pr-10646
+/v2/b/loops/add-hankles-limited-label

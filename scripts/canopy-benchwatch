@@ -1,0 +1,224 @@
+#!/usr/bin/env python3
+"""canopy-benchwatch — after a commit touches canopy, bench it, and say which key got slow.
+
+  canopy-benchwatch            watch forever (the launchd agent com.philbrockman.canopy-benchwatch runs this)
+  canopy-benchwatch --once     bench HEAD now, whatever was benched before
+  canopy-benchwatch --status   the recent runs
+
+Polls ~/.dotfiles HEAD. When it has moved past the last benched commit and the move touched
+scripts/canopy-native, it waits for HEAD to sit still (sessions land commits in bursts) and for the
+machine to be quiet (a loaded box times everything slow), builds that commit in its own worktree
+(never the shared working tree, which holds other sessions' edits), and runs
+`canopy --bench --quick --budget BUDGET` against the live viewer server on the pages in
+~/.dotfiles/canopy/bench-pages. A page that goes over is benched again; only keys over in both runs
+count. A red run, or a different set of slow keys than last time, arrives in Show as the live deck
+~/.cache/canopy-native/benchwatch/canopy-bench.json (Runs, ⌘4) naming the keys, the pages and the
+commits since the last green run. A green run updates the deck without a notification.
+
+Journal: ~/.cache/canopy-native/benchwatch/journal.tsv (at, sha, result, worst ms, note); the
+newest KEEP runs' output in runs/.
+"""
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+import urllib.request
+
+DOTFILES = os.path.expanduser("~/.dotfiles")
+LOOPS = os.path.expanduser("~/coding/loops")
+WATCHED = ["scripts/canopy-native/Sources", "scripts/canopy-native/Package.swift"]
+HOME = os.path.join(os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache")), "canopy-native", "benchwatch")
+WT = os.path.join(HOME, "wt")
+RUNS = os.path.join(HOME, "runs")
+STATE = os.path.join(HOME, "state.json")
+JOURNAL = os.path.join(HOME, "journal.tsv")
+DECK = os.path.join(HOME, "canopy-bench.json")
+PAGES = os.path.join(DOTFILES, "canopy", "bench-pages")
+BUDGET = float(os.environ.get("CANOPY_BENCHWATCH_BUDGET", "100"))
+POLL = 30
+STILL = 60
+QUIET_LOAD = (os.cpu_count() or 8) * 0.6
+KEEP = 30
+HIT = re.compile(r"^\s+(\d+)ms\s+(\S+)\s+(.+?)\s{2,}.*?(/v2\S*)")
+
+
+def git(*args, cwd=DOTFILES):
+    return subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True).stdout.strip()
+
+
+def load_state():
+    try:
+        return json.load(open(STATE))
+    except (OSError, ValueError):
+        return {}
+
+
+def save_state(s):
+    tmp = STATE + ".tmp"
+    json.dump(s, open(tmp, "w"), indent=1)
+    os.replace(tmp, STATE)
+
+
+def touches_canopy(a, b):
+    return not a or bool(git("diff", "--name-only", f"{a}..{b}", "--", *WATCHED))
+
+
+def server_port():
+    port = subprocess.run(["stack-review-port"], cwd=LOOPS, capture_output=True, text=True).stdout.strip()
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/state", timeout=5) as r:
+            return port if r.status == 200 else None
+    except (OSError, ValueError):
+        return None
+
+
+def pages():
+    try:
+        lines = [l.split("#")[0].strip() for l in open(PAGES)]
+    except OSError:
+        return []
+    return [l for l in lines if l.startswith("/v2")]
+
+
+def build(sha, log):
+    if not os.path.isdir(WT):
+        subprocess.run(["git", "-C", DOTFILES, "worktree", "add", "-q", "--detach", WT, sha], stdout=log, stderr=log)
+    subprocess.run(["git", "-C", WT, "checkout", "-q", "--detach", sha], stdout=log, stderr=log, check=True)
+    pkg = os.path.join(WT, "scripts", "canopy-native")
+    subprocess.run(["heavy-turn", "--class", "canopy-bench", "--batch", "--",
+                    "swift", "build", "-c", "release", "--product", "Canopy"], cwd=pkg, stdout=log, stderr=log, check=True)
+    out = subprocess.run(["swift", "build", "-c", "release", "--show-bin-path"], cwd=pkg, capture_output=True, text=True).stdout.strip()
+    return os.path.join(out, "Canopy")
+
+
+def bench(binary, port, routes, log):
+    args = [binary, "--port", port, "--repo", LOOPS, "--bench", "--quick", "--budget", str(int(BUDGET))]
+    for r in routes:
+        args += ["--page", r]
+    out = subprocess.run(args, capture_output=True, text=True, timeout=1800).stdout
+    log.write(out)
+    log.flush()
+    hits = []
+    for line in out.splitlines():
+        m = HIT.match(line)
+        if m:
+            hits.append({"ms": int(m.group(1)), "pass": m.group(2), "step": m.group(3).strip(), "page": m.group(4)})
+    return out, hits
+
+
+def wait_quiet():
+    for _ in range(60):
+        if os.getloadavg()[0] <= QUIET_LOAD:
+            return True
+        time.sleep(30)
+    return False
+
+
+def journal(sha, result, worst, note):
+    with open(JOURNAL, "a") as j:
+        j.write("\t".join([time.strftime("%Y-%m-%dT%H:%M:%S"), sha[:10], result, str(worst), note]) + "\n")
+
+
+def deck(state, sha, result, hits, note):
+    since = state.get("green")
+    log = git("log", "--format=%h %s", f"{since}..{sha}", "--", *WATCHED) if since else git("log", "-1", "--format=%h %s", sha)
+    rows = [[str(h["ms"]), h["step"], h["pass"], h["page"]] for h in hits]
+    body = (f"**{len(hits)} key{'s' if len(hits) != 1 else ''} over {int(BUDGET)}ms** at `{sha[:10]}`, in two runs each."
+            if hits else f"Every key under {int(BUDGET)}ms at `{sha[:10]}`.")
+    if note:
+        body += f"\n\n{note}"
+    if hits and log:
+        body += "\n\nCommits to canopy since the last green run:\n\n" + "\n".join(f"- `{l[:10]}` {l[11:]}" for l in log.splitlines()[:20])
+    body += f"\n\nRe-run by hand: `canopy --bench --quick --page …` (pages in `{PAGES.replace(os.path.expanduser('~'), '~')}`)."
+    sec = {"id": "latest", "title": "Slow keys" if hits else "All keys fast", "body": body}
+    if rows:
+        sec["tables"] = [{"title": "over budget", "columns": ["ms", "key", "pass", "page"], "rows": rows}]
+    d = {"title": "canopy bench", "mode": "live",
+         "status": {"state": "failed" if result == "red" else "done", "done": 1, "total": 1,
+                    "current": f"{len(hits)} slow key(s) at {sha[:10]}" if hits else f"green at {sha[:10]}"},
+         "sections": [sec]}
+    tmp = DECK + ".tmp"
+    json.dump(d, open(tmp, "w"), indent=1)
+    os.replace(tmp, DECK)
+
+
+def run(sha, state):
+    os.makedirs(RUNS, exist_ok=True)
+    at = time.strftime("%Y-%m-%dT%H:%M:%S")
+    with open(os.path.join(RUNS, f"{at}-{sha[:10]}.log"), "w") as log:
+        port = server_port()
+        if not port:
+            journal(sha, "skipped", 0, "no viewer server answering")
+            return False
+        if not wait_quiet():
+            journal(sha, "skipped", 0, f"load stayed over {QUIET_LOAD:.1f} for 30 min")
+            return False
+        try:
+            binary = build(sha, log)
+        except subprocess.CalledProcessError as e:
+            journal(sha, "unbuilt", 0, f"build failed ({e.returncode}); log in runs/")
+            return True
+        routes = pages()
+        _, first = bench(binary, port, routes, log)
+        hits = []
+        if first:
+            again = sorted({h["page"] for h in first})
+            log.write(f"\n--- again: {' '.join(again)}\n")
+            _, second = bench(binary, port, again, log)
+            twice = {(h["page"], h["step"], h["pass"]) for h in second}
+            hits = [h for h in first if (h["page"], h["step"], h["pass"]) in twice]
+    for old in sorted(os.listdir(RUNS))[:-KEEP]:
+        os.remove(os.path.join(RUNS, old))
+    result = "red" if hits else "green"
+    worst = max((h["ms"] for h in hits), default=0)
+    journal(sha, result, worst, "; ".join(f"{h['step']} {h['ms']}ms {h['page']}" for h in hits[:6]))
+    sig = sorted(f"{h['page']}|{h['step']}" for h in hits)
+    deck(state, sha, result, hits, "")
+    if hits and sig != state.get("redsig"):
+        subprocess.run([os.path.join(DOTFILES, "scripts", "show"), DECK], capture_output=True)
+    state["redsig"] = sig
+    if not hits:
+        state["green"] = sha
+    return True
+
+
+def watch(once=False):
+    os.makedirs(HOME, exist_ok=True)
+    state = load_state()
+    while True:
+        head = git("rev-parse", "HEAD")
+        if head and (once or (head != state.get("benched") and touches_canopy(state.get("benched"), head))):
+            time.sleep(0 if once else STILL)
+            if once or git("rev-parse", "HEAD") == head:
+                if run(head, state):
+                    state["benched"] = head
+                save_state(state)
+        elif head and head != state.get("benched"):
+            state["benched"] = head
+            save_state(state)
+        if once:
+            return
+        time.sleep(POLL)
+
+
+def status():
+    try:
+        rows = [l.rstrip("\n").split("\t") for l in open(JOURNAL) if l.strip()]
+    except FileNotFoundError:
+        sys.exit("canopy-benchwatch: no runs yet")
+    for r in rows[-12:]:
+        at, sha, result, worst, note = (r + [""] * 5)[:5]
+        print(f"{at}  {sha}  {result:<8} {worst:>5}ms  {note}")
+
+
+if __name__ == "__main__":
+    if sys.argv[1:] == ["--status"]:
+        status()
+    elif sys.argv[1:] == ["--once"]:
+        watch(once=True)
+    elif sys.argv[1:]:
+        sys.exit(__doc__)
+    else:
+        watch()

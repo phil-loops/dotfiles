@@ -6,7 +6,7 @@
 #   canopy --build                 just (re)build; prints the binary's path
 #   canopy --dump [--dump-wait s]  headless: hydrate + listen, print the world as JSON, exit
 #   canopy --shoot <dir> --shot "<name>=/v2/… [keys…]" [--size WxH]   headless: draw pages to <dir>/<name>.png
-#   canopy --bench [--page /v2/…]… [--budget ms]   headless: time every key on every page; exit 1 if any is over
+#   canopy --bench [--page /v2/…]… [--budget ms] [--quick]   headless: time every key on every page; exit 1 if any is over
 #   canopy --appearance light|dark|system
 # For those, the server port is per repo: --port wins, else `stack-review-port` in --repo, else the
 # current git repo's when a server listens there, else ~/coding/loops.
@@ -51,6 +51,7 @@ while [[ $# -gt 0 ]]; do
     --dump) headless=1; pass+=("--dump"); shift ;;
     --shoot) headless=1; pass+=("$1" "$2"); shift 2 ;;
     --bench) headless=1; pass+=("$1"); shift ;;
+    --quick) pass+=("$1"); shift ;;
     --shot|--size|--page|--budget|--dump-wait|--appearance) pass+=("$1" "$2"); shift 2 ;;
     /v2*|canopy:*) route="$1"; shift ;;
     *) echo "canopy: unknown argument $1" >&2; exit 64 ;;
