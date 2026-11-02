@@ -104,6 +104,7 @@ enum KeyTable {
         KeyBinding(id: "library.open-file", menu: "Library", title: "Open File…", key: "o", modifiers: [.command, .option]) { $0.openOther(nil) },
         KeyBinding(id: "library.back", menu: "Library", title: "Back", key: "[", modifiers: .command,
                    isEnabled: { $0.workspaces[$0.active]?.back.isEmpty == false }) { $0.goBack(nil) },
+        KeyBinding(id: "library.history", menu: "Library", title: "History…", key: "y", modifiers: .command, overOverlay: true) { $0.showHistory(nil) },
         KeyBinding(id: "library.archive", menu: "Library", title: "Archive Shelf Row", key: "\u{8}", when: .onShelf,
                    isEnabled: { $0.workspaces[$0.active].map { $0.shelf.selectedRow >= 0 } ?? false }) { $0.archiveSelected(nil) },
         KeyBinding(id: "library.reload", menu: "Library", title: "Reload", key: "r", modifiers: .command) { $0.reloadCurrent(nil) },

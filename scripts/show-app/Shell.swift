@@ -77,19 +77,22 @@ final class FinderOverlay: NSView, NSTextFieldDelegate, NSTableViewDataSource, N
     let table = NSTableView()
     let panel = NSVisualEffectView()
     private var entries: [ShelfEntry] = []
+    private let searchesDetail: Bool
     private(set) var matches: [ShelfEntry] = []
     var onPick: ((ShelfEntry) -> Void)?
     var onClose: (() -> Void)?
 
-    init(entries: [ShelfEntry], workspace: Workspace) {
+    /// `searchesDetail` also matches each row's detail line (History's workspace, topic and time).
+    init(entries: [ShelfEntry], placeholder: String, searchesDetail: Bool = false) {
         self.entries = entries
+        self.searchesDetail = searchesDetail
         super.init(frame: .zero)
         panel.material = .popover
         panel.state = .active
         panel.wantsLayer = true
         panel.layer?.cornerRadius = 10
         panel.layer?.masksToBounds = true
-        field.placeholderString = "Find in \(workspace.name)"
+        field.placeholderString = placeholder
         field.font = .systemFont(ofSize: 16)
         field.isBordered = false
         field.drawsBackground = false
@@ -159,7 +162,8 @@ final class FinderOverlay: NSView, NSTextFieldDelegate, NSTableViewDataSource, N
         let query = field.stringValue
         matches = entries.compactMap { entry -> (ShelfEntry, Int)? in
             let name = ((entry.path as NSString).lastPathComponent as NSString).deletingPathExtension
-            let score = [fuzzyScore(query, entry.title), fuzzyScore(query, name).map { $0 + 2 }].compactMap { $0 }.min()
+            let detail = searchesDetail ? fuzzyScore(query, entry.progress).map { $0 + 4 } : nil
+            let score = [fuzzyScore(query, entry.title), fuzzyScore(query, name).map { $0 + 2 }, detail].compactMap { $0 }.min()
             return score.map { (entry, $0) }
         }
         .sorted { ($0.1, $1.0.touched) < ($1.1, $0.0.touched) }
@@ -405,10 +409,10 @@ final class ShellController: NSViewController {
     }
 
     /// Lays the finder over the whole window, searching only `entries`.
-    func showFinder(entries: [ShelfEntry], onPick: @escaping (ShelfEntry) -> Void) {
+    func showFinder(entries: [ShelfEntry], placeholder: String? = nil, searchesDetail: Bool = false, onPick: @escaping (ShelfEntry) -> Void) {
         hideFinder()
         hideOverlay()
-        let overlay = FinderOverlay(entries: entries, workspace: active)
+        let overlay = FinderOverlay(entries: entries, placeholder: placeholder ?? "Find in \(active.name)", searchesDetail: searchesDetail)
         overlay.onPick = { [weak self] entry in
             self?.hideFinder()
             onPick(entry)
@@ -814,8 +818,9 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
             return
         }
         if let canopy {
-            let route = (try? JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: path)))) as? [String: Any]
-            canopy.start(route: (route?["route"] as? String).flatMap { $0.isEmpty ? nil : $0 })
+            let route = CanopyRequest(path: path).route
+            route.map(CanopyArrivals.remove)
+            canopy.start(route: route)
             return
         }
         prefs.set(Date(), forKey: "opened." + path)
@@ -862,6 +867,7 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
             controller.settleColumns()
             controller.window?.makeFirstResponder(controller.table)
         }
+        ShowHistory.record(HistoryRecord(kind: .opened, target: path, workspace: workspace, title: documentTitle, topic: nil))
         syncShelfSelection()
         onTitleChange?()
         onLibraryChange?()

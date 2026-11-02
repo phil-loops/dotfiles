@@ -211,6 +211,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         for entry in entries where entry.state == .waiting {
             counts[entry.workspace, default: 0] += 1
         }
+        counts[.canopy] = CanopyArrivals.pending.count
         shell.setBadges(counts)
     }
 
@@ -296,11 +297,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
     }
 
-    /// Brings a workspace forward in the same window: its view swaps in, nothing else moves.
+    /// Brings a workspace forward in the same window: its view swaps in, nothing else moves. Canopy goes to the newest page
+    /// a session sent while you were elsewhere.
     func switchTo(_ workspace: Workspace) {
         if snapshotPath == nil && selfTest == nil {
             workspaces[workspace]?.console?.start()
-            workspaces[workspace]?.canopy?.start()
+            if let canopy = workspaces[workspace]?.canopy {
+                let waiting = CanopyArrivals.take()
+                canopy.start(route: waiting.flatMap { $0.isEmpty ? nil : $0 })
+                if waiting != nil { refreshLibrary(force: true) }
+            }
         }
         guard workspace != active else { return }
         shell.hideFinder()
@@ -356,6 +362,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     @objc func goBack(_ sender: Any?) {
         workspaces[active]?.goBack()
+    }
+
+    /// ⌘Y: everything that arrived or was opened, in every workspace, newest first; type a workspace or topic to narrow it.
+    @objc func showHistory(_ sender: Any?) {
+        guard let controller = workspaces[active] else { return }
+        shell.hideOverlay()
+        if shell.finder != nil {
+            shell.hideFinder()
+            controller.restoreFocus(in: window)
+            return
+        }
+        controller.rememberFocus(in: window)
+        shell.showFinder(entries: ShowHistory.entries(), placeholder: "History", searchesDetail: true) { [weak self] entry in
+            self?.openHistory(entry.path)
+        }
+    }
+
+    private func openHistory(_ target: String) {
+        if target.hasPrefix("canopy:") {
+            let route = String(target.dropFirst("canopy:".count))
+            CanopyArrivals.remove(route)
+            switchTo(.canopy)
+            workspaces[.canopy]?.canopy?.start(route: route.isEmpty ? nil : route)
+            return
+        }
+        guard FileManager.default.fileExists(atPath: target) else {
+            workspaces[active]?.say("\((target as NSString).lastPathComponent) is gone (archived or removed)")
+            return
+        }
+        openPath(target)
     }
 
     @objc func archiveSelected(_ sender: Any?) {

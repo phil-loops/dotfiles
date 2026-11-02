@@ -28,7 +28,10 @@ final class CanopyHost: NSViewController {
     /// Brings canopy up on its first visit, and goes to `route` (a /v2/… path) once it's there.
     func start(route: String? = nil) {
         _ = view
-        if let route { pendingRoute = route }
+        if let route {
+            pendingRoute = route
+            ShowHistory.record(HistoryRecord(kind: .opened, target: "canopy:" + route, workspace: .canopy, title: canopyTitle(route), topic: nil))
+        }
         if let embed {
             if let r = pendingRoute { embed.navigate(r); pendingRoute = nil }
             view.window?.makeFirstResponder(embed.view)

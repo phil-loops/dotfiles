@@ -355,6 +355,25 @@ final class SelfTestDriver {
         settle()
         check("a --focus request opens it in its workspace", app.active == .review && front.current == focused,
               "front \(app.active.name), open: \(front.current ?? "-")")
+
+        let canopyRequest = at("canopy-request.json")
+        try? #"{"workspace": "canopy", "route": "/v2/p/loops/zeta-forest", "replyTo": ""}"#.write(toFile: canopyRequest, atomically: true, encoding: .utf8)
+        app.application(NSApp, open: [URL(fileURLWithPath: canopyRequest)])
+        settle()
+        check("a session's canopy page waits instead of switching", app.active == .review && CanopyArrivals.pending == ["/v2/p/loops/zeta-forest"],
+              "front \(app.active.name), waiting \(CanopyArrivals.pending)")
+
+        command("y", code: 16)
+        let history = app.shell.finder?.matches ?? []
+        check("⌘Y opens History, newest first", history.first?.path == "canopy:/v2/p/loops/zeta-forest" && history.first?.title == "Forest zeta-forest",
+              history.prefix(3).map { "\($0.title) (\($0.progress))" }.joined(separator: ", "))
+        check("…with what was opened as well as what arrived", history.contains { $0.path == focused && $0.state == .done }
+              && history.contains { $0.path == quiet && $0.state == .waiting })
+        type("epsilon")
+        enter()
+        check("↵ on a History row opens it", app.active == .review && front.current == quiet && app.shell.finder == nil,
+              "front \(app.active.name), open: \(front.current ?? "-")")
+        command("[", code: 33)
         command("[", code: 33)
     }
 

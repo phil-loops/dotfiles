@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# canopy [/v2/... | canopy://...] — open canopy at a page: Show's canopy workspace (⌘6). Show is
+# canopy [--focus] [/v2/... | canopy://...] — open canopy at a page: Show's canopy workspace (⌘6). From a Claude session
+# the page arrives quietly (a notification) unless --focus or SHOW_FOCUS=1; from your terminal it comes forward. Show is
 # canopy's only app and window. The headless tools below run the bare canopy binary instead — a
 # plain executable, not an app, so nothing can open it as a second window — rebuilt when its sources changed.
 #   canopy --build                 just (re)build; prints the binary's path
@@ -37,12 +38,13 @@ build() {
   echo "$sha" > "$stamp"
 }
 
-port="" repo="" route="" headless=0
+port="" repo="" route="" headless=0 focus=()
 pass=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    -h|--help) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     --build) build; echo "$bin"; exit 0 ;;
+    --focus) focus=(--focus); shift ;;
     --port) port="$2"; shift 2 ;;
     --repo) repo="$2"; shift 2 ;;
     --dump) headless=1; pass+=("--dump"); shift ;;
@@ -53,7 +55,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-(( headless )) || exec "$here/../show" --canopy "$route"
+(( headless )) || exec "$here/../show" --canopy ${focus[@]+"${focus[@]}"} "$route"
 
 port_of() { (cd "$1" && "$HOME/.dotfiles/scripts/stack-review-port") 2>/dev/null; }
 listening() { nc -z 127.0.0.1 "$1" >/dev/null 2>&1; }

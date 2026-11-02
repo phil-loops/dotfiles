@@ -82,13 +82,26 @@ hand_over() {
 
 case "${1:-}" in
   -h|--help)
-    echo "usage: show [--focus] [<file.json>…] | show --api | show --canopy [/v2/…] | show --build | show --snapshot <file.json> <out.png> [--appearance light|dark] | show --selftest | show --check-routing <file.json> | show --check-live <deck.json> | show --tutor [<session.json>] | show --tutor-check <session.json> | show --tutor-ask <session.json> <message>" >&2
+    echo "usage: show [--focus] [<file.json>…] | show --api | show --canopy [--focus] [/v2/…] | show --build | show --snapshot <file.json> <out.png> [--appearance light|dark] | show --selftest | show --check-routing <file.json> | show --check-live <deck.json> | show --tutor [<session.json>] | show --tutor-check <session.json> | show --tutor-ask <session.json> <message>" >&2
     exit 64
     ;;
   --canopy)
+    # A page a Claude session sends arrives quietly (a notification, ⌘6's badge) unless it passes --focus or SHOW_FOCUS=1;
+    # anything else (your terminal) comes forward. Each request gets its own file, so queued pages don't overwrite each other.
+    shift
+    focus=0 route=""
+    for arg in "$@"; do
+      if [[ "$arg" == "--focus" ]]; then focus=1; else route="$arg"; fi
+    done
+    [[ -n "${SHOW_FOCUS:-}" || -z "${CLAUDECODE:-}" ]] && focus=1
     build
-    printf '{"workspace": "canopy", "route": "%s"}\n' "${2:-}" > "$cache/canopy.json"
-    open -a "$app" "$cache/canopy.json"
+    requests="$cache/canopy-requests"
+    mkdir -p "$requests"
+    find "$requests" -name '*.json' -mtime +1 -delete 2>/dev/null || true
+    request="$requests/$(date +%s)-$$.json"
+    python3 -c 'import json, sys; json.dump({"workspace": "canopy", "route": sys.argv[1], "replyTo": sys.argv[2]}, open(sys.argv[3], "w"))' \
+      "$route" "${CLAUDE_CODE_SESSION_ID:0:8}" "$request"
+    hand_over "$focus" "$request"
     ;;
   --api)
     # A file naming the workspace routes there in a running Show too, where launch flags never reach.
