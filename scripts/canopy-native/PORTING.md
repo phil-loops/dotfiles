@@ -50,7 +50,7 @@ canopy-native is a Helix-style modal app, not a click UI with shortcuts added on
 ```
 canopy-native/
   Package.swift            SwiftPM; macOS 14; Swift language mode 5
-  canopy                   launcher: builds release if sources changed, wraps Canopy.app, opens it
+  canopy                   launcher: opens canopy in Show; --build/--dump/--shoot run the bare Canopy.app
   API.md                   every endpoint v2 calls (method, body, response, caller, READ/MUTATING)
   PORTING.md               this file
   Sources/
@@ -80,12 +80,11 @@ canopy-native/
 cd ~/.dotfiles/scripts/canopy-native
 swift build                     # debug
 swift test                      # all suites; must stay green at every commit
-./canopy                        # release build (if sources changed) → ~/.cache/canopy-native/Canopy.app → open
-./canopy /v2/b/loops/<branch>   # open on a route; a running app is routed through canopy://
+./canopy --build                # release build (if sources changed) → ~/.cache/canopy-native/Canopy.app, for --dump/--shoot
+./canopy /v2/b/loops/<branch>   # Show's canopy workspace on that route (Show answers canopy:// too)
 ./canopy --dump [--dump-wait 5] # headless: hydrate + listen + exercise keys, JSON on stdout, exit 1 if no hello
 ./canopy --build >/dev/null; .build/debug/Canopy --shoot <dir> --shot "name=/v2/b/loops/<b> 2 k" [--size 1280x800]
                                 # headless: draw each shot offscreen into <dir>/name.png (keys after the route; never a write key)
-./canopy --repo ~/coding/monotoad --appearance light
 tail -f ~/.cache/canopy-native/canopy.log   # what the running app is doing (hydrate, events, nav, key problems)
 ```
 
