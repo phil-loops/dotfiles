@@ -46,6 +46,9 @@ public final class Store {
     public private(set) var decodeFailures: [String] = []
 
     @ObservationIgnored private var listeners: [Int: () -> Void] = [:]
+    /// Bumped by every write (hydrate, patch, op): what `list`'s copies are good for.
+    @ObservationIgnored private var revision = 0
+    @ObservationIgnored private var lists: [EntityType: (revision: Int, value: Any)] = [:]
     @ObservationIgnored private var nextListener = 0
 
     public init() {}
@@ -78,6 +81,7 @@ public final class Store {
         epoch = s.epoch
         versions = s.versions
         ready = true
+        revision += 1
         changed()
     }
 
@@ -108,6 +112,7 @@ public final class Store {
         let failed = u.failures
         if !failed.isEmpty { decodeFailures = Array((decodeFailures + failed).suffix(50)) }
         versions[p.domain] = p.version
+        revision += 1
         changed()
         return .ok
     }
@@ -122,8 +127,8 @@ public final class Store {
 
     // ── the optimistic overlay ──
 
-    public func addOps(_ new: [Op]) { ops.append(contentsOf: new) }
-    public func dropOps(seq: Int) { ops.removeAll { $0.seq == seq } }
+    public func addOps(_ new: [Op]) { ops.append(contentsOf: new); revision += 1 }
+    public func dropOps(seq: Int) { ops.removeAll { $0.seq == seq }; revision += 1 }
 
     // ── reads ──
 
@@ -144,9 +149,26 @@ public final class Store {
         }
     }
 
+    /// The server's copy of one entity: cast alone — `table`'s cast converts every entry of the type.
+    private func row<T: Entity>(_: T.Type, _ id: String) -> T? {
+        switch T.kind {
+        case .repo: return repo[id] as? T
+        case .project: return project[id] as? T
+        case .branch: return branch[id] as? T
+        case .pr: return pr[id] as? T
+        case .landed: return landed[id] as? T
+        case .conv: return conv[id] as? T
+        case .thread: return thread[id] as? T
+        case .draft: return draft[id] as? T
+        case .viewed: return viewed[id] as? T
+        case .todo: return todo[id] as? T
+        case .warm: return warm[id] as? T
+        }
+    }
+
     /// The entity as the user should see it: the server's copy with pending changes on top.
     public func view<T: Entity>(_ t: T.Type, _ id: String) -> T? {
-        guard let base = table(t)[id] else { return nil }
+        guard let base = row(t, id) else { return nil }
         let mine = ops.filter { $0.type == T.kind && $0.id == id }
         if mine.isEmpty { return base }
         guard var obj = raw[T.kind.rawValue]?[id]?.object else { return base }
@@ -154,9 +176,14 @@ public final class Store {
         return (try? JSONValue.object(obj).decode(T.self)) ?? base
     }
 
-    /// Every entity of a type through `view`, sorted by id (callers sort for display).
+    /// Every entity of a type through `view`, sorted by id (callers sort for display). Built once per
+    /// change: pages list the same table many times a keypress.
     public func list<T: Entity>(_ t: T.Type) -> [T] {
-        table(t).keys.sorted().compactMap { view(t, $0) }
+        let base = table(t)
+        if let hit = lists[T.kind], hit.revision == revision, let value = hit.value as? [T] { return value }
+        let value = base.keys.sorted().compactMap { view(t, $0) }
+        lists[T.kind] = (revision, value)
+        return value
     }
 
     /// An entity's raw JSON object with the overlay applied — for fields the shared models lack.

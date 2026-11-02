@@ -34,9 +34,8 @@ struct WhichKeyView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .frame(minWidth: 220, maxWidth: 420, alignment: .leading)
-            .background(theme.vellumRaise)
+            .background { Rectangle().fill(theme.vellumRaise).shadow(color: .black.opacity(0.4), radius: 16, y: 8) }
             .overlay { Rectangle().stroke(theme.rule, lineWidth: 1) }
-            .shadow(color: .black.opacity(0.4), radius: 16, y: 8)
             .allowsHitTesting(false)
         }
     }
