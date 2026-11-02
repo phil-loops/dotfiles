@@ -194,6 +194,15 @@ import Testing
         #expect(found == (a.registry.command("find.concept") != nil))
     }
 
+    /// The Review page's own keys each say where they sit in `?` — a group, or a verb that implies
+    /// one — so a new command can't fall back into one undifferentiated list.
+    @Test func everyReviewKeyHasASheetGroup() {
+        let a = app()
+        for c in a.registry.commands where c.scope == .review && !c.keys.isEmpty {
+            #expect(c.sheetGroup != nil, "\(c.id) (\(c.keys.joined(separator: " "))) has no group in the ? sheet")
+        }
+    }
+
     @Test func theSheetSaysWhatIsUnderTheCursorAndScrollsByKey() {
         let a = app(.todo)
         a.keys.handle("?")

@@ -37,6 +37,8 @@ public final class AppModel: CommandContext {
     @ObservationIgnored var jumpDepth = 0
     /// Branch visits, fuzzy × frecency for `space b` (seeded from the usage log at start).
     @ObservationIgnored public var frecency = Frecency()
+    /// Commands run from a key, frecency-ranked, for the `?` sheet's order (seeded with `frecency`).
+    @ObservationIgnored public var keyUses = Frecency()
 
     // ── the `:` line and insert mode ──
     public var cmdline = ""
@@ -73,6 +75,7 @@ public final class AppModel: CommandContext {
         stream = EventStream(transport: transport, store: store)
         pulse = Pulse(transport: transport)
         runner.context = self
+        runner.onRun = { [weak self] id in self?.keyUses.visit(id) }
 
         let tel = telemetry
         transport.count = { name, ms in Task { @MainActor in tel.count(name, ms) } }

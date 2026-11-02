@@ -120,6 +120,41 @@ public struct RouteTo {
     public init(_ id: String, target: String? = nil, arg: Any? = nil) { self.id = id; self.target = target; self.arg = arg }
 }
 
+/// Where a page-wide command sits in the `?` sheet. A command on an inner scope (a commit, a line, a
+/// thread) is headed by what it acts on instead; these split the page's own commands and the global ones.
+public enum KeyGroup: String, CaseIterable, Sendable {
+    /// what the page shows: tabs, bases, folds, the conversation, the code beside it
+    case show
+    /// what you can do to the branch the page is about
+    case branch
+    /// going to another branch or page
+    case others
+    /// keys that work on every page
+    case anywhere
+    /// moving the cursor: one collapsed line, since every page moves the same way
+    case move
+
+    /// The group a verb puts its command in when the command doesn't name one.
+    public static func of(_ verb: Verb) -> KeyGroup? {
+        switch verb {
+        case .next, .previous, .first, .last, .halfDown, .halfUp, .left, .right, .nextWord, .previousWord,
+             .nextFile, .previousFile, .nextHunk, .previousHunk, .nextThread, .previousThread,
+             .labels, .find, .search, .map, .paneLeft, .paneDown, .paneUp, .paneRight, .paneNext:
+            return .move
+        case .nextSibling, .previousSibling, .parent, .child, .root, .tip, .out:
+            return .others
+        case .face, .conversation, .type, .symbols, .nth1, .nth2, .nth3, .nth4, .nth5, .nth6, .nth7, .nth8, .nth9:
+            return .show
+        case .push, .sync, .words, .editor, .github, .preview, .rename:
+            return .branch
+        case .definition, .typeDefinition, .implementations, .references:
+            return .move
+        default:
+            return nil
+        }
+    }
+}
+
 /// Every action the app can take (registry.ts Command). Keys, buttons, the space menu and the
 /// palette all dispatch by id through the Runner.
 public struct Command {
@@ -144,6 +179,12 @@ public struct Command {
     public var label: String?
     /// its opposite (next ↔ previous): the hint line shows the two as one
     public var pair: String?
+    /// its place in the `?` sheet when it's the page's own or global (`KeyGroup.of` its verb otherwise)
+    public var group: KeyGroup?
+    /// `group`, else what its verb implies, else (global) anywhere
+    public var sheetGroup: KeyGroup? {
+        group ?? verbs.lazy.compactMap(KeyGroup.of).first ?? (scope == .global ? .anywhere : nil)
+    }
     /// keys a component handles itself (a text box's ⌘↵): shown in the sheet, never bound
     public var hint: [String]
     /// v1 telemetry ids this replaces
@@ -164,7 +205,7 @@ public struct Command {
     public init(id: String, title: String, scope: Scope, budget: Budget = .local,
                 verb: Verb? = nil, verbs: [Verb] = [], leader: LocalKey? = nil,
                 modes: [KeyMode] = [.normal], needsArg: Bool = false, label: String? = nil,
-                pair: String? = nil, hint: [String] = [], v1: [String] = [], quiet: Bool = false,
+                pair: String? = nil, group: KeyGroup? = nil, hint: [String] = [], v1: [String] = [], quiet: Bool = false,
                 recordsJump: Bool = false,
                 available: ((String?) -> Bool)? = nil, route: ((String?) -> RouteTo?)? = nil,
                 local: ((_ target: String?, _ arg: Any?) throws -> Void)? = nil,
@@ -172,7 +213,7 @@ public struct Command {
         self.id = id; self.title = title; self.scope = scope; self.budget = budget; self.label = label
         self.verbs = (verb.map { [$0] } ?? []) + verbs; self.leader = leader
         self.modes = modes; self.needsArg = needsArg
-        self.pair = pair; self.hint = hint; self.v1 = v1; self.quiet = quiet; self.recordsJump = recordsJump; self.available = available
+        self.pair = pair; self.group = group; self.hint = hint; self.v1 = v1; self.quiet = quiet; self.recordsJump = recordsJump; self.available = available
         self.route = route; self.local = local; self.write = write
     }
 }
@@ -199,11 +240,23 @@ public final class CommandRegistry {
     /// Bumped whenever keys change, so the keymap rebuilds.
     public private(set) var keysVersion = 0
 
+    /// Sheet groups a page assigns by id (`place`), for commands registered before or after.
+    private var placed: [String: KeyGroup] = [:]
+
     public init() {}
+
+    /// Put these commands in a `?` sheet group: a page lays out its sheet in one table.
+    public func place(_ g: KeyGroup, _ ids: [String]) {
+        for id in ids {
+            placed[id] = g
+            byID[id]?.group = g
+        }
+    }
 
     public func register(_ c: Command) {
         precondition(byID[c.id] == nil, "command \(c.id) registered twice")
         var c = c
+        if let g = placed[c.id] { c.group = g }
         if c.verbs.contains(where: { $0.spec.jump }) { c.recordsJump = true }
         resolve(&c)
         byID[c.id] = c

@@ -64,8 +64,14 @@ extension AppModel {
             var f = Frecency()
             f.seed(jsonl: text)
             let seeded = f
+            var k = Frecency()
+            k.seedCommands(jsonl: text)
+            let keys = k
             await MainActor.run { [weak self] in
                 guard let self else { return }
+                var mergedKeys = keys
+                for (id, e) in self.keyUses.entries { for _ in 0..<Int(e.rank) { mergedKeys.visit(id, at: e.last) } }
+                self.keyUses = mergedKeys
                 var merged = seeded
                 for (id, e) in self.frecency.entries { for _ in 0..<Int(e.rank) { merged.visit(id, at: e.last) } }
                 self.frecency = merged

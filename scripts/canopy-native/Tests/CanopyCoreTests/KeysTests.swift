@@ -171,3 +171,38 @@ import Testing
         #expect(bad == ["menu: ret: a and b in one place"])
     }
 }
+
+@Suite struct SheetSectionTests {
+    func c(_ id: String, _ scope: String, _ keys: [String], verb: String? = nil, group: KeyGroup? = nil, pair: String? = nil,
+           uses: Double = 0, label: String? = nil) -> SheetCmd {
+        SheetCmd(id: id, title: id, scope: scope, keys: keys, available: true, verb: verb, group: group?.rawValue, pair: pair, uses: uses, label: label)
+    }
+
+    /// The commits view: what acts on the commit first, then the page's by group, then anywhere, then one move line.
+    @Test func theCommitsViewReadsInnermostFirstThenByGroup() {
+        let cmds = [
+            c("history.next", "history", ["j"], verb: "next", group: .move, pair: "history.prev"),
+            c("history.prev", "history", ["k"], verb: "previous", group: .move),
+            c("history.open", "history", ["ret"], verb: "main"),
+            c("history.write", "history", ["i"], verb: "write", uses: 3),
+            c("history.exit", "history", ["esc"], verb: "cancel"),
+            c("review.tab.conversation", "review", ["1"], verb: "nth-1", group: .show, label: "conversation"),
+            c("review.tab.commits", "review", ["2"], verb: "nth-2", group: .show, label: "commits"),
+            c("review.tab.files", "review", ["3"], verb: "nth-3", group: .show, label: "code"),
+            c("review.sync", "review", ["s"], verb: "sync", group: .branch),
+            c("review.branch.next", "review", ["J"], verb: "next-sibling", group: .others, pair: "review.branch.prev"),
+            c("review.branch.prev", "review", ["K"], verb: "previous-sibling", group: .others),
+            c("review.file.next", "review", ["]"], verb: "next-file", group: .move),
+            c("nav.keys", "global", ["?"], verb: "keys"),
+        ]
+        let live = ["history", "review", "global"]
+        let s = sheetNow(surface: "review", live: live, cmds: cmds, surfaceScopes: ["review": ["history", "review"]])
+        let secs = sheetSections(s, surface: "review", live: live)
+        #expect(secs.map(\.kind) == [.scope("history"), .group(.show), .group(.branch), .group(.others), .group(.anywhere), .group(.move)])
+        #expect(secs[0].lines.map(\.cmd.id) == ["history.write", "history.open", "history.exit"], "the most used first, then as found")
+        #expect(secs[1].lines.map(\.key) == ["1 2 3"])
+        #expect(secs[1].lines[0].cmd.title == "conversation · commits · code")
+        #expect(secs[3].lines.map(\.key) == ["J K"])
+        #expect(secs[5].lines.map(\.key) == ["j k", "]"], "motions on any scope collapse into the move line")
+    }
+}

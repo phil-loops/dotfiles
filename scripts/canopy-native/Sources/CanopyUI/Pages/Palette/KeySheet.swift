@@ -2,9 +2,10 @@ import CanopyCore
 import SwiftUI
 
 /// `?` (KeySheet.tsx): what you can do right now — the keys that act on the thing under the cursor,
-/// as the commands they'd run here, grouped by what they act on; then what works anywhere; then
-/// this page's keys that do nothing at the moment. Generated from the registry, so it can't drift
-/// from what the keys do. j/k (C-d/C-u) scroll it; `?` or esc closes it.
+/// as the commands they'd run here; then the page's own by what they act on (show, this branch,
+/// other branches); then what works anywhere; then every motion on one line; then this page's keys
+/// that do nothing at the moment. The order is `sheetSections`'; this only draws it. Generated from
+/// the registry, so it can't drift from what the keys do. j/k (C-d/C-u) scroll it; `?` or esc closes it.
 @MainActor
 enum KeySheet {
     struct Group: Equatable {
@@ -26,6 +27,8 @@ enum KeySheet {
         /// commands whose keys a component handles itself (shown, never bound)
         var hints: [Hint]
         var everywhere: [SheetLine]
+        /// every motion's keys, shown as one line
+        var moves: [SheetLine]
         var notNow: [SheetLine]
         var customized: Set<String>
     }
@@ -44,6 +47,7 @@ enum KeySheet {
         case .article: return app.state { WikiState() }.page(t)?.title ?? "this page"
         case .concept: return t.map { $0.replacingOccurrences(of: "-", with: " ") } ?? "this concept"
         case .lesson, .session: return "this session"
+        case .history: return "this commit"
         case .line: return "this line"
         case .thread: return "this conversation"
         case .gap: return "the hidden lines"
@@ -52,25 +56,46 @@ enum KeySheet {
         }
     }
 
+    /// Keys that work anywhere shown, the most used first; `:` finds the rest.
+    static let anywhereShown = 8
+
+    /// A page-wide group's heading.
+    static func groupLabel(_ g: KeyGroup, _ app: AppModel) -> String {
+        switch g {
+        case .show: return "show"
+        case .branch: return labelOf(.branch, app) == "this branch" ? "this branch" : "this branch · \(labelOf(.branch, app))"
+        case .others: return "other branches"
+        case .anywhere: return "anywhere"
+        case .move: return "move"
+        }
+    }
+
     static func model(_ app: AppModel) -> Model {
         let liveScopes = app.liveScopes()
         let live = liveScopes.map(\.rawValue)
         let cmds = app.registry.commands.filter { !$0.keys.isEmpty }.map {
             SheetCmd(id: $0.id, title: $0.title, scope: $0.scope.rawValue, keys: $0.keys, available: $0.available?(app.target(for: $0.scope)) ?? true,
-                     verb: $0.verbs.first?.name)
+                     verb: $0.verbs.first?.name, group: $0.sheetGroup?.rawValue, pair: $0.pair, uses: app.keyUses.score($0.id), label: $0.label)
         }
-        let sheet = sheetNow(surface: app.router.surface.id, live: live, cmds: cmds,
+        let surface = app.router.surface.id
+        let sheet = sheetNow(surface: surface, live: live, cmds: cmds,
                              surfaceScopes: app.registry.surfaceScopes.mapValues { $0.map(\.rawValue) })
         var groups: [Group] = []
-        for l in sheet.now {
-            let label = labelOf(Scope(rawValue: l.cmd.scope), app)
-            if let i = groups.firstIndex(where: { $0.label == label }) { groups[i].lines.append(l) } else { groups.append(Group(label: label, lines: [l])) }
+        var everywhere: [SheetLine] = []
+        var moves: [SheetLine] = []
+        for sec in sheetSections(sheet, surface: surface, live: live) {
+            switch sec.kind {
+            case .group(.anywhere): everywhere = sec.lines
+            case .group(.move): moves = sec.lines
+            case .group(let g): groups.append(Group(label: groupLabel(g, app), lines: sec.lines))
+            case .scope(let sc): groups.append(Group(label: labelOf(Scope(rawValue: sc), app), lines: sec.lines))
+            }
         }
         let hints = app.registry.commands.filter { !$0.hint.isEmpty && liveScopes.contains($0.scope) }.map {
             Hint(title: $0.title, keys: $0.hint.joined(separator: " · "))
         }
         return Model(here: labelOf(liveScopes.first ?? .global, app), problems: app.registry.keyProblems, warnings: app.registry.keyWarnings, now: groups, hints: hints,
-                     everywhere: sheet.everywhere, notNow: sheet.notNow, customized: Set(app.registry.commands.filter { $0.verbs.contains(where: app.registry.customized.contains) }.map(\.id)))
+                     everywhere: everywhere, moves: moves, notNow: sheet.notNow, customized: Set(app.registry.commands.filter { $0.verbs.contains(where: app.registry.customized.contains) }.map(\.id)))
     }
 }
 
@@ -79,6 +104,8 @@ enum SheetEntry: Equatable {
     case heading(String, gold: Bool)
     case line(SheetLine, dim: Bool)
     case hint(KeySheet.Hint)
+    /// every motion's keys on one line
+    case moves(String)
     case empty(String)
 }
 
@@ -92,7 +119,14 @@ extension KeySheet.Model {
         }
         out += hints.map { .hint($0) }
         out.append(.heading("Anywhere", gold: false))
-        out += everywhere.map { .line($0, dim: false) }
+        out += everywhere.prefix(KeySheet.anywhereShown).map { .line($0, dim: false) }
+        if everywhere.count > KeySheet.anywhereShown {
+            out.append(.empty("\(everywhere.count - KeySheet.anywhereShown) more work anywhere — : finds any of them by name"))
+        }
+        if !moves.isEmpty {
+            out.append(.heading("Move", gold: false))
+            out.append(.moves(moves.map { $0.key.components(separatedBy: " · ").first ?? $0.key }.map { k in k.split(separator: " ").map { glyph(String($0)) }.joined(separator: " ") }.joined(separator: " · ")))
+        }
         if !notNow.isEmpty {
             out.append(.heading("not here", gold: false))
             out += notNow.map { .line($0, dim: true) }
@@ -174,6 +208,8 @@ struct KeySheetView: View {
         case .heading(let s, let gold):
             Text(s.uppercased()).font(Theme.mono(11)).tracking(1.3).foregroundStyle(gold ? theme.goldLeaf : theme.inkFaint)
                 .padding(.top, gold ? 4 : 12).padding(.bottom, 2)
+        case .moves(let keys):
+            Text(keys).foregroundStyle(theme.goldLeaf).fixedSize(horizontal: false, vertical: true).padding(.vertical, 1)
         case .hint(let h):
             HStack(alignment: .firstTextBaseline, spacing: 16) {
                 Text(h.title).foregroundStyle(theme.inkDim)
