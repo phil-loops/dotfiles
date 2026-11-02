@@ -126,6 +126,13 @@ public final class ReviewPageState: ShipHost {
     /// The left margin: the commits, the files, or both.
     public var showsOutline: Bool { showsHistory || showsTree }
     public var outlineWidth: CGFloat { showsHistory ? max(270, showsTree ? treeWidth : 0) : treeWidth }
+    /// While the diff has focus the outline is a strip: the files by name, wide enough for the longest.
+    public var stripWidth: CGFloat {
+        let longest = files.map { $0.path.split(separator: "/").last?.count ?? 0 }.max() ?? 16
+        return min(220, max(140, CGFloat(longest) * 6.6 + 48))
+    }
+    /// The outline folds to a strip while the reader is in the diff, when there are files to list.
+    public func outlineIsStrip(_ pane: String?) -> Bool { pane == reviewDiffPane && showsTree }
     /// The files list earns its column only when there's more than one file to move between (or a filter typed into it).
     public var showsTree: Bool { views.count > 1 || !filter.isEmpty }
     /// As wide as the longest path needs, within reason.

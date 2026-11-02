@@ -365,6 +365,17 @@ import Testing
         #expect(a.pane?.id == reviewCodePane, "past the new half, l is the code beside it")
     }
 
+    @Test func theOutlineFoldsToAStripWhileTheDiffHasFocus() async throws {
+        let (a, _) = try await app()
+        let pg = ReviewPageState.of(a)
+        #expect(a.pane?.id == reviewDiffPane)
+        #expect(pg.outlineIsStrip(a.pane?.id), "reading the diff, the outline is the files by name")
+        #expect(pg.stripWidth < pg.outlineWidth)
+        keys(a, "h", "h")
+        #expect(a.pane?.id != reviewDiffPane)
+        #expect(!pg.outlineIsStrip(a.pane?.id), "in the outline it opens back to full width")
+    }
+
     /// w / b step name to name, crossing lines, and g d / space k ask about the name they land on.
     @Test func wAndBStepNameToNameAcrossLines() async throws {
         let (a, _) = try await app()
