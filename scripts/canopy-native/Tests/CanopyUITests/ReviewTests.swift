@@ -575,6 +575,11 @@ import Testing
         #expect(a.pane?.id == reviewDiffPane)
         keys(a, "y")
         #expect(Clipboard.text == "canopy://v2/b/loops/hankles-next?file=b.ts&line=6")
+        keys(a, "Y")
+        let words = Clipboard.text?.split(separator: "\n").map(String.init) ?? []
+        #expect(words.first?.contains("hankles-next") == true, "the breadcrumb leads")
+        #expect(words.dropFirst().first == "b.ts:6")
+        #expect(words.last == "canopy://v2/b/loops/hankles-next?file=b.ts&line=6")
         keys(a, "C-o")
         #expect(a.router.route == .review(repo: "loops", branch: "add-hankles-limited-label"), "following a link is a jump")
         pg.sync()   // the view does on a route change
