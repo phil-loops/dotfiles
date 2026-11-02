@@ -50,7 +50,7 @@ canopy-native is a Helix-style modal app, not a click UI with shortcuts added on
 ```
 canopy-native/
   Package.swift            SwiftPM; macOS 14; Swift language mode 5
-  canopy                   launcher: opens canopy in Show; --build/--dump/--shoot run the bare Canopy.app
+  canopy                   launcher: opens canopy in Show; --build/--dump/--shoot run the bare headless binary
   API.md                   every endpoint v2 calls (method, body, response, caller, READ/MUTATING)
   PORTING.md               this file
   Sources/
@@ -68,7 +68,7 @@ canopy-native/
       Theme/               SHARED: Theme (tokens.css dark + light), Fonts (bundled Plex Mono + Fraunces)
       Pages/<Area>/        OWNED: one folder per area, see §8
       Resources/Fonts/     the web app's woff2 latin subsets (OFL); CoreText registers woff2 directly
-    Canopy/main.swift      the executable: --shoot → Shoot, --dump → Dump, else hand off to Show
+    Canopy/main.swift      the executable: --shoot → Shoot, --dump → Dump, else refuse (canopy is Show)
   Tests/
     CanopyCoreTests/       wire/store/route/keys/runner tests + Fixtures/ (a real /state, a real SSE capture)
     CanopyUITests/         ShellTests + ModalTests over the whole installed app; add <Area>Tests.swift here
@@ -80,7 +80,7 @@ canopy-native/
 cd ~/.dotfiles/scripts/canopy-native
 swift build                     # debug
 swift test                      # all suites; must stay green at every commit
-./canopy --build                # release build (if sources changed) → ~/.cache/canopy-native/Canopy.app, for --dump/--shoot
+./canopy --build                # release build (if sources changed) → ~/.cache/canopy-native/canopy, for --dump/--shoot
 ./canopy /v2/b/loops/<branch>   # Show's canopy workspace on that route (Show answers canopy:// too)
 ./canopy --dump [--dump-wait 5] # headless: hydrate + listen + exercise keys, JSON on stdout, exit 1 if no hello
 ./canopy --build >/dev/null; .build/debug/Canopy --shoot <dir> --shot "name=/v2/b/loops/<b> 2 k" [--size 1280x800]

@@ -87,9 +87,6 @@ case "${1:-}" in
     ;;
   --canopy)
     build
-    # A standalone Canopy window (not --shoot/--dump) never follows new builds: retire it.
-    pgrep -fl '/canopy-native/Canopy.app/Contents/MacOS/Canopy' | grep -v -e --shoot -e --dump \
-      | while read -r pid _; do kill "$pid"; done
     printf '{"workspace": "canopy", "route": "%s"}\n' "${2:-}" > "$cache/canopy.json"
     open -a "$app" "$cache/canopy.json"
     ;;
