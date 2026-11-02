@@ -2,8 +2,9 @@ import CanopyCore
 import SwiftUI
 
 /// Forests.tsx, the home: focus (hand-ordered), the workbench, and a quiet archive count. Each forest
-/// is one calm row that opens inline into its branch spine, in merge order; each branch says where it
-/// stands in one glyph and word and does one thing on ↵. `, r` narrows it all to what's ready.
+/// is one calm row that ↵ opens on its own page (the palette's "open or fold" unfolds its branch
+/// spine inline, in merge order); each branch says where it stands in one glyph and word and does
+/// one thing on ↵. `, r` narrows it all to what's ready.
 struct ForestsPage: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme
