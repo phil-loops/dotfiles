@@ -289,13 +289,33 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
 
     // ── the history and the words ──
 
+    @Test func historyGroupsCommitsByWhetherTheyreShared() {
+        let keys = ["h|", "h|aaa", "h|bbb", "h|ccc"]
+        let byKey = ["h|aaa": HistoryCommit(sha: "aaa", subject: "a", pushed: true),
+                     "h|bbb": HistoryCommit(sha: "bbb", subject: "b", pushed: true),
+                     "h|ccc": HistoryCommit(sha: "ccc", subject: "c", pushed: false)]
+        #expect(keys.map { HistoryList.group($0, keys, byKey, nil) } == [nil, "pushed", nil, "to push"])
+        let unknown = ["h|aaa": HistoryCommit(sha: "aaa", subject: "a")]
+        #expect(HistoryList.group("h|aaa", ["h|", "h|aaa"], unknown, nil) == nil)
+    }
+
+    @Test func wordsRowsSayWhoCanSeeThem() {
+        let o = WordsOutline(branch: "b", head: "h", commits: [OutlineCommit(sha: "aaa", subject: "a"),
+                                                              OutlineCommit(sha: "bbb", subject: "b", pushed: true, locked: "on origin")])
+        #expect(WordsEditor.state(.desc, o) == "only here")
+        #expect(WordsEditor.state(.title, o) == "draft")
+        #expect(WordsEditor.state(.subject("aaa"), o) == "local")
+        #expect(WordsEditor.state(.subject("bbb"), o) == "on origin")
+        #expect(WordsEditor.state(.commitBody("aaa"), o) == nil)
+    }
+
     @Test func historyStepsSelectOneCommit() throws {
         let (a, _) = try app()
         let ship = ShipState.of(a)
         let b = try #require(a.store.view(Branch.self, Self.branch))
         ship.putHistory(b, [HistoryCommit(sha: "aaa1111", subject: "rename"), HistoryCommit(sha: "bbb2222", subject: "fail louder"),
                             HistoryCommit(sha: "ccc3333", subject: "someone else's", own: false)])
-        #expect(ShipRows.history(a, Self.branch) == ["h|bbb2222", "h|aaa1111", "h|"])
+        #expect(ShipRows.history(a, Self.branch) == ["h|", "h|bbb2222", "h|aaa1111"])
         a.runner.dispatch("history.select", via: .key, arg: "bbb2222")
         #expect(ship.commitScope == "bbb2222" && ship.host.tab == "commits")
         a.runner.dispatch("history.exit", via: .key)

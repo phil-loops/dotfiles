@@ -27,7 +27,7 @@ public enum TimelineItem: Equatable {
 
 /// The rows Ship's panes walk, as cursor keys:
 ///   conversation  "c|body", "c|r…"/"c|c…" (a review, a comment), "t|<thread>", "p|<draft item>"
-///   history       "h|<sha>" (one commit, oldest first), then "h|" (what lands on main)
+///   history       "h|" (all changes: what lands on main), then "h|<sha>" (one commit, oldest first)
 ///   words         "w|desc", "w|title", "w|body", "w|s|<sha>" / "w|b|<sha>" (a commit's subject / body)
 @MainActor
 public enum ShipRows {
@@ -68,7 +68,7 @@ public enum ShipRows {
     }
 
     public static func history(_ app: AppModel, _ id: String) -> [String] {
-        (ShipState.of(app).historyRows(id) ?? []).reversed().map { "h|\($0.sha)" } + ["h|"]
+        ["h|"] + (ShipState.of(app).historyRows(id) ?? []).reversed().map { "h|\($0.sha)" }
     }
 
     /// The words pane: on the review page, what lands on main (or the one commit the history shows);

@@ -10,10 +10,13 @@ public struct PaneList<Row: View>: View {
     let pane: String
     let rows: [String]
     let row: (String, _ cursor: Bool) -> Row
+    /// a quiet label drawn above a row, outside its cursor band (a group's name), else nil
+    let header: (String) -> String?
 
     /// `rows` must be the same keys (same order) the surface's `panes()` returns for `pane`.
-    public init(pane: String, rows: [String], @ViewBuilder row: @escaping (String, _ cursor: Bool) -> Row) {
-        self.pane = pane; self.rows = rows; self.row = row
+    public init(pane: String, rows: [String], header: @escaping (String) -> String? = { _ in nil },
+                @ViewBuilder row: @escaping (String, _ cursor: Bool) -> Row) {
+        self.pane = pane; self.rows = rows; self.header = header; self.row = row
     }
 
     public var body: some View {
@@ -26,6 +29,10 @@ public struct PaneList<Row: View>: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(rows, id: \.self) { key in
+                        if let h = header(key) {
+                            Text(h).font(Theme.text(10.5)).foregroundStyle(theme.inkFaint)
+                                .padding(.horizontal, 10).padding(.top, 10).padding(.bottom, 2)
+                        }
                         row(key, key == cursor)
                             .padding(.vertical, 5).padding(.horizontal, 10)
                             .frame(maxWidth: .infinity, alignment: .leading)
