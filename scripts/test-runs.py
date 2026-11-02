@@ -85,6 +85,19 @@ class Runs(unittest.TestCase):
         self.assertNotEqual(r2.pid, r.pid)
         self.assertFalse(r2.marked("stopped"))
 
+    def test_a_replaced_run_keeps_the_previous_one_under_prev(self):
+        r1 = self.runs.start("t", "p", ["sh", "-c", "echo first"], cwd="/")
+        until(lambda: not r1.alive())
+        r2 = self.runs.start("t", "p", ["sh", "-c", "echo second"], cwd="/")
+        until(lambda: not r2.alive())
+        prev = os.path.join(r2.dir, "prev")
+        self.assertEqual(open(os.path.join(prev, "out.log")).read().strip(), "first")
+        r3 = self.runs.start("t", "p", ["true"], cwd="/")
+        until(lambda: not r3.alive())
+        self.assertEqual(open(os.path.join(r3.dir, "prev", "out.log")).read().strip(), "second")
+        self.assertFalse(os.path.exists(os.path.join(r3.dir, "prev", "prev")))
+        self.assertEqual([r.dir for r in self.runs.every("t")], [r3.dir])
+
     def test_markers_are_once_only_records(self):
         r = self.runs.start("t", "m", ["true"], cwd="/")
         self.assertFalse(r.marked("applied"))
