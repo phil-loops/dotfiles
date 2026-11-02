@@ -22,8 +22,10 @@ enum ShellCommands {
                            }))
         r.register(Command(id: "menu.open", title: "Open the command menu", scope: .global, verb: .menu, label: "menu", quiet: true,
                            local: { [weak app] _, _ in app?.menuOpen = true }))
-        r.register(Command(id: "help.keys", title: "Show every key", scope: .global, verb: .keys, modes: [.normal, .sheet], label: "keys",
-                           local: { [weak app] _, _ in app?.sheetOpen.toggle() }))
+        r.register(Command(id: "help.keys", title: "Say what's on screen, then every key", scope: .global, verb: .keys, modes: [.normal, .sheet], label: "keys",
+                           local: { [weak app] _, _ in if let app { ExplainState.of(app).step(app) } }))
+        app.addCloser(first: true, isOpen: { [weak app] in app.map { ExplainState.of($0).open } ?? false },
+                      close: { [weak app] in app.map { ExplainState.of($0).open = false } })
         r.register(Command(
             id: "overlay.close", title: "Back out", scope: .global, verb: .cancel, label: "back", quiet: true,
             available: { [weak app] _ in app?.closers.contains { $0.isOpen() } ?? false },

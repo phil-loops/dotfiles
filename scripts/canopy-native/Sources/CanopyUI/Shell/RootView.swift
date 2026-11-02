@@ -22,6 +22,7 @@ public struct RootView: View {
             Statusline()
         }
         .overlay { LabelsView() }
+        .overlay { ExplainView() }
         .background(theme.vellumNight)
         .foregroundStyle(theme.ink)
         .font(Theme.text())
