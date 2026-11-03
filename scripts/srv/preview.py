@@ -3,7 +3,8 @@
 # the running Docker) so a branch renders in the browser WITHOUT moving the main checkout off :3000.
 #   GET  /preview-wait     ?branch=  → HTML                   warming page: starts + watches the boot,
 #                        | ?project=                           hands the tab off once the server answers
-#   POST /preview          {branch}  → {ok, url, port, dir, reused?}  start, or attach to a running one
+#   POST /preview          {branch}  → {ok, url, port, dir, reused?, replaced?}  start, attach to a running one,
+#                                       or take over a clean twin's port (the same branch served from another checkout)
 #   POST /preview-integration {project} → {ok, url, port, dir, reused?, dirty, fresh}  same, for a
 #                                                             project's ✦integration playground worktree
 #   POST /preview-main     {port?}    → {ok, url, port, dir, reused?}  run (or attach to) the literal
@@ -442,17 +443,46 @@ def _failure(p, fallback):
     out = _ANSI.sub("", (p.stdout or "") + (p.stderr or "")).strip() or fallback
     return out[-600:]
 
-def _serve_dir(req, dirp, extra=None):
+def _twin(previews, branch, dirp, dirty):
+    """A managed, running preview of `branch` served from another checkout than `dirp`, whose
+    checkout `dirty(dir)` says holds no uncommitted edits — the one a new preview of the branch
+    takes over, port and all. A dirty twin is someone's work in progress, so it's left alone."""
+    for pv in previews:
+        if (branch and pv.get("branch") == branch and pv.get("dir") != dirp and pv.get("managed")
+                and pv.get("state") == "up" and str(pv.get("port", "")).isdigit() and not dirty(pv["dir"])):
+            return pv
+    return None
+
+
+def _dirty(dirp):
+    r = ctx.run(["git", "-C", dirp, "status", "--porcelain", "--untracked-files=no"])
+    return r.returncode != 0 or bool((r.stdout or "").strip())
+
+
+def _serve_dir(req, dirp, extra=None, branch=None):
     # attach, don't restart: loops-preview cold-reboots an existing session (kills tmux, wipes
     # .next), so re-clicking preview on a warm checkout must NOT destroy the running server.
-    for pv in _list_json(fresh=True):
+    previews = _list_json(fresh=True)
+    for pv in previews:
         if pv.get("dir") == dirp and pv.get("state") == "up" and str(pv.get("port", "")).isdigit():
             port = int(pv["port"])
             req._send(200, json.dumps({"ok": True, "port": port, "url": "http://localhost:%d" % port,
                                        "dir": dirp, "reused": True, **(extra or {})}))
             return
+    argv = [_script(), dirp, "--main", checkout._active_main_wt()]
+    # one preview per branch: a clean twin from another checkout gives up its port to this one, so
+    # the branch keeps one server and its open tab
+    twin = _twin(previews, branch, dirp, _dirty)
+    if twin:
+        subprocess.run([_script(), twin["dir"], "--kill", "--port", twin["port"]], capture_output=True, text=True)
+        for _ in range(20):
+            if not _listening(int(twin["port"])):
+                break
+            time.sleep(0.5)
+        argv += ["--port", twin["port"]]
+        extra = {**(extra or {}), "replaced": twin["dir"]}
     # loops-preview detaches the server into tmux and returns immediately with the URL on stdout.
-    p = subprocess.run([_script(), dirp, "--main", checkout._active_main_wt()], capture_output=True, text=True)
+    p = subprocess.run(argv, capture_output=True, text=True)
     _list_invalidate()
     m = re.search(r"localhost:(\d+)", p.stdout)
     if not m:
@@ -476,7 +506,7 @@ def start(req, raw):
     if r.returncode != 0 or not dirp:
         req._send(500, json.dumps({"ok": False, "err": _ANSI.sub("", (r.stderr or "could not resolve a worktree").strip())}))
         return
-    _serve_dir(req, dirp)
+    _serve_dir(req, dirp, branch=branch)
 
 
 def _integrate_playground(project):
