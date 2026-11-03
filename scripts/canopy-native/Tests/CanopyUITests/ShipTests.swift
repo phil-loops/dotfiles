@@ -345,6 +345,14 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
         #expect(WordsEditor.reach(.body, opened)?.editable == false)
     }
 
+    @Test func wordsSayWhoCanSeeThemOnceWhereItChanges() {
+        let o = WordsOutline(branch: "b", head: "h", commits: [OutlineCommit(sha: "aaa", subject: "a", pushed: true, locked: "on origin"),
+                                                              OutlineCommit(sha: "bbb", subject: "b", pushed: true, locked: "on origin"),
+                                                              OutlineCommit(sha: "ccc", subject: "c")])
+        let rows = ["w|desc", "w|title", "w|body", "w|s|aaa", "w|s|bbb", "w|s|ccc", "w|b|ccc"]
+        #expect(rows.map { WordsEditor.reachHeader($0, rows, o) } == [.onlyHere, .draft, nil, .locked("on origin"), nil, .local, nil])
+    }
+
     @Test func theHistorySaysWhatsWaitingToGoOut() {
         #expect(HistoryList.waiting(toPush: 0, edits: 0) == nil)
         #expect(HistoryList.waiting(toPush: 2, edits: 1) == "waiting to go out: 2 commits to push, 1 unsaved edit")

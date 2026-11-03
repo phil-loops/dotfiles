@@ -54,21 +54,17 @@ struct HistoryList: View {
         let byKey = Dictionary((rows ?? []).map { ("h|\($0.sha)", $0) }, uniquingKeysWith: { a, _ in a })
         let conv = app.store.view(Conv.self, branchID)
         let keys = ShipRows.history(app, branchID)
-        let oneDay = Set((rows ?? []).map { Self.day($0.date) }).count <= 1
         VStack(alignment: .leading, spacing: 4) {
             PaneList(pane: ShipSeam.historyPane, rows: keys, header: { key in Self.group(key, keys, byKey, conv) }) { key, _ in
                 let scoped = key == "h|\(ship.commitScope ?? "")"
                 if key == "h|" {
-                    Text("all changes\(conv.map { " · #" + String($0.number) } ?? "")")
+                    Text("all changes")
                         .foregroundStyle(scoped ? theme.goldLeaf : theme.ink)
                         .explains("history|all", "the whole branch: what lands on main when the PR squashes")
                 } else if let c = byKey[key] {
                     VStack(alignment: .leading, spacing: 1) {
                         Text(c.subject).foregroundStyle(scoped ? theme.goldLeaf : theme.ink).lineLimit(2)
-                        let meta = [scoped ? String(c.sha.prefix(7)) : nil, oneDay ? nil : Self.day(c.date)].compactMap { $0 }
-                        if !meta.isEmpty {
-                            Text(meta.joined(separator: "  ")).foregroundStyle(theme.inkFaint).font(Theme.text(10.5))
-                        }
+                        if scoped { Text(c.sha.prefix(7)).foregroundStyle(theme.inkFaint).font(Theme.text(10.5)) }
                         ForEach(addresses(c.sha), id: \.self) { a in Text("→ \(a)").font(Theme.text(10.5)).foregroundStyle(theme.inkDim) }
                     }
                 }
@@ -86,11 +82,6 @@ struct HistoryList: View {
         let parts = [toPush > 0 ? "\(toPush) commit\(toPush == 1 ? "" : "s") to push" : nil,
                      edits > 0 ? "\(edits) unsaved edit\(edits == 1 ? "" : "s")" : nil].compactMap { $0 }
         return parts.isEmpty ? nil : "waiting to go out: " + parts.joined(separator: ", ")
-    }
-
-    /// The month-day a commit was written ("11-02"), its year dropped.
-    static func day(_ date: String) -> String {
-        String(date.replacingOccurrences(of: "^\\d{4}-", with: "", options: .regularExpression).prefix(5))
     }
 
     /// The group a commit row opens, if it's the first of its kind: shared ("on #N", or "pushed"
@@ -167,17 +158,8 @@ public struct WordsEditor: View {
             }
             let orphans = w.orphans(branchID)
             if orphans > 0 { Text("\(orphans) edit\(orphans == 1 ? "" : "s") dropped · branch moved").foregroundStyle(theme.inkFaint) }
-            let issues = self.issues(rows)
-            if !issues.isEmpty {
-                VStack(alignment: .leading, spacing: 2) {
-                    ForEach(Array(issues.enumerated()), id: \.offset) { _, x in
-                        (Text(x.where_ + ": ").foregroundStyle(theme.inkFaint) + Text(x.hint.text).foregroundStyle(tone(x.hint.tone))
-                            + Text(x.hint.fix.map { " · \($0.label)" } ?? "").foregroundStyle(theme.inkFaint))
-                    }
-                }
-                .font(Theme.text(11))
-            }
-            PaneList(pane: ShipSeam.wordsPane, rows: rows) { key, on in row(key, on: on) }
+            let o = w.shown[branchID]
+            PaneList(pane: ShipSeam.wordsPane, rows: rows, header: { key in Self.reachHeader(key, rows, o) }) { key, on in row(key, on: on) }
             let pending = w.pending(branchID)
             if pending > 0 {
                 HStack(spacing: 10) {
@@ -205,18 +187,28 @@ public struct WordsEditor: View {
 
     private func tone(_ t: WordsHint.Tone) -> Color { t == .error ? theme.ember : t == .warn ? theme.goldLeaf : theme.inkFaint }
 
-    /// Every hint on the shown words, once each: the title's, then each commit's — an opening commit
-    /// that is the title says nothing the title didn't.
-    private func issues(_ rows: [String]) -> [(where_: String, hint: WordsHint)] {
+    /// A row's own hints — an opening commit that is the title says nothing the title didn't.
+    private func hints(_ r: WordsRow) -> [WordsHint] {
         let w = WordsState.of(app)
-        var out: [(String, WordsHint)] = []
-        if landing { for h in w.prHints(branchID) { out.append((h.id == "plan" || h.id == "prose" ? "why" : "lands as", h)) } }
-        let title = w.prValue(branchID).subject.trimmingCharacters(in: .whitespacesAndNewlines)
-        for c in w.shown[branchID]?.commits ?? [] where rows.contains("w|s|\(c.sha)") {
+        switch r {
+        case .desc, .commitBody: return []
+        case .title: return landing ? w.prHints(branchID).filter { !Self.bodyHints.contains($0.id) } : []
+        case .body: return landing ? w.prHints(branchID).filter { Self.bodyHints.contains($0.id) } : []
+        case .subject(let sha):
+            guard let c = w.shown[branchID]?.commits.first(where: { $0.sha == sha }) else { return [] }
+            let title = w.prValue(branchID).subject.trimmingCharacters(in: .whitespacesAndNewlines)
             let sameAsTitle = landing && w.valueOf(branchID, c).subject.trimmingCharacters(in: .whitespacesAndNewlines) == title
-            for h in w.hintsOf(branchID, c) where !(sameAsTitle && Self.titleHints.contains(h.id)) { out.append((String(c.short.prefix(7)), h)) }
+            return w.hintsOf(branchID, c).filter { !(sameAsTitle && Self.titleHints.contains($0.id)) }
         }
-        return out
+    }
+
+    static let bodyHints: Set<String> = ["plan", "prose"]
+
+    /// Who can see the words from this row on, said once where it changes.
+    static func reachHeader(_ key: String, _ rows: [String], _ o: WordsOutline?) -> Reach? {
+        guard let r = WordsRow(key), let here = reach(r, o), let i = rows.firstIndex(of: key) else { return nil }
+        let before = rows[..<i].reversed().lazy.compactMap { WordsRow($0).flatMap { reach($0, o) } }.first
+        return before == here ? nil : here
     }
 
     @ViewBuilder private func row(_ key: String, on: Bool) -> some View {
@@ -227,14 +219,8 @@ public struct WordsEditor: View {
             let field = r.field(branchID)
             let writing = app.insertField == field
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                VStack(alignment: .leading, spacing: 0) {
-                    TermText("words|label|\(key)", Self.label(r, o)).foregroundStyle(theme.inkFaint)
-                    if let reach = Self.reach(r, o) {
-                        TermText("words|reach|\(key)", reach)
-                            .foregroundStyle(reach.editable ? theme.goldLeaf.opacity(0.8) : theme.inkFaint.opacity(0.7))
-                    }
-                }
-                .font(Theme.text(10.5)).frame(width: 84, alignment: .leading)
+                TermText("words|label|\(key)", Self.label(r, o)).foregroundStyle(theme.inkFaint)
+                    .font(Theme.text(10.5)).frame(width: 72, alignment: .leading)
                 VStack(alignment: .leading, spacing: 2) {
                     switch r {
                     case .desc:
@@ -273,7 +259,6 @@ public struct WordsEditor: View {
                                     w.editPr(branchID, MessageWords(subject: cur.subject, body: OutlineHints.joinTemplate(own, OutlineHints.splitTemplate(cur.body).template)))
                                 }))
                         } else { Text(parts.own.isEmpty ? "why — a line or three" : parts.own).foregroundStyle(parts.own.isEmpty ? theme.inkFaint : theme.inkDim) }
-                        if !parts.template.isEmpty { Text("＋ the repo's PR template").font(Theme.text(10.5)).foregroundStyle(theme.inkFaint) }
                     case .subject(let sha), .commitBody(let sha):
                         if let c = o?.commits.first(where: { $0.sha == sha }) {
                             let v = w.valueOf(branchID, c)
@@ -295,6 +280,10 @@ public struct WordsEditor: View {
                                 Text(v.body.isEmpty ? "why" : v.body).foregroundStyle(v.body.isEmpty ? theme.inkFaint : theme.inkDim)
                             }
                         }
+                    }
+                    ForEach(Array(hints(r).enumerated()), id: \.offset) { _, h in
+                        (Text(h.text).foregroundStyle(tone(h.tone)) + Text(h.fix.map { " · \($0.label)" } ?? "").foregroundStyle(theme.inkFaint))
+                            .font(Theme.text(11))
                     }
                 }
             }
