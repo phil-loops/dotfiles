@@ -260,8 +260,10 @@ enum KeyLessons {
             KeyStep("{symbols}: the file's symbols.", [.symbols], check: { $0.nav.picker != nil }),
             KeyStep("{cancel}.", [.cancel], check: { $0.nav.picker == nil }),
             KeyStep("{github} opens it on GitHub — practice, so nothing opens.", [.github], setup: P.review()),
+            KeyStep("{github-main} opens the lines you're on (or have selected) on GitHub, on main — Helix's key for it too.", [.githubMain]),
+            KeyStep("{github-branch}: the same lines at the branch instead.", [.githubBranch]),
             KeyStep("{preview} previews it on a side port — practice, so nothing starts.", [.preview]),
-        ], recap: "{find} by name, {search} by text, {map} the stack; {type} {definition} {type-definition} {implementations} {references} {symbols} read code; {github} and {preview} leave the app."),
+        ], recap: "{find} by name, {search} by text, {map} the stack; {type} {definition} {type-definition} {implementations} {references} {symbols} read code; {github} {github-main} {github-branch} and {preview} leave the app."),
 
         KeyLesson(id: "writing", title: "Writing", steps: [
             KeyStep("You're writing a comment (insert mode). Type a line, then ↵: in a many-line box like this, ↵ is a new line, like {newline}. Sending is always deliberate.",

@@ -22,6 +22,7 @@ public enum Verb: String, CaseIterable, Sendable, Comparable {
     case labels, find, search, map, conversation
     case type, definition, typeDefinition = "type-definition", implementations, references, symbols
     case github, preview
+    case githubMain = "github-main", githubBranch = "github-branch"
     case goForests = "go-forests", goDashboard = "go-dashboard", goTodo = "go-todo"
     case goMachine = "go-machine", goWiki = "go-wiki", goTutor = "go-tutor"
     case alternate
@@ -127,6 +128,8 @@ public enum Verbs {
         v(.references, .nav, ["g r"], "list its references"),
         v(.symbols, .nav, ["space S"], "list the file's symbols"),
         v(.github, .nav, ["g h"], "open it on GitHub"),
+        v(.githubMain, .nav, ["space o m"], "open these lines on GitHub, on main"),
+        v(.githubBranch, .nav, ["space o b"], "open these lines on GitHub, at the branch (the code beside the diff: at its commit)"),
         v(.preview, .nav, ["g p"], "preview it on a side port"),
         v(.goForests, .nav, ["g f"], "go to Forests"),
         v(.goDashboard, .nav, ["g s"], "go to the dashboard"),

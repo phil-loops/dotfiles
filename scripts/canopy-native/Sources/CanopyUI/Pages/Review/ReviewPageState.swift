@@ -162,6 +162,17 @@ public final class ReviewPageState: ShipHost {
         guard let w = word, let h = here, h.key == w.key, let row = h.row, sideLine(row, prefer: column).side == w.side else { return nil }
         return w.at
     }
+    /// The name `w` / `b` put the cursor on in the code beside the diff: its line and UTF-16 range.
+    public var sideWord: (line: Int, at: Range<Int>)?
+    /// The side pane's selected name, when the cursor is still on its line.
+    public var sideHereWord: Range<Int>? {
+        guard let w = sideWord, let app, app.pane?.id == reviewCodePane, RowKey.id(app.selected, "s").flatMap(Int.init) == w.line else { return nil }
+        return w.at
+    }
+    /// The repo's GitHub page per repo ("https://github.com/<owner>/<name>"), once origin is read.
+    @ObservationIgnored var githubWebs: [String: String] = [:]
+    /// How the GitHub page is found: origin's URL in the branch's checkout (the keytutor and tests stub it).
+    @ObservationIgnored public var githubWeb: ((AppModel) async -> String?)?
     /// Helix open in the diff, from `i` or `o` until it quits.
     public var helix: HelixOpen?
     /// "<branch>@<tip>" → its Helix checkout, made ahead of the first `i` or `o`
@@ -803,6 +814,7 @@ public final class ReviewPageState: ShipHost {
     func show(_ l: Loc) {
         let same = side
         side = l
+        sideWord = nil
         guard let app else { return }
         app.focus(pane: reviewCodePane)
         app.setCursor("s:\(l.line)")

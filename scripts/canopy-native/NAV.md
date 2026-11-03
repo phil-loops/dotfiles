@@ -43,6 +43,7 @@
 | definition / type-definition / implementations / references | `g d` / `g y` / `g I` / `g r` | code navigation |
 | symbols | `space S` | list the file's symbols |
 | github | `g h` | open it on GitHub |
+| lines on GitHub | `space o m` / `space o b` | the lines under the cursor or selection on GitHub, on main / at the branch (the code beside the diff: at its commit) — Helix's gh-open keys |
 | preview | `g p` | preview it on a side port |
 | go-forests / go-dashboard / go-todo / go-machine / go-wiki / go-tutor | `g f` / `g s` / `g o` / `g m` / `g i` / `g t` | go to that page |
 | alternate | `g a` | the alternate place (where the last jump left from) |

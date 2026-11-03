@@ -46,6 +46,46 @@ extension ReviewPageState {
         Task { @MainActor in _ = await askHelixDir(app, branch: t.name) }
     }
 
+    /// The repo's GitHub page, read from origin in the branch's checkout (gh-open's rule) and kept per repo.
+    func githubPage(_ app: AppModel) async -> String? {
+        guard let t = target else { return nil }
+        if let w = githubWebs[t.repo] { return w }
+        let web: String?
+        if let stub = githubWeb {
+            web = await stub(app)
+        } else {
+            var dir = helixDirs["\(t.name)@\(tip)"]
+            if dir == nil { dir = await askHelixDir(app, branch: t.name)?.dir }
+            guard let dir else { return nil }
+            web = await Self.originWeb(dir)
+        }
+        if let web { githubWebs[t.repo] = web }
+        return web
+    }
+
+    /// origin's URL as a github.com page: `git@github.com:o/r.git` and `https://github.com/o/r.git` → `https://github.com/o/r`.
+    nonisolated static func originWeb(_ dir: String) async -> String? {
+        await withCheckedContinuation { (k: CheckedContinuation<String?, Never>) in
+            let p = Zsh.process("exec git -C \"$0\" remote get-url origin", [dir])
+            let out = Pipe()
+            p.standardOutput = out
+            p.standardError = FileHandle.nullDevice
+            p.terminationHandler = { _ in
+                let raw = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+                k.resume(returning: githubPage(remote: raw))
+            }
+            do { try p.run() } catch { k.resume(returning: nil) }
+        }
+    }
+
+    nonisolated static func githubPage(remote raw: String) -> String? {
+        var u = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if u.hasSuffix(".git") { u.removeLast(4) }
+        if u.hasPrefix("git@github.com:") { u = "https://github.com/" + u.dropFirst("git@github.com:".count) }
+        if u.hasPrefix("ssh://git@github.com/") { u = "https://github.com/" + u.dropFirst("ssh://git@github.com/".count) }
+        return u.hasPrefix("https://github.com/") ? u : nil
+    }
+
     private func askHelixDir(_ app: AppModel, branch: String) async -> HelixWhere? {
         let at = tip
         let r = await app.transport.ask(repoPath("/review-helix"), ["branch": branch, "op": "where"], as: HelixWhere.self)
