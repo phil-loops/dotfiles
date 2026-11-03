@@ -42,9 +42,16 @@ Non-negotiable, in every repo, regardless of what a task seems to call for.
 
 **"Spec X", "design Y", "write up a plan", "whiteboard it" mean *produce a spec*** — inline in chat or a plain markdown file — not launch a tool. Same restraint for any heavyweight skill: pick the lightest action that fits, and let the user opt into the heavier tool.
 
-# Browser / "open in web"
+# Your words for where things go
 
-**The Claude browser extension is NOT installed/connected** — the `mcp__claude-in-chrome__*` tools load via ToolSearch but fail at runtime; don't rely on them. **For browser automation or visual verification of a running app, use Puppeteer** (a small node script that launches headless Chromium, navigates, screenshots, asserts on the DOM). **"open in web" / "open in the browser" means run `open <url-or-path>`** — hand off to the default browser, don't drive one. (Distinct from `stack web`, the forest viewer Phil reviews on himself.)
+| Phil says | Means | How |
+|---|---|---|
+| "via message", "message me", "send me" | a note in Show's **Inbox** (⌘4) | `show-note "<title>" "<markdown>"` — every branch or forest in it a `[name](canopy://v2/b/<repo>/<branch>)` link |
+| "show me", "put it in show" | a **deck** in Show, brought forward | `show --focus <deck.json>` (show skill) |
+| "in the viewer", "in canopy" | the **canopy page** for that branch or forest | `canopy /v2/b/<repo>/<branch>` (or `/v2/p/<repo>/<project>`) |
+| "open in web", "in the browser" | hand the URL to the default browser | `open <url-or-path>` — never drive a browser |
+
+Combined, the words stack: "show me in the viewer, via message" = an Inbox note deeplinking the canopy page. **The Claude browser extension is NOT connected** — `mcp__claude-in-chrome__*` tools load but fail; browser automation or visual checks of a running app use Puppeteer (a small node script: headless Chromium, navigate, screenshot, assert on the DOM).
 
 # Topic files
 
