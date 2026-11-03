@@ -8,8 +8,13 @@
 # worktree is stamped independently, so tsgo roots per-branch (correct types), at the
 # cost of one ~1.2GB tsgo per concurrently-open editor (no cross-instance LRU).
 #
-# Idempotent and self-scoping: no-ops unless the worktree ships a tsserver-pinned
-# .helix config, and skips if already stamped.
+# Also: the shared config formats with `--stdin-filepath %{buffer_name}`, but Helix runs
+# the formatter from the file's folder, where that root-relative path points nowhere and
+# oxfmt sorts the repo's Tailwind classes as unknown. %{file_path_absolute} fixes it
+# (format-helix-buffers-by-absolute-path); once main carries that, this half no-ops.
+#
+# Idempotent and self-scoping: each half no-ops unless the worktree ships the config it
+# overrides, and skips if already stamped.
 emulate -L zsh; set -uo pipefail
 
 dir="${1:-$PWD}"
@@ -17,6 +22,12 @@ top=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null) || exit 0
 cfg="$top/.helix/languages.toml"
 
 [[ -f "$cfg" ]] || exit 0
+
+if grep -q '"%{buffer_name}"' "$cfg"; then
+  sed -i '' 's/"%{buffer_name}"/"%{file_path_absolute}"/g' "$cfg"
+  git -C "$top" update-index --skip-worktree .helix/languages.toml
+fi
+
 grep -q 'typescript-language-server' "$cfg" || exit 0   # not the config we override
 grep -q 'language-server.tsgo' "$cfg" && exit 0         # already stamped
 
