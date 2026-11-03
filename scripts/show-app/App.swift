@@ -375,7 +375,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         workspaces[active]?.goBack()
     }
 
-    /// ⌘I: the Inbox workspace, opened on the messages Claude sessions post with `show-note`.
+    /// ⌘4: the Inbox workspace, opened on the messages Claude sessions post with `show-note`.
     @objc func openInbox() {
         guard FileManager.default.fileExists(atPath: inboxPath) else { return switchTo(.inbox) }
         openPath(inboxPath)
