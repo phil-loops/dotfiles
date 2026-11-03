@@ -1,0 +1,142 @@
+#!/usr/bin/env python3
+"""closeup — is this Claude session done, and if so, close its tmux pane.
+
+  closeup check   what this session still has outstanding; exit 1 if anything, 0 if clean
+  closeup close [--dry]   release this session's lanes and kill its own tmux pane (refuses unless
+                  the pane is provably this session's: its pane_pid is an ancestor of the
+                  session's claude process — never inferred from pane_current_command)
+
+`check` sees only what lives on disk: uncommitted changes in the session's checkout, dirty
+files inside the dotfiles lanes it holds, canopy-todo items it still has `doing`, and
+patches written since it started that haven't landed. What only the conversation knows —
+running background tasks, a question awaiting Phil, a promised follow-up — is the
+/closeup skill's job to check before it calls `close`.
+"""
+import json, os, subprocess, sys
+
+DOTFILES = os.path.expanduser("~/.dotfiles")
+PRESENCE = os.path.expanduser("~/.claude/session-presence")
+
+
+def sh(args, cwd=None):
+    try:
+        return subprocess.run(args, capture_output=True, text=True, timeout=20, cwd=cwd).stdout
+    except Exception:
+        return ""
+
+
+def session():
+    """This session's presence record, found by its claude pid."""
+    out = sh([os.path.join(DOTFILES, "scripts/claude-session-pid")]).split("\t")
+    pid = int(out[0]) if out and out[0].strip().isdigit() else None
+    sid = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+    for name in os.listdir(PRESENCE) if os.path.isdir(PRESENCE) else []:
+        try:
+            rec = json.load(open(os.path.join(PRESENCE, name)))
+        except Exception:
+            continue
+        if (sid and rec.get("session_id") == sid) or (pid and rec.get("pid") == pid):
+            rec["pid"] = pid or rec.get("pid")
+            return rec
+    if pid:
+        return {"pid": pid, "session_id": sid, "cwd": os.getcwd(), "started_at": 0, "tmux_pane": os.environ.get("TMUX_PANE")}
+    sys.exit("closeup: can't find this session's claude process")
+
+
+def my_lanes():
+    """[(lane, [path prefixes])] the session holds, from `own list`."""
+    lanes = []
+    for line in sh(["own", "list"]).splitlines():
+        if "(you)" not in line:
+            continue
+        cols = line.split()
+        if not cols:
+            continue
+        mid = line.split("ago", 1)[-1].split("·")[0].split()
+        lanes.append((cols[0], mid))
+    return lanes
+
+
+def check(rec):
+    found = []
+    cwd = rec.get("cwd") or os.getcwd()
+    top = sh(["git", "-C", cwd, "rev-parse", "--show-toplevel"]).strip()
+    if top and os.path.realpath(top) != os.path.realpath(DOTFILES):
+        dirty = sh(["git", "-C", top, "status", "--short"]).splitlines()
+        if dirty:
+            found.append(f"uncommitted in {top}: " + ", ".join(l[3:] for l in dirty[:6]) + (" …" if len(dirty) > 6 else ""))
+
+    lanes = my_lanes()
+    if lanes:
+        prefixes = [p for _, ps in lanes for p in ps]
+        dirty = [l[3:] for l in sh(["git", "-C", DOTFILES, "status", "--short"]).splitlines()
+                 if any(l[3:].startswith(p) for p in prefixes)]
+        if dirty:
+            found.append(f"uncommitted in your dotfiles lanes ({', '.join(n for n, _ in lanes)}): " + ", ".join(dirty))
+
+    short = (rec.get("session_id") or "")[:8]
+    mine = []
+    tdir = os.path.join(DOTFILES, "canopy/todo")
+    for f in sorted(os.listdir(tdir)) if short and os.path.isdir(tdir) else []:
+        head = open(os.path.join(tdir, f)).read().split("+++")[1:2]
+        meta = dict(l.split(" = ", 1) for l in (head[0].splitlines() if head else []) if " = " in l)
+        if meta.get("owner", "").strip('"') == short and meta.get("state", "").strip('"') == "doing":
+            mine.append(f[:-3])
+    if mine:
+        found.append("canopy-todo still doing: " + ", ".join(mine))
+
+    pdir = os.path.join(DOTFILES, "patches")
+    since = rec.get("started_at") or 0
+    fresh = [f for f in sorted(os.listdir(pdir)) if f.endswith(".patch")
+             and os.path.getmtime(os.path.join(pdir, f)) >= since] if since and os.path.isdir(pdir) else []
+    if fresh:
+        found.append("patches written this session, not landed: " + ", ".join(fresh))
+
+    for f in found:
+        print("• " + f)
+    if not found:
+        print("nothing outstanding on disk")
+    return 1 if found else 0
+
+
+def ancestors(pid):
+    tree = {}
+    for line in sh(["ps", "-axo", "pid=,ppid="]).splitlines():
+        p = line.split()
+        if len(p) == 2:
+            tree[int(p[0])] = int(p[1])
+    seen = []
+    while pid and pid not in seen:
+        seen.append(pid)
+        pid = tree.get(pid)
+    return seen
+
+
+def close(rec, dry=False, pane=None):
+    pane = pane or rec.get("tmux_pane") or os.environ.get("TMUX_PANE")
+    if not pane:
+        sys.exit("closeup: this session isn't in a tmux pane — nothing to close")
+    pane_pid = sh(["tmux", "display-message", "-p", "-t", pane, "#{pane_pid}"]).strip()
+    if not pane_pid.isdigit() or int(pane_pid) not in ancestors(rec["pid"]):
+        sys.exit(f"closeup: pane {pane} (pane_pid {pane_pid or '?'}) isn't this session's — refusing")
+    if dry:
+        print(f"would release {', '.join(l for l, _ in my_lanes()) or 'no lanes'} and close pane {pane} (pane_pid {pane_pid} owns claude {rec['pid']})")
+        return
+    for lane, _ in my_lanes():
+        sh(["own", "release", lane])
+    print(f"closing pane {pane}")
+    sys.stdout.flush()
+    subprocess.Popen(["sh", "-c", f"sleep 1; tmux kill-pane -t '{pane}'"], start_new_session=True,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+if __name__ == "__main__":
+    cmd = sys.argv[1] if len(sys.argv) > 1 else "check"
+    rec = session()
+    if cmd == "check":
+        sys.exit(check(rec))
+    if cmd == "close":
+        args = sys.argv[2:]
+        close(rec, dry="--dry" in args, pane=next((a for a in args if a.startswith("%")), None))
+        sys.exit(0)
+    sys.exit(__doc__)
