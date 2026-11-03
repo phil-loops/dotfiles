@@ -228,4 +228,19 @@ import Testing
         #expect(sb.liveScopes().contains(.practice) && !a.liveScopes().contains(.practice))
         #expect(sb.registry.command("keytutor.skip")?.keys == [", k s"])
     }
+
+    @Test func tabInTheSheetPracticesTheFirstLinesKey() throws {
+        let (a, t, _) = try host()
+        t.leave()
+        #expect(a.router.route.surfaceID != "keytutor")
+        a.keys.handle("?")
+        for k in ["u", "n", "d", "o"] { a.keys.handle(k) }
+        let verbs = SheetState.firstVerbs(a)
+        let at = try #require(KeyTutor.teaching(verbs), "a lesson teaches undo")
+        a.keys.handle("tab")
+        #expect(!a.sheetOpen)
+        #expect(a.router.route.surfaceID == "keytutor")
+        #expect(t.lessonIndex == at.lesson && t.stepIndex == at.step)
+        #expect(!Set(t.lesson.steps[t.stepIndex].wants).isDisjoint(with: verbs), "the step it lands on finishes on that key")
+    }
 }

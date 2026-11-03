@@ -304,6 +304,24 @@ final class KeyTutor {
         if app.router.route.surfaceID != "keytutor" { app.go(.keytutor(lesson: nil)) }
     }
 
+    /// The first lesson and step that a verb finishes, if any teaches it.
+    static func teaching(_ verbs: [Verb]) -> (lesson: Int, step: Int)? {
+        for (i, l) in lessons.enumerated() {
+            if let s = l.steps.firstIndex(where: { !Set($0.wants).isDisjoint(with: verbs) }) { return (i, s) }
+        }
+        return nil
+    }
+
+    /// Practice a command's key: the keytutor at the step that teaches it.
+    func practice(_ verbs: [Verb]) throws {
+        if let host { return try host.practice(verbs) }
+        guard let app else { return }
+        guard let at = Self.teaching(verbs) else { throw Refusal("no lesson teaches that key yet") }
+        ensureSandbox()
+        go(lesson: at.lesson, step: at.step)
+        if app.router.route.surfaceID != "keytutor" { app.go(.keytutor(lesson: nil)) }
+    }
+
     /// Back to where you were before the keytutor (the jumplist), else Forests.
     func leave() {
         if let host { return host.leave() }

@@ -194,6 +194,7 @@ final class SheetState {
     /// j, k and ? keep scrolling and closing until something's typed; then backspace edits,
     /// C-n / C-p scroll and ↵ runs the first key that matches. false hands the key to the keymap.
     func type(_ key: String, _ app: AppModel) -> Bool {
+        if key == "tab" { return practiceFirst(app) }
         let printable = key.count == 1 && key != "?"
         if query.isEmpty {
             guard printable, key != "j", key != "k" else { return false }
@@ -204,8 +205,7 @@ final class SheetState {
         case "C-n": move(1, app); return true
         case "C-p": move(-1, app); return true
         case "ret":
-            guard let first = KeySheet.model(app).entries.lazy.compactMap({ e -> SheetLine? in if case .line(let l, false) = e { return l }; return nil }).first
-            else { return true }
+            guard let first = Self.first(app) else { return true }
             app.sheetOpen = false
             app.runner.dispatch(first.cmd.id, via: .key)
             return true
@@ -214,6 +214,25 @@ final class SheetState {
             query += key
         }
         top = 0
+        return true
+    }
+
+    /// The line ↵ runs: the first one that works here.
+    static func first(_ app: AppModel) -> SheetLine? {
+        KeySheet.model(app).entries.lazy.compactMap { e -> SheetLine? in if case .line(let l, false) = e { return l }; return nil }.first
+    }
+
+    /// The verbs the first line's command is bound by, which the keytutor teaches.
+    static func firstVerbs(_ app: AppModel) -> [Verb] {
+        first(app).flatMap { app.registry.command($0.cmd.id)?.verbs } ?? []
+    }
+
+    /// ⇥: practice the first line's key in the keytutor.
+    private func practiceFirst(_ app: AppModel) -> Bool {
+        let verbs = Self.firstVerbs(app)
+        guard KeyTutor.teaching(verbs) != nil else { app.runner.say("no lesson teaches that key yet"); return true }
+        app.sheetOpen = false
+        do { try KeyTutorArea.tutor(app).practice(verbs) } catch { app.runner.say("\(error)") }
         return true
     }
 }
@@ -261,7 +280,7 @@ struct KeySheetView: View {
                                 Text("canopy/keys-native.toml").foregroundStyle(theme.inkDim)
                                 Text(" (").foregroundStyle(theme.inkFaint)
                                 Text("underlined").underline(pattern: .dot).foregroundStyle(theme.inkFaint)
-                                Text(") · type to filter, ↵ runs the first · ? or esc closes").foregroundStyle(theme.inkFaint)
+                                Text(") · type to filter, ↵ runs the first\(KeyTutor.teaching(SheetState.firstVerbs(app)) == nil ? "" : ", ⇥ practices it") · ? or esc closes").foregroundStyle(theme.inkFaint)
                             }
                             .font(Theme.mono(11)).padding(.top, 16)
                         }
