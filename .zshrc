@@ -142,7 +142,6 @@ stack() {
             echo "  stack fmt <project>              oxfmt every branch's delta + re-cascade (--check|--plan)"
             echo "  stack rm [project...]            fzf multi-select & kill project(s): branches+worktrees+config"
             echo "  stack archive|unarchive|archived hide/show finished projects"
-            echo "  stack review-branch              review branch against main in nvim"
             echo "  stack pr-review                  review PRs assigned to you"
             echo "  stack purpose [branch] [text]    view/set a branch's purpose (git branch description)"
             echo "  stack stories [project]          write every branch's story in one \$EDITOR buffer"
@@ -165,7 +164,6 @@ _stack() {
             'archive[hide a finished project]' \
             'unarchive[show an archived project]' \
             'archived[list archived projects]' \
-            'review-branch[review current branch vs main]' \
             'pr-review[review PRs assigned to you]' \
             'purpose[view/set branch purpose]' \
             'stories[write every branch story in one $EDITOR buffer]' \
