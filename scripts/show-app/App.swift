@@ -17,7 +17,7 @@ var prefs = UserDefaults.standard
 
 /// The workspaces on the rail, top to bottom; the nth answers to ⌘n. Nothing crosses between them except the rail's waiting badges.
 enum Workspace: String, CaseIterable {
-    case canopy, learn, machine, forest, review, runs, api
+    case canopy, learn, machine, forest, review, runs, api, inbox
 
     var name: String { self == .api ? "API" : rawValue.capitalized }
 
@@ -30,6 +30,7 @@ enum Workspace: String, CaseIterable {
         case .api: return "bolt"
         case .canopy: return "leaf"
         case .machine: return "server.rack"
+        case .inbox: return "tray"
         }
     }
 
@@ -48,6 +49,7 @@ enum Workspace: String, CaseIterable {
         case .api: return .secondaryLabelColor
         case .canopy: return forestTint
         case .machine: return .secondaryLabelColor
+        case .inbox: return .secondaryLabelColor
         }
     }
 
@@ -365,6 +367,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     @objc func goBack(_ sender: Any?) {
         workspaces[active]?.goBack()
+    }
+
+    /// ⌘I: the Inbox workspace, opened on the messages Claude sessions post with `show-note`.
+    @objc func openInbox() {
+        guard FileManager.default.fileExists(atPath: inboxPath) else { return switchTo(.inbox) }
+        openPath(inboxPath)
     }
 
     /// ⌘Y: everything that arrived or was opened, in every workspace, newest first; type a workspace or topic to narrow it.
