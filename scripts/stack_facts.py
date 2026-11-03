@@ -3,8 +3,8 @@
 
 Everything the forest knows about a branch is derived HERE, once: its job, its purpose, its stored
 summary, the project's whole plan in merge order (steps that already landed, steps still in flight),
-each step's PR, and the graph edges. `stack-forest-mermaid` and `stack-pr-body`
-are now RENDERERS over this — views of one truth, so they cannot disagree.
+each step's PR, and the graph edges. `stack-pr-body` and the viewer
+are RENDERERS over this — views of one truth, so they cannot disagree.
 
 They used to each derive it, and they had already drifted: a PR body named a branch by its
 description while the map right below it named the same branch by its commit subject.

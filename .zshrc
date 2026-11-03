@@ -106,9 +106,6 @@ stack() {
         archived)
             ~/.dotfiles/scripts/stack-archive list
             ;;
-        review-branch)
-            ~/.dotfiles/scripts/branch-review "$@"
-            ;;
         pr-review)
             _stack_pr_review "$@"
             ;;
