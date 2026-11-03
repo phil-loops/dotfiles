@@ -12,7 +12,7 @@ description: Present a design, plan or walkthrough as a native macOS app (Swift 
 | Canopy | ⌘1 | `show --canopy [--focus] [/v2/…]` (or `canopy`) | the forest viewer (canopy) inside Show, with canopy's own keys; Show keeps only its ⌘ shortcuts there. Arrival follows the rule below |
 | Learn | ⌘2 | `"mode": "tutor"` | tutor sessions |
 | Machine | ⌘3 | — | canopy's machine page on its own key: every preview and dev server, its branch and port |
-| Inbox | ⌘4 | `show-note "<title>" "<markdown>"` (`"workspace": "inbox"`) | messages from Claude sessions, one per row; a reply goes to the sender, ⌘J jumps to its pane, ⌘I opens it from anywhere |
+| Inbox | ⌘4 | `show-note "<title>" "<markdown>"` (`"workspace": "inbox"`) | messages from Claude sessions, one per row; a reply goes to the sender, ⌘J jumps to its pane |
 | Forest | — | `"mode": "forest"` | a project's branches in merge order (branch-deck decks) |
 | Review | — | `"mode": "deck"` or no mode | plans and designs to sign off |
 | Runs | — | `"mode": "live"` | live runs, read-only |
