@@ -10,33 +10,43 @@ import Testing
         return AppModel(config: c, port: 1, telemetry: false)
     }
 
-    @Test func questionMarkSaysWhatsOnScreenThenEveryKeyThenCloses() {
+    @Test func oneQuestionMarkIsWhereYouAreWhatsOnScreenAndEveryKey() {
         let a = app()
-        let e = ExplainState.of(a)
-        e.note(.init(id: "x", text: "to push: commits only on this machine", rect: CGRect(x: 0, y: 10, width: 50, height: 12)))
+        ExplainState.of(a).note(.init(id: "x", word: "to push", text: "commits only on this machine", rect: CGRect(x: 0, y: 10, width: 50, height: 12)))
         a.keys.handle("?")
-        #expect(e.open && !a.sheetOpen, "the first ? is the notes")
+        #expect(a.sheetOpen, "one press")
+        let m = KeySheet.model(a)
+        #expect(m.entries.first == .heading("On screen", gold: false))
+        #expect(m.entries.contains(.note(word: "to push", text: "commits only on this machine")))
+        #expect(!m.whereNow.isEmpty, "where you are, even with nothing explained")
         a.keys.handle("?")
-        #expect(!e.open && a.sheetOpen, "the second is every key")
-        a.keys.handle("?")
-        #expect(!e.open && !a.sheetOpen)
-        a.keys.handle("?")
-        a.keys.handle("esc")
-        #expect(!e.open, "esc closes the notes")
+        #expect(!a.sheetOpen, "? again closes it")
     }
 
-    @Test func withNothingToExplainQuestionMarkIsTheKeySheet() {
+    @Test func withNothingExplainedTheSheetStillSaysWhereYouAre() {
         let a = app()
         a.keys.handle("?")
-        #expect(!ExplainState.of(a).open && a.sheetOpen)
+        let m = KeySheet.model(a)
+        #expect(a.sheetOpen && !m.whereNow.isEmpty)
+        #expect(!m.entries.contains { if case .note = $0 { return true }; return false }, "no empty section")
+    }
+
+    @Test func typingFiltersTheNotesWithTheKeys() {
+        let a = app()
+        let e = ExplainState.of(a)
+        e.note(.init(id: "p", word: "to push", text: "commits only on this machine", rect: CGRect(x: 0, y: 10, width: 50, height: 12)))
+        e.note(.init(id: "d", word: "draft", text: "goes out when you open the PR", rect: CGRect(x: 0, y: 30, width: 50, height: 12)))
+        a.keys.handle("?")
+        for k in ["m", "a", "c", "h"] { a.keys.handle(k) }
+        #expect(KeySheet.model(a).notes.map(\.id) == ["p"])
     }
 
     @Test func aRepeatedNoteShowsOnceTopmostAndAGoneViewTakesItsNote() {
         let a = app()
         let e = ExplainState.of(a)
-        e.note(.init(id: "b", text: "local", rect: CGRect(x: 0, y: 40, width: 10, height: 10)))
-        e.note(.init(id: "a", text: "local", rect: CGRect(x: 0, y: 20, width: 10, height: 10)))
-        e.note(.init(id: "c", text: "draft", rect: CGRect(x: 0, y: 30, width: 10, height: 10)))
+        e.note(.init(id: "b", word: nil, text: "local", rect: CGRect(x: 0, y: 40, width: 10, height: 10)))
+        e.note(.init(id: "a", word: nil, text: "local", rect: CGRect(x: 0, y: 20, width: 10, height: 10)))
+        e.note(.init(id: "c", word: nil, text: "draft", rect: CGRect(x: 0, y: 30, width: 10, height: 10)))
         #expect(e.shown.map(\.id) == ["a", "c"])
         e.drop("a")
         #expect(e.shown.map(\.id) == ["c", "b"])

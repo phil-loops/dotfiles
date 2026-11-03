@@ -232,15 +232,16 @@ public final class KeyEngine {
 
     /// The way on and out of whatever mode or layer is up, as "↵ keep · esc back": each key bound in
     /// it here, then esc — generated from the registry, so no mode can trap you without saying how out.
-    public func modeKeys() -> [String] {
-        guard active != .normal, let ctx = runner.context else { return [] }
+    public func modeKeys(_ mode: KeyMode? = nil) -> [String] {
+        let m = mode ?? active
+        guard m != .normal, let ctx = runner.context else { return [] }
         let live = ctx.liveScopes()
         let targets = Self.targets(ctx, live)
         var seen = Set<String>()
         var out: [String] = []
-        for c in registry.commands where c.modes.contains(active) && (c.scope == .global || live.contains(c.scope))
+        for c in registry.commands where c.modes.contains(m) && (c.scope == .global || live.contains(c.scope))
             && (c.available?(targets[c.scope] ?? nil) ?? true) {
-            guard let k = c.keysByMode[active]?.first, seen.insert(k).inserted else { continue }
+            guard let k = c.keysByMode[m]?.first, seen.insert(k).inserted else { continue }
             out.append("\(glyph(k)) \(c.label ?? shortTitle(c.title))")
         }
         return seen.contains("esc") ? out : out + ["esc back"]

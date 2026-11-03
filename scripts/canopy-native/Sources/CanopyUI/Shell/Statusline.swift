@@ -26,10 +26,8 @@ struct Statusline: View {
                 } else {
                     if !app.keys.pendingKeys.isEmpty { Text(glyph(app.keys.pendingKeys)).foregroundStyle(theme.goldLeaf) }
                     if let l = app.labeling { Text("label \(l.typed)…").foregroundStyle(theme.goldLeaf) }
-                    if let p = app.pane {
-                        let n = p.rows.count
-                        let at = app.selected.flatMap { p.rows.firstIndex(of: $0) }.map { $0 + 1 } ?? 0
-                        Text(app.provider?.position(app) ?? "\(p.title.isEmpty ? p.id : p.title) \(at)/\(n)").foregroundStyle(theme.inkFaint)
+                    if let pos = app.position {
+                        Text(pos).foregroundStyle(theme.inkFaint)
                         if app.keys.mode == .select { Text("\(app.selection.count) selected").foregroundStyle(theme.goldLeaf) }
                     }
                     let search = PageSearch.of(app)
@@ -61,6 +59,15 @@ struct Statusline: View {
         case .normal: theme.inkDim
         default: theme.goldDeep
         }
+    }
+}
+
+extension AppModel {
+    /// Where the cursor is: the page's own words for it, else the focused pane and the row's place in it.
+    var position: String? {
+        guard let p = pane else { return nil }
+        let at = selected.flatMap { p.rows.firstIndex(of: $0) }.map { $0 + 1 } ?? 0
+        return provider?.position(self) ?? "\(p.title.isEmpty ? p.id : p.title) \(at)/\(p.rows.count)"
     }
 }
 
