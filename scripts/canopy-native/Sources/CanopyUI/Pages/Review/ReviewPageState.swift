@@ -892,7 +892,13 @@ public extension ReviewPageState {
 
     /// `o`: Helix over the whole page, on the file and line under the cursor.
     func openHelixWhole(_ app: AppModel) -> Bool {
-        guard helix == nil, integration == nil, let t = target, let h = here else { return false }
+        guard helix == nil, integration == nil, let t = target else { return false }
+        if let s = side, app.pane?.id == reviewCodePane {
+            let line = RowKey.id(app.selected, "s").flatMap(Int.init) ?? s.line
+            openHelix(app, branch: t.name, path: s.path, line: line, col: (sideHereWord?.lowerBound ?? 0) + 1, whole: true, fromSide: true)
+            return true
+        }
+        guard let h = here else { return false }
         var line = tipLineNear(h) ?? 1, col = 1
         if h.kind == .line, let row = h.row, sideLine(row, prefer: column).side == .right, let w = hereWord { col = w.lowerBound + 1 }
         if h.kind == .thread, let l = h.id.flatMap({ app.store.view(CanopyCore.Thread.self, $0) })?.local?.line { line = l }
