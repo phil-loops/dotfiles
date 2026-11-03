@@ -257,6 +257,9 @@ final class ShellController: NSViewController {
     static let railShownKey = "show.railShown"
     var railShown: Bool { UserDefaults.standard.bool(forKey: Self.railShownKey) }
     let titleLabel = NSTextField(labelWithString: "")
+    /// Shown once a newer build is ready; Show never relaunches under you, only when this is pressed.
+    let updateButton = NSButton(title: "Update", target: nil, action: nil)
+    var onUpdate: (() -> Void)?
     private var buttons: [Workspace: RailButton] = [:]
     var onPick: ((Workspace) -> Void)?
     var runsRunning = false {
@@ -313,7 +316,13 @@ final class ShellController: NSViewController {
         titleLabel.alignment = .center
         titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         let slot = NSView()
-        for view in [band, bandEdge, rail, edge, stack, slot, titleLabel] {
+        updateButton.bezelStyle = .rounded
+        updateButton.controlSize = .small
+        updateButton.target = self
+        updateButton.action = #selector(update)
+        updateButton.toolTip = "A newer Show is built: quit this one and open it, back where you were"
+        updateButton.isHidden = true
+        for view in [band, bandEdge, rail, edge, stack, slot, titleLabel, updateButton] {
             view.translatesAutoresizingMaskIntoConstraints = false
         }
         root.addSubview(rail)
@@ -322,6 +331,7 @@ final class ShellController: NSViewController {
         root.addSubview(band)
         root.addSubview(bandEdge)
         band.addSubview(titleLabel)
+        band.addSubview(updateButton)
         rail.addSubview(stack)
         NSLayoutConstraint.activate([
             band.leadingAnchor.constraint(equalTo: root.leadingAnchor),
@@ -336,7 +346,9 @@ final class ShellController: NSViewController {
             titleLabel.centerYAnchor.constraint(equalTo: band.centerYAnchor),
             titleLabel.centerXAnchor.constraint(equalTo: band.centerXAnchor),
             titleLabel.leadingAnchor.constraint(greaterThanOrEqualTo: band.leadingAnchor, constant: 84),
-            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: band.trailingAnchor, constant: -16),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: updateButton.leadingAnchor, constant: -12),
+            updateButton.centerYAnchor.constraint(equalTo: band.centerYAnchor),
+            updateButton.trailingAnchor.constraint(equalTo: band.trailingAnchor, constant: -12),
             rail.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             rail.topAnchor.constraint(equalTo: bandEdge.bottomAnchor),
             rail.bottomAnchor.constraint(equalTo: root.bottomAnchor),
@@ -415,6 +427,10 @@ final class ShellController: NSViewController {
         buttons[target] = button
         NSLayoutConstraint.activate([button.widthAnchor.constraint(equalToConstant: 34), button.heightAnchor.constraint(equalToConstant: 34)])
         return button
+    }
+
+    @objc private func update(_ sender: NSButton) {
+        onUpdate?()
     }
 
     @objc private func pick(_ sender: NSButton) {
