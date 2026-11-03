@@ -381,7 +381,17 @@ import Testing
         keys(a, "h", "h")
         #expect(a.pane?.id != reviewDiffPane)
         #expect(!pg.outlineIsStrip(a.pane?.id), "in the outline it opens back to full width")
-        #expect(pg.outlineReserve == pg.stripWidth, "the diff keeps its width: the full outline floats over it")
+        #expect(pg.outlineReserve(a.pane?.id) == pg.outlineWidth, "the diff moves over: the open outline never covers it")
+        #expect(pg.outlineReserve(reviewDiffPane) == pg.stripWidth)
+    }
+
+    @Test func retOnAllChangesGoesBackIntoTheDiff() async throws {
+        let (a, _) = try await app()
+        #expect(ReviewPageState.of(a).showsHistory)
+        a.focus(pane: ShipSeam.historyPane)
+        a.setCursor("h|")
+        keys(a, "ret")
+        #expect(a.pane?.id == reviewDiffPane, "↵ reads the whole branch's diff, never 'nothing here'")
     }
 
     /// w / b step name to name, crossing lines, and g d / space k ask about the name they land on.
