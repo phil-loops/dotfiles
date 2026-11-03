@@ -253,7 +253,7 @@ final class ShellController: NSViewController {
     private let railEdge = NSBox()
     private var railWidth: NSLayoutConstraint?
     private var railEdgeWidth: NSLayoutConstraint?
-    /// The rail stays out of the way until asked for (⌃⌘R); ⌘1–⌘7 switch workspaces either way.
+    /// The rail stays out of the way until asked for (⌃⌘R); ⌘1–⌘8 switch workspaces either way.
     static let railShownKey = "show.railShown"
     var railShown: Bool { UserDefaults.standard.bool(forKey: Self.railShownKey) }
     let titleLabel = NSTextField(labelWithString: "")
