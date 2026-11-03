@@ -53,6 +53,7 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
     let progress = NSTextField(labelWithString: "")
     let submit = NSButton(title: "Submit", target: nil, action: nil)
     let goToSession = NSButton(title: "Go to session", target: nil, action: nil)
+    let inboxHint = NSTextField(labelWithString: "⌘↩ reply · ⌘S done · ⌘J go to session")
     let live = LivePanel()
     var actionBar: NSView!
     var actionDivider: NSView!
@@ -114,6 +115,15 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
 
     var selectionKey: String { "selected." + path }
 
+    /// The Inbox keeps only the reply field and a key hint; every other deck shows its sign-off controls.
+    func applyBarChrome() {
+        let inbox = deck.isInbox
+        [signed, send, submit].forEach { $0.isHidden = inbox }
+        goToSession.isHidden = inbox || selectedReplyTo == nil
+        inboxHint.isHidden = !inbox
+        if inbox { composer.placeholder = "Reply to this session — ⌘↩ sends" }
+    }
+
     /// Who answers for the selected section: its own sender, else the deck's.
     var selectedReplyTo: String? { selectedSection?.replyTo ?? deck.replyTo }
 
@@ -161,7 +171,7 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
 
     private func apply(_ deck: Deck, keepingSelection key: String?) {
         self.deck = deck
-        goToSession.isHidden = selectedReplyTo == nil
+        applyBarChrome()
         rows = []
         branchPlaces = [:]
         if deck.isForest {
@@ -324,8 +334,10 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
         goToSession.action = #selector(jumpToSession)
         goToSession.bezelStyle = .rounded
         goToSession.toolTip = "Bring the Claude session that sent this to the front (⌘J)"
-        goToSession.isHidden = selectedReplyTo == nil
-        let bar = NSStackView(views: [signed, composerScroll, send, goToSession, submit])
+        applyBarChrome()
+        inboxHint.font = .systemFont(ofSize: 11)
+        inboxHint.textColor = .tertiaryLabelColor
+        let bar = NSStackView(views: [signed, composerScroll, send, goToSession, submit, inboxHint])
         bar.orientation = .horizontal
         bar.alignment = .centerY
         bar.spacing = 14
@@ -357,7 +369,7 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
         return vc
     }
 
-    @objc private func toggleSigned() {
+    @objc func toggleSigned() {
         guard !deck.isLive, let section = selectedSection else { return }
         store.update(section.key) { $0.signed = signed.state == .on }
         reloadSelectedRow()
@@ -641,7 +653,7 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
             table.reloadData(forRowIndexes: IndexSet(integersIn: 0..<rows.count), columnIndexes: IndexSet(integer: 0))
         }
         guard let section = selectedSection else { return }
-        goToSession.isHidden = selectedReplyTo == nil
+        applyBarChrome()
         prefs.set(section.key, forKey: selectionKey)
         if let address = section.url, let url = URL(string: address) {
             textScroll.isHidden = true

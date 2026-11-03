@@ -834,7 +834,7 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
     /// Puts the dividers where they read best at 1180pt: a 210pt shelf, then the open document's own columns.
     func settleColumns() {
         split.view.layoutSubtreeIfNeeded()
-        if console != nil || canopy != nil {
+        if console != nil || canopy != nil || workspace == .inbox {
             split.splitViewItems.first?.isCollapsed = true
             return
         }
