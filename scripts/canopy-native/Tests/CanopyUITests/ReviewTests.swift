@@ -512,6 +512,56 @@ import Testing
         #expect(ReviewSurface().title(for: "s:2", a) == "2 two")
     }
 
+    /// The code beside the diff reads like Helix: w / b walk its names (what g d asks about), v and x
+    /// select lines, space o m / space o b open them on GitHub.
+    @Test func theCodeBesideTheDiffMovesLikeHelix() async throws {
+        let (a, p) = try await app()
+        let pg = ReviewPageState.of(a)
+        let tip = pg.tip
+        var opened: [String] = []
+        ShipState.of(a).openURL = { opened.append($0.absoluteString) }
+        pg.githubWeb = { _ in "https://github.com/o/r" }
+        ShipStub.answer(p, "POST", "/loops/lsp/definition", #"{"ok":true,"sha":"\#(tip)","locations":[{"path":"lib/z.ts","line":2,"character":0}]}"#)
+        ShipStub.answer(p, "GET", "/loops/lsp/src", #"{"path":"lib/z.ts","sha":"x","text":"one\nconst two = three\n\nfour"}"#)
+        keys(a, "g", "d")
+        await until("the side pane") { pg.sideText != nil }
+        keys(a, "w")
+        #expect(a.selected == "s:2" && pg.sideHereWord == 6..<9, "two (const is a keyword, not a name)")
+        keys(a, "w")
+        #expect(pg.sideHereWord == 12..<17, "three")
+        keys(a, "w")
+        #expect(a.selected == "s:4" && pg.sideHereWord == 0..<4, "past the blank line, four")
+        keys(a, "b")
+        #expect(a.selected == "s:2" && pg.sideHereWord == 12..<17, "back up, three")
+        let asked = ShipStub.posts(p).filter { $0.path == "/loops/lsp/definition" }.count
+        keys(a, "g", "d")
+        await until("the second ask") { ShipStub.posts(p).filter { $0.path == "/loops/lsp/definition" }.count > asked }
+        let ask = ShipStub.posts(p).last { $0.path == "/loops/lsp/definition" }!
+        #expect(ask.body["line"] == 2 && ask.body["character"] == 12, "g d asks about the name w landed on")
+        await until("the jump, to line 2 of the same file") { a.selected == "s:2" && pg.sideWord == nil }
+
+        keys(a, "x")
+        #expect(a.keys.mode == .select && a.selection == ["s:2"])
+        keys(a, "x", "j")
+        #expect(a.selection == ["s:2", "s:3", "s:4"])
+        keys(a, "space", "o", "m")
+        await until("the browser") { opened.count == 1 }
+        #expect(opened.last == "https://github.com/o/r/blob/main/lib/z.ts#L2-L4")
+        keys(a, "esc", "space", "o", "b")
+        await until("the browser") { opened.count == 2 }
+        #expect(opened.last == "https://github.com/o/r/blob/\(tip)/lib/z.ts#L4", "at the commit the code is shown at")
+
+        keys(a, "h", "space", "o", "b")
+        await until("the browser") { opened.count == 3 }
+        #expect(opened.last == "https://github.com/o/r/blob/add-hankles-limited-label/a.ts#L1", "the diff's line, at the branch")
+    }
+
+    @Test func originsBecomeGitHubPages() {
+        #expect(ReviewPageState.githubPage(remote: "git@github.com:Loops-so/loops.git\n") == "https://github.com/Loops-so/loops")
+        #expect(ReviewPageState.githubPage(remote: "https://github.com/phil-loops/loops") == "https://github.com/phil-loops/loops")
+        #expect(ReviewPageState.githubPage(remote: "git@gitlab.com:x/y.git") == nil)
+    }
+
     @Test func spaceKAsksAgainWhileTsgoLoads() async throws {
         let (a, p) = try await app()
         let look = CodeLookup.of(a)

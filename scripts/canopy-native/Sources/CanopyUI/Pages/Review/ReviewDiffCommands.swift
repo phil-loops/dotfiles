@@ -321,7 +321,26 @@ enum DiffCommands {
             let all = CodeLookup.names(text)
             return (side, side == .left ? all.filter { $0.upperBound < pg.splitWidth(s.path) } : all)
         }
+        /// The code beside the diff: name to name across its lines.
+        func sideStep(_ d: Int) throws {
+            let lines = (pg.sideText ?? "").components(separatedBy: "\n")
+            guard var n = RowKey.id(app.selected, "s").flatMap(Int.init) else { throw Refusal("no line here") }
+            var from = pg.sideHereWord
+            while n >= 1 && n <= lines.count {
+                let ns = CodeLookup.names(lines[n - 1])
+                let pick = d > 0 ? ns.first { from == nil || $0.lowerBound > from!.lowerBound } : ns.last { from == nil || $0.lowerBound < from!.lowerBound }
+                if let pick {
+                    if app.selected != "s:\(n)" { app.setCursor("s:\(n)") }
+                    pg.sideWord = (n, pick)
+                    return
+                }
+                from = nil
+                n += d
+            }
+            throw Refusal(d > 0 ? "no more names below" : "no more names above")
+        }
         func step(_ d: Int) throws {
+            if app.pane?.id == reviewCodePane, pg.side != nil { return try sideStep(d) }
             guard app.pane?.id == reviewDiffPane, var i = pg.here.flatMap({ pg.stopIndex[$0.key] }) else { throw Refusal("names are in the diff") }
             var from = pg.hereWord
             while i >= 0 && i < pg.stops.count {
@@ -373,7 +392,9 @@ enum DiffCommands {
                 let n = RowKey.id(app.selected, "s").flatMap(Int.init) ?? s.line
                 let lines = (pg.sideText ?? "").components(separatedBy: "\n")
                 let text = n >= 1 && n <= lines.count ? lines[n - 1] : ""
-                return (CodeLookup.position(path: s.path, line: n, text: text), .commit(repo: s.repo, sha: s.sha))
+                let pos = pg.sideHereWord.flatMap { CodeLookup.position(path: s.path, line: n, text: text, at: $0.lowerBound) }
+                    ?? CodeLookup.position(path: s.path, line: n, text: text)
+                return (pos, .commit(repo: s.repo, sha: s.sha))
             }
             let w = CodeLookup.Where.branch(repo: t.repo, name: t.name, base: pg.baseSha)
             if let p = pg.pointer, p.seq == pg.cursorMoved, p.key == pg.here?.key {
@@ -413,6 +434,48 @@ enum DiffCommands {
                            }))
         r.register(Command(id: "review.side.close", title: "Close the code beside the diff", scope: .review, quiet: true,
                            available: { _ in pg.side != nil }, local: { _, _ in pg.closeSide() }))
+        r.register(Command(id: "review.side.extend", title: "Select this line, then the next (the code beside the diff)", scope: .review, verb: .extend,
+                           modes: [.normal, .select], label: "range", group: .move, available: { _ in pg.side != nil && app.pane?.id == reviewCodePane },
+                           local: { _, _ in
+                               if app.keys.mode != .select { app.anchorHere(); return app.keys.setMode(.select) }
+                               guard let n = RowKey.id(app.selected, "s").flatMap(Int.init), n < pg.sideRows.count else { return }
+                               app.setCursor("s:\(n + 1)")
+                           }))
+
+        // ── space o m / space o b: these lines on GitHub (Helix's gh-open keys) ──
+
+        /// The lines under the cursor or selection: the code beside the diff's at its commit, else the diff's at the tip.
+        func githubLines() -> (path: String, lines: ClosedRange<Int>, sha: String?)? {
+            if let s = pg.side, app.pane?.id == reviewCodePane {
+                let ns = app.selection.compactMap { RowKey.id($0, "s").flatMap(Int.init) }
+                guard let lo = ns.min(), let hi = ns.max() else { return nil }
+                return (s.path, lo...hi, s.sha)
+            }
+            guard app.pane?.id == reviewDiffPane, let h = pg.here, h.kind == .line || h.kind == .file else { return nil }
+            if app.keys.mode == .select {
+                let ns = app.selection.compactMap { pg.stopIndex[$0].map { pg.stops[$0] } }.filter { $0.path == h.path }.compactMap { $0.row?.right?.new }
+                if let lo = ns.min(), let hi = ns.max() { return (h.path, lo...hi, nil) }
+            }
+            if let r = pg.range, r.path == h.path, r.side == .right { return (h.path, (r.startLine ?? r.line)...r.line, nil) }
+            return pg.tipLineNear(h).map { (h.path, $0...$0, nil) }
+        }
+        func openOnGitHub(main: Bool) throws {
+            guard let t = pg.target, let at = githubLines() else { throw Refusal("no lines here to open") }
+            let ref = main ? "main" : at.sha ?? t.name
+            let frag = at.lines.count > 1 ? "#L\(at.lines.lowerBound)-L\(at.lines.upperBound)" : "#L\(at.lines.lowerBound)"
+            let ship = ShipState.of(app)
+            Task { @MainActor in
+                guard let web = await pg.githubPage(app) else { return app.runner.say("couldn't read origin's GitHub address for \(t.repo)") }
+                let path = at.path.split(separator: "/").map { String($0).uriComponent }.joined(separator: "/")
+                if let u = URL(string: "\(web)/blob/\(ref.uriComponent)/\(path)\(frag)") { ship.openURL(u) }
+            }
+        }
+        r.register(Command(id: "review.github.main", title: "Open these lines on GitHub, on main", scope: .review, verb: .githubMain,
+                           modes: [.normal, .select], label: "gh main", available: { _ in githubLines() != nil },
+                           local: { _, _ in try openOnGitHub(main: true) }))
+        r.register(Command(id: "review.github.branch", title: "Open these lines on GitHub at the branch — the code beside the diff, at its commit", scope: .review,
+                           verb: .githubBranch, modes: [.normal, .select], label: "gh branch", available: { _ in githubLines() != nil },
+                           local: { _, _ in try openOnGitHub(main: false) }))
 
         r.register(Command(id: "review.open", title: "Open the file in Helix, over the diff — quitting commits what changed", scope: .review,
                            verb: .editor, label: "helix",

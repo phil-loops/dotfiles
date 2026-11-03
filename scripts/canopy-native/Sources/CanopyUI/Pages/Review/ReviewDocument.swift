@@ -274,6 +274,9 @@ enum ReviewDocument {
     }
 
     /// One file at one commit as canvas rows ("s:<n>"), its line numbers in the gutter (CodePane).
+    /// Where a code view's text starts on its row, past the line number.
+    static let codeStart = 6
+
     static func code(_ lines: [String], path: String, _ c: CanvasColors) -> NSAttributedString {
         let b = DocBuilder()
         let lang = langOf(path)
@@ -283,7 +286,7 @@ enum ReviewDocument {
             let start = b.length
             b.put(l, [.foregroundColor: c.inkDim])
             b.tokens(l, lang, at: start, c.code)
-            b.endRow(RowInfo(kind: .code, stop: "s:\(i + 1)", path: path, newLine: i + 1, codeStart: 6), p)
+            b.endRow(RowInfo(kind: .code, stop: "s:\(i + 1)", path: path, newLine: i + 1, codeStart: codeStart), p)
         }
         return b.build(base(c))
     }

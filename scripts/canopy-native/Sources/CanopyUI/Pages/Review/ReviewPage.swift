@@ -322,7 +322,8 @@ private struct SidePane: View {
         let pg = ReviewPageState.of(app)
         if let l = pg.side {
             CodePaneView(handle: pg.sideCanvas, pane: reviewCodePane, path: l.path, refLabel: l.sha, text: pg.sideText,
-                         lit: l.line...max(l.line, l.end ?? l.line), repo: l.repo, sha: l.sha, close: "review.side.close")
+                         lit: l.line...max(l.line, l.end ?? l.line), repo: l.repo, sha: l.sha, close: "review.side.close",
+                         word: pg.sideHereWord.flatMap { w in pg.sideWord.map { ($0.line, w) } })
         }
     }
 }
@@ -345,10 +346,13 @@ public struct CodePaneView: View {
     let sha: String
     /// the command that closes it (its ✕), if it can be closed
     var close: String?
+    /// the name `w` / `b` are on: its line and UTF-16 range in that line
+    var word: (line: Int, at: Range<Int>)?
 
-    public init(handle: CanvasHandle, pane: String, path: String, refLabel: String, text: String?, err: String? = nil, lit: ClosedRange<Int>?, repo: String, sha: String, close: String? = nil) {
+    public init(handle: CanvasHandle, pane: String, path: String, refLabel: String, text: String?, err: String? = nil, lit: ClosedRange<Int>?, repo: String, sha: String, close: String? = nil,
+                word: (line: Int, at: Range<Int>)? = nil) {
         self.handle = handle; self.pane = pane; self.path = path; self.refLabel = refLabel; self.text = text; self.err = err
-        self.lit = lit; self.repo = repo; self.sha = sha; self.close = close
+        self.lit = lit; self.repo = repo; self.sha = sha; self.close = close; self.word = word
     }
 
     public var body: some View {
@@ -371,7 +375,7 @@ public struct CodePaneView: View {
                 let c = CanvasColors(theme)
                 let cursor = app.cursors["\(app.router.surface.id)/\(pane)"] ?? lit.map { "s:\($0.lowerBound)" }
                 CanvasView(handle: handle, segments: [Segment(key: "code|\(repo)|\(sha)|\(path)|\(lines.count)") { ReviewDocument.code(lines, path: path, c) }],
-                           marks: CanvasMarks(cursor: cursor, lit: lit, focused: focused),
+                           marks: marks(cursor: cursor, focused: focused),
                            centerOn: lit.map { "s:\($0.lowerBound)|\(repo)|\(sha)|\(path)" },
                            onClick: { stop, _ in app.focus(pane: pane); app.setCursor(stop) })
             } else {
@@ -381,5 +385,12 @@ public struct CodePaneView: View {
         }
         .background(theme.diffBg)
         .paneRing(pane)
+    }
+
+    private func marks(cursor: String?, focused: Bool) -> CanvasMarks {
+        var m = CanvasMarks(cursor: cursor, lit: lit, focused: focused)
+        if let word { m.word = ("s:\(word.line)", (ReviewDocument.codeStart + word.at.lowerBound)..<(ReviewDocument.codeStart + word.at.upperBound)) }
+        if focused && app.keys.mode == .select { m.selection = Set(app.selection) }
+        return m
     }
 }
