@@ -15,6 +15,8 @@ struct Deck: Decodable {
     /// A live deck is watched, not judged: no sign-off bar, no sign-off file, no sign-off marks.
     var isLive: Bool { mode == "live" }
     var isForest: Bool { mode == "forest" }
+    /// The Inbox: messages, not a review, so no sign-off checkbox, Send or Submit, only a reply field.
+    var isInbox: Bool { mode == "inbox" }
 }
 
 struct Section: Decodable {

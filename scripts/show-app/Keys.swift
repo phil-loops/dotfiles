@@ -434,7 +434,8 @@ extension AppDelegate {
 
     func toggleSignedOff() {
         guard let deck = signableDeck, deck.selectedSection != nil else { return }
-        deck.signed.performClick(nil)
+        deck.signed.state = deck.signed.state == .on ? .off : .on
+        deck.toggleSigned()
     }
 
     /// ⎋: closes whatever covers the window, otherwise steps out of a text field into its column's list. Typed text always stays.
