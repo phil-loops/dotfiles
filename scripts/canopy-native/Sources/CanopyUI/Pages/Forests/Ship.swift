@@ -5,7 +5,7 @@ import Foundation
 // (ship.ts), so the tests pin the rules. The facts are the outbox's (srv/outbox.py), derived from the store.
 
 /// A branch's place on its way to main.
-public enum ShipStage: String, Sendable, CaseIterable {
+public enum ShipStage: String, Sendable, CaseIterable, Term {
     case local, green, pushed, review, approved, landed
 
     public var glyph: String {
@@ -29,6 +29,20 @@ public enum ShipStage: String, Sendable, CaseIterable {
         case .landed: "landed"
         }
     }
+
+    public var meaning: String? {
+        switch self {
+        case .local: "not on origin, and the gates aren't green on this tip"
+        case .green: "the gates passed on this tip: ready to push"
+        case .pushed: "on origin, no PR yet"
+        case .review: "its PR is open, waiting on review"
+        case .approved: "its PR is approved; the row says what it still waits on"
+        case .landed: "its PR merged into main"
+        }
+    }
+
+    /// The glyph and word a row draws, as the note's word.
+    var term: RowName { RowName(word: "\(glyph) \(word)", meaning: meaning) }
 }
 
 /// What an approved PR still waits on.

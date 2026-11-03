@@ -19,7 +19,21 @@ public struct LoopStep: Equatable, Sendable {
     }
 
     public var word: String { id == .pr ? "PR" : id.rawValue }
+
+    /// What the step in the way is waiting for.
+    public var meaning: String? {
+        switch id {
+        case .words: "the PR title or body has something to fix"
+        case .gates: "next: green push gates on this tip"
+        case .push: "next: push it to origin"
+        case .pr: "next: open its PR"
+        case .review: "its PR waits on review"
+        case .merged: "approved; waits on what follows to merge"
+        }
+    }
 }
+
+extension LoopStep: Term {}
 
 /// One outline hint as the loop reads it (outlineHints.ts Hint: its id and tone).
 public struct LoopWord: Equatable, Sendable {

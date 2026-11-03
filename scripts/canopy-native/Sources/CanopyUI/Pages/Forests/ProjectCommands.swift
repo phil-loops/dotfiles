@@ -208,3 +208,17 @@ enum ProjectCommands {
             }))
     }
 }
+
+/// A lane's name on Forests, and what being in it means.
+extension ProjectState: Term {
+    public var word: String { rawValue }
+
+    public var meaning: String? {
+        switch self {
+        case .focus: "the forests you're working now, in your order"
+        case .workbench: "live forests out of focus: parked, or waiting on others"
+        case .archive: "put away: landed or dropped"
+        default: nil
+        }
+    }
+}

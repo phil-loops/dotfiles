@@ -43,11 +43,11 @@ struct ForestsPage: View {
                                 }
                                 .padding(.leading, 44).padding(.bottom, 20)
                             }
-                            section("Focus", p.focus, fs, nameWidth: nameWidth, cursor: cursor, selection: selection)
-                            section("Workbench", p.workbench, fs, nameWidth: nameWidth, cursor: cursor, selection: selection)
+                            section(.focus, p.focus, fs, nameWidth: nameWidth, cursor: cursor, selection: selection)
+                            section(.workbench, p.workbench, fs, nameWidth: nameWidth, cursor: cursor, selection: selection)
                             if !m.readyOnly {
                                 if m.showArchive {
-                                    section("Archive", p.archive, fs, nameWidth: nameWidth, cursor: cursor, selection: selection)
+                                    section(.archive, p.archive, fs, nameWidth: nameWidth, cursor: cursor, selection: selection)
                                 } else if !p.archive.isEmpty {
                                     HStack(spacing: 6) {
                                         Button("archive · \(p.archive.count)") { app.runner.dispatch("archive.toggle", via: .click) }
@@ -85,13 +85,13 @@ struct ForestsPage: View {
     }
 
     @ViewBuilder
-    private func section(_ title: String, _ projects: [Project], _ fs: [String: ForestView], nameWidth: CGFloat, cursor: String?, selection: Set<String>) -> some View {
+    private func section(_ state: ProjectState, _ projects: [Project], _ fs: [String: ForestView], nameWidth: CGFloat, cursor: String?, selection: Set<String>) -> some View {
         let m = app.forestModel
         let views = projects.compactMap { fs[$0.id] }.filter { !m.readyOnly || !$0.ready.isEmpty }
         if !m.readyOnly || !views.isEmpty {
             VStack(alignment: .leading, spacing: 0) {
-                if title != "Focus" {
-                    Text(title.lowercased()).font(Theme.text(11)).foregroundStyle(theme.inkFaint)
+                if state != .focus {
+                    TermText("lane|\(state.rawValue)", state).font(Theme.text(11)).foregroundStyle(theme.inkFaint)
                         .padding(.leading, 44).padding(.bottom, 4)
                 }
                 if views.isEmpty {
@@ -129,6 +129,7 @@ private struct NextMove: View {
         let n = f.ready.count
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text("next").foregroundStyle(theme.inkFaint)
+                .explains("home|next", RowName(word: "next", meaning: "the first focus forest with branches you can act on now"))
             Text(f.p.name).foregroundStyle(theme.goldLeaf).font(Theme.text(14, weight: .semibold))
             Text("\(n) branch\(n == 1 ? "" : "es") ready for you").foregroundStyle(theme.inkDim)
         }
@@ -149,6 +150,7 @@ private struct WindowLine: View {
         if due > 0 {
             Text("☀ \(due) held overnight \(due == 1 ? "is" : "are") due").foregroundColor(theme.goldLeaf)
                 .font(Theme.display(15))
+                .explains("home|due", RowName(word: "☀ held", meaning: "branches held for the morning push window, now due to push"))
                 .padding(.leading, 44).padding(.bottom, 24)
         }
     }
@@ -174,11 +176,15 @@ private struct ForestRowView: View {
                 Text(p.name).font(Theme.display(17))
                     .foregroundStyle(cursor ? theme.goldLeaf : f.closed ? theme.inkFaint : theme.ink)
                     .lineLimit(1).truncationMode(.tail)
-                if verdict?.state == .conflicts { Text("✕").font(Theme.text(11)).foregroundStyle(theme.del) }
+                if verdict?.state == .conflicts {
+                    Text("✕").font(Theme.text(11)).foregroundStyle(theme.del)
+                        .explains("forest|✕|\(p.id)", RowName(word: "✕", meaning: "its branches don't merge onto main together"))
+                }
             }
             .frame(width: nameWidth, alignment: .leading)
             if closing || f.closed {
                 Text("✦ canopy closed").font(Theme.display(13)).foregroundStyle(closing ? theme.goldLeaf.opacity(0.8) : theme.inkFaint)
+                    .explains("forest|closed|\(p.id)", RowName(word: "✦ closed", meaning: "every branch has landed; it can go to the archive"))
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 Text(p.summary).foregroundStyle(theme.inkDim).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
@@ -193,6 +199,7 @@ private struct ForestRowView: View {
                     }
                 }
                 .frame(minWidth: 60, alignment: .trailing)
+                .explains("forest|dots|\(p.id)", RowName(word: "● ● ●", meaning: "one dot per branch in merge order: green has landed, gold is ready for you, faint is still in the works"))
             }
         }
         .frame(height: 30)
@@ -236,6 +243,7 @@ private struct BranchRowView: View {
         let word = shipWord(m)
         HStack(alignment: .firstTextBaseline, spacing: 12) {
             Text(v.b.order < 999 ? "\(v.b.order)" : "").font(Theme.text(11)).foregroundStyle(theme.inkFaint).frame(width: 16, alignment: .trailing)
+                .explains("branch|order|\(v.b.id)", RowName(word: "1 2 3", meaning: "the branch's place in merge order"))
             Text(leaf(v.b.name)).foregroundStyle(cursor ? theme.goldLeaf : theme.ink).lineLimit(1).frame(width: 172, alignment: .leading)
             Text(v.b.description == summary ? "" : v.b.description).foregroundStyle(theme.inkDim).lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -244,6 +252,7 @@ private struct BranchRowView: View {
                 .opacity(v.b.pending != nil || word.hasSuffix("…") ? 0.75 : 1)
                 .fixedSize()
                 .settles("\(v.st.ship.rawValue)|\(word)", reduced: reduced)
+                .explains("branch|ship|\(v.b.id)", shipTerm(word))
             if cursor, !meta.isEmpty {
                 Text(meta).font(Theme.text(11)).foregroundStyle(v.b.gates == .red && v.pr == nil ? theme.del : theme.inkFaint).fixedSize()
             }
@@ -253,6 +262,15 @@ private struct BranchRowView: View {
         .padding(.leading, 40).padding(.trailing, 16)
         .overlay { if armed { Rectangle().stroke(theme.goldDeep, lineWidth: 1) } }
         .rowChrome(RowKey.branch(v.b.id), cursor: cursor, selected: selected)
+    }
+
+    /// The stage's note, or the in-flight word's while one replaces it.
+    private func shipTerm(_ word: String) -> RowName {
+        switch word {
+        case "pushing…": RowName(word: "pushing…", meaning: "sending it to origin")
+        case "waiting for GitHub…": RowName(word: "waiting for GitHub…", meaning: "pushed with its PR opening; GitHub hasn't reported the PR yet")
+        default: v.st.ship.term
+        }
     }
 
     private func shipWord(_ m: ForestModel) -> String {
