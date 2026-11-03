@@ -32,9 +32,8 @@ struct Statusline: View {
                     }
                     let search = PageSearch.of(app)
                     if search.active {
-                        let ms = search.matches(app)
-                        let at = app.selected.flatMap { ms.firstIndex(of: $0) }.map { "\($0 + 1)/" } ?? ""
-                        Text("/\(search.query)  \(at)\(ms.count)").foregroundStyle(ms.isEmpty ? theme.ember : theme.goldLeaf)
+                        let t = search.tally(app)
+                        Text("/\(search.query)  \(t.at.map { "\($0)/" } ?? "")\(t.of)").foregroundStyle(t.of == 0 ? theme.ember : theme.goldLeaf)
                     }
                     if let note = app.runner.note {
                         Text(note).foregroundStyle(theme.inkDim).lineLimit(1).accessibilityAddTraits(.updatesFrequently)
@@ -91,7 +90,7 @@ private struct SearchLine: View {
 
     var body: some View {
         let search = PageSearch.of(app)
-        let n = search.matches(app).count
+        let n = search.tally(app).of
         HStack(spacing: 0) {
             Text("/").foregroundStyle(theme.goldLeaf).padding(.trailing, 2)
             Text(search.query)

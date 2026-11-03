@@ -358,6 +358,25 @@ enum DiffCommands {
             }
             throw Refusal(d > 0 ? "no more names below" : "no more names above")
         }
+        /// `*`: the name under the cursor (w's, else the line's first), as a kept search from there.
+        func searchWord() throws {
+            let search = PageSearch.of(app)
+            if app.pane?.id == reviewCodePane, pg.side != nil {
+                guard let n = RowKey.id(app.selected, "s").flatMap(Int.init) else { throw Refusal("no name here") }
+                let lines = (pg.sideText ?? "").components(separatedBy: "\n")
+                let text = n >= 1 && n <= lines.count ? lines[n - 1] : ""
+                guard let w = pg.sideHereWord ?? CodeLookup.names(text).first else { throw Refusal("no name on this line") }
+                let q = (text as NSString).substring(with: NSRange(location: w.lowerBound, length: w.count))
+                if !search.seek(app, q, at: PageSearch.Hit(row: "s:\(n)", field: 0, at: w)) { throw Refusal("no matches") }
+                return
+            }
+            guard app.pane?.id == reviewDiffPane, let h = pg.here, let (side, ns) = names(h), let w = pg.hereWord ?? ns.first,
+                  let text = (side == .left ? h.row?.left : h.row?.right)?.text else { throw Refusal("no name here") }
+            let q = (text as NSString).substring(with: NSRange(location: w.lowerBound, length: w.count))
+            if !search.seek(app, q, at: PageSearch.Hit(row: h.key, field: side == .right ? 0 : 1, at: w)) { throw Refusal("no matches") }
+        }
+        r.register(Command(id: "review.search.word", title: "Search for the name under the cursor", scope: .review, verb: .searchWord, label: "search name",
+                           local: { _, _ in try searchWord() }))
         r.register(Command(id: "review.word.next", title: "The next name", scope: .review, verb: .nextWord, quiet: true,
                            local: { _, _ in try step(1) }))
         r.register(Command(id: "review.word.previous", title: "The previous name", scope: .review, verb: .previousWord, quiet: true,

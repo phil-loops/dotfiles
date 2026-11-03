@@ -90,8 +90,8 @@ struct CanvasMarks: Equatable {
     var column: Side?
     /// the selected name: its row's stop and its UTF-16 range from the row's start
     var word: (stop: String, at: Range<Int>)?
-    /// `/`'s query, lit wherever it appears in a line (smartcase)
-    var search: String?
+    /// `/`'s matches: per row stop, UTF-16 ranges from the row's start
+    var hits: [String: [Range<Int>]] = [:]
     /// the range `x` marked, or the lines the selected conversation covers: path, side, from…to
     var range: (path: String, side: Side, from: Int, to: Int)?
     /// "<path>#<hunk>" whose changes are all viewed (dimmed)
@@ -104,7 +104,7 @@ struct CanvasMarks: Equatable {
     var focused = true
 
     static func == (a: CanvasMarks, b: CanvasMarks) -> Bool {
-        a.cursor == b.cursor && a.column == b.column && a.word?.stop == b.word?.stop && a.word?.at == b.word?.at && a.search == b.search && a.range?.path == b.range?.path && a.range?.side == b.range?.side && a.range?.from == b.range?.from &&
+        a.cursor == b.cursor && a.column == b.column && a.word?.stop == b.word?.stop && a.word?.at == b.word?.at && a.hits == b.hits && a.range?.path == b.range?.path && a.range?.side == b.range?.side && a.range?.from == b.range?.from &&
             a.range?.to == b.range?.to && a.seen == b.seen && a.selection == b.selection && a.lit == b.lit && a.focused == b.focused
     }
 }
@@ -203,21 +203,15 @@ final class CanvasTextView: NSTextView {
                     }
                 }
             }
-            if let q = self.marks.search, !q.isEmpty, inf.kind == .line {
+            if let stop = inf.stop, let hits = self.marks.hits[stop] {
                 let line = (ts.string as NSString).paragraphRange(for: NSRange(location: ci, length: 0))
-                let text = (ts.string as NSString).substring(with: line) as NSString
-                let opts: NSString.CompareOptions = q == q.lowercased() ? [.caseInsensitive] : []
-                var from = NSRange(location: 0, length: text.length)
-                while true {
-                    let hit = text.range(of: q, options: opts, range: from)
-                    if hit.location == NSNotFound { break }
-                    let g = lm.glyphRange(forCharacterRange: NSRange(location: line.location + hit.location, length: hit.length), actualCharacterRange: nil)
+                for hit in hits {
+                    let g = lm.glyphRange(forCharacterRange: NSRange(location: line.location + hit.lowerBound, length: hit.count), actualCharacterRange: nil)
                     if NSLocationInRange(g.location, gr) {
                         colors.gold.withAlphaComponent(0.28).setFill()
                         NSBezierPath(roundedRect: lm.boundingRect(forGlyphRange: g, in: tc).offsetBy(dx: origin.x, dy: origin.y).insetBy(dx: -1, dy: 1),
                                      xRadius: 2, yRadius: 2).fill()
                     }
-                    from = NSRange(location: hit.location + max(1, hit.length), length: text.length - hit.location - max(1, hit.length))
                 }
             }
             if let word = self.marks.word, inf.stop == word.stop {

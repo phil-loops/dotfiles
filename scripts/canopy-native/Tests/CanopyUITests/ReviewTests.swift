@@ -614,6 +614,58 @@ import Testing
         #expect(!PageSearch.of(a).active, "esc while typing drops it")
     }
 
+    /// `/` the Helix way: n steps match by match (two on one line take two presses) and lands on the
+    /// match itself, selected like a name; only code is searched — not paths, conversations or gaps.
+    @Test func slashLandsOnEachMatchInTheCode() async throws {
+        let (a, _) = try await app()
+        let pg = ReviewPageState.of(a)
+        func type(_ s: String) { for ch in s { keys(a, ch == " " ? "space" : String(ch)) } }
+        keys(a, "/"); type("e"); keys(a, "ret")
+        #expect(pg.here?.key == "l|a.ts|R:1" && pg.hereWord == 1..<2, "keep: its first e")
+        keys(a, "n")
+        #expect(pg.here?.key == "l|a.ts|R:1" && pg.hereWord == 2..<3, "the second e on the same line")
+        keys(a, "n")
+        #expect(pg.here?.key == "l|a.ts|R:2" && pg.column == .right && pg.hereWord == 1..<2, "new one, on the new half")
+        keys(a, "N", "N")
+        #expect(pg.here?.key == "l|a.ts|R:1" && pg.hereWord == 1..<2)
+        keys(a, "esc", "/"); type("old"); keys(a, "ret")
+        #expect(pg.here?.key == "l|a.ts|R:2" && pg.column == .left && pg.hereWord == 0..<3, "a removed line's old half")
+        keys(a, "esc", "/"); type("a.ts"); keys(a, "ret")
+        #expect(PageSearch.of(a).hits(a).isEmpty, "file headers aren't code")
+        keys(a, "esc", "/"); type("hankles"); keys(a, "ret")
+        #expect(PageSearch.of(a).hits(a).isEmpty, "neither are conversations")
+    }
+
+    /// `*` searches for the name under the cursor, from there; n goes to its next use.
+    @Test func starSearchesTheNameUnderTheCursor() async throws {
+        let (a, _) = try await app()
+        let pg = ReviewPageState.of(a)
+        keys(a, "j", "w")
+        #expect(pg.here?.key == "l|a.ts|R:2" && pg.hereWord == 4..<7, "one (new is a keyword)")
+        keys(a, "*")
+        #expect(PageSearch.of(a).query == "one" && !PageSearch.of(a).typing && pg.hereWord == 4..<7, "stays on the name it searched")
+    }
+
+    /// The code beside the diff searches its text, not its line numbers, and lights its matches.
+    @Test func slashSearchesTheCodeBesideTheDiff() async throws {
+        let (a, p) = try await app()
+        let pg = ReviewPageState.of(a)
+        let tip = pg.tip
+        ShipStub.answer(p, "POST", "/loops/lsp/definition", #"{"ok":true,"sha":"\#(tip)","locations":[{"path":"lib/z.ts","line":1,"character":0}]}"#)
+        ShipStub.answer(p, "GET", "/loops/lsp/src", #"{"path":"lib/z.ts","sha":"x","text":"alpha\nbeta 3\ngamma\nx alpha alpha"}"#)
+        keys(a, "g", "d")
+        await until("the side pane") { pg.sideText != nil }
+        keys(a, "/", "3", "ret")
+        #expect(PageSearch.of(a).hits(a).map(\.row) == ["s:2"], "the 3 in beta 3, not line 3")
+        keys(a, "esc", "/", "a", "l", "p", "h", "a", "ret")
+        #expect(a.pane?.id == reviewCodePane && a.selected == "s:4" && pg.sideHereWord == 2..<7, "the first alpha after where it began (line 2)")
+        keys(a, "n")
+        #expect(a.selected == "s:4" && pg.sideHereWord == 8..<13, "the second alpha on that line")
+        keys(a, "n")
+        #expect(a.selected == "s:1" && pg.sideHereWord == 0..<5, "wrapping to the top")
+        #expect(PageSearch.of(a).tally(a) == (1, 3))
+    }
+
     /// Ship's half, by key on the real page: `x` marks a range, `c` opens Ship's comment box on it.
     @Test func aShipCommandRunsByKeyOnTheReviewPage() async throws {
         let (a, _) = try await app()

@@ -139,7 +139,7 @@ public enum KeyGroup: String, CaseIterable, Sendable {
         switch verb {
         case .next, .previous, .first, .last, .halfDown, .halfUp, .left, .right, .nextWord, .previousWord,
              .nextFile, .previousFile, .nextHunk, .previousHunk, .nextThread, .previousThread,
-             .labels, .find, .search, .map, .paneLeft, .paneDown, .paneUp, .paneRight, .paneNext:
+             .labels, .find, .search, .searchWord, .map, .paneLeft, .paneDown, .paneUp, .paneRight, .paneNext:
             return .move
         case .nextSibling, .previousSibling, .parent, .child, .root, .tip, .out:
             return .others

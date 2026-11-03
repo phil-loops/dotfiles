@@ -118,6 +118,41 @@ struct ReviewSurface: SurfaceProvider {
         return nil
     }
 
+    /// In the diff `/` reads code only — a line's new half (field 0), and its old half (field 1) where
+    /// that's a removed line, as far as it's drawn; headers, conversations and gaps aren't searched.
+    /// The code beside the diff: each line's text. Elsewhere (the file tree): titles.
+    func searchFields(for row: String, _ app: AppModel) -> [String] {
+        let pg = ReviewPageState.of(app)
+        switch PageSearch.of(app).pane {
+        case reviewDiffPane:
+            guard let i = pg.stopIndex[row], pg.stops[i].kind == .line, let r = pg.stops[i].row else { return [] }
+            let w = pg.splitWidth(pg.stops[i].path)
+            let old = r.left.flatMap { $0.kind == .del ? $0.text : nil }.map { $0.count > w ? String($0.prefix(max(0, w - 1))) : $0 }
+            return [r.right?.text ?? "", old ?? ""]
+        case reviewCodePane:
+            guard let n = RowKey.id(row, "s").flatMap(Int.init), let t = pg.sideText else { return [] }
+            let lines = t.components(separatedBy: "\n")
+            return n >= 1 && n <= lines.count ? [lines[n - 1]] : []
+        default:
+            return [searchText(for: row, app) ?? app.guessTitle(row)]
+        }
+    }
+
+    /// Landing on a match selects it, as `w` selects a name — so g d, space k and space o m act on it.
+    func searchLanded(_ hit: PageSearch.Hit, _ app: AppModel) {
+        let pg = ReviewPageState.of(app)
+        switch PageSearch.of(app).pane {
+        case reviewDiffPane:
+            let side: Side = hit.field == 0 ? .right : .left
+            pg.column = side
+            pg.word = (hit.row, side, hit.at)
+            pg.cursorMoved &+= 1
+        case reviewCodePane:
+            if let n = RowKey.id(hit.row, "s").flatMap(Int.init) { pg.sideWord = (n, hit.at) }
+        default: break
+        }
+    }
+
     /// A line matches on its code, both halves; everything else on its title.
     func searchText(for row: String, _ app: AppModel) -> String? {
         let pg = ReviewPageState.of(app)
