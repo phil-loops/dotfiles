@@ -11,7 +11,8 @@
 # Also: the shared config formats with `--stdin-filepath %{buffer_name}`, but Helix runs
 # the formatter from the file's folder, where that root-relative path points nowhere and
 # oxfmt sorts the repo's Tailwind classes as unknown. %{file_path_absolute} fixes it
-# (format-helix-buffers-by-absolute-path); once main carries that, this half no-ops.
+# — until main pins sortTailwindcss.config in .oxfmtrc.json (pin-oxfmt-tailwind-config), the
+# real fix, after which this half no-ops.
 #
 # Idempotent and self-scoping: each half no-ops unless the worktree ships the config it
 # overrides, and skips if already stamped.
@@ -41,7 +42,9 @@ if (( ! ${KNOWN[(Ie)$blob]} )) && ! git -C "$top" cat-file -p "$blob" | grep -q 
   exit 3
 fi
 
-if grep -q '"%{buffer_name}"' "$cfg"; then
+# pin-oxfmt-tailwind-config fixes the cause (oxfmt no longer guesses where Tailwind's config is), so
+# a checkout that carries it needs no path rewrite
+if grep -q '"%{buffer_name}"' "$cfg" && ! grep -q '"config": "./tailwind.config.js"' "$top/.oxfmtrc.json" 2>/dev/null; then
   sed -i '' 's/"%{buffer_name}"/"%{file_path_absolute}"/g' "$cfg"
   git -C "$top" update-index --skip-worktree .helix/languages.toml
 fi
