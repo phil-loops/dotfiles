@@ -26,14 +26,16 @@ enum DiffCommands {
             pg.setCursor(s[max(0, min(s.count - 1, i))].key)
             CodeLookup.of(app).dismiss()
         }
-        func seek(_ dir: Int, _ ok: (Stop) -> Bool) throws {
+        func seek(_ dir: Int, refusing what: String? = nil, _ ok: (Stop) -> Bool) throws {
             let s = pg.stops
             var i = idx() + dir
             while i >= 0 && i < s.count {
                 if ok(s[i]) { return goTo(i) }
                 i += dir
             }
-            throw Refusal(dir > 0 ? "nothing further down" : "nothing further up")
+            guard let what else { throw Refusal(dir > 0 ? "nothing further down" : "nothing further up") }
+            let edge = s.count(where: ok) <= 1 ? "the only \(what) in this diff" : dir > 0 ? "the last \(what)" : "the first \(what)"
+            throw Refusal(what == "file" ? "\(edge) · } { move by hunk" : edge)
         }
 
         // ── moving ──
@@ -86,10 +88,10 @@ enum DiffCommands {
         }
         r.register(Command(id: "review.file.next", title: "Go to the next file", scope: .review, verb: .nextFile, modes: motion,
                            label: "file", pair: "review.file.prev", available: onDiff,
-                           local: { _, _ in try seek(1) { $0.kind == .file } }))
+                           local: { _, _ in try seek(1, refusing: "file") { $0.kind == .file } }))
         r.register(Command(id: "review.file.prev", title: "Go to the previous file", scope: .review, verb: .previousFile, modes: motion,
                            label: "file", available: onDiff,
-                           local: { _, _ in try seek(-1) { $0.kind == .file } }))
+                           local: { _, _ in try seek(-1, refusing: "file") { $0.kind == .file } }))
         /// n/N: open conversations first, then any.
         func thread(_ dir: Int) throws {
             func openOne(_ s: Stop) -> Bool {

@@ -213,10 +213,10 @@ import Testing
 
     /// The review page on the fixture's branch, its diff answered by the stub, a second branch after
     /// it in merge order, an open thread on a.ts's new line 3.
-    func app() async throws -> (AppModel, Int) {
+    func app(_ payload: String? = nil) async throws -> (AppModel, Int) {
         Self.nextPort += 1
         let p = Self.nextPort
-        ShipStub.answer(p, "GET", "/loops/node", Self.payload)
+        ShipStub.answer(p, "GET", "/loops/node", payload ?? Self.payload)
         var c = AppConfig()
         c.route = .review(repo: "loops", branch: "add-hankles-limited-label")
         let a = AppModel(config: c, port: p, telemetry: false, protocolClasses: [ShipStub.self])
@@ -286,6 +286,22 @@ import Testing
         #expect(pg.here?.key == pg.stops.last?.key)
         keys(a, "g", "g")
         #expect(pg.here?.key == pg.stops.first?.key)
+    }
+
+    @Test func bracketsStayPutInAOneFileDiffEvenFromARemovedLine() async throws {
+        let patch = ["@@ -1,5 +1,4 @@", " import {", "-  Gone,", "   Kept,", " } from \"x\";", " tail",
+                     "@@ -40,3 +39,3 @@", " a", "-b", "+B", " c"].joined(separator: "\n")
+        let o: JSONValue = ["branch": "add-hankles-limited-label", "baseSha": "base123",
+                            "files": .array([["path": "a.ts", "add": 1, "del": 2, "patch": .string(patch)]])]
+        let (a, _) = try await app(String(decoding: try JSONEncoder().encode(o), as: UTF8.self))
+        let pg = ReviewPageState.of(a)
+        keys(a, "]")
+        #expect(pg.here?.key == "l|a.ts|R:1", "the only file: ] refuses")
+        keys(a, "j")
+        let removed = pg.here?.key
+        #expect(removed != "l|a.ts|R:1")
+        keys(a, "]")
+        #expect(pg.here?.key == removed, "] from a removed line refuses too, not a jump to the next hunk")
     }
 
     @Test func jumpsComeBackWithCtrlO() async throws {
