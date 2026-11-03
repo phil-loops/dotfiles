@@ -101,13 +101,3 @@ def open_file(req, raw):   # POST /open — open a file on a branch in the warm 
     req._send(200 if code == 0 else 500,
               json.dumps({"ok": code == 0, "out": out, "err": err}))
 
-
-def steer(req, raw):   # POST /steer — launch the Steer workspace (headless-claude design convo)
-    d = json.loads(raw or "{}")
-    args = [os.path.join(ctx.SCRIPTS, "steer-open"), d.get("branch", "")]
-    p = d.get("path")   # the file the user is focused on; steer-open falls back to top-changed .ts
-    if p:
-        args.append(p)
-    r = ctx.run(args)
-    req._send(200 if r.returncode == 0 else 500,
-              json.dumps({"ok": r.returncode == 0, "out": r.stdout, "err": r.stderr}))
