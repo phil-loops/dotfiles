@@ -20,7 +20,7 @@ stamp="$cache/source.sha"
 
 # Show builds from its own copy of the sources in $src, never the shared tree other sessions are editing: show-app as
 # it stands (this lane's own work), and canopy-native as last committed — another lane's half-saved file never reaches
-# Show's build, and only canopy commits rebuild (and relaunch) it. SHOW_CANOPY=worktree links the live canopy-native,
+# Show's build, and only canopy commits rebuild it (Show then offers Update). SHOW_CANOPY=worktree links the live canopy-native,
 # for work on the seam between them (CanopyUI/Shell/Embed.swift).
 src="$cache/src"
 

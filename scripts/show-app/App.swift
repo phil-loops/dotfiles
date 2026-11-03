@@ -119,6 +119,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
         shell = ShellController(workspaces: workspaces, active: start)
         shell.onPick = { [weak self] in self?.switchTo($0) }
+        shell.onUpdate = { [weak self] in self?.relaunch() }
         window = ShowWindow(contentRect: NSRect(x: 0, y: 0, width: 1180, height: 780),
                           styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                           backing: .buffered, defer: false)
@@ -202,13 +203,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
     }
 
-    /// Reloads documents edited on disk, refreshes the rail's waiting badges, and relaunches into a newer build once the launcher finishes one.
+    /// Reloads documents edited on disk, refreshes the rail's waiting badges, and offers Update once the launcher finishes a newer build.
     private func stayCurrent() {
         workspaces.values.forEach { $0.reloadChanged() }
         shell.runsRunning = workspaces[.runs]?.isRunning ?? false
         refreshLibrary()
         if let built = modificationDate(buildStamp), built != launchedBuild {
-            relaunch()
+            shell.updateButton.isHidden = false
         }
     }
 
@@ -227,7 +228,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         shell.setBadges(counts)
     }
 
-    private func relaunch() {
+    func relaunch() {
         watcher?.invalidate()
         saveAll()
         let process = Process()
