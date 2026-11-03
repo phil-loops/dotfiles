@@ -101,8 +101,8 @@ public struct ShipStripView: View {
                 && app.store.view(Warm.self, b.repo)?.prs == true {
                 KeyButton(title: "open the PR ↗", id: "review.finish", target: branchID, gold: true)
             }
-            Spacer(minLength: 0)
         }
+        .fixedSize(horizontal: true, vertical: false)
     }
 
     /// what the last sync left to say: a hand-off to Claude only until the tip moves
