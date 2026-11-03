@@ -253,7 +253,7 @@ final class ShellController: NSViewController {
     private let railEdge = NSBox()
     private var railWidth: NSLayoutConstraint?
     private var railEdgeWidth: NSLayoutConstraint?
-    /// The rail stays out of the way until asked for (⌃⌘R); ⌘1–⌘6 switch workspaces either way.
+    /// The rail stays out of the way until asked for (⌃⌘R); ⌘1–⌘7 switch workspaces either way.
     static let railShownKey = "show.railShown"
     var railShown: Bool { UserDefaults.standard.bool(forKey: Self.railShownKey) }
     let titleLabel = NSTextField(labelWithString: "")
@@ -598,7 +598,7 @@ func shelfEntry(_ path: String) -> ShelfEntry? {
         let progress = [counts, live.status?.state].compactMap { $0 }.joined(separator: " · ")
         return ShelfEntry(path: path, workspace: workspace, title: live.title, state: state, progress: progress, touched: touched,
                           topic: Topics.cached(live.replyTo))
-    case .api, .canopy:
+    case .api, .canopy, .machine:
         return nil
     case .forest, .review:
         guard let deck = try? loadDeck(path) else { return nil }
@@ -755,7 +755,7 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
         self.workspace = workspace
         tutor = workspace == .learn ? TutorController() : nil
         console = workspace == .api ? ConsoleController() : nil
-        canopy = workspace == .canopy ? CanopyHost() : nil
+        canopy = workspace.hostsCanopy ? CanopyHost(home: workspace == .machine ? "/v2/machine" : nil) : nil
         super.init(nibName: nil, bundle: nil)
         tutor?.onTitleChange = { [weak self] in self?.onTitleChange?() }
         tutor?.onStartRetest = { [weak self] concept in self?.startTutor(.retest(concept: concept)) }
@@ -862,7 +862,7 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
         switch workspace {
         case .learn:
             tutor?.show(path: path)
-        case .api, .canopy:
+        case .api, .canopy, .machine:
             return
         case .forest, .review, .runs:
             let controller: DeckController
@@ -928,7 +928,7 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
                 : "Nothing open. Pick a session from the shelf, or press ⌘O.")
         case .api:
             if let console { display(console) }
-        case .canopy:
+        case .canopy, .machine:
             if let canopy { display(canopy) }
         case .runs:
             display(emptyState("No live runs yet", "A live run shows here while it's going."))

@@ -1,4 +1,4 @@
-// Show — one native window with five workspaces on a rail: Forest (⌘1), Review (⌘2), Learn (⌘3), Runs (⌘4), API (⌘5), Canopy (⌘6).
+// Show — one native window with workspaces on a rail: Canopy (⌘1), Learn (⌘2), Machine (⌘3), Forest (⌘4), Review (⌘5), Runs (⌘6), API (⌘7).
 // A file goes to the workspace its optional "workspace" key names, otherwise to the one its "mode" implies (forest, deck, tutor, live).
 // Decks: { "title", "subtitle"?, "sections": [{ "id"?, "group", "title", "tag"?, "body" (markdown), "url"? (a live page shown instead of the body) }] }
 // Sign-offs and notes save beside the deck as <deck>.signoff.json; "replyTo" names the claude-say session that Submit notifies.
@@ -17,7 +17,7 @@ var prefs = UserDefaults.standard
 
 /// The workspaces on the rail, top to bottom; the nth answers to ⌘n. Nothing crosses between them except the rail's waiting badges.
 enum Workspace: String, CaseIterable {
-    case forest, review, learn, runs, api, canopy
+    case canopy, learn, machine, forest, review, runs, api
 
     var name: String { self == .api ? "API" : rawValue.capitalized }
 
@@ -29,10 +29,14 @@ enum Workspace: String, CaseIterable {
         case .runs: return "dot.radiowaves.left.and.right"
         case .api: return "bolt"
         case .canopy: return "leaf"
+        case .machine: return "server.rack"
         }
     }
 
     var key: String { "\((Workspace.allCases.firstIndex(of: self) ?? 0) + 1)" }
+
+    /// Canopy runs in it: the Canopy workspace, and Machine, canopy's machine page on its own key.
+    var hostsCanopy: Bool { self == .canopy || self == .machine }
 
     /// The quiet tint on the selected rail tile and the window subtitle; Runs turns Signal orange only while a run is going.
     func tint(running: Bool = false) -> NSColor {
@@ -43,6 +47,7 @@ enum Workspace: String, CaseIterable {
         case .runs: return running ? .systemOrange : .secondaryLabelColor
         case .api: return .secondaryLabelColor
         case .canopy: return forestTint
+        case .machine: return .secondaryLabelColor
         }
     }
 
@@ -91,7 +96,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     var tutor: TutorController? { workspaces[.learn]?.tutor }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        let start = prefs.string(forKey: "workspace.active").flatMap(Workspace.init(rawValue:)) ?? .review
+        let start = prefs.string(forKey: "workspace.active").flatMap(Workspace.init(rawValue:)) ?? .canopy
         for workspace in Workspace.allCases {
             let controller = WorkspaceController(workspace: workspace)
             controller.onTitleChange = { [weak self] in
@@ -104,7 +109,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             }
             workspaces[workspace] = controller
         }
-        workspaces[.canopy]?.canopy?.isActive = { [weak self] in self?.active == .canopy && self?.shell.finder == nil && self?.shell.overlay == nil }
+        for hosted in [Workspace.canopy, .machine] {
+            workspaces[hosted]?.canopy?.isActive = { [weak self] in self?.active == hosted && self?.shell.finder == nil && self?.shell.overlay == nil }
+        }
         shell = ShellController(workspaces: workspaces, active: start)
         shell.onPick = { [weak self] in self?.switchTo($0) }
         window = ShowWindow(contentRect: NSRect(x: 0, y: 0, width: 1180, height: 780),

@@ -244,7 +244,7 @@ final class EventLog {
     /// document, become opens, so nothing is lost when the log takes over.
     private func seedFromPreferences() {
         var seeded: [ShowEvent] = []
-        for workspace in Workspace.allCases where ![.api, .canopy].contains(workspace) {
+        for workspace in Workspace.allCases where ![.api, .canopy, .machine].contains(workspace) {
             let stack = prefs.stringArray(forKey: "workspace.\(workspace.rawValue).back") ?? []
             let open = prefs.string(forKey: "workspace.\(workspace.rawValue).open")
             for path in stack + [open].compactMap({ $0 }) {
