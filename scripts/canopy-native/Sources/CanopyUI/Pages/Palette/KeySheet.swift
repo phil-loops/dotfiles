@@ -20,6 +20,10 @@ enum KeySheet {
 
     struct Model: Equatable {
         var here: String
+        /// the mode under the sheet, where the cursor is, and that mode's way out
+        var whereNow: String
+        /// what the things on screen are (the views' notes), narrowed by the query
+        var notes: [ExplainState.Note]
         /// what's typed into the sheet's filter ("" shows every key)
         var query: String
         var problems: [String]
@@ -119,7 +123,14 @@ enum KeySheet {
         let hints = app.registry.commands.filter { !$0.hint.isEmpty && liveScopes.contains($0.scope) }.map {
             Hint(title: $0.title, keys: $0.hint.joined(separator: " · "))
         }
-        return Model(here: labelOf(liveScopes.first ?? .global, app), query: query, problems: app.registry.keyProblems, warnings: app.registry.keyWarnings,
+        let mode = app.keys.mode
+        let whereNow = ([mode == .normal ? nil : "\(mode.rawValue) mode", app.position].compactMap { $0 } + app.keys.modeKeys(mode))
+            .joined(separator: " · ")
+        let notes = ExplainState.of(app).shown.filter { n in
+            let text = "\(n.word ?? "") \(n.text)".lowercased()
+            return query.lowercased().split(separator: " ").allSatisfy { text.contains($0) }
+        }
+        return Model(here: labelOf(liveScopes.first ?? .global, app), whereNow: whereNow, notes: notes, query: query, problems: app.registry.keyProblems, warnings: app.registry.keyWarnings,
                      now: groups, hints: query.isEmpty ? hints : [], everywhere: everywhere, moves: moves, notNow: sheet.notNow, customized: Set(app.registry.commands.filter { $0.verbs.contains(where: app.registry.customized.contains) }.map(\.id)))
     }
 }
@@ -128,6 +139,8 @@ enum KeySheet {
 enum SheetEntry: Equatable {
     case heading(String, gold: Bool)
     case line(SheetLine, dim: Bool)
+    /// a thing on screen and what it is
+    case note(word: String?, text: String)
     case hint(KeySheet.Hint)
     /// every motion's keys on one line
     case moves(String)
@@ -137,6 +150,10 @@ enum SheetEntry: Equatable {
 extension KeySheet.Model {
     var entries: [SheetEntry] {
         var out: [SheetEntry] = []
+        if !notes.isEmpty {
+            out.append(.heading("On screen", gold: false))
+            out += notes.map { .note(word: $0.word, text: $0.text) }
+        }
         if now.isEmpty && hints.isEmpty { out.append(.empty(query.isEmpty ? "nothing under the cursor" : "no key here does “\(query)” — : finds any command by name")) }
         for g in now {
             out.append(.heading(g.label, gold: true))
@@ -222,7 +239,10 @@ struct KeySheetView: View {
                                 Text(m.query.isEmpty ? "type to filter" : "/ \(m.query)").font(Theme.mono(13))
                                     .foregroundStyle(m.query.isEmpty ? theme.inkFaint : theme.goldLeaf)
                             }
-                            .font(Theme.display(20)).padding(.bottom, 12)
+                            .font(Theme.display(20)).padding(.bottom, m.whereNow.isEmpty ? 12 : 2)
+                            if !m.whereNow.isEmpty {
+                                Text(m.whereNow).foregroundStyle(theme.inkDim).lineLimit(1).padding(.bottom, 12)
+                            }
                             if !m.problems.isEmpty || !m.warnings.isEmpty {
                                 VStack(alignment: .leading, spacing: 2) {
                                     ForEach(m.problems, id: \.self) { Text($0) }
@@ -266,6 +286,12 @@ struct KeySheetView: View {
         case .heading(let s, let gold):
             Text(s.uppercased()).font(Theme.mono(11)).tracking(1.3).foregroundStyle(gold ? theme.goldLeaf : theme.inkFaint)
                 .padding(.top, gold ? 4 : 12).padding(.bottom, 2)
+        case .note(let word, let text):
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                if let word { Text(word).foregroundStyle(theme.ink).frame(minWidth: 96, alignment: .leading) }
+                Text(text).foregroundStyle(theme.inkDim).fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.vertical, 1)
         case .moves(let keys):
             Text(keys).foregroundStyle(theme.goldLeaf).fixedSize(horizontal: false, vertical: true).padding(.vertical, 1)
         case .hint(let h):
