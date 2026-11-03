@@ -44,6 +44,7 @@ func prepareSelfTest(_ mode: SelfTestMode) {
     setenv("SHOW_CLAUDE_SAY", (scratch as NSString).appendingPathComponent("claude-say-stub"), 1)
     setenv("SHOW_EVENTS", (scratch as NSString).appendingPathComponent("events.jsonl"), 1)
     setenv("SHOW_INBOX", (scratch as NSString).appendingPathComponent("inbox"), 1)
+    setenv("SHOW_INBOX_DECK", (scratch as NSString).appendingPathComponent("inbox-deck.json"), 1)
     setenv("LEARNING_GRAPH", (scratch as NSString).appendingPathComponent("graph.json"), 1)
     setenv("LEARNING_MEMORY", "0", 1)
     if case .run = mode {
@@ -168,7 +169,11 @@ final class SelfTestDriver {
     func backspace() { press("\u{7f}", code: 51) }
     func command(_ key: String, code: UInt16 = 0, shift: Bool = false) { press(key, code: code, shift ? [.command, .shift] : .command) }
     /// ⌘ and the workspace's own number, whatever order the rail is in.
-    func switchKey(_ workspace: Workspace) { command(workspace.key, code: [18, 19, 20, 21, 23, 22, 26][Int(workspace.key)! - 1]) }
+    /// Presses the workspace's ⌘ number; a workspace without one (off the rail) is switched to directly.
+    func switchKey(_ workspace: Workspace) {
+        guard let number = Int(workspace.key) else { return app.switchTo(workspace) }
+        command(workspace.key, code: [18, 19, 20, 21, 23, 22, 26][number - 1])
+    }
 
     var focusName: String {
         let stops = app.focusStops
@@ -205,12 +210,14 @@ final class SelfTestDriver {
 
         check("Machine is canopy's machine page on ⌘\(Workspace.machine.key)",
               app.workspaces[.machine]?.canopy?.home == "/v2/machine" && app.workspaces[.canopy]?.canopy?.home == nil)
-        // the last switch leaves Review in front, where the finder steps below start
-        for workspace in [Workspace.forest, .learn, .runs, .review] {
+        for workspace in [Workspace.inbox, .learn] {
             let key = workspace.key
             switchKey(workspace)
             check("⌘\(key) switches to \(workspace.name)", app.active == workspace, "front is \(app.active.name)")
         }
+        check("Forest, Review, Runs and API have no ⌘ number", [Workspace.forest, .review, .runs, .api].allSatisfy { $0.key.isEmpty })
+        // the finder steps below start in Review, which has no key now
+        app.switchTo(.review)
 
         app.focus(front.currentDeck!.table)
         press("/", code: 44)

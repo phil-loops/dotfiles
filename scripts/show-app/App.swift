@@ -1,4 +1,4 @@
-// Show — one native window with workspaces on a rail: Canopy (⌘1), Learn (⌘2), Machine (⌘3), Inbox (⌘4), Forest (⌘5), Review (⌘6), Runs (⌘7), API (⌘8).
+// Show — one native window with workspaces on a rail: Canopy (⌘1), Learn (⌘2), Machine (⌘3), Inbox (⌘4); Forest, Review, Runs and API have no tile and open when a document routes to them.
 // A file goes to the workspace its optional "workspace" key names, otherwise to the one its "mode" implies (forest, deck, tutor, live).
 // Decks: { "title", "subtitle"?, "sections": [{ "id"?, "group", "title", "tag"?, "body" (markdown), "url"? (a live page shown instead of the body) }] }
 // Sign-offs and notes save beside the deck as <deck>.signoff.json; "replyTo" names the claude-say session that Submit notifies.
@@ -34,7 +34,10 @@ enum Workspace: String, CaseIterable {
         }
     }
 
-    var key: String { "\((Workspace.allCases.firstIndex(of: self) ?? 0) + 1)" }
+    /// The workspaces with a rail tile and a ⌘ number; the rest open only when a document routes to them.
+    static let onRail: [Workspace] = [.canopy, .learn, .machine, .inbox]
+
+    var key: String { Workspace.onRail.firstIndex(of: self).map { "\($0 + 1)" } ?? "" }
 
     /// Canopy runs in it: the Canopy workspace, and Machine, canopy's machine page on its own key.
     var hostsCanopy: Bool { self == .canopy || self == .machine }

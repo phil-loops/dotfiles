@@ -131,10 +131,7 @@ enum KeyTable {
         KeyBinding(id: "workspace.canopy", menu: "Workspace", title: "Canopy", key: Workspace.canopy.key, modifiers: .command, overOverlay: true) { $0.switchTo(.canopy) },
         KeyBinding(id: "workspace.learn", menu: "Workspace", title: "Learn", key: Workspace.learn.key, modifiers: .command, overOverlay: true) { $0.switchTo(.learn) },
         KeyBinding(id: "workspace.machine", menu: "Workspace", title: "Machine", key: Workspace.machine.key, modifiers: .command, overOverlay: true) { $0.switchTo(.machine) },
-        KeyBinding(id: "workspace.forest", menu: "Workspace", title: "Forest", key: Workspace.forest.key, modifiers: .command, overOverlay: true) { $0.switchTo(.forest) },
-        KeyBinding(id: "workspace.review", menu: "Workspace", title: "Review", key: Workspace.review.key, modifiers: .command, overOverlay: true) { $0.switchTo(.review) },
-        KeyBinding(id: "workspace.runs", menu: "Workspace", title: "Runs", key: Workspace.runs.key, modifiers: .command, overOverlay: true) { $0.switchTo(.runs) },
-        KeyBinding(id: "workspace.api", menu: "Workspace", title: "API", key: Workspace.api.key, modifiers: .command, overOverlay: true) { $0.switchTo(.api) },
+        KeyBinding(id: "workspace.inbox", menu: "Workspace", title: "Inbox", key: Workspace.inbox.key, modifiers: .command, overOverlay: true) { $0.openInbox() },
         KeyBinding(id: "workspace.rail", menu: "Workspace", title: "Toggle Rail", key: "r", modifiers: [.command, .control], overOverlay: true) { $0.shell.toggleRail() },
 
         KeyBinding(id: "tutor.send", menu: "Tutor", title: "Send", key: "\r", modifiers: .command, workspaces: [.learn]) { $0.tutor?.sendFocused() },
