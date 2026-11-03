@@ -326,7 +326,7 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
     }
 
     @Test func everyWordTheForestsAndHistoryDrawSaysWhatItMeans() {
-        let terms: [any Term] = [HistoryGroup.toPush, HistoryGroup.pushed, HistoryGroup.onPR(7), Reach.onlyHere, Reach.draft, Reach.local, Reach.locked("on origin")] + ShipStage.allCases.map { $0 as any Term }
+        let terms: [any Term] = [HistoryGroup.toPush, HistoryGroup.pushed, HistoryGroup.onPR(7), Reach.onlyHere, Reach.draft, Reach.local, Reach.onPR(7), Reach.locked("on origin")] + ShipStage.allCases.map { $0 as any Term }
             + LoopStep.ID.allCases.map { LoopStep(id: $0, state: .now) as any Term } + [ProjectState.focus, ProjectState.workbench, ProjectState.archive]
         for t in terms { #expect(t.meaning.map { !$0.isEmpty && !$0.hasPrefix(t.word) } == true, "\(t.word) has a meaning that doesn't repeat it") }
     }
@@ -339,6 +339,28 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
         #expect(WordsEditor.reach(.subject("aaa"), o) == .local)
         #expect(WordsEditor.reach(.subject("bbb"), o) == .locked("on origin"))
         #expect(WordsEditor.reach(.commitBody("aaa"), o) == nil)
+        var opened = o
+        opened.pr = .init(exists: true, number: 12, state: "OPEN", title: "t")
+        #expect(WordsEditor.reach(.title, opened) == .onPR(12))
+        #expect(WordsEditor.reach(.body, opened)?.editable == false)
+    }
+
+    @Test func theHistorySaysWhatsWaitingToGoOut() {
+        #expect(HistoryList.waiting(toPush: 0, edits: 0) == nil)
+        #expect(HistoryList.waiting(toPush: 2, edits: 1) == "waiting to go out: 2 commits to push, 1 unsaved edit")
+        #expect(HistoryList.waiting(toPush: 1, edits: 0) == "waiting to go out: 1 commit to push")
+    }
+
+    @Test func landsAsDoesntEchoALoneCommit() {
+        var o = WordsOutline(branch: "b", head: "h", commits: [OutlineCommit(sha: "aaa", subject: "feat: add x")])
+        o.draft = .init(title: "feat: add x", body: "")
+        #expect(WordsEditor.echoesCommit(o, "feat: add x"))
+        #expect(!WordsEditor.echoesCommit(o, "feat: add y"))
+        o.draft = .init(title: "feat: add x", body: "", titleSaved: true)
+        #expect(!WordsEditor.echoesCommit(o, "feat: add x"))
+        o.draft = nil
+        o.commits.append(OutlineCommit(sha: "bbb", subject: "more"))
+        #expect(!WordsEditor.echoesCommit(o, "feat: add x"))
     }
 
     @Test func historyStepsSelectOneCommit() throws {
@@ -404,7 +426,8 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
         o.pr = .init(exists: true, number: 1, state: "OPEN")
         w.setShown(Self.branch, o)
         #expect(!WordsCommands.editable(a, Self.branch, .title))
-        #expect(ShipRows.words(a, Self.branch) == ["w|desc"])
+        #expect(ShipRows.words(a, Self.branch) == ["w|desc", "w|title", "w|body"])
+        #expect(!WordsCommands.editable(a, Self.branch, .body))
         a.runner.dispatch("words.edit", via: .key, target: "w|s|c2")
         #expect(a.insertField == "words.s|\(Self.branch)|c2")
     }
