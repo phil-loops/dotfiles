@@ -82,6 +82,7 @@ extension AppModel {
 extension NavCommands {
     static func installPickers(_ app: AppModel) {
         KeyMode.textEntry.insert(.search)
+        app.keys.layerTyping[.search] = { [weak app] k in app.map { PageSearch.of($0).type(k, $0) } ?? false }
         let r = app.registry
         r.register(Command(id: "nav.branches", title: "Find a branch — every forest, most visited first", scope: .global, verb: .branches, label: "branches",
                            local: { [weak app] _, _ in try app?.pickBranch() }))

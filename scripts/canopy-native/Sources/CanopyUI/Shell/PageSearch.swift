@@ -57,6 +57,20 @@ public final class PageSearch {
         }
     }
 
+    /// A key while typing: the engine types the query itself, like the `?` sheet's filter, so a key
+    /// can't be lost to whichever view holds AppKit's focus. false: not a typing key (ret, esc, ⌃…).
+    func type(_ key: String, _ app: AppModel) -> Bool {
+        guard typing else { return false }
+        switch key {
+        case "backspace": typed(app, String(query.dropLast()))
+        case "space": typed(app, query + " ")
+        default:
+            guard key.count == 1 else { return false }
+            typed(app, query + key)
+        }
+        return true
+    }
+
     func keep(_ app: AppModel) {
         typing = false
         if app.keys.layer == .search { app.keys.closeLayer() }
