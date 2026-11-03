@@ -93,7 +93,7 @@ extension NavCommands {
         r.register(Command(id: "page.search", title: "Search this page in place", scope: .global, verb: .search, label: "search",
                            local: { [weak app] _, _ in try app?.searchPage() }))
         let typing: (String?) -> Bool = { [weak app] _ in app.map { PageSearch.of($0).typing } ?? false }
-        r.register(Command(id: "page.search.keep", title: "Keep the search (n / N step its matches)", scope: .global, verb: .send, modes: [.search], quiet: true,
+        r.register(Command(id: "page.search.keep", title: "Keep the search (n / N step its matches)", scope: .global, verb: .send, modes: [.search], label: "keep", quiet: true,
                            available: typing, local: { [weak app] _, _ in app.map { PageSearch.of($0).keep($0) } }))
         r.register(Command(id: "page.search.cancel", title: "Drop the search, back where it began", scope: .global, verb: .cancel, modes: [.search], quiet: true,
                            available: typing, local: { [weak app] _, _ in app.map { PageSearch.of($0).cancel($0) } }))

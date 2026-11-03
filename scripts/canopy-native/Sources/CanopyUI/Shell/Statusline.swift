@@ -42,6 +42,7 @@ struct Statusline: View {
                         Text(note).foregroundStyle(theme.inkDim).lineLimit(1).accessibilityAddTraits(.updatesFrequently)
                     }
                     Spacer(minLength: 8)
+                    ModeKeys()
                     if app.store.conn != .live {
                         Text(app.store.conn.rawValue).foregroundStyle(app.store.conn == .down ? theme.ember : theme.inkFaint)
                     }
@@ -63,6 +64,17 @@ struct Statusline: View {
     }
 }
 
+/// Outside normal mode, the keys that act in this mode and esc: every mode says its own way out.
+private struct ModeKeys: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.theme) private var theme
+
+    var body: some View {
+        let keys = app.keys.modeKeys()
+        if !keys.isEmpty { Text(keys.prefix(5).joined(separator: " · ")).foregroundStyle(theme.inkFaint).lineLimit(1) }
+    }
+}
+
 /// The `:` field. Its keys are the engine's first (ret runs, tab/C-n/C-p choose); typing goes here.
 /// `/`'s line: what you type moves the page as you type it.
 private struct SearchLine: View {
@@ -79,6 +91,8 @@ private struct SearchLine: View {
                 .textFieldStyle(.plain)
                 .focused($focused)
             if !search.query.isEmpty { Text("\(n)").foregroundStyle(n == 0 ? theme.ember : theme.inkFaint) }
+            Spacer(minLength: 8)
+            ModeKeys()
         }
         .onAppear { focused = true }
     }
