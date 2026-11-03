@@ -100,7 +100,7 @@ order; per branch:
 - Set description + parent/project/requires (+ the project's Linear ticket, once) in the same
   motion, per forests.md *Config + purpose*.
 
-The viewer then renders the story (`⌘K → "merge story"`, or `≣ story`), and
+canopy then renders the story (`canopy /v2/p/<repo>/<project>`, `⇥` flips story ⇄ branches), and
 `stack-pr-body <branch>` drafts each PR body — the container the routing check empties into,
 so run that check per branch as you go, not after. The repo's `AGENTS.md` §Comments owns the
 rule itself; the check above is just its three bars applied at forest time.

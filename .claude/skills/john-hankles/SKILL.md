@@ -56,16 +56,13 @@ answer to "how would we know it's ready".
 
 ## Surfacing the findings — durable and local
 
-Chat scrolls away; the review also lands on the branch's node in the forest viewer, which
-is where Phil actually reviews:
+Chat scrolls away, so the review also lands in a durable local sidecar:
 
-- **Teammate PR** → make sure it's imported as `review/pr-<N>` (viewer Home does this; or
-  `POST /review-import`), then write the full ranked review as the node's notes card:
-  `stack-notes --set - review/pr-<N>` (sidecar markdown, never committed, survives
-  rebases). Phil reads it beside the diff and carries what he agrees with to GitHub
-  himself. The card renders as prose-styled markdown (`wiki-prose`): fence every
-  command in ```bash blocks, bullet the caveats, never leave bare hard-wrapped lines —
-  they flow into paragraph soup in a serif face.
+- **Teammate PR** → make sure it's imported as `review/pr-<N>` (`stack-review-import <N>`),
+  then write the full ranked review with `stack-notes --set - review/pr-<N>` (sidecar
+  markdown, never committed, survives rebases). canopy doesn't display notes (since
+  2026-10-27), so also give Phil the findings in chat; he carries what he agrees with
+  to GitHub himself.
 
 **The card is a queue, not a journal.** It carries only items still pending a decision or
 action — unapplied findings, follow-up candidates, live test caveats. A finding that got

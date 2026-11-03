@@ -21,8 +21,9 @@ healthcheck ports, and a Docker compose project. You can't just run it twice:
   there's one DB, shared by both servers (your seed data is already there).
 - **Worktrees lack `node_modules` and untracked `.env`.** A `git worktree` has the
   source but no installed deps and no env file (env is gitignored, lives only in
-  the main checkout). The script symlinks both from the main checkout so the app
-  boots.
+  the main checkout). The script clones node_modules from the main checkout (an APFS
+  clone, or a pre-warmed pool entry — `loops-preview --warm`) and links the `.env`
+  files; Turbopack refuses a node_modules symlinked from outside the checkout.
 - **Shared-checkout safety.** When two Claude sessions (or you + a session) share
   one machine, restarting/relocating the primary dev server steps on the other.
   This leaves `:3000` and the main checkout untouched — the preview is fully
@@ -57,8 +58,8 @@ loops-preview --list                            # list running previews
 
 ## Caveat
 
-The preview shares the main checkout's **built workspace packages** (via the
-symlinked `node_modules`), so a branch that changes `packages/*` won't reflect
+The preview shares the main checkout's **built workspace packages** (copied
+from the main checkout's `packages/*/dist`), so a branch that changes `packages/*` won't reflect
 those until the main checkout rebuilds them. App code (`app/`, `pages/`,
 `components/`, `trpc/`, `lib/`) compiles from the preview checkout itself, so
 UI/route/API changes render fine — which is the common case.

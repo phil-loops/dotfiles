@@ -1,6 +1,6 @@
 ---
 name: land-forest
-description: Land an already-built stacked-PR forest — the shipping motion that complements /reforest's building motion. Restacks every branch onto fresh origin/main (raw git, bottom-up, contracting any already-merged node), confirms the canonical merge order, drafts a forest-framed PR body per branch (stack-pr-body), hands the push + PR-opening to the user, and contracts the forest after each base merges. Use when the work is split into a forest and the user wants to ship it — "see this forest out", "land these PRs", "ship the stack", "get this forest merged", "prep the forest for push", or after /reforest when it's time to merge. NOT for building/splitting a forest (that's /reforest) or a routine single-branch restack.
+description: Land an already-built stacked-PR forest — the shipping motion that complements /reforest's building motion. Restacks every branch onto fresh origin/main (raw git, bottom-up, contracting any already-merged node), confirms the canonical merge order, drafts each branch's PR body (stack-pr-body), hands the push + PR-opening to the user, and contracts the forest after each base merges. Use when the work is split into a forest and the user wants to ship it — "see this forest out", "land these PRs", "ship the stack", "get this forest merged", "prep the forest for push", or after /reforest when it's time to merge. NOT for building/splitting a forest (that's /reforest) or a routine single-branch restack.
 ---
 
 # Land Forest — ship an existing forest out to merged
@@ -34,9 +34,10 @@ a PR is live, its history is frozen.
 
 ### 3 · Draft the PR bodies
 
-`stack-pr-body <branch>` per PR-able branch, in merge order. Default output is furniture — the
-purpose + merge-order block shaped to sit UNDER the user's own prose (above the Traffic Cop
-template); `--full` emits the standalone document. Hand over paste-ready blocks; skip ★ nodes.
+`stack-pr-body <branch>` per PR-able branch, in merge order. Default output is the opening
+commit's 1–3-line why, for above the Traffic Cop template; `--context` adds where it sits (merge
+order as #N refs), `--plan` the purpose + outline + merge-order furniture, `--full` the
+standalone document. Hand over paste-ready blocks; skip ★ nodes.
 
 ### 4 · Hand off
 

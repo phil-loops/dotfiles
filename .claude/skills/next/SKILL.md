@@ -52,14 +52,14 @@ invariants, and say which ones govern:
 - **One source of truth.** No second copy of state. Derive it (the tracker links forests and PRs, it doesn't copy them).
 - **Every action is a registry command**: keys, the space menu, the `?` sheet, telemetry and undo
   (`inverse`) come from one declaration. On-page key hints use `keyOf(id)`. A key means one thing on
-  every page (`bindings.test.ts`).
+  every page (`Tests/CanopyCoreTests/KeysTests.swift`).
 - **Data reaches the client through `/state` domains**, with optimistic writes through the runner and
-  a `settled` check against the server's copy. Only `sync.ts` touches the network.
+  a `settled` check against the server's copy. Only `CanopyCore/Transport` touches the network.
 - **Outward actions only through Phil**: the viewer never pushes or posts to GitHub on its own.
   Review writes stop at his pending review.
 - **Tests load the real thing**: the registry, the real file, a fake GitHub. They don't scrape the
   source. Pure logic lives in pure modules with tests beside it.
-- **Measured**: a new command has a budget class; a new surface has a `data-paint` marker.
+- **Measured**: a new command has a budget class; a new surface is covered by `canopy --bench --budget`.
 - **Quiet UI**: outcome buttons, rails don't grow buttons, ambient stays quiet, sticky not modal.
   See the viewer-grammar memories.
 - **Simple over generic; no churn for purity.**
@@ -75,7 +75,7 @@ For each top-3 item, pipe 3–7 steps into `canopy-todo steps <id>`:
 Design: <the invariant(s) that shape this, and the decision made>
 1. <file(s)> — <change>; test first where there's logic (<test file>)
 2. …
-Verify: <npm test / typecheck / Puppeteer check / fixture harness> — <what you'll see>
+Verify: <swift test / canopy --bench / fixture harness> — <what you'll see>
 Done when: <observable outcome>
 ```
 

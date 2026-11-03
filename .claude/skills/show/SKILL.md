@@ -5,7 +5,7 @@ description: Present a design, plan or walkthrough as a native macOS app (Swift 
 
 # show — a native walkthrough Phil can sign off on
 
-`show <file.json>` opens a file in the one Show window (section list, rendered markdown, a **Signed off** checkbox and a note field per section). The window never multiplies: a rail on its left edge switches between six **workspaces**, and each keeps its own open document, typed text and scroll while another is in front.
+`show <file.json>` opens a file in the one Show window (section list, rendered markdown, a **Signed off** checkbox and a note field per section). The window never multiplies: a rail on its left edge switches between seven **workspaces**, and each keeps its own open document, typed text and scroll while another is in front.
 
 | Workspace | Key | Opens files with | Holds |
 |---|---|---|---|
