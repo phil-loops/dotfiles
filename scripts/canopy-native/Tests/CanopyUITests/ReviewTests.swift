@@ -432,6 +432,26 @@ import Testing
         #expect(land.body["dir"] == .string("/tmp/x.diffbase") && land.body["sha"] == .string("abc1234"))
     }
 
+    /// o from the code beside the diff opens Helix at that file, line and name — not the diff's
+    /// cursor — and quitting puts that pane back where Helix left off.
+    @Test func oFromTheCodeBesideTheDiffOpensHelixThere() async throws {
+        let (a, p) = try await app()
+        let pg = ReviewPageState.of(a)
+        let tip = pg.tip
+        ShipStub.answer(p, "POST", "/loops/review-helix", #"{"ok":true,"dir":"/tmp/x.diffbase","sha":"\#(tip)"}"#)
+        ShipStub.answer(p, "POST", "/loops/lsp/definition", #"{"ok":true,"sha":"\#(tip)","locations":[{"path":"lib/z.ts","line":2,"character":0}]}"#)
+        ShipStub.answer(p, "GET", "/loops/lsp/src", #"{"path":"lib/z.ts","sha":"x","text":"one\nconst two = three\n\nfour"}"#)
+        keys(a, "g", "d")
+        await until("the side pane") { pg.sideText != nil }
+        keys(a, "w", "o")
+        let h = try #require(pg.helix)
+        #expect(h.path == "lib/z.ts" && h.line == 2 && h.col == 7 && h.whole && h.fromSide)
+        await until("the checkout") { pg.helix?.dir != nil }
+        pg.helixAt = ("lib/z.ts", 4)
+        pg.landHelix(a)
+        #expect(pg.side?.path == "lib/z.ts" && a.pane?.id == reviewCodePane && a.selected == "s:4", "back beside the diff, where Helix left off")
+    }
+
     /// i on the old half has nothing to edit: that's history.
     @Test func iOnTheOldHalfOpensNothing() async throws {
         let (a, _) = try await app()

@@ -16,15 +16,17 @@ public struct HelixOpen: Equatable {
     public var sha: String
     /// over the whole diff (`o`), not just its new half (`i`)
     public var whole = false
+    /// opened from the code beside the diff: quitting puts that pane back where Helix left off
+    public var fromSide = false
 }
 
 private struct HelixWhere: Decodable { var ok: Bool; var dir: String?; var sha: String?; var err: String? }
 private struct HelixLanded: Decodable { var ok: Bool; var nothing: Bool?; var message: String?; var err: String? }
 
 extension ReviewPageState {
-    func openHelix(_ app: AppModel, branch: String, path: String, line: Int, col: Int, whole: Bool = false) {
+    func openHelix(_ app: AppModel, branch: String, path: String, line: Int, col: Int, whole: Bool = false, fromSide: Bool = false) {
         let warm = helixDirs["\(branch)@\(tip)"]
-        helix = HelixOpen(path: path, line: line, col: col, dir: warm, sha: tip, whole: whole)
+        helix = HelixOpen(path: path, line: line, col: col, dir: warm, sha: tip, whole: whole, fromSide: fromSide)
         if warm != nil { return app.runner.say("Helix on \(branch) · :w saves · quitting commits it") }
         app.runner.say("checking \(branch) out for Helix…")
         Task { @MainActor in
@@ -99,9 +101,15 @@ extension ReviewPageState {
         helix = nil
         let at = helixAt ?? (h.path, h.line)
         helixAt = nil
-        pendingNear = (id, at.path, at.line)
-        if let k = stopNear(path: at.path, line: at.line) { setCursor(k) }
-        app.focus(pane: reviewDiffPane)
+        let k = stopNear(path: at.path, line: at.line)
+        if h.fromSide, k == nil {
+            // a file the diff doesn't show: back beside it, at the tip Helix edited
+            show(Loc(repo: t.repo, sha: h.sha, path: at.path, line: at.line))
+        } else {
+            pendingNear = (id, at.path, at.line)
+            if let k { setCursor(k) }
+            app.focus(pane: reviewDiffPane)
+        }
         Task { @MainActor in
             let body = ["branch": t.name, "op": "land", "dir": dir, "sha": h.sha]
             let r = await app.transport.ask(repoPath("/review-helix"), body, as: HelixLanded.self)
