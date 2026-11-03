@@ -94,8 +94,8 @@ enum ReviewCommands {
             ship.historyFocus = .diff
             ship.host.focusDiff(app, true)
         }
-        r.register(Command(id: "history.open", title: "Read the commit's diff", scope: .history, verb: .main, label: "read",
-                           available: { _ in ship.commitScope != nil }, local: enterDiff))
+        r.register(Command(id: "history.open", title: "Read the diff: this commit's, or the whole branch's", scope: .history, verb: .main, label: "read",
+                           local: enterDiff))
         r.register(Command(id: "history.exit", title: "Back to the whole branch's code", scope: .history, verb: .cancel, label: "back",
                            local: { _, _ in
                                if let app = weakApp, ShipSeam.backOut(app) { return }

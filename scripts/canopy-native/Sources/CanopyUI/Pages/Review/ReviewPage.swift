@@ -33,7 +33,7 @@ struct ReviewPage: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 default:
                     HStack(alignment: .top, spacing: 0) {
-                        if pg.showsOutline { Color.clear.frame(width: pg.outlineReserve) }
+                        if pg.showsOutline { Color.clear.frame(width: pg.outlineReserve(app.pane?.id)) }
                         VStack(alignment: .leading, spacing: 8) {
                             if let sha = ShipState.of(app).commitScope {
                                 CommitHead(branchID: pg.id, sha: sha).padding(.horizontal, 16).padding(.top, 4)
@@ -53,7 +53,7 @@ struct ReviewPage: View {
                                 .frame(maxHeight: .infinity, alignment: .top)
                                 .background(theme.vellumNight)
                                 .overlay(alignment: .trailing) {
-                                    if !strip && pg.outlineWidth > pg.outlineReserve { theme.vellumEdge.frame(width: 1) }
+                                    if !strip && pg.showsTree { theme.vellumEdge.frame(width: 1) }
                                 }
                         }
                     }
