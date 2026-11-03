@@ -99,7 +99,7 @@ extension AppDelegate {
         }
     }
 
-    /// Something a session sent without being asked to show it: an `arrived` event (it waits in History, a canopy page on ⌘6's
+    /// Something a session sent without being asked to show it: an `arrived` event (it waits in History, a canopy page on Canopy's
     /// badge, a deck at the top of its shelf) and a notification naming it and the session's topic. Nothing switches or opens.
     func arrive(_ request: ShowRequest) {
         let target = request.target

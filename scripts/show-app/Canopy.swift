@@ -6,6 +6,8 @@ import CanopyUI
 /// starts the repo's viewer server when nothing answers, as the menu bar's launcher does.
 final class CanopyHost: NSViewController {
     static let repo = "~/coding/loops"
+    /// The page a workspace of its own opens on (Machine: /v2/machine); nil is canopy's own start.
+    let home: String?
     var isActive: () -> Bool = { false }
     /// Every page canopy goes to, by any key or link: its /v2/… address.
     var onNavigate: ((String) -> Void)?
@@ -13,6 +15,13 @@ final class CanopyHost: NSViewController {
     private var pendingRoute: String?
     private var starting = false
     private let note = NSTextField(labelWithString: "")
+
+    init(home: String? = nil) {
+        self.home = home
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) { fatalError("CanopyHost is built in code") }
 
     override func loadView() {
         let container = PageBackdrop()
@@ -30,7 +39,7 @@ final class CanopyHost: NSViewController {
     /// Brings canopy up on its first visit, and goes to `route` (a /v2/… path) once it's there.
     func start(route: String? = nil) {
         _ = view
-        if let route { pendingRoute = route }
+        if let route { pendingRoute = route } else if embed == nil, pendingRoute == nil { pendingRoute = home }
         if let embed {
             if let r = pendingRoute { embed.navigate(r); pendingRoute = nil }
             view.window?.makeFirstResponder(embed.view)

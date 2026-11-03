@@ -167,6 +167,8 @@ final class SelfTestDriver {
     func escape() { press("\u{1b}", code: 53) }
     func backspace() { press("\u{7f}", code: 51) }
     func command(_ key: String, code: UInt16 = 0, shift: Bool = false) { press(key, code: code, shift ? [.command, .shift] : .command) }
+    /// ⌘ and the workspace's own number, whatever order the rail is in.
+    func switchKey(_ workspace: Workspace) { command(workspace.key, code: [18, 19, 20, 21, 23, 22, 26][Int(workspace.key)! - 1]) }
 
     var focusName: String {
         let stops = app.focusStops
@@ -201,8 +203,12 @@ final class SelfTestDriver {
                 && app.workspaces[.runs]?.current == live && app.workspaces[.review]?.current == alpha,
               Workspace.allCases.map { "\($0): \(app.workspaces[$0]?.current ?? "-")" }.joined(separator: ", "))
 
-        for (key, workspace) in [("1", Workspace.forest), ("3", .learn), ("4", .runs), ("2", .review)] {
-            command(key, code: [18, 19, 20, 21][Int(key)! - 1])
+        check("Machine is canopy's machine page on ⌘\(Workspace.machine.key)",
+              app.workspaces[.machine]?.canopy?.home == "/v2/machine" && app.workspaces[.canopy]?.canopy?.home == nil)
+        // the last switch leaves Review in front, where the finder steps below start
+        for workspace in [Workspace.forest, .learn, .runs, .review] {
+            let key = workspace.key
+            switchKey(workspace)
             check("⌘\(key) switches to \(workspace.name)", app.active == workspace, "front is \(app.active.name)")
         }
 
@@ -277,7 +283,7 @@ final class SelfTestDriver {
         check("…and runs the headless Claude in ~/.dotfiles with the show skill",
               args.hasPrefix(canonicalPath(("~/.dotfiles" as NSString).expandingTildeInPath)) && args.contains("-p\n") && args.contains("ducks in a row") && args.contains("skills/show/SKILL.md"),
               args)
-        command("4", code: 21)
+        switchKey(.runs)
         command("n", code: 45)
         check("⌘N in Runs opens nothing", app.shell.overlay == nil)
         check("…and its menu item is off, with the reason", !app.isEnabled(KeyTable.binding("library.new-runs")!) && !app.isEnabled(KeyTable.binding("library.new")!))
@@ -293,7 +299,7 @@ final class SelfTestDriver {
         check("⌫ on a listed run forgets it and leaves its file", FileManager.default.fileExists(atPath: runEight) && !registeredLiveRuns().contains(runEight),
               "registry: \(registeredLiveRuns())")
 
-        command("2", code: 19)
+        switchKey(.review)
         app.openPath(beta)
         app.focus(front.shelf)
         backspace()
@@ -304,7 +310,7 @@ final class SelfTestDriver {
         arrivals()
         fold()
 
-        command("3", code: 20)
+        switchKey(.learn)
         app.focus(front.shelf)
         var learnOrder: [String] = [focusName]
         for _ in 0..<4 {
@@ -316,7 +322,7 @@ final class SelfTestDriver {
         escape()
         check("⎋ leaves the composer with its text", app.tutor?.composer.string == "draft question" && !app.isTyping, app.tutor?.composer.string ?? "-")
 
-        command("2", code: 19)
+        switchKey(.review)
         app.saveAll()
         prefs.synchronize()
         relaunchChild()
@@ -330,7 +336,7 @@ final class SelfTestDriver {
         for (path, title) in [(gamma, "Gamma notes"), (delta, "Delta notes"), (quiet, "Epsilon notes"), (focused, "Zeta notes")] {
             write(["title": title, "replyTo": "abcd1234", "sections": [["id": "s1", "group": "G", "title": "Only", "body": "One."]]], path)
         }
-        command("2", code: 19)
+        switchKey(.review)
         for path in [gamma, alpha, gamma, delta] { app.openPath(path) }
         var walked: [String] = []
         for _ in 0..<4 {
@@ -340,7 +346,7 @@ final class SelfTestDriver {
         check("⌘[ walks the whole back stack, revisits included", walked == [gamma, alpha, gamma, alpha],
               walked.map { ($0 as NSString).lastPathComponent }.joined(separator: " → "))
 
-        command("1", code: 18)
+        switchKey(.forest)
         app.application(NSApp, open: [inbox(.document(quiet))])
         settle()
         let review = app.workspaces[.review]!
@@ -358,7 +364,7 @@ final class SelfTestDriver {
         check("a session's showNow request opens it in its workspace", app.active == .review && front.current == focused,
               "front \(app.active.name), open: \(front.current ?? "-")")
         command("[", code: 33)
-        command("1", code: 18)
+        switchKey(.forest)
         app.application(NSApp, open: [URL(fileURLWithPath: focused)])
         settle()
         check("a file Phil opens himself comes forward", app.active == .review && front.current == focused,
@@ -368,9 +374,9 @@ final class SelfTestDriver {
         settle()
         check("a session's canopy page waits instead of switching", app.active == .review && showEvents.state.waiting.contains(.canopy("/v2/p/loops/zeta-forest")),
               "front \(app.active.name), waiting \(showEvents.state.waiting.map(\.key))")
-        command("6", code: 22)
-        check("⌘6 stays where it was: the page still waits", showEvents.state.waiting.contains(.canopy("/v2/p/loops/zeta-forest")))
-        command("2", code: 19)
+        switchKey(.canopy)
+        check("Canopy stays where it was: the page still waits", showEvents.state.waiting.contains(.canopy("/v2/p/loops/zeta-forest")))
+        switchKey(.review)
 
         command("y", code: 16)
         let history = app.shell.finder?.matches ?? []
