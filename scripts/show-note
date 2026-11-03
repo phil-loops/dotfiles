@@ -1,0 +1,35 @@
+#!/usr/bin/env python3
+"""show-note "<title>" "<markdown body>" — post a short note from this Claude session to Show.
+
+Writes a one-section deck to ~/.cache/show/notes/ whose replyTo is this session, then hands it to `show`, so it
+waits in History with a notification. In Show, Submit (⌘↩) acks it back to the session and Go to session (⌘J) jumps to
+the session's tmux pane. Run outside a Claude session, the note has no replyTo and no jump.
+"""
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+NOTES = Path.home() / ".cache/show/notes"
+
+
+def main():
+    if len(sys.argv) != 3:
+        sys.exit(__doc__.strip())
+    title, body = sys.argv[1], sys.argv[2]
+    session = os.environ.get("CLAUDE_CODE_SESSION_ID", "")[:8] or None
+    slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:48] or "note"
+    NOTES.mkdir(parents=True, exist_ok=True)
+    path = NOTES / f"{time.strftime('%Y%m%d-%H%M%S')}-{slug}.json"
+    deck = {"title": title, "subtitle": "Note from a Claude session", "replyTo": session,
+            "sections": [{"id": "note", "title": title, "body": body}]}
+    path.write_text(json.dumps(deck, indent=1, ensure_ascii=False))
+    subprocess.run([str(Path(__file__).with_name("show")), str(path)], check=True)
+    print(path)
+
+
+if __name__ == "__main__":
+    main()
