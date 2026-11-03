@@ -1,4 +1,4 @@
-// Show — one native window with workspaces on a rail: Canopy (⌘1), Learn (⌘2), Machine (⌘3), Forest (⌘4), Review (⌘5), Runs (⌘6), API (⌘7).
+// Show — one native window with workspaces on a rail: Canopy (⌘1), Learn (⌘2), Machine (⌘3), Inbox (⌘4), Forest (⌘5), Review (⌘6), Runs (⌘7), API (⌘8).
 // A file goes to the workspace its optional "workspace" key names, otherwise to the one its "mode" implies (forest, deck, tutor, live).
 // Decks: { "title", "subtitle"?, "sections": [{ "id"?, "group", "title", "tag"?, "body" (markdown), "url"? (a live page shown instead of the body) }] }
 // Sign-offs and notes save beside the deck as <deck>.signoff.json; "replyTo" names the claude-say session that Submit notifies.
@@ -17,7 +17,7 @@ var prefs = UserDefaults.standard
 
 /// The workspaces on the rail, top to bottom; the nth answers to ⌘n. Nothing crosses between them except the rail's waiting badges.
 enum Workspace: String, CaseIterable {
-    case canopy, learn, machine, forest, review, runs, api, inbox
+    case canopy, learn, machine, inbox, forest, review, runs, api
 
     var name: String { self == .api ? "API" : rawValue.capitalized }
 
