@@ -81,6 +81,7 @@ struct ForestPage: View {
                         .foregroundStyle(v.state == .conflicts ? theme.del : theme.inkFaint)
                         .opacity(v.state == .checking ? 0.7 : 1)
                         .labelTarget(pane: "controls", key: "forest.integrate", title: "merge check", run: RouteTo("forest.integrate", target: p.id))
+                        .explains("forest|merge", RowName(word: Self.merge[v.state]!, meaning: Self.mergeMeaning[v.state]!))
                         .help(v.state == .conflicts ? "the branches don't merge onto main together\n\(v.detail)" : v.state == .clean ? "every branch merged onto main at once, cleanly" : v.detail)
                 }
             }
@@ -98,6 +99,11 @@ struct ForestPage: View {
         guard app.forestModel.face == .branches, let pid = app.forestModel.pageProject else { return [] }
         return Tracker.queue(app.store.trackerItems(on: pid)).flatMap(\.items)
     }
+
+    static let mergeMeaning: [IntegrationVerdict.State: String] = [
+        .checking: "trying every branch onto main at once", .clean: "every branch merges onto main together, cleanly",
+        .conflicts: "the branches don't merge onto main together; the leaves below conflict", .failed: "the merge check errored; press it to try again",
+    ]
 
     static let merge: [IntegrationVerdict.State: String] = [
         .checking: "◌ merging…", .clean: "✓ merges clean", .conflicts: "✕ doesn't merge", .failed: "merge check couldn't run",
@@ -119,6 +125,7 @@ private struct ForestBranchView: View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 Text(b.order < 999 ? "\(b.order)" : "").font(Theme.text(11)).foregroundStyle(theme.inkFaint).frame(width: 20, alignment: .trailing)
+                    .explains("branch|order|\(b.id)", RowName(word: "1 2 3", meaning: "the branch's place in merge order"))
                 Text(leaf(b.name)).font(Theme.display(17)).foregroundStyle(cursor ? theme.goldLeaf : theme.ink).lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 LoopStripView(branchID: b.id, size: 11).fixedSize()

@@ -325,9 +325,10 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
         #expect(HistoryList.group("h|aaa", ["h|", "h|aaa"], unknown, nil) == nil)
     }
 
-    @Test func everyGroupAndReachSaysWhatItMeans() {
-        let terms: [any Term] = [HistoryGroup.toPush, HistoryGroup.pushed, HistoryGroup.onPR(7), Reach.onlyHere, Reach.draft, Reach.local, Reach.locked("on origin")]
-        for t in terms { #expect(t.meaning?.hasPrefix(t.word + ":") == true, "\(t.word)'s note names it first") }
+    @Test func everyWordTheForestsAndHistoryDrawSaysWhatItMeans() {
+        let terms: [any Term] = [HistoryGroup.toPush, HistoryGroup.pushed, HistoryGroup.onPR(7), Reach.onlyHere, Reach.draft, Reach.local, Reach.locked("on origin")] + ShipStage.allCases.map { $0 as any Term }
+            + LoopStep.ID.allCases.map { LoopStep(id: $0, state: .now) as any Term } + [ProjectState.focus, ProjectState.workbench, ProjectState.archive]
+        for t in terms { #expect(t.meaning.map { !$0.isEmpty && !$0.hasPrefix(t.word) } == true, "\(t.word) has a meaning that doesn't repeat it") }
     }
 
     @Test func wordsRowsSayWhoCanSeeThem() {

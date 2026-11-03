@@ -341,9 +341,9 @@ enum HistoryGroup: Term, Equatable {
 
     var meaning: String? {
         switch self {
-        case .toPush: "to push: commits only on this machine, free to reword"
-        case .pushed: "pushed: on origin, no PR yet"
-        case .onPR(let n): "on #\(n): in the open PR, so reviewers have seen them — read-only"
+        case .toPush: "commits only on this machine, free to reword"
+        case .pushed: "on origin, no PR yet"
+        case .onPR(let n): "in the open PR, so reviewers have seen them — read-only"
         }
     }
 }
@@ -367,10 +367,10 @@ enum Reach: Term, Equatable {
 
     var meaning: String? {
         switch self {
-        case .onlyHere: "only here: kept in git config, never sent anywhere"
-        case .draft: "draft: becomes the PR's words when you open it"
-        case .local: "local: not pushed yet, so i rewords it"
-        case .locked(let why): "\(why): already shared, so it can't be reworded here"
+        case .onlyHere: "kept in git config, never sent anywhere"
+        case .draft: "becomes the PR's words when you open it"
+        case .local: "not pushed yet, so i rewords it"
+        case .locked(let why): "already shared, so it can't be reworded here"
         }
     }
 }
@@ -379,4 +379,6 @@ enum Reach: Term, Equatable {
 struct RowName: Term, Equatable {
     var word: String
     var meaning: String?
+
+    func with(word: String) -> RowName { RowName(word: word, meaning: meaning) }
 }

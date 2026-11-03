@@ -25,6 +25,7 @@ public struct LoopStripView: View {
                 }
                 if steps.allSatisfy({ $0.state == .done }) {
                     Text("merged").foregroundStyle(theme.patina).padding(.leading, 4)
+                        .explains("loop|\(branchID)", ShipStage.landed.term.with(word: "merged"))
                 }
             }
             .font(Theme.text(size))
@@ -32,6 +33,10 @@ public struct LoopStripView: View {
     }
 
     @ViewBuilder private func named(_ s: LoopStep) -> some View {
+        stepText(s).explains("loop|\(branchID)|\(s.id.rawValue)", s)
+    }
+
+    @ViewBuilder private func stepText(_ s: LoopStep) -> some View {
         let text = Text(s.word).foregroundColor(s.flag == true ? theme.goldLeaf : color(s.state))
             + Text(s.note.map { " \($0)" } ?? "").foregroundColor(theme.inkDim)
         if s.id == .words {
