@@ -203,6 +203,10 @@ public final class ReviewPageState: ShipHost {
     @ObservationIgnored var pendingCursor: (id: String, key: String)?
     /// An address's line on the tip (`?file=…&line=…`), to find once the diff is here.
     @ObservationIgnored var pendingLoc: (id: String, loc: Loc)?
+    /// Where Helix's cursor was when it quit, to put the diff's cursor on once the diff (perhaps with Helix's commit) is here.
+    @ObservationIgnored var pendingNear: (id: String, path: String, line: Int)?
+    /// Helix's cursor as its status line last showed it, while it's open.
+    @ObservationIgnored var helixAt: (path: String, line: Int)?
     /// The branch the page last showed (a new one starts fresh).
     @ObservationIgnored private var shownID = ""
     /// This branch's diff is here (not the last page's, still showing while this one comes).
@@ -343,6 +347,10 @@ public final class ReviewPageState: ShipHost {
     /// first line (page.ts here()'s default) when it has none.
     private func settleCursor() {
         let s = stops
+        if let n = pendingNear, n.id == id, let k = stopNear(path: n.path, line: n.line) {
+            pendingNear = nil
+            return setCursor(k)
+        }
         if let c = carry, c.id == id {
             carry = nil
             if let p = c.path, stopIndex["f|\(p)"] != nil { return setCursor("f|\(p)", focus: false) }
@@ -870,18 +878,30 @@ public extension ReviewPageState {
         return true
     }
 
-    /// `o`: Helix over the whole diff, on the file and line under the cursor.
+    /// `o`: Helix over the whole page, on the file and line under the cursor.
     func openHelixWhole(_ app: AppModel) -> Bool {
         guard helix == nil, integration == nil, let t = target, let h = here else { return false }
-        var line = 1, col = 1
-        if h.kind == .line, let row = h.row {
-            let at = sideLine(row)
-            line = at.line
-            if at.side == .right, let w = hereWord { col = w.lowerBound + 1 }
-        } else if h.kind == .thread, let l = h.id.flatMap({ app.store.view(CanopyCore.Thread.self, $0) })?.local?.line {
-            line = l
-        }
+        var line = tipLineNear(h) ?? 1, col = 1
+        if h.kind == .line, let row = h.row, sideLine(row, prefer: column).side == .right, let w = hereWord { col = w.lowerBound + 1 }
+        if h.kind == .thread, let l = h.id.flatMap({ app.store.view(CanopyCore.Thread.self, $0) })?.local?.line { line = l }
         openHelix(app, branch: t.name, path: h.path, line: line, col: col, whole: true)
         return true
+    }
+
+    /// The tip's line at a stop: its new half, else (a removed line, a gap, the file's header) the nearest new
+    /// line after it in its file, else before. A removed line's own number belongs to the old file, not the tip.
+    func tipLineNear(_ s: Stop) -> Int? {
+        if let n = s.row?.right?.new { return n }
+        guard let i = stopIndex[s.key] else { return nil }
+        let all = stops
+        let ahead = all[i...].prefix { $0.path == s.path }.lazy.compactMap { $0.row?.right?.new }.first
+        return ahead ?? all[..<i].reversed().prefix { $0.path == s.path }.lazy.compactMap { $0.row?.right?.new }.first
+    }
+
+    /// The diff's stop nearest a tip line of a file: that line, else the closest line the diff shows, else the file.
+    func stopNear(path: String, line: Int) -> String? {
+        let inFile = stops.filter { $0.path == path }
+        let lines = inFile.compactMap { s in s.kind == .line ? s.row?.right?.new.map { (s.key, $0) } : nil }
+        return lines.min { abs($0.1 - line) < abs($1.1 - line) }?.0 ?? inFile.first?.key
     }
 }

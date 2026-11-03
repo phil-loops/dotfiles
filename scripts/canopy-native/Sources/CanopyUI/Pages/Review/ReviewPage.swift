@@ -67,6 +67,7 @@ struct ReviewPage: View {
             }
         }
         .overlay { if app.keys.layer == .map { MapOverlay() } }
+        .overlay { if let h = pg.helix, h.whole, let dir = h.dir { HelixCover(open: h, dir: dir) } }
         .onAppear { pg.sync() }
         .task(id: "\(pg.id)@\(pg.tip)") { pg.warmHelix(app) }
     }
@@ -203,6 +204,21 @@ struct PathText: View {
     }
 }
 
+/// `o`: Helix over the whole page — the header, the outline and the diff — not boxed inside the diff.
+private struct HelixCover: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.theme) private var theme
+    let open: HelixOpen
+    let dir: String
+
+    var body: some View {
+        let pg = ReviewPageState.of(app)
+        HelixHalf(open: open, dir: dir, colors: CanvasColors(theme), moved: { pg.helixAt = ($0, $1) }) { pg.landHelix(app) }
+            .id("\(dir)|\(open.path)")
+            .background(theme.vellumNight)
+    }
+}
+
 /// The diff itself: the canvas over the page state's stops.
 private struct DiffPane: View {
     @Environment(AppModel.self) private var app
@@ -231,10 +247,10 @@ private struct DiffPane: View {
     /// Helix over the diff: `o` covers it all; `i` starts where the split puts the new half, so the
     /// old half stays to read against.
     @ViewBuilder private func helix(_ pg: ReviewPageState) -> some View {
-        if let h = pg.helix, let dir = h.dir {
-            HelixHalf(open: h, dir: dir, colors: CanvasColors(theme)) { pg.landHelix(app) }
+        if let h = pg.helix, !h.whole, let dir = h.dir {
+            HelixHalf(open: h, dir: dir, colors: CanvasColors(theme), moved: { pg.helixAt = ($0, $1) }) { pg.landHelix(app) }
                 .id("\(dir)|\(h.path)")
-                .padding(.leading, h.whole ? 0 : CGFloat(pg.splitWidth(h.path) + 7) * DocFont.charWidth + 1)
+                .padding(.leading, CGFloat(pg.splitWidth(h.path) + 7) * DocFont.charWidth + 1)
         }
     }
 
