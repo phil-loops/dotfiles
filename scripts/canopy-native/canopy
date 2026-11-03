@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# canopy [--focus] [/v2/... | canopy://...] — open canopy at a page: Show's canopy workspace (⌘6). From a Claude session
+# canopy [--focus] [/v2/... | canopy://...] — open canopy at a page: Show's canopy workspace (⌘1). From a Claude session
 # the page arrives quietly (a notification) unless --focus or SHOW_FOCUS=1; from your terminal it comes forward. Show is
 # canopy's only app and window. The headless tools below run the bare canopy binary instead — a
 # plain executable, not an app, so nothing can open it as a second window — rebuilt when its sources changed.
