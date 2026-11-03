@@ -15,13 +15,31 @@
 #
 # Idempotent and self-scoping: each half no-ops unless the worktree ships the config it
 # overrides, and skips if already stamped.
+#
+# Fails loud on a config it hasn't seen: the committed file's blob must be one of KNOWN
+# (or already carry %{file_path_absolute}, upstream's own fix). Anything else means a
+# teammate changed it, so the stamp touches nothing, says so on stderr and in a
+# notification, and exits 3 — recheck both halves against the new file, then add its blob.
 emulate -L zsh; set -uo pipefail
+
+KNOWN=(
+  75d4833f4a1f8192f5e87b308e803eea2101900a   # 112fc96f00 — tsserver, pre-#10330 branches
+  7e903265fda07d81418f27d3f3f41e772d16dbc2   # 395746a1dc — #10330, main as of 2026-11-02
+)
 
 dir="${1:-$PWD}"
 top=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null) || exit 0
 cfg="$top/.helix/languages.toml"
 
 [[ -f "$cfg" ]] || exit 0
+
+blob=$(git -C "$top" rev-parse -q --verify HEAD:.helix/languages.toml 2>/dev/null) || exit 0
+if (( ! ${KNOWN[(Ie)$blob]} )) && ! git -C "$top" cat-file -p "$blob" | grep -q '%{file_path_absolute}'; then
+  msg="helix-tsgo-stamp: loops' .helix/languages.toml changed upstream (blob ${blob:0:10}) — not stamped. Recheck the tsgo + absolute-path overrides, then add the blob to KNOWN in ~/.dotfiles/scripts/helix-tsgo-stamp"
+  print -u2 -- "⚠ $msg  [$top]"
+  osascript -e "display notification \"${msg//\"/}\" with title \"Helix stamp refused\"" >/dev/null 2>&1 || true
+  exit 3
+fi
 
 if grep -q '"%{buffer_name}"' "$cfg"; then
   sed -i '' 's/"%{buffer_name}"/"%{file_path_absolute}"/g' "$cfg"
