@@ -353,6 +353,15 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
         #expect(rows.map { WordsEditor.reachHeader($0, rows, o) } == [.onlyHere, .draft, nil, .locked("on origin"), nil, .local, nil])
     }
 
+    @Test func theRowThatIsThePageTitleSaysSo() {
+        var o = WordsOutline(branch: "b", head: "h", commits: [])
+        #expect(WordsEditor.isPageTitle(.desc, o) && !WordsEditor.isPageTitle(.title, o))
+        o.pr = .init(exists: true, number: 3, state: "OPEN")
+        #expect(!WordsEditor.isPageTitle(.desc, o) && WordsEditor.isPageTitle(.title, o))
+        o.pr = .init(exists: true, number: 3, state: "CLOSED")
+        #expect(WordsEditor.isPageTitle(.desc, o))
+    }
+
     @Test func theHistorySaysWhatsWaitingToGoOut() {
         #expect(HistoryList.waiting(toPush: 0, edits: 0) == nil)
         #expect(HistoryList.waiting(toPush: 2, edits: 1) == "waiting to go out: 2 commits to push, 1 unsaved edit")
