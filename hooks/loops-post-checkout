@@ -6,7 +6,11 @@
 # tree is stamped (or if the tree isn't tsserver-pinned). Covers the creation paths cw and
 # stack-open already wrap, plus the ones they don't — bare `git worktree add` and `wt`.
 [ "$3" = "1" ] || exit 0
-"$HOME/.dotfiles/scripts/helix-tsgo-stamp" "$PWD" >/dev/null || true   # stderr stays: a refused stamp must be seen
+# not mid-rebase: the pre-rebase hook just cleared the stamp so the rebase can run; re-stamping on
+# its own checkout makes it refuse ("unstaged changes"). post-rewrite re-stamps once it's done.
+if [ ! -d "$(git rev-parse --git-path rebase-merge)" ] && [ ! -d "$(git rev-parse --git-path rebase-apply)" ]; then
+  "$HOME/.dotfiles/scripts/helix-tsgo-stamp" "$PWD" >/dev/null || true   # stderr stays: a refused stamp must be seen
+fi
 # Refresh the tRPC .gen boundary for the newly-checked-out source (idempotent, COW-cheap,
 # backgrounds any real rebuild). Covers branch switches + bare `git worktree add`.
 "$HOME/.dotfiles/scripts/seed-gen" "$PWD" >/dev/null 2>&1 || true
