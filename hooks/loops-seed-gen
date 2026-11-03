@@ -7,5 +7,7 @@
 # single-flight-locked, and backgrounds any real rebuild via tsgo, so it's safe to fire on
 # every rewrite. Symlinked from both post-rewrite and post-merge; stdin (post-rewrite's
 # commit list) is intentionally ignored.
+# pre-rebase dropped the local .helix override; put it back on the rewritten tree.
+"$HOME/.dotfiles/scripts/helix-tsgo-stamp" "$PWD" >/dev/null 2>&1 || true
 "$HOME/.dotfiles/scripts/seed-gen" "$PWD" >/dev/null 2>&1 || true
 exit 0
