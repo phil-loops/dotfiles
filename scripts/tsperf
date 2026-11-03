@@ -4,6 +4,7 @@
     tsperf run    [-n 3]              measure the full check on the working tree
     tsperf pareto [-n 3] [--top 25]   where the check time goes: hot files + hot nodes
     tsperf ab <refA> <refB> [-n 5]    A/B two refs, alternating arms, same worktree
+    tsperf checkers [--counts 1,2,4]  wall time per parallel-checker count
 
 Every number it prints is either deterministic or controlled, because each trap below
 cost us a wrong conclusion:
@@ -246,14 +247,15 @@ def parse_diagnostics(out):
     }
 
 
-def check_once(root, engine, project):
+def check_once(root, engine, project, extra=()):
     cfg = write_bench_tsconfig(root, project)
     before = resource.getrusage(resource.RUSAGE_CHILDREN)
     load = os.getloadavg()[0]
     t0 = time.monotonic()
     try:
         try:
-            r = sh(queued([engine_bin(root, engine), "-p", str(cfg), "--extendedDiagnostics"]),
+            r = sh(queued([engine_bin(root, engine), "-p", str(cfg), "--extendedDiagnostics",
+                           *extra]),
                    cwd=root, timeout=COMPILE_TIMEOUT)
         except subprocess.TimeoutExpired:
             sys.exit(f"tsperf: {engine} still running after {COMPILE_TIMEOUT}s — killed.")
@@ -278,6 +280,15 @@ def check_once(root, engine, project):
     return m
 
 
+def work_once(root, engine, project):
+    """Exact work, single checker. The default 4 parallel checkers each keep their own
+    type cache, so shared types get rebuilt per checker and the SUMMED counts shift with
+    how files happen to be partitioned — adding one tiny test file once moved them +1.85M
+    with zero new work. One checker counts each type once."""
+    m = check_once(root, engine, project, ("--checkers", "1"))
+    return {k: m[k] for k in ("instantiations", "types", "memory_gb")}
+
+
 def fmt(m):
     loaded = "  ⚠ loaded" if m["load"] > BUSY_LOAD_PER_CPU * os.cpu_count() else ""
     return (f"inst {m['instantiations']/1e6:6.2f}M  types {m['types']/1e6:4.2f}M  "
@@ -296,6 +307,9 @@ def cmd_run(args):
     require_inputs(root)
     require_quiet(args.force, args.wait)
     print_fingerprint(fingerprint(root, args.engine, args.project))
+    w = work_once(root, args.engine, args.project)
+    print(f"  work (1 checker, exact): inst {w['instantiations']/1e6:.2f}M  "
+          f"types {w['types']/1e6:.2f}M")
     runs = []
     for i in range(args.n):
         m = check_once(root, args.engine, args.project)
@@ -453,10 +467,11 @@ def cmd_ab(args):
         prints[ref] = fp
 
     try:
+        work = {}
         for ref in refs:   # warmup: a cold FS cache would tax whoever ran first
             checkout(ref)
-            check_once(root, args.engine, args.project)
-            print(f"  warmup  {ref}")
+            work[ref] = work_once(root, args.engine, args.project)
+            print(f"  warmup  {ref}  (work: inst {work[ref]['instantiations']/1e6:.2f}M)")
         a, b = (prints[r] for r in refs)
         for k in ("compiler", "project", "prisma"):
             if a[k] != b[k]:
@@ -475,9 +490,12 @@ def cmd_ab(args):
         regen_trpc_types(root)
 
     A, B = arms[args.refA], arms[args.refB]
-    print("\n  counts (exact — whether the work shrank)")
-    for key, unit, scale in (("instantiations", "M", 1e6), ("types", "M", 1e6),
-                             ("memory_gb", "G", 1)):
+    print("\n  work (exact, 1 checker — whether the work shrank)")
+    for key, unit, scale in (("instantiations", "M", 1e6), ("types", "M", 1e6)):
+        x, y = work[args.refA][key] / scale, work[args.refB][key] / scale
+        print(f"    {key:<15} {x:7.2f}{unit} -> {y:7.2f}{unit}  ({(y - x) / x * 100:+.1f}%)")
+    print("\n  default 4-checker run (counts include per-checker duplication)")
+    for key, unit, scale in (("instantiations", "M", 1e6), ("memory_gb", "G", 1)):
         x, y = A[0][key] / scale, B[0][key] / scale
         print(f"    {key:<15} {x:7.2f}{unit} -> {y:7.2f}{unit}  ({(y - x) / x * 100:+.1f}%)")
     print("\n  time (min of N — load only ever adds time)")
@@ -491,6 +509,26 @@ def cmd_ab(args):
               f"   ranges {min(xs):.2f}–{max(xs):.2f} / {min(ys):.2f}–{max(ys):.2f}")
     if any(m["load"] > BUSY_LOAD_PER_CPU * os.cpu_count() for m in A + B):
         print("\n  ⚠ some runs ran under load — trust the counts, re-run for the times")
+
+
+def cmd_checkers(args):
+    """Wall time per checker count: parallelism vs per-checker duplicated work."""
+    root = repo_root()
+    require_inputs(root)
+    require_quiet(args.force, args.wait)
+    print_fingerprint(fingerprint(root, args.engine, args.project))
+    counts = [int(c) for c in args.counts.split(",")]
+    res = {c: [] for c in counts}
+    for i in range(args.n):
+        for c in counts:   # alternate, same pass, same load
+            m = check_once(root, args.engine, args.project, ("--checkers", str(c)))
+            res[c].append(m)
+            print(f"  pass {i+1}  checkers {c:<2} {fmt(m)}")
+    print("\n  checkers   wall min   cpu min   inst (summed)   mem")
+    for c in counts:
+        r = res[c]
+        print(f"  {c:>8}   {min(x['wall'] for x in r):7.2f}s  {min(x['cpu'] for x in r):7.1f}s"
+              f"   {r[0]['instantiations']/1e6:10.2f}M   {r[0]['memory_gb']:.2f}G")
 
 
 def main():
@@ -525,6 +563,11 @@ def main():
     ab.add_argument("refB")
     common(ab, 5)
     ab.set_defaults(fn=cmd_ab)
+
+    ck = sub.add_parser("checkers", help="wall time per --checkers value")
+    common(ck, 3)
+    ck.add_argument("--counts", default="1,2,3,4,6,8")
+    ck.set_defaults(fn=cmd_checkers)
 
     args = p.parse_args()
     args.fn(args)
