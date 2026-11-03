@@ -75,7 +75,17 @@ struct HistoryList: View {
             }
             if rows == nil { Text("reading the commits…").foregroundStyle(theme.inkFaint) }
             else if rows?.isEmpty == true { Text("no commits of its own").foregroundStyle(theme.inkFaint) }
+            if let waiting = Self.waiting(toPush: (rows ?? []).filter { $0.pushed == false }.count, edits: WordsState.of(app).pending(branchID)) {
+                Text(waiting).foregroundStyle(theme.goldLeaf.opacity(0.8)).font(Theme.text(11)).padding(.top, 6)
+            }
         }
+    }
+
+    /// What this machine holds that nobody else has seen yet, or nil when everything is out.
+    static func waiting(toPush: Int, edits: Int) -> String? {
+        let parts = [toPush > 0 ? "\(toPush) commit\(toPush == 1 ? "" : "s") to push" : nil,
+                     edits > 0 ? "\(edits) unsaved edit\(edits == 1 ? "" : "s")" : nil].compactMap { $0 }
+        return parts.isEmpty ? nil : "waiting to go out: " + parts.joined(separator: ", ")
     }
 
     /// The month-day a commit was written ("11-02"), its year dropped.
@@ -242,13 +252,20 @@ public struct WordsEditor: View {
                         .font(Theme.text(10.5)).foregroundStyle(theme.inkFaint)
                     case .title:
                         let v = w.prValue(branchID)
-                        if writing {
+                        if let pr = o?.pr, WordsState.githubOwns(pr) {
+                            Text(pr.title ?? "—").foregroundStyle(theme.inkDim)
+                        } else if !writing, Self.echoesCommit(o, v.subject) {
+                            Text("same as its one commit").foregroundStyle(theme.inkFaint)
+                        } else if writing {
                             ModalTextField(field, text: Binding(get: { w.prValue(branchID).subject },
                                                                 set: { w.editPr(branchID, MessageWords(subject: $0.replacingOccurrences(of: "\n", with: " "), body: w.prValue(branchID).body)) }))
                         } else { Text(v.subject.isEmpty ? "—" : v.subject).foregroundStyle(theme.ink) }
                     case .body:
-                        let parts = OutlineHints.splitTemplate(w.prValue(branchID).body)
-                        if writing {
+                        let github = o?.pr.flatMap { WordsState.githubOwns($0) ? $0 : nil }
+                        let parts = OutlineHints.splitTemplate(github?.body ?? w.prValue(branchID).body)
+                        if github != nil {
+                            Text(parts.own.isEmpty ? "—" : parts.own).foregroundStyle(theme.inkDim)
+                        } else if writing {
                             ShipTextEditor(field, placeholder: "why — a line or three", text: Binding(
                                 get: { OutlineHints.splitTemplate(w.prValue(branchID).body).own },
                                 set: { own in
@@ -292,11 +309,18 @@ public struct WordsEditor: View {
 
     private func rowsShowBody(_ sha: String) -> Bool { ShipRows.words(app, branchID, full: landing && !landingOnly).contains("w|b|\(sha)") }
 
+    /// Whether the landing title is just the branch's one commit's subject, never saved as its own.
+    static func echoesCommit(_ o: WordsOutline?, _ title: String) -> Bool {
+        guard let o, o.draft?.titleSaved != true else { return false }
+        let own = o.commits.filter { !$0.carried }
+        return own.count == 1 && own[0].subject.trimmingCharacters(in: .whitespaces) == title.trimmingCharacters(in: .whitespaces)
+    }
+
     /// Who can see a row's words yet, and so whether they can still change. Nil for a commit's body row.
     static func reach(_ r: WordsRow, _ o: WordsOutline?) -> Reach? {
         switch r {
         case .desc: .onlyHere
-        case .title, .body: .draft
+        case .title, .body: o?.pr.flatMap { WordsState.githubOwns($0) ? Reach.onPR($0.number ?? 0) : nil } ?? .draft
         case .subject(let sha): (o?.commits.first { $0.sha == sha }).map { $0.locked.isEmpty ? .local : .locked($0.locked) }
         case .commitBody: nil
         }
@@ -351,16 +375,24 @@ enum HistoryGroup: Term, Equatable {
 /// Who can see a words row yet: only this machine, the PR once it's opened, or already shared.
 enum Reach: Term, Equatable {
     case onlyHere, draft, local
+    /// the open PR's words, which GitHub keeps from here on
+    case onPR(Int)
     /// shared already; the server's reason it can't be reworded ("on origin", a merge, carried from a dep)
     case locked(String)
 
-    var editable: Bool { if case .locked = self { false } else { true } }
+    var editable: Bool {
+        switch self {
+        case .locked, .onPR: false
+        default: true
+        }
+    }
 
     var word: String {
         switch self {
         case .onlyHere: "only here"
         case .draft: "draft"
         case .local: "local"
+        case .onPR(let n): "on #\(n)"
         case .locked(let why): why
         }
     }
@@ -370,6 +402,7 @@ enum Reach: Term, Equatable {
         case .onlyHere: "kept in git config, never sent anywhere"
         case .draft: "becomes the PR's words when you open it"
         case .local: "not pushed yet, so i rewords it"
+        case .onPR: "GitHub holds the PR's words now — change them there"
         case .locked(let why): "already shared, so it can't be reworded here"
         }
     }

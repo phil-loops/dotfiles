@@ -81,8 +81,7 @@ public enum ShipRows {
             guard let c = o.commits.first(where: { $0.sha.hasPrefix(sha) }), c.locked.isEmpty else { return [] }
             return ["w|s|\(c.sha)", "w|b|\(c.sha)"]
         }
-        var out = ["w|desc"]
-        if !WordsState.githubOwns(o.pr) { out += ["w|title", "w|body"] }
+        var out = ["w|desc", "w|title", "w|body"]
         guard full else { return out }
         let at = app.cursors["\(app.router.surface.id)/\(wordsPane)"] ?? ""
         for c in o.commits {
