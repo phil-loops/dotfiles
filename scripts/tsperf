@@ -1,50 +1,60 @@
 #!/usr/bin/env python3
 """tsperf — a repeatable typecheck-performance harness for the loops repo.
 
-    tsperf run    [-n 3]              time the full check on the working tree
-    tsperf pareto [--top 25]          per-file check-time Pareto (what to attack)
-    tsperf ab <refA> <refB> [-n 3]    A/B two refs, alternating arms, same worktree
+    tsperf run    [-n 3]              measure the full check on the working tree
+    tsperf pareto [-n 3] [--top 25]   where the check time goes: hot files + hot nodes
+    tsperf ab <refA> <refB> [-n 5]    A/B two refs, alternating arms, same worktree
 
-Three lessons are baked in, because each one cost us a wrong conclusion:
+Every number it prints is either deterministic or controlled, because each trap below
+cost us a wrong conclusion:
 
-  * `incremental: true` in tsconfig.node.json makes a bench run reuse .tsbuildinfo
-    and check NOTHING (trace comes out empty). Every run here forces it off.
-  * `checkSourceFile` trace events are B/E pairs, not X spans. Pareto stacks them.
-  * Comparing two worktrees is noise (we once "measured" a -35% that wasn't real).
-    `ab` alternates arms in ONE worktree and reports the median of paired runs.
-
-Instantiation counts do NOT predict check time — read the `check` clock, not the
-counters. See memory: ts-perf-db-delegate-cast.
+  * Inputs, not noise, faked the biggest "wins". A worktree whose node_modules symlinks to
+    the main checkout type-checks against MAIN's generated Prisma client; stale
+    .gen/trpc-types inflated counts 15.4M -> 11.9M on the same code. So every run
+    fingerprints its inputs, refuses a Prisma client that doesn't match this tree's schema,
+    and `ab` regenerates the tRPC types per arm and refuses arms whose non-code inputs differ.
+  * Counts are the headline: instantiations / types / memory are identical run to run, so
+    they say whether the WORK shrank. Time says whether anyone will feel it — report both.
+  * Time is taken under control: each compile goes through heavy-turn, runs refuse to
+    start on a busy machine (--force overrides, and the load is printed per run), CPU time
+    (user+sys) is reported beside wall time, arms alternate in ONE worktree, the estimate is
+    min-of-N (load only ever adds time), and a delta is believable only if every pair agrees.
+  * `incremental: true` makes a bench run reuse .tsbuildinfo and check NOTHING. Forced off.
+  * Rank by SELF time (a node's time minus its children's), not per-file totals: July's
+    per-file ranking found the hot file and then tried three wrong calls inside it.
 """
 
 import argparse
+import hashlib
 import json
 import os
 import re
+import resource
 import shutil
 import signal
 import statistics
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 TSGO_SPEC = "@typescript/native-preview@^7.0.0-dev.20260707.2"
 TSGO_HOME = Path.home() / ".cache" / "tsperf" / "tsgo"
+SCRIPTS = Path(__file__).resolve().parent
 BENCH_TSCONFIG = "tsconfig.tsperf.json"
-# A repo-scale check is ~30s under tsc, ~9s under tsgo. Anything past this is wedged, and a
-# wedged compile is not slow data — it is no data, so waiting longer buys nothing.
-COMPILE_TIMEOUT = 900
+DEFAULT_PROJECT = "typescript/tsconfig.next.json"   # what CI's lint:typecheck:next checks
+TRPC_TYPES_PROJECT = "typescript/tsconfig.trpc-types.json"
+COMPILE_TIMEOUT = 900   # past this a compile is wedged: no data, not slow data
+BUSY_LOAD_PER_CPU = 0.4
+MIN_FREE_MEMORY_PCT = 25
 
 
 def sh(cmd, timeout=None, **kw):
     """Run a child we can always reap: its own process group, killed on ANY exit path.
 
-    Compiles are the reason. A plain subprocess.run leaves tsgo running if tsperf dies —
-    it gets reparented to launchd and burns a core until the machine is rebooted (one such
-    orphan ran 9h at 190% CPU). start_new_session gives the child its own group so we can
-    take the whole tree down; the finally-kill covers timeout, KeyboardInterrupt, and the
-    SIGTERM/SIGHUP that a closing terminal sends (see install_reaper).
+    A plain subprocess.run leaves tsgo running if tsperf dies — it gets reparented to
+    launchd and burns a core (one orphan ran 9h at 190% CPU).
     """
     p = subprocess.Popen(cmd, shell=isinstance(cmd, str), text=True,
                          stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -52,25 +62,29 @@ def sh(cmd, timeout=None, **kw):
     try:
         out, err = p.communicate(timeout=timeout)
     except BaseException:
-        try:
-            os.killpg(p.pid, signal.SIGKILL)   # start_new_session ⇒ pid is the pgid
-        except ProcessLookupError:
-            pass
-        p.wait()
+        kill_group(p)
         raise
     return subprocess.CompletedProcess(cmd, p.returncode, out, err)
 
 
-def install_reaper():
-    """Turn every catchable kill into a normal unwind, so sh()'s finally-kill runs.
+def kill_group(p):
+    try:
+        os.killpg(p.pid, signal.SIGKILL)   # start_new_session ⇒ pid is the pgid
+    except ProcessLookupError:
+        pass
+    p.wait()
 
-    SIGINT is in here for a reason that looks redundant and isn't: the child has its own
-    session, so Ctrl-C reaches tsperf ALONE and the compile must be killed by us. Relying on
-    the default KeyboardInterrupt is not enough — a backgrounded tsperf inherits SIGINT as
-    SIG_IGN, and the compile then outlives it (measured).
-    """
+
+def install_reaper():
+    """Turn every catchable kill into a normal unwind, so sh()'s kill runs (a backgrounded
+    tsperf inherits SIGINT as SIG_IGN, so the default KeyboardInterrupt is not enough)."""
     for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
         signal.signal(sig, lambda s, _f: sys.exit(f"tsperf: killed by signal {s}"))
+
+
+def queued(cmd):
+    """Every compile takes a heavy-turn slot, like every other typecheck on the machine."""
+    return [str(SCRIPTS / "heavy-turn"), "--class", "tsc", "--", *cmd]
 
 
 def repo_root():
@@ -80,23 +94,9 @@ def repo_root():
     return Path(r.stdout.strip())
 
 
-def require_deps(root):
-    """A worktree without deps reports thousands of phantom import errors."""
-    if not (root / "node_modules").exists():
-        sys.exit(f"tsperf: {root}/node_modules is missing — every import would\n"
-                 f"        fail and the numbers would be meaningless. Fix with:\n"
-                 f"        ln -sfn ~/coding/loops/node_modules {root}/node_modules\n"
-                 f"        ln -sfn ~/coding/loops/.gen {root}/.gen")
-
-
 def engine_bin(root, engine):
     if engine == "tsc":
         return str(root / "node_modules" / ".bin" / "tsc")
-    return tsgo_bin(root)
-
-
-def tsgo_bin(root):
-    """Prefer the worktree's own tsgo; else a pinned copy we provision once."""
     local = root / "node_modules" / ".bin" / "tsgo"
     if local.exists():
         return str(local)
@@ -113,183 +113,384 @@ def tsgo_bin(root):
     return str(binary)
 
 
-def write_bench_tsconfig(root, trace_dir=None):
-    """A bench config that actually checks: incremental off, no emit."""
-    opts = {"incremental": False, "noEmit": True, "tsBuildInfoFile": None}
-    if trace_dir:
-        opts["generateTrace"] = trace_dir
-    cfg = {"extends": "./tsconfig.node.json",
-           "compilerOptions": {k: v for k, v in opts.items() if v is not None}}
+# ── inputs ────────────────────────────────────────────────────────────────────
+
+def normalized_schema(text):
+    text = re.sub(r"generator\s+\w+\s*\{.*?\}", "", text, flags=re.S)
+    lines = (re.sub(r"//.*", "", l).rstrip() for l in text.splitlines())
+    return "\n".join(l for l in lines if l.strip())
+
+
+def require_inputs(root):
+    """Refuse inputs that make the numbers describe a different program."""
+    if not (root / "node_modules").exists():
+        sys.exit(f"tsperf: {root}/node_modules is missing — every import would fail.\n"
+                 f"        Run the push gates once (their env step builds a tree-local copy).")
+    schema = root / "packages" / "prisma" / "schema.prisma"
+    client = root / "node_modules" / ".prisma" / "client" / "schema.prisma"
+    if schema.exists() and client.exists() and \
+            normalized_schema(schema.read_text()) != normalized_schema(client.read_text()):
+        sys.exit("tsperf: node_modules' generated Prisma client was built from a different\n"
+                 "        schema than this tree's (a node_modules symlinked to another\n"
+                 "        checkout?). Counts would describe that other program. Regenerate\n"
+                 "        the client for this tree, or run the push gates' env step.")
+
+
+def sha_of_files(paths):
+    h = hashlib.sha256()
+    for p in sorted(paths):
+        h.update(str(p).encode())
+        h.update(p.read_bytes())
+    return h.hexdigest()[:12]
+
+
+def sha_of_declarations(gen):
+    """TS7's declaration emit orders some optional members differently run to run (same
+    tree, clean builds: 3 of 1,488 files differ, `id?: undefined` moves). Hash each .d.ts
+    as its SORTED lines — blind to that reordering, not to stale content — and skip maps."""
+    h = hashlib.sha256()
+    for p in sorted(gen.rglob("*.d.ts")):
+        h.update(str(p.relative_to(gen)).encode())
+        h.update("\n".join(sorted(p.read_text().splitlines())).encode())
+    return h.hexdigest()[:12]
+
+
+def fingerprint(root, engine, project):
+    gen = root / ".gen" / "trpc-types"
+    client = root / "node_modules" / ".prisma" / "client" / "index.d.ts"
+    version = sh([engine_bin(root, engine), "--version"]).stdout.strip()
+    tree = sh(["git", "rev-parse", "HEAD^{tree}"], cwd=root).stdout.strip()[:12]
+    dirty = bool(sh(["git", "status", "--porcelain", "-uno"], cwd=root).stdout.strip())
+    return {
+        "compiler": f"{engine} {version}",
+        "project": project,
+        "prisma": sha_of_files([client]) if client.exists() else "missing",
+        "trpc": sha_of_declarations(gen) if gen.exists() else "missing",
+        "tree": tree + ("+dirty" if dirty else ""),
+    }
+
+
+def regen_trpc_types(root):
+    """Stale tRPC declaration types change what the app check does — rebuild per arm."""
+    gen = root / ".gen"
+    if gen.is_symlink():
+        sys.exit(f"tsperf: {gen} is a symlink — regenerating would write into another\n"
+                 f"        checkout's types. Give this tree its own .gen first.")
+    shutil.rmtree(gen / "trpc-types", ignore_errors=True)   # incremental emit keeps the
+    for f in gen.glob("trpc-types*.tsbuildinfo"):           # other arm's files around
+        f.unlink()
+    r = sh(queued([engine_bin(root, "tsc"), "-p", TRPC_TYPES_PROJECT, "--pretty", "false"]),
+           cwd=root, timeout=COMPILE_TIMEOUT)
+    if r.returncode:
+        sys.exit(f"tsperf: tRPC types failed to build:\n{(r.stdout + r.stderr)[-800:]}")
+
+
+# ── machine ───────────────────────────────────────────────────────────────────
+
+def machine_state():
+    load = os.getloadavg()[0]
+    free = None
+    mp = sh(["memory_pressure"])
+    m = re.search(r"free percentage:\s*(\d+)%", mp.stdout)
+    if m:
+        free = int(m.group(1))
+    st = sh([str(SCRIPTS / "heavy-turn"), "--status"]).stdout
+    m = re.search(r"(\d+)/\d+ slots held", st)
+    held = int(m.group(1)) if m else 0
+    busy = []
+    if load > BUSY_LOAD_PER_CPU * os.cpu_count():
+        busy.append(f"load {load:.1f} on {os.cpu_count()} cores")
+    if free is not None and free < MIN_FREE_MEMORY_PCT:
+        busy.append(f"{free}% memory free")
+    if held:
+        busy.append(f"{held} heavy-turn slot(s) held by other work")
+    return {"load": load, "free": free, "busy": busy}
+
+
+def require_quiet(force, wait_min=0):
+    st = machine_state()
+    deadline = time.monotonic() + wait_min * 60
+    while st["busy"] and not force and time.monotonic() < deadline:
+        print("tsperf: waiting for a quiet machine (" + "; ".join(st["busy"]) + ")…",
+              file=sys.stderr)
+        time.sleep(20)
+        st = machine_state()
+    if st["busy"] and not force:
+        sys.exit("tsperf: the machine is busy (" + "; ".join(st["busy"]) + ").\n"
+                 "        Timings now would mostly measure the other work. Wait, or pass\n"
+                 "        --force (counts stay exact; times get flagged).")
+    return st
+
+
+# ── one compile ───────────────────────────────────────────────────────────────
+
+def write_bench_tsconfig(root, project):
+    cfg = {"extends": f"./{project}",
+           "compilerOptions": {"incremental": False, "noEmit": True}}
     path = root / BENCH_TSCONFIG
     path.write_text(json.dumps(cfg, indent=2) + "\n")
     return path
 
 
 def parse_diagnostics(out):
-    """Pull the numbers worth trusting out of --extendedDiagnostics."""
     def num(label):
-        m = re.search(rf"^{label}:\s+([\d.]+)s?$", out, re.M)
+        m = re.search(rf"^{label}:\s+([\d.]+)[sK]?$", out, re.M)
         return float(m.group(1)) if m else None
     return {
         "check": num("Check time"),
         "total": num("Total time"),
         "types": num("Types"),
         "instantiations": num("Instantiations"),
+        "memory_gb": (num("Memory used") or 0) / 1024 / 1024,
         "errors": len(re.findall(r"error TS\d+", out)),
     }
 
 
-def check_once(root, engine, extra=()):
-    cfg = write_bench_tsconfig(root)
+def check_once(root, engine, project):
+    cfg = write_bench_tsconfig(root, project)
+    before = resource.getrusage(resource.RUSAGE_CHILDREN)
+    load = os.getloadavg()[0]
+    t0 = time.monotonic()
     try:
         try:
-            r = sh([engine_bin(root, engine), "-p", str(cfg),
-                    "--extendedDiagnostics", *extra],
+            r = sh(queued([engine_bin(root, engine), "-p", str(cfg), "--extendedDiagnostics"]),
                    cwd=root, timeout=COMPILE_TIMEOUT)
         except subprocess.TimeoutExpired:
-            sys.exit(f"tsperf: {engine} still running after {COMPILE_TIMEOUT}s — killed. "
-                     f"A wedged compile times nothing.")
-        out = r.stdout + r.stderr
-        if "TS5108" in out:
-            sys.exit("tsperf: tsgo rejects this tree's moduleResolution=node10.\n"
-                     "        Only the ts7 forest (nodenext configs) runs under tsgo;\n"
-                     "        elsewhere pass --engine tsc.")
-        m = parse_diagnostics(out)
-        if m["check"] is None:
-            sys.exit(f"tsperf: no check happened — the compiler bailed:\n{out[-800:]}")
-        # Errors cut the check short, so a tree with them is timing a different,
-        # smaller job. Usually a missing .gen (tRPC types) — which looks like a win.
-        if m["errors"]:
-            sys.exit(f"tsperf: {m['errors']} type errors — timings would be "
-                     f"meaningless. Missing .gen?\n"
-                     f"        ln -sfn ~/coding/loops/.gen {root}/.gen")
-        return m
+            sys.exit(f"tsperf: {engine} still running after {COMPILE_TIMEOUT}s — killed.")
     finally:
         cfg.unlink(missing_ok=True)
+    wall = time.monotonic() - t0
+    after = resource.getrusage(resource.RUSAGE_CHILDREN)
+    out = r.stdout + r.stderr
+    m = parse_diagnostics(out)
+    if m["check"] is None:
+        sys.exit(f"tsperf: no check happened — the compiler bailed:\n{out[-800:]}")
+    # Errors cut the check short, so an erroring tree times a smaller job — which looks
+    # like a win. Usually stale or missing tRPC types.
+    if m["errors"]:
+        first = "\n".join(l for l in out.splitlines() if "error TS" in l)[:600]
+        sys.exit(f"tsperf: {m['errors']} type errors — the numbers would describe a\n"
+                 f"        different job. First errors:\n{first}")
+    m["wall"] = m["total"]   # the compiler's own clock: excludes time queued for a slot
+    m["queued_wall"] = wall
+    m["cpu"] = (after.ru_utime - before.ru_utime) + (after.ru_stime - before.ru_stime)
+    m["load"] = load
+    return m
 
 
 def fmt(m):
-    return (f"check {m['check']:.2f}s  total {m['total']:.2f}s  "
-            f"inst {m['instantiations']/1e6:.2f}M  errors {m['errors']}")
+    loaded = "  ⚠ loaded" if m["load"] > BUSY_LOAD_PER_CPU * os.cpu_count() else ""
+    return (f"inst {m['instantiations']/1e6:6.2f}M  types {m['types']/1e6:4.2f}M  "
+            f"mem {m['memory_gb']:4.2f}G  |  wall {m['wall']:5.2f}s  cpu {m['cpu']:5.1f}s  "
+            f"check {m['check']:5.2f}s  load {m['load']:4.1f}{loaded}")
 
+
+def print_fingerprint(fp, label=""):
+    print(f"  inputs{label}: " + "  ".join(f"{k}={v}" for k, v in fp.items()))
+
+
+# ── commands ──────────────────────────────────────────────────────────────────
 
 def cmd_run(args):
     root = repo_root()
-    require_deps(root)
+    require_inputs(root)
+    require_quiet(args.force, args.wait)
+    print_fingerprint(fingerprint(root, args.engine, args.project))
     runs = []
     for i in range(args.n):
-        m = check_once(root, args.engine)
+        m = check_once(root, args.engine, args.project)
         runs.append(m)
         print(f"  run {i+1}: {fmt(m)}")
-    med = statistics.median(r["check"] for r in runs)
-    print(f"\nmedian check: {med:.2f}s   ({runs[0]['errors']} errors)")
+    print(f"\n  counts: inst {runs[0]['instantiations']/1e6:.2f}M (exact)   "
+          f"time: wall min {min(r['wall'] for r in runs):.2f}s  "
+          f"cpu min {min(r['cpu'] for r in runs):.1f}s  "
+          f"(range {min(r['wall'] for r in runs):.2f}–{max(r['wall'] for r in runs):.2f}s)")
 
 
-def trace_once(root, engine):
+def trace_once(root, engine, project):
+    """Trace one check. tsgo writes the timing trace first and then dumps every type it
+    made (minutes, GBs) — we stop once trace.json has stopped growing and the dump began."""
     trace_dir = Path(tempfile.mkdtemp(prefix="tsperf-trace-"))
-    cfg = write_bench_tsconfig(root, trace_dir=str(trace_dir))
+    cfg = write_bench_tsconfig(root, project)
+    p = subprocess.Popen(queued([engine_bin(root, engine), "-p", str(cfg),
+                                 "--generateTrace", str(trace_dir)]),
+                         cwd=root, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True)
     try:
-        sh([engine_bin(root, engine), "-p", str(cfg)], cwd=root)
-        trace = next(trace_dir.glob("trace*.json"), None)
-        if not trace:
-            sys.exit(f"tsperf: no trace emitted into {trace_dir}")
-        events = json.loads(trace.read_text())
+        deadline = time.monotonic() + COMPILE_TIMEOUT
+        last_size, stable_since = -1, None
+        while p.poll() is None:
+            if time.monotonic() > deadline:
+                sys.exit("tsperf: trace still running after the timeout — killed")
+            trace = next(trace_dir.glob("trace*.json"), None)
+            dumping = next(trace_dir.glob("types*.json"), None)
+            if trace and dumping:
+                size = trace.stat().st_size
+                if size != last_size:
+                    last_size, stable_since = size, time.monotonic()
+                elif time.monotonic() - stable_since > 5:
+                    break
+            time.sleep(1)
     finally:
+        kill_group(p)
         cfg.unlink(missing_ok=True)
-        shutil.rmtree(trace_dir, ignore_errors=True)
+    trace = next(trace_dir.glob("trace*.json"), None)
+    if not trace:
+        sys.exit(f"tsperf: no trace emitted into {trace_dir}")
+    events = []
+    for line in trace.read_text().splitlines():
+        line = line.strip().rstrip(",")
+        if line.startswith("{"):
+            try:
+                events.append(json.loads(line))
+            except json.JSONDecodeError:
+                pass
+    for f in trace_dir.iterdir():
+        f.unlink()
+    trace_dir.rmdir()
+    return self_times(events, root)
 
-    # checkSourceFile arrives as B/E pairs, NOT X spans — pair them with a stack.
-    stack, per_file = [], {}
-    for e in events:
-        if e.get("name") != "checkSourceFile":
-            continue
-        if e.get("ph") == "B":
+
+def self_times(events, root):
+    """Self time per traced node (its span minus its direct children's), per thread."""
+    spans = [e for e in events if e.get("ph") == "X" and e.get("cat") == "check"
+             and (e.get("args") or {}).get("path")]
+    if not spans:
+        sys.exit("tsperf: trace had no check spans (incremental reuse? compiler bailed?)")
+    by_tid = {}
+    for e in spans:
+        by_tid.setdefault(e["tid"], []).append(e)
+    nodes = {}
+    for es in by_tid.values():
+        es.sort(key=lambda e: (e["ts"], -e["dur"]))
+        stack, own = [], {}
+        for e in es:
+            while stack and stack[-1]["ts"] + stack[-1]["dur"] < e["ts"] + e["dur"] - 1e-3:
+                stack.pop()
+            if stack:
+                parent = id(stack[-1])
+                own[parent] = own.get(parent, stack[-1]["dur"]) - e["dur"]
             stack.append(e)
-        elif e.get("ph") == "E" and stack:
-            b = stack.pop()
-            path = (b.get("args") or {}).get("path", "?")
-            per_file[path] = per_file.get(path, 0) + (e["ts"] - b["ts"]) / 1000.0
-    if not per_file:
-        sys.exit("tsperf: trace had zero checkSourceFile events "
-                 "(incremental reuse? stale .tsbuildinfo?)")
-    return per_file
+        for e in es:
+            a = e["args"]
+            key = (os.path.relpath(a["path"], root), a.get("pos"), e["name"])
+            nodes[key] = nodes.get(key, 0.0) + own.get(id(e), e["dur"]) / 1000.0
+    return nodes
+
+
+def line_of(root, path, pos):
+    try:
+        text = (root / path).read_text()
+    except OSError:
+        return "?"
+    n = text[:pos].count("\n")
+    return f"{n + 1}: {text.splitlines()[n].strip()[:70]}"
 
 
 def cmd_pareto(args):
     root = repo_root()
-    require_deps(root)
-
-    # A single trace INVENTS hot files: wall-clock attribution absorbs whatever
-    # machine load hit while that file was being checked. Two identical runs once
-    # disagreed on 5 of their top 6. Only a file that stays hot across runs is real,
-    # so score each file by its MEDIAN and show the spread.
+    require_inputs(root)
+    require_quiet(args.force, args.wait)
+    print_fingerprint(fingerprint(root, args.engine, args.project))
     runs = []
     for i in range(args.n):
-        runs.append(trace_once(root, args.engine))
-        print(f"  traced {i+1}/{args.n} "
-              f"({sum(runs[-1].values())/1000:.1f}s check)", file=sys.stderr)
+        runs.append(trace_once(root, args.engine, args.project))
+        print(f"  traced {i+1}/{args.n} ({sum(runs[-1].values())/1000:.1f}s of check, "
+              f"summed over checker threads)", file=sys.stderr)
 
-    files = set().union(*runs)
-    scored = {f: [r.get(f, 0.0) for r in runs] for f in files}
-    ranked = sorted(scored.items(), key=lambda kv: -statistics.median(kv[1]))
+    # A single trace invents hot spots (wall-clock attribution absorbs whatever load hit
+    # that moment) — score by the median across runs and show the spread.
+    def ranked(score_key):
+        agg = []
+        for r in runs:
+            d = {}
+            for k, v in r.items():
+                d[score_key(k)] = d.get(score_key(k), 0.0) + v
+            agg.append(d)
+        keys = set().union(*agg)
+        scored = {k: [d.get(k, 0.0) for d in agg] for k in keys}
+        return sorted(scored.items(), key=lambda kv: -statistics.median(kv[1]))
+
     total = statistics.median([sum(r.values()) for r in runs])
-
-    print(f"\ncheck time {total/1000:.1f}s across {len(ranked)} files "
-          f"(median of {args.n} traces)\n")
-    for i, (path, samples) in enumerate(ranked[:args.top], 1):
-        med = statistics.median(samples)
-        rel = os.path.relpath(path, root)
-        spread = f"{min(samples):.0f}–{max(samples):.0f}"
-        flag = "" if args.n < 2 or min(samples) > 0.4 * max(samples) else "  ⚠ unstable"
-        print(f"{i:>3}. {med:>7.0f}ms  {med/total*100:>4.1f}%  "
-              f"[{spread:>11}ms]  {rel}{flag}")
+    print(f"\n  hot files (self time summed per file, median of {args.n})")
+    for i, (path, s) in enumerate(ranked(lambda k: k[0])[:args.top], 1):
+        med = statistics.median(s)
+        print(f"  {i:>3}. {med:>7.0f}ms  {med/total*100:>4.1f}%  "
+              f"[{min(s):.0f}–{max(s):.0f}]  {path}")
+    print(f"\n  hot nodes (self time — the expression to change)")
+    for i, ((path, pos, name), s) in enumerate(
+            ranked(lambda k: k)[:args.top], 1):
+        med = statistics.median(s)
+        print(f"  {i:>3}. {med:>7.0f}ms  {name:<24} {path}:{line_of(root, path, pos or 0)}")
     if args.n < 3:
-        print("\n  ⚠ fewer than 3 traces — treat any single-run ranking as noise")
+        print("\n  ⚠ fewer than 3 traces — treat the ranking as noise")
 
 
 def cmd_ab(args):
     root = repo_root()
-    require_deps(root)
+    require_inputs(root)
     if sh(["git", "status", "--porcelain", "-uno"], cwd=root).stdout.strip():
         sys.exit("tsperf ab: tracked files are modified — it checks out refs, "
                  "which would clobber them")
+    require_quiet(args.force, args.wait)
     orig = sh(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=root).stdout.strip()
     if orig == "HEAD":
         orig = sh(["git", "rev-parse", "HEAD"], cwd=root).stdout.strip()
 
-    arms = {args.refA: [], args.refB: []}
+    refs = (args.refA, args.refB)
+    arms = {ref: [] for ref in refs}
+    prints = {}
+
+    def checkout(ref):
+        if sh(["git", "checkout", "--detach", "-q", ref], cwd=root).returncode:
+            sys.exit(f"tsperf ab: cannot check out {ref}")
+        require_inputs(root)
+        regen_trpc_types(root)
+        fp = fingerprint(root, args.engine, args.project)
+        if ref in prints and prints[ref] != fp:
+            sys.exit(f"tsperf ab: {ref}'s inputs changed between passes:\n"
+                     f"  {prints[ref]}\n  {fp}")
+        prints[ref] = fp
+
     try:
-        for ref in (args.refA, args.refB):  # cold FS cache would tax whoever ran first
-            sh(["git", "checkout", "--detach", "-q", ref], cwd=root)
-            check_once(root, args.engine)
+        for ref in refs:   # warmup: a cold FS cache would tax whoever ran first
+            checkout(ref)
+            check_once(root, args.engine, args.project)
             print(f"  warmup  {ref}")
+        a, b = (prints[r] for r in refs)
+        for k in ("compiler", "project", "prisma"):
+            if a[k] != b[k]:
+                sys.exit(f"tsperf ab: the arms differ in {k} ({a[k]} vs {b[k]}) — that is\n"
+                         f"        not the code under test. Refusing to compare.")
+        for ref in refs:
+            print_fingerprint(prints[ref], f" {ref}")
         for i in range(args.n):
-            for ref in (args.refA, args.refB):  # alternate: same pass, same machine load
-                if sh(["git", "checkout", "--detach", "-q", ref], cwd=root).returncode:
-                    sys.exit(f"tsperf ab: cannot check out {ref}")
-                m = check_once(root, args.engine)
+            for ref in refs:   # alternate: same pass, same machine load
+                checkout(ref)
+                m = check_once(root, args.engine, args.project)
                 arms[ref].append(m)
-                print(f"  pair {i+1}  {ref:<28} {fmt(m)}")
+                print(f"  pair {i+1}  {ref:<34} {fmt(m)}")
     finally:
         sh(["git", "checkout", "-q", orig], cwd=root)
+        regen_trpc_types(root)
 
-    print()
-    for label, key in (("min", min), ("median", statistics.median)):
-        a = key([m["check"] for m in arms[args.refA]])
-        b = key([m["check"] for m in arms[args.refB]])
-        print(f"  {label:>6}:  {args.refA} {a:.2f}s -> {args.refB} {b:.2f}s"
-              f"   {(b - a):+.2f}s ({(b - a) / a * 100:+.1f}%)")
-    # Other sessions' load only ever ADDS time, so the fastest run of each arm is
-    # the least-contaminated estimate of its true cost. Median chases the noise.
-    wins = sum(1 for x, y in zip(arms[args.refA], arms[args.refB])
-               if y["check"] < x["check"])
-    print(f"\n  {wins}/{args.n} pairs favor {args.refB} "
-          f"— believe the delta only if that's unanimous")
-    ia = arms[args.refA][0]["instantiations"]
-    ib = arms[args.refB][0]["instantiations"]
-    print(f"  instantiations {ia/1e6:.2f}M -> {ib/1e6:.2f}M "
-          f"({(ib - ia) / ia * 100:+.1f}%) — deterministic, but it does NOT "
-          f"predict time")
+    A, B = arms[args.refA], arms[args.refB]
+    print("\n  counts (exact — whether the work shrank)")
+    for key, unit, scale in (("instantiations", "M", 1e6), ("types", "M", 1e6),
+                             ("memory_gb", "G", 1)):
+        x, y = A[0][key] / scale, B[0][key] / scale
+        print(f"    {key:<15} {x:7.2f}{unit} -> {y:7.2f}{unit}  ({(y - x) / x * 100:+.1f}%)")
+    print("\n  time (min of N — load only ever adds time)")
+    for key in ("wall", "cpu", "check"):
+        xs, ys = [m[key] for m in A], [m[key] for m in B]
+        x, y = min(xs), min(ys)
+        wins = sum(1 for p, q in zip(xs, ys) if q < p)
+        verdict = "unanimous" if wins in (0, args.n) else "MIXED — not a believable delta"
+        print(f"    {key:<6} {x:6.2f}s -> {y:6.2f}s  {y - x:+.2f}s ({(y - x) / x * 100:+.1f}%)"
+              f"   {wins}/{args.n} pairs favor {args.refB} ({verdict})"
+              f"   ranges {min(xs):.2f}–{max(xs):.2f} / {min(ys):.2f}–{max(ys):.2f}")
+    if any(m["load"] > BUSY_LOAD_PER_CPU * os.cpu_count() for m in A + B):
+        print("\n  ⚠ some runs ran under load — trust the counts, re-run for the times")
 
 
 def main():
@@ -298,30 +499,31 @@ def main():
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    def engine_flag(sp):
-        sp.add_argument("--engine", choices=("tsgo", "tsc"), default="tsgo",
-                        help="tsgo needs nodenext configs (the ts7 forest); "
-                             "tsc runs anywhere but is slower and noisier")
+    def common(sp, n):
+        sp.add_argument("-n", type=int, default=n)
+        sp.add_argument("--engine", choices=("tsc", "tsgo"), default="tsc",
+                        help="tsc = the repo's own compiler (what CI runs); "
+                             "tsgo = the global native preview")
+        sp.add_argument("--project", default=DEFAULT_PROJECT,
+                        help=f"tsconfig to measure (default {DEFAULT_PROJECT})")
+        sp.add_argument("--force", action="store_true",
+                        help="run on a busy machine (times get flagged)")
+        sp.add_argument("--wait", type=float, default=0, metavar="MIN",
+                        help="poll up to MIN minutes for a quiet machine before refusing")
 
-    r = sub.add_parser("run", help="time the full check on the working tree")
-    r.add_argument("-n", type=int, default=3)
-    engine_flag(r)
+    r = sub.add_parser("run", help="measure the full check on the working tree")
+    common(r, 3)
     r.set_defaults(fn=cmd_run)
 
-    pa = sub.add_parser("pareto", help="per-file check-time Pareto")
+    pa = sub.add_parser("pareto", help="hot files + hot nodes by self time")
+    common(pa, 3)
     pa.add_argument("--top", type=int, default=25)
-    pa.add_argument("-n", type=int, default=3,
-                    help="traces to median over — 1 trace invents hot files")
-    # tsgo's --generateTrace never finished a repo-scale run (20min+ CPU, killed);
-    # tsc traces in ~30s and the file RANKING is what we act on.
-    pa.add_argument("--engine", choices=("tsgo", "tsc"), default="tsc")
     pa.set_defaults(fn=cmd_pareto)
 
     ab = sub.add_parser("ab", help="A/B two refs, alternating arms")
     ab.add_argument("refA")
     ab.add_argument("refB")
-    ab.add_argument("-n", type=int, default=3)
-    engine_flag(ab)
+    common(ab, 5)
     ab.set_defaults(fn=cmd_ab)
 
     args = p.parse_args()
