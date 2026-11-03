@@ -5,7 +5,7 @@ description: Present a design, plan or walkthrough as a native macOS app (Swift 
 
 # show — a native walkthrough Phil can sign off on
 
-`show <file.json>` opens a file in the one Show window (section list, rendered markdown, a **Signed off** checkbox and a note field per section). The window never multiplies: a rail on its left edge switches between eight **workspaces**, and each keeps its own open document, typed text and scroll while another is in front.
+`show <file.json>` opens a file in the one Show window (section list, rendered markdown, a **Signed off** checkbox and a note field per section). The window never multiplies: a rail on its left edge switches between **workspaces** (four on the rail with ⌘1–⌘4; Forest, Review, Runs and API have no tile or number and come forward when a document routes to them or from History), and each keeps its own open document, typed text and scroll while another is in front.
 
 | Workspace | Key | Opens files with | Holds |
 |---|---|---|---|
@@ -13,10 +13,10 @@ description: Present a design, plan or walkthrough as a native macOS app (Swift 
 | Learn | ⌘2 | `"mode": "tutor"` | tutor sessions |
 | Machine | ⌘3 | — | canopy's machine page on its own key: every preview and dev server, its branch and port |
 | Inbox | ⌘4 | `show-note "<title>" "<markdown>"` (`"workspace": "inbox"`) | messages from Claude sessions, one per row; a reply goes to the sender, ⌘J jumps to its pane, ⌘I opens it from anywhere |
-| Forest | ⌘5 | `"mode": "forest"` | a project's branches in merge order (branch-deck decks) |
-| Review | ⌘6 | `"mode": "deck"` or no mode | plans and designs to sign off |
-| Runs | ⌘7 | `"mode": "live"` | live runs, read-only |
-| API | ⌘8 | `show --api` | the loops-postman console (:7070), started when it's down |
+| Forest | — | `"mode": "forest"` | a project's branches in merge order (branch-deck decks) |
+| Review | — | `"mode": "deck"` or no mode | plans and designs to sign off |
+| Runs | — | `"mode": "live"` | live runs, read-only |
+| API | — | `show --api` | the loops-postman console (:7070), started when it's down |
 
 **Who takes the screen — one rule.** Every door (`show`, `canopy`, `stack web`, `show --api`) writes a request `{target, actor, intent}` into `~/.cache/show/inbox/` and hands it to Show with `open -g`. Show comes forward only when Phil is the actor (his terminal, Finder, a `canopy://` link) or a session passes `--focus` / `SHOW_FOCUS=1` because Phil asked to see it now. Anything else a session sends **arrives**: a notification naming it and the session's topic, a rail badge (a deck tops its shelf; a canopy page counts on ⌘1), a ◆ row in History (⌘Y). Nothing switches or opens, and ⌘1 stays on its page. A Claude session is detected by `CLAUDECODE`.
 

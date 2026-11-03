@@ -253,7 +253,7 @@ final class ShellController: NSViewController {
     private let railEdge = NSBox()
     private var railWidth: NSLayoutConstraint?
     private var railEdgeWidth: NSLayoutConstraint?
-    /// The rail stays out of the way until asked for (⌃⌘R); ⌘1–⌘8 switch workspaces either way.
+    /// The rail stays out of the way until asked for (⌃⌘R); ⌘1–⌘4 switch workspaces either way.
     static let railShownKey = "show.railShown"
     var railShown: Bool { UserDefaults.standard.bool(forKey: Self.railShownKey) }
     let titleLabel = NSTextField(labelWithString: "")
@@ -306,7 +306,7 @@ final class ShellController: NSViewController {
         rail.blendingMode = .behindWindow
         let edge = railEdge
         edge.boxType = .separator
-        let stack = NSStackView(views: Workspace.allCases.map(button))
+        let stack = NSStackView(views: Workspace.onRail.map(button))
         stack.orientation = .vertical
         stack.spacing = 10
         titleLabel.lineBreakMode = .byTruncatingTail
@@ -408,7 +408,7 @@ final class ShellController: NSViewController {
         let image = NSImage(systemSymbolName: target.symbol, accessibilityDescription: target.name)?
             .withSymbolConfiguration(.init(pointSize: 15, weight: .regular)) ?? NSImage()
         let button = RailButton(image: image, target: self, action: #selector(pick))
-        button.tag = Workspace.allCases.firstIndex(of: target) ?? 0
+        button.tag = Workspace.onRail.firstIndex(of: target) ?? 0
         button.isBordered = false
         button.refusesFirstResponder = true
         button.toolTip = "\(target.name) ⌘\(target.key)"
@@ -418,7 +418,7 @@ final class ShellController: NSViewController {
     }
 
     @objc private func pick(_ sender: NSButton) {
-        onPick?(Workspace.allCases[sender.tag])
+        onPick?(Workspace.onRail[sender.tag])
     }
 
     private(set) var finder: FinderOverlay?

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# show [--focus] [<file.json>…] — hand files to the one Show window, each to its workspace (Learn ⌘2, Inbox ⌘4, Forest ⌘5, Review ⌘6, Runs ⌘7;
+# show [--focus] [<file.json>…] — hand files to the one Show window, each to its workspace (Learn ⌘2, Inbox ⌘4; Forest, Review and Runs have no key;
 # no args: bring Show to the front, or start it back on the last workspace and documents), rebuilding it when any show-app/*.swift changes. Re-showing an open file reloads it.
 # Show comes forward only when Phil asked: run from his terminal, or with --focus / SHOW_FOCUS=1 (a session whose user asked to
 # see it now). From a Claude session otherwise it arrives — History (⌘Y), a rail badge, a notification — and nothing moves.
-# show --api — the API workspace (⌘8): the loops-postman console, started when it isn't up.
+# show --api — the API workspace (no key): the loops-postman console, started when it isn't up.
 # show --canopy [--focus] [/v2/…] — the Canopy workspace (⌘1; its machine page has ⌘3): the forest viewer, at a page when given one.
 # show --status <deck | /v2/…> — whether it's waiting, opened or dismissed, from Show's event log.
 # show --build — just (re)build. show --snapshot <file.json> <out.png> [--appearance light|dark] — render the window offscreen, no window shown.
