@@ -1,0 +1,36 @@
+#!/usr/bin/env python3
+"""claude-jump <session-id prefix> [--dry-run] — bring a Claude session's tmux pane to the front.
+
+Resolves the pane with `claude-say --json`, selects its window and pane, switches the attached tmux client to it, and
+activates Terminal. --dry-run prints the tmux commands instead of running them.
+"""
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+CLAUDE_SAY = Path(__file__).with_name("claude-say")
+
+
+def main():
+    args = [a for a in sys.argv[1:] if a != "--dry-run"]
+    if len(args) != 1:
+        sys.exit(__doc__.strip())
+    prefix = args[0]
+    sessions = json.loads(subprocess.check_output([str(CLAUDE_SAY), "--json"], text=True))
+    hits = [s for s in sessions if s["session_id"].startswith(prefix)]
+    if len(hits) != 1:
+        sys.exit(f"claude-jump: {len(hits)} sessions match {prefix!r} (need exactly 1)")
+    pane = hits[0]["pane"]
+    commands = [["tmux", "select-window", "-t", pane], ["tmux", "select-pane", "-t", pane], ["tmux", "switch-client", "-t", pane]]
+    if "--dry-run" in sys.argv:
+        for command in commands:
+            print(" ".join(command))
+        return
+    for command in commands:
+        subprocess.run(command, check=True)
+    subprocess.run(["open", "-a", "Terminal"], check=True)
+
+
+if __name__ == "__main__":
+    main()

@@ -52,6 +52,7 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
     let send = NSButton(title: "Send", target: nil, action: nil)
     let progress = NSTextField(labelWithString: "")
     let submit = NSButton(title: "Submit", target: nil, action: nil)
+    let goToSession = NSButton(title: "Go to session", target: nil, action: nil)
     let live = LivePanel()
     var actionBar: NSView!
     var actionDivider: NSView!
@@ -157,6 +158,7 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
 
     private func apply(_ deck: Deck, keepingSelection key: String?) {
         self.deck = deck
+        goToSession.isHidden = deck.replyTo == nil
         rows = []
         branchPlaces = [:]
         if deck.isForest {
@@ -315,7 +317,12 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
         submit.keyEquivalent = "\r"
         submit.keyEquivalentModifierMask = [.command]
         submit.toolTip = "Tell Claude you're done (⌘↩ outside the reply field)"
-        let bar = NSStackView(views: [signed, composerScroll, send, submit])
+        goToSession.target = self
+        goToSession.action = #selector(jumpToSession)
+        goToSession.bezelStyle = .rounded
+        goToSession.toolTip = "Bring the Claude session that sent this to the front (⌘J)"
+        goToSession.isHidden = deck.replyTo == nil
+        let bar = NSStackView(views: [signed, composerScroll, send, goToSession, submit])
         bar.orientation = .horizontal
         bar.alignment = .centerY
         bar.spacing = 14
@@ -415,6 +422,11 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
             return
         }
         submit.title = "Submitted ✓"
+    }
+
+    @objc func jumpToSession() {
+        guard let replyTo = deck.replyTo, let failure = claudeJump(replyTo) else { return }
+        showClaudeSayFailure(replyTo: replyTo, saved: "Nothing was lost.", detail: failure, window: window)
     }
 
     private func showSubmitFailure(_ detail: String) {
@@ -651,6 +663,27 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
         }
         live.update(modified: deckModified)
     }
+}
+
+/// The `claude-jump` binary; `SHOW_CLAUDE_JUMP` swaps in a stub for testing.
+var claudeJumpPath: String {
+    ProcessInfo.processInfo.environment["SHOW_CLAUDE_JUMP"] ?? ("~/.dotfiles/scripts/claude-jump" as NSString).expandingTildeInPath
+}
+
+/// Runs `claude-jump <replyTo>`, bringing that session's tmux pane forward; returns what went wrong, or nil.
+func claudeJump(_ replyTo: String) -> String? {
+    let process = Zsh.process("exec \"$0\" \"$@\"", [claudeJumpPath, replyTo])
+    let errors = Pipe()
+    process.standardOutput = FileHandle.nullDevice
+    process.standardError = errors
+    do {
+        try process.run()
+        process.waitUntilExit()
+    } catch {
+        return error.localizedDescription
+    }
+    guard process.terminationStatus != 0 else { return nil }
+    return String(data: errors.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
 }
 
 /// Runs `claude-say <replyTo> <message>`; returns what went wrong, or nil once it's delivered.
