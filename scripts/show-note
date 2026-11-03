@@ -36,6 +36,7 @@ def main():
     with open(INBOX.with_suffix(".lock"), "w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         deck = json.loads(INBOX.read_text()) if INBOX.exists() else {"title": "Inbox", "subtitle": "Messages from Claude sessions", "sections": []}
+        deck["workspace"] = "inbox"
         deck["sections"] = [{
             "id": f"msg-{time.strftime('%Y%m%d-%H%M%S')}-{session or 'none'}",
             "group": time.strftime("%a %b %-d"),

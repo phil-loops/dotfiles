@@ -8,7 +8,7 @@ enum NewRequest {
         switch workspace {
         case .review: return "Ask Claude for a deck about…"
         case .forest: return "Branch deck for project…"
-        case .learn, .runs, .api, .canopy, .machine: return ""
+        case .learn, .runs, .api, .canopy, .machine, .inbox: return ""
         }
     }
 

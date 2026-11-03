@@ -600,7 +600,7 @@ func shelfEntry(_ path: String) -> ShelfEntry? {
                           topic: Topics.cached(live.replyTo))
     case .api, .canopy, .machine:
         return nil
-    case .forest, .review:
+    case .forest, .review, .inbox:
         guard let deck = try? loadDeck(path) else { return nil }
         let store = SignOffStore(deckPath: path)
         let done = deck.sections.filter { store.entries[$0.key]?.signed == true }.count
@@ -864,7 +864,7 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
             tutor?.show(path: path)
         case .api, .canopy, .machine:
             return
-        case .forest, .review, .runs:
+        case .forest, .review, .runs, .inbox:
             let controller: DeckController
             if let existing = decks[path] {
                 controller = existing
@@ -934,6 +934,8 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
             display(emptyState("No live runs yet", "A live run shows here while it's going."))
         case .forest:
             display(emptyState("No forest open", entries.isEmpty ? "Claude opens a project's branches here with `show <deck>`." : "Pick a project from the shelf, or press ⌘O."))
+        case .inbox:
+            display(emptyState("Inbox is empty", "Claude sessions post messages here with `show-note`."))
         case .review:
             display(emptyState("Nothing to review", entries.isEmpty ? "Claude opens a deck here with `show <deck>`." : "Pick a deck from the shelf, or press ⌘O."))
         }

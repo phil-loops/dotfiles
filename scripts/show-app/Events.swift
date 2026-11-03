@@ -271,6 +271,9 @@ final class EventLog {
     }
 }
 
+/// The messages deck `show-note` writes; `SHOW_INBOX_DECK` points it elsewhere.
+let inboxPath = ProcessInfo.processInfo.environment["SHOW_INBOX_DECK"] ?? ("~/.cache/show/inbox.json" as NSString).expandingTildeInPath
+
 let eventsPath = ProcessInfo.processInfo.environment["SHOW_EVENTS"]
     ?? ("~/Library/Application Support/Show/events.jsonl" as NSString).expandingTildeInPath
 
