@@ -258,7 +258,7 @@ final class ShellController: NSViewController {
     var railShown: Bool { UserDefaults.standard.bool(forKey: Self.railShownKey) }
     let titleLabel = NSTextField(labelWithString: "")
     /// Shown once a newer build is ready; Show never relaunches under you, only when this is pressed.
-    let updateButton = NSButton(title: "Update", target: nil, action: nil)
+    let updateButton = LoudButton(title: "Update")
     var onUpdate: (() -> Void)?
     private var buttons: [Workspace: RailButton] = [:]
     var onPick: ((Workspace) -> Void)?
@@ -316,12 +316,6 @@ final class ShellController: NSViewController {
         titleLabel.alignment = .center
         titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         let slot = NSView()
-        updateButton.bezelStyle = .rounded
-        updateButton.controlSize = .small
-        updateButton.bezelColor = NSColor(srgbRed: 0.85, green: 0.64, blue: 0.24, alpha: 1)
-        updateButton.attributedTitle = NSAttributedString(string: "Update ↻", attributes: [
-            .foregroundColor: NSColor.black, .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold),
-        ])
         updateButton.target = self
         updateButton.action = #selector(update)
         updateButton.toolTip = "A newer Show is built: quit this one and open it, back where you were"
@@ -476,6 +470,57 @@ final class ShellController: NSViewController {
     func hideFinder() {
         finder?.removeFromSuperview()
         finder = nil
+    }
+}
+
+/// A small button meant to be noticed: canopy's gold, a soft glow, and three slow pulses when it first appears.
+final class LoudButton: NSButton {
+    static let gold = NSColor(srgbRed: 0xE6 / 255, green: 0xB6 / 255, blue: 0x4E / 255, alpha: 1)
+    static let ink = NSColor(srgbRed: 0x1E / 255, green: 0x16 / 255, blue: 0x08 / 255, alpha: 1)
+
+    convenience init(title: String) {
+        self.init(frame: .zero)
+        self.title = title
+        isBordered = false
+        wantsLayer = true
+        focusRingType = .none
+        attributedTitle = NSAttributedString(string: title, attributes: [
+            .foregroundColor: Self.ink, .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
+        ])
+    }
+
+    override var wantsUpdateLayer: Bool { true }
+
+    override func updateLayer() {
+        guard let layer else { return }
+        layer.backgroundColor = (isHighlighted ? Self.gold.blended(withFraction: 0.2, of: .black) : Self.gold)?.cgColor
+        layer.cornerRadius = 6
+        layer.masksToBounds = false
+        layer.shadowColor = Self.gold.cgColor
+        layer.shadowOffset = .zero
+        layer.shadowRadius = 7
+        if layer.animation(forKey: "pulse") == nil { layer.shadowOpacity = 0.55 }
+    }
+
+    override var intrinsicContentSize: NSSize {
+        let text = attributedTitle.size()
+        return NSSize(width: ceil(text.width) + 20, height: 22)
+    }
+
+    override var isHidden: Bool {
+        didSet { if oldValue && !isHidden { pulse() } }
+    }
+
+    private func pulse() {
+        guard let layer, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
+        let glow = CABasicAnimation(keyPath: "shadowOpacity")
+        glow.fromValue = 0.55
+        glow.toValue = 1.0
+        glow.duration = 0.7
+        glow.autoreverses = true
+        glow.repeatCount = 3
+        glow.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        layer.add(glow, forKey: "pulse")
     }
 }
 
