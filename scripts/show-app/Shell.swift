@@ -318,6 +318,10 @@ final class ShellController: NSViewController {
         let slot = NSView()
         updateButton.bezelStyle = .rounded
         updateButton.controlSize = .small
+        updateButton.bezelColor = NSColor(srgbRed: 0.85, green: 0.64, blue: 0.24, alpha: 1)
+        updateButton.attributedTitle = NSAttributedString(string: "Update ↻", attributes: [
+            .foregroundColor: NSColor.black, .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold),
+        ])
         updateButton.target = self
         updateButton.action = #selector(update)
         updateButton.toolTip = "A newer Show is built: quit this one and open it, back where you were"

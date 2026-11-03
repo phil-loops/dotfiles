@@ -191,12 +191,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         watcher = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.stayCurrent() }
     }
 
-    /// Reopens each workspace's last document from the event log, so a relaunch into a new build comes back where it was.
+    /// Reopens each workspace's last document or canopy page from the event log, so a relaunch into a new build comes back where it was.
     private func restore() {
         for (workspace, controller) in workspaces {
             if case .document(let path)? = showEvents.state.current[workspace], FileManager.default.fileExists(atPath: path),
                Workspace.route(path).workspace == workspace {
                 controller.open(path)
+            } else if case .canopy(let route)? = showEvents.state.current[workspace], !route.isEmpty, let canopy = controller.canopy {
+                canopy.resume(at: route)
             } else {
                 _ = controller.view
             }
