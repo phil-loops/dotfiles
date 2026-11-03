@@ -37,7 +37,8 @@
 | face | `⇥` | the page's other face (story ⇄ branches, the next tab, web ⇄ jobs) |
 | labels | `g w` `f` | label everything on screen; type a label to go there |
 | find | `space f` | find something on this page by name |
-| search | `/` | search this page's text |
+| search | `/` | search this page's text — the cursor lands on each match, selected like a name; `n`/`N` step match by match (on Review: code only, not paths or comments) |
+| search name | `*` | search for the name under the cursor |
 | map | `space m` | the map around what you're on |
 | type | `space k` | the type under the cursor (hover) |
 | definition / type-definition / implementations / references | `g d` / `g y` / `g I` / `g r` | code navigation |

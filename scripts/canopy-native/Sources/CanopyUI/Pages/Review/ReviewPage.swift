@@ -259,8 +259,10 @@ private struct DiffPane: View {
         let here = pg.here
         let focused = app.isFocused(reviewDiffPane)
         var marks = CanvasMarks(cursor: here?.key, column: pg.column, focused: focused)
-        let search = PageSearch.of(app)
-        if search.active && search.pane == reviewDiffPane { marks.search = search.query }
+        for (row, hs) in PageSearch.of(app).hitsByRow(app, pane: reviewDiffPane) {
+            let right = pg.splitWidth(pg.stopIndex[row].map { pg.stops[$0].path }) + 13
+            marks.hits[row] = hs.map { h in let o = h.field == 0 ? right : ReviewDocument.codeStart; return (o + h.at.lowerBound)..<(o + h.at.upperBound) }
+        }
         if let w = pg.hereWord, let k = here?.key, let row = here?.row {
             let start = sideLine(row, prefer: pg.column).side == .left ? 6 : pg.splitWidth(here?.path) + 13
             marks.word = (k, (start + w.lowerBound)..<(start + w.upperBound))
@@ -323,7 +325,7 @@ private struct SidePane: View {
         if let l = pg.side {
             CodePaneView(handle: pg.sideCanvas, pane: reviewCodePane, path: l.path, refLabel: l.sha, text: pg.sideText,
                          lit: l.line...max(l.line, l.end ?? l.line), repo: l.repo, sha: l.sha, close: "review.side.close",
-                         word: pg.sideHereWord.flatMap { w in pg.sideWord.map { ($0.line, w) } })
+                         word: pg.sideHereWord.flatMap { w in pg.sideWord.map { ($0.line, w) } }, searched: true)
         }
     }
 }
@@ -348,11 +350,13 @@ public struct CodePaneView: View {
     var close: String?
     /// the name `w` / `b` are on: its line and UTF-16 range in that line
     var word: (line: Int, at: Range<Int>)?
+    /// `/` searches its lines' text (its surface's `searchFields`), so its matches light up
+    var searched = false
 
     public init(handle: CanvasHandle, pane: String, path: String, refLabel: String, text: String?, err: String? = nil, lit: ClosedRange<Int>?, repo: String, sha: String, close: String? = nil,
-                word: (line: Int, at: Range<Int>)? = nil) {
+                word: (line: Int, at: Range<Int>)? = nil, searched: Bool = false) {
         self.handle = handle; self.pane = pane; self.path = path; self.refLabel = refLabel; self.text = text; self.err = err
-        self.lit = lit; self.repo = repo; self.sha = sha; self.close = close; self.word = word
+        self.lit = lit; self.repo = repo; self.sha = sha; self.close = close; self.word = word; self.searched = searched
     }
 
     public var body: some View {
@@ -390,6 +394,9 @@ public struct CodePaneView: View {
     private func marks(cursor: String?, focused: Bool) -> CanvasMarks {
         var m = CanvasMarks(cursor: cursor, lit: lit, focused: focused)
         if let word { m.word = ("s:\(word.line)", (ReviewDocument.codeStart + word.at.lowerBound)..<(ReviewDocument.codeStart + word.at.upperBound)) }
+        for (row, hs) in searched ? PageSearch.of(app).hitsByRow(app, pane: pane) : [:] {
+            m.hits[row] = hs.map { (ReviewDocument.codeStart + $0.at.lowerBound)..<(ReviewDocument.codeStart + $0.at.upperBound) }
+        }
         if focused && app.keys.mode == .select { m.selection = Set(app.selection) }
         return m
     }

@@ -20,6 +20,7 @@ public enum Verb: String, CaseIterable, Sendable, Comparable {
     case nextThread = "next-thread", previousThread = "previous-thread"
     case face
     case labels, find, search, map, conversation
+    case searchWord = "search-word"
     case type, definition, typeDefinition = "type-definition", implementations, references, symbols
     case github, preview
     case githubMain = "github-main", githubBranch = "github-branch"
@@ -119,6 +120,7 @@ public enum Verbs {
         v(.labels, .nav, ["g w", "f"], "label everything on screen; type a label to go there"),
         v(.find, .nav, ["space f"], "find something on this page by name"),
         v(.search, .nav, ["/"], "search this page's text"),
+        v(.searchWord, .nav, ["*"], "search for the name under the cursor (n / N then step through its uses)"),
         v(.map, .nav, ["space m"], "the map around what you're on"),
         v(.conversation, .nav, ["space c"], "the conversation, in place of what you're reading; esc brings it back"),
         v(.type, .nav, ["space k"], "the type under the cursor (hover)"),

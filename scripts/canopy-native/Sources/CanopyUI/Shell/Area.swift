@@ -44,6 +44,11 @@ public protocol SurfaceProvider {
     func title(for row: String, _ app: AppModel) -> String?
     /// What `/` matches a row against. Default: its title.
     func searchText(for row: String, _ app: AppModel) -> String?
+    /// The texts `/` searches in a row, each its own field (the review diff's new half, then its old).
+    /// Default: `[searchText]`; empty: the row isn't searched.
+    func searchFields(for row: String, _ app: AppModel) -> [String]
+    /// The cursor just landed on a match: select it, if the page has a selection for it.
+    func searchLanded(_ hit: PageSearch.Hit, _ app: AppModel)
     /// Where the cursor is, in the reader's words, for the status line; nil says "<pane> i/n".
     func position(_ app: AppModel) -> String?
     /// Fill in what the jumplist keeps beyond route, pane and cursor (which the shell fills):
@@ -65,6 +70,8 @@ public extension SurfaceProvider {
     func targets(_ app: AppModel) -> [LabelTarget] { app.visibleTargets() }
     func title(for row: String, _ app: AppModel) -> String? { app.guessTitle(row) }
     func searchText(for row: String, _ app: AppModel) -> String? { title(for: row, app) }
+    func searchFields(for row: String, _ app: AppModel) -> [String] { [searchText(for: row, app) ?? app.guessTitle(row)] }
+    func searchLanded(_ hit: PageSearch.Hit, _ app: AppModel) {}
     func position(_ app: AppModel) -> String? { nil }
     func remember(_ place: inout Place, _ app: AppModel) {}
     func restore(_ place: Place, _ app: AppModel) {}

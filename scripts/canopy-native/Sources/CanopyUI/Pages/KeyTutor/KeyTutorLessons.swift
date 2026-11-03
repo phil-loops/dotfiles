@@ -249,6 +249,8 @@ enum KeyLessons {
             KeyStep("{next-word} puts the cursor on the next name, line after line.", [.nextWord], setup: P.review(at: "l|greet.ts|R:2"),
                     check: { P.pg($0).hereWord != nil }),
             KeyStep("{previous-word} the name before it.", [.previousWord]),
+            KeyStep("{search-word} searches for that name — {next-thread} then steps through its uses.", [.searchWord],
+                    check: { PageSearch.of($0).active && !PageSearch.of($0).typing }),
             KeyStep("{type}: the type of the name under the cursor.", [.type]),
             KeyStep("{definition}: go to the definition.", [.definition]),
             KeyStep("{type-definition}: the definition of its type.", [.typeDefinition]),
