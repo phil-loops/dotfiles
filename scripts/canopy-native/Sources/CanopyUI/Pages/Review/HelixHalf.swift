@@ -57,28 +57,60 @@ extension ReviewPageState {
     func landHelix(_ app: AppModel) {
         guard let h = helix, let dir = h.dir, let t = target else { helix = nil; return }
         helix = nil
+        let at = helixAt ?? (h.path, h.line)
+        helixAt = nil
+        pendingNear = (id, at.path, at.line)
+        if let k = stopNear(path: at.path, line: at.line) { setCursor(k) }
         app.focus(pane: reviewDiffPane)
         Task { @MainActor in
             let body = ["branch": t.name, "op": "land", "dir": dir, "sha": h.sha]
             let r = await app.transport.ask(repoPath("/review-helix"), body, as: HelixLanded.self)
+            if r?.ok != true || r?.nothing == true { pendingNear = nil }
             guard let r, r.ok else { return app.runner.say(r?.err ?? "the edit didn't commit — it's saved in \(dir)") }
             app.runner.say(r.nothing == true ? "nothing changed" : "committed “\(r.message ?? "the edit")” to \(t.name)")
         }
     }
 }
 
-/// The terminal Helix runs in, laid over the new half. It takes the keyboard while it's open.
+/// Helix's position from its status line ("NOR   pages/x.tsx [+]   1 sel  12:4"): the file and the line.
+func helixStatus(_ line: String) -> (path: String, line: Int)? {
+    let parts = line.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
+    guard parts.count >= 3, ["NOR", "INS", "SEL"].contains(parts[0]),
+          let pos = parts.last, let colon = pos.firstIndex(of: ":"), let n = Int(pos[..<colon]), Int(pos[pos.index(after: colon)...]) != nil
+    else { return nil }
+    return (parts[1], n)
+}
+
+/// A terminal that reads Helix's status line as the screen updates, so quitting knows where the cursor was.
+final class HelixTerminal: LocalProcessTerminalView {
+    var onPosition: ((String, Int) -> Void)?
+
+    override func dataReceived(slice: ArraySlice<UInt8>) {
+        super.dataReceived(slice: slice)
+        let term = getTerminal()
+        for row in stride(from: term.rows - 1, through: max(0, term.rows - 3), by: -1) {
+            if let text = term.getLine(row: row)?.translateToString(trimRight: true), let at = helixStatus(text) {
+                onPosition?(at.path, at.line)
+                return
+            }
+        }
+    }
+}
+
+/// The terminal Helix runs in, over the new half or the whole page. It takes the keyboard while it's open.
 struct HelixHalf: NSViewRepresentable {
     let open: HelixOpen
     let dir: String
     let colors: CanvasColors
+    var moved: (String, Int) -> Void = { _, _ in }
     let quit: () -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(quit: quit) }
 
     func makeNSView(context: Context) -> LocalProcessTerminalView {
         // starts at a real size, so Helix lays out once before SwiftUI sizes it
-        let t = LocalProcessTerminalView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+        let t = HelixTerminal(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+        t.onPosition = moved
         t.processDelegate = context.coordinator
         for v in t.subviews where v is NSScroller { v.isHidden = true }   // Helix scrolls itself
         t.font = .monospacedSystemFont(ofSize: DocFont.size, weight: .regular)

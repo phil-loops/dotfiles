@@ -26,6 +26,13 @@ import Testing
 
     """
 
+    @Test func helixsStatusLineSaysWhereItsCursorIs() {
+        #expect(helixStatus(" NOR   pages/campaigns/index.tsx                1 sel  1:1 ")! == ("pages/campaigns/index.tsx", 1))
+        #expect(helixStatus(" INS   models/team-membership.ts [+]   2 sels  48:12")! == ("models/team-membership.ts", 48))
+        #expect(helixStatus("  45   import { sortCampaigns } from \"../../lib/utils/cardSorting\";") == nil)
+        #expect(helixStatus("") == nil)
+    }
+
     @Test func changedWordsAreTheOnesThatDiffer() {
         let (l, r) = changedWords("for (let i = 0; i < 101; i++) {", "for (let i = 0; i < 2 * SIZE - 3; i++) {")
         let ns = "for (let i = 0; i < 2 * SIZE - 3; i++) {" as NSString
