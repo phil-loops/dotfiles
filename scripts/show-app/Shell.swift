@@ -250,6 +250,12 @@ final class ShellController: NSViewController {
     let workspaces: [Workspace: NSViewController]
     private(set) var active: Workspace
     let rail = NSVisualEffectView()
+    private let railEdge = NSBox()
+    private var railWidth: NSLayoutConstraint?
+    private var railEdgeWidth: NSLayoutConstraint?
+    /// The rail stays out of the way until asked for (⌃⌘R); ⌘1–⌘6 switch workspaces either way.
+    static let railShownKey = "show.railShown"
+    var railShown: Bool { UserDefaults.standard.bool(forKey: Self.railShownKey) }
     let titleLabel = NSTextField(labelWithString: "")
     private var buttons: [Workspace: RailButton] = [:]
     var onPick: ((Workspace) -> Void)?
@@ -265,6 +271,30 @@ final class ShellController: NSViewController {
 
     required init?(coder: NSCoder) { fatalError("unused") }
 
+    private func railWidthConstraint() -> NSLayoutConstraint {
+        let c = rail.widthAnchor.constraint(equalToConstant: railShown ? 44 : 0)
+        railWidth = c
+        rail.isHidden = !railShown
+        return c
+    }
+
+    private func railEdgeWidthConstraint() -> NSLayoutConstraint {
+        let c = railEdge.widthAnchor.constraint(equalToConstant: railShown ? 1 : 0)
+        railEdgeWidth = c
+        railEdge.isHidden = !railShown
+        return c
+    }
+
+    /// Show the rail, or give its width back to the workspace.
+    func toggleRail() {
+        let on = !railShown
+        UserDefaults.standard.set(on, forKey: Self.railShownKey)
+        railWidth?.constant = on ? 44 : 0
+        railEdgeWidth?.constant = on ? 1 : 0
+        rail.isHidden = !on
+        railEdge.isHidden = !on
+    }
+
     override func loadView() {
         let root = NSView()
         let band = NSVisualEffectView()
@@ -274,7 +304,7 @@ final class ShellController: NSViewController {
         bandEdge.boxType = .separator
         rail.material = .titlebar
         rail.blendingMode = .behindWindow
-        let edge = NSBox()
+        let edge = railEdge
         edge.boxType = .separator
         let stack = NSStackView(views: Workspace.allCases.map(button))
         stack.orientation = .vertical
@@ -310,11 +340,11 @@ final class ShellController: NSViewController {
             rail.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             rail.topAnchor.constraint(equalTo: bandEdge.bottomAnchor),
             rail.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-            rail.widthAnchor.constraint(equalToConstant: 44),
+            railWidthConstraint(),
             edge.leadingAnchor.constraint(equalTo: rail.trailingAnchor),
             edge.topAnchor.constraint(equalTo: bandEdge.bottomAnchor),
             edge.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-            edge.widthAnchor.constraint(equalToConstant: 1),
+            railEdgeWidthConstraint(),
             stack.topAnchor.constraint(equalTo: rail.topAnchor, constant: 10),
             stack.centerXAnchor.constraint(equalTo: rail.centerXAnchor),
             slot.leadingAnchor.constraint(equalTo: edge.trailingAnchor),
