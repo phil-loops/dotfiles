@@ -7,7 +7,6 @@
 viewer      scripts/srv/ scripts/stack-review-server.py scripts/stack-review-serve scripts/stack-review-port scripts/stack-prs
 forest      scripts/stack-forest scripts/stack-open scripts/stack-purpose
 stack       scripts/stack-restack scripts/stack-fmt scripts/stack-precommit-fmt scripts/stack-install-precommit-hook scripts/stack-gates scripts/stack-integrate scripts/stack-list scripts/stack-rm scripts/git-stacks scripts/stack-prompt.sh scripts/stack-squash scripts/stack-archive scripts/stack-reword scripts/test-stack-reword.sh scripts/stack-stories scripts/test-stack-stories.sh
-review      scripts/branch-review
 shell       .zshrc
 docs        CLAUDE.md OWNERS claude/
 learning    learning/ scripts/learning.py scripts/learn scripts/test-learning.py .claude/skills/tutor/ .claude/skills/retest/
