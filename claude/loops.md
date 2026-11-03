@@ -3,7 +3,7 @@
 ## Remotes
 
 - `origin` (`Loops-so/loops`) — the shared team repo; branches and PRs live here, origin-internal (head branch → `main`, same repo — never fork PRs). Phil pushes via GH Desktop / the viewer and opens every PR manually (spine hard rule).
-- `phil-loops` (`phil-loops/loops`) — Phil's fork: bench/experimental branches only (e.g. `bench/goal-metrics`), and the repo's `stack-push.remote` default. A PR branch never goes here — it'd be orphaned. When in doubt, it's Phil's push either way.
+- `phil-loops` (`phil-loops/loops`) — Phil's fork: bench/experimental branches only (e.g. `bench/goal-metrics`). A PR branch never goes here — it'd be orphaned. When in doubt, it's Phil's push either way.
 
 ## Script runner
 
@@ -24,7 +24,7 @@ Each script exports `(dryRun: boolean, ...args: string[]) => Promise<void>` and 
 The loops repo uses [go-task](https://taskfile.dev/) for project commands. **Always prefer Taskfile tasks over raw commands** (npm, npx, etc.):
 
 ```bash
-task lint                # oxlint + oxfmt + prisma format
+task lint                # typecheck + oxlint + oxfmt + prisma format + package/openapi/knip checks
 task clickhouse:migrate  # run ClickHouse migrations (uses correct URL)
 task ci:run              # full CI pipeline locally
 ```
@@ -43,7 +43,7 @@ npx -y squawk-cli packages/prisma/migrations/<dir>/migration.sql
 
 ## Typecheck
 
-Whenever a change touches a typed boundary (zod validators, tRPC inputs, model/query signatures, exported types) run a full project typecheck before declaring done. **Default to `npx tsc`** — on main, tsc is the native fast compiler (~16s full runtime check), so the routine check and the CI-exact verdict are the same command:
+Whenever a change touches a typed boundary (zod validators, tRPC inputs, model/query signatures, exported types) run a full project typecheck before declaring done. **Default to `npx tsc`** — on main, tsc is the native fast compiler (~7–10s full runtime check), so the routine check and the CI-exact verdict are the same command:
 
 ```bash
 npx tsc --project typescript/tsconfig.runtime.json --noEmit   # the default full typecheck

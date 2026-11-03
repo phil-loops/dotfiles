@@ -42,4 +42,4 @@ Always: runs the server in a detached **tmux session `loops-dev`** logging to **
 
 - Don't kill `claude` processes — the script never does; neither should you.
 - Don't `docker compose down` by hand in keep mode — psql has no volume, so down = data wipe. Let the script decide (it only downs on relocate/reset).
-- Don't run it to "pick up a viewer (:62333) change" — that's a different server; this is the app dev stack only.
+- Don't run it to "pick up a viewer change" (the canopy server, port from `stack-review-port`) — that's a different server; this is the app dev stack only.

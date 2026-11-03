@@ -104,7 +104,8 @@ voiced (no wip/fixup). Sealing them costs the reviewer the "changes since" view.
 curl -s -X POST http://localhost:$(stack-review-port)/gates \
   -H 'Content-Type: application/json' -H 'X-Stack-Actor: claude' \
   -H "X-Stack-Session: ${CLAUDE_CODE_SESSION_ID:-}" -d '{"branch":"<b>","detach":true}'
-# then poll http://localhost:$(stack-review-port)/gates-progress until done
+# then poll "http://localhost:$(stack-review-port)/gates-progress?branch=<b>" until .result is set
+# (polling is what records the green verdict)
 ```
 
 (The `X-Stack-*` headers attribute the call to this session in the viewer's request and usage
@@ -118,9 +119,9 @@ fix honestly, new commit, re-run. Never hand-write `gates-green-tree` (spine har
 
 Done means `git config branch.<b>.stack-gates-green-tree` equals
 `git rev-parse '<b>^{tree}'` — check it, don't assume. Any commit landed after green invalidates
-the verdict; re-run. Point the viewer (`stack-review-serve <project>` reuses the live server;
-`open` the URL if the user isn't already there) and report in a few lines: branch, tip SHA,
-per-gate results, review flags (count + one line each), viewer URL, push button unlocked.
+the verdict; re-run. Point canopy at it (`stack-review-serve <project>` reuses the live server and opens canopy;
+or `canopy /v2/b/<repo>/<branch>`) and report in a few lines: branch, tip SHA,
+per-gate results, review flags (count + one line each), the `canopy /v2/…` route, push button unlocked.
 
 ## Guardrails
 
