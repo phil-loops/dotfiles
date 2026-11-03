@@ -49,6 +49,7 @@ TRPC_TYPES_PROJECT = "typescript/tsconfig.trpc-types.json"
 COMPILE_TIMEOUT = 900   # past this a compile is wedged: no data, not slow data
 BUSY_LOAD_PER_CPU = 0.4
 MIN_FREE_MEMORY_PCT = 25
+STABLE_S = 8   # trace.json idle this long ⇒ the check is done, the type dump has begun
 
 
 def sh(cmd, timeout=None, **kw):
@@ -322,8 +323,10 @@ def cmd_run(args):
 
 
 def trace_once(root, engine, project):
-    """Trace one check. tsgo writes the timing trace first and then dumps every type it
-    made (minutes, GBs) — we stop once trace.json has stopped growing and the dump began."""
+    """Trace one check. The compiler streams check events into trace.json while it
+    checks, then spends minutes (and GBs) dumping every type it made — tsc 7.0.2 does
+    that dump without opening its types file early, so we stop as soon as trace.json has
+    stopped growing for STABLE_S seconds rather than waiting for a types file."""
     trace_dir = Path(tempfile.mkdtemp(prefix="tsperf-trace-"))
     cfg = write_bench_tsconfig(root, project)
     p = subprocess.Popen(queued([engine_bin(root, engine), "-p", str(cfg),
@@ -337,12 +340,11 @@ def trace_once(root, engine, project):
             if time.monotonic() > deadline:
                 sys.exit("tsperf: trace still running after the timeout — killed")
             trace = next(trace_dir.glob("trace*.json"), None)
-            dumping = next(trace_dir.glob("types*.json"), None)
-            if trace and dumping:
+            if trace:
                 size = trace.stat().st_size
                 if size != last_size:
                     last_size, stable_since = size, time.monotonic()
-                elif time.monotonic() - stable_since > 5:
+                elif size > 0 and time.monotonic() - stable_since > STABLE_S:
                     break
             time.sleep(1)
     finally:
