@@ -31,6 +31,8 @@ struct Section: Decodable {
     let tables: [DataTable]?
     let source: SourceText?
     let sha: String?
+    /// The session this section came from, overriding the deck's `replyTo` (the Inbox holds notes from many sessions).
+    let replyTo: String?
 
     var key: String { id ?? title }
 }

@@ -114,6 +114,9 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
 
     var selectionKey: String { "selected." + path }
 
+    /// Who answers for the selected section: its own sender, else the deck's.
+    var selectedReplyTo: String? { selectedSection?.replyTo ?? deck.replyTo }
+
     var selectedSection: Section? {
         guard table.selectedRow >= 0, table.selectedRow < rows.count, case .item(let i) = rows[table.selectedRow] else { return nil }
         return deck.sections[i]
@@ -158,7 +161,7 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
 
     private func apply(_ deck: Deck, keepingSelection key: String?) {
         self.deck = deck
-        goToSession.isHidden = deck.replyTo == nil
+        goToSession.isHidden = selectedReplyTo == nil
         rows = []
         branchPlaces = [:]
         if deck.isForest {
@@ -321,7 +324,7 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
         goToSession.action = #selector(jumpToSession)
         goToSession.bezelStyle = .rounded
         goToSession.toolTip = "Bring the Claude session that sent this to the front (⌘J)"
-        goToSession.isHidden = deck.replyTo == nil
+        goToSession.isHidden = selectedReplyTo == nil
         let bar = NSStackView(views: [signed, composerScroll, send, goToSession, submit])
         bar.orientation = .horizontal
         bar.alignment = .centerY
@@ -403,7 +406,7 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
         thread = loadThread(path)
         threadStamp = fileStamp(threadURL(path).path)
         reloadSelectedRow()
-        delivery.send(delivery.threadLine(section: section.key), key: section.key, replyTo: deck.replyTo)
+        delivery.send(delivery.threadLine(section: section.key), key: section.key, replyTo: section.replyTo ?? deck.replyTo)
         refreshThread(stickToBottom: true)
     }
 
@@ -425,7 +428,7 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
     }
 
     @objc func jumpToSession() {
-        guard let replyTo = deck.replyTo, let failure = claudeJump(replyTo) else { return }
+        guard let replyTo = selectedReplyTo, let failure = claudeJump(replyTo) else { return }
         showClaudeSayFailure(replyTo: replyTo, saved: "Nothing was lost.", detail: failure, window: window)
     }
 
@@ -538,7 +541,7 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
         guard let section = selectedSection, section.rank != nil else {
             return "⌘⇧R regenerates a branch page; pick a branch first"
         }
-        delivery.send("regenerate page \(section.key) — \(path)", key: "regen:" + section.key, replyTo: deck.replyTo)
+        delivery.send("regenerate page \(section.key) — \(path)", key: "regen:" + section.key, replyTo: section.replyTo ?? deck.replyTo)
         return "Asked Claude to regenerate \(section.key)"
     }
 
@@ -638,6 +641,7 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
             table.reloadData(forRowIndexes: IndexSet(integersIn: 0..<rows.count), columnIndexes: IndexSet(integer: 0))
         }
         guard let section = selectedSection else { return }
+        goToSession.isHidden = selectedReplyTo == nil
         prefs.set(section.key, forKey: selectionKey)
         if let address = section.url, let url = URL(string: address) {
             textScroll.isHidden = true

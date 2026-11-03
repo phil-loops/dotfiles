@@ -1,19 +1,29 @@
 #!/usr/bin/env python3
-"""show-note "<title>" "<markdown body>" — post a short note from this Claude session to Show.
+"""show-note "<title>" "<markdown body>" — post a message from this Claude session to Show's Inbox.
 
-Writes a one-section deck to ~/.cache/show/notes/ whose replyTo is this session, then hands it to `show`, so it
-waits in History with a notification. In Show, Submit (⌘↩) acks it back to the session and Go to session (⌘J) jumps to
-the session's tmux pane. Run outside a Claude session, the note has no replyTo and no jump.
+Every message is one section of a single deck, ~/.cache/show/inbox.json, newest first and grouped by day; each section
+carries its sender as `replyTo`. In Show the sidebar is the message list. ⌘S signs it off (ack). A reply typed under
+it goes back to the session that wrote it. Go to session (⌘J) jumps to that session's tmux pane. Run outside a Claude
+session, a message has no sender, so no reply or jump.
 """
+import fcntl
 import json
 import os
-import re
 import subprocess
 import sys
 import time
 from pathlib import Path
 
-NOTES = Path.home() / ".cache/show/notes"
+INBOX = Path.home() / ".cache/show/inbox.json"
+KEEP = 200
+SCRIPTS = Path(__file__).resolve().parent
+
+
+def topic(session):
+    if not session:
+        return None
+    result = subprocess.run([str(SCRIPTS / "claude-say"), "--topic", session], capture_output=True, text=True)
+    return result.stdout.strip() or None
 
 
 def main():
@@ -21,14 +31,24 @@ def main():
         sys.exit(__doc__.strip())
     title, body = sys.argv[1], sys.argv[2]
     session = os.environ.get("CLAUDE_CODE_SESSION_ID", "")[:8] or None
-    slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:48] or "note"
-    NOTES.mkdir(parents=True, exist_ok=True)
-    path = NOTES / f"{time.strftime('%Y%m%d-%H%M%S')}-{slug}.json"
-    deck = {"title": title, "subtitle": "Note from a Claude session", "replyTo": session,
-            "sections": [{"id": "note", "title": title, "body": body}]}
-    path.write_text(json.dumps(deck, indent=1, ensure_ascii=False))
-    subprocess.run([str(Path(__file__).with_name("show")), str(path)], check=True)
-    print(path)
+    sender = " · ".join(x for x in [topic(session), session] if x) or "unknown session"
+    INBOX.parent.mkdir(parents=True, exist_ok=True)
+    with open(INBOX.with_suffix(".lock"), "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        deck = json.loads(INBOX.read_text()) if INBOX.exists() else {"title": "Inbox", "subtitle": "Messages from Claude sessions", "sections": []}
+        deck["sections"] = [{
+            "id": f"msg-{time.strftime('%Y%m%d-%H%M%S')}-{session or 'none'}",
+            "group": time.strftime("%a %b %-d"),
+            "title": title,
+            "tag": f"{sender} · {time.strftime('%H:%M')}",
+            "body": body,
+            "replyTo": session,
+        }] + deck["sections"][:KEEP - 1]
+        tmp = INBOX.with_suffix(".tmp")
+        tmp.write_text(json.dumps(deck, indent=1, ensure_ascii=False))
+        os.replace(tmp, INBOX)
+    subprocess.run([str(SCRIPTS / "show"), str(INBOX)], check=True)
+    print(INBOX)
 
 
 if __name__ == "__main__":
