@@ -228,6 +228,8 @@ public struct WordsEditor: View {
                         if writing {
                             ModalTextField(field, prompt: "one verb-first line",
                                            text: Binding(get: { ship.describing[branchID] ?? saved }, set: { ship.describing[branchID] = $0.replacingOccurrences(of: "\n", with: " ") }))
+                        } else if landingOnly, Self.isPageTitle(r, o) {
+                            Text("↑ the page title").foregroundStyle(theme.inkFaint)
                         } else {
                             Text(saved.isEmpty ? "—" : saved).foregroundStyle(theme.ink)
                         }
@@ -239,7 +241,7 @@ public struct WordsEditor: View {
                     case .title:
                         let v = w.prValue(branchID)
                         if let pr = o?.pr, WordsState.githubOwns(pr) {
-                            Text(pr.title ?? "—").foregroundStyle(theme.inkDim)
+                            Text(landingOnly ? "↑ the page title" : pr.title ?? "—").foregroundStyle(landingOnly ? theme.inkFaint : theme.inkDim)
                         } else if !writing, Self.echoesCommit(o, v.subject) {
                             Text("same as its one commit").foregroundStyle(theme.inkFaint)
                         } else if writing {
@@ -297,6 +299,17 @@ public struct WordsEditor: View {
     }
 
     private func rowsShowBody(_ sha: String) -> Bool { ShipRows.words(app, branchID, full: landing && !landingOnly).contains("w|b|\(sha)") }
+
+    /// Whether a row's words are the review page's title (ReviewPage's header): the PR's title once
+    /// GitHub has one, the description before.
+    static func isPageTitle(_ r: WordsRow, _ o: WordsOutline?) -> Bool {
+        let prOpen = o?.pr.map(WordsState.githubOwns) ?? false
+        switch r {
+        case .desc: return !prOpen
+        case .title: return prOpen
+        default: return false
+        }
+    }
 
     /// Whether the landing title is just the branch's one commit's subject, never saved as its own.
     static func echoesCommit(_ o: WordsOutline?, _ title: String) -> Bool {
