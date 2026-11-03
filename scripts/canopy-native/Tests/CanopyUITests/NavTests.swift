@@ -339,6 +339,7 @@ import Testing
         let a = try app()
         press(a, "/")
         #expect(a.keys.active == .search)
+        #expect(a.keys.modeKeys() == ["↵ keep", "esc back"], "the search line says its own way out")
         PageSearch.of(a).typed(a, "email")
         #expect(a.selected == RowKey.project("loops:email-destinations"), "the cursor follows the typing")
         a.keys.handle("ret")
