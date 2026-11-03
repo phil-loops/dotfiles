@@ -1,8 +1,7 @@
 +++
 title = "? explains what's on screen, then the keys, then practice"
 kind = "build"
-state = "doing"
-owner = "8778bd36"
+state = "done"
 area = "keys"
 size = "M"
 why = "2026-11-02: Phil kept asking 'what am I looking at' (on #N vs to push, draft, only here, all changes, gate glyphs); ? only answers 'what can I press'"
@@ -27,3 +26,6 @@ Why not callouts beside each element (dfb3628's layer): it depended on every vie
 ## The principle (2687288)
 
 A word canopy shows and what it means are one value: a `Term` (word + meaning), drawn with `TermText` so the note registers with the word. Kinds of state are enums conforming to Term (`HistoryGroup`, `Reach`, `RowName`); an exhaustive switch makes a new case carry a meaning or not compile. Free-text `.explains(id, text)` stays for one-off status lines drawn in exactly one branch of code (the ship strip).
+
+## Done
+2026-11-02 — 794e140 notes on Forests + forest page (ship stages, loop steps, lanes, dots, merge check); f2ec74f ⇥ in the sheet practices the first line's key; cursor-narrowing already held — the sheet leads with the cursor row's scope
