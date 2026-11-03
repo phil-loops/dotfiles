@@ -36,6 +36,11 @@ final class CanopyHost: NSViewController {
         view = container
     }
 
+    /// The page canopy opens on when it next starts, without starting it: where a relaunch left off.
+    func resume(at route: String) {
+        if embed == nil { pendingRoute = route }
+    }
+
     /// Brings canopy up on its first visit, and goes to `route` (a /v2/… path) once it's there.
     func start(route: String? = nil) {
         _ = view
