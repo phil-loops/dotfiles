@@ -290,9 +290,9 @@ final class CanvasTextView: NSTextView {
                 let left = col == .left ? inf.left != nil : inf.right == nil
                 lit = left ? NSRect(x: 0, y: band.minY, width: mid, height: band.height) : NSRect(x: mid, y: band.minY, width: band.width - mid, height: band.height)
             }
-            c.goldWash.setFill(); lit.fill()
+            c.gold.withAlphaComponent(marks.focused ? 0.18 : 0.10).setFill(); lit.fill()
             (marks.focused ? c.gold : c.goldDeep).setFill()
-            NSRect(x: lit.minX, y: band.minY, width: 2, height: band.height).fill()
+            NSRect(x: lit.minX, y: band.minY, width: 3, height: band.height).fill()
         }
     }
 
