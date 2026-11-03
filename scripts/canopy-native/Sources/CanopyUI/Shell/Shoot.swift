@@ -7,7 +7,7 @@ import SwiftUI
 /// into `<dir>/<name>.png` — how the app's looks get checked without anyone's screen. Keys are
 /// pressed through the engine like Phil's, so only pass keys that move or switch tabs, never a write.
 /// Inside a shot: `>text` types into the open Helix terminal (`\\r` is enter, `\\e` escape), `~N` waits N
-/// seconds, `!name` draws a mid-sequence `<name>.png`, and `?` prints the review page's cursor and Helix's last place.
+/// seconds, `!name` draws a mid-sequence `<name>.png`, `=k` presses k as a key (`=?` the sheet), and `?` prints the review page's cursor and Helix's last place.
 @MainActor
 public enum Shoot {
     public static func run(_ config: AppConfig) -> Never {
@@ -64,6 +64,8 @@ public enum Shoot {
                             print("screen: \(term.cols)x\(term.rows) view=\(NSStringFromSize(t.bounds.size))")
                             for r in 0..<term.rows { print("  |" + (term.getLine(row: r)?.translateToString(trimRight: true) ?? "")) }
                         } else { print("screen: no terminal") }
+                    } else if k.hasPrefix("="), k.count > 1 {
+                        _ = app.keys.handle(String(k.dropFirst()))
                     } else if k == "?" {
                         let pg = ReviewPageState.of(app)
                         print("state: cursor=\(pg.here?.key ?? "nil") pane=\(app.pane?.id ?? "nil") helix=\(pg.helix.map { "\($0.path):\($0.line) whole=\($0.whole)" } ?? "closed") helixAt=\(pg.helixAt.map { "\($0.path):\($0.line)" } ?? "nil") terminalFrame=\(terminal(in: host).map { NSStringFromRect($0.convert($0.bounds, to: nil)) } ?? "none") window=\(NSStringFromSize(size))")
