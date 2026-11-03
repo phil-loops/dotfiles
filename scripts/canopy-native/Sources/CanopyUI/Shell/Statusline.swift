@@ -83,25 +83,23 @@ private struct ModeKeys: View {
 }
 
 /// The `:` field. Its keys are the engine's first (ret runs, tab/C-n/C-p choose); typing goes here.
-/// `/`'s line: what you type moves the page as you type it.
+/// `/`'s line: what you type moves the page as you type it. It only shows the query — the key
+/// engine types it (PageSearch.type), so no field has to win AppKit's focus first.
 private struct SearchLine: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme
-    @FocusState private var focused: Bool
 
     var body: some View {
         let search = PageSearch.of(app)
         let n = search.matches(app).count
-        HStack(spacing: 2) {
-            Text("/").foregroundStyle(theme.goldLeaf)
-            TextField("", text: Binding(get: { search.query }, set: { search.typed(app, $0) }))
-                .textFieldStyle(.plain)
-                .focused($focused)
-            if !search.query.isEmpty { Text("\(n)").foregroundStyle(n == 0 ? theme.ember : theme.inkFaint) }
+        HStack(spacing: 0) {
+            Text("/").foregroundStyle(theme.goldLeaf).padding(.trailing, 2)
+            Text(search.query)
+            Rectangle().fill(theme.goldLeaf).frame(width: 1.5, height: 13)
+            if !search.query.isEmpty { Text("\(n)").foregroundStyle(n == 0 ? theme.ember : theme.inkFaint).padding(.leading, 6) }
             Spacer(minLength: 8)
             ModeKeys()
         }
-        .onAppear { focused = true }
     }
 }
 

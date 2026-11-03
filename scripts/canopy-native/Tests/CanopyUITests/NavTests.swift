@@ -348,6 +348,17 @@ import Testing
         press(a, "esc")
         #expect(!PageSearch.of(a).active, "esc clears it")
     }
+
+    /// Typed keys reach the query through the engine — even ones bound elsewhere — not through a
+    /// field that has to win AppKit's focus first.
+    @Test func slashTakesEveryTypedKey() throws {
+        let a = try app()
+        press(a, "/")
+        for k in ["g", "j", "?", "f", "space", "n", "x", "backspace"] { #expect(a.keys.handle(k), "\(k) is the search's") }
+        #expect(PageSearch.of(a).query == "gj?f n" && a.keys.active == .search)
+        press(a, "esc")
+        #expect(!PageSearch.of(a).active)
+    }
 }
 
 @MainActor @Suite struct KeymapDeltaTests {
