@@ -249,10 +249,12 @@ import json, sys
 d = json.load(open(sys.argv[1]))
 if d.get("mode", d.get("kind")) == "tutor":
     assert d["title"] and isinstance(d["rungs"], list)
+elif isinstance(d.get("plan"), dict):
+    assert d["title"] and isinstance(d["plan"].get("stages"), list) and isinstance(d["plan"].get("rows"), list)
 else:
     assert d["title"] and d["sections"] and all(s.get("body") or s.get("url") or d.get("mode") == "live" for s in d["sections"])
 ' "$deck" \
-        || { echo "show: $deck is not a deck (needs title + sections) or a tutor session (mode \"tutor\" + title + rungs)" >&2; exit 65; }
+        || { echo "show: $deck is not a deck (needs title + sections), a plan (title + plan.stages + plan.rows) or a tutor session (mode \"tutor\" + title + rungs)" >&2; exit 65; }
       decks+=("$deck")
     done
     build
