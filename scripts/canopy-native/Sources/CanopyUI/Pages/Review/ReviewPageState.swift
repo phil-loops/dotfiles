@@ -86,9 +86,10 @@ public struct ReviewLineRange: Equatable, Sendable {
 }
 
 /// The side and line number a row is commented on: the `prefer`red half when the row has a line
-/// there, else the half it has.
+/// there, else the half it has. The old half counts only where it differs from the new — a removed
+/// line — so an unchanged line is always read, and commented on, on its new half.
 public func sideLine(_ r: DiffRow, prefer: Side = .right) -> (side: Side, line: Int) {
-    if prefer == .left, let o = r.left?.old { return (.left, o) }
+    if prefer == .left, let o = r.left?.old, r.left?.kind == .del || r.right?.new == nil { return (.left, o) }
     if let n = r.right?.new { return (.right, n) }
     return (.left, r.left?.old ?? 0)
 }
@@ -435,14 +436,14 @@ public final class ReviewPageState: ShipHost {
     public func commitScopeChanged(_ sha: String?) {
         commitScope = sha
         mark = nil
-        if let first = stops.first(where: { $0.kind == .line }) { setCursor(first.key, focus: false) }
+        if let k = stopFiles.first.flatMap(landing(file:)) { setCursor(k, focus: false) }
         guard let sha, commitFiles?.sha != sha, let app else { return }
         let path = repoPath("/commit-diff?sha=\(sha.uriComponent)")
         Task { @MainActor [weak self] in
             struct CommitDiff: Decodable { var sha: String?; var files: [NodeFile] }
             guard let got = try? await app.transport.getJSON(path, as: CommitDiff.self), let self, self.commitScope == sha else { return }
             self.commitFiles = (sha, got.files)
-            if let first = self.stops.first(where: { $0.kind == .line }) { self.setCursor(first.key, focus: false) }
+            if let k = self.stopFiles.first.flatMap(self.landing(file:)) { self.setCursor(k, focus: false) }
         }
     }
 
@@ -739,7 +740,7 @@ public final class ReviewPageState: ShipHost {
             let i = app?.cursorIdxs[diffPaneKey] ?? 0
             return s[max(0, min(s.count - 1, i))]
         }
-        return s.first { $0.kind == .line } ?? s.first
+        return stopFiles.first.flatMap(landing(file:)).flatMap { stopIndex[$0] }.map { s[$0] } ?? s.first
     }
 
     /// Keep the diff cursor `row` lines below the canvas's visible top when it next scrolls to it.
@@ -751,6 +752,18 @@ public final class ReviewPageState: ShipHost {
         guard let r = pendingRow, r.id == id else { return }
         pendingRow = nil
         if side == nil { anchor(row: r.row) }
+    }
+
+    /// A click on a line's code: the cursor on that row, on the half clicked where that half is its
+    /// own (a removed line), on the character clicked — where h / l would have put it.
+    public func click(_ key: String, side: Side, at: Int) {
+        guard let i = stopIndex[key], let row = stops[i].row else { return }
+        let s: Side = row.right?.new == nil ? .left : side == .left && row.left?.kind == .del ? .left : .right
+        guard let t = (s == .left ? row.left : row.right)?.text as NSString?, t.length > 0 else { return }
+        let r = t.rangeOfComposedCharacterSequence(at: min(max(0, at), t.length - 1))
+        column = s
+        word = (key, s, r.location..<(r.location + r.length))
+        cursorMoved &+= 1
     }
 
     /// Where every jump into a file lands: its first changed line, else its first line, else its

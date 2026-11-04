@@ -116,6 +116,8 @@ final class CanvasTextView: NSTextView {
     var charWidth: CGFloat = 7
     /// a click on a row: its stop key, and whether shift was held
     var onClick: ((String, Bool) -> Void)?
+    /// a click on a line's code: its stop, the half and the UTF-16 offset in that half's text
+    var onClickAt: ((String, Side, Int) -> Void)?
     /// the pointer over code: (row info, UTF-16 offset in the row's code, whether on the right half)
     var onPointer: ((RowInfo, Int, Bool) -> Void)?
     /// a click on a file header's ☐: its path
@@ -140,6 +142,11 @@ final class CanvasTextView: NSTextView {
                 return
             }
             onClick?(s, event.modifierFlags.contains(.shift))
+            if inf.kind == .line, !event.modifierFlags.contains(.shift), let ts = textStorage {
+                let off = i - (ts.string as NSString).paragraphRange(for: NSRange(location: i, length: 0)).location
+                if inf.splitCol > 0, off >= inf.rightCodeStart { onClickAt?(s, .right, off - inf.rightCodeStart) }
+                else if off >= inf.codeStart { onClickAt?(s, inf.splitCol > 0 || inf.right == nil ? .left : .right, off - inf.codeStart) }
+            }
         }
         super.mouseDown(with: event)
     }
@@ -221,7 +228,8 @@ final class CanvasTextView: NSTextView {
                 guard NSLocationInRange(g.location, gr) else { return }
                 let r = lm.boundingRect(forGlyphRange: g, in: tc).offsetBy(dx: origin.x, dy: origin.y)
                 // one character is h / l's cursor: a block you can find at a glance; a name is w's, a wash
-                colors.gold.withAlphaComponent(word.at.count == 1 ? 0.6 : 0.22).setFill()
+                let one = (ts.string as NSString).rangeOfComposedCharacterSequence(at: chars.location) == chars
+                colors.gold.withAlphaComponent(one ? 0.6 : 0.22).setFill()
                 NSBezierPath(roundedRect: r.insetBy(dx: -1, dy: 1), xRadius: 2, yRadius: 2).fill()
                 colors.gold.setFill()
                 NSRect(x: r.minX, y: r.maxY - 2, width: r.width, height: 1.5).fill()
@@ -288,7 +296,7 @@ final class CanvasTextView: NSTextView {
             var lit = band
             if inf.kind == .line, inf.splitCol > 0, let col = marks.column {
                 let mid = x0 + charWidth * CGFloat(inf.splitCol)
-                let left = col == .left ? inf.left != nil : inf.right == nil
+                let left = col == .left ? inf.left == .del || (inf.left != nil && inf.right == nil) : inf.right == nil
                 lit = left ? NSRect(x: 0, y: band.minY, width: mid, height: band.height) : NSRect(x: mid, y: band.minY, width: band.width - mid, height: band.height)
             }
             c.gold.withAlphaComponent(marks.focused ? 0.18 : 0.10).setFill(); lit.fill()
@@ -714,6 +722,7 @@ struct CanvasView: NSViewRepresentable {
     /// center the stop before the first "|" once each time this changes (a code pane opening at a place)
     var centerOn: String?
     var onClick: ((String, Bool) -> Void)?
+    var onClickAt: ((String, Side, Int) -> Void)?
     var onPointer: ((RowInfo, Int, Bool) -> Void)?
     /// a click on a file header's ☐ (in place or pinned): its path
     var onViewed: ((String) -> Void)?
@@ -734,6 +743,7 @@ struct CanvasView: NSViewRepresentable {
         c.text.colors = CanvasColors(theme)
         c.text.charWidth = DocFont.charWidth
         c.text.onClick = onClick
+        c.text.onClickAt = onClickAt
         c.text.onPointer = onPointer
         c.text.onViewed = onViewed
         c.apply(segments)
