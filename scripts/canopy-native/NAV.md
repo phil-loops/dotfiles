@@ -2,6 +2,8 @@
 
 > **Decided 2026-10-31 — what canopy writes:** canopy reads and talks; Helix writes code. `i` on the new half of a diff puts real Helix there, in the branch's diff-view checkout at the cursor's line and name, with the old half still beside it to read against; `:w` saves as usual and quitting Helix commits what changed — a `fixup!` of the branch's own unpushed commit that wrote the first line touched, else `edit <file>` (`/review-helix`). `o` still opens the outside Helix. Beyond that canopy makes only one-decision edits: apply a suggestion (`A`), rename (`space r`). Every edit lands as a commit you see, never as loose changes in your worktree.
 >
+> **Decided 2026-11-03 (later) — keys mean what they mean in Helix (supersedes the bracket keys below):** Phil reads in canopy and edits in Helix all day, so a key meaning two things across them is the inconsistency to remove. A review's files are Helix's buffers: `g n`/`g p` next/previous file (`}`/`{` stay), `space g` the changed-file list. `]` opens Helix's "next" menu: `] g` change, `] c` conversation (`[` the same backwards). `m` is Helix's match key: `m m` goes to the other half of the edit. Marking (viewed, done, answered) is a page's own key, `, m` / `, M` — it was pressed 3 times in five days. Preview moved to `g P`. For the transition the old keys say where their verb went (`] ]` → `] g`, bare `M` → `, M`, and which-key under `m` lists `, m`) — `Verbs.moved`; drop it once the habit has moved. Still clashing with Helix, for Phil to decide: `f` (labels; Helix find-char), `g h`/`g s` (GitHub, dashboard; Helix line start, first non-blank), `g f` (Forests; file under cursor), `g i` (wiki; implementations), `g t` (tutor; window top).
+
 > **Decided 2026-11-03 — `]`/`[` move by change, `}`/`{` by file (swapped, from usage):** five days of native telemetry had 173 `]`/`[` presses, 85 of them refused, and zero `}`/`{` — the reader reads change by change and reached for the bracket, which ran out after one to three files. A *change* is a run of changed lines with nothing unchanged between them (finer than git's hunk, which can hold two edits); `]` crosses into the next file, and at the branch's last change says `J` is next. The shifted key is the bigger unit: `j` line → `]` change → `}` file → `J` branch. The most-pressed key should almost never refuse.
 >
 > **Decided 2026-11-03 — the motion rules, tested on every motion (`everyMotionKeepsTheRules`):** (1) a key that can't act says why, and what would; (2) the keyboard goes where the cursor went — only a detail pane following its list (the diff under the commits) moves without taking it; (3) jumps land on code — `]`/`[`, `J`/`K`, picking a file, opening the page and `gg` land on the first changed line of what they reached (a viewed file, folded to its header, lands there), `G` on the last change; `}`/`{` already did. Headers and gaps are rows `j`/`k` pass through.
@@ -38,12 +40,14 @@
 | cancel | `esc` | close the innermost transient thing — never changes page |
 | next-sibling / previous-sibling | `J` / `K` | the next / previous branch in merge order, staying on this kind of page (jumps) |
 | parent / child / root / tip | `g k` / `g j` / `g K` / `g J` | the branch's parent, child (labels at a fork), its stack's root, tip (jumps) |
-| next-file / previous-file | `}` / `{` | the next / previous file, at its first change (jumps) |
-| next-hunk / previous-hunk | `]` / `[` | the next / previous change, into the next file at the end of one |
-| next-thread / previous-thread | `n` / `N` | the next / previous conversation, open ones first (jumps) |
+| next-file / previous-file | `g n` / `g p` (`}` / `{`) | the next / previous file, at its first change — Helix's next / previous buffer (jumps) |
+| next-hunk / previous-hunk | `] g` / `[ g` | the next / previous change, into the next file at the end of one (Helix `]g`) |
+| match | `m m` | the other half of this edit: what replaced the line, or what it replaced (Helix `mm`) |
+| next-thread / previous-thread | `n` / `N`, `] c` / `[ c` | the next / previous conversation, open ones first (jumps) |
 | face | `⇥` | the page's other face (story ⇄ branches, the next tab, web ⇄ jobs) |
 | labels | `g w` `f` | label everything on screen; type a label to go there |
 | find | `space f` | find something on this page by name |
+| changed-files | `space g` | the files this branch changes, to pick one (Helix's changed-file picker) |
 | search | `/` | search this page's text — the cursor lands on each match, selected like a name; `n`/`N` step match by match (on Review: code only, not paths or comments) |
 | search name | `*` | search for the name under the cursor |
 | map | `space m` | the map around what you're on |
@@ -52,7 +56,7 @@
 | symbols | `space S` | list the file's symbols |
 | github | `g h` | open it on GitHub |
 | lines on GitHub | `space o m` / `space o b` | the lines under the cursor or selection on GitHub, on main / at the branch (the code beside the diff: at its commit) — Helix's gh-open keys |
-| preview | `g p` | preview it on a side port |
+| preview | `g P` | preview it on a side port |
 | go-forests / go-dashboard / go-todo / go-machine / go-wiki / go-tutor | `g f` / `g s` / `g o` / `g m` / `g i` / `g t` | go to that page |
 | alternate | `g a` | the alternate place (where the last jump left from) |
 | slot-1 … slot-9 | `g 1` … `g 9` | the Nth focus forest |
@@ -64,7 +68,7 @@
 | *shared* | | |
 | main | `↵` | the thing's main action |
 | write | `i` | start writing: the field for the thing under the cursor |
-| mark / unmark | `m` / `M` | mark it (viewed, done, answered) and go on / take the mark off |
+| mark / unmark | `, m` / `, M` (each page's own) | mark it (viewed, done, answered) and go on / take the mark off |
 | put-away | `X` | put it away: archive, drop, delete, kill, forget, cut |
 | apply | `A` | apply the suggested fix |
 | copy | `y` | copy it; where a page has nothing of its own to copy, a link to here (below) |

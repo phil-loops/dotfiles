@@ -25,6 +25,42 @@ import Testing
         #expect(pg.here?.kind == .line && pg.hereWord?.lowerBound == col, "past the conversation, the same column: \(String(describing: pg.hereWord)) want \(col)")
     }
 
+    @Test func mmGoesToTheOtherHalfOfTheEditAndSaysWhenThereIsNone() async throws {
+        let (a, _) = try await base.app(payload([("e.ts", ["@@ -1,3 +1,2 @@", "-let old = 1", "-gone()", "+let neu = 1"].joined(separator: "\n"))]))
+        let pg = ReviewPageState.of(a)
+        keys(a, "l", "l", "l", "l")
+        let col = try #require(pg.hereWord?.lowerBound)
+        keys(a, "m", "m")
+        #expect(pg.range?.side == .left && pg.hereWord?.lowerBound == col, "the removed line, same column")
+        keys(a, "m", "m")
+        #expect(pg.range?.side == .right, "and back")
+        keys(a, "j", "m", "m")
+        #expect(a.runner.note == "only removed — nothing replaced it")
+    }
+
+    @Test func helixFileKeysAndTheChangedFilePicker() async throws {
+        let (a, _) = try await base.app(payload([("a.ts", "@@ -1,1 +1,1 @@\n-a\n+A"), ("b.ts", "@@ -1,1 +1,1 @@\n-b\n+B")]))
+        let pg = ReviewPageState.of(a)
+        keys(a, "g", "n")
+        #expect(pg.here?.path == "b.ts")
+        keys(a, "g", "p")
+        #expect(pg.here?.path == "a.ts")
+        keys(a, "space", "g")
+        #expect(pg.tab == "files" && a.pane?.id == reviewTreePane)
+    }
+
+    @Test func movedKeysSayWhereTheyWent() async throws {
+        let (a, _) = try await base.app()
+        keys(a, "]")
+        #expect(a.keys.whichKeyRows().contains { $0.key == "g" && $0.verb == "next-hunk" })
+        keys(a, "]")
+        #expect(a.runner.note == "] ] moved: next-hunk is ] g now, as in Helix")
+        keys(a, "m")
+        #expect(a.keys.whichKeyRows().contains { $0.key == ", m" && $0.verb == "mark" }, "\(a.keys.whichKeyRows())")
+        keys(a, "esc", "M")
+        #expect(a.runner.note == "M moved: unmark is , M now, as in Helix")
+    }
+
     @Test func lNeverSplitsACharacter() async throws {
         let (a, _) = try await base.app(payload([("e.ts", ["@@ -1,1 +1,1 @@", "-a", "+s = \"😀é x\";"].joined(separator: "\n"))]))
         let pg = ReviewPageState.of(a)
@@ -52,7 +88,7 @@ import Testing
         let (a, _) = try await base.app()
         let pg = ReviewPageState.of(a)
         for f in pg.files { pg.viewedOverride[f.path] = true }
-        for k in ["g g", "G", "]", "[", "}", "{", "j", "k", "h", "l", "n"] {
+        for k in ["g g", "G", "] g", "[ g", "g n", "g p", "}", "{", "j", "k", "h", "l", "n"] {
             let before = pg.here?.key
             for part in k.split(separator: " ") { keys(a, String(part)) }
             #expect(pg.here?.key != before || a.runner.note != nil, "\(k) with every file viewed: did nothing, said nothing")
@@ -61,7 +97,7 @@ import Testing
 
     @Test func anEmptyDiffSaysSo() async throws {
         let (a, _) = try await base.app(payload([]))
-        for k in ["g g", "G", "]", "}", "j", "h", "l", "n"] {
+        for k in ["g g", "G", "] g", "g n", "}", "j", "h", "l", "n"] {
             let before = a.runner.note
             for part in k.split(separator: " ") { keys(a, String(part)) }
             #expect(a.runner.note != nil && a.runner.note != before || a.runner.note != nil, "\(k) on an empty diff said nothing")

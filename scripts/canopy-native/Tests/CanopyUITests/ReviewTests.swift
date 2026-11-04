@@ -270,9 +270,9 @@ import Testing
         let (a, _) = try await app()
         let pg = ReviewPageState.of(a)
         #expect(pg.here?.key == "l|a.ts|R:2", "split: the changed pair is one row, keyed by its new line")
-        keys(a, "]")
+        keys(a, "]", "g")
         #expect(pg.here?.key == "l|a.ts|R:22", "the next change's first line")
-        keys(a, "[")
+        keys(a, "[", "g")
         #expect(pg.here?.key == "l|a.ts|R:2")
         keys(a, "}")
         #expect(pg.here?.key == "l|b.ts|R:6", "the next file's first change, not its header")
@@ -298,11 +298,11 @@ import Testing
         let removed = pg.here?.key
         keys(a, "}")
         #expect(pg.here?.key == removed && a.runner.note == "the only file in this diff · ] [ move by change")
-        keys(a, "]")
+        keys(a, "]", "g")
         #expect(pg.here?.key == "l|a.ts|R:40", "the next change, from the removed line")
-        keys(a, "]")
+        keys(a, "]", "g")
         #expect(pg.here?.key == "l|a.ts|R:40" && a.runner.note?.hasPrefix("the last change") == true)
-        keys(a, "[")
+        keys(a, "[", "g")
         #expect(pg.here?.key == removed)
     }
 
@@ -314,12 +314,12 @@ import Testing
         let (a, _) = try await app(String(decoding: try JSONEncoder().encode(o), as: UTF8.self))
         let pg = ReviewPageState.of(a)
         #expect(pg.here?.key == "l|a.ts|R:2")
-        keys(a, "]")
+        keys(a, "]", "g")
         #expect(pg.here?.key == "l|a.ts|R:5", "the second edit, though git holds both in one hunk")
         #expect(a.position?.contains("change 2 of 2") == true, "the statusline counts the same changes: \(a.position ?? "-")")
-        keys(a, "k", "k", "[")
+        keys(a, "k", "k", "[", "g")
         #expect(pg.here?.key == "l|a.ts|R:2", "from the unchanged lines between, [ is the edit above")
-        keys(a, "j", "]")
+        keys(a, "j", "]", "g")
         #expect(pg.here?.key == "l|a.ts|R:5")
     }
 
@@ -339,7 +339,7 @@ import Testing
         let pg = ReviewPageState.of(a)
         ShipStub.answer(p, "POST", "/loops/viewed", #"{"ok":true,"count":1,"on":true}"#)
         let hunk0 = pg.fileOf("a.ts")!.blocks.filter { $0.hunk == 0 }.map(\.key)
-        keys(a, "m")
+        keys(a, ",", "m")
         #expect(hunk0.allSatisfy(pg.isSeen))
         #expect(pg.here?.key == "l|a.ts|R:22", "on to the next unviewed hunk")
         await until("the post") { ShipStub.posts(p).contains { $0.path == "/loops/viewed" } }
@@ -347,13 +347,13 @@ import Testing
         #expect(post.body["on"] == .bool(true))
         #expect(post.body["keys"] == .array(hunk0.map(JSONValue.string)))
         // the last hunk of a.ts: m finishes the file and moves to b.ts
-        keys(a, "m")
+        keys(a, ",", "m")
         #expect(pg.fileOf("a.ts")!.viewed)
         #expect(pg.here?.key == "l|b.ts|R:6", "the next file's first change")
         #expect(!pg.stops.contains { $0.key == "l|a.ts|R:1" }, "a viewed file folds")
         keys(a, "{")
         #expect(pg.here?.key == "f|a.ts", "a viewed file is just its header")
-        keys(a, "M")
+        keys(a, ",", "M")
         #expect(!pg.fileOf("a.ts")!.viewed)
     }
 
@@ -361,7 +361,7 @@ import Testing
         let (a, p) = try await app()
         let pg = ReviewPageState.of(a)
         ShipStub.answer(p, "POST", "/loops/viewed", #"{"ok":true}"#)
-        keys(a, "v", "]", "m")
+        keys(a, "v", "]", "g", ",", "m")
         #expect(a.keys.mode == .normal)
         #expect(pg.fileOf("a.ts")!.viewed)
     }
@@ -836,10 +836,10 @@ import Testing
         let (a, _) = try await app()
         #expect(KeyboardRule.violations(a) { $0.hasPrefix("review.") || $0.hasPrefix("inline.") } == [])
         for (id, verb) in ["review.file.next": Verb.nextFile, "review.hunk.next": .nextHunk, "review.thread.next": .nextThread,
-                           "review.branch.next": .nextSibling, "review.parent": .parent, "review.filter": .find, "review.unviewed": .unmark] {
+                           "review.branch.next": .nextSibling, "review.parent": .parent, "review.filter": .find, "review.files": .changedFiles, "review.unviewed": .unmark, "review.match": .match] {
             #expect(a.registry.command(id)?.verbs == [verb], "\(id)")
         }
-        #expect(a.registry.command("review.viewed")?.keys == ["m"])
+        #expect(a.registry.command("review.viewed")?.keys == [", m"])
         #expect(a.registry.keyProblems.isEmpty, "\(a.registry.keyProblems)")
     }
 

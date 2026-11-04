@@ -20,6 +20,7 @@ public enum Verb: String, CaseIterable, Sendable, Comparable {
     case nextThread = "next-thread", previousThread = "previous-thread"
     case face
     case labels, find, search, map, conversation
+    case match, changedFiles = "changed-files"
     case searchWord = "search-word"
     case type, definition, typeDefinition = "type-definition", implementations, references, symbols
     case github, preview
@@ -110,15 +111,17 @@ public enum Verbs {
         v(.child, .nav, ["g j"], jump: true, "the branch's child (labels at a fork)"),
         v(.root, .nav, ["g K"], jump: true, "the root of the branch's stack"),
         v(.tip, .nav, ["g J"], jump: true, "the tip of the branch's stack"),
-        v(.nextFile, .nav, ["}"], jump: true, "the next file, at its first change"),
-        v(.previousFile, .nav, ["{"], jump: true, "the previous file, at its first change"),
-        v(.nextHunk, .nav, ["]"], "the next change, into the next file at the end of one"),
-        v(.previousHunk, .nav, ["["], "the previous change"),
-        v(.nextThread, .nav, ["n"], jump: true, "the next conversation (open ones first)"),
-        v(.previousThread, .nav, ["N"], jump: true, "the previous conversation (open ones first)"),
+        v(.nextFile, .nav, ["g n", "}"], jump: true, "the next file, at its first change (Helix's next buffer)"),
+        v(.previousFile, .nav, ["g p", "{"], jump: true, "the previous file, at its first change (Helix's previous buffer)"),
+        v(.nextHunk, .nav, ["] g"], "the next change, into the next file at the end of one (Helix ]g)"),
+        v(.previousHunk, .nav, ["[ g"], "the previous change (Helix [g)"),
+        v(.nextThread, .nav, ["n", "] c"], jump: true, "the next conversation (open ones first)"),
+        v(.previousThread, .nav, ["N", "[ c"], jump: true, "the previous conversation (open ones first)"),
+        v(.match, .nav, ["m m"], "the matching thing: the other half of this edit — what replaced the line, or what it replaced (Helix mm)"),
         v(.face, .nav, ["tab"], "the page's other face (story ⇄ branches, the next tab, web ⇄ jobs)"),
         v(.labels, .nav, ["g w", "f"], "label everything on screen; type a label to go there"),
         v(.find, .nav, ["space f"], "find something on this page by name"),
+        v(.changedFiles, .nav, ["space g"], "the files this branch changes, to pick one (Helix's changed-file picker)"),
         v(.search, .nav, ["/"], "search this page's text"),
         v(.searchWord, .nav, ["*"], "search for the name under the cursor (n / N then step through its uses)"),
         v(.map, .nav, ["space m"], "the map around what you're on"),
@@ -132,7 +135,7 @@ public enum Verbs {
         v(.github, .nav, ["g h"], "open it on GitHub"),
         v(.githubMain, .nav, ["space o m"], "open these lines on GitHub, on main"),
         v(.githubBranch, .nav, ["space o b"], "open these lines on GitHub, at the branch (the code beside the diff: at its commit)"),
-        v(.preview, .nav, ["g p"], "preview it on a side port"),
+        v(.preview, .nav, ["g P"], "preview it on a side port"),
         v(.goForests, .nav, ["g f"], "go to Forests"),
         v(.goDashboard, .nav, ["g s"], "go to the dashboard"),
         v(.goTodo, .nav, ["g o"], "go to the tracker"),
@@ -162,8 +165,8 @@ public enum Verbs {
 
         v(.main, .shared, ["ret"], "the thing's main action"),
         v(.write, .shared, ["i"], "start writing: the field for the thing under the cursor"),
-        v(.mark, .shared, ["m"], "mark it (viewed, done, answered) and go on"),
-        v(.unmark, .shared, ["M"], "take the mark off"),
+        v(.mark, .shared, [], "mark it (viewed, done, answered) and go on"),
+        v(.unmark, .shared, [], "take the mark off"),
         v(.putAway, .shared, ["X"], "put it away: archive, drop, delete, kill, forget, cut"),
         v(.apply, .shared, ["A"], "apply the suggested fix"),
         v(.copy, .shared, ["y"], "copy it"),
@@ -186,6 +189,13 @@ public enum Verbs {
 
         v(.send, .insert, ["C-ret"], entry: ["ret", "C-ret"], "send or finish what's typed: ⌃↵ always; ↵ only in a one-line field"),
         v(.newline, .insert, [], entry: ["A-ret"], native: true, "a new line in what's typed (↵ too, in a many-line box)"),
+    ]
+
+    /// Keys that moved for Helix (2026-11-03): pressing the old one says where the verb went, and
+    /// which-key under the old prefix shows it.
+    public static let moved: [(old: String, now: String, verb: Verb)] = [
+        ("] ]", "] g", .nextHunk), ("[ [", "[ g", .previousHunk),
+        ("m", ", m", .mark), ("M", ", M", .unmark),
     ]
 
     public static let byVerb: [Verb: VerbSpec] = Dictionary(table.map { ($0.verb, $0) }, uniquingKeysWith: { a, _ in a })

@@ -175,13 +175,18 @@ public final class KeyEngine {
         if case .run(let id) = fed {
             runner.dispatch(id, via: .key)
             if let onVerb {
-                let verb = registry.command(id)?.verbs.first { registry.verbKeys.of($0, in: mode).contains(seq) }
+                let cmd = registry.command(id)
+                let verb = cmd?.verbs.first { registry.verbKeys.of($0, in: mode).contains(seq) }
+                    ?? cmd.flatMap { c in c.leader.map { $0.key(leader: registry.verbKeys.leader) } == seq ? c.verbs.first : nil }
                 let ok = runner.fired.map { $0.id != id || $0.ok } ?? true
                 onVerb(VerbEvent(verb: verb, command: id, keys: seq, ok: ok, mode: mode))
             }
             return true
         }
         let verb = Verb.allCases.first { registry.verbKeys.of($0, in: mode).contains(seq) }
+        if verb == nil, !mode.takesText, let mv = Verbs.moved.first(where: { $0.old == seq }) {
+            runner.say("\(seq) moved: \(mv.verb.name) is \(mv.now) now, as in Helix")
+        }
         // a nav key the page doesn't answer says what it means and that it isn't here, never nothing
         if let verb, !mode.takesText, let spec = Verbs.table.first(where: { $0.verb == verb }), spec.tier == .nav {
             runner.say("\(seq): \(spec.meaning) — not on this page")
@@ -220,6 +225,9 @@ public final class KeyEngine {
                 let verb = c.verbs.first { vk.of($0, in: active).contains(k) }
                 if seen.insert(rest).inserted { rows.append(WhichKeyRow(key: rest, verb: verb?.name, what: shortTitle(c.title))) }
             }
+        }
+        for mv in Verbs.moved where mv.old == prefix && !seen.contains(mv.now) {
+            rows.append(WhichKeyRow(key: mv.now, verb: mv.verb.name, what: "moved off \(mv.old) — esc, then \(mv.now)"))
         }
         // a run of numbered slots (g 1 … g 9) reads as one row
         let digits = rows.filter { $0.key.count == 1 && $0.key.first!.isNumber }
