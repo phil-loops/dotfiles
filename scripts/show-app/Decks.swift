@@ -132,13 +132,13 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
         return deck.sections[i]
     }
 
-    /// Re-reads the deck and its sign-offs from disk, keeping the selected section, its scroll and a note being typed.
+    /// Re-reads the deck and its sign-offs from disk, keeping the selected section, its place on the page and a note being typed.
     func reload() {
         deckModified = modificationDate(path)
         saveNote()
         guard let fresh = try? loadDeck(path) else { return }
         let kept = selectedSection?.key
-        let origin = textScroll.contentView.bounds.origin
+        let place = self.place
         let listOrigin = (table.enclosingScrollView?.contentView.bounds.origin) ?? .zero
         store = SignOffStore(deckPath: path)
         thread = loadThread(path)
@@ -149,14 +149,62 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
             list.contentView.scroll(to: list.contentView.constrainBoundsRect(NSRect(origin: listOrigin, size: list.contentView.bounds.size)).origin)
             list.reflectScrolledClipView(list.contentView)
         }
-        if selectedSection?.key == kept {
-            if let container = text.textContainer {
-                text.layoutManager?.ensureLayout(for: container)
-            }
-            let clip = textScroll.contentView
-            clip.scroll(to: clip.constrainBoundsRect(NSRect(origin: origin, size: clip.bounds.size)).origin)
-            textScroll.reflectScrolledClipView(clip)
+        if let place {
+            resume(at: place)
         }
+    }
+
+    /// Where the reader is, as text rather than pixels so it outlives a re-wrap, a new build and the process:
+    /// `<deck path>#<section key>?at=<anchor>`, the anchor being the index of the first character visible at the top of
+    /// the page, or `end` when the page sits scrolled to its bottom (so a growing page keeps following its newest lines).
+    var place: String? {
+        guard let key = selectedSection?.key else { return nil }
+        return "\(path)#\(key)?at=\(anchor)"
+    }
+
+    /// Goes back to a `place`: selects its section and scrolls its anchor's line to the top of the page. A place in another deck, or naming a section this deck no longer has, changes nothing.
+    func resume(at place: String) {
+        guard place.hasPrefix(path + "#") else { return }
+        let rest = place.dropFirst(path.count + 1)
+        guard let mark = rest.range(of: "?at=", options: .backwards) else { return }
+        let key = String(rest[..<mark.lowerBound])
+        if selectedSection?.key != key {
+            select(section: key)
+        }
+        guard selectedSection?.key == key, !textScroll.isHidden else { return }
+        scroll(toAnchor: String(rest[mark.upperBound...]))
+    }
+
+    /// Whether the page is scrolled to (within a line or two of) its bottom: the point where re-rendering follows new text down.
+    private var isScrolledToBottom: Bool { textScroll.contentView.bounds.maxY >= text.bounds.height - 60 }
+
+    /// The open page's anchor for `place`.
+    private var anchor: String {
+        guard !textScroll.isHidden, let layout = text.layoutManager, let container = text.textContainer else { return "0" }
+        layout.ensureLayout(for: container)
+        let visible = textScroll.contentView.bounds
+        if text.bounds.height > visible.height, isScrolledToBottom { return "end" }
+        let top = NSPoint(x: 0, y: visible.minY - text.textContainerOrigin.y)
+        guard top.y > 0, layout.numberOfGlyphs > 0 else { return "0" }
+        return String(layout.characterIndexForGlyph(at: layout.glyphIndex(for: top, in: container)))
+    }
+
+    /// Scrolls the open page so the line holding the anchor's character sits at the top, as far as the page allows.
+    private func scroll(toAnchor anchor: String) {
+        guard let layout = text.layoutManager, let container = text.textContainer else { return }
+        viewController.view.layoutSubtreeIfNeeded()
+        layout.ensureLayout(for: container)
+        if anchor == "end" {
+            return text.scrollToEndOfDocument(nil)
+        }
+        var y: CGFloat = 0
+        if let index = Int(anchor), index > 0, let length = text.textStorage?.length, length > 0 {
+            let glyph = layout.glyphIndexForCharacter(at: min(index, length - 1))
+            y = layout.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil).minY + text.textContainerOrigin.y
+        }
+        let clip = textScroll.contentView
+        clip.scroll(to: clip.constrainBoundsRect(NSRect(origin: NSPoint(x: 0, y: y), size: clip.bounds.size)).origin)
+        textScroll.reflectScrolledClipView(clip)
     }
 
     func reloadIfChanged() {
@@ -498,7 +546,7 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
         guard let section = selectedSection, section.url == nil, !deck.isLive else { return }
         let clip = textScroll.contentView
         let origin = clip.bounds.origin
-        let wasAtBottom = clip.bounds.maxY >= text.bounds.height - 60
+        let wasAtBottom = isScrolledToBottom
         text.textStorage?.setAttributedString(page(section))
         if let container = text.textContainer {
             text.layoutManager?.ensureLayout(for: container)

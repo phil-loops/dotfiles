@@ -65,7 +65,7 @@ func writeSelfTestFixtures(_ scratch: String) {
     func at(_ name: String) -> String { (show as NSString).appendingPathComponent(name) }
     let page = "Prose with **bold**.\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n```\ncode\n```"
     write(["title": "Alpha plan", "sections": [
-        ["id": "a1", "group": "Ideas", "title": "First idea", "body": page],
+        ["id": "a1", "group": "Ideas", "title": "First idea", "body": page + (1...80).map { "\n\nParagraph \($0): long enough to wrap onto a second line at the page's width, so the page scrolls well past one screen." }.joined()],
         ["id": "a2", "group": "Ideas", "title": "Second idea", "body": "Two."],
         ["id": "a3", "group": "Plan", "title": "Build order", "body": "Three."],
     ]], at("alpha-plan.json"))
@@ -330,6 +330,7 @@ final class SelfTestDriver {
         check("⎋ leaves the composer with its text", app.tutor?.composer.string == "draft question" && !app.isTyping, app.tutor?.composer.string ?? "-")
 
         switchKey(.review)
+        scrolledPartway()
         app.workspaces[.canopy]?.canopy?.resume(at: Self.canopyPlace)
         let historyBefore = showEvents.state.current[.canopy]
         app.saveAll()
@@ -337,6 +338,20 @@ final class SelfTestDriver {
               "\(String(describing: showEvents.state.current[.canopy]))")
         prefs.synchronize()
         relaunchChild()
+    }
+
+    /// Scrolls Review's long section partway down and checks a reload keeps that character at the top; the relaunch checks it again.
+    func scrolledPartway() {
+        guard let deck = front.currentDeck else { return check("Review has a deck open to scroll", false) }
+        let clip = deck.textScroll.contentView
+        clip.scroll(to: NSPoint(x: 0, y: (deck.text.bounds.height - clip.bounds.height) * 0.4))
+        deck.textScroll.reflectScrolledClipView(clip)
+        let place = deck.place ?? "-"
+        let anchor = place.components(separatedBy: "?at=").last.flatMap { Int($0) } ?? 0
+        check("a deck's place names its section and the character at the top", place.hasPrefix(deck.path + "#a1?at=") && anchor > 0, place)
+        deck.reload()
+        check("reload keeps the character at the top", deck.place == place && clip.bounds.minY > 0, "\(place) → \(deck.place ?? "-")")
+        prefs.set(place, forKey: Self.reviewPlaceKey)
     }
 
     /// ⌘[ walks back more than one document; `show <file>` while Show sits behind only lands it on the shelf, with its
@@ -462,10 +477,16 @@ final class SelfTestDriver {
         }
         check("Review keeps the selected section", app.workspaces[.review]?.currentDeck?.selectedSection?.key == "a1",
               app.workspaces[.review]?.currentDeck?.selectedSection?.key ?? "-")
+        let review = app.workspaces[.review]
+        check("Review comes back scrolled to the same character", review?.place != nil && review?.place == prefs.string(forKey: Self.reviewPlaceKey)
+              && (review?.currentDeck?.textScroll.contentView.bounds.minY ?? 0) > 0,
+              "\(review?.place ?? "-") vs saved \(prefs.string(forKey: Self.reviewPlaceKey) ?? "-")")
         check("Learn keeps the composer draft", app.tutor?.composer.string == "draft question", app.tutor?.composer.string ?? "-")
         check("Canopy comes back on its page's file and line", app.workspaces[.canopy]?.canopy?.place == Self.canopyPlace,
               app.workspaces[.canopy]?.canopy?.place ?? "-")
     }
 
     static let canopyPlace = "/v2/b/loops/beta-branch?file=b.ts&line=6"
+    /// Where the first half left Review, for the relaunch to compare against.
+    static let reviewPlaceKey = "selftest.review-place"
 }
