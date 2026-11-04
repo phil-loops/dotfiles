@@ -1047,17 +1047,36 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
     func saveState() {
         decks.values.forEach { $0.saveNote() }
         tutor?.saveDrafts()
-        saveCanopyPlace()
+        savePlace()
     }
 
-    /// Where canopy's spot is kept across a relaunch: view state, like a deck's selection, not an event in History.
-    var canopyPlaceKey: String { "workspace.\(workspace.rawValue).canopy-place" }
+    /// Where you are here, as one address that a reload or a relaunch brings back: canopy's page (file and line included),
+    /// or the open deck's `DeckController.place`. Learn and API have none; they keep what they keep today.
+    var place: String? { canopy?.place ?? currentDeck?.place }
 
-    /// Keeps canopy's exact address, file and line included; a page still loading keeps the spot saved for that same page.
-    private func saveCanopyPlace() {
-        guard let place = canopy?.place, !place.isEmpty else { return }
-        if let saved = prefs.string(forKey: canopyPlaceKey), !place.contains("?"), saved.hasPrefix(place + "?") { return }
-        prefs.set(place, forKey: canopyPlaceKey)
+    /// Goes back to a saved `place`. A deck place only lands when it names the document open here.
+    func resume(at place: String) {
+        if let canopy {
+            canopy.resume(at: place)
+        } else {
+            currentDeck?.resume(at: place)
+        }
+    }
+
+    /// Where `place` is kept across a relaunch: view state, like a deck's selection, not an event in History.
+    var placeKey: String { "workspace.\(workspace.rawValue).place" }
+    /// Before `placeKey`, canopy's spot was kept here; read once, then dropped on the next save.
+    private var legacyCanopyPlaceKey: String { "workspace.\(workspace.rawValue).canopy-place" }
+
+    /// The place the last run saved.
+    var savedPlace: String? { prefs.string(forKey: placeKey) ?? prefs.string(forKey: legacyCanopyPlaceKey) }
+
+    /// Keeps `place`; a canopy page still loading keeps the spot saved for that same page.
+    private func savePlace() {
+        guard let place, !place.isEmpty else { return }
+        prefs.removeObject(forKey: legacyCanopyPlaceKey)
+        if canopy != nil, let saved = prefs.string(forKey: placeKey), !place.contains("?"), saved.hasPrefix(place + "?") { return }
+        prefs.set(place, forKey: placeKey)
     }
 
     // MARK: the shelf
