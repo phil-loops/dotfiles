@@ -1,10 +1,10 @@
 import CanopyCore
 import SwiftUI
 
-/// The commits tab (Review.tsx History + Commits.tsx): the branch's commits down the side in the
-/// order they were written, and what they land on main as at the foot — the sum of them. j/k step
-/// through; a commit's words sit over its own diff (`diff`, area B's). Two panes: "history" and
-/// "words" (`C-w l`).
+/// The commits tab (Review.tsx History + Commits.tsx): the branch's commits down the side, newest
+/// first, opening on the newest. j/k step through; a commit's words sit over its own diff (`diff`,
+/// area B's). With no commit shown (the `words` verb) it holds what lands on main. Two panes:
+/// "history" and "words" (`C-w l`).
 public struct CommitsPanel: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme
@@ -38,11 +38,16 @@ public struct CommitsPanel: View {
             ship.loadHistory(app, branchID)
             WordsState.of(app).load(app, branchID)
         }
+        .task(id: ShipRows.history(app, branchID).first) {
+            guard ship.commitScope == nil, app.pane?.id == ShipSeam.historyPane,
+                  let newest = ShipRows.history(app, branchID).first else { return }
+            app.runner.dispatch("history.select", via: .key, arg: String(newest.dropFirst(2)))
+        }
     }
 }
 
-/// The history list: all changes (what lands on main) first, then the branch's own commits oldest
-/// first, grouped by whether they're already shared ("on #N", or "pushed" before a PR) or still to push.
+/// The history list: the branch's own commits newest first, grouped by whether they're still to
+/// push or already shared ("on #N", or "pushed" before a PR).
 struct HistoryList: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme
@@ -57,11 +62,7 @@ struct HistoryList: View {
         VStack(alignment: .leading, spacing: 4) {
             PaneList(pane: ShipSeam.historyPane, rows: keys, header: { key in Self.group(key, keys, byKey, conv) }) { key, _ in
                 let scoped = key == "h|\(ship.commitScope ?? "")"
-                if key == "h|" {
-                    Text("all changes")
-                        .foregroundStyle(scoped ? theme.goldLeaf : theme.ink)
-                        .explains("history|all", "the whole branch: what lands on main when the PR squashes")
-                } else if let c = byKey[key] {
+                if let c = byKey[key] {
                     VStack(alignment: .leading, spacing: 1) {
                         Text(c.subject).foregroundStyle(scoped ? theme.goldLeaf : theme.ink).lineLimit(2)
                         if scoped { Text(c.sha.prefix(7)).foregroundStyle(theme.inkFaint).font(Theme.text(10.5)) }

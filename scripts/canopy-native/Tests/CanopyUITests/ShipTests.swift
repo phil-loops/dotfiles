@@ -316,13 +316,13 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
     // ── the history and the words ──
 
     @Test func historyGroupsCommitsByWhetherTheyreShared() {
-        let keys = ["h|", "h|aaa", "h|bbb", "h|ccc"]
+        let keys = ["h|ccc", "h|bbb", "h|aaa"]
         let byKey = ["h|aaa": HistoryCommit(sha: "aaa", subject: "a", pushed: true),
                      "h|bbb": HistoryCommit(sha: "bbb", subject: "b", pushed: true),
                      "h|ccc": HistoryCommit(sha: "ccc", subject: "c", pushed: false)]
-        #expect(keys.map { HistoryList.group($0, keys, byKey, nil) } == [nil, .pushed, nil, .toPush])
+        #expect(keys.map { HistoryList.group($0, keys, byKey, nil) } == [.toPush, .pushed, nil])
         let unknown = ["h|aaa": HistoryCommit(sha: "aaa", subject: "a")]
-        #expect(HistoryList.group("h|aaa", ["h|", "h|aaa"], unknown, nil) == nil)
+        #expect(HistoryList.group("h|aaa", ["h|aaa"], unknown, nil) == nil)
     }
 
     @Test func everyWordTheForestsAndHistoryDrawSaysWhatItMeans() {
@@ -386,7 +386,7 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
         let b = try #require(a.store.view(Branch.self, Self.branch))
         ship.putHistory(b, [HistoryCommit(sha: "aaa1111", subject: "rename"), HistoryCommit(sha: "bbb2222", subject: "fail louder"),
                             HistoryCommit(sha: "ccc3333", subject: "someone else's", own: false)])
-        #expect(ShipRows.history(a, Self.branch) == ["h|", "h|bbb2222", "h|aaa1111"])
+        #expect(ShipRows.history(a, Self.branch) == ["h|aaa1111", "h|bbb2222"])
         a.runner.dispatch("history.select", via: .key, arg: "bbb2222")
         #expect(ship.commitScope == "bbb2222" && ship.host.tab == "commits")
         a.runner.dispatch("history.exit", via: .key)
