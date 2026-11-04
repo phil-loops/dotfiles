@@ -522,19 +522,29 @@ enum ReviewCommands {
         // ── the gates strip: which gate's output it shows ──
 
         r.register(Command(
-            id: "review.gates.show", title: "Show the next gate's output in the gates strip (round to the running one)", scope: .review,
+            id: "review.gates.show", title: "Show or hide the gates strip", scope: .review,
             leader: LocalKey(",g"), label: "gate output",
             available: { id in !(GatesRun.rows(id.flatMap { ship.progressOf($0) }, now: Date().timeIntervalSince1970).isEmpty) },
             local: { id, arg in
                 guard let id else { return }
-                let rows = GatesRun.rows(ship.progressOf(id), now: Date().timeIntervalSince1970).filter { $0.state != .queued }
+                let progress = ship.progressOf(id)
+                let rows = GatesRun.rows(progress, now: Date().timeIntervalSince1970).filter { $0.state != .queued }
                 if let g = arg as? String {
+                    ship.gatesHidden.remove(id)
                     ship.gateShown = ship.gateShown == "\(id) \(g)" ? nil : "\(id) \(g)"
                     return
                 }
-                let cur = ship.gateShown.flatMap { $0.hasPrefix("\(id) ") ? String($0.dropFirst(id.count + 1)) : nil }
-                let i = cur.flatMap { c in rows.firstIndex { $0.name == c } }.map { $0 + 1 } ?? 0
-                ship.gateShown = i < rows.count ? "\(id) \(rows[i].name)" : nil
+                let shown = ship.gateShown?.hasPrefix("\(id) ") == true
+                let visible = !ship.gatesHidden.contains(id) && (progress?.running == true || rows.contains { $0.state == .red } || shown)
+                if visible {
+                    ship.gatesHidden.insert(id)
+                    if shown { ship.gateShown = nil }
+                    return
+                }
+                ship.gatesHidden.remove(id)
+                if progress?.running != true, !rows.contains(where: { $0.state == .red }), let last = rows.last {
+                    ship.gateShown = "\(id) \(last.name)"
+                }
             }))
         r.register(Command(
             id: "review.gates.skip", title: "Skip the red gate shown (else the first red one) for this code and re-run the rest", scope: .review,
