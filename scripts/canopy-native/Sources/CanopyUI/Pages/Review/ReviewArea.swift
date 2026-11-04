@@ -216,13 +216,17 @@ struct ReviewSurface: SurfaceProvider {
     func remember(_ place: inout Place, _ app: AppModel) {
         let pg = ReviewPageState.of(app)
         place.tab = pg.tab
-        if pg.tab == "files", app.pane?.id == reviewDiffPane, let k = pg.diffCursor {
+        place.commit = pg.commitScope
+        if pg.tab == "files" || pg.scoped, app.pane?.id == reviewDiffPane, let k = pg.diffCursor {
             place.row = pg.diffCanvas.canvas.viewportRow(of: k)
         }
     }
 
     func restore(_ place: Place, _ app: AppModel) {
         let pg = ReviewPageState.of(app)
+        let scoping = place.commit != nil && place.commit != pg.commitScope
+        if scoping, let k = place.cursorKey { pg.pendingCursor = (pg.id, k) }
+        if scoping, let l = place.loc { pg.pendingLoc = (pg.id, l) }
         if let tab = place.tab, tab != pg.tab {
             pg.tab = tab
             if let p = place.pane { app.focus(pane: p) }
@@ -233,7 +237,8 @@ struct ReviewSurface: SurfaceProvider {
         if (place.pane ?? reviewDiffPane) == reviewDiffPane, let k = place.cursorKey, !pg.diffHere || pg.stopIndex[k] == nil { pg.pendingCursor = (pg.id, k) }
         pg.pendingRow = nil
         pg.diffCanvas.canvas.anchor = nil
-        if let row = place.row, (place.pane ?? reviewDiffPane) == reviewDiffPane, (place.tab ?? "files") == "files" {
+        if let c = place.commit, scoping { ShipState.of(app).showCommit(c) }
+        if let row = place.row, (place.pane ?? reviewDiffPane) == reviewDiffPane, (place.tab ?? "files") == "files" || place.commit != nil {
             if pg.pendingCursor?.id == pg.id || pg.pendingLoc?.id == pg.id { pg.pendingRow = (pg.id, row) } else if pg.side == nil { pg.anchor(row: row) }
         }
         pg.cursorMoved &+= 1
