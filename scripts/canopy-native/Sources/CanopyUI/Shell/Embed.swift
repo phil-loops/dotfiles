@@ -38,6 +38,9 @@ public final class CanopyEmbed {
 
     public func navigate(_ route: String) { model.open(address: route) }
 
+    /// Where canopy is, exactly, as an address `navigate` lands back on: the page, its tab, the cursor and the code place.
+    public var address: String { model.here().address }
+
     /// Whether the forest viewer answers on `port`.
     public nonisolated static func answers(_ port: Int) -> Bool {
         guard let url = URL(string: "http://127.0.0.1:\(port)/sig") else { return false }
