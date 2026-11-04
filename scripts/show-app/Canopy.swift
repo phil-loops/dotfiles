@@ -41,6 +41,9 @@ final class CanopyHost: NSViewController {
         if embed == nil { pendingRoute = route }
     }
 
+    /// The address canopy is at, file and line included, or the one it will open on when it hasn't started: what a relaunch brings back.
+    var place: String? { embed?.address ?? pendingRoute }
+
     /// Brings canopy up on its first visit, and goes to `route` (a /v2/… path) once it's there.
     func start(route: String? = nil) {
         _ = view

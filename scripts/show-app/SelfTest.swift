@@ -330,6 +330,7 @@ final class SelfTestDriver {
         check("⎋ leaves the composer with its text", app.tutor?.composer.string == "draft question" && !app.isTyping, app.tutor?.composer.string ?? "-")
 
         switchKey(.review)
+        app.workspaces[.canopy]?.canopy?.resume(at: Self.canopyPlace)
         app.saveAll()
         prefs.synchronize()
         relaunchChild()
@@ -459,5 +460,9 @@ final class SelfTestDriver {
         check("Review keeps the selected section", app.workspaces[.review]?.currentDeck?.selectedSection?.key == "a1",
               app.workspaces[.review]?.currentDeck?.selectedSection?.key ?? "-")
         check("Learn keeps the composer draft", app.tutor?.composer.string == "draft question", app.tutor?.composer.string ?? "-")
+        check("Canopy comes back on its page's file and line", app.workspaces[.canopy]?.canopy?.place == Self.canopyPlace,
+              app.workspaces[.canopy]?.canopy?.place ?? "-")
     }
+
+    static let canopyPlace = "/v2/b/loops/beta-branch?file=b.ts&line=6"
 }
