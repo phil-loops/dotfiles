@@ -56,6 +56,8 @@ public final class ShipState {
     public private(set) var divergence: [String: DivergedDetail?] = [:]
     /// the gate whose output the strip shows instead of the running one's — "<branch id> <gate>"
     public var gateShown: String?
+    /// branches whose gates strip `, g` put away, even while their gates run
+    public var gatesHidden: Set<String> = []
 
     // ── the review ledger ──
     public var composer: ShipComposer?

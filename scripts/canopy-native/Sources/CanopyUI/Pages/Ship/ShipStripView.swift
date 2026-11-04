@@ -25,7 +25,7 @@ public struct ShipStripView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     line(b, m, rows, progress, now: ctx.date.timeIntervalSince1970)
                     if let m { StepsStrip(branchID: branchID, motion: m) }
-                    else if !rows.isEmpty, progress?.running == true || rows.contains(where: { $0.state == .red }) || shown != nil {
+                    else if !rows.isEmpty, !ship.gatesHidden.contains(branchID), progress?.running == true || rows.contains(where: { $0.state == .red }) || shown != nil {
                         GatesStrip(branchID: branchID, rows: rows, progress: progress, shown: shown)
                     }
                     if m == nil, b.diverged, case .some(.some(let s)) = ship.forceScopeOf(app, branchID) { GuardStrip(guards: s.guards) }
