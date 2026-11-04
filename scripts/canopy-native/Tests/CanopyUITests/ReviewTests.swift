@@ -645,6 +645,10 @@ import Testing
         #expect(a.selected == "s:4" && pg.sideHereWord == 0..<1, "past the blank line, four")
         keys(a, "b")
         #expect(a.selected == "s:2" && pg.sideHereWord == 12..<13, "back up, three")
+        keys(a, "k")
+        #expect(a.selected == "s:1" && pg.sideHereWord == 2..<3, "k keeps the column, as far as the shorter line reaches")
+        keys(a, "j")
+        #expect(a.selected == "s:2" && pg.sideHereWord == 12..<13, "j goes back to the column it aimed for")
         let asked = ShipStub.posts(p).filter { $0.path == "/loops/lsp/definition" }.count
         keys(a, "g", "d")
         await until("the second ask") { ShipStub.posts(p).filter { $0.path == "/loops/lsp/definition" }.count > asked }
@@ -722,7 +726,7 @@ import Testing
         keys(a, "N", "N")
         #expect(pg.here?.key == "l|a.ts|R:1" && pg.hereWord == 1..<2)
         keys(a, "esc", "/"); type("old"); keys(a, "ret")
-        #expect(pg.here?.key == "l|a.ts|R:2" && pg.column == .left && pg.hereWord == 0..<3, "a removed line's old half")
+        #expect(pg.here?.key == "l|a.ts|R:2" && pg.column == .left && pg.hereWord == 0..<1, "a removed line's old half")
         keys(a, "esc", "/"); type("a.ts"); keys(a, "ret")
         #expect(PageSearch.of(a).hits(a).isEmpty, "file headers aren't code")
         keys(a, "esc", "/"); type("hankles"); keys(a, "ret")
@@ -736,7 +740,7 @@ import Testing
         keys(a, "w")
         #expect(pg.here?.key == "l|a.ts|R:2" && pg.hereWord == 4..<5, "one (new is a keyword)")
         keys(a, "*")
-        #expect(PageSearch.of(a).query == "one" && !PageSearch.of(a).typing && pg.hereWord == 4..<7, "stays on the name it searched")
+        #expect(PageSearch.of(a).query == "one" && !PageSearch.of(a).typing && pg.hereWord == 4..<5, "stays on the name it searched")
     }
 
     /// The code beside the diff searches its text, not its line numbers, and lights its matches.
@@ -751,11 +755,11 @@ import Testing
         keys(a, "/", "3", "ret")
         #expect(PageSearch.of(a).hits(a).map(\.row) == ["s:2"], "the 3 in beta 3, not line 3")
         keys(a, "esc", "/", "a", "l", "p", "h", "a", "ret")
-        #expect(a.pane?.id == reviewCodePane && a.selected == "s:4" && pg.sideHereWord == 2..<7, "the first alpha after where it began (line 2)")
+        #expect(a.pane?.id == reviewCodePane && a.selected == "s:4" && pg.sideHereWord == 2..<3, "the first alpha after where it began (line 2)")
         keys(a, "n")
-        #expect(a.selected == "s:4" && pg.sideHereWord == 8..<13, "the second alpha on that line")
+        #expect(a.selected == "s:4" && pg.sideHereWord == 8..<9, "the second alpha on that line")
         keys(a, "n")
-        #expect(a.selected == "s:1" && pg.sideHereWord == 0..<5, "wrapping to the top")
+        #expect(a.selected == "s:1" && pg.sideHereWord == 0..<1, "wrapping to the top")
         #expect(PageSearch.of(a).tally(a) == (1, 3))
     }
 

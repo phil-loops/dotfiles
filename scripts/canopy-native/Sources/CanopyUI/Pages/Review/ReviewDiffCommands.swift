@@ -70,6 +70,8 @@ enum DiffCommands {
         var goal: Int?
         var placed: Int?
         var carried: String?
+        var sideGoal: Int?
+        var sidePlaced: Int?
         func charStep(_ d: Int) throws {
             guard let h = pg.here, h.kind == .line, let row = h.row else { throw Refusal("no code on this row") }
             let side = sideLine(row, prefer: pg.column).side
@@ -110,6 +112,21 @@ enum DiffCommands {
             placed = r.lowerBound
         }
 
+        /// After j / k in the code beside the diff: the same column on the new line, as the diff does.
+        func keepSideColumn(from: Int?) {
+            let c = from.map { $0 == sidePlaced ? (sideGoal ?? $0) : $0 } ?? sideGoal
+            sideGoal = c
+            sidePlaced = nil
+            guard let c, let n = RowKey.id(app.selected, "s").flatMap(Int.init) else { return }
+            let lines = (pg.sideText ?? "").components(separatedBy: "\n")
+            let t = n >= 1 && n <= lines.count ? lines[n - 1] : ""
+            let len = (t as NSString).length
+            guard len > 0 else { return }
+            let r = char(t, min(c, len - 1))
+            pg.sideWord = (n, r)
+            sidePlaced = r.lowerBound
+        }
+
         // ── moving ──
 
         /// gg / G: the first changed line of the diff, the last changed line of it.
@@ -148,11 +165,13 @@ enum DiffCommands {
                            local: { _, _ in
                                if app.keys.mode != .select { pg.mark = nil }
                                let from = pg.hereWord?.lowerBound
+                               let sideFrom = pg.sideHereWord?.lowerBound
                                let was = app.selected
                                let wasKey = pg.here?.key
                                app.moveCursor(1)
                                if app.selected == was { throw Refusal("nothing further down") }
                                if app.pane?.id == reviewDiffPane { keepColumn(from: from, was: wasKey) }
+                               if app.pane?.id == reviewCodePane, pg.side != nil { keepSideColumn(from: sideFrom) }
                                pg.cursorMoved &+= 1
                                CodeLookup.of(app).dismiss()
                            }))
@@ -160,11 +179,13 @@ enum DiffCommands {
                            local: { _, _ in
                                if app.keys.mode != .select { pg.mark = nil }
                                let from = pg.hereWord?.lowerBound
+                               let sideFrom = pg.sideHereWord?.lowerBound
                                let was = app.selected
                                let wasKey = pg.here?.key
                                app.moveCursor(-1)
                                if app.selected == was { throw Refusal("nothing further up") }
                                if app.pane?.id == reviewDiffPane { keepColumn(from: from, was: wasKey) }
+                               if app.pane?.id == reviewCodePane, pg.side != nil { keepSideColumn(from: sideFrom) }
                                pg.cursorMoved &+= 1
                                CodeLookup.of(app).dismiss()
                            }))

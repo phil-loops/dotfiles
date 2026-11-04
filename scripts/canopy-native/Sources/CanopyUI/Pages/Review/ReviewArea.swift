@@ -138,17 +138,18 @@ struct ReviewSurface: SurfaceProvider {
         }
     }
 
-    /// Landing on a match selects it, as `w` selects a name — so g d, space k and space o m act on it.
+    /// Landing on a match puts the one-character cursor on its first character (the matches stay lit),
+    /// so g d, space k and * ask about the name it starts.
     func searchLanded(_ hit: PageSearch.Hit, _ app: AppModel) {
         let pg = ReviewPageState.of(app)
         switch PageSearch.of(app).pane {
         case reviewDiffPane:
             let side: Side = hit.field == 0 ? .right : .left
             pg.column = side
-            pg.word = (hit.row, side, hit.at)
+            pg.word = (hit.row, side, hit.at.lowerBound ..< hit.at.lowerBound + 1)
             pg.cursorMoved &+= 1
         case reviewCodePane:
-            if let n = RowKey.id(hit.row, "s").flatMap(Int.init) { pg.sideWord = (n, hit.at) }
+            if let n = RowKey.id(hit.row, "s").flatMap(Int.init) { pg.sideWord = (n, hit.at.lowerBound ..< hit.at.lowerBound + 1) }
         default: break
         }
     }
