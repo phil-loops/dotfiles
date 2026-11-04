@@ -29,7 +29,7 @@ import subprocess
 import threading
 import time
 
-from . import ctx, linemap
+from . import ctx, linemap, lru
 
 FAKE_ENV = "STACK_REVIEW_GH_FAKE"
 BOT = "john-hankles"
@@ -107,14 +107,16 @@ def legacy_threads(full):
 
 # ── the read cache: filled by packet's poller and by refetch() ───────────────
 
-_FULL = {}      # repo -> {number: normalized pr + "at"}
+_FULL = {}      # repo -> ByteLRU {number: normalized pr + "at"}: every PR ever read would otherwise stay
 _VIEWER = {}    # repo -> login
 _LOCK = threading.Lock()
 
 
 def absorb(repo, full, viewer=None):
     with _LOCK:
-        _FULL.setdefault(repo, {})[full["number"]] = {**full, "at": time.time()}
+        if repo not in _FULL:
+            _FULL[repo] = lru.ByteLRU(32 << 20, size=lru.json_size)
+        _FULL[repo][full["number"]] = {**full, "at": time.time()}
         if viewer:
             _VIEWER[repo] = viewer
 
@@ -132,8 +134,10 @@ def cached(numbers):
     if fake:
         return {n: p for n, p in fake.read().items() if n in numbers}
     with _LOCK:
-        have = _FULL.get(ctx.repo_cwd(), {})
-        return {n: have[n] for n in numbers if n in have}
+        have = _FULL.get(ctx.repo_cwd())
+        if have is None:
+            return {}
+        return {n: p for n in numbers if (p := have.get(n)) is not None}
 
 
 def refetch(number):

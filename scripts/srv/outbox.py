@@ -18,7 +18,7 @@ import threading
 import time
 from datetime import datetime, timezone
 
-from . import ctx, push, repostate, stackcfg, sync
+from . import ctx, lru, push, repostate, stackcfg, sync
 from . import packet   # own line: packet imports this module back
 
 FIXTURE_ENV = "STACK_OUTBOX_PR_FIXTURE"
@@ -139,7 +139,7 @@ def _rank(project, snap):
 # ── walks: ONE `git log` over every unlanded commit per snapshot, walked in Python ──
 _GRAPHS = {}   # repo -> (snapshot fingerprint, Graph)
 _TREES = {}   # repo -> (refs fingerprint, {branch: tree})
-_TEMPLATE = {}   # (repo, trunk sha) -> the PR template GitHub would otherwise supply
+_TEMPLATE = lru.ByteLRU(1 << 20)   # (repo, trunk sha) -> the PR template GitHub would otherwise supply
 
 
 class Graph:
@@ -210,10 +210,11 @@ def _trees(snap):
 def _template(snap):
     trunk = snap.remote(snap.main()) or snap.local(snap.main())
     key = (ctx.repo_cwd(), trunk)
-    if key not in _TEMPLATE:
+    hit = _TEMPLATE.get(key)
+    if hit is None:
         t = ctx.run(["git", "show", f"{trunk}:.github/pull_request_template.md"])
-        _TEMPLATE[key] = t.stdout.strip() if t.returncode == 0 else ""
-    return _TEMPLATE[key]
+        hit = _TEMPLATE[key] = t.stdout.strip() if t.returncode == 0 else ""
+    return hit
 
 
 def _gates(snap, branch, tree):
