@@ -448,7 +448,7 @@ def fixes_between(base, branch):
 def fixes(snap, branch, pr):
     """fixes_between the PR's base and the local tip, memoised on both — a spawn only when they move."""
     base = f"origin/{pr['base']}" if snap.remote(pr["base"]) else pr["base"]
-    key = (ctx.repo_cwd(), base, snap.local(branch))
+    key = (ctx.repo_cwd(), base, snap.remote(pr["base"]) or snap.local(pr["base"]), snap.local(branch))
     hit = _FIXES.get(key)
     if hit is None:
         hit = _FIXES[key] = fixes_between(base, branch)

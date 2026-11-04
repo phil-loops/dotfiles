@@ -449,7 +449,8 @@ def commit_diff(req, u):
     hide_ws = _hide_ws(u)
     key = (ctx.repo_cwd(), sha, frm, hide_ws)
     show = (lambda *flags: ["git", "diff", *flags, f"{frm}^", sha]) if frm else (lambda *flags: ["git", "show", *flags, "--format=", sha])
-    hit = _CDIFF_CACHE.get(key) if len(sha) >= 7 else None
+    pinned = re.fullmatch(r"[0-9a-f]{7,40}", sha) is not None   # a branch name moves; only a sha may be cached
+    hit = _CDIFF_CACHE.get(key) if pinned else None
     if hit is not None:
         return req._send(200, hit)
     ws = ["-w"] if hide_ws else []
@@ -471,7 +472,7 @@ def commit_diff(req, u):
                       "wsOnly": hide_ws and path not in shown,
                       "patch": ch.rstrip("\n") + "\n"})
     out_json = json.dumps({"sha": sha, "files": files})
-    if files and len(sha) >= 7:
+    if files and pinned:
         _CDIFF_CACHE[key] = out_json
         _bound(_CDIFF_CACHE, 300)
     req._send(200, out_json)
