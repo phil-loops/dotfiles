@@ -154,7 +154,7 @@ import Testing
         #expect(t.stepIndex == markStep + 1)
         // a miss or two, and the hint names the verb and your key for it
         press(a, "q"); press(a, "q")
-        #expect(t.hint == "this step wants previous-hunk — your key is {")
+        #expect(t.hint == "this step wants previous-hunk — your key is [")
         _ = sb
     }
 

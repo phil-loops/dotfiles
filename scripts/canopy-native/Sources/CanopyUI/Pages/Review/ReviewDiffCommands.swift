@@ -134,7 +134,7 @@ enum DiffCommands {
             let j = i + dir
             guard fs.indices.contains(j), let k = pg.landing(file: fs[j]) else {
                 let edge = fs.count <= 1 ? "the only file in this diff" : dir > 0 ? "the last file" : "the first file"
-                throw Refusal("\(edge) · } { move by hunk")
+                throw Refusal("\(edge) · ] [ move by change")
             }
             if app.keys.mode != .select { pg.mark = nil }
             pg.setCursor(k)
@@ -169,33 +169,30 @@ enum DiffCommands {
                            local: { _, _ in try ends(first: true) }))
         r.register(Command(id: "review.bottom", title: "Go to the last line", scope: .review, verb: .last, modes: motion, label: "ends", quiet: true,
                            local: { _, _ in try ends(first: false) }))
-        r.register(Command(id: "review.hunk.next", title: "Go to the next hunk", scope: .review, verb: .nextHunk, modes: motion,
-                           label: "hunk", pair: "review.hunk.prev", available: onDiff, local: { _, _ in try hunk(1) }))
-        r.register(Command(id: "review.hunk.prev", title: "Go to the previous hunk", scope: .review, verb: .previousHunk, modes: motion,
-                           label: "hunk", available: onDiff, local: { _, _ in try hunk(-1) }))
-        /// }/{: the first changed line of the next (previous) hunk — "a bigger j".
-        func hunk(_ dir: Int) throws {
+        r.register(Command(id: "review.hunk.next", title: "Go to the next change", scope: .review, verb: .nextHunk, modes: motion,
+                           label: "change", pair: "review.hunk.prev", available: onDiff, local: { _, _ in try change(1) }))
+        r.register(Command(id: "review.hunk.prev", title: "Go to the previous change", scope: .review, verb: .previousHunk, modes: motion,
+                           label: "change", available: onDiff, local: { _, _ in try change(-1) }))
+        /// ]/[: the start of the next (previous) change — a run of changed lines with nothing unchanged
+        /// between them, finer than git's hunk (which can hold two edits) — crossing into the next file.
+        func change(_ dir: Int) throws {
             let s = pg.stops
-            let here = pg.here
-            let cur = here.flatMap { h in h.row.map { "\(h.path)#\($0.hunk)" } ?? (h.kind == .gap ? "\(h.path)#\(h.at ?? -1)" : nil) }
-            var i = idx() + dir
-            var target: String?
-            while i >= 0 && i < s.count {
-                let st = s[i]
-                if let row = st.row {
-                    let h = "\(st.path)#\(row.hunk)"
-                    if h != cur {
-                        target = h
-                        break
-                    }
-                }
-                i += dir
+            let starts = pg.changeStarts
+            let i = idx()
+            let target: Int?
+            if dir > 0 {
+                target = starts.first { $0 > i }
+            } else {
+                let cur = starts.last { $0 <= i }
+                let inside = cur.map { c in (c...i).allSatisfy { k in s[k].row.map(changed) ?? (s[k].kind == .thread || s[k].kind == .pending) } } ?? false
+                target = inside ? starts.last { $0 < cur! } : cur
             }
-            guard let target else { throw Refusal(dir > 0 ? "no hunk further down" : "no hunk further up") }
-            let rows = s.enumerated().filter { e in e.element.row.map { "\(e.element.path)#\($0.hunk)" == target } ?? false }
-            let first = rows.first { changed($0.element.row!) } ?? rows.first!
+            guard let target else {
+                if dir > 0 { throw Refusal(pg.neighbour(1) != nil ? "the last change · J the next branch" : "the last change in this branch") }
+                throw Refusal(pg.neighbour(-1) != nil ? "the first change · K the branch before" : "the first change in this branch")
+            }
             if app.keys.mode != .select { pg.mark = nil }
-            goTo(first.offset)
+            goTo(target)
         }
         r.register(Command(id: "review.file.next", title: "Go to the next file", scope: .review, verb: .nextFile, modes: motion,
                            label: "file", pair: "review.file.prev", available: onDiff,
@@ -458,7 +455,9 @@ enum DiffCommands {
         }
         func step(_ d: Int) throws {
             if app.pane?.id == reviewCodePane, pg.side != nil { return try sideStep(d) }
-            guard app.pane?.id == reviewDiffPane, var i = pg.here.flatMap({ pg.stopIndex[$0.key] }) else { throw Refusal("names are in the diff") }
+            // names live in code: from a list pane, w / b go into the diff and step there
+            if app.pane?.id != reviewDiffPane { app.focus(pane: reviewDiffPane) }
+            guard app.pane?.id == reviewDiffPane, var i = pg.here.flatMap({ pg.stopIndex[$0.key] }) else { throw Refusal("no diff to step through") }
             var from = pg.hereWord
             while i >= 0 && i < pg.stops.count {
                 let s = pg.stops[i]

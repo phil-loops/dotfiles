@@ -270,13 +270,13 @@ import Testing
         let (a, _) = try await app()
         let pg = ReviewPageState.of(a)
         #expect(pg.here?.key == "l|a.ts|R:2", "split: the changed pair is one row, keyed by its new line")
-        keys(a, "}")
-        #expect(pg.here?.key == "l|a.ts|R:22", "the next hunk's first changed line")
-        keys(a, "{")
-        #expect(pg.here?.key == "l|a.ts|R:2")
         keys(a, "]")
-        #expect(pg.here?.key == "l|b.ts|R:6", "the next file's first change, not its header")
+        #expect(pg.here?.key == "l|a.ts|R:22", "the next change's first line")
         keys(a, "[")
+        #expect(pg.here?.key == "l|a.ts|R:2")
+        keys(a, "}")
+        #expect(pg.here?.key == "l|b.ts|R:6", "the next file's first change, not its header")
+        keys(a, "{")
         #expect(pg.here?.key == "l|a.ts|R:2", "the previous file's first change")
         keys(a, "n")
         #expect(pg.here?.key == "t|\(Self.branch)#T1")
@@ -287,7 +287,8 @@ import Testing
         #expect(pg.here?.key == "l|a.ts|R:2", "the first change")
     }
 
-    @Test func bracketsStayPutInAOneFileDiffEvenFromARemovedLine() async throws {
+    /// In a one-file diff ] [ walk its changes, and } { say there's no other file and what to press.
+    @Test func bracketsWalkChangesBracesSayWhyInAOneFileDiff() async throws {
         let patch = ["@@ -1,5 +1,4 @@", " import {", "-  Gone,", "   Kept,", " } from \"x\";", " tail",
                      "@@ -40,3 +39,3 @@", " a", "-b", "+B", " c"].joined(separator: "\n")
         let o: JSONValue = ["branch": "add-hankles-limited-label", "baseSha": "base123",
@@ -295,20 +296,37 @@ import Testing
         let (a, _) = try await app(String(decoding: try JSONEncoder().encode(o), as: UTF8.self))
         let pg = ReviewPageState.of(a)
         let removed = pg.here?.key
-        #expect(pg.stopIndex[removed ?? ""].flatMap { pg.stops[$0].row?.right } == nil, "it opens on the removed line, the first change")
+        keys(a, "}")
+        #expect(pg.here?.key == removed && a.runner.note == "the only file in this diff · ] [ move by change")
         keys(a, "]")
-        #expect(pg.here?.key == removed, "the only file: ] refuses")
-        #expect(a.runner.note?.hasPrefix("the only file in this diff") == true, "and says why")
+        #expect(pg.here?.key == "l|a.ts|R:40", "the next change, from the removed line")
+        keys(a, "]")
+        #expect(pg.here?.key == "l|a.ts|R:40" && a.runner.note?.hasPrefix("the last change") == true)
+        keys(a, "[")
+        #expect(pg.here?.key == removed)
+    }
+
+    /// Two edits git keeps in one hunk are two changes: ] stops at each.
+    @Test func bracketsStopAtEachEditInsideAHunk() async throws {
+        let patch = ["@@ -1,6 +1,6 @@", " a", "-b", "+B", " c", " d", "-e", "+E", " f"].joined(separator: "\n")
+        let o: JSONValue = ["branch": "add-hankles-limited-label", "baseSha": "base123",
+                            "files": .array([["path": "a.ts", "add": 2, "del": 2, "patch": .string(patch)]])]
+        let (a, _) = try await app(String(decoding: try JSONEncoder().encode(o), as: UTF8.self))
+        let pg = ReviewPageState.of(a)
+        #expect(pg.here?.key == "l|a.ts|R:2")
+        keys(a, "]")
+        #expect(pg.here?.key == "l|a.ts|R:5", "the second edit, though git holds both in one hunk")
+        #expect(a.position?.contains("change 2 of 2") == true, "the statusline counts the same changes: \(a.position ?? "-")")
+        keys(a, "k", "k", "[")
+        #expect(pg.here?.key == "l|a.ts|R:2", "from the unchanged lines between, [ is the edit above")
         keys(a, "j", "]")
-        #expect(pg.here?.key != removed && a.runner.note?.hasPrefix("the only file") == true)
-        keys(a, "k", "]")
-        #expect(pg.here?.key == removed, "] from a removed line refuses too, not a jump to the next hunk")
+        #expect(pg.here?.key == "l|a.ts|R:5")
     }
 
     @Test func jumpsComeBackWithCtrlO() async throws {
         let (a, _) = try await app()
         let pg = ReviewPageState.of(a)
-        keys(a, "]")
+        keys(a, "}")
         #expect(pg.here?.key == "l|b.ts|R:6")
         keys(a, "C-o")
         #expect(pg.here?.key == "l|a.ts|R:2")
@@ -333,7 +351,7 @@ import Testing
         #expect(pg.fileOf("a.ts")!.viewed)
         #expect(pg.here?.key == "l|b.ts|R:6", "the next file's first change")
         #expect(!pg.stops.contains { $0.key == "l|a.ts|R:1" }, "a viewed file folds")
-        keys(a, "[")
+        keys(a, "{")
         #expect(pg.here?.key == "f|a.ts", "a viewed file is just its header")
         keys(a, "M")
         #expect(!pg.fileOf("a.ts")!.viewed)
@@ -343,7 +361,7 @@ import Testing
         let (a, p) = try await app()
         let pg = ReviewPageState.of(a)
         ShipStub.answer(p, "POST", "/loops/viewed", #"{"ok":true}"#)
-        keys(a, "v", "}", "m")
+        keys(a, "v", "]", "m")
         #expect(a.keys.mode == .normal)
         #expect(pg.fileOf("a.ts")!.viewed)
     }
@@ -352,7 +370,7 @@ import Testing
         let (a, p) = try await app()
         let pg = ReviewPageState.of(a)
         ShipStub.answer(p, "GET", "/loops/node", Self.payload)
-        keys(a, "]")      // on b.ts
+        keys(a, "}")      // on b.ts
         keys(a, "K")
         #expect(a.router.route == .review(repo: "loops", branch: "add-hankles-limited-label"), "nothing before the first")
         keys(a, "J")

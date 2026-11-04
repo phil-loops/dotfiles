@@ -97,4 +97,13 @@ import Testing
         a.keys.handle("l")
         #expect(pg.hereWord == 2..<3, "and l goes on from the character clicked")
     }
+
+    @Test func wFromAListPaneGoesIntoTheDiff() async throws {
+        let (a, _) = try await base.app()
+        let pg = ReviewPageState.of(a)
+        a.keys.handle("C-h")
+        #expect(a.pane?.id != reviewDiffPane)
+        a.keys.handle("w")
+        #expect(a.pane?.id == reviewDiffPane && pg.hereWord != nil, "w goes into the diff and onto a name")
+    }
 }
