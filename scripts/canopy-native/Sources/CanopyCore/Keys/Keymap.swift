@@ -51,7 +51,8 @@ public struct Keymap {
 public enum KeyName {
     public static func name(key: String, ctrl: Bool = false, meta: Bool = false, alt: Bool = false) -> String? {
         let named = [" ": "space", "Escape": "esc", "Enter": "ret", "ArrowDown": "down", "ArrowUp": "up",
-                     "ArrowLeft": "left", "ArrowRight": "right", "Tab": "tab", "Backspace": "backspace"]
+                     "ArrowLeft": "left", "ArrowRight": "right", "Tab": "tab", "Backspace": "backspace",
+                     "Home": "home", "End": "end"]
         guard let k = named[key] ?? (key.count == 1 ? key : nil) else { return nil }
         if meta { return nil }
         return ctrl ? "C-\(k)" : alt ? "A-\(k)" : k
@@ -60,7 +61,7 @@ public enum KeyName {
     /// macOS virtual key codes for the named keys (Carbon kVK_*).
     public static let codes: [UInt16: String] = [
         49: " ", 53: "Escape", 36: "Enter", 76: "Enter", 48: "Tab",
-        125: "ArrowDown", 126: "ArrowUp", 123: "ArrowLeft", 124: "ArrowRight", 51: "Backspace",
+        125: "ArrowDown", 126: "ArrowUp", 123: "ArrowLeft", 124: "ArrowRight", 51: "Backspace", 115: "Home", 119: "End",
     ]
 
     /// From an AppKit key event's parts. `characters` is what the key typed (shift applied);

@@ -4,8 +4,8 @@ import Observation
 import SwiftUI
 
 // Code navigation the Helix way (review/types.ts), for any pane that shows code — the review diff,
-// its side pane, the Tutor's pinned code. `space k` shows the type, `g d` / `g y` / `g I` / `g r` go
-// to the definition, the type's definition, the implementations, the references; `space S` lists
+// its side pane, the Tutor's pinned code. `space k` shows the type, `g d` / `g y` / `g i` / `g r` go
+// to the definition, the type's definition, the implementations, the references; `space s` lists
 // the file's symbols. One place goes straight there through `app.nav.go` (recorded on the app-wide
 // jumplist; the attached surface opens it), several open the picker. Answers come from the server's
 // `/lsp/*` (srv/lsp.py's one tsgo — never a process of ours); a "loading" answer is asked again
@@ -16,8 +16,8 @@ import SwiftUI
 //   let pos = CodeLookup.position(path:, line:, text:, side: .new)   // the line's first name worth a type
 //   let at  = CodeLookup.Where.commit(repo:, sha:)                   // or .branch(repo:, name:, base:)
 //   CodeLookup.of(app).hover(pos, at)             // space k → `pop` (TypesPopView draws it)
-//   CodeLookup.of(app).goto(.definition, pos, at) // g d / g y / g I / g r → app.nav.go or the picker
-//   CodeLookup.of(app).symbols(path:, side:, at)  // space S → the picker
+//   CodeLookup.of(app).goto(.definition, pos, at) // g d / g y / g i / g r → app.nav.go or the picker
+//   CodeLookup.of(app).symbols(path:, side:, at)  // space s → the picker
 //   CodeLookup.of(app).dismiss()                  // esc, or the cursor moved
 
 @MainActor
@@ -201,7 +201,7 @@ public final class CodeLookup {
         .references: ("finding the references…", "no references found", "references"),
     ]
 
-    /// g d / g y / g I / g r: one place goes there, several open the picker.
+    /// g d / g y / g i / g r: one place goes there, several open the picker.
     public func goto(_ kind: LSPGoto, _ p: Position?, _ w: Where?) {
         guard let p, let w else { pop = .note("nothing to look up here"); return }
         let words = Self.gotoWords[kind]!
@@ -230,7 +230,7 @@ public final class CodeLookup {
         }
     }
 
-    /// space S: a file's symbols, in the picker.
+    /// space s: a file's symbols, in the picker.
     public func symbols(path: String?, side: String = "new", _ w: Where?) {
         guard let path, let w else { pop = .note("no file to list"); return }
         pop = .wait("reading the file's symbols…")

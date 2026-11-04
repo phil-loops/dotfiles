@@ -9,9 +9,12 @@ import Foundation
 public enum Verb: String, CaseIterable, Sendable, Comparable {
     // ── nav: owned by the nav core, the same on every page ──
     case next, previous, first, last
-    case halfDown = "half-down", halfUp = "half-up"
+    case halfDown = "half-down", halfUp = "half-up", pageDown = "page-down", pageUp = "page-up"
+    case windowTop = "window-top", windowCenter = "window-center", windowBottom = "window-bottom"
     case left, right, out
     case nextWord = "next-word", previousWord = "previous-word"
+    case lineStart = "line-start", lineEnd = "line-end", firstNonBlank = "first-non-blank"
+    case findChar = "find-char", tillChar = "till-char", findCharBack = "find-char-back", tillCharBack = "till-char-back"
     case cancel
     case nextSibling = "next-sibling", previousSibling = "previous-sibling"
     case parent, child, root, tip
@@ -96,13 +99,25 @@ public enum Verbs {
         v(.next, .nav, ["j", "down"], entry: ["down", "C-n", "C-j", "tab"], "the next row, line or item"),
         v(.previous, .nav, ["k", "up"], entry: ["up", "C-p", "C-k"], "the previous row, line or item"),
         v(.first, .nav, ["g g"], jump: true, "the first row"),
-        v(.last, .nav, ["G"], jump: true, "the last row"),
+        v(.last, .nav, ["G", "g e"], jump: true, "the last row"),
         v(.halfDown, .nav, ["C-d"], "down half a page"),
         v(.halfUp, .nav, ["C-u"], "up half a page"),
+        v(.pageDown, .nav, ["C-f"], "down a page"),
+        v(.pageUp, .nav, ["C-b"], "up a page"),
+        v(.windowTop, .nav, ["g t"], "the top of what's on screen"),
+        v(.windowCenter, .nav, ["g c"], "the middle of what's on screen"),
+        v(.windowBottom, .nav, ["g b"], "the bottom of what's on screen"),
         v(.left, .nav, ["h", "left"], "a character left in code (onto the old half at a removed line's start), else the pane to the left"),
         v(.right, .nav, ["l", "right"], "a character right in code (from the old half's end onto the new), else the pane to the right"),
         v(.nextWord, .nav, ["w"], "the next name in the code, across lines — what g d and space k ask about"),
         v(.previousWord, .nav, ["b"], "the previous name in the code"),
+        v(.lineStart, .nav, ["g h", "home"], "the start of the line in code"),
+        v(.lineEnd, .nav, ["g l", "end"], "the end of the line in code"),
+        v(.firstNonBlank, .nav, ["g s"], "the line's first character that isn't a space, in code"),
+        v(.findChar, .nav, ["f"], "on to the next of a character you type, along the line in code"),
+        v(.tillChar, .nav, ["t"], "up to just before the next of a character you type, in code"),
+        v(.findCharBack, .nav, ["F"], "back to the previous of a character you type, in code"),
+        v(.tillCharBack, .nav, ["T"], "back to just after the previous of a character you type, in code"),
         v(.out, .nav, ["-"], "up a level: line → file → branch → forest → forests (↵ goes in)"),
         v(.cancel, .nav, ["esc"], "close the innermost transient thing — never changes page"),
         v(.nextSibling, .nav, ["J"], jump: true, "the next branch in merge order, staying on this kind of page"),
@@ -119,7 +134,7 @@ public enum Verbs {
         v(.previousThread, .nav, ["N", "[ c"], jump: true, "the previous conversation (open ones first)"),
         v(.match, .nav, ["m m"], "the matching thing: the other half of this edit — what replaced the line, or what it replaced (Helix mm)"),
         v(.face, .nav, ["tab"], "the page's other face (story ⇄ branches, the next tab, web ⇄ jobs)"),
-        v(.labels, .nav, ["g w", "f"], "label everything on screen; type a label to go there"),
+        v(.labels, .nav, ["g w"], "label everything on screen; type a label to go there"),
         v(.find, .nav, ["space f"], "find something on this page by name"),
         v(.changedFiles, .nav, ["space g"], "the files this branch changes, to pick one (Helix's changed-file picker)"),
         v(.search, .nav, ["/"], "search this page's text"),
@@ -129,19 +144,19 @@ public enum Verbs {
         v(.type, .nav, ["space k"], "the type under the cursor (hover)"),
         v(.definition, .nav, ["g d"], "go to the definition"),
         v(.typeDefinition, .nav, ["g y"], "go to the definition of its type"),
-        v(.implementations, .nav, ["g I"], "go to its implementations"),
+        v(.implementations, .nav, ["g i"], "go to its implementations"),
         v(.references, .nav, ["g r"], "list its references"),
-        v(.symbols, .nav, ["space S"], "list the file's symbols"),
-        v(.github, .nav, ["g h"], "open it on GitHub"),
+        v(.symbols, .nav, ["space s"], "list the file's symbols"),
+        v(.github, .nav, ["space o g"], "open it on GitHub"),
         v(.githubMain, .nav, ["space o m"], "open these lines on GitHub, on main"),
         v(.githubBranch, .nav, ["space o b"], "open these lines on GitHub, at the branch (the code beside the diff: at its commit)"),
-        v(.preview, .nav, ["g P"], "preview it on a side port"),
-        v(.goForests, .nav, ["g f"], "go to Forests"),
-        v(.goDashboard, .nav, ["g s"], "go to the dashboard"),
-        v(.goTodo, .nav, ["g o"], "go to the tracker"),
-        v(.goMachine, .nav, ["g m"], "go to the machine"),
-        v(.goWiki, .nav, ["g i"], "go to the wiki"),
-        v(.goTutor, .nav, ["g t"], "go to the tutor"),
+        v(.preview, .nav, ["space o p"], "preview it on a side port"),
+        v(.goForests, .nav, ["g F"], "go to Forests"),
+        v(.goDashboard, .nav, ["g S"], "go to the dashboard"),
+        v(.goTodo, .nav, ["g O"], "go to the tracker"),
+        v(.goMachine, .nav, ["g M"], "go to the machine"),
+        v(.goWiki, .nav, ["g W"], "go to the wiki"),
+        v(.goTutor, .nav, ["g T"], "go to the tutor"),
         v(.alternate, .nav, ["g a"], "the alternate place (where the last jump left from)"),
         v(.slot1, .nav, ["g 1"], "focus forest 1"), v(.slot2, .nav, ["g 2"], "focus forest 2"), v(.slot3, .nav, ["g 3"], "focus forest 3"),
         v(.slot4, .nav, ["g 4"], "focus forest 4"), v(.slot5, .nav, ["g 5"], "focus forest 5"), v(.slot6, .nav, ["g 6"], "focus forest 6"),
@@ -152,11 +167,11 @@ public enum Verbs {
         v(.branches, .nav, ["space b"], "find a branch in any forest"),
         v(.jumps, .nav, ["space j"], "pick from the jumplist"),
         v(.lastPicker, .nav, ["space '"], "reopen the last picker"),
-        v(.paneLeft, .nav, ["C-h", "C-w h", "A-h"], "focus the pane to the left"),
-        v(.paneDown, .nav, ["C-w j", "A-j"], "focus the pane below"),
-        v(.paneUp, .nav, ["C-w k", "A-k"], "focus the pane above"),
-        v(.paneRight, .nav, ["C-l", "C-w l", "A-l"], "focus the pane to the right"),
-        v(.paneNext, .nav, ["C-w w"], "focus the next pane"),
+        v(.paneLeft, .nav, ["C-h", "C-w h", "space w h", "A-h"], "focus the pane to the left"),
+        v(.paneDown, .nav, ["C-w j", "space w j", "A-j"], "focus the pane below"),
+        v(.paneUp, .nav, ["C-w k", "space w k", "A-k"], "focus the pane above"),
+        v(.paneRight, .nav, ["C-l", "C-w l", "space w l", "A-l"], "focus the pane to the right"),
+        v(.paneNext, .nav, ["C-w w", "space w w"], "focus the next pane"),
         v(.command, .nav, [":"], "the command line: run anything by name"),
         v(.menu, .nav, ["space ?"], "the command menu"),
         v(.keys, .nav, ["?"], "every key, here and now"),
@@ -196,6 +211,8 @@ public enum Verbs {
     public static let moved: [(old: String, now: String, verb: Verb)] = [
         ("] ]", "] g", .nextHunk), ("[ [", "[ g", .previousHunk),
         ("m", ", m", .mark), ("M", ", M", .unmark),
+        ("g f", "g F", .goForests), ("g o", "g O", .goTodo), ("g m", "g M", .goMachine),
+        ("g I", "g i", .implementations), ("g P", "space o p", .preview), ("space S", "space s", .symbols),
     ]
 
     public static let byVerb: [Verb: VerbSpec] = Dictionary(table.map { ($0.verb, $0) }, uniquingKeysWith: { a, _ in a })

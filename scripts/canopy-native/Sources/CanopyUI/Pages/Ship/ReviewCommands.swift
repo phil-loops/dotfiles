@@ -6,7 +6,7 @@ import Foundation
 // (comment on a line or a range, reply, apply a suggestion, address a thread) with GitHub's keys
 // where they're verbs (r reply, c comment) and the review page's leader otherwise. What Phil writes
 // lands in the ledger (srv/reviewdesk.py) and, on his keypress, in his PENDING review on GitHub —
-// submitting it, and resolving, happen on GitHub, which `g h` opens. Text is typed in insert mode:
+// submitting it, and resolving, happen on GitHub, which `space o g` opens. Text is typed in insert mode:
 // ↵ / ⌃↵ sends, ⌥↵ is a newline, esc stops typing (the words stay); `, d` drafts, `, S` suggests.
 
 @MainActor
@@ -276,7 +276,7 @@ enum ReviewCommands {
             }
             let undoKey = weakApp?.registry.keyOf("review.pending.remove") ?? "X"
             let sendKey = weakApp?.registry.keyOf("review.send") ?? "p"
-            let ghKey = weakApp?.registry.keyOf("review.finish") ?? "g h"
+            let ghKey = weakApp?.registry.keyOf("review.finish") ?? "space o g"
             _ = d
             return Write(
                 ops: [Op(type: .draft, id: id, fields: ["items": .array(existing + [.object(item)])])],
@@ -388,7 +388,7 @@ enum ReviewCommands {
             return Write(ops: [Op(type: .draft, id: id, fields: ["items": .array(items)])],
                          path: repoPath("/review-draft"), body: ["branch": .string(name()), "op": "send", "keys": .array(keys.map(JSONValue.string))],
                          settled: { store.table(Draft.self)[id]?.items.contains { keys.contains($0.key) && $0.state == .sending } != true },
-                         said: "in your pending review — \(weakApp?.registry.keyOf("review.finish") ?? "g h") opens GitHub to submit it",
+                         said: "in your pending review — \(weakApp?.registry.keyOf("review.finish") ?? "space o g") opens GitHub to submit it",
                          failed: "kept as a draft, not on GitHub")
         }
         r.register(Command(id: "review.send", title: "Send the draft to your pending review", scope: .pending, budget: .slowIO, verb: .push, label: "send",

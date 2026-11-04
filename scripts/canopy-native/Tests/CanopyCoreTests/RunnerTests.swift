@@ -152,9 +152,9 @@ final class Ctx: CommandContext {
         let keys = KeyEngine(registry: runner.registry, runner: runner)
         #expect(keys.handle("g"))
         #expect(keys.pendingKeys == "g")
-        #expect(keys.whichKeyRows().map(\.key) == ["f"])
+        #expect(keys.whichKeyRows().map(\.key) == ["F"])
         #expect(keys.whichKeyRows().map(\.verb) == ["go-forests"])
-        #expect(keys.handle("f"))
+        #expect(keys.handle("F"))
         #expect(keys.pendingKeys == "")
         ctx.scopes = [.row, .global]
         keys.handle("g"); keys.handle("y")
@@ -169,6 +169,6 @@ final class Ctx: CommandContext {
         runner.registry.applyUserKeys(["nav.x": ["Z"]])
         #expect(runner.registry.keyProblems.isEmpty)
         #expect(runner.registry.keyWarnings.first?.contains("go-forests") == true)
-        #expect(runner.registry.command("nav.x")?.keys == ["g f"])
+        #expect(runner.registry.command("nav.x")?.keys == ["g F"])
     }
 }

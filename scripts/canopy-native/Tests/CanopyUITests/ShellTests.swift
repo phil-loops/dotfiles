@@ -135,7 +135,7 @@ import Testing
 
     @Test func navCommandsRoute() {
         let a = app()
-        a.keys.handle("g"); a.keys.handle("o")
+        a.keys.handle("g"); a.keys.handle("O")
         #expect(a.router.route == .todo)
         a.runner.dispatch("route.back", via: .menu)
         #expect(a.router.route == .forests)

@@ -223,7 +223,7 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:]) -> AppModel {
         a.keys.handle("f")
         #expect(a.store.view(Project.self, "r:bench")?.state == .focus)
         a.keys.handle("g")
-        #expect(a.keys.whichKeyRows().contains { $0.key == "f" && $0.verb == "go-forests" })
+        #expect(a.keys.whichKeyRows().contains { $0.key == "F" && $0.verb == "go-forests" })
         a.keys.handle("esc")
     }
 

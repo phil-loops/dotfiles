@@ -19,7 +19,7 @@ public struct Bound: Equatable, Sendable {
 /// verb table gives each key one verb; what's left to check is the table itself (after keys.toml),
 /// each page's leader namespace, and that nothing is bound twice in one place. Pure.
 public enum Bindings {
-    private static let named: Set<String> = ["space", "esc", "ret", "tab", "up", "down", "left", "right"]
+    private static let named: Set<String> = ["space", "esc", "ret", "tab", "up", "down", "left", "right", "home", "end"]
 
     public static func validKey(_ k: String) -> Bool {
         k.split(separator: " ", omittingEmptySubsequences: false).allSatisfy { tok in

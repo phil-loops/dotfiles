@@ -10,7 +10,7 @@ import SwiftUI
 /// the GPU. A watchdog also catches the main thread stalling between keys (work a key started that
 /// lands later). Prints the slowest and exits 1 when anything is over budget. `--quick` runs the
 /// first and third passes only (what `canopy-benchwatch` runs after each commit).
-/// Keys only move and look — never `g h`, `g p` or anything that leaves the app. Writes run, but
+/// Keys only move and look — never `space o g`, `space o p` or anything that leaves the app. Writes run, but
 /// every request that isn't a GET is answered here (`Blackhole`) and never reaches the server.
 @MainActor
 public enum Bench {

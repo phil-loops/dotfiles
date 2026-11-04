@@ -40,6 +40,13 @@ enum Practice {
     static func onBranch(_ a: AppModel, _ name: String) -> Bool { a.router.route == .review(repo: S.repo, branch: name) }
     static func onForest(_ a: AppModel, _ name: String) -> Bool { a.router.route == .forest(repo: S.repo, project: name) }
     static func here(_ a: AppModel) -> String? { pg(a).here?.key }
+    /// The character cursor's column on the line, and the length of the half it's on.
+    static func col(_ a: AppModel) -> Int? { pg(a).hereWord?.lowerBound }
+    static func lineLength(_ a: AppModel) -> Int {
+        guard let h = pg(a).here, let row = h.row else { return -1 }
+        let side = sideLine(row, prefer: pg(a).column).side
+        return ((side == .left ? row.left?.text : row.right?.text) as NSString?)?.length ?? -1
+    }
 
     static func forests(cursor: String? = RowKey.project(S.greetings)) -> @MainActor (AppModel) -> Bool {
         { a in
@@ -135,7 +142,7 @@ enum KeyLessons {
             KeyStep("{cancel} backs out one level: the line closes and you're in normal mode. esc only ever cancels — it never changes page.",
                     [.cancel], check: { $0.keys.mode == .normal }),
             KeyStep("Press the first key of {go-forests} and stop: a chord waits for its next key, as long as it takes, and which-key lists what can follow.",
-                    [], check: { !$0.keys.pendingKeys.isEmpty }, hint: "press just the first key of a chord, like the g of g f"),
+                    [], check: { !$0.keys.pendingKeys.isEmpty }, hint: "press just the first key of a chord, like the g of g F"),
             KeyStep("{cancel} drops the half-typed chord.", [.cancel], check: { $0.keys.pendingKeys.isEmpty }),
         ], recap: "{command} opens the command line. {cancel} backs out exactly one level — a chord, a layer, a mode — and never changes page."),
 
@@ -146,7 +153,23 @@ enum KeyLessons {
             KeyStep("{first} jumps back to the first.", [.first], check: { P.here($0) == P.pg($0).stopFiles.first.flatMap(P.pg($0).landing(file:)) }),
             KeyStep("{half-down} goes down half a page.", [.halfDown]),
             KeyStep("{half-up} comes back up half a page.", [.halfUp]),
-        ], recap: "{next} / {previous} a line, {first} / {last} the ends (jumps: the jumplist remembers), {half-down} / {half-up} half a page."),
+            KeyStep("{page-down} goes down a whole page.", [.pageDown]),
+            KeyStep("{page-up} comes back up one.", [.pageUp]),
+            KeyStep("{window-bottom}: the bottom of what's on screen.", [.windowBottom]),
+            KeyStep("{window-center}: its middle.", [.windowCenter]),
+            KeyStep("{window-top}: its top.", [.windowTop]),
+        ], recap: "{next} / {previous} a line, {first} / {last} the ends (jumps: the jumplist remembers), {half-down} / {half-up} half a page, {page-down} / {page-up} a page, {window-top} {window-center} {window-bottom} the screen's top, middle and bottom — Helix's keys for each."),
+
+        KeyLesson(id: "along", title: "Along a line", steps: [
+            KeyStep("A line of code: {line-end} goes to its end.", [.lineEnd], setup: P.review(at: "l|greet.ts|R:5"),
+                    check: { P.col($0) == P.lineLength($0) - 1 }),
+            KeyStep("{line-start}: its start.", [.lineStart], check: { P.col($0) == 0 }),
+            KeyStep("{first-non-blank}: the first character that isn't a space.", [.firstNonBlank], check: { P.col($0) == 2 }),
+            KeyStep("{find-char} then $: on to the next $.", [.findChar], check: { P.col($0) == 10 }, hint: "{find-char}, then type $"),
+            KeyStep("{till-char} then a comma: up to just before the next one.", [.tillChar], check: { P.col($0) == 20 }, hint: "{till-char}, then type ,"),
+            KeyStep("{find-char-back} then an opening brace: back to the previous one.", [.findCharBack], check: { P.col($0) == 11 }, hint: "{find-char-back}, then type an opening brace"),
+            KeyStep("{till-char-back} then r: back to just after the previous r.", [.tillCharBack], check: { P.col($0) == 7 }, hint: "{till-char-back}, then type r"),
+        ], recap: "{line-start} / {line-end} / {first-non-blank} the line's ends; {find-char} / {till-char} a character on, {find-char-back} / {till-char-back} one back — as in Helix."),
 
         KeyLesson(id: "ladder", title: "In and out", steps: [
             KeyStep("{main} goes in: forests → forest → branch → file → line. On the greetings forest, it opens the forest's page.",
