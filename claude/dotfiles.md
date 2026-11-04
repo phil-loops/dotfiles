@@ -16,7 +16,7 @@ Each concurrent session takes ONE lane (see `~/.dotfiles/OWNERS`). Start of dotf
 A file is "live" if it's dirty in `git status`, has a recent mtime, or changed between your Read and Edit. Writing it directly races/clobbers the other session. Instead:
 
 1. **Author in a throwaway worktree at HEAD** — `git worktree add --detach /tmp/wt HEAD`, edit there.
-2. **Capture a patch artifact** — `git -C /tmp/wt diff > ~/.dotfiles/patches/<name>.patch` (durable, reviewable, hand-off-able).
+2. **Capture a patch artifact** — `git -C /tmp/wt add -A && git -C /tmp/wt diff --cached > ~/.dotfiles/patches/<name>.patch` (`add -A` is safe in a throwaway worktree, and a plain `diff` would leave new files out).
 3. **Land with `patch-land <patch> -m "<subject>"`** — `git apply --3way`, commits exactly the paths it touches, deletes the patch; refuses if those paths are dirty, and a conflict leaves tree and patch untouched.
 
 Land when the file goes quiet, or hand the `.patch` to the session that owns the file. A patch left in `patches/` means *not landed yet* — `patch-land --sweep` says where each stands, `--prune` retires the ones already in.
