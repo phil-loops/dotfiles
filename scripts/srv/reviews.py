@@ -93,9 +93,16 @@ def _warm_review_requests():
                 ctx.run([os.path.join(ctx.SCRIPTS, "stack-review-import"), num]).returncode != 0:
             continue
         branch = f"review/pr-{num}"
-        if branch in _warming and _warming[branch].poll() is None:
+        if branch in _warming and _warming[branch].poll() is None or _preparing(branch):
             continue
         _warming[branch] = picker.prepare_branch(branch)
+
+
+def _preparing(branch):
+    """A prepare for this branch is alive — maybe started by a server that has since restarted, which
+    `_warming` forgets: five restarts on 2026-11-04 left six prepares hashing the same two trees."""
+    return subprocess.run(["pgrep", "-f", f"stack-open --prepare {re.escape(branch)}$"],
+                          capture_output=True).returncode == 0
 
 
 def warm_requests_forever():
