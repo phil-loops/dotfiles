@@ -43,15 +43,17 @@ enum BranchCommands {
             id: "branch.push", title: "Push to origin", scope: .branch, verb: .push, label: "push",
             route: { id in pushRoute(id, app).map { RouteTo($0, target: id) } }))
 
-        func gatesWrite(_ v: BranchView, skip: [String]) -> Write {
+        func gatesWrite(_ v: BranchView, skip: [String], quick: Bool = false) -> Write {
             let id = v.b.id, was = v.b.gates
             var body: JSONObject = ["branch": .string(v.b.name), "detach": true]
             if !skip.isEmpty { body["skip"] = .array(skip.map(JSONValue.string)) }
+            if quick { body["mode"] = "quick" }
             return Write(
                 ops: [Op(type: .branch, id: id, fields: ["gates": "running"])],
                 path: t.atRepo(v.b.repo, "/gates"), body: .object(body),
                 settled: { s.table(Branch.self)[id]?.gates != was },
-                said: skip.isEmpty ? "running the gates — p pushes once they're green" : "skipping \(skip.joined(separator: ", ")) for this code — the rest re-run",
+                said: !skip.isEmpty ? "skipping \(skip.joined(separator: ", ")) for this code — the rest re-run"
+                    : quick ? "running the quick gates — typecheck and lint left to CI" : "running the gates — p pushes once they're green",
                 failed: "the gates didn't start")
         }
         r.register(Command(
@@ -59,16 +61,22 @@ enum BranchCommands {
             available: { id in m.branchView(id).map { $0.b.gates != .running } ?? false },
             write: { id, _ in m.branchView(id).map { gatesWrite($0, skip: []) } }))
         r.register(Command(
+            id: "branch.gates.quick", title: "Run the quick gates — typecheck and lint left to CI, which runs them on push",
+            scope: .branch, label: "quick gates", quiet: true,
+            available: { id in m.branchView(id).map { $0.b.gates != .running } ?? false },
+            write: { id, _ in m.branchView(id).map { gatesWrite($0, skip: [], quick: true) } }))
+        r.register(Command(
             id: "branch.gates.show", title: "Show a gate's output in the gates strip (again to go back to the running one)",
             scope: .branch, needsArg: true, quiet: true,
             local: { target, _ in m.gateShown = m.gateShown == target ? nil : target }))
         r.register(Command(
-            id: "branch.gates.skip", title: "Skip a red gate for this code and re-run the rest", scope: .branch, needsArg: true, quiet: true,
+            id: "branch.gates.skip", title: "Skip a red gate for this code and re-run the rest (\"<branch> <gates> quick\" keeps a quick run quick)",
+            scope: .branch, needsArg: true, quiet: true,
             write: { target, _ in
-                let parts = target.split(separator: " ", maxSplits: 1).map(String.init)
+                let parts = target.split(separator: " ").map(String.init)
                 let skip = (parts.count > 1 ? parts[1] : "").split(separator: ",").map(String.init).filter { !$0.isEmpty }
                 guard let v = m.branchView(parts.first), !skip.isEmpty else { return nil }
-                return gatesWrite(v, skip: skip)
+                return gatesWrite(v, skip: skip, quick: parts.dropFirst(2).contains("quick"))
             }))
         r.register(Command(
             id: "branch.gates.wait", title: "The gates are running", scope: .branch, quiet: true,

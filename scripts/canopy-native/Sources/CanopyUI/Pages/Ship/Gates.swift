@@ -108,6 +108,11 @@ public enum GatesRun {
         }
     }
 
+    /// The gates a quick run left to CI (stack-gates --quick says "quick gates" in each one's warn).
+    public static func quick(_ rows: [GateRow]) -> [String] {
+        rows.filter { $0.state == .waived && $0.summary?.contains("quick gates") == true }.map(\.name)
+    }
+
     /// What an in-flight run is doing while no gate is running: "gates starting" before the first
     /// gate (the server is readying the checkout or waiting for a slot), "<gate> next" between two.
     /// Nil when a gate is running, one went red, or nothing is in flight.
