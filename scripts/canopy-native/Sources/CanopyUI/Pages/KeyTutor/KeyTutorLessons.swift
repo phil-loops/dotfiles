@@ -149,6 +149,7 @@ enum KeyLessons {
         KeyLesson(id: "moving", title: "Moving", steps: [
             KeyStep("A diff to move through. {next} goes down a line.", [.next], setup: P.review()),
             KeyStep("{previous} goes up.", [.previous]),
+            KeyStep("3 then {next}: three lines down.", [.next]),
             KeyStep("{last} jumps to the last change.", [.last], check: { P.here($0) == P.pg($0).stops.last { $0.row.map(changed) ?? false }?.key }),
             KeyStep("{first} jumps back to the first.", [.first], check: { P.here($0) == P.pg($0).stopFiles.first.flatMap(P.pg($0).landing(file:)) }),
             KeyStep("{half-down} goes down half a page.", [.halfDown]),
@@ -158,7 +159,7 @@ enum KeyLessons {
             KeyStep("{window-bottom}: the bottom of what's on screen.", [.windowBottom]),
             KeyStep("{window-center}: its middle.", [.windowCenter]),
             KeyStep("{window-top}: its top.", [.windowTop]),
-        ], recap: "{next} / {previous} a line, {first} / {last} the ends (jumps: the jumplist remembers), {half-down} / {half-up} half a page, {page-down} / {page-up} a page, {window-top} {window-center} {window-bottom} the screen's top, middle and bottom — Helix's keys for each."),
+        ], recap: "{next} / {previous} a line (a count first repeats it), {first} / {last} the ends (jumps: the jumplist remembers), {half-down} / {half-up} half a page, {page-down} / {page-up} a page, {window-top} {window-center} {window-bottom} the screen's top, middle and bottom — Helix's keys for each."),
 
         KeyLesson(id: "along", title: "Along a line", steps: [
             KeyStep("A line of code: {line-end} goes to its end.", [.lineEnd], setup: P.review(at: "l|greet.ts|R:5"),
@@ -170,9 +171,9 @@ enum KeyLessons {
             KeyStep("{find-char-back} then an opening brace: back to the previous one.", [.findCharBack], check: { P.col($0) == 11 }, hint: "{find-char-back}, then type an opening brace"),
             KeyStep("{till-char-back} then r: back to just after the previous r.", [.tillCharBack], check: { P.col($0) == 7 }, hint: "{till-char-back}, then type r"),
             KeyStep("{repeat-motion} does it again: back to just after the r before that.", [.repeatMotion], check: { P.col($0) == 3 }),
-            KeyStep("{next-long-word}: the next run of non-blank characters — punctuation and all, unlike {next-word}.", [.nextLongWord]),
-            KeyStep("{previous-long-word}: back a run.", [.previousLongWord]),
-            KeyStep("{long-word-end}: the last character of this run, or the next.", [.longWordEnd]),
+            KeyStep("{next-long-word}: the next WORD.", [.nextLongWord]),
+            KeyStep("{previous-long-word}: back one.", [.previousLongWord]),
+            KeyStep("{long-word-end}: its end.", [.longWordEnd]),
         ], recap: "{line-start} / {line-end} / {first-non-blank} the line's ends; {find-char} / {till-char} a character on, {find-char-back} / {till-char-back} one back, {repeat-motion} again; {next-long-word} / {previous-long-word} / {long-word-end} by runs of non-blanks — as in Helix."),
 
         KeyLesson(id: "shape", title: "Code by its shape", steps: [
@@ -192,8 +193,8 @@ enum KeyLessons {
             KeyStep("{view-top} scrolls so this line is at the top of the screen.", [.viewTop]),
             KeyStep("{view-center}: in the middle.", [.viewCenter]),
             KeyStep("{view-bottom}: at the bottom.", [.viewBottom]),
-            KeyStep("{scroll-down} scrolls the diff a line; the cursor stays until the edge carries it.", [.scrollDown]),
-            KeyStep("{scroll-up}: a line the other way.", [.scrollUp]),
+            KeyStep("{scroll-down}: scroll a line.", [.scrollDown]),
+            KeyStep("{scroll-up}: back.", [.scrollUp]),
         ], recap: "{next-function} / {previous-function} functions, {next-type} / {previous-type} types, {next-finding} / {previous-finding} the review's findings ({first-finding} / {last-finding} its ends), {first-change} / {last-change} the ends; {view-top} {view-center} {view-bottom} place the screen, {scroll-down} / {scroll-up} nudge it — Helix's ] [ and z."),
 
         KeyLesson(id: "ladder", title: "In and out", steps: [
@@ -270,12 +271,12 @@ enum KeyLessons {
             KeyStep("{previous-hunk}: the one before.", [.previousHunk]),
             KeyStep("{next-thread}: the next conversation, open ones first.", [.nextThread], check: { P.here($0)?.hasPrefix("t|") == true }),
             KeyStep("{previous-thread}: the one before.", [.previousThread], check: { P.here($0)?.hasPrefix("t|") == true }),
-            KeyStep("{next-conversation} goes to a conversation too — and keeps doing so while a search is kept, where {next-thread} steps matches.", [.nextConversation],
+            KeyStep("{next-conversation}: a conversation, even mid-search.", [.nextConversation],
                     check: { P.here($0)?.hasPrefix("t|") == true }),
             KeyStep("{previous-conversation}: the one before.", [.previousConversation], check: { P.here($0)?.hasPrefix("t|") == true }),
-            KeyStep("{next-git-hunk}: git's next hunk — one can hold several of {next-hunk}'s changes.", [.nextGitHunk]),
+            KeyStep("{next-git-hunk}: git's next hunk.", [.nextGitHunk]),
             KeyStep("{previous-git-hunk}: back one.", [.previousGitHunk]),
-            KeyStep("{next-test}: the next test file's first change.", [.nextTest]),
+            KeyStep("{next-test}: the next test file.", [.nextTest]),
             KeyStep("{previous-test}: the one before.", [.previousTest]),
             KeyStep("{match} goes to the other half of the edit: the line this one replaced.", [.match], setup: P.review(at: "l|greet.ts|R:2"),
                     check: { P.pg($0).range?.side == .left }),
@@ -347,7 +348,7 @@ enum KeyLessons {
                     check: { ShipState.of($0).composer != nil }),
             KeyStep("{cancel} twice: stop writing, then close the box.", [.cancel],
                     check: { $0.keys.mode == .normal && ShipState.of($0).composer == nil }),
-            KeyStep("Digits pick the Nth thing shown: {nth-1}, the conversation tab.", [.nth1], check: { P.pg($0).tab == "conversation" }),
+            KeyStep("{nth-1}: the conversation tab.", [.nth1], check: { P.pg($0).tab == "conversation" }),
             KeyStep("{nth-2}: the commits tab.", [.nth2], check: { P.pg($0).tab == "commits" }),
             KeyStep("{nth-3}: the files again.", [.nth3], check: { P.pg($0).tab == "files" }),
             KeyStep("{face} steps through the tabs too.", [.face]),
