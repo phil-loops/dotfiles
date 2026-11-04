@@ -61,6 +61,25 @@ enum ShellCommands {
                            local: { [weak app] _, _ in try step(app, down: true) { $0.moveCursor(max(1, ($0.pane?.pageSize ?? 10))) } }))
         r.register(Command(id: "cursor.halfup", title: "Up half a page", scope: .global, verb: .halfUp, modes: motion, quiet: true,
                            local: { [weak app] _, _ in try step(app, down: false) { $0.moveCursor(-max(1, ($0.pane?.pageSize ?? 10))) } }))
+        r.register(Command(id: "cursor.pagedown", title: "Down a page", scope: .global, verb: .pageDown, modes: motion, quiet: true,
+                           local: { [weak app] _, _ in try step(app, down: true) { $0.moveCursor(2 * max(1, ($0.pane?.pageSize ?? 10))) } }))
+        r.register(Command(id: "cursor.pageup", title: "Up a page", scope: .global, verb: .pageUp, modes: motion, quiet: true,
+                           local: { [weak app] _, _ in try step(app, down: false) { $0.moveCursor(-2 * max(1, ($0.pane?.pageSize ?? 10))) } }))
+        /// g t / g c / g b: the focused pane's top, middle or bottom row of what's on screen (Helix's window moves).
+        func onScreen(_ app: AppModel?, _ pick: ([String]) -> String?) throws {
+            guard let app, let pane = app.pane else { return }
+            let seen = (app.provider?.targets(app) ?? app.visibleTargets()).filter { $0.pane == pane.id && pane.rows.contains($0.key) }
+            let rows = pane.rows.filter { k in seen.contains { $0.key == k } }
+            guard let k = pick(rows) else { throw Refusal("nothing on screen here") }
+            if k == app.selected { throw Refusal("already there") }
+            app.setCursor(k)
+        }
+        r.register(Command(id: "cursor.screen.top", title: "The top of the screen", scope: .global, verb: .windowTop, modes: motion, quiet: true,
+                           local: { [weak app] _, _ in try onScreen(app) { $0.first } }))
+        r.register(Command(id: "cursor.screen.middle", title: "The middle of the screen", scope: .global, verb: .windowCenter, modes: motion, quiet: true,
+                           local: { [weak app] _, _ in try onScreen(app) { $0.isEmpty ? nil : $0[$0.count / 2] } }))
+        r.register(Command(id: "cursor.screen.bottom", title: "The bottom of the screen", scope: .global, verb: .windowBottom, modes: motion, quiet: true,
+                           local: { [weak app] _, _ in try onScreen(app) { $0.last } }))
         r.register(Command(id: "cursor.set", title: "Select row", scope: .global, needsArg: true, quiet: true,
                            local: { [weak app] key, _ in app?.setCursor(key) }))
         r.register(Command(id: "pane.open", title: "Open the row under the cursor", scope: .global, verb: .main, label: "open",
@@ -83,7 +102,7 @@ enum ShellCommands {
                                app.focus(pane: ps[(i + 1) % ps.count].id)
                            }))
 
-        // ── pages ── (`g d` is Helix's go-to-definition on the review page, so the dashboard is `g s`)
+        // ── pages ── (g + a capital: lowercase g keys are Helix's moves in the code)
         let go: [String: Verb] = ["forests": .goForests, "dashboard": .goDashboard, "todo": .goTodo, "machine": .goMachine, "wiki": .goWiki, "tutor": .goTutor]
         for s in Surface.all where !s.arg || s.bare {
             r.register(Command(id: "nav.\(s.id)", title: "Go to \(s.title)", scope: .global, verb: go[s.id],

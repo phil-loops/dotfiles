@@ -137,7 +137,9 @@ public enum KeyGroup: String, CaseIterable, Sendable {
     /// The group a verb puts its command in when the command doesn't name one.
     public static func of(_ verb: Verb) -> KeyGroup? {
         switch verb {
-        case .next, .previous, .first, .last, .halfDown, .halfUp, .left, .right, .nextWord, .previousWord,
+        case .next, .previous, .first, .last, .halfDown, .halfUp, .pageDown, .pageUp, .windowTop, .windowCenter, .windowBottom,
+             .left, .right, .nextWord, .previousWord, .lineStart, .lineEnd, .firstNonBlank,
+             .findChar, .tillChar, .findCharBack, .tillCharBack,
              .nextFile, .previousFile, .nextHunk, .previousHunk, .nextThread, .previousThread, .match, .changedFiles,
              .labels, .find, .search, .searchWord, .map, .paneLeft, .paneDown, .paneUp, .paneRight, .paneNext:
             return .move

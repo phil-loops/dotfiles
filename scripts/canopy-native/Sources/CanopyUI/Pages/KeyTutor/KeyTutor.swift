@@ -175,7 +175,9 @@ final class KeyTutor {
         }
         settle()
         if ready, let s = step {
-            let fired = s.wants.isEmpty || evs.contains { $0.verb.map(s.wants.contains) == true }
+            // a verb that waits for more (f / t wait for a character) stays fired until the step ends
+            if evs.contains(where: { $0.verb.map(s.wants.contains) == true }) { wantFired = true }
+            let fired = s.wants.isEmpty || wantFired
             if fired, s.check?(sb) ?? true {
                 complete()
                 return
@@ -219,6 +221,8 @@ final class KeyTutor {
     }
 
     /// Re-check the step's outcome for a few seconds after its verb fired.
+    private var wantFired = false
+
     private func awaitOutcome() {
         let at = (lessonIndex, stepIndex)
         outcome?.cancel()
@@ -235,6 +239,7 @@ final class KeyTutor {
     private func begin() {
         ready = false
         misses = 0
+        wantFired = false
         events = []
         outcome?.cancel()
         outcome = nil

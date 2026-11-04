@@ -99,10 +99,10 @@ import Testing
         }
     }
 
-    @Test func fAndGWOpenTheLayerAndALabelPicksThenExits() {
+    @Test func gWOpensTheLayerAndALabelPicksThenExits() {
         let a = app()
         layOut(a)
-        a.keys.handle("f")
+        a.keys.handle("g"); a.keys.handle("w")
         #expect(a.keys.active == .labels)
         let s = a.labeling!
         let last = a.panes[1].rows.prefix(4).last!
@@ -116,31 +116,46 @@ import Testing
         #expect(a.keys.active == .labels)
     }
 
+    @Test func gTGCGBGoToTheScreensTopMiddleAndBottom() {
+        let a = app()
+        a.focus(pane: "page")
+        layOut(a)
+        let shown = Array(a.panes[1].rows.prefix(4))
+        a.keys.handle("g"); a.keys.handle("b")
+        #expect(a.selected == shown.last)
+        a.keys.handle("g"); a.keys.handle("c")
+        #expect(a.selected == shown[2])
+        a.keys.handle("g"); a.keys.handle("t")
+        #expect(a.selected == shown.first)
+        a.keys.handle("g"); a.keys.handle("t")
+        #expect(a.runner.note == "already there")
+    }
+
     @Test func labelsAreStableAcrossOpens() {
         let a = app()
         layOut(a, extra: 12)
-        a.keys.handle("f")
+        a.keys.handle("g"); a.keys.handle("w")
         let first = a.labeling!.items.map(\.label)
         #expect(first.allSatisfy { $0.count == 2 }, "> 10 targets: two keys, the first picking the pane")
         #expect(Set(a.labeling!.items.filter { $0.pane == "pages" }.map { $0.label.first! }).count == 1)
         a.keys.handle("esc")
         #expect(a.keys.active == .normal)
         a.keys.handle("j")
-        a.keys.handle("f")
+        a.keys.handle("g"); a.keys.handle("w")
         #expect(a.labeling!.items.map(\.label) == first, "moving the cursor doesn't reshuffle labels")
     }
 
     @Test func aPrefixWaitsAndAnythingElseCancels() {
         let a = app()
         layOut(a, extra: 12)
-        a.keys.handle("f")
+        a.keys.handle("g"); a.keys.handle("w")
         let tab = a.labeling!.items.first { $0.pane == "tabs" }!.label
         a.keys.handle(String(tab.first!))
         #expect(a.keys.active == .labels && a.labeling?.typed.count == 1)
         a.keys.handle("z")
         #expect(a.keys.active == .normal && a.labeling == nil)
         #expect(a.router.route == .wiki(slug: nil))
-        a.keys.handle("f")
+        a.keys.handle("g"); a.keys.handle("w")
         for ch in tab { a.keys.handle(String(ch)) }
         #expect(a.router.route == .todo, "a free target runs its command")
         #expect(a.jumps.back.count == 1, "one jump, not one per record point")
@@ -151,7 +166,7 @@ import Testing
         a.focus(pane: "page")
         layOut(a)
         a.keys.handle("v")
-        a.keys.handle("f")
+        a.keys.handle("g"); a.keys.handle("w")
         let l = a.labeling!.label("page", a.panes[1].rows[3])!
         a.keys.handle(l)
         #expect(a.keys.mode == .select && a.selection.count == 4)
@@ -159,7 +174,7 @@ import Testing
 
     @Test func nothingToLabelSaysSo() {
         let a = app()
-        a.keys.handle("f")
+        a.keys.handle("g"); a.keys.handle("w")
         #expect(a.keys.active == .normal && a.labeling == nil)
         a.runner.dispatch("nav.labels", via: .palette)
         #expect(a.runner.note == "nothing on screen to label")
@@ -181,9 +196,9 @@ import Testing
         a.focus(pane: "page")
         a.keys.handle("j"); a.keys.handle("j")
         let spot = a.selected
-        a.keys.handle("g"); a.keys.handle("o")
+        a.keys.handle("g"); a.keys.handle("O")
         #expect(a.router.route == .todo)
-        a.keys.handle("g"); a.keys.handle("m")
+        a.keys.handle("g"); a.keys.handle("M")
         a.keys.handle("C-o")
         #expect(a.router.route == .todo)
         a.keys.handle("C-o")
@@ -195,11 +210,11 @@ import Testing
 
     @Test func aNewJumpAfterGoingBackTruncatesForward() {
         let a = app()
-        a.keys.handle("g"); a.keys.handle("o")
-        a.keys.handle("g"); a.keys.handle("m")
+        a.keys.handle("g"); a.keys.handle("O")
+        a.keys.handle("g"); a.keys.handle("M")
         a.keys.handle("C-o"); a.keys.handle("C-o")
         #expect(a.jumps.fwd.count == 2)
-        a.keys.handle("g"); a.keys.handle("f")
+        a.keys.handle("g"); a.keys.handle("F")
         #expect(a.jumps.fwd.isEmpty)
         a.keys.handle("C-i")
         #expect(a.router.route == .forests, "nothing forward any more")
@@ -220,7 +235,7 @@ import Testing
         let a = app()
         a.keys.handle("C-s")
         #expect(a.jumps.back.count == 1)
-        a.keys.handle("g"); a.keys.handle("o")
+        a.keys.handle("g"); a.keys.handle("O")
         a.keys.handle("g"); a.keys.handle("a")
         #expect(a.router.route == .wiki(slug: nil))
         a.keys.handle("g"); a.keys.handle("a")
@@ -312,7 +327,7 @@ import Testing
 
     @Test func spaceJPicksFromTheJumplist() throws {
         let a = try app()
-        press(a, "g o"); press(a, "g m")
+        press(a, "g O"); press(a, "g M")
         press(a, "space j")
         #expect(a.nav.shown.map(\.label) == ["todo · auto-archive-closed-forests", "forests · hankles-limited-label"], "a real page names its cursor row")
         a.nav.move(1)
@@ -383,7 +398,7 @@ import Testing
         let a = app()
         let keyOf = { (id: String) in a.registry.command(id)?.keys ?? [] }
         #expect(keyOf("mode.select") == ["v"])
-        #expect(keyOf("nav.labels") == ["g w", "f"])
+        #expect(keyOf("nav.labels") == ["g w"])
         #expect(keyOf("nav.branches") == ["space b"])
         #expect(keyOf("page.search") == ["/"])
         #expect(keyOf("nav.back") == ["C-o"] && keyOf("nav.forward") == ["C-i"] && keyOf("nav.save") == ["C-s"])
@@ -400,6 +415,6 @@ import Testing
         let rows = a.keys.whichKeyRows()
         #expect(rows.contains { $0.key == "1–9" && $0.what == "go to focus forest N" })
         #expect(!rows.contains { $0.key == "5" })
-        #expect(rows.count <= 12, "\(rows.map(\.key))")
+        #expect(rows.count <= 20, "\(rows.map(\.key))")
     }
 }

@@ -148,7 +148,7 @@ import Testing
         // grouped in the palette's order, and every command shows its key
         let order = all.map { MenuGroups.order.firstIndex(of: $0.group)! }
         #expect(order == order.sorted())
-        #expect(all.first { $0.id == "nav.machine" }?.side == "g m")
+        #expect(all.first { $0.id == "nav.machine" }?.side == "g ⇧m")
         menu.query = "go to machine"
         #expect(menu.rows(a).first?.id == "nav.machine")
         a.keys.handle("ret")
@@ -223,7 +223,7 @@ import Testing
         let first = m.entries.lazy.compactMap { e -> String? in if case .line(let l, false) = e { return l.cmd.id }; return nil }.first
         #expect(first == "nav.forests", "\(String(describing: first))")
         a.keys.handle("ret")
-        #expect(!a.sheetOpen && a.router.route == .forests, "↵ ran the first match: g f")
+        #expect(!a.sheetOpen && a.router.route == .forests, "↵ ran the first match: g F")
     }
 
     /// The Review page's own keys each say where they sit in `?` — a group, or a verb that implies
@@ -241,7 +241,7 @@ import Testing
         #expect(a.keys.layer == .sheet)
         let m = KeySheet.model(a)
         #expect(m.here == "the Todo page")
-        #expect(m.everywhere.contains { $0.cmd.id == "nav.forests" && $0.key == "g f" })
+        #expect(m.everywhere.contains { $0.cmd.id == "nav.forests" && $0.key == "g F" })
         #expect(m.entries.contains(.heading("Anywhere", gold: false)))
         let sheet = a.state { SheetState() }
         a.keys.handle("j"); a.keys.handle("j")
@@ -288,7 +288,7 @@ import Testing
         let a = app(.wiki(slug: nil))
         a.keys.handle("g")
         let rows = a.keys.whichKeyRows()
-        #expect(rows.contains { $0.key == "f" && $0.what == "go to Forests" })
+        #expect(rows.contains { $0.key == "F" && $0.what == "go to Forests" })
         let ks: [String] = rows.map(\.key)
         let lower: [String] = ks.map { $0.lowercased() }
         #expect(lower == lower.sorted())

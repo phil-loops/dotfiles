@@ -3,7 +3,7 @@ import CanopyCore
 import Foundation
 
 /// `--dump`: no window. Hydrate, hold /v2/events for `--dump-wait` seconds, exercise the key
-/// engine (`g` → which-key, `g o` / `g f` navigate, j/v/j/j select, esc, `:go dashbord` ret), print the world as JSON on
+/// engine (`g` → which-key, `g O` / `g F` navigate, j/v/j/j select, esc, `:go dashbord` ret), print the world as JSON on
 /// stdout, exit (1 when no `hello` arrived). Nothing is written to the server: telemetry is off,
 /// and no command sends a write.
 @MainActor
@@ -50,7 +50,7 @@ public enum Dump {
         let pendingAfterG = app.keys.pendingKeys
         app.keys.handle("o")
         let afterGO = app.router.route.path
-        app.keys.handle("g"); app.keys.handle("f")
+        app.keys.handle("g"); app.keys.handle("F")
         let afterGF = app.router.route.path
         // the modal grammar: j/G move the focused pane, v selects, esc backs out, `:` runs by name
         app.keys.handle("j"); app.keys.handle("v"); app.keys.handle("j"); app.keys.handle("j")

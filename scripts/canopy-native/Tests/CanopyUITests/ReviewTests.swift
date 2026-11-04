@@ -297,7 +297,7 @@ import Testing
         let pg = ReviewPageState.of(a)
         let removed = pg.here?.key
         keys(a, "}")
-        #expect(pg.here?.key == removed && a.runner.note == "the only file in this diff · ] [ move by change")
+        #expect(pg.here?.key == removed && a.runner.note == "the only file in this diff · ] g [ g move by change")
         keys(a, "]", "g")
         #expect(pg.here?.key == "l|a.ts|R:40", "the next change, from the removed line")
         keys(a, "]", "g")

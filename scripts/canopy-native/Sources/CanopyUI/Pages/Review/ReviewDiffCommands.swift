@@ -1,6 +1,9 @@
 import CanopyCore
 import Foundation
 
+/// The layer f / t wait in for the character to find.
+let findCharLayer: KeyMode = "find-char"
+
 // The review page's diff commands (commands/review.ts, the diff half): moving by line, hunk, file,
 // thread and branch; tabs, split, base; the map; folds and hidden lines; viewed; code navigation;
 // open in Helix. Ship's half (comment, reply, send, resolve, history, …) is area C's.
@@ -134,7 +137,7 @@ enum DiffCommands {
             let j = i + dir
             guard fs.indices.contains(j), let k = pg.landing(file: fs[j]) else {
                 let edge = fs.count <= 1 ? "the only file in this diff" : dir > 0 ? "the last file" : "the first file"
-                throw Refusal("\(edge) · ] [ move by change")
+                throw Refusal("\(edge) · ] g [ g move by change")
             }
             if app.keys.mode != .select { pg.mark = nil }
             pg.setCursor(k)
@@ -502,6 +505,77 @@ enum DiffCommands {
                            local: { _, _ in try step(1) }))
         r.register(Command(id: "review.word.previous", title: "The previous name", scope: .review, verb: .previousWord, quiet: true,
                            local: { _, _ in try step(-1) }))
+        // ── along the line, as Helix: g h / g l / g s to its start, end and first non-blank; f / t / F / T
+        // to a character typed next ──
+
+        /// Put the character cursor at the offset `pick` chooses on the line under the cursor, diff or side.
+        func onLine(_ edge: String, _ pick: (String, Range<Int>?) -> Int?) throws {
+            if app.pane?.id == reviewCodePane, pg.side != nil {
+                guard let line = RowKey.id(app.selected, "s").flatMap(Int.init) else { throw Refusal("no line here") }
+                let lines = (pg.sideText ?? "").components(separatedBy: "\n")
+                let t = line >= 1 && line <= lines.count ? lines[line - 1] : ""
+                guard !t.isEmpty, let at = pick(t, pg.sideHereWord) else { throw Refusal(edge) }
+                pg.sideWord = (line, char(t, at))
+                return
+            }
+            guard app.pane?.id == reviewDiffPane, let h = pg.here, h.kind == .line, let row = h.row else { throw Refusal("no code on this row") }
+            let side = sideLine(row, prefer: pg.column).side
+            let t = halfText(h, side) ?? ""
+            guard !t.isEmpty, let at = pick(t, pg.hereWord) else { throw Refusal(edge) }
+            let r = char(t, at)
+            if r == pg.hereWord { throw Refusal(edge) }
+            pg.word = (h.key, side, r)
+            (goal, placed, carried) = (r.lowerBound, r.lowerBound, h.key)
+            pg.cursorMoved &+= 1
+        }
+        let len: (String) -> Int = { ($0 as NSString).length }
+        r.register(Command(id: "review.line.start", title: "The start of the line", scope: .review, verb: .lineStart, modes: motion, quiet: true,
+                           local: { _, _ in try onLine("already at the line's start") { _, _ in 0 } }))
+        r.register(Command(id: "review.line.end", title: "The end of the line", scope: .review, verb: .lineEnd, modes: motion, quiet: true,
+                           local: { _, _ in try onLine("already at the line's end") { t, _ in len(t) - 1 } }))
+        r.register(Command(id: "review.line.first", title: "The line's first non-blank", scope: .review, verb: .firstNonBlank, modes: motion, quiet: true,
+                           local: { _, _ in try onLine("already at the first non-blank") { t, _ in min(firstNonBlank(t), len(t) - 1) } }))
+
+        /// Where f / t / F / T land for `c` on `t`, from the character cursor `w`: nil when it isn't there.
+        func seekChar(_ t: String, _ w: Range<Int>?, _ c: String, back: Bool, till: Bool) -> Int? {
+            let ns = t as NSString
+            let n = ns.length
+            let here = w?.lowerBound ?? (back ? n : -1)
+            if back {
+                let end = here - (till ? 1 : 0)
+                guard end > 0 else { return nil }
+                let found = ns.range(of: c, options: .backwards, range: NSRange(location: 0, length: end))
+                guard found.location != NSNotFound else { return nil }
+                return till ? found.location + found.length : found.location
+            }
+            let from = max(0, (w?.upperBound ?? 0) + (till && w != nil ? 1 : 0))
+            guard from < n else { return nil }
+            let found = ns.range(of: c, range: NSRange(location: from, length: n - from))
+            guard found.location != NSNotFound else { return nil }
+            return till ? (found.location > from ? found.location - 1 : nil) : found.location
+        }
+        var seeking: (back: Bool, till: Bool)?
+        app.keys.layerKeys[findCharLayer] = { [weak app] k in
+            guard let app else { return false }
+            app.keys.closeLayer()
+            guard let how = seeking, k.count == 1 || k == "space" else { return true }
+            let c = k == "space" ? " " : k
+            do {
+                try onLine("no \(c) \(how.back ? "before" : "after") the cursor on this line") { t, w in seekChar(t, w, c, back: how.back, till: how.till) }
+            } catch let e as Refusal { app.runner.say(e.message) } catch {}
+            return true
+        }
+        for (id, verb, back, till, what) in [("review.find.char", Verb.findChar, false, false, "on to"), ("review.till.char", .tillChar, false, true, "up to"),
+                                             ("review.find.back", .findCharBack, true, false, "back to"), ("review.till.back", .tillCharBack, true, true, "back to just after")] {
+            r.register(Command(id: id, title: "\(what.prefix(1).uppercased() + what.dropFirst()) a character you type next, along the line", scope: .review,
+                               verb: verb, modes: motion, quiet: true,
+                               local: { _, _ in
+                                   let inCode = (app.pane?.id == reviewCodePane && pg.side != nil) || (app.pane?.id == reviewDiffPane && pg.here?.kind == .line)
+                                   guard inCode else { throw Refusal("f / t find a character along a line of code — g w labels the screen") }
+                                   seeking = (back, till)
+                                   app.keys.openLayer(findCharLayer)
+                               }))
+        }
         r.register(Command(id: "review.conversation", title: "The conversation, in place of the diff (esc brings the diff back)", scope: .review,
                            verb: .conversation, label: "conversation", available: { _ in pg.integration == nil },
                            local: { _, _ in

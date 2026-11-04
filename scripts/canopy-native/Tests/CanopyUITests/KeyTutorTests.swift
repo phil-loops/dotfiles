@@ -65,6 +65,10 @@ import Testing
             }
             press(a, label.map(String.init).joined(separator: " "))
         case ("jumps", 1): sb.nav.typed("foot"); press(a, keyOf(sb, .send))
+        case ("along", 3): press(a, keyOf(sb, .findChar)); a.keys.handle("$")
+        case ("along", 4): press(a, keyOf(sb, .tillChar)); a.keys.handle(",")
+        case ("along", 5): press(a, keyOf(sb, .findCharBack)); a.keys.handle("{")
+        case ("along", 6): press(a, keyOf(sb, .tillCharBack)); a.keys.handle("r")
         case ("code", 1): ReviewPageState.of(sb).filter = "head"; press(a, keyOf(sb, .send))
         case ("code", 3): PageSearch.of(sb).typed(sb, "wave"); press(a, keyOf(sb, .send))
         case ("writing", 0):
