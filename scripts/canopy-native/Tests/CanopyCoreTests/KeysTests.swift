@@ -116,7 +116,7 @@ import Testing
             guard let spec = Verbs.byVerb[v] else { Issue.record("\(v) has no row in the table"); continue }
             let all = spec.keys + spec.entry
             #expect(!spec.meaning.isEmpty, "\(v) has no meaning")
-            #expect(!all.isEmpty, "\(v) has no keys")
+            #expect(!all.isEmpty || [.mark, .unmark].contains(v), "\(v) has no keys")
             for k in all { #expect(Bindings.validKey(k), "\(v): \(k)") }
             for k in spec.entry { #expect(k.count > 1, "\(v): \(k) is printable — it could never reach a text field") }
         }

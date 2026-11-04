@@ -133,7 +133,9 @@ final class KeyTutor {
             let ta = a.element.split(separator: " ").count, tb = b.element.split(separator: " ").count
             return (ta, a.element.count, a.offset) < (tb, b.element.count, b.offset)
         }?.element
-        return best.map(glyph) ?? "(no key)"
+        // a verb each page keeps under its own leader (mark: , m)
+        let local = (sandbox ?? app)?.registry.commands.first { $0.verbs.contains(v) && $0.leader != nil }?.leader?.key(leader: vk.leader)
+        return (best ?? local).map(glyph) ?? "(no key)"
     }
 
     /// A step's or recap's text with each `{verb}` as its key now.

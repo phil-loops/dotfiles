@@ -89,8 +89,8 @@ import Testing
         #expect(a.registry.command("forest.integration")?.keys == ["; i"])
         #expect(a.registry.customized == [.putAway, .leader])
         // onto a key another verb holds: the table says so
-        a.registry.applyUserKeys(["put-away": ["m"]])
-        #expect(a.registry.keyProblems.contains("m: mark and put-away"))
+        a.registry.applyUserKeys(["put-away": ["i"]])
+        #expect(a.registry.keyProblems.contains("i: write and put-away"), "\(a.registry.keyProblems)")
         // v2's command-id lines are warnings, never problems
         a.registry.applyUserKeys(["project.archive": ["x"]])
         #expect(a.registry.keyProblems.isEmpty && a.registry.keyWarnings.count == 1)

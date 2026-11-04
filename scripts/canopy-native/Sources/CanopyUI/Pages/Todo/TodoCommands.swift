@@ -75,7 +75,7 @@ enum TodoCommands {
         r.register(Command(id: "todo.start", title: "Start the item", scope: .item, budget: .configWrite, leader: LocalKey(",s"), label: "start",
                            available: { [weak s] id in id.flatMap { s?.trackerItem($0) }?.state == "open" },
                            write: moveTo("doing")))
-        r.register(Command(id: "todo.done", title: "Mark the item done", scope: .item, budget: .configWrite, verb: .mark, label: "done",
+        r.register(Command(id: "todo.done", title: "Mark the item done", scope: .item, budget: .configWrite, verb: .mark, leader: LocalKey(",m"), label: "done",
                            available: { [weak s] id in id.flatMap { s?.trackerItem($0) }.map { !closed.contains($0.state.rawValue) } ?? false },
                            write: moveTo("done") { "done: \($0.title) — u puts it back" }))
         r.register(Command(id: "todo.drop", title: "Drop the item", scope: .item, budget: .configWrite, verb: .putAway, label: "drop",

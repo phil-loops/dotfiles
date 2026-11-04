@@ -267,7 +267,7 @@ enum TutorCommands {
         r.register(Command(id: "tutor.question.reopen", title: "Reopen the question", scope: .question, budget: .configWrite, v1: ["click:reopen"], quiet: true,
                            write: { id, _ in question("reopen", id) }))
         r.register(Command(
-            id: "tutor.question.toggle", title: "Mark the question answered, or reopen it", scope: .question, verb: .mark, label: "answered",
+            id: "tutor.question.toggle", title: "Mark the question answered, or reopen it", scope: .question, verb: .mark, leader: LocalKey(",m"), label: "answered",
             route: { [weak t] id in
                 guard let q = t?.learn?.questions.first(where: { $0.id == id }) else { return nil }
                 return RouteTo(q.status == "open" ? "tutor.question.close" : "tutor.question.reopen", target: q.id)

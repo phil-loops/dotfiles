@@ -222,6 +222,9 @@ enum KeyLessons {
             KeyStep("{previous-hunk}: the one before.", [.previousHunk]),
             KeyStep("{next-thread}: the next conversation, open ones first.", [.nextThread], check: { P.here($0)?.hasPrefix("t|") == true }),
             KeyStep("{previous-thread}: the one before.", [.previousThread], check: { P.here($0)?.hasPrefix("t|") == true }),
+            KeyStep("{match} goes to the other half of the edit: the line this one replaced.", [.match], setup: P.review(at: "l|greet.ts|R:2"),
+                    check: { P.pg($0).range?.side == .left }),
+            KeyStep("{match} again, back to what replaced it.", [.match], check: { P.pg($0).range?.side == .right }),
             KeyStep("{mark} marks the hunk viewed and goes on to the next unviewed one.", [.mark],
                     setup: P.review(at: "l|greet.ts|R:1"), check: { a in Self.hunk0(a).allSatisfy(P.pg(a).isSeen) }),
             KeyStep("{previous-hunk} back to it…", [.previousHunk]),
@@ -233,7 +236,7 @@ enum KeyLessons {
             KeyStep("{extend} again stretches it a line.", [.extend]),
             KeyStep("{comment} comments on the range — three verbs in a row, not a chord.", [.comment],
                     check: { ShipState.of($0).composer != nil }),
-        ], recap: "{next-file} {previous-file} · {next-hunk} {previous-hunk} · {next-thread} {previous-thread}; {mark} marks viewed and moves on, {unmark} unmarks; {select} ranges, {extend} lines, {comment} comments."),
+        ], recap: "{next-file} {previous-file} · {next-hunk} {previous-hunk} · {next-thread} {previous-thread} · {match} the other half; {mark} marks viewed and moves on, {unmark} unmarks; {select} ranges, {extend} lines, {comment} comments."),
 
         KeyLesson(id: "code", title: "Finding things and reading code", steps: [
             KeyStep("{find} finds a file on this page by name.", [.find], setup: P.review(at: "l|greet.ts|R:2"), check: { $0.keys.mode == .insert }),
@@ -246,6 +249,8 @@ enum KeyLessons {
             KeyStep("{cancel} closes it.", [.cancel], check: { $0.keys.layer == nil }),
             KeyStep("{conversation} puts the conversation where the diff was; {cancel} brings the diff back.", [.conversation],
                     check: { P.pg($0).tab == "conversation" }),
+            KeyStep("{changed-files} lists just the files this branch changes, as Helix's changed-file picker does.", [.changedFiles],
+                    setup: P.review(at: "l|greet.ts|R:2"), check: { P.pg($0).tab == "files" }),
             KeyStep("{next-word} puts the cursor on the next name, line after line.", [.nextWord], setup: P.review(at: "l|greet.ts|R:2"),
                     check: { P.pg($0).hereWord != nil }),
             KeyStep("{previous-word} the name before it.", [.previousWord]),

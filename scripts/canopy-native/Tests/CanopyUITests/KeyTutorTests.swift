@@ -37,6 +37,7 @@ import Testing
         let vk = sb.registry.verbKeys
         var ks = vk.of(v, in: sb.keys.active)
         if ks.isEmpty { ks = vk.keys[v] ?? [] }
+        if ks.isEmpty, let l = sb.registry.commands.first(where: { $0.verbs.contains(v) && $0.leader != nil })?.leader { ks = [l.key(leader: vk.leader)] }
         if sb.keys.active == .insert && sb.keys.fieldLines == .multi && v == .send { ks.removeAll { $0 == "ret" } }
         return ks.min { ($0.split(separator: " ").count, $0.count) < ($1.split(separator: " ").count, $1.count) } ?? ""
     }
@@ -148,13 +149,11 @@ import Testing
         _ = await until("ready") { t.ready }
         #expect(t.render(t.step!.text).contains(KeyTutorPiece(text: "⇧z", key: true)))
         #expect(!t.plain(t.step!.text).contains(" m "))
-        press(a, "m")
-        #expect(t.stepIndex == markStep, "the old key is nothing now")
         press(a, "Z")
         #expect(t.stepIndex == markStep + 1)
         // a miss or two, and the hint names the verb and your key for it
         press(a, "q"); press(a, "q")
-        #expect(t.hint == "this step wants previous-hunk — your key is [")
+        #expect(t.hint == "this step wants previous-hunk — your key is [ g")
         _ = sb
     }
 

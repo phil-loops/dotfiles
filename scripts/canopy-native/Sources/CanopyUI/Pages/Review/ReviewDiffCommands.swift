@@ -336,6 +336,11 @@ enum DiffCommands {
                                app.focus(pane: reviewTreePane)
                                app.beginInsert(ReviewPage.filterField)
                            }))
+        r.register(Command(id: "review.files", title: "The files this branch changes: j k to one, ↵ goes there", scope: .review, verb: .changedFiles, label: "files",
+                           local: { _, _ in
+                               pg.tab = "files"
+                               app.focus(pane: reviewTreePane)
+                           }))
         r.register(Command(id: "review.filter.accept", title: "Go to the first file the filter finds", scope: .filter, verb: .send, modes: [.insert], quiet: true,
                            available: { _ in app.insertField == ReviewPage.filterField },
                            local: { _, _ in
@@ -617,10 +622,26 @@ enum DiffCommands {
                            available: { _ in pg.integration == nil && pg.helix == nil },
                            local: { _, _ in if !pg.openHelixWhole(app) { throw Refusal("nothing to open here") } }))
 
-        // ── viewed: m marks and moves on, M takes it back ──
+        r.register(Command(id: "review.match", title: "The other half of this edit — what replaced the line, or what it replaced",
+                           scope: .review, verb: .match, label: "match", available: onDiff,
+                           local: { _, _ in
+                               guard let h = pg.here, h.kind == .line, let row = h.row, changed(row) else { throw Refusal("m m matches a changed line's two halves — this row has none") }
+                               let side = sideLine(row, prefer: pg.column).side
+                               let other: Side = side == .left ? .right : .left
+                               guard let o = halfText(h, other), !o.isEmpty else {
+                                   throw Refusal(row.left?.kind == .del ? "only removed — nothing replaced it" : "only added — it replaced nothing")
+                               }
+                               let r = char(o, min(pg.hereWord?.lowerBound ?? firstNonBlank(o), (o as NSString).length - 1))
+                               pg.column = other
+                               pg.word = (h.key, other, r)
+                               (goal, placed, carried) = (r.lowerBound, r.lowerBound, h.key)
+                               pg.cursorMoved &+= 1
+                           }))
+
+        // ── viewed: , m marks and moves on, , M takes it back ──
 
         r.register(Command(id: "review.viewed", title: "Mark viewed and go on to the next unviewed — the hunk, the file on its header, the range in select",
-                           scope: .review, budget: .configWrite, verb: .mark, modes: motion, label: "viewed", pair: "review.unviewed",
+                           scope: .review, budget: .configWrite, verb: .mark, leader: LocalKey(",m"), modes: motion, label: "viewed", pair: "review.unviewed",
                            available: { _ in onDiff(nil) && pg.here != nil && !pg.scoped },
                            write: { _, _ in
                                let w = viewed(app, pg, on: true)
@@ -628,7 +649,7 @@ enum DiffCommands {
                                return w
                            }))
         r.register(Command(id: "review.unviewed", title: "Mark unviewed — the hunk, the file on its header, the range in select",
-                           scope: .review, budget: .configWrite, verb: .unmark, modes: motion, label: "unviewed",
+                           scope: .review, budget: .configWrite, verb: .unmark, leader: LocalKey(",M"), modes: motion, label: "unviewed",
                            available: { _ in onDiff(nil) && pg.here != nil && !pg.scoped },
                            write: { _, _ in
                                let w = viewed(app, pg, on: false)

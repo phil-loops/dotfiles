@@ -138,7 +138,7 @@ public enum KeyGroup: String, CaseIterable, Sendable {
     public static func of(_ verb: Verb) -> KeyGroup? {
         switch verb {
         case .next, .previous, .first, .last, .halfDown, .halfUp, .left, .right, .nextWord, .previousWord,
-             .nextFile, .previousFile, .nextHunk, .previousHunk, .nextThread, .previousThread,
+             .nextFile, .previousFile, .nextHunk, .previousHunk, .nextThread, .previousThread, .match, .changedFiles,
              .labels, .find, .search, .searchWord, .map, .paneLeft, .paneDown, .paneUp, .paneRight, .paneNext:
             return .move
         case .nextSibling, .previousSibling, .parent, .child, .root, .tip, .out:
