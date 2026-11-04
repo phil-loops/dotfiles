@@ -238,7 +238,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         saveAll()
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
-        let waitForExit = "i=0; while kill -0 \"$1\" 2>/dev/null && [ $i -lt 200 ]; do sleep 0.05; i=$((i+1)); done; "
+        // `open` on a still-running Show only activates it, so wait out a slow quit (a swapped-out heap can take well past 10s)
+        let waitForExit = "i=0; while kill -0 \"$1\" 2>/dev/null && [ $i -lt 2400 ]; do sleep 0.05; i=$((i+1)); done; "
         let open = NSApp.isActive ? "open -a \"$0\"" : "open -g -a \"$0\" --args --background"
         process.arguments = ["-c", waitForExit + open, Bundle.main.bundlePath, String(ProcessInfo.processInfo.processIdentifier)]
         try? process.run()
