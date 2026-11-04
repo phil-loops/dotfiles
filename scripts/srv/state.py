@@ -133,7 +133,7 @@ def _behind_trunk(snap, trunk, branches):
     """{branch: commits on trunk it lacks} — v1's /sync `behind`, for every member in ONE spawn
     (for-each-ref's ahead-behind), recomputed only when a ref moves."""
     repo = ctx.repo_cwd()
-    key = (_refs_key(snap), trunk)
+    key = (_refs_key(snap), trunk, tuple(sorted(branches)))
     hit = _BEHIND.get(repo)
     if hit and hit[0] == key:
         return hit[1]
