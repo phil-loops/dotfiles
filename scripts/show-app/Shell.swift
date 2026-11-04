@@ -941,6 +941,7 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
                     return
                 }
                 controller = DeckController(path: path, deck: deck)
+                controller.onSay = { [weak self] message in self?.say(message) }
                 controller.onTitleChange = { [weak self, weak controller] in
                     guard let self, let controller, self.currentDeck === controller else { return }
                     self.onTitleChange?()

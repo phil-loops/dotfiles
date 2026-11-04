@@ -55,6 +55,7 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
     let goToSession = NSButton(title: "Go to session", target: nil, action: nil)
     let inboxHint = NSTextField(labelWithString: "⌘↩ reply · ⌘S done · ⌘J go to session")
     let live = LivePanel()
+    let planScroll = PlanScroll()
     var actionBar: NSView!
     var actionDivider: NSView!
     var deckModified: Date?
@@ -95,6 +96,11 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
     }
 
     var window: NSWindow? { viewController.view.window }
+    /// The page's focusable view: the plan grid, the web page or the text.
+    var pageView: NSView { !planScroll.isHidden ? planScroll.grid : web.isHidden ? text : web }
+    /// A line at the foot of the workspace's shelf, where the plan grid reports what it did.
+    var onSay: ((String) -> Void)?
+    func say(_ message: String) { onSay?(message) }
     var title: String { deck.title }
     /// In a forest deck, each branch section's merge number and nesting depth.
     private var branchPlaces: [Int: (number: Int, depth: Int)] = [:]
@@ -329,7 +335,10 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
         web.isHidden = true
         web.navigationDelegate = self
         let page = NSView()
-        for view in [scroll, web] as [NSView] {
+        planScroll.isHidden = true
+        planScroll.grid.onOpenSection = { [weak self] key in self?.select(section: key) }
+        planScroll.grid.onSay = { [weak self] message in self?.say(message) }
+        for view in [scroll, web, planScroll] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             page.addSubview(view)
             NSLayoutConstraint.activate([
@@ -703,7 +712,12 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
         guard let section = selectedSection else { return }
         applyBarChrome()
         prefs.set(section.key, forKey: selectionKey)
-        if let address = section.url, let url = URL(string: address) {
+        planScroll.isHidden = section.view != "plan"
+        if section.view == "plan" {
+            textScroll.isHidden = true
+            web.isHidden = true
+            planScroll.grid.update(plan: deck.plan, path: path)
+        } else if let address = section.url, let url = URL(string: address) {
             textScroll.isHidden = true
             web.isHidden = false
             if web.url != url {

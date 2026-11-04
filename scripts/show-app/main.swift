@@ -36,6 +36,13 @@ if let flag = arguments.firstIndex(of: "--check-live") {
     }
     exit(checkLive(arguments[flag + 1]))
 }
+if let flag = arguments.firstIndex(of: "--check-plan") {
+    guard flag + 1 < arguments.count else {
+        FileHandle.standardError.write("usage: Show --check-plan <plan.json>\n".data(using: .utf8)!)
+        exit(64)
+    }
+    exit(checkPlan(arguments[flag + 1]))
+}
 if let flag = arguments.firstIndex(of: "--check-routing") {
     guard flag + 1 < arguments.count else {
         FileHandle.standardError.write("usage: Show --check-routing <file.json>\n".data(using: .utf8)!)
