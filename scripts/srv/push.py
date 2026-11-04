@@ -207,11 +207,22 @@ def _queue_file(run):
 QUICK_SKIPS = ("typecheck", "lint")   # stack-gates --quick's set: what CI re-runs on every push
 
 
+def _tier(branch, background):
+    """The gate queue's tier: Phil's click, else whether the branch can ship next."""
+    if not background:
+        return "interactive"
+    from . import outbox
+    snap = repostate.snapshot()
+    main = snap.main()
+    pr = outbox._pr_map()[0].get(branch) or {}
+    return "ship" if pr.get("state") == "OPEN" or snap.parent(branch) in ("", main) else "background"
+
+
 def _gates_cmd(branch, fix=False, background=False, tree=None, skip=(), quick=False):
     cmd = [os.path.join(ctx.SCRIPTS, "stack-gates-turn"),
            "--queue", GATES_TURN_DIR, "--branch", branch,
            "--tree", _tree(branch) if tree is None else tree,
-           "--priority", "background" if background else "interactive", "--",
+           "--priority", _tier(branch, background), "--",
            os.path.join(ctx.SCRIPTS, "stack-gates"), "--branch", branch]
     if fix:
         cmd.append("--fix")

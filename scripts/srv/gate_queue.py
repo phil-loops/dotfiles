@@ -23,6 +23,9 @@ def locked(root):
 
 
 ORPHANED_SLOT_GRACE_SECONDS = 30
+# Lower runs first: a run Phil clicked, then a branch that can ship next (an open PR, or sitting on
+# main), then everything else an agent or the ambient pre-gater asked for.
+TIERS = {"interactive": 0, "ship": 1, "background": 2}
 
 
 def alive(pid):
@@ -162,7 +165,7 @@ def main(argv=None):
     parser.add_argument("--queue", required=True)
     parser.add_argument("--branch", required=True)
     parser.add_argument("--tree", required=True)
-    parser.add_argument("--priority", choices=("interactive", "background"), default="interactive")
+    parser.add_argument("--priority", choices=tuple(TIERS), default="interactive")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
@@ -172,7 +175,7 @@ def main(argv=None):
     root = Path(args.queue).absolute()
     name = Path(progress).name if progress else str(uuid.uuid4())
     request = root / (name + ".queue.json")
-    record = {"pid": os.getpid(), "priority": int(args.priority == "background"),
+    record = {"pid": os.getpid(), "priority": TIERS[args.priority],
               "created": time.time_ns(), "state": "queued"}
     with locked(root):
         promotion = request.with_suffix(".promoted")
