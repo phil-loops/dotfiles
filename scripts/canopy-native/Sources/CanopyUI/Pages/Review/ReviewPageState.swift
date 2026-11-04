@@ -93,6 +93,9 @@ public func sideLine(_ r: DiffRow, prefer: Side = .right) -> (side: Side, line: 
     return (.left, r.left?.old ?? 0)
 }
 
+/// A row that changed: either half added or removed.
+public func changed(_ r: DiffRow) -> Bool { r.left?.kind != .ctx || r.right?.kind != .ctx }
+
 public let reviewDiffPane = "diff"
 public let reviewTreePane = "files"
 public let reviewCodePane = "code"
@@ -366,8 +369,8 @@ public final class ReviewPageState: ShipHost {
         }
         if let c = carry, c.id == id {
             carry = nil
-            if let p = c.path, stopIndex["f|\(p)"] != nil { return setCursor("f|\(p)", focus: false) }
-            if let first = s.first(where: { $0.kind == .line }) ?? s.first { return setCursor(first.key, focus: false) }
+            let path = c.path.flatMap { stopIndex["f|\($0)"] != nil ? $0 : nil } ?? stopFiles.first
+            if let k = path.flatMap(landing(file:)) ?? s.first?.key { setCursor(k) }
             return
         }
         if let p = pendingCursor, p.id == id, stopIndex[p.key] != nil {
@@ -382,7 +385,7 @@ public final class ReviewPageState: ShipHost {
         }
         // a page opening for the first time puts the keyboard in the diff
         let fresh = app?.focusedPane["review"] == nil
-        if diffCursor == nil, let first = s.first(where: { $0.kind == .line }) ?? s.first { setCursor(first.key, focus: fresh) }
+        if diffCursor == nil, let k = stopFiles.first.flatMap(landing(file:)) ?? s.first?.key { setCursor(k, focus: fresh) }
         else if fresh { app?.focus(pane: reviewDiffPane) }
     }
 
@@ -749,6 +752,25 @@ public final class ReviewPageState: ShipHost {
         pendingRow = nil
         if side == nil { anchor(row: r.row) }
     }
+
+    /// Where every jump into a file lands: its first changed line, else its first line, else its
+    /// header (a viewed file folds to just that). Jumps land on code you can act on.
+    public func landing(file path: String) -> String? {
+        let s = stops
+        guard let h = stopIndex["f|\(path)"] else { return nil }
+        var firstLine: String?
+        var i = h + 1
+        while i < s.count, s[i].kind != .file, s[i].path == path {
+            if let row = s[i].row {
+                if changed(row) { return s[i].key }
+                firstLine = firstLine ?? s[i].key
+            }
+            i += 1
+        }
+        return firstLine ?? s[h].key
+    }
+    /// The files in the diff's order.
+    public var stopFiles: [String] { stops.filter { $0.kind == .file }.map(\.path) }
 
     /// Put the diff cursor on a stop; `focus` moves the keyboard to the diff too.
     public func setCursor(_ key: String?, focus: Bool = true) {

@@ -142,8 +142,8 @@ enum KeyLessons {
         KeyLesson(id: "moving", title: "Moving", steps: [
             KeyStep("A diff to move through. {next} goes down a line.", [.next], setup: P.review()),
             KeyStep("{previous} goes up.", [.previous]),
-            KeyStep("{last} jumps to the last line.", [.last], check: { P.here($0) == P.pg($0).stops.last?.key }),
-            KeyStep("{first} jumps back to the first.", [.first], check: { P.here($0) == P.pg($0).stops.first?.key }),
+            KeyStep("{last} jumps to the last change.", [.last], check: { P.here($0) == P.pg($0).stops.last { $0.row.map(changed) ?? false }?.key }),
+            KeyStep("{first} jumps back to the first.", [.first], check: { P.here($0) == P.pg($0).stopFiles.first.flatMap(P.pg($0).landing(file:)) }),
             KeyStep("{half-down} goes down half a page.", [.halfDown]),
             KeyStep("{half-up} comes back up half a page.", [.halfUp]),
         ], recap: "{next} / {previous} a line, {first} / {last} the ends (jumps: the jumplist remembers), {half-down} / {half-up} half a page."),
@@ -215,9 +215,9 @@ enum KeyLessons {
         ], recap: "The g keys go to a page; {pane-left} {pane-down} {pane-up} {pane-right} / {pane-next} move between panes; {face} is a page's other face."),
 
         KeyLesson(id: "review", title: "Reviewing a diff", steps: [
-            KeyStep("{next-file} jumps to the next file.", [.nextFile], setup: P.review(at: "l|greet.ts|R:1"),
-                    check: { P.here($0) == "f|header.ts" }),
-            KeyStep("{previous-file} back.", [.previousFile], check: { P.here($0) == "f|greet.ts" }),
+            KeyStep("{next-file} jumps to the next file's first change.", [.nextFile], setup: P.review(at: "l|greet.ts|R:1"),
+                    check: { P.here($0) == P.pg($0).landing(file: "header.ts") }),
+            KeyStep("{previous-file} back.", [.previousFile], check: { P.here($0) == P.pg($0).landing(file: "greet.ts") }),
             KeyStep("{next-hunk}: the next hunk.", [.nextHunk]),
             KeyStep("{previous-hunk}: the one before.", [.previousHunk]),
             KeyStep("{next-thread}: the next conversation, open ones first.", [.nextThread], check: { P.here($0)?.hasPrefix("t|") == true }),

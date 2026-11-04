@@ -2,6 +2,8 @@
 
 > **Decided 2026-10-31 — what canopy writes:** canopy reads and talks; Helix writes code. `i` on the new half of a diff puts real Helix there, in the branch's diff-view checkout at the cursor's line and name, with the old half still beside it to read against; `:w` saves as usual and quitting Helix commits what changed — a `fixup!` of the branch's own unpushed commit that wrote the first line touched, else `edit <file>` (`/review-helix`). `o` still opens the outside Helix. Beyond that canopy makes only one-decision edits: apply a suggestion (`A`), rename (`space r`). Every edit lands as a commit you see, never as loose changes in your worktree.
 >
+> **Decided 2026-11-03 — the motion rules, tested on every motion (`everyMotionKeepsTheRules`):** (1) a key that can't act says why, and what would; (2) the keyboard goes where the cursor went — only a detail pane following its list (the diff under the commits) moves without taking it; (3) jumps land on code — `]`/`[`, `J`/`K`, picking a file, opening the page and `gg` land on the first changed line of what they reached (a viewed file, folded to its header, lands there), `G` on the last change; `}`/`{` already did. Headers and gaps are rows `j`/`k` pass through.
+>
 > **Decided 2026-11-03 (supersedes the h/l half of the note below):** `h`/`l` move one character in code — the diff and the code beside it — with a one-character cursor that `j`/`k` carry at the same column (vim's curswant) and `g d`/`space k` ask about. At the new half's start `h` crosses onto the old half of a removed line, and `l` crosses back; on a row with no code they refuse rather than leave. `⌃h`/`⌃l` move panes from anywhere (as `⌃w h`/`⌥h` do). In panes with no code (the files, the commits, lists) bare `h`/`l` still move to the pane beside. Why: "h is the old half here and the pane over there" depended on the row's colour, so you couldn't tell where a press would land.
 >
 > **Decided 2026-10-31 (supersedes the zoom-ladder h/l below):** hjkl move the cursor in what you see; structure has its own keys. `h`/`l` are left/right — the old/new half of a split diff line, else the pane to that side. `ret` goes in, `-` goes up a level (vim-vinegar's parent), `C-o` retraces time, `esc` cancels. The old rule borrowed Miller columns' h/l without Miller columns' layout: canopy's levels are pages that replace each other, so "out" was never to the left of anything, and on the pages that do have a left and a right (a split diff, list ⇄ detail) h/l meant something you couldn't see.
@@ -34,7 +36,7 @@
 | cancel | `esc` | close the innermost transient thing — never changes page |
 | next-sibling / previous-sibling | `J` / `K` | the next / previous branch in merge order, staying on this kind of page (jumps) |
 | parent / child / root / tip | `g k` / `g j` / `g K` / `g J` | the branch's parent, child (labels at a fork), its stack's root, tip (jumps) |
-| next-file / previous-file | `]` / `[` | the next / previous file (jumps) |
+| next-file / previous-file | `]` / `[` | the next / previous file, at its first change (jumps) |
 | next-hunk / previous-hunk | `}` / `{` | the next / previous hunk |
 | next-thread / previous-thread | `n` / `N` | the next / previous conversation, open ones first (jumps) |
 | face | `⇥` | the page's other face (story ⇄ branches, the next tab, web ⇄ jobs) |

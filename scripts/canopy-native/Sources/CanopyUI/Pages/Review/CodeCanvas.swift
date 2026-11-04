@@ -362,6 +362,10 @@ final class Canvas: NSObject {
     private var heights: [String: CGFloat] = [:]
     private var lastCursor: String?
     private var lastScrolledTick = -1
+    /// When the cursor last moved: layout that settles soon after (an extras view reporting its
+    /// height, the diff arriving, the pane resizing) keeps the cursor on screen; later, the reader's
+    /// own scrolling wins.
+    private var cursorMovedAt = Date.distantPast
     /// A restored place's viewport row, for the next scroll to this stop (instead of `reveal`'s least move).
     var anchor: (stop: String, row: Int)?
     var app: AppModel?
@@ -511,6 +515,7 @@ final class Canvas: NSObject {
         if let c = m.cursor, c != lastCursor || scrollTick != lastScrolledTick {
             lastCursor = c
             lastScrolledTick = scrollTick
+            cursorMovedAt = Date()
             let a = anchor
             anchor = nil
             if let a, a.stop == c, settle(c, row: a.row) { return }
@@ -679,6 +684,13 @@ final class Canvas: NSObject {
             let f = NSRect(x: indent, y: rect.minY + 4, width: width, height: max(0, rect.height - 8))
             if v.frame != f { v.frame = f }
         }
+        keepCursorInView()
+    }
+
+    /// Layout moved under a cursor that just moved: put it back on screen.
+    func keepCursorInView() {
+        guard let c = lastCursor, Date().timeIntervalSince(cursorMovedAt) < 1 else { return }
+        reveal(c)
     }
 
     /// Forget every cached segment (the theme or font changed).

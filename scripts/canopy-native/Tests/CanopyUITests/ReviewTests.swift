@@ -254,10 +254,10 @@ import Testing
 
     func keys(_ a: AppModel, _ ks: String...) { for k in ks { a.keys.handle(k) } }
 
-    @Test func theDiffLandsWithTheCursorOnItsFirstLine() async throws {
+    @Test func theDiffLandsWithTheCursorOnItsFirstChange() async throws {
         let (a, _) = try await app()
         let pg = ReviewPageState.of(a)
-        #expect(pg.here?.key == "l|a.ts|R:1")
+        #expect(pg.here?.key == "l|a.ts|R:2", "past the context line, on the first changed pair")
         #expect(a.pane?.id == reviewDiffPane)
         #expect(pg.stops.first?.key == "f|a.ts")
         #expect(pg.stops.contains { $0.key == "t|\(Self.branch)#T1" })
@@ -269,23 +269,22 @@ import Testing
     @Test func movingByLineHunkFileAndThread() async throws {
         let (a, _) = try await app()
         let pg = ReviewPageState.of(a)
-        keys(a, "j")
         #expect(pg.here?.key == "l|a.ts|R:2", "split: the changed pair is one row, keyed by its new line")
         keys(a, "}")
         #expect(pg.here?.key == "l|a.ts|R:22", "the next hunk's first changed line")
         keys(a, "{")
         #expect(pg.here?.key == "l|a.ts|R:2")
         keys(a, "]")
-        #expect(pg.here?.key == "f|b.ts")
+        #expect(pg.here?.key == "l|b.ts|R:6", "the next file's first change, not its header")
         keys(a, "[")
-        #expect(pg.here?.key == "f|a.ts")
+        #expect(pg.here?.key == "l|a.ts|R:2", "the previous file's first change")
         keys(a, "n")
         #expect(pg.here?.key == "t|\(Self.branch)#T1")
         #expect(a.liveScopes().contains(.thread))
         keys(a, "G")
-        #expect(pg.here?.key == pg.stops.last?.key)
+        #expect(pg.here?.key == pg.stops.last { $0.row.map(changed) ?? false }?.key, "the last change")
         keys(a, "g", "g")
-        #expect(pg.here?.key == pg.stops.first?.key)
+        #expect(pg.here?.key == "l|a.ts|R:2", "the first change")
     }
 
     @Test func bracketsStayPutInAOneFileDiffEvenFromARemovedLine() async throws {
@@ -295,12 +294,14 @@ import Testing
                             "files": .array([["path": "a.ts", "add": 1, "del": 2, "patch": .string(patch)]])]
         let (a, _) = try await app(String(decoding: try JSONEncoder().encode(o), as: UTF8.self))
         let pg = ReviewPageState.of(a)
-        keys(a, "]")
-        #expect(pg.here?.key == "l|a.ts|R:1", "the only file: ] refuses")
-        keys(a, "j")
         let removed = pg.here?.key
-        #expect(removed != "l|a.ts|R:1")
+        #expect(pg.stopIndex[removed ?? ""].flatMap { pg.stops[$0].row?.right } == nil, "it opens on the removed line, the first change")
         keys(a, "]")
+        #expect(pg.here?.key == removed, "the only file: ] refuses")
+        #expect(a.runner.note?.hasPrefix("the only file in this diff") == true, "and says why")
+        keys(a, "j", "]")
+        #expect(pg.here?.key != removed && a.runner.note?.hasPrefix("the only file") == true)
+        keys(a, "k", "]")
         #expect(pg.here?.key == removed, "] from a removed line refuses too, not a jump to the next hunk")
     }
 
@@ -308,11 +309,11 @@ import Testing
         let (a, _) = try await app()
         let pg = ReviewPageState.of(a)
         keys(a, "]")
-        #expect(pg.here?.key == "f|b.ts")
+        #expect(pg.here?.key == "l|b.ts|R:6")
         keys(a, "C-o")
-        #expect(pg.here?.key == "l|a.ts|R:1")
+        #expect(pg.here?.key == "l|a.ts|R:2")
         keys(a, "C-i")
-        #expect(pg.here?.key == "f|b.ts")
+        #expect(pg.here?.key == "l|b.ts|R:6")
     }
 
     @Test func mMarksTheHunkViewedAndMovesOnMUnmarks() async throws {
@@ -356,7 +357,7 @@ import Testing
         keys(a, "J")
         #expect(a.router.route == .review(repo: "loops", branch: "hankles-next"))
         await until("the neighbour's diff") { pg.payload?.key.hasPrefix("loops:hankles-next@") == true }
-        #expect(pg.here?.key == "f|b.ts", "the same file, since the neighbour touches it")
+        #expect(pg.here?.key == "l|b.ts|R:6" && a.pane?.id == reviewDiffPane, "the same file's first change, keyboard with it")
         keys(a, "g", "k")
         #expect(a.router.route == .review(repo: "loops", branch: "add-hankles-limited-label"))
     }
@@ -373,7 +374,6 @@ import Testing
     @Test func hAndLMoveACharacterAndCtrlMovesPanes() async throws {
         let (a, _) = try await app()
         let pg = ReviewPageState.of(a)
-        keys(a, "j")
         let row = try #require(pg.here?.row)
         #expect(pg.here?.key == "l|a.ts|R:2" && pg.hereWord == nil)
         let new = row.right?.text ?? "", old = row.left?.text ?? ""
@@ -402,10 +402,46 @@ import Testing
         #expect(a.pane?.id == reviewCodePane)
     }
 
+    /// The motion rules, checked on every review motion command from every kind of starting place —
+    /// a new motion gets them checked without anyone writing a test for it:
+    /// a key that can't act says why; the keyboard goes where the cursor went; a jump lands on code.
+    @Test func everyMotionKeepsTheRules() async throws {
+        let motions: Set<Verb> = [.next, .previous, .first, .last, .halfDown, .halfUp, .left, .right, .nextWord, .previousWord,
+                                  .nextFile, .previousFile, .nextHunk, .previousHunk, .nextThread, .previousThread]
+        let jumps: Set<Verb> = [.first, .last, .nextFile, .previousFile, .nextHunk, .previousHunk]
+        let starts: [(String, @MainActor (AppModel, ReviewPageState) -> Void)] = [
+            ("the first change", { _, _ in }),
+            ("a file header", { _, pg in pg.setCursor("f|a.ts") }),
+            ("the diff's last row", { _, pg in pg.setCursor(pg.stops.last?.key) }),
+            ("a conversation", { _, pg in pg.setCursor("t|\(Self.branch)#T1") }),
+            ("the old half of a removed line", { _, pg in pg.column = .left }),
+            ("the file list", { a, _ in a.focus(pane: reviewTreePane) }),
+        ]
+        let (probe, _) = try await app()
+        let ids = probe.registry.commands.filter { $0.scope == .review && !motions.isDisjoint(with: $0.verbs) }.map(\.id)
+        #expect(ids.count >= 14, "the motions are all found: \(ids)")
+        for id in ids {
+            let isJump = !jumps.isDisjoint(with: probe.registry.command(id)?.verbs ?? [])
+            for (from, setup) in starts {
+                let (a, _) = try await app()
+                let pg = ReviewPageState.of(a)
+                setup(a, pg)
+                guard let cmd = a.registry.command(id), cmd.available?(nil) != false, cmd.modes.contains(a.keys.mode) else { continue }
+                let before = (pg.here?.key, pg.hereWord, a.pane?.id, pg.column, a.selected)
+                a.runner.dispatch(id, via: .key)
+                let after = (pg.here?.key, pg.hereWord, a.pane?.id, pg.column, a.selected)
+                let moved = before.0 != after.0 || before.1 != after.1 || before.2 != after.2 || before.3 != after.3 || before.4 != after.4
+                #expect(moved || a.runner.note != nil, "\(id) from \(from): did nothing and said nothing")
+                if before.0 != after.0 { #expect(a.pane?.id == reviewDiffPane, "\(id) from \(from): moved the diff cursor but left the keyboard in \(a.pane?.id ?? "-")") }
+                if isJump && moved { #expect(pg.here?.kind == .line, "\(id) from \(from): landed on a \(pg.here?.kind.rawValue ?? "-"), not code") }
+            }
+        }
+    }
+
     /// On a row with no code (a file's header), h / l say so instead of leaving the diff.
     @Test func hOnAHeaderStaysInTheDiff() async throws {
         let (a, _) = try await app()
-        keys(a, "g", "g")
+        ReviewPageState.of(a).setCursor("f|a.ts")
         #expect(ReviewPageState.of(a).here?.kind == .file)
         keys(a, "h")
         #expect(a.pane?.id == reviewDiffPane)
@@ -457,7 +493,6 @@ import Testing
         let (a, p) = try await app()
         let pg = ReviewPageState.of(a)
         ShipStub.answer(p, "POST", "/loops/review-helix", #"{"ok":true,"dir":"/tmp/x.diffbase","sha":"abc1234","message":"fixup! feat: x"}"#)
-        keys(a, "j")
         keys(a, "i")
         await until("the checkout") { pg.helix?.dir != nil }
         let h = try #require(pg.helix)
@@ -495,7 +530,6 @@ import Testing
     @Test func iOnTheOldHalfOpensNothing() async throws {
         let (a, _) = try await app()
         let pg = ReviewPageState.of(a)
-        keys(a, "j")
         pg.column = .left
         keys(a, "i")
         #expect(pg.helix == nil)
@@ -559,9 +593,9 @@ import Testing
         keys(a, "g", "d")
         await until("the jump") { pg.here?.key == "l|b.ts|R:6" }
         let ask = ShipStub.posts(p).last { $0.path == "/loops/lsp/definition" }!
-        #expect(ask.body["branch"] == "add-hankles-limited-label" && ask.body["path"] == "a.ts" && ask.body["line"] == 1)
+        #expect(ask.body["branch"] == "add-hankles-limited-label" && ask.body["path"] == "a.ts" && ask.body["line"] == 2)
         keys(a, "C-o")
-        #expect(pg.here?.key == "l|a.ts|R:1")
+        #expect(pg.here?.key == "l|a.ts|R:2")
         // somewhere the diff doesn't show: beside it, at the commit
         ShipStub.answer(p, "POST", "/loops/lsp/definition", #"{"ok":true,"sha":"\#(tip)","locations":[{"path":"lib/z.ts","line":2,"character":0}]}"#)
         ShipStub.answer(p, "GET", "/loops/lsp/src", #"{"path":"lib/z.ts","sha":"x","text":"one\ntwo\nthree"}"#)
@@ -612,7 +646,7 @@ import Testing
 
         keys(a, "C-h", "space", "o", "b")
         await until("the browser") { opened.count == 3 }
-        #expect(opened.last == "https://github.com/o/r/blob/add-hankles-limited-label/a.ts#L1", "the diff's line, at the branch")
+        #expect(opened.last == "https://github.com/o/r/blob/add-hankles-limited-label/a.ts#L2", "the diff's line, at the branch")
     }
 
     @Test func originsBecomeGitHubPages() {
@@ -659,6 +693,7 @@ import Testing
         let (a, _) = try await app()
         let pg = ReviewPageState.of(a)
         func type(_ s: String) { for ch in s { keys(a, ch == " " ? "space" : String(ch)) } }
+        pg.setCursor("f|a.ts")
         keys(a, "/"); type("e"); keys(a, "ret")
         #expect(pg.here?.key == "l|a.ts|R:1" && pg.hereWord == 1..<2, "keep: its first e")
         keys(a, "n")
@@ -679,7 +714,7 @@ import Testing
     @Test func starSearchesTheNameUnderTheCursor() async throws {
         let (a, _) = try await app()
         let pg = ReviewPageState.of(a)
-        keys(a, "j", "w")
+        keys(a, "w")
         #expect(pg.here?.key == "l|a.ts|R:2" && pg.hereWord == 4..<7, "one (new is a keyword)")
         keys(a, "*")
         #expect(PageSearch.of(a).query == "one" && !PageSearch.of(a).typing && pg.hereWord == 4..<7, "stays on the name it searched")
@@ -708,7 +743,6 @@ import Testing
     /// Ship's half, by key on the real page: `x` marks a range, `c` opens Ship's comment box on it.
     @Test func aShipCommandRunsByKeyOnTheReviewPage() async throws {
         let (a, _) = try await app()
-        keys(a, "j")          // a.ts R:2 (new one), paired with what it replaced
         let pg = ReviewPageState.of(a)
         #expect(pg.here?.key == "l|a.ts|R:2")
         keys(a, "x", "x")
