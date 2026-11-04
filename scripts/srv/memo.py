@@ -11,10 +11,17 @@ from collections import OrderedDict
 
 _MAX_AGE = 120.0
 _CAP = 512
+_BYTE_CAP = 64 << 20
 _LOCK = threading.Lock()
-_ENTRIES = OrderedDict()   # key -> (built at, value)
+_ENTRIES = OrderedDict()   # key -> (built at, value, size)
+_bytes = 0
 _FLIGHTS = {}              # key -> Event, while a build is running
 STATS = {"hit": 0, "miss": 0}
+
+
+def _size(value):
+    parts = value if isinstance(value, tuple) else (value,)
+    return sum(len(v) for v in parts if isinstance(v, (str, bytes)))
 
 
 def get(key, build, keep=lambda value: True):
@@ -36,11 +43,20 @@ def get(key, build, keep=lambda value: True):
         value = build()
         if not keep(value):
             return value
+        global _bytes
+        size = _size(value)
+        now = time.monotonic()
         with _LOCK:
-            _ENTRIES[key] = (time.monotonic(), value)
-            _ENTRIES.move_to_end(key)
-            while len(_ENTRIES) > _CAP:
-                _ENTRIES.popitem(last=False)
+            old = _ENTRIES.pop(key, None)
+            if old is not None:
+                _bytes -= old[2]
+            _ENTRIES[key] = (now, value, size)
+            _bytes += size
+            while _ENTRIES:
+                oldest = next(iter(_ENTRIES.values()))
+                if len(_ENTRIES) <= _CAP and _bytes <= _BYTE_CAP and now - oldest[0] < _MAX_AGE:
+                    break
+                _bytes -= _ENTRIES.popitem(last=False)[1][2]
             STATS["miss"] += 1
         return value
     finally:
