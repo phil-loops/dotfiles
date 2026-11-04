@@ -444,6 +444,8 @@ def _refresher():
     while True:
         _WAKE.wait(TICK)
         _WAKE.clear()
+        if ctx.run is None:   # the thread starts at import; the server wires ctx.run a moment later
+            continue
         if _SUBS[0] <= 0:
             try:   # a reply waiting on a push goes out after it even with no v2 tab open (a stat when the queue is empty)
                 _each_repo(lambda n: reviewdesk.release_due())
