@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
-"""show-autobuild — rebuild Show whenever its source settles, so the running app relaunches into it.
+"""show-autobuild — rebuild Show whenever its source settles, so a launch never waits and the running app can offer Update.
 
   show-autobuild            watch forever (the launchd agent com.philbrockman.show-autobuild runs this)
   show-autobuild --status   the recent builds, their times, and whether builds are dragging
 
 Watches the same files `show --build` fingerprints (show-app/*.swift, its Package.swift, and
-canopy-native's Package.swift + Sources, since Show links canopy). A change waits until nothing has
-moved for QUIET seconds — other sessions save files in bursts — then runs `show --build` under a
-heavy-turn slot; the running Show sees the new build stamp and relaunches itself. A build that
+canopy-native's Package.swift + Sources, since Show links canopy). Canopy builds as last committed, so
+an uncommitted canopy edit wakes it but builds nothing (an `unchanged` row). A change waits until
+nothing has moved for QUIET seconds — other sessions save files in bursts — then runs `show --build`
+under a heavy-turn slot; the running Show sees the new build stamp and lights Update, and Phil
+chooses when to relaunch into it. Launches (`show`, `show <deck>`) never build, so this agent is
+what keeps Show current. A build that
 fails because a file moved mid-build waits for quiet again; a real compile error waits for the
 next change.
 
