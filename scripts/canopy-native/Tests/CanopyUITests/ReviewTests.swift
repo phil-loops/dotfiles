@@ -390,6 +390,29 @@ import Testing
         #expect(pg.hereWord?.lowerBound == 4)
     }
 
+    /// Digits are Helix's counts: 3 j is three lines, 2 } two files; esc drops a count; space N picks a tab.
+    @Test func digitsAreCountsAndSpaceDigitPicks() async throws {
+        let (a, _) = try await app()
+        let pg = ReviewPageState.of(a)
+        let start = try #require(pg.here.flatMap { pg.stopIndex[$0.key] })
+        keys(a, "j", "j", "j")
+        let three = pg.here?.key
+        keys(a, "k", "k", "k")
+        #expect(pg.stopIndex[pg.here?.key ?? ""] == start)
+        keys(a, "3")
+        #expect(a.keys.count == 3 && pg.tab == "files", "a bare digit waits as a count, never a tab")
+        keys(a, "j")
+        #expect(pg.here?.key == three && a.keys.count == nil)
+        keys(a, "1", "2", "esc")
+        #expect(a.keys.count == nil && pg.here?.key == three, "esc drops the count")
+        keys(a, "2", "}")
+        #expect(pg.here?.path == "a.ts", "two files on from a.ts, wrapping: \(pg.here?.key ?? "-")")
+        keys(a, "space", "1")
+        #expect(pg.tab == "conversation")
+        keys(a, "space", "3")
+        #expect(pg.tab == "files")
+    }
+
     @Test func jumpsComeBackWithCtrlO() async throws {
         let (a, _) = try await app()
         let pg = ReviewPageState.of(a)
@@ -857,7 +880,7 @@ import Testing
         let (a, p) = try await app()
         let pg = ReviewPageState.of(a)
         ShipStub.answer(p, "GET", "/loops/commit-diff", #"{"sha":"c1","files":[{"path":"c.ts","add":1,"del":0,"patch":"@@ -1,0 +1,1 @@\n+hi"}]}"#)
-        keys(a, "2")
+        keys(a, "space", "2")
         #expect(pg.tab == "commits")
         ShipState.of(a).commitScope = "c1"
         pg.commitScopeChanged("c1")
@@ -865,7 +888,7 @@ import Testing
         #expect(a.panes.map(\.id).contains(reviewDiffPane))
         pg.focusDiff(a, true)
         #expect(pg.here?.key == "l|c.ts|R:1")
-        keys(a, "3")
+        keys(a, "space", "3")
         #expect(pg.scoped && pg.files.map(\.path) == ["c.ts"], "the outline's scope carries into the files view")
         ShipState.of(a).showCommit(nil)
         #expect(pg.scoped == false && pg.files.map(\.path) == ["a.ts", "b.ts"], "= on main: the whole branch again")

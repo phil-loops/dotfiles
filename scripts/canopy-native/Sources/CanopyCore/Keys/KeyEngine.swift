@@ -23,6 +23,8 @@ public final class KeyEngine {
     public private(set) var layer: KeyMode?
     /// The half-typed prefix ("space", "g") which-key and the statusline show; "" when none.
     public private(set) var pendingKeys = ""
+    /// A count typed before a motion (Helix's `3j`): digits in normal and select mode, until the motion runs.
+    public private(set) var count: Int?
     /// The kind of field insert mode is typing into; back to `.single` whenever insert ends.
     public var fieldLines: FieldLines = .single
 
@@ -100,6 +102,12 @@ public final class KeyEngine {
     @discardableResult
     public func backOut() -> Bool {
         let from = active
+        if count != nil {
+            count = nil
+            keymap.reset()
+            pendingKeys = ""
+            return cancelled(from)
+        }
         if !pendingKeys.isEmpty {
             reset()
             return cancelled(from)
@@ -158,6 +166,10 @@ public final class KeyEngine {
 
     private func feed(_ key: String) -> Bool {
         if let raw = layerKeys[active] { return raw(key) }
+        if takesCount(key), let d = Int(key) {
+            count = min(9999, (count ?? 0) * 10 + d)
+            return true
+        }
         if pendingKeys.isEmpty, let typing = layerTyping[active], typing(key) { return true }
         rebuild()
         let mode = active
@@ -172,8 +184,14 @@ public final class KeyEngine {
         }
         let wasPending = !pendingKeys.isEmpty
         pendingKeys = ""
+        let times = count ?? 1
+        count = nil
         if case .run(let id) = fed {
-            runner.dispatch(id, via: .key)
+            let repeats = times > 1 && registry.command(id)?.verbs.contains(where: Verbs.countable.contains) == true
+            for i in 0..<(repeats ? times : 1) {
+                runner.dispatch(id, via: .key)
+                if repeats, i < times - 1, runner.fired.map({ $0.id == id && !$0.ok }) == true { break }
+            }
             if let onVerb {
                 let cmd = registry.command(id)
                 let verb = cmd?.verbs.first { registry.verbKeys.of($0, in: mode).contains(seq) }
@@ -198,10 +216,17 @@ public final class KeyEngine {
         return wasPending
     }
 
-    /// Drop a half-typed chord (a click anywhere does too).
+    /// Drop a half-typed chord and any count (a click anywhere does too).
     public func reset() {
         keymap.reset()
         pendingKeys = ""
+        count = nil
+    }
+
+    /// A digit starts or extends a count in normal and select mode before any chord: 1–9 start one, 0 only extends.
+    private func takesCount(_ key: String) -> Bool {
+        guard layer == nil, mode == .normal || mode == .select, pendingKeys.isEmpty, key.count == 1, let c = key.first, c.isASCII, c.isNumber else { return false }
+        return c != "0" || count != nil
     }
 
     /// What can follow the pending prefix here (WhichKey.tsx), narrowest scope's meaning winning:

@@ -24,6 +24,7 @@ struct Statusline: View {
                 } else if PageSearch.of(app).typing {
                     SearchLine()
                 } else {
+                    if let n = app.keys.count { Text("\(n)").foregroundStyle(theme.goldLeaf) }
                     if !app.keys.pendingKeys.isEmpty { Text(glyph(app.keys.pendingKeys)).foregroundStyle(theme.goldLeaf) }
                     if let l = app.labeling { Text("label \(l.typed)…").foregroundStyle(theme.goldLeaf) }
                     if let pos = app.position {

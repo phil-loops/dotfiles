@@ -235,8 +235,9 @@ let learningFixture = #"""
         a.setCursor("x:2:5:1")
         a.keys.handle("ret")
         #expect(t.draft == "both" && a.insertField == "tutor.draft")
-        // insert keeps its fixed set, so rating is normal mode's: esc, then 2 (the 2nd chip)
+        // insert keeps its fixed set, so rating is normal mode's: esc, then space 2 (the 2nd chip)
         a.keys.handle("esc")
+        a.keys.handle("space")
         a.keys.handle("2")
         #expect(t.confidence == "medium")
 
