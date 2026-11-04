@@ -10,6 +10,7 @@ struct Deck: Decodable {
     let repo: String?
     let runDir: String?
     let repoPath: String?
+    let plan: Plan?
     let sections: [Section]
 
     /// A live deck is watched, not judged: no sign-off bar, no sign-off file, no sign-off marks.
@@ -17,6 +18,7 @@ struct Deck: Decodable {
     var isForest: Bool { mode == "forest" }
     /// The Inbox: messages, not a review, so no sign-off checkbox, Send or Submit, only a reply field.
     var isInbox: Bool { mode == "inbox" }
+    var isPlan: Bool { plan != nil }
 }
 
 struct Section: Decodable {
@@ -26,6 +28,8 @@ struct Section: Decodable {
     let tag: String?
     let body: String?
     let url: String?
+    /// "plan": the section shows the deck's plan grid instead of a body.
+    let view: String?
     let rank: Int?
     let parent: String?
     let status: String?
@@ -47,7 +51,7 @@ struct SignOff: Codable {
 
 
 func loadDeck(_ path: String) throws -> Deck {
-    try JSONDecoder().decode(Deck.self, from: Data(contentsOf: URL(fileURLWithPath: path)))
+    try JSONDecoder().decode(Deck.self, from: expandPlan(Data(contentsOf: URL(fileURLWithPath: path))))
 }
 
 func modificationDate(_ path: String) -> Date? {

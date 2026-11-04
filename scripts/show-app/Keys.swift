@@ -199,7 +199,7 @@ extension WorkspaceController {
             if let list = deck.viewController.splitViewItems.first, !list.isCollapsed {
                 stops.append(FocusStop(responder: deck.table, column: list.viewController.view))
             }
-            let page = deck.web.isHidden ? deck.text as NSView : deck.web
+            let page = deck.pageView
             stops.append(FocusStop(responder: page, column: deck.textScroll.superview ?? page))
             if !deck.actionBar.isHidden {
                 stops.append(FocusStop(responder: deck.composer, column: deck.actionBar))
