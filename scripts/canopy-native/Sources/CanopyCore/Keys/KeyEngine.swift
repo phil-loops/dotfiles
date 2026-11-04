@@ -181,8 +181,12 @@ public final class KeyEngine {
             }
             return true
         }
+        let verb = Verb.allCases.first { registry.verbKeys.of($0, in: mode).contains(seq) }
+        // a nav key the page doesn't answer says what it means and that it isn't here, never nothing
+        if let verb, !mode.takesText, let spec = Verbs.table.first(where: { $0.verb == verb }), spec.tier == .nav {
+            runner.say("\(seq): \(spec.meaning) — not on this page")
+        }
         if let onVerb {
-            let verb = Verb.allCases.first { registry.verbKeys.of($0, in: mode).contains(seq) }
             // typing into a field isn't an attempt at anything
             if verb != nil || !mode.takesText { onVerb(VerbEvent(verb: verb, command: nil, keys: seq, ok: false, mode: mode)) }
         }
