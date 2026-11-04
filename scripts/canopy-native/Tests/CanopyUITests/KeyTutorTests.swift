@@ -69,6 +69,7 @@ import Testing
         case ("along", 4): press(a, keyOf(sb, .tillChar)); a.keys.handle(",")
         case ("along", 5): press(a, keyOf(sb, .findCharBack)); a.keys.handle("{")
         case ("along", 6): press(a, keyOf(sb, .tillCharBack)); a.keys.handle("r")
+        case ("along", 7): a.keys.handle("A-.")
         case ("code", 1): ReviewPageState.of(sb).filter = "head"; press(a, keyOf(sb, .send))
         case ("code", 3): PageSearch.of(sb).typed(sb, "wave"); press(a, keyOf(sb, .send))
         case ("writing", 0):

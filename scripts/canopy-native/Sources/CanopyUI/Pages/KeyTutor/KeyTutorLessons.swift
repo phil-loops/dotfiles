@@ -169,7 +169,25 @@ enum KeyLessons {
             KeyStep("{till-char} then a comma: up to just before the next one.", [.tillChar], check: { P.col($0) == 20 }, hint: "{till-char}, then type ,"),
             KeyStep("{find-char-back} then an opening brace: back to the previous one.", [.findCharBack], check: { P.col($0) == 11 }, hint: "{find-char-back}, then type an opening brace"),
             KeyStep("{till-char-back} then r: back to just after the previous r.", [.tillCharBack], check: { P.col($0) == 7 }, hint: "{till-char-back}, then type r"),
-        ], recap: "{line-start} / {line-end} / {first-non-blank} the line's ends; {find-char} / {till-char} a character on, {find-char-back} / {till-char-back} one back — as in Helix."),
+            KeyStep("{repeat-motion} does it again: back to just after the r before that.", [.repeatMotion], check: { P.col($0) == 3 }),
+        ], recap: "{line-start} / {line-end} / {first-non-blank} the line's ends; {find-char} / {till-char} a character on, {find-char-back} / {till-char-back} one back, {repeat-motion} again — as in Helix."),
+
+        KeyLesson(id: "shape", title: "Code by its shape", steps: [
+            KeyStep("{next-function}: the next function in this file's diff — the status line names it.", [.nextFunction],
+                    setup: P.review(at: "l|greet.ts|R:2"), check: { P.here($0) == "l|greet.ts|R:4" }),
+            KeyStep("{next-function} again.", [.nextFunction], check: { P.here($0) == "l|greet.ts|R:7" }),
+            KeyStep("{previous-function}: back one.", [.previousFunction], check: { P.here($0) == "l|greet.ts|R:4" }),
+            KeyStep("{next-type}: the next class, interface or enum — where the diff first shows it.", [.nextType], check: { P.here($0) == "l|greet.ts|R:22" }),
+            KeyStep("{previous-type}: there's none before it, and it says so.", [.previousType]),
+            KeyStep("{next-finding}: the next thing push-ready's review flagged on this branch; the status line reads it out.", [.nextFinding],
+                    check: { P.here($0) == "l|header.ts|R:2" }),
+            KeyStep("{previous-finding}: the one before.", [.previousFinding], check: { P.here($0) == "l|greet.ts|R:5" }),
+            KeyStep("{last-change}: the branch's last change.", [.lastChange], check: { P.here($0) == P.pg($0).stops.last { $0.row.map(changed) ?? false }?.key }),
+            KeyStep("{first-change}: its first.", [.firstChange], check: { P.here($0) == P.pg($0).stopFiles.first.flatMap(P.pg($0).landing(file:)) }),
+            KeyStep("{view-top} scrolls so this line is at the top of the screen.", [.viewTop]),
+            KeyStep("{view-center}: in the middle.", [.viewCenter]),
+            KeyStep("{view-bottom}: at the bottom.", [.viewBottom]),
+        ], recap: "{next-function} / {previous-function} functions, {next-type} / {previous-type} types, {next-finding} / {previous-finding} the review's findings, {first-change} / {last-change} the ends; {view-top} {view-center} {view-bottom} place the screen — Helix's ] [ and z."),
 
         KeyLesson(id: "ladder", title: "In and out", steps: [
             KeyStep("{main} goes in: forests → forest → branch → file → line. On the greetings forest, it opens the forest's page.",

@@ -53,6 +53,7 @@ public final class CodeLookup {
         case note(String)
         case hover(String)
         public var text: String { switch self { case .wait(let t), .note(let t), .hover(let t): t } }
+        public var isWait: Bool { if case .wait = self { true } else { false } }
     }
 
     public private(set) var pop: Pop?
@@ -248,6 +249,15 @@ public final class CodeLookup {
                          label: String(repeating: "  ", count: $0.depth) + $0.name, text: "\($0.kind) :\($0.line)")
             })
         }
+    }
+
+    /// ] f / ] t: a file's symbols, quietly (nil when they can't be had: the note says why).
+    public func symbolList(path: String, side: String = "new", _ w: Where) async -> [LSPSymbols.Symbol]? {
+        let b = body(nil, path: path, side: side, w)
+        guard let r = await asking("/lsp/symbols", w, b, LSPSymbols.self) else { return nil }
+        if pop?.isWait == true { pop = nil }
+        if !r.ok { pop = .note(Self.plainNote(r.message).isEmpty ? "types aren't available" : Self.plainNote(r.message)); return nil }
+        return r.symbols ?? []
     }
 
     /// Each picker row's source line, as its file arrives (nav.ts pick).

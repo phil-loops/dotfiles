@@ -24,6 +24,9 @@ public enum Verb: String, CaseIterable, Sendable, Comparable {
     case face
     case labels, find, search, map, conversation
     case match, changedFiles = "changed-files"
+    case nextFunction = "next-function", previousFunction = "previous-function", nextType = "next-type", previousType = "previous-type"
+    case nextFinding = "next-finding", previousFinding = "previous-finding", firstChange = "first-change", lastChange = "last-change"
+    case repeatMotion = "repeat-motion", viewCenter = "view-center", viewTop = "view-top", viewBottom = "view-bottom"
     case searchWord = "search-word"
     case type, definition, typeDefinition = "type-definition", implementations, references, symbols
     case github, preview
@@ -132,6 +135,18 @@ public enum Verbs {
         v(.previousHunk, .nav, ["[ g"], "the previous change (Helix [g)"),
         v(.nextThread, .nav, ["n", "] c"], jump: true, "the next conversation (open ones first)"),
         v(.previousThread, .nav, ["N", "[ c"], jump: true, "the previous conversation (open ones first)"),
+        v(.nextFunction, .nav, ["] f"], "the next function in this file's diff (Helix ]f)"),
+        v(.previousFunction, .nav, ["[ f"], "the previous function (Helix [f)"),
+        v(.nextType, .nav, ["] t"], "the next class, interface or enum in this file's diff (Helix ]t)"),
+        v(.previousType, .nav, ["[ t"], "the previous one (Helix [t)"),
+        v(.nextFinding, .nav, ["] d"], "the next finding push-ready's review left on this branch (Helix ]d: the next diagnostic)"),
+        v(.previousFinding, .nav, ["[ d"], "the previous finding (Helix [d)"),
+        v(.firstChange, .nav, ["[ G"], jump: true, "the branch's first change (Helix [G)"),
+        v(.lastChange, .nav, ["] G"], jump: true, "the branch's last change (Helix ]G)"),
+        v(.repeatMotion, .nav, ["A-."], "repeat the last f / t / F / T (Helix alt-.)"),
+        v(.viewCenter, .nav, ["z z", "z c"], "scroll the code so the cursor's line is in the middle (Helix zz)"),
+        v(.viewTop, .nav, ["z t"], "scroll so the cursor's line is at the top (Helix zt)"),
+        v(.viewBottom, .nav, ["z b"], "scroll so the cursor's line is at the bottom (Helix zb)"),
         v(.match, .nav, ["m m"], "the matching thing: the other half of this edit — what replaced the line, or what it replaced (Helix mm)"),
         v(.face, .nav, ["tab"], "the page's other face (story ⇄ branches, the next tab, web ⇄ jobs)"),
         v(.labels, .nav, ["g w"], "label everything on screen; type a label to go there"),
