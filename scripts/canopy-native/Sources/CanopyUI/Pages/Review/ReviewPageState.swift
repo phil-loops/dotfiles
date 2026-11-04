@@ -363,6 +363,8 @@ public final class ReviewPageState: ShipHost {
     /// Once a diff is here: put the cursor where a J/K hop or a jumplist entry wants it, or on the
     /// first line (page.ts here()'s default) when it has none.
     private func settleCursor() {
+        // a restored commit's place waits for that commit's diff, not the branch's
+        if let c = commitScope, commitFiles?.sha != c, pendingCursor?.id == id || pendingLoc?.id == id { return }
         let s = stops
         if let n = pendingNear, n.id == id, let k = stopNear(path: n.path, line: n.line) {
             pendingNear = nil
@@ -436,13 +438,15 @@ public final class ReviewPageState: ShipHost {
     public func commitScopeChanged(_ sha: String?) {
         commitScope = sha
         mark = nil
-        if let k = stopFiles.first.flatMap(landing(file:)) { setCursor(k, focus: false) }
+        let waiting = pendingCursor?.id == id || pendingLoc?.id == id
+        if !waiting, let k = stopFiles.first.flatMap(landing(file:)) { setCursor(k, focus: false) }
         guard let sha, commitFiles?.sha != sha, let app else { return }
         let path = repoPath("/commit-diff?sha=\(sha.uriComponent)")
         Task { @MainActor [weak self] in
             struct CommitDiff: Decodable { var sha: String?; var files: [NodeFile] }
             guard let got = try? await app.transport.getJSON(path, as: CommitDiff.self), let self, self.commitScope == sha else { return }
             self.commitFiles = (sha, got.files)
+            if self.pendingCursor?.id == self.id || self.pendingLoc?.id == self.id { return self.settleCursor() }
             if let k = self.stopFiles.first.flatMap(self.landing(file:)) { self.setCursor(k, focus: false) }
         }
     }

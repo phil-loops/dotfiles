@@ -211,6 +211,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     /// Reloads documents edited on disk, refreshes the rail's waiting badges, and offers Update once the launcher finishes a newer build.
     private func stayCurrent() {
         workspaces.values.forEach { $0.reloadChanged() }
+        workspaces[active]?.savePlace()   // a crash or a kill comes back to within a second of where you were, not to the last quit
         shell.runsRunning = workspaces[.runs]?.isRunning ?? false
         refreshLibrary()
         if let built = modificationDate(buildStamp), built != launchedBuild {

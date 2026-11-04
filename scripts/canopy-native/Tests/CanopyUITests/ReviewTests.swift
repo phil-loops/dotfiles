@@ -413,6 +413,29 @@ import Testing
         #expect(pg.tab == "files")
     }
 
+    /// A place names the commit it shows: the address keeps it and opening the address comes back to it.
+    @Test func theCommitInViewSurvivesTheAddress() async throws {
+        let (a, p) = try await app()
+        let pg = ReviewPageState.of(a)
+        ShipStub.answer(p, "GET", "/loops/commit-diff", #"{"sha":"c1","files":[{"path":"c.ts","add":2,"del":0,"patch":"@@ -1,0 +1,2 @@\n+hi\n+there"}]}"#)
+        keys(a, "space", "2")
+        ShipState.of(a).showCommit("c1")
+        await until("the commit's diff") { pg.files.map(\.path) == ["c.ts"] }
+        pg.focusDiff(a, true)
+        keys(a, "j")
+        let at = a.here()
+        #expect(at.commit == "c1" && at.address.contains("commit=c1"), "\(at.address)")
+        #expect(Place(address: at.address).commit == "c1")
+
+        let (b, q) = try await app()
+        ShipStub.answer(q, "GET", "/loops/commit-diff", #"{"sha":"c1","files":[{"path":"c.ts","add":2,"del":0,"patch":"@@ -1,0 +1,2 @@\n+hi\n+there"}]}"#)
+        let pb = ReviewPageState.of(b)
+        b.open(address: at.address)
+        await until("back on the commit") { pb.commitScope == "c1" && pb.files.map(\.path) == ["c.ts"] }
+        await until("at the same line") { pb.here?.key == pg.here?.key }
+        #expect(pb.tab == "commits" && pb.here?.key == pg.here?.key, "\(pb.here?.key ?? "-") vs \(pg.here?.key ?? "-")")
+    }
+
     @Test func jumpsComeBackWithCtrlO() async throws {
         let (a, _) = try await app()
         let pg = ReviewPageState.of(a)

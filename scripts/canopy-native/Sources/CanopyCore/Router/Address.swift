@@ -7,6 +7,7 @@ import Foundation
 ///   `&sha=<commit>`            …at another commit, beside the diff
 ///   `?thread=<id>`             a conversation
 ///   `?tab=<face>`              the page's other face (the review page's commits, a forest's story)
+///   `&commit=<sha>`            the one commit the review page shows
 ///   `?at=<row key>`            any other row (`b:loops:x` on a forest)
 ///   `&row=<n>`                 the cursor's height on screen, in lines from the top
 extension Place {
@@ -30,6 +31,7 @@ extension Place {
             cursorKey = a
         }
         row = q["row"].flatMap(Int.init)
+        commit = q["commit"].flatMap { $0.isEmpty ? nil : $0 }
     }
 
     /// The place as an address `Place(address:)` reads back. A code place on the tip is its line; one
@@ -45,6 +47,7 @@ extension Place {
             else { items = [URLQueryItem(name: "at", value: k)] }
         }
         if let t = tab, t != Place.firstFace { items.insert(URLQueryItem(name: "tab", value: t), at: 0) }
+        if let c = commit { items.append(URLQueryItem(name: "commit", value: c)) }
         if let r = row { items.append(URLQueryItem(name: "row", value: String(r))) }
         guard !items.isEmpty else { return route.path }
         var c = URLComponents()

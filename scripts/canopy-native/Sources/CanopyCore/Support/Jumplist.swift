@@ -25,6 +25,8 @@ public struct Place: Equatable, Sendable {
     }
     /// a code place (CodeNav), when the page shows code
     public var loc: Loc?
+    /// the one commit the review page is showing instead of the whole branch
+    public var commit: String?
 
     public init(route: Route, pane: String? = nil, cursorKey: String? = nil, tab: String? = nil, row: Int? = nil, loc: Loc? = nil) {
         self.route = route; self.pane = pane; self.cursorKey = cursorKey; self.tab = tab; self.row = row; self.loc = loc
@@ -42,7 +44,7 @@ public struct Place: Equatable, Sendable {
 
     /// The same spot, ignoring the viewport row: two consecutive entries that are the same spot collapse.
     public func sameSpot(_ o: Place) -> Bool {
-        route == o.route && pane == o.pane && cursorKey == o.cursorKey && tab == o.tab && loc == o.loc
+        route == o.route && pane == o.pane && cursorKey == o.cursorKey && tab == o.tab && loc == o.loc && commit == o.commit
     }
 }
 
