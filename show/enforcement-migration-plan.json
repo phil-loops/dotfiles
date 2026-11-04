@@ -445,7 +445,7 @@
         "end": "record",
         "cliff": "record",
         "why": "The first event written in prod fixes the payload shape forever. Without a version, retiring a reason or adding a required field later means a lenient decoder for every old event.",
-        "detail": "A schemaVersion on each event, independent of the stream position; old decoders kept as replay fixtures."
+        "detail": "A schemaVersion on each event, independent of the stream position; old decoders kept as replay fixtures.\n\n**Recommendation: into the MVP (press m).** It's small: one field plus a dispatch in `parseEvent`. Miss the cliff and every event from before it must be read as an unmarked v0 forever; until then, retiring one reason stops the whole team's history from folding, including releases of unrelated cases."
       },
       {
         "id": "r2",
@@ -455,7 +455,7 @@
         "end": "flip",
         "cliff": "record",
         "why": "Events written without a causal key can never be deduplicated against a redelivery; they need a 'no key' exception in perpetuity.",
-        "detail": "A durable key from the source occurrence and policy, deduplicated across all history, separate from 'is a case already open'."
+        "detail": "A durable key from the source occurrence and policy, deduplicated across all history, separate from 'is a case already open'.\n\n**Recommendation: leave it out and record `accepted`.** It's a real design change, and its cliff is softer than R1's: only events from before the key can't be deduplicated, which matters only if a provider resends an old notification after its case was released. Suggested reason: *pre-key events can't dedupe; redelivery window is short; the fix lands right after the flip.* If you'd rather carry no such window, press m on it too."
       },
       {
         "id": "r3",
@@ -519,5 +519,42 @@
       }
     ]
   },
-  "sections": []
+  "sections": [
+    {
+      "id": "decide-r1-r2",
+      "group": "Open decisions",
+      "title": "R1 and R2: in the MVP?",
+      "body": "The plan's two lint warnings. Both have their cliff at **record**, the first stage that stores real events.\n\n- **R1, payload schema version → into the MVP.** Small, and the cliff is hard: events stored without a version are an unmarked v0 forever.\n- **R2, cause keys → leave out, record `accepted`.** Bigger, and the cliff is soft: only pre-key events can't be deduplicated, and that only bites on a redelivery after release.\n\nDecide on the grid: `m` on a lane (or drag it across the dashed line) moves it in or out of the MVP. The reasoning for each sits on its extra's page too."
+    },
+    {
+      "id": "decide-content-in-first-prs",
+      "group": "Open decisions",
+      "title": "Keep content readings in the first PRs?",
+      "body": "reading.reviewed, email scope and the publish effect are already built into the core branches. The alternative is cutting them out so the first PRs show only the core schema.\n\n**Recommendation: keep them.** They're in the MVP lane already; cutting them out means a reshape for a smaller first diff, not a safer one."
+    },
+    {
+      "id": "decide-readings-retention",
+      "group": "Open decisions",
+      "title": "Readings retention on team delete",
+      "body": "Events now outlive the team (plain `teamId`, no FK; purged by one line in `finalize-team-delete.ts` for now). Readings (`SuspiciousActivity`, `AccountLimitNotice`) are still deleted with the team, so a kept event could cite a reading that's gone.\n\n**Recommendation: decide after the MVP.** While events are purged with the team too, nothing dangles. It becomes real the day that purge line is removed."
+    },
+    {
+      "id": "decide-deletion-requested",
+      "group": "Open decisions",
+      "title": "team.deletion_requested as a case",
+      "body": "This is R6 (condition cases): a case that should close when its condition clears, which rules can't do today.\n\n**Recommendation: as planned, outside the MVP** (lane R6, flip → readers). It needs the ledger to be the authority first."
+    },
+    {
+      "id": "decide-seed-exception",
+      "group": "Open decisions",
+      "title": "The seed's CHECK exception",
+      "body": "Adopting legacy disables writes events with the `legacy.unrecorded` actor, which the `rules_open_or_review` CHECK rejects. The proposal is a narrow exception for exactly that actor.\n\n**Waiting on your approval**: it loosens a guard, so it needs your yes."
+    },
+    {
+      "id": "decide-restack",
+      "group": "Open decisions",
+      "title": "Restack before any push",
+      "body": "The forests are 13 commits behind main. I restack and re-run the gates once the plan is settled, since a plan change would mean re-splitting branches and restacking twice.\n\nNothing to decide; this is here so it isn't lost."
+    }
+  ]
 }
