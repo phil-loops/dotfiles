@@ -201,13 +201,15 @@ enum KeyTutorSandbox {
             let t = tip(b)
             return (200, #"{"ok":true,"branch":"\#(b)","parent":"main","base":"origin/main","head":"\#(t)","description":"adds a greeting the pages can share","story":"","ticket":"","commits":[{"sha":"\#(t)","short":"\#(t.prefix(10))","subject":"feat: add greeting","body":"","author":"you","date":"2026-10-29","pushed":false,"merge":false,"carried":false,"locked":"","files":3,"add":9,"del":5}],"pr":{"exists":false},"draft":{"title":"feat: add greeting","titleSaved":false,"body":"so every page can say hello the same way","bodySaved":false,"derivedBody":null,"bodyPending":false},"reseat":null,"undo":null}"#)
         case ("GET", "/learning-state"): return (200, learning)
+        case ("GET", "/review-flags"):
+            return (200, #"{"flags":[{"path":"greet.ts","line":5,"text":"who defaults to name, so hello() still says world"},{"path":"header.ts","line":2,"text":"greeting is imported but never used"}]}"#)
         case ("POST", "/lsp/hover"): return (200, #"{"ok":true,"contents":"```ts\nconst greeting: \"hello\"\n```"}"#)
         case ("POST", "/lsp/definition"), ("POST", "/lsp/type-definition"), ("POST", "/lsp/implementation"):
             return (200, #"{"ok":true,"sha":"\#(tip(root))","locations":[{"path":"greet.ts","line":2,"character":13}]}"#)
         case ("POST", "/lsp/references"):
             return (200, #"{"ok":true,"sha":"\#(tip(root))","locations":[{"path":"greet.ts","line":2,"character":13},{"path":"header.ts","line":2,"character":9}]}"#)
         case ("POST", "/lsp/symbols"):
-            return (200, #"{"ok":true,"sha":"\#(tip(root))","symbols":[{"name":"name","kind":"const","line":1,"endLine":1,"depth":0},{"name":"greeting","kind":"const","line":2,"endLine":2,"depth":0},{"name":"hello","kind":"function","line":4,"endLine":6,"depth":0}]}"#)
+            return (200, #"{"ok":true,"sha":"\#(tip(root))","symbols":[{"name":"name","kind":"const","line":1,"endLine":1,"depth":0},{"name":"greeting","kind":"const","line":2,"endLine":2,"depth":0},{"name":"hello","kind":"function","line":4,"endLine":6,"depth":0},{"name":"farewell","kind":"function","line":7,"endLine":9,"depth":0},{"name":"Waver","kind":"class","line":21,"endLine":26,"depth":0}]}"#)
         case ("POST", "/review-apply"): return (200, #"{"ok":true,"sha":"ab12cd"}"#)
         case ("POST", "/sync"): return (200, #"{"ok":true,"rebased":true,"summary":"replayed 1 commit (practice)"}"#)
         case ("POST", _): return (200, #"{"ok":true}"#)

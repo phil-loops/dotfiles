@@ -555,11 +555,13 @@ enum DiffCommands {
             return till ? (found.location > from ? found.location - 1 : nil) : found.location
         }
         var seeking: (back: Bool, till: Bool)?
+        var lastSeek: (back: Bool, till: Bool, c: String)?
         app.keys.layerKeys[findCharLayer] = { [weak app] k in
             guard let app else { return false }
             app.keys.closeLayer()
             guard let how = seeking, k.count == 1 || k == "space" else { return true }
             let c = k == "space" ? " " : k
+            lastSeek = (how.back, how.till, c)
             do {
                 try onLine("no \(c) \(how.back ? "before" : "after") the cursor on this line") { t, w in seekChar(t, w, c, back: how.back, till: how.till) }
             } catch let e as Refusal { app.runner.say(e.message) } catch {}
@@ -576,6 +578,127 @@ enum DiffCommands {
                                    app.keys.openLayer(findCharLayer)
                                }))
         }
+        r.register(Command(id: "review.seek.again", title: "Repeat the last f / t / F / T", scope: .review, verb: .repeatMotion, modes: motion, quiet: true,
+                           local: { _, _ in
+                               guard let l = lastSeek else { throw Refusal("nothing to repeat yet — f / t / F / T first") }
+                               try onLine("no \(l.c) \(l.back ? "before" : "after") the cursor on this line") { t, w in seekChar(t, w, l.c, back: l.back, till: l.till) }
+                           }))
+
+        // ── ]G / [G: the branch's last and first change ──
+        r.register(Command(id: "review.change.last", title: "The branch's last change", scope: .review, verb: .lastChange, modes: motion, quiet: true,
+                           available: onDiff, local: { _, _ in try ends(first: false) }))
+        r.register(Command(id: "review.change.first", title: "The branch's first change", scope: .review, verb: .firstChange, modes: motion, quiet: true,
+                           available: onDiff, local: { _, _ in try ends(first: true) }))
+
+        // ── z: where the cursor's line sits on screen ──
+        for (id, verb, at, what) in [("review.view.center", Verb.viewCenter, 0.5, "middle"), ("review.view.top", .viewTop, 0.0, "top"),
+                                     ("review.view.bottom", .viewBottom, 1.0, "bottom")] {
+            r.register(Command(id: id, title: "Scroll the cursor's line to the \(what)", scope: .review, verb: verb, modes: motion, quiet: true,
+                               local: { _, _ in
+                                   guard app.pane?.id == reviewDiffPane, let k = pg.diffCursor else { throw Refusal("z scrolls the diff — this pane follows its cursor") }
+                                   if !pg.diffCanvas.canvas.place(k, at: at) { throw Refusal("the diff isn't drawn yet") }
+                               }))
+        }
+
+        // ── ]f / ]t: the next function or type in this file's diff, by the file's symbols ──
+
+        /// The diff's new-side line under the cursor (a removed line counts as the line after it).
+        func newLine(_ s: Stop?) -> Int {
+            guard let row = s?.row else { return 0 }
+            return row.right?.new ?? row.left?.new ?? 0
+        }
+        /// The stop a symbol lands on: its first line if the diff shows it, else its first line the diff does.
+        func landing(_ sym: LSPSymbols.Symbol, in path: String) -> Int? {
+            var best: (line: Int, i: Int)?
+            for (i, s) in pg.stops.enumerated() where s.path == path && s.kind == .line {
+                guard let n = s.row?.right?.new, n >= sym.line, n <= max(sym.line, sym.endLine) else { continue }
+                if best == nil || n < best!.line { best = (n, i) }
+            }
+            return best?.i
+        }
+        func symbolStep(_ dir: Int, kinds: Set<String>, noun: String) throws {
+            guard app.pane?.id == reviewDiffPane, let here = pg.here, let path = here.path as String?, !path.isEmpty else {
+                throw Refusal("] f / ] t walk the diff's code")
+            }
+            let (_, w) = position()
+            guard let w else { throw Refusal("no code here") }
+            let from = idx()
+            let look = CodeLookup.of(app)
+            Task { @MainActor in
+                guard let syms = await look.symbolList(path: path, w) else { return }
+                guard pg.here?.key == here.key else { return }   // the cursor moved on while tsgo answered
+                let marks = syms.filter { kinds.contains($0.kind) }.compactMap { s in landing(s, in: path).map { (s, $0) } }
+                let pick = dir > 0 ? marks.filter { $0.1 > from }.min { $0.1 < $1.1 } : marks.filter { $0.1 < from }.max { $0.1 < $1.1 }
+                guard let (sym, i) = pick else {
+                    app.runner.say(marks.isEmpty ? "no \(noun) in this file's diff" : dir > 0 ? "the last \(noun) in this file's diff" : "the first \(noun) in this file's diff")
+                    return
+                }
+                if app.keys.mode != .select { pg.mark = nil }
+                goTo(i)
+                app.runner.say("\(sym.kind) \(sym.name)")
+            }
+        }
+        let functions: Set<String> = ["function", "method", "constructor"]
+        let types: Set<String> = ["class", "interface", "enum", "struct"]
+        r.register(Command(id: "review.function.next", title: "The next function", scope: .review, verb: .nextFunction, modes: motion, quiet: true,
+                           available: onDiff, local: { _, _ in try symbolStep(1, kinds: functions, noun: "function") }))
+        r.register(Command(id: "review.function.prev", title: "The previous function", scope: .review, verb: .previousFunction, modes: motion, quiet: true,
+                           available: onDiff, local: { _, _ in try symbolStep(-1, kinds: functions, noun: "function") }))
+        r.register(Command(id: "review.type.next", title: "The next class, interface or enum", scope: .review, verb: .nextType, modes: motion, quiet: true,
+                           available: onDiff, local: { _, _ in try symbolStep(1, kinds: types, noun: "type") }))
+        r.register(Command(id: "review.type.prev", title: "The previous class, interface or enum", scope: .review, verb: .previousType, modes: motion, quiet: true,
+                           available: onDiff, local: { _, _ in try symbolStep(-1, kinds: types, noun: "type") }))
+
+        // ── ]d / [d: push-ready's findings, as Helix walks diagnostics ──
+
+        /// Each finding's stop: its line (the nearest the diff shows), else its file's first change.
+        func findingStops(_ fs: [ReviewFlag]) -> [(i: Int, n: Int, flag: ReviewFlag)] {
+            var out: [(Int, Int, ReviewFlag)] = []
+            for (n, f) in fs.enumerated() {
+                guard let path = f.path, pg.stopFiles.contains(path) else { continue }
+                if let line = f.line {
+                    let near = pg.stops.enumerated().filter { $0.element.path == path && $0.element.kind == .line && $0.element.row?.right?.new != nil }
+                        .min { abs($0.element.row!.right!.new! - line) < abs($1.element.row!.right!.new! - line) }
+                    if let near { out.append((near.offset, n, f)); continue }
+                }
+                if let k = pg.landing(file: path), let i = pg.stopIndex[k] { out.append((i, n, f)) }
+            }
+            return out.sorted { ($0.0, $0.1) < ($1.0, $1.1) }
+        }
+        var shownFinding: (key: String, n: Int)?
+        func findingStep(_ dir: Int) throws {
+            guard let t = pg.target else { throw Refusal("no branch here") }
+            let at = idx()
+            let flags = ReviewFlags.of(app)
+            Task { @MainActor in
+                guard let fs = await flags.load(app, t) else {
+                    app.runner.say("no findings on this tree — push-ready's review hasn't run since the last edit")
+                    return
+                }
+                if fs.isEmpty { app.runner.say("push-ready's review found nothing here"); return }
+                let all = findingStops(fs)
+                let outside = fs.count - all.count
+                let shown = shownFinding.flatMap { s in pg.here?.key == s.key ? s.n : nil }
+                let pick = dir > 0
+                    ? all.first { f in f.i > at || (f.i == at && f.n > (shown ?? -1)) }   // the one you stand on first
+                    : all.last { f in f.i < at || (f.i == at && shown.map { f.n < $0 } ?? false) }
+                guard let p = pick else {
+                    let rest = outside > 0 ? " · \(outside) more on code this diff doesn't show" : ""
+                    app.runner.say(all.isEmpty ? "\(fs.count) findings, none on this diff's code" : (dir > 0 ? "the last finding" : "the first finding") + rest)
+                    return
+                }
+                if app.keys.mode != .select { pg.mark = nil }
+                goTo(p.i)
+                shownFinding = (pg.here?.key ?? "", p.n)
+                let k = (all.firstIndex { $0.n == p.n } ?? 0) + 1
+                app.runner.say("finding \(k) of \(all.count): \(p.flag.text)")
+            }
+        }
+        r.register(Command(id: "review.finding.next", title: "The next review finding", scope: .review, verb: .nextFinding, modes: motion, quiet: true,
+                           available: onDiff, local: { _, _ in try findingStep(1) }))
+        r.register(Command(id: "review.finding.prev", title: "The previous review finding", scope: .review, verb: .previousFinding, modes: motion, quiet: true,
+                           available: onDiff, local: { _, _ in try findingStep(-1) }))
+
         r.register(Command(id: "review.conversation", title: "The conversation, in place of the diff (esc brings the diff back)", scope: .review,
                            verb: .conversation, label: "conversation", available: { _ in pg.integration == nil },
                            local: { _, _ in

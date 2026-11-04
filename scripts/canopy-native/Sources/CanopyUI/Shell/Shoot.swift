@@ -68,7 +68,7 @@ public enum Shoot {
                         _ = app.keys.handle(String(k.dropFirst()))
                     } else if k == "?" {
                         let pg = ReviewPageState.of(app)
-                        print("state: cursor=\(pg.here?.key ?? "nil") pane=\(app.pane?.id ?? "nil") helix=\(pg.helix.map { "\($0.path):\($0.line) whole=\($0.whole)" } ?? "closed") helixAt=\(pg.helixAt.map { "\($0.path):\($0.line)" } ?? "nil") terminalFrame=\(terminal(in: host).map { NSStringFromRect($0.convert($0.bounds, to: nil)) } ?? "none") window=\(NSStringFromSize(size))")
+                        print("state: cursor=\(pg.here?.key ?? "nil") note=\(app.runner.note ?? "-") pop=\(CodeLookup.of(app).pop?.text ?? "-") pane=\(app.pane?.id ?? "nil") helix=\(pg.helix.map { "\($0.path):\($0.line) whole=\($0.whole)" } ?? "closed") helixAt=\(pg.helixAt.map { "\($0.path):\($0.line)" } ?? "nil") terminalFrame=\(terminal(in: host).map { NSStringFromRect($0.convert($0.bounds, to: nil)) } ?? "none") window=\(NSStringFromSize(size))")
                     } else {
                         _ = app.keys.handle(k)
                     }

@@ -544,6 +544,14 @@ final class Canvas: NSObject {
         return true
     }
 
+    /// z t / z z / z b: scroll so a stop's line sits at `at` (0 the top, 1 the bottom) of the view.
+    @discardableResult
+    func place(_ stop: String, at: Double) -> Bool {
+        guard let r = stopMap[stop], let rect = text.rect(for: NSRange(location: r.location, length: 1)), rect.height > 0 else { return false }
+        let rows = max(1, Int(scroll.contentView.bounds.height / rect.height))
+        return settle(stop, row: Int((Double(rows - 1) * at).rounded()))
+    }
+
     /// A stop's viewport row: whole lines from the visible top down to it, kept on screen.
     func viewportRow(of stop: String) -> Int? {
         let h = scroll.contentView.bounds.height
