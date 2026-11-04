@@ -16,7 +16,7 @@ import hashlib
 import threading
 from urllib.parse import parse_qs
 
-from . import ctx, memo, repostate, shellout, picker, watch
+from . import ctx, lru, memo, repostate, shellout, picker, watch
 
 # (repo, branch) -> {"sig", "branches", "out"} — validated per-FOREST (only its own ref
 # tips + config), so an unrelated worktree's commit no longer busts every
@@ -355,14 +355,9 @@ def file(req, u):
 # Answers are pure functions of refs, so they're memoised the way GitHub Desktop keeps
 # history in its store: /commits by (branch tip, origin tip, parent tip), /commit-diff by
 # sha — a commit's diff can never change. Bounded so a long-lived server doesn't grow forever.
-_COMMITS_CACHE = {}   # (repo, branch, refs-fingerprint) -> rows json
-_CDIFF_CACHE = {}     # (repo, sha) -> diff json
+_COMMITS_CACHE = lru.ByteLRU(16 << 20)   # (repo, branch, refs-fingerprint) -> rows json
+_CDIFF_CACHE = lru.ByteLRU(32 << 20)     # (repo, sha) -> diff json
 
-
-def _bound(cache, cap):
-    if len(cache) > cap:
-        for k in list(cache)[: len(cache) // 2]:
-            del cache[k]
 
 
 def commits(req, u):
@@ -410,7 +405,6 @@ def commits(req, u):
                          **({"pushed": p[0] in pushed} if pushed is not None else {})})
     out_json = json.dumps(rows)
     _COMMITS_CACHE[key] = out_json
-    _bound(_COMMITS_CACHE, 200)
     req._send(200, out_json)
 
 
@@ -474,7 +468,6 @@ def commit_diff(req, u):
     out_json = json.dumps({"sha": sha, "files": files})
     if files and pinned:
         _CDIFF_CACHE[key] = out_json
-        _bound(_CDIFF_CACHE, 300)
     req._send(200, out_json)
 
 

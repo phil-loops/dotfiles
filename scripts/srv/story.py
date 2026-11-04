@@ -9,9 +9,9 @@ doesn't change under it.
 import json
 from urllib.parse import parse_qs
 
-from . import ctx
+from . import ctx, lru
 
-_FOUND = {}   # (repo, pr) -> answer
+_FOUND = lru.ByteLRU(4 << 20, size=lru.json_size)   # (repo, pr) -> answer
 
 
 def why(req, u):
