@@ -160,6 +160,17 @@ def obsolete(progress):
     print(json.dumps({k: v for k, v in verdict.items() if k != "event"}))
 
 
+def stop(child):
+    if child.poll() is not None:
+        return
+    os.killpg(child.pid, signal.SIGTERM)
+    try:
+        child.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        os.killpg(child.pid, signal.SIGKILL)
+        child.wait()
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--queue", required=True)
@@ -213,15 +224,20 @@ def main(argv=None):
         child = subprocess.Popen(command, start_new_session=True, env=env)
         with locked(root):
             (slot / "pid").write_text(str(child.pid))
-        return child.wait()
-    except (InterruptedError, KeyboardInterrupt):
-        if child is not None and child.poll() is None:
-            os.killpg(child.pid, signal.SIGTERM)
+        # a --fix run commits its own format fix, so only a run that never writes can be outrun
+        outrunnable = "--fix" not in command
+        while True:
             try:
-                child.wait(timeout=5)
+                return child.wait(timeout=2)
             except subprocess.TimeoutExpired:
-                os.killpg(child.pid, signal.SIGKILL)
-                child.wait()
+                pass
+            if outrunnable and tree_of(args.branch) != args.tree:
+                stop(child)
+                obsolete(progress)
+                return 0
+    except (InterruptedError, KeyboardInterrupt):
+        if child is not None:
+            stop(child)
         return 130
     finally:
         with locked(root):
