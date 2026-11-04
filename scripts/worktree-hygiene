@@ -10,6 +10,14 @@ relinked regardless of age; .next keeps an idle window.
   worktree-hygiene                 dry run: list what would change and why the rest is kept
   worktree-hygiene --apply         do it, appending one JSON line per tree to the log
   worktree-hygiene --days N        idle window for .next (default 2)
+  worktree-hygiene --retire-days N idle window before a worktree is retired (default 3)
+
+A worktree idle past the retire window is removed outright: a checkout is disposable, the work
+lives in git. Nothing is lost on the way out. A dirty tree is committed onto a new
+parked/<name> branch first; a detached HEAD no ref holds gets a parked/<name> branch. Bring
+either back with `git worktree add ~/coding/<name> parked/<name>`. Idle for retiring means the
+newest of the .next signals plus the HEAD file and the last commit. The index and reflog are
+left out because canopy's status sweeps and restacks touch every tree's.
 
 Three shapes count as fine, not just the symlink: see nm_state — seed-gen's exploded
 per-entry-symlink view is deliberate (Turbopack refuses a node_modules that links out of the
@@ -68,6 +76,57 @@ def newest_touch(path):
     return latest
 
 
+def last_activity(path):
+    latest = newest_touch(path)
+    gitdir = git(["rev-parse", "--absolute-git-dir"], cwd=path).strip()
+    head = os.path.join(gitdir, "HEAD")
+    if os.path.exists(head):
+        latest = max(latest, os.stat(head).st_mtime)
+    committed = git(["log", "-1", "--format=%ct"], cwd=path).strip()
+    if committed.isdigit():
+        latest = max(latest, int(committed))
+    return latest
+
+
+def unused_branch(base):
+    name, n = base, 1
+    while git(["rev-parse", "--verify", "-q", f"refs/heads/{name}"]).strip():
+        n += 1
+        name = f"{base}-{n}"
+    return name
+
+
+def retire(wt, apply):
+    """Remove an idle worktree, parking anything no branch holds. Returns how it was retired."""
+    name = os.path.basename(wt)
+    branch = git(["symbolic-ref", "-q", "--short", "HEAD"], cwd=wt).strip()
+    head = git(["rev-parse", "HEAD"], cwd=wt).strip()
+    dirty = git(["status", "--porcelain", "--untracked-files=normal"], cwd=wt).strip()
+    held = branch or git(["for-each-ref", "--contains", head, "--count=1", "refs/heads", "refs/remotes"]).strip()
+    parked = None
+    if dirty or not held:
+        parked = unused_branch(f"parked/{name}")
+    if apply:
+        if dirty:
+            git(["switch", "-q", "-c", parked], cwd=wt)
+            git(["add", "-A"], cwd=wt)
+            was = branch or f"detached {head[:10]}"
+            git(["-c", "core.hooksPath=/dev/null", "commit", "-q", "--no-verify",
+                 "-m", f"wip: parked {name} (was {was})"], cwd=wt)
+            if git(["status", "--porcelain"], cwd=wt).strip():
+                return None
+        elif parked:
+            git(["branch", parked, head])
+        subprocess.run(["git", "worktree", "remove", "--force", wt], cwd=REPO, capture_output=True)
+        if os.path.exists(wt):
+            return None
+    if dirty:
+        return f"parked changes on {parked}"
+    if parked:
+        return f"parked detached HEAD on {parked}"
+    return f"removed ({branch or 'detached, held by a ref'})"
+
+
 def nm_state(path):
     """Which of the three node_modules shapes this is — the discriminator hygiene turned out to
     need. seed-gen builds an EXPLODED view (a directory of per-entry symlinks into the donor)
@@ -105,6 +164,9 @@ def main():
     days = 2
     if "--days" in sys.argv:
         days = int(sys.argv[sys.argv.index("--days") + 1])
+    retire_days = 3
+    if "--retire-days" in sys.argv:
+        retire_days = int(sys.argv[sys.argv.index("--retire-days") + 1])
     main_wt, trees = worktrees()
     main_nm = os.path.join(main_wt, "node_modules")
     if not os.path.isdir(main_nm) or os.path.islink(main_nm):
@@ -113,11 +175,20 @@ def main():
     donor = git(["config", "--get", "stack.donor"]).strip()
     busy = cwds_in_use()
     now = time.time()
-    acted, kept = [], []
+    acted, kept, retired = [], [], []
     for wt in trees:
         name = os.path.basename(wt)
         if "/stack-study/" in wt or name.startswith(".") or wt in (main_wt, donor):
             continue
+        if not os.path.isdir(wt):
+            continue
+        in_use = any(c == wt or c.startswith(wt + "/") for c in busy)
+        if not in_use and (now - last_activity(wt)) / 86400 >= retire_days:
+            how = retire(wt, apply)
+            if how:
+                retired.append({"at": now, "worktree": wt, "retired": how})
+                continue
+            kept.append((name, "retire failed; left in place"))
         nm = os.path.join(wt, "node_modules")
         nxt = os.path.join(wt, ".next")
         real_nm = nm_state(nm) == "real"
@@ -149,17 +220,22 @@ def main():
     os.makedirs(CACHE, exist_ok=True)
     if apply:
         with open(os.path.join(CACHE, "log.jsonl"), "a") as fh:
-            for a in acted:
+            for a in acted + retired:
                 fh.write(json.dumps(a) + "\n")
+        subprocess.run(["git", "worktree", "prune"], cwd=REPO, capture_output=True)
         with open(os.path.join(CACHE, "last.json"), "w") as fh:
-            json.dump({"at": now, "days": days, "stripped": len(acted),
+            json.dump({"at": now, "days": days, "retireDays": retire_days, "retired": len(retired),
+                       "stripped": len(acted),
                        "apparentMb": sum(a["apparentMb"] for a in acted), "kept": len(kept)}, fh)
+    for r in retired:
+        print(f"{'retired' if apply else 'would retire'} {os.path.basename(r['worktree'])}: {r['retired']}")
     verb = "relinked" if apply else "would relink"
     for a in acted:
         print(f"{verb} {os.path.basename(a['worktree'])}: {' + '.join(a['removed'])} ({a['apparentMb']} MB apparent)")
     for name, why in kept:
         print(f"kept {name}: {why}")
-    print(f"{verb} {len(acted)} tree(s), {sum(a['apparentMb'] for a in acted)} MB apparent; kept {len(kept)}")
+    print(f"{verb} {len(acted)} tree(s), {sum(a['apparentMb'] for a in acted)} MB apparent; "
+          f"{'retired' if apply else 'would retire'} {len(retired)}; kept {len(kept)}")
 
 
 if __name__ == "__main__":
