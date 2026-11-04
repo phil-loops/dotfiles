@@ -76,28 +76,29 @@ class Graph:
             stack.pop()
 
     def extend(self, tips):
-        """Make every sha in tips (and its ancestry) known. False when git can't produce one."""
+        """Make every sha in tips (and its ancestry) known. False when git can't produce one.
+        git runs outside the lock: a slow rev-list must not hold up a request asking about commits
+        the graph already has. Two overlapping extends both ingest; ingesting is idempotent."""
         with self.lock:
-            return self._extend(tips)
-
-    def _extend(self, tips):
-        new = [t for t in tips if t not in self.tips and t not in self.parents]
-        if not new:
-            self.tips.update(t for t in tips)
-            return True
-        stdin = "\n".join(new + ["^" + t for t in self.tips]) + "\n"
+            new = [t for t in tips if t not in self.tips and t not in self.parents]
+            if not new:
+                self.tips.update(t for t in tips)
+                return True
+            stdin = "\n".join(new + ["^" + t for t in self.tips]) + "\n"
         r = self._git(["rev-list", "--parents", "--stdin"], input=stdin)
         if r.returncode != 0:
             return False
-        self._ingest(r.stdout)
-        self.tips.update(new)
-        return all(t in self.parents for t in new)
+        with self.lock:
+            self._ingest(r.stdout)
+            self.tips.update(new)
+            return all(t in self.parents for t in new)
 
     def load_refs(self, generation):
         """Re-read refs (packed-refs + loose files) when the watcher's generation moved, and fold
         any new branch/remote tips into the graph."""
-        if self.refs_gen == generation:
-            return
+        with self.lock:
+            if self.refs_gen == generation:
+                return
         refs = {}
         try:
             with open(os.path.join(self.gd, "packed-refs")) as fh:
@@ -126,8 +127,9 @@ class Graph:
         for name, target in sym.items():
             if target in refs:
                 refs[name] = refs[target]
-        self.refs = refs
-        self.refs_gen = generation
+        with self.lock:
+            self.refs = refs
+            self.refs_gen = generation
         tips = [s for n, s in refs.items() if n.startswith(("refs/heads/", "refs/remotes/"))]
         self.extend(tips)
 
@@ -235,6 +237,5 @@ def graph(gd, generation):
         g = _GRAPHS.get(gd)
         if g is None:
             g = _GRAPHS[gd] = Graph(gd)
-    with g.lock:
-        g.load_refs(generation)
+    g.load_refs(generation)
     return g
