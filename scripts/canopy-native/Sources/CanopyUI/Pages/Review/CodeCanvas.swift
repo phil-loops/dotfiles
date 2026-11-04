@@ -220,7 +220,8 @@ final class CanvasTextView: NSTextView {
                 let g = lm.glyphRange(forCharacterRange: chars, actualCharacterRange: nil)
                 guard NSLocationInRange(g.location, gr) else { return }
                 let r = lm.boundingRect(forGlyphRange: g, in: tc).offsetBy(dx: origin.x, dy: origin.y)
-                colors.gold.withAlphaComponent(0.22).setFill()
+                // one character is h / l's cursor: a block you can find at a glance; a name is w's, a wash
+                colors.gold.withAlphaComponent(word.at.count == 1 ? 0.6 : 0.22).setFill()
                 NSBezierPath(roundedRect: r.insetBy(dx: -1, dy: 1), xRadius: 2, yRadius: 2).fill()
                 colors.gold.setFill()
                 NSRect(x: r.minX, y: r.maxY - 2, width: r.width, height: 1.5).fill()

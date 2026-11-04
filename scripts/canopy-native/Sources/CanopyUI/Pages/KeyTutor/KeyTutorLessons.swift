@@ -155,7 +155,7 @@ enum KeyLessons {
                     setup: P.forest(cursor: RowKey.branch(S.id(S.root))), check: { P.onBranch($0, S.root) }),
             KeyStep("{out} goes up a level: the forest, the branch still under the cursor.", [.out], check: { P.onForest($0, "greetings") }),
             KeyStep("{out} once more: Forests.", [.out], check: { $0.router.route == .forests }),
-        ], recap: "{main} goes in and {out} comes back up; {left} / {right} only ever move across what you see."),
+        ], recap: "{main} goes in and {out} comes back up; {left} / {right} move a character in code, and {pane-left} / {pane-right} move panes from anywhere."),
 
         KeyLesson(id: "labels", title: "Labels", steps: [
             KeyStep("To go to something you can see, don't step to it: {labels} labels everything on screen.",
@@ -199,9 +199,9 @@ enum KeyLessons {
                     setup: P.forests(), check: { $0.router.route == .tutor(session: nil) }),
             KeyStep("{pane-down} focuses the pane below.", [.paneDown], setup: P.tutorPage(), check: { $0.pane?.id == TutorPane.topics }),
             KeyStep("{pane-up} the pane above.", [.paneUp], check: { $0.pane?.id == TutorPane.due }),
-            KeyStep("{right} moves right in what you see: here, the pane to the right.", [.right], check: { $0.pane?.id != TutorPane.due }),
+            KeyStep("{right} moves a character in code; in a list with no code, like this one, it's the pane to the right.", [.right], check: { $0.pane?.id != TutorPane.due }),
             KeyStep("{left} back to the left.", [.left], check: { $0.pane?.id == TutorPane.due }),
-            KeyStep("{pane-right} always means the pane, even where {right} has something nearer to move to.", [.paneRight], check: { $0.pane?.id != TutorPane.due }),
+            KeyStep("{pane-right} always means the pane: in the diff, where {right} moves a character, it's how you leave.", [.paneRight], check: { $0.pane?.id != TutorPane.due }),
             KeyStep("{pane-left} back.", [.paneLeft], check: { $0.pane?.id == TutorPane.due }),
             KeyStep("{pane-next} cycles through them.", [.paneNext]),
             KeyStep("{go-dashboard}: the dashboard.", [.goDashboard], check: { $0.router.route == .dashboard }),

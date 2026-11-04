@@ -2,6 +2,8 @@
 
 > **Decided 2026-10-31 — what canopy writes:** canopy reads and talks; Helix writes code. `i` on the new half of a diff puts real Helix there, in the branch's diff-view checkout at the cursor's line and name, with the old half still beside it to read against; `:w` saves as usual and quitting Helix commits what changed — a `fixup!` of the branch's own unpushed commit that wrote the first line touched, else `edit <file>` (`/review-helix`). `o` still opens the outside Helix. Beyond that canopy makes only one-decision edits: apply a suggestion (`A`), rename (`space r`). Every edit lands as a commit you see, never as loose changes in your worktree.
 >
+> **Decided 2026-11-03 (supersedes the h/l half of the note below):** `h`/`l` move one character in code — the diff and the code beside it — with a one-character cursor that `j`/`k` carry at the same column (vim's curswant) and `g d`/`space k` ask about. At the new half's start `h` crosses onto the old half of a removed line, and `l` crosses back; on a row with no code they refuse rather than leave. `⌃h`/`⌃l` move panes from anywhere (as `⌃w h`/`⌥h` do). In panes with no code (the files, the commits, lists) bare `h`/`l` still move to the pane beside. Why: "h is the old half here and the pane over there" depended on the row's colour, so you couldn't tell where a press would land.
+>
 > **Decided 2026-10-31 (supersedes the zoom-ladder h/l below):** hjkl move the cursor in what you see; structure has its own keys. `h`/`l` are left/right — the old/new half of a split diff line, else the pane to that side. `ret` goes in, `-` goes up a level (vim-vinegar's parent), `C-o` retraces time, `esc` cancels. The old rule borrowed Miller columns' h/l without Miller columns' layout: canopy's levels are pages that replace each other, so "out" was never to the left of anything, and on the pages that do have a left and a right (a split diff, list ⇄ detail) h/l meant something you couldn't see.
 >
 > **Decided 2026-10-29:** Phil adopted every recommendation below (Q1–Q5) and both stated assumptions (one app-wide jumplist; `M-h/j/k/l` pane alias). This file is binding for every area; change it only by coordination.
@@ -25,7 +27,8 @@
 | next / previous | `j` `↓` / `k` `↑` (typing in `:`, the menu, a picker: `↓` `C-n` `C-j` `⇥` / `↑` `C-p` `C-k`) | the next / previous row, line or item |
 | first / last | `g g` / `G` | the first / last row (jumps) |
 | half-down / half-up | `C-d` / `C-u` | half a page |
-| left / right | `h` `←` / `l` `→` | across what you see: the old half of a removed line / back to the new half, else the pane to that side |
+| left / right | `h` `←` / `l` `→` | a character in code (onto the old half of a removed line at the new half's start, and back); in a pane without code, the pane to that side |
+| pane left / right | `⌃h` / `⌃l` | the pane to that side, from anywhere (also `⌃w h`/`⌃w l`, `⌥h`/`⌥l`) |
 | next / previous name | `w` / `b` | the next / previous name in the code, across lines; `g d`, `space k` and friends ask about it |
 | in / out | `ret` / `-` | one level in / up on the ladder (forests → forest → branch → file → line) |
 | cancel | `esc` | close the innermost transient thing — never changes page |

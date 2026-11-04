@@ -368,24 +368,47 @@ import Testing
         #expect(a.selected == RowKey.branch(Self.branch))
     }
 
-    /// h / l move across what you see: the old half of a removed line, then the pane beside; leaving
-    /// the diff forgets the old half, so l comes back on the new one.
-    @Test func hAndLCrossTheSplitThenThePanes() async throws {
+    /// h / l move a character along the code; at the new half's start h crosses onto the old half of a
+    /// removed line, and l crosses back. They never leave the diff: ⌃h / ⌃l move panes.
+    @Test func hAndLMoveACharacterAndCtrlMovesPanes() async throws {
         let (a, _) = try await app()
         let pg = ReviewPageState.of(a)
         keys(a, "j")
-        #expect(pg.here?.key == "l|a.ts|R:2" && pg.range?.side == .right)
-        keys(a, "h")
-        #expect(pg.column == .left && pg.range?.side == .left && a.pane?.id == reviewDiffPane, "the old half of the same row")
-        keys(a, "h")
-        #expect(pg.column == .right && a.pane?.id == (pg.showsHistory ? ShipSeam.historyPane : reviewTreePane), "past the old half, the outline to its left")
+        let row = try #require(pg.here?.row)
+        #expect(pg.here?.key == "l|a.ts|R:2" && pg.hereWord == nil)
+        let new = row.right?.text ?? "", old = row.left?.text ?? ""
+        let start = new.utf16.firstIndex { $0 != 32 }.map { new.utf16.distance(from: new.utf16.startIndex, to: $0) } ?? 0
         keys(a, "l")
-        #expect(pg.column == .right && pg.range?.side == .right && a.pane?.id == reviewDiffPane, "back on the new half")
+        #expect(pg.column == .right && pg.hereWord == start..<(start + 1), "l enters the line at its first character")
+        keys(a, "l")
+        #expect(pg.hereWord == (start + 1)..<(start + 2), "then one character at a time")
+        keys(a, "h", "h")
+        #expect(pg.hereWord == (start - 1)..<start || start == 0)
+        for _ in 0..<start { keys(a, "h") }
+        #expect(pg.column == .left && pg.range?.side == .left, "past the new half's start, the old half of the removed line")
+        #expect(pg.hereWord == (old.utf16.count - 1)..<old.utf16.count && a.pane?.id == reviewDiffPane, "at its last character")
+        keys(a, "l")
+        #expect(pg.column == .right && pg.range?.side == .right, "and l crosses back")
+        keys(a, "j")
+        #expect(pg.hereWord?.count == 1 && pg.here?.key != "l|a.ts|R:2", "j keeps the character cursor on the next line")
+        keys(a, "C-h")
+        #expect(a.pane?.id == (pg.showsHistory ? ShipSeam.historyPane : reviewTreePane), "⌃h, the pane to the left")
+        keys(a, "C-l")
+        #expect(a.pane?.id == reviewDiffPane)
         pg.open(Loc(repo: "loops", sha: "zzz", path: "other.ts", line: 4))
+        keys(a, "C-h")
+        #expect(a.pane?.id == reviewDiffPane, "from the code beside the diff, ⌃h is the diff")
+        keys(a, "C-l")
+        #expect(a.pane?.id == reviewCodePane)
+    }
+
+    /// On a row with no code (a file's header), h / l say so instead of leaving the diff.
+    @Test func hOnAHeaderStaysInTheDiff() async throws {
+        let (a, _) = try await app()
+        keys(a, "g", "g")
+        #expect(ReviewPageState.of(a).here?.kind == .file)
         keys(a, "h")
-        #expect(a.pane?.id == reviewDiffPane, "from the code beside the diff, h is the diff")
-        keys(a, "l")
-        #expect(a.pane?.id == reviewCodePane, "past the new half, l is the code beside it")
+        #expect(a.pane?.id == reviewDiffPane)
     }
 
     @Test func theOutlineFoldsToAStripWhileTheDiffHasFocus() async throws {
@@ -394,7 +417,7 @@ import Testing
         #expect(a.pane?.id == reviewDiffPane)
         #expect(pg.outlineIsStrip(a.pane?.id), "reading the diff, the outline is the files by name")
         #expect(pg.stripWidth < pg.outlineWidth)
-        keys(a, "h", "h")
+        keys(a, "C-h")
         #expect(a.pane?.id != reviewDiffPane)
         #expect(!pg.outlineIsStrip(a.pane?.id), "in the outline it opens back to full width")
         #expect(pg.outlineReserve(a.pane?.id) == pg.outlineWidth, "the diff moves over: the open outline never covers it")
@@ -426,7 +449,7 @@ import Testing
         keys(a, "b")
         #expect(pg.here?.key == first.key && pg.hereWord == names.last, "back to the last name of the line before")
         keys(a, "j")
-        #expect(pg.hereWord == nil, "the name belongs to its line")
+        #expect(pg.hereWord?.count == 1, "j keeps the column as a one-character cursor")
     }
 
     /// i on a new line opens Helix there, in the branch's diff checkout; quitting it commits what changed.
@@ -587,7 +610,7 @@ import Testing
         await until("the browser") { opened.count == 2 }
         #expect(opened.last == "https://github.com/o/r/blob/\(tip)/lib/z.ts#L4", "at the commit the code is shown at")
 
-        keys(a, "h", "space", "o", "b")
+        keys(a, "C-h", "space", "o", "b")
         await until("the browser") { opened.count == 3 }
         #expect(opened.last == "https://github.com/o/r/blob/add-hankles-limited-label/a.ts#L1", "the diff's line, at the branch")
     }
