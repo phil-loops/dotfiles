@@ -479,11 +479,10 @@ import Testing
         #expect(pg.outlineReserve(reviewDiffPane) == pg.stripWidth)
     }
 
-    @Test func retOnAllChangesGoesBackIntoTheDiff() async throws {
+    @Test func retOnTheHistoryGoesIntoTheDiff() async throws {
         let (a, _) = try await app()
         #expect(ReviewPageState.of(a).showsHistory)
         a.focus(pane: ShipSeam.historyPane)
-        a.setCursor("h|")
         keys(a, "ret")
         #expect(a.pane?.id == reviewDiffPane, "↵ reads the whole branch's diff, never 'nothing here'")
     }

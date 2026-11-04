@@ -100,7 +100,7 @@ enum ReviewCommands {
                            local: { _, _ in
                                if let app = weakApp, ShipSeam.backOut(app) { return }
                                ship.showCommit(nil)
-                               weakApp?.setCursor("h|")
+                               ship.host.tab = "files"
                            }))
         let backToList = { (_: String?, _: Any?) in
             guard let app = weakApp else { return }
