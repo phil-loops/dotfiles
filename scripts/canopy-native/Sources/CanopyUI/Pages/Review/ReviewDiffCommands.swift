@@ -26,16 +26,14 @@ enum DiffCommands {
             pg.setCursor(s[max(0, min(s.count - 1, i))].key)
             CodeLookup.of(app).dismiss()
         }
-        func seek(_ dir: Int, refusing what: String? = nil, _ ok: (Stop) -> Bool) throws {
+        func seek(_ dir: Int, _ ok: (Stop) -> Bool) throws {
             let s = pg.stops
             var i = idx() + dir
             while i >= 0 && i < s.count {
                 if ok(s[i]) { return goTo(i) }
                 i += dir
             }
-            guard let what else { throw Refusal(dir > 0 ? "nothing further down" : "nothing further up") }
-            let edge = s.count(where: ok) <= 1 ? "the only \(what) in this diff" : dir > 0 ? "the last \(what)" : "the first \(what)"
-            throw Refusal(what == "file" ? "\(edge) · } { move by hunk" : edge)
+            throw Refusal(dir > 0 ? "nothing further down" : "nothing further up")
         }
 
         /// A line stop's text on one half: the old half only where it differs, and only as far as it's drawn.
@@ -97,11 +95,45 @@ enum DiffCommands {
 
         // ── moving ──
 
+        /// gg / G: the first changed line of the diff, the last changed line of it.
+        func ends(first: Bool) throws {
+            if app.pane?.id != reviewDiffPane {
+                let was = app.selected
+                app.cursorTo(first ? 0 : Int.max)
+                if app.selected == was { throw Refusal(first ? "already at the top" : "already at the bottom") }
+                return
+            }
+            let s = pg.stops
+            let target: Stop? = first
+                ? pg.stopFiles.first.flatMap(pg.landing(file:)).flatMap { k in pg.stopIndex[k].map { s[$0] } }
+                : s.last { $0.row.map(changed) ?? false } ?? s.last { $0.kind == .line }
+            guard let target else { throw Refusal("nothing in this diff") }
+            if target.key == pg.here?.key { throw Refusal(first ? "already at the first change" : "already at the last change") }
+            if app.keys.mode != .select { pg.mark = nil }
+            pg.setCursor(target.key)
+            CodeLookup.of(app).dismiss()
+        }
+        /// ]/[: the next (previous) file by the diff's order, landing on its first change.
+        func file(_ dir: Int) throws {
+            let fs = pg.stopFiles
+            guard let here = pg.here?.path, let i = fs.firstIndex(of: here) else { throw Refusal("no file here") }
+            let j = i + dir
+            guard fs.indices.contains(j), let k = pg.landing(file: fs[j]) else {
+                let edge = fs.count <= 1 ? "the only file in this diff" : dir > 0 ? "the last file" : "the first file"
+                throw Refusal("\(edge) · } { move by hunk")
+            }
+            if app.keys.mode != .select { pg.mark = nil }
+            pg.setCursor(k)
+            CodeLookup.of(app).dismiss()
+        }
+
         r.register(Command(id: "review.down", title: "Next line", scope: .review, verb: .next, modes: motion, label: "line", pair: "review.up", quiet: true,
                            local: { _, _ in
                                if app.keys.mode != .select { pg.mark = nil }
                                let from = pg.hereWord?.lowerBound
+                               let was = app.selected
                                app.moveCursor(1)
+                               if app.selected == was { throw Refusal("nothing further down") }
                                if app.pane?.id == reviewDiffPane { keepColumn(from: from) }
                                pg.cursorMoved &+= 1
                                CodeLookup.of(app).dismiss()
@@ -110,15 +142,17 @@ enum DiffCommands {
                            local: { _, _ in
                                if app.keys.mode != .select { pg.mark = nil }
                                let from = pg.hereWord?.lowerBound
+                               let was = app.selected
                                app.moveCursor(-1)
+                               if app.selected == was { throw Refusal("nothing further up") }
                                if app.pane?.id == reviewDiffPane { keepColumn(from: from) }
                                pg.cursorMoved &+= 1
                                CodeLookup.of(app).dismiss()
                            }))
         r.register(Command(id: "review.top", title: "Go to the first line", scope: .review, verb: .first, modes: motion, label: "ends", pair: "review.bottom", quiet: true,
-                           local: { _, _ in app.cursorTo(0); pg.cursorMoved &+= 1; CodeLookup.of(app).dismiss() }))
+                           local: { _, _ in try ends(first: true) }))
         r.register(Command(id: "review.bottom", title: "Go to the last line", scope: .review, verb: .last, modes: motion, label: "ends", quiet: true,
-                           local: { _, _ in app.cursorTo(Int.max); pg.cursorMoved &+= 1; CodeLookup.of(app).dismiss() }))
+                           local: { _, _ in try ends(first: false) }))
         r.register(Command(id: "review.hunk.next", title: "Go to the next hunk", scope: .review, verb: .nextHunk, modes: motion,
                            label: "hunk", pair: "review.hunk.prev", available: onDiff, local: { _, _ in try hunk(1) }))
         r.register(Command(id: "review.hunk.prev", title: "Go to the previous hunk", scope: .review, verb: .previousHunk, modes: motion,
@@ -143,16 +177,16 @@ enum DiffCommands {
             }
             guard let target else { throw Refusal(dir > 0 ? "no hunk further down" : "no hunk further up") }
             let rows = s.enumerated().filter { e in e.element.row.map { "\(e.element.path)#\($0.hunk)" == target } ?? false }
-            let changed = rows.first { $0.element.row!.left?.kind != .ctx || $0.element.row!.right?.kind != .ctx } ?? rows.first!
+            let first = rows.first { changed($0.element.row!) } ?? rows.first!
             if app.keys.mode != .select { pg.mark = nil }
-            goTo(changed.offset)
+            goTo(first.offset)
         }
         r.register(Command(id: "review.file.next", title: "Go to the next file", scope: .review, verb: .nextFile, modes: motion,
                            label: "file", pair: "review.file.prev", available: onDiff,
-                           local: { _, _ in try seek(1, refusing: "file") { $0.kind == .file } }))
+                           local: { _, _ in try file(1) }))
         r.register(Command(id: "review.file.prev", title: "Go to the previous file", scope: .review, verb: .previousFile, modes: motion,
                            label: "file", available: onDiff,
-                           local: { _, _ in try seek(-1, refusing: "file") { $0.kind == .file } }))
+                           local: { _, _ in try file(-1) }))
         /// n/N: open conversations first, then any.
         func thread(_ dir: Int) throws {
             func openOne(_ s: Stop) -> Bool {
@@ -184,13 +218,7 @@ enum DiffCommands {
         r.register(Command(id: "review.file.go", title: "Go to a file", scope: .review, needsArg: true, quiet: true, recordsJump: true,
                            local: { _, arg in
                                pg.tab = "files"
-                               if let path = arg as? String {
-                                   if pg.fileOf(path)?.viewed == false, let first = pg.stops.first(where: { $0.path == path && $0.kind == .line }) {
-                                       pg.setCursor(first.key)
-                                   } else {
-                                       pg.setCursor("f|\(path)")
-                                   }
-                               }
+                               if let path = arg as? String, let k = pg.landing(file: path) { pg.setCursor(k) }
                            }))
         r.register(Command(id: "review.in", title: "Into the diff at the file", scope: .review, verb: .main, label: "in",
                            available: { _ in app.pane?.id == reviewTreePane && onFiles(nil) },
@@ -312,9 +340,16 @@ enum DiffCommands {
                                app.keys.openLayer(.map)
                            }))
         r.register(Command(id: "review.map.down", title: "Next branch on the map", scope: .review, verb: .next, modes: [.map], quiet: true,
-                           local: { _, _ in pg.mapIndex = min(max(0, ReviewMap.rows(app).count - 1), pg.mapIndex + 1) }))
+                           local: { _, _ in
+                               let last = max(0, ReviewMap.rows(app).count - 1)
+                               if pg.mapIndex >= last { throw Refusal("the last branch on the map") }
+                               pg.mapIndex += 1
+                           }))
         r.register(Command(id: "review.map.up", title: "Previous branch on the map", scope: .review, verb: .previous, modes: [.map], quiet: true,
-                           local: { _, _ in pg.mapIndex = max(0, pg.mapIndex - 1) }))
+                           local: { _, _ in
+                               if pg.mapIndex <= 0 { throw Refusal("the first branch on the map") }
+                               pg.mapIndex -= 1
+                           }))
         r.register(Command(id: "review.map.open", title: "Open the branch under the map's cursor", scope: .review, verbs: [.main], modes: [.map], quiet: true,
                            route: { _ in
                                let rows = ReviewMap.rows(app)
