@@ -331,9 +331,10 @@ import Testing
         // the last hunk of a.ts: m finishes the file and moves to b.ts
         keys(a, "m")
         #expect(pg.fileOf("a.ts")!.viewed)
-        #expect(pg.here?.key == "f|b.ts")
+        #expect(pg.here?.key == "l|b.ts|R:6", "the next file's first change")
         #expect(!pg.stops.contains { $0.key == "l|a.ts|R:1" }, "a viewed file folds")
         keys(a, "[")
+        #expect(pg.here?.key == "f|a.ts", "a viewed file is just its header")
         keys(a, "M")
         #expect(!pg.fileOf("a.ts")!.viewed)
     }

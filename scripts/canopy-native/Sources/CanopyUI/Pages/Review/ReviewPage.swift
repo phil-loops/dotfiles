@@ -280,6 +280,7 @@ private struct DiffPane: View {
                               app.focus(pane: reviewDiffPane)
                               app.runner.dispatch("review.cursor.set", via: .click, target: stop, arg: shift)
                           },
+                          onClickAt: { stop, side, at in pg.click(stop, side: side, at: at) },
                           onPointer: { info, offset, right in
                               let l: DiffLine? = {
                                   guard let i = pg.stopIndex[info.stop ?? ""], let row = pg.stops[i].row else { return nil }

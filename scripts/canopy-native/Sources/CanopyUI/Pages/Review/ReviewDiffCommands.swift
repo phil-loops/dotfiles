@@ -47,50 +47,64 @@ enum DiffCommands {
             let u = Array(t.utf16)
             return u.firstIndex { $0 != 32 && $0 != 9 } ?? 0
         }
+        /// The whole character (an emoji, a letter and its accent) at a UTF-16 offset.
+        func char(_ t: String, _ at: Int) -> Range<Int> {
+            let r = (t as NSString).rangeOfComposedCharacterSequence(at: at)
+            return r.location..<(r.location + r.length)
+        }
+        /// The character a step from `w` lands on, or nil past the line's edge.
+        func stepped(_ t: String, from w: Range<Int>?, _ d: Int) -> Range<Int>? {
+            let n = (t as NSString).length
+            guard n > 0 else { return nil }
+            guard let w else { return char(t, min(firstNonBlank(t), n - 1)) }
+            let at = d > 0 ? w.upperBound : w.lowerBound - 1
+            return at >= 0 && at < n ? char(t, at) : nil
+        }
         /// The column j / k aim for, and the one last put down: a line too short for the goal puts the
-        /// cursor at its end, and the next line aims for the goal again (vim's curswant).
+        /// cursor at its end, and the next line aims for the goal again (vim's curswant). `carried` is
+        /// the row the goal was last carried to, so a row with no code (a header, a conversation)
+        /// passes the goal on instead of dropping it.
         var goal: Int?
         var placed: Int?
+        var carried: String?
         func charStep(_ d: Int) throws {
             guard let h = pg.here, h.kind == .line, let row = h.row else { throw Refusal("no code on this row") }
             let side = sideLine(row, prefer: pg.column).side
             let t = halfText(h, side) ?? ""
-            let n = (t as NSString).length
-            let at: Int
-            if let w = pg.hereWord { at = d > 0 ? (w.count > 1 ? w.upperBound : w.lowerBound + 1) : w.lowerBound - 1 }
-            else { at = firstNonBlank(t) }
-            if at >= 0 && at < n {
-                pg.word = (h.key, side, at..<(at + 1))
-                goal = at
-                placed = at
+            if let r = stepped(t, from: pg.hereWord, d) {
+                pg.word = (h.key, side, r)
+                (goal, placed, carried) = (r.lowerBound, r.lowerBound, h.key)
                 pg.cursorMoved &+= 1
                 return
             }
             let other: Side = side == .left ? .right : .left
             if (d < 0) == (side == .right), let o = halfText(h, other), !o.isEmpty {
-                let m = (o as NSString).length
-                let c = d < 0 ? m - 1 : firstNonBlank(o)
+                let r = d < 0 ? char(o, (o as NSString).length - 1) : char(o, firstNonBlank(o))
                 pg.column = other
-                pg.word = (h.key, other, c..<(c + 1))
-                goal = c
-                placed = c
+                pg.word = (h.key, other, r)
+                (goal, placed, carried) = (r.lowerBound, r.lowerBound, h.key)
                 pg.cursorMoved &+= 1
                 return
             }
             throw Refusal(d < 0 ? "start of the line" : "end of the line")
         }
         /// After j / k: the character cursor at the same column on the new line, as far as it reaches.
-        func keepColumn(from: Int?) {
-            guard let from else { goal = nil; placed = nil; return }
-            let c = from == placed ? goal ?? from : from
+        func keepColumn(from: Int?, was: String?) {
+            let c: Int
+            if let from { c = from == placed ? goal ?? from : from }
+            else if let g = goal, was != nil, was == carried { c = g }
+            else { (goal, placed, carried) = (nil, nil, nil); return }
             goal = c
-            guard let h = pg.here, let row = h.row else { return }
+            guard let h = pg.here else { return }
+            carried = h.key
+            guard let row = h.row else { return }
             let side = sideLine(row, prefer: pg.column).side
-            let n = ((halfText(h, side) ?? "") as NSString).length
+            let t = halfText(h, side) ?? ""
+            let n = (t as NSString).length
             guard n > 0 else { return }
-            let at = min(c, n - 1)
-            pg.word = (h.key, side, at..<(at + 1))
-            placed = at
+            let r = char(t, min(c, n - 1))
+            pg.word = (h.key, side, r)
+            placed = r.lowerBound
         }
 
         // ── moving ──
@@ -132,9 +146,10 @@ enum DiffCommands {
                                if app.keys.mode != .select { pg.mark = nil }
                                let from = pg.hereWord?.lowerBound
                                let was = app.selected
+                               let wasKey = pg.here?.key
                                app.moveCursor(1)
                                if app.selected == was { throw Refusal("nothing further down") }
-                               if app.pane?.id == reviewDiffPane { keepColumn(from: from) }
+                               if app.pane?.id == reviewDiffPane { keepColumn(from: from, was: wasKey) }
                                pg.cursorMoved &+= 1
                                CodeLookup.of(app).dismiss()
                            }))
@@ -143,9 +158,10 @@ enum DiffCommands {
                                if app.keys.mode != .select { pg.mark = nil }
                                let from = pg.hereWord?.lowerBound
                                let was = app.selected
+                               let wasKey = pg.here?.key
                                app.moveCursor(-1)
                                if app.selected == was { throw Refusal("nothing further up") }
-                               if app.pane?.id == reviewDiffPane { keepColumn(from: from) }
+                               if app.pane?.id == reviewDiffPane { keepColumn(from: from, was: wasKey) }
                                pg.cursorMoved &+= 1
                                CodeLookup.of(app).dismiss()
                            }))
@@ -398,10 +414,8 @@ enum DiffCommands {
             guard let line = RowKey.id(app.selected, "s").flatMap(Int.init) else { throw Refusal("no line here") }
             let lines = (pg.sideText ?? "").components(separatedBy: "\n")
             let t = line >= 1 && line <= lines.count ? lines[line - 1] : ""
-            let n = (t as NSString).length
-            let at = pg.sideHereWord.map { w in d > 0 ? (w.count > 1 ? w.upperBound : w.lowerBound + 1) : w.lowerBound - 1 } ?? firstNonBlank(t)
-            guard at >= 0 && at < n else { throw Refusal(d < 0 ? "start of the line" : "end of the line") }
-            pg.sideWord = (line, at..<(at + 1))
+            guard let r = stepped(t, from: pg.sideHereWord, d) else { throw Refusal(d < 0 ? "start of the line" : "end of the line") }
+            pg.sideWord = (line, r)
         }
         func horizontal(_ d: Int) throws {
             switch app.pane?.id {
@@ -720,6 +734,6 @@ enum DiffCommands {
         let vs = pg.views
         let at = vs.firstIndex { $0.file.path == path } ?? -1
         let after = vs[(at + 1)...].first { !$0.viewed }
-        pg.setCursor("f|\(after?.file.path ?? path)")
+        pg.setCursor(pg.landing(file: after?.file.path ?? path) ?? "f|\(path)")
     }
 }
