@@ -40,6 +40,15 @@ import Testing
         #expect(GatesRun.setup(planned) == nil)
     }
 
+    @Test func aQuickRunNamesTheGatesItLeftToCI() {
+        let rows = GatesRun.rows(GateProgress(running: false, events: [plan,
+            GateEvent(event: "done", gate: "env", ok: true, ms: 900),
+            GateEvent(event: "done", gate: "typecheck", ok: true, ms: 0, warn: "typecheck skipped (quick gates — CI checks it)"),
+            GateEvent(event: "done", gate: "tests", ok: true, ms: 0, warn: "tests skipped by you")]), now: 0)
+        #expect(GatesRun.quick(rows) == ["typecheck"])
+        #expect(rows.filter { $0.state == .waived }.count == 2)
+    }
+
     @Test func aRunThatDiedMidGateSaysStopped() {
         let rows = GatesRun.rows(GateProgress(running: false, events: [plan, GateEvent(event: "start", gate: "env", ts: 1)], dead: true), now: 500)
         #expect(rows.map(\.state) == [.stopped, .stopped, .stopped])

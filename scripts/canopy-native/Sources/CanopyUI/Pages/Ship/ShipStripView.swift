@@ -83,13 +83,23 @@ public struct ShipStripView: View {
                     ForEach(red, id: \.name) { g in Text(g.name).foregroundStyle(theme.ember) }
                     KeyButton(title: "skip", id: "review.gates.skip", target: branchID, quiet: true)
                 } else if b.gates == .green && !waived.isEmpty {
-                    Text("\(waived.count) skipped").foregroundStyle(theme.patina)
+                    let quick = GatesRun.quick(rows)
+                    let others = waived.count - quick.count
+                    if !quick.isEmpty {
+                        Text("quick · CI checks \(quick.joined(separator: ", "))").foregroundStyle(theme.goldLeaf)
+                            .explains("ship|gates", "green on the quick gates: typecheck and lint didn't run here — CI runs them on the push")
+                    }
+                    if others > 0 { Text("\(others) skipped").foregroundStyle(theme.patina) }
                 }
             }
             if acts || live != nil {
                 KeyButton(title: pushLabel(b, route: route, live: live, forced: push?.forced ?? false), id: "review.push", target: branchID,
                           gold: true, busy: live == .sending || live == .landing, failed: live == .failed)
                     .explains("ship|push", "p: this branch's next step — run the gates, then push to origin")
+            }
+            if route == "branch.gates.run" && live == nil && app.store.view(Pr.self, branchID) != nil {
+                KeyButton(title: "quick", id: "review.gates.quick", target: branchID)
+                    .explains("ship|gates", "a follow-up onto an open PR: env, fresh, format and tests here — typecheck and lint left to CI, which runs them on the push")
             }
             if live == .failed, let err = push?.run.err { Text(err).foregroundStyle(theme.ember).lineLimit(2) }
             if live == nil, b.diverged, case .some(.some(let s)) = ship.forceScopeOf(app, branchID), !s.eligible,

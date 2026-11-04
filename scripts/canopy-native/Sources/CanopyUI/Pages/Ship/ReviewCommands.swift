@@ -560,7 +560,16 @@ enum ReviewCommands {
                 let shown = ship.gateShown.flatMap { $0.hasPrefix("\(id) ") ? String($0.dropFirst(id.count + 1)) : nil }
                 guard let g = red.first(where: { $0.name == shown }) ?? red.first else { throw Refusal("no red gate") }
                 let skipped = rows.filter { $0.state == .waived && $0.summary?.hasSuffix("skipped by you") == true }.map(\.name)
-                app.runner.dispatch("branch.gates.skip", via: .key, target: "\(id) \((skipped + [g.name]).joined(separator: ","))")
+                let quick = GatesRun.quick(rows).isEmpty ? "" : " quick"
+                app.runner.dispatch("branch.gates.skip", via: .key, target: "\(id) \((skipped + [g.name]).joined(separator: ","))\(quick)")
+            }))
+        r.register(Command(
+            id: "review.gates.quick", title: "Run the quick gates — typecheck and lint left to CI (a follow-up onto an open PR)", scope: .review,
+            leader: LocalKey(",q"), label: "quick gates",
+            available: { id in pushRoute(weakApp, id) == "branch.gates.run" },
+            local: { id, _ in
+                guard let app = weakApp, let id else { return }
+                app.runner.dispatch("branch.gates.quick", via: .key, target: id)
             }))
     }
 

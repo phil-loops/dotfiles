@@ -29,7 +29,7 @@ enum ReviewArea: PageArea {
         r.place(.show, ["review.in", "review.back", "review.history", "review.outdated", "review.base.parent", "review.base.main",
                         "review.base.outgoing", "review.gates.show", "review.viewed", "review.unviewed"])
         r.place(.branch, ["review.compose.edit", "review.compose.send", "review.compose.draft", "review.compose.suggest", "review.send.all",
-                          "review.address.claude", "review.address.pick.list"])
+                          "review.address.claude", "review.address.pick.list", "review.gates.quick"])
         r.place(.others, ["review.map.open"])
     }
 
