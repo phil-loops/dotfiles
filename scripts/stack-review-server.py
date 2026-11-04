@@ -331,6 +331,8 @@ class H(BaseHTTPRequestHandler):
             return sync.diverged_detail(self, u)
         elif u.path == "/force-scope":  # read-only: may /force-origin replace origin's copy (the guards it re-checks)
             return sync.force_scope_get(self, u)
+        elif u.path == "/review-flags":  # read-only: push-ready's findings on this tree, by place
+            return push.review_flags_get(self, u)
         elif u.path == "/prep-route":  # what "prep to push" would do next (read-only verdict + delegate)
             return prep.route(self, u)
         elif u.path == "/events":   # SSE: one push stream per tab, replaces the /heartbeat + /sig + /?_hot polls
