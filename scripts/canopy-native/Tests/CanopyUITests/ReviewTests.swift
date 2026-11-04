@@ -323,6 +323,73 @@ import Testing
         #expect(pg.here?.key == "l|a.ts|R:5")
     }
 
+    /// } at the last file wraps to the first, as Helix's g n cycles its buffers — and says it wrapped.
+    @Test func nextFileWrapsAtTheEnd() async throws {
+        let (a, _) = try await app()
+        let pg = ReviewPageState.of(a)
+        let start = pg.here?.key
+        keys(a, "}")
+        #expect(pg.here?.path == "b.ts")
+        keys(a, "}")
+        #expect(pg.here?.key == start && a.runner.note == "wrapped to the first file")
+        keys(a, "{")
+        #expect(pg.here?.path == "b.ts" && a.runner.note == "wrapped to the last file")
+    }
+
+    /// ] p walks git's hunks: one stop per @@, across files, then says it's at the last.
+    @Test func bracketPWalksGitHunks() async throws {
+        let (a, _) = try await app()
+        let pg = ReviewPageState.of(a)
+        keys(a, "]", "p")
+        #expect(pg.here?.path == "a.ts" && pg.here?.row?.right?.new == 21, "a.ts's second hunk: \(pg.here?.key ?? "-")")
+        keys(a, "]", "p")
+        #expect(pg.here?.path == "b.ts" && pg.here?.row?.right?.new == 5)
+        keys(a, "]", "p")
+        #expect(pg.here?.path == "b.ts" && a.runner.note == "the last hunk in this diff")
+        keys(a, "[", "p")
+        #expect(pg.here?.path == "a.ts" && pg.here?.row?.right?.new == 21)
+    }
+
+    /// ] T skips to the next test file; past the last one it says so.
+    @Test func bracketTWalksTestFiles() async throws {
+        let p = ["@@ -1,1 +1,1 @@", "-a", "+A"].joined(separator: "\n")
+        let o: JSONValue = ["branch": "add-hankles-limited-label", "baseSha": "base123", "files": .array([
+            ["path": "src/x.ts", "add": 1, "del": 1, "patch": .string(p)],
+            ["path": "src/y.ts", "add": 1, "del": 1, "patch": .string(p)],
+            ["path": "src/x.test.ts", "add": 1, "del": 1, "patch": .string(p)],
+        ])]
+        let (a, _) = try await app(String(decoding: try JSONEncoder().encode(o), as: UTF8.self))
+        let pg = ReviewPageState.of(a)
+        #expect(pg.here?.path == "src/x.ts")
+        keys(a, "]", "T")
+        #expect(pg.here?.path == "src/x.test.ts")
+        keys(a, "]", "T")
+        #expect(pg.here?.path == "src/x.test.ts" && a.runner.note == "no test file after this one")
+        #expect(isTestPath("a/__tests__/b.ts") && isTestPath("c_spec.rb") && !isTestPath("contest.ts"))
+    }
+
+    /// ] c reaches the conversation; n / N keep stepping a search but ] c never does.
+    @Test func bracketCGoesToTheConversation() async throws {
+        let (a, _) = try await app()
+        let pg = ReviewPageState.of(a)
+        keys(a, "]", "c")
+        #expect(pg.here?.kind == .thread, "landed on \(pg.here?.key ?? "-")")
+    }
+
+    /// W / B step over runs of non-blank characters; E lands on a run's last character.
+    @Test func longWordsAreRunsOfNonBlanks() async throws {
+        #expect(longWords("  a.b(c)  d ") == [2..<8, 10..<11])
+        let (a, _) = try await app()
+        let pg = ReviewPageState.of(a)
+        keys(a, "E")
+        let first = pg.hereWord?.lowerBound
+        keys(a, "E")
+        let second = pg.hereWord?.lowerBound
+        #expect(first == 2 && second == 6, "\"xxx one\": E at 2 then 6, got \(String(describing: first)) \(String(describing: second))")
+        keys(a, "B")
+        #expect(pg.hereWord?.lowerBound == 4)
+    }
+
     @Test func jumpsComeBackWithCtrlO() async throws {
         let (a, _) = try await app()
         let pg = ReviewPageState.of(a)
@@ -426,8 +493,11 @@ import Testing
     /// a key that can't act says why; the keyboard goes where the cursor went; a jump lands on code.
     @Test func everyMotionKeepsTheRules() async throws {
         let motions: Set<Verb> = [.next, .previous, .first, .last, .halfDown, .halfUp, .left, .right, .nextWord, .previousWord,
-                                  .nextFile, .previousFile, .nextHunk, .previousHunk, .nextThread, .previousThread]
-        let jumps: Set<Verb> = [.first, .last, .nextFile, .previousFile, .nextHunk, .previousHunk]
+                                  .nextFile, .previousFile, .nextHunk, .previousHunk, .nextThread, .previousThread,
+                                  .nextConversation, .previousConversation, .nextTest, .previousTest, .nextGitHunk, .previousGitHunk,
+                                  .nextLongWord, .previousLongWord, .longWordEnd, .scrollDown, .scrollUp]
+        let jumps: Set<Verb> = [.first, .last, .nextFile, .previousFile, .nextHunk, .previousHunk, .nextTest, .previousTest,
+                                .nextGitHunk, .previousGitHunk]
         let starts: [(String, @MainActor (AppModel, ReviewPageState) -> Void)] = [
             ("the first change", { _, _ in }),
             ("a file header", { _, pg in pg.setCursor("f|a.ts") }),

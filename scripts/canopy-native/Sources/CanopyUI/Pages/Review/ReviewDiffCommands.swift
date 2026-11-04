@@ -4,6 +4,25 @@ import Foundation
 /// The layer f / t wait in for the character to find.
 let findCharLayer: KeyMode = "find-char"
 
+/// A test file by its name or folder: `x.test.ts`, `x_spec.rb`, `__tests__/`, `tests/`.
+func isTestPath(_ p: String) -> Bool {
+    p.range(of: #"([._](test|spec)\.[^/]+$)|((^|/)(__tests__|tests?)/)"#, options: .regularExpression) != nil
+}
+
+/// Helix's WORDs: runs of non-blank characters, as UTF-16 ranges.
+func longWords(_ text: String) -> [Range<Int>] {
+    let u = Array(text.utf16)
+    var out: [Range<Int>] = []
+    var start: Int?
+    for (i, c) in u.enumerated() {
+        let blank = c == 32 || c == 9
+        if blank, let s = start { out.append(s..<i); start = nil }
+        if !blank, start == nil { start = i }
+    }
+    if let s = start { out.append(s..<u.count) }
+    return out
+}
+
 // The review page's diff commands (commands/review.ts, the diff half): moving by line, hunk, file,
 // thread and branch; tabs, split, base; the map; folds and hidden lines; viewed; code navigation;
 // open in Helix. Ship's half (comment, reply, send, resolve, history, …) is area C's.
@@ -151,14 +170,44 @@ enum DiffCommands {
         func file(_ dir: Int) throws {
             let fs = pg.stopFiles
             guard let here = pg.here?.path, let i = fs.firstIndex(of: here) else { throw Refusal("no file here") }
-            let j = i + dir
-            guard fs.indices.contains(j), let k = pg.landing(file: fs[j]) else {
-                let edge = fs.count <= 1 ? "the only file in this diff" : dir > 0 ? "the last file" : "the first file"
-                throw Refusal("\(edge) · ] g [ g move by change")
+            guard fs.count > 1 else { throw Refusal("the only file in this diff · ] g [ g move by change") }
+            let j = (i + dir + fs.count) % fs.count
+            guard let k = pg.landing(file: fs[j]) else { throw Refusal("nothing to land on in \(fs[j])") }
+            if app.keys.mode != .select { pg.mark = nil }
+            pg.setCursor(k)
+            CodeLookup.of(app).dismiss()
+            if (j > i) != (dir > 0) { app.runner.say(dir > 0 ? "wrapped to the first file" : "wrapped to the last file") }
+        }
+        /// ]T / [T: the next (previous) test file, landing on its first change.
+        func testFile(_ dir: Int) throws {
+            let fs = pg.stopFiles
+            guard let here = pg.here?.path, let i = fs.firstIndex(of: here) else { throw Refusal("no file here") }
+            let tests = fs.enumerated().filter { isTestPath($0.element) }
+            guard !tests.isEmpty else { throw Refusal("no test files in this diff") }
+            let pick = dir > 0 ? tests.first { $0.offset > i } : tests.last { $0.offset < i }
+            guard let pick, let k = pg.landing(file: pick.element) else {
+                throw Refusal(dir > 0 ? "no test file after this one" : "no test file before this one")
             }
             if app.keys.mode != .select { pg.mark = nil }
             pg.setCursor(k)
             CodeLookup.of(app).dismiss()
+        }
+        /// ]p / [p: the first line of the next (previous) git hunk — a hunk can hold several of ] g's changes.
+        func gitHunk(_ dir: Int) throws {
+            let s = pg.stops
+            var starts: [Int] = []
+            var last: (path: String, hunk: Int)?
+            for (n, st) in s.enumerated() where st.kind == .line {
+                guard let row = st.row else { continue }
+                if last.map({ $0.path != st.path || $0.hunk != row.hunk }) ?? true { starts.append(n) }
+                last = (st.path, row.hunk)
+            }
+            let i = idx()
+            guard let target = dir > 0 ? starts.first(where: { $0 > i }) : starts.last(where: { $0 < i }) else {
+                throw Refusal(dir > 0 ? "the last hunk in this diff" : "the first hunk in this diff")
+            }
+            if app.keys.mode != .select { pg.mark = nil }
+            goTo(target)
         }
 
         r.register(Command(id: "review.down", title: "Next line", scope: .review, verb: .next, modes: motion, label: "line", pair: "review.up", quiet: true,
@@ -224,16 +273,27 @@ enum DiffCommands {
         r.register(Command(id: "review.file.prev", title: "Go to the previous file", scope: .review, verb: .previousFile, modes: motion,
                            label: "file", available: onDiff,
                            local: { _, _ in try file(-1) }))
-        /// n/N: open conversations first, then any.
-        func thread(_ dir: Int) throws {
+        r.register(Command(id: "review.test.next", title: "Go to the next test file", scope: .review, verb: .nextTest, modes: motion,
+                           label: "test", pair: "review.test.prev", available: onDiff, local: { _, _ in try testFile(1) }))
+        r.register(Command(id: "review.test.prev", title: "Go to the previous test file", scope: .review, verb: .previousTest, modes: motion,
+                           label: "test", available: onDiff, local: { _, _ in try testFile(-1) }))
+        r.register(Command(id: "review.githunk.next", title: "Go to the next git hunk", scope: .review, verb: .nextGitHunk, modes: motion,
+                           label: "hunk", pair: "review.githunk.prev", available: onDiff, local: { _, _ in try gitHunk(1) }))
+        r.register(Command(id: "review.githunk.prev", title: "Go to the previous git hunk", scope: .review, verb: .previousGitHunk, modes: motion,
+                           label: "hunk", available: onDiff, local: { _, _ in try gitHunk(-1) }))
+        /// n/N: open conversations first, then any. While a search is kept n/N step its matches; ]c [c never do.
+        func thread(_ dir: Int, searchFirst: Bool = true) throws {
             func openOne(_ s: Stop) -> Bool {
                 guard s.kind == .thread, let t = s.id.flatMap({ app.store.view(CanopyCore.Thread.self, $0) }) else { return false }
                 return !t.resolved && !t.outdated
             }
             let search = PageSearch.of(app)
-            if search.active && !search.typing {
+            if searchFirst && search.active && !search.typing {
                 if !search.step(app, dir) { throw Refusal("no matches") }
                 return
+            }
+            if !pg.stops.contains(where: { $0.kind == .thread }) {
+                throw Refusal(pg.integration == nil ? "no conversations on this diff · space c the conversation tab" : "no conversations on this diff")
             }
             if (try? seek(dir, openOne)) != nil { return }
             try seek(dir) { $0.kind == .thread }
@@ -244,6 +304,12 @@ enum DiffCommands {
         r.register(Command(id: "review.thread.prev", title: "Go to the previous conversation (open ones first)", scope: .review,
                            verb: .previousThread, label: "thread", available: onDiff,
                            local: { _, _ in try thread(-1) }))
+        r.register(Command(id: "review.conversation.next", title: "Go to the next conversation, even during a search", scope: .review,
+                           verb: .nextConversation, label: "conversation", pair: "review.conversation.prev", available: onDiff,
+                           local: { _, _ in try thread(1, searchFirst: false) }))
+        r.register(Command(id: "review.conversation.prev", title: "Go to the previous conversation, even during a search", scope: .review,
+                           verb: .previousConversation, label: "conversation", available: onDiff,
+                           local: { _, _ in try thread(-1, searchFirst: false) }))
         r.register(Command(id: "review.cursor.set", title: "Put the cursor here", scope: .review, needsArg: true, quiet: true,
                            local: { key, shift in
                                guard let key else { return }
@@ -457,24 +523,26 @@ enum DiffCommands {
         // ── w / b: the cursor to the next name's first character, across lines — g d and space k ask about that name ──
 
         /// The names on a line stop's current half (the old half only as far as it's drawn).
-        func names(_ s: Stop) -> (side: Side, names: [Range<Int>])? {
+        func names(_ s: Stop, _ tokens: (String) -> [Range<Int>] = CodeLookup.names) -> (side: Side, names: [Range<Int>])? {
             guard s.kind == .line, let row = s.row else { return nil }
             let side = sideLine(row, prefer: pg.column).side
             guard let text = (side == .left ? row.left : row.right)?.text else { return nil }
-            let all = CodeLookup.names(text)
+            let all = tokens(text)
             return (side, side == .left ? all.filter { $0.upperBound < pg.splitWidth(s.path) } : all)
         }
         /// The code beside the diff: name to name across its lines.
-        func sideStep(_ d: Int) throws {
+        func sideStep(_ d: Int, _ tokens: (String) -> [Range<Int>] = CodeLookup.names, end: Bool = false) throws {
             let lines = (pg.sideText ?? "").components(separatedBy: "\n")
             guard var n = RowKey.id(app.selected, "s").flatMap(Int.init) else { throw Refusal("no line here") }
             var from = pg.sideHereWord
             while n >= 1 && n <= lines.count {
-                let ns = CodeLookup.names(lines[n - 1])
-                let pick = d > 0 ? ns.first { from == nil || $0.lowerBound > from!.lowerBound } : ns.last { from == nil || $0.lowerBound < from!.lowerBound }
+                let ns = tokens(lines[n - 1])
+                let pick = end ? ns.first { from == nil || $0.upperBound - 1 > from!.lowerBound }
+                    : d > 0 ? ns.first { from == nil || $0.lowerBound > from!.lowerBound } : ns.last { from == nil || $0.lowerBound < from!.lowerBound }
                 if let pick {
                     if app.selected != "s:\(n)" { app.setCursor("s:\(n)") }
-                    pg.sideWord = (n, pick.lowerBound ..< pick.lowerBound + 1)
+                    let at = end ? pick.upperBound - 1 : pick.lowerBound
+                    pg.sideWord = (n, at ..< at + 1)
                     return
                 }
                 from = nil
@@ -482,19 +550,21 @@ enum DiffCommands {
             }
             throw Refusal(d > 0 ? "no more names below" : "no more names above")
         }
-        func step(_ d: Int) throws {
-            if app.pane?.id == reviewCodePane, pg.side != nil { return try sideStep(d) }
+        func step(_ d: Int, _ tokens: @escaping (String) -> [Range<Int>] = CodeLookup.names, end: Bool = false) throws {
+            if app.pane?.id == reviewCodePane, pg.side != nil { return try sideStep(d, tokens, end: end) }
             // names live in code: from a list pane, w / b go into the diff and step there
             if app.pane?.id != reviewDiffPane { app.focus(pane: reviewDiffPane) }
             guard app.pane?.id == reviewDiffPane, var i = pg.here.flatMap({ pg.stopIndex[$0.key] }) else { throw Refusal("no diff to step through") }
             var from = pg.hereWord
             while i >= 0 && i < pg.stops.count {
                 let s = pg.stops[i]
-                if let (side, ns) = names(s) {
-                    let pick = d > 0 ? ns.first { from == nil || $0.lowerBound > from!.lowerBound } : ns.last { from == nil || $0.lowerBound < from!.lowerBound }
+                if let (side, ns) = names(s, tokens) {
+                    let pick = end ? ns.first { from == nil || $0.upperBound - 1 > from!.lowerBound }
+                        : d > 0 ? ns.first { from == nil || $0.lowerBound > from!.lowerBound } : ns.last { from == nil || $0.lowerBound < from!.lowerBound }
                     if let pick {
                         if s.key != pg.here?.key { pg.setCursor(s.key) }
-                        pg.word = (s.key, side, pick.lowerBound ..< pick.lowerBound + 1)
+                        let at = end ? pick.upperBound - 1 : pick.lowerBound
+                        pg.word = (s.key, side, at ..< at + 1)
                         return
                     }
                 }
@@ -528,6 +598,12 @@ enum DiffCommands {
                            local: { _, _ in try step(1) }))
         r.register(Command(id: "review.word.previous", title: "The previous name", scope: .review, verb: .previousWord, quiet: true,
                            local: { _, _ in try step(-1) }))
+        r.register(Command(id: "review.longword.next", title: "The next run of non-blank characters", scope: .review, verb: .nextLongWord, quiet: true,
+                           local: { _, _ in try step(1, longWords) }))
+        r.register(Command(id: "review.longword.previous", title: "The previous run of non-blank characters", scope: .review, verb: .previousLongWord, quiet: true,
+                           local: { _, _ in try step(-1, longWords) }))
+        r.register(Command(id: "review.longword.end", title: "The end of this or the next run of non-blank characters", scope: .review, verb: .longWordEnd, quiet: true,
+                           local: { _, _ in try step(1, longWords, end: true) }))
         // ── along the line, as Helix: g h / g l / g s to its start, end and first non-blank; f / t / F / T
         // to a character typed next ──
 
@@ -623,6 +699,25 @@ enum DiffCommands {
                                }))
         }
 
+        /// z j / z k: the diff a line further down (up) under a cursor that stays put until the edge carries it.
+        func scrollLine(_ dir: Int) throws {
+            guard app.pane?.id == reviewDiffPane, let k = pg.diffCursor else { throw Refusal("z scrolls the diff — this pane follows its cursor") }
+            let canvas = pg.diffCanvas.canvas
+            guard let row = canvas.viewportRow(of: k) else { throw Refusal("the diff isn't drawn yet") }
+            let want = row - dir
+            canvas.settle(k, row: max(0, want))
+            if want >= 0, canvas.viewportRow(of: k) == want { return }
+            let was = app.selected
+            app.moveCursor(dir)
+            if app.selected == was { throw Refusal(dir > 0 ? "the end of the diff" : "the top of the diff") }
+            pg.anchor(row: row)
+            pg.cursorMoved &+= 1
+        }
+        r.register(Command(id: "review.scroll.down", title: "Scroll the diff down a line", scope: .review, verb: .scrollDown, modes: motion, quiet: true,
+                           local: { _, _ in try scrollLine(1) }))
+        r.register(Command(id: "review.scroll.up", title: "Scroll the diff up a line", scope: .review, verb: .scrollUp, modes: motion, quiet: true,
+                           local: { _, _ in try scrollLine(-1) }))
+
         // ── ]f / ]t: the next function or type in this file's diff, by the file's symbols ──
 
         /// The diff's new-side line under the cursor (a removed line counts as the line after it).
@@ -689,7 +784,7 @@ enum DiffCommands {
             return out.sorted { ($0.0, $0.1) < ($1.0, $1.1) }
         }
         var shownFinding: (key: String, n: Int)?
-        func findingStep(_ dir: Int) throws {
+        func findingStep(_ dir: Int, edge: Bool = false) throws {
             guard let t = pg.target else { throw Refusal("no branch here") }
             let at = idx()
             let flags = ReviewFlags.of(app)
@@ -702,7 +797,7 @@ enum DiffCommands {
                 let all = findingStops(fs)
                 let outside = fs.count - all.count
                 let shown = shownFinding.flatMap { s in pg.here?.key == s.key ? s.n : nil }
-                let pick = dir > 0
+                let pick = edge ? (dir > 0 ? all.last : all.first) : dir > 0
                     ? all.first { f in f.i > at || (f.i == at && f.n > (shown ?? -1)) }   // the one you stand on first
                     : all.last { f in f.i < at || (f.i == at && shown.map { f.n < $0 } ?? false) }
                 guard let p = pick else {
@@ -721,6 +816,10 @@ enum DiffCommands {
                            available: onDiff, local: { _, _ in try findingStep(1) }))
         r.register(Command(id: "review.finding.prev", title: "The previous review finding", scope: .review, verb: .previousFinding, modes: motion, quiet: true,
                            available: onDiff, local: { _, _ in try findingStep(-1) }))
+        r.register(Command(id: "review.finding.last", title: "The last review finding", scope: .review, verb: .lastFinding, modes: motion, quiet: true,
+                           available: onDiff, local: { _, _ in try findingStep(1, edge: true) }))
+        r.register(Command(id: "review.finding.first", title: "The first review finding", scope: .review, verb: .firstFinding, modes: motion, quiet: true,
+                           available: onDiff, local: { _, _ in try findingStep(-1, edge: true) }))
 
         r.register(Command(id: "review.conversation", title: "The conversation, in place of the diff (esc brings the diff back)", scope: .review,
                            verb: .conversation, label: "conversation", available: { _ in pg.integration == nil },

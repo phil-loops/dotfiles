@@ -21,6 +21,11 @@ public enum Verb: String, CaseIterable, Sendable, Comparable {
     case nextFile = "next-file", previousFile = "previous-file"
     case nextHunk = "next-hunk", previousHunk = "previous-hunk"
     case nextThread = "next-thread", previousThread = "previous-thread"
+    case nextConversation = "next-conversation", previousConversation = "previous-conversation"
+    case nextTest = "next-test", previousTest = "previous-test", nextGitHunk = "next-git-hunk", previousGitHunk = "previous-git-hunk"
+    case lastFinding = "last-finding", firstFinding = "first-finding"
+    case nextLongWord = "next-long-word", previousLongWord = "previous-long-word", longWordEnd = "long-word-end"
+    case scrollDown = "scroll-down", scrollUp = "scroll-up"
     case face
     case labels, find, search, map, conversation
     case match, changedFiles = "changed-files"
@@ -114,6 +119,9 @@ public enum Verbs {
         v(.right, .nav, ["l", "right"], "a character right in code (from the old half's end onto the new), else the pane to the right"),
         v(.nextWord, .nav, ["w"], "the next name in the code, across lines — what g d and space k ask about"),
         v(.previousWord, .nav, ["b"], "the previous name in the code"),
+        v(.nextLongWord, .nav, ["W"], "the next run of non-blank characters in the code, across lines (Helix W)"),
+        v(.previousLongWord, .nav, ["B"], "the previous run of non-blank characters (Helix B)"),
+        v(.longWordEnd, .nav, ["E"], "the end of this or the next run of non-blank characters (Helix E)"),
         v(.lineStart, .nav, ["g h", "home"], "the start of the line in code"),
         v(.lineEnd, .nav, ["g l", "end"], "the end of the line in code"),
         v(.firstNonBlank, .nav, ["g s"], "the line's first character that isn't a space, in code"),
@@ -133,20 +141,30 @@ public enum Verbs {
         v(.previousFile, .nav, ["g p", "{"], jump: true, "the previous file, at its first change (Helix's previous buffer)"),
         v(.nextHunk, .nav, ["] g"], "the next change, into the next file at the end of one (Helix ]g)"),
         v(.previousHunk, .nav, ["[ g"], "the previous change (Helix [g)"),
-        v(.nextThread, .nav, ["n", "] c"], jump: true, "the next conversation (open ones first)"),
-        v(.previousThread, .nav, ["N", "[ c"], jump: true, "the previous conversation (open ones first)"),
+        v(.nextThread, .nav, ["n"], jump: true, "the next search match while a search is kept, else the next conversation (open ones first)"),
+        v(.previousThread, .nav, ["N"], jump: true, "the previous search match, else the previous conversation"),
+        v(.nextConversation, .nav, ["] c"], jump: true, "the next conversation (open ones first), even during a search"),
+        v(.previousConversation, .nav, ["[ c"], jump: true, "the previous conversation (open ones first)"),
+        v(.nextTest, .nav, ["] T"], jump: true, "the next test file, at its first change (Helix ]T)"),
+        v(.previousTest, .nav, ["[ T"], jump: true, "the previous test file (Helix [T)"),
+        v(.nextGitHunk, .nav, ["] p"], "the next git hunk — one size up from ] g's change (Helix ]p, a paragraph)"),
+        v(.previousGitHunk, .nav, ["[ p"], "the previous git hunk (Helix [p)"),
         v(.nextFunction, .nav, ["] f"], "the next function in this file's diff (Helix ]f)"),
         v(.previousFunction, .nav, ["[ f"], "the previous function (Helix [f)"),
         v(.nextType, .nav, ["] t"], "the next class, interface or enum in this file's diff (Helix ]t)"),
         v(.previousType, .nav, ["[ t"], "the previous one (Helix [t)"),
         v(.nextFinding, .nav, ["] d"], "the next finding push-ready's review left on this branch (Helix ]d: the next diagnostic)"),
         v(.previousFinding, .nav, ["[ d"], "the previous finding (Helix [d)"),
+        v(.lastFinding, .nav, ["] D"], "the last finding (Helix ]D)"),
+        v(.firstFinding, .nav, ["[ D"], "the first finding (Helix [D)"),
         v(.firstChange, .nav, ["[ G"], jump: true, "the branch's first change (Helix [G)"),
         v(.lastChange, .nav, ["] G"], jump: true, "the branch's last change (Helix ]G)"),
         v(.repeatMotion, .nav, ["A-."], "repeat the last f / t / F / T (Helix alt-.)"),
         v(.viewCenter, .nav, ["z z", "z c"], "scroll the code so the cursor's line is in the middle (Helix zz)"),
         v(.viewTop, .nav, ["z t"], "scroll so the cursor's line is at the top (Helix zt)"),
         v(.viewBottom, .nav, ["z b"], "scroll so the cursor's line is at the bottom (Helix zb)"),
+        v(.scrollDown, .nav, ["z j"], "scroll the diff down a line, the cursor staying put until the edge pushes it (Helix zj)"),
+        v(.scrollUp, .nav, ["z k"], "scroll the diff up a line (Helix zk)"),
         v(.match, .nav, ["m m"], "the matching thing: the other half of this edit — what replaced the line, or what it replaced (Helix mm)"),
         v(.face, .nav, ["tab"], "the page's other face (story ⇄ branches, the next tab, web ⇄ jobs)"),
         v(.labels, .nav, ["g w"], "label everything on screen; type a label to go there"),

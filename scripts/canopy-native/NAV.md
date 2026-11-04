@@ -38,14 +38,20 @@
 | left / right | `h` `←` / `l` `→` | a character in code (onto the old half of a removed line at the new half's start, and back); in a pane without code, the pane to that side |
 | pane left / right | `⌃h` / `⌃l` | the pane to that side, from anywhere (also `⌃w h`/`⌃w l`, `⌥h`/`⌥l`) |
 | next / previous name | `w` / `b` | the next / previous name in the code, across lines; `g d`, `space k` and friends ask about it |
+| next / previous / end of a run | `W` / `B` / `E` | the next / previous run of non-blank characters, or this run's last character (Helix's WORDs) |
 | in / out | `ret` / `-` | one level in / up on the ladder (forests → forest → branch → file → line) |
 | cancel | `esc` | close the innermost transient thing — never changes page |
 | next-sibling / previous-sibling | `J` / `K` | the next / previous branch in merge order, staying on this kind of page (jumps) |
 | parent / child / root / tip | `g k` / `g j` / `g K` / `g J` | the branch's parent, child (labels at a fork), its stack's root, tip (jumps) |
-| next-file / previous-file | `g n` / `g p` (`}` / `{`) | the next / previous file, at its first change — Helix's next / previous buffer (jumps) |
+| next-file / previous-file | `g n` / `g p` (`}` / `{`) | the next / previous file, at its first change, wrapping past the last — Helix's next / previous buffer (jumps) |
+| next-test / previous-test | `] T` / `[ T` | the next / previous test file, at its first change (Helix `]T`; jumps) |
 | next-hunk / previous-hunk | `] g` / `[ g` | the next / previous change, into the next file at the end of one (Helix `]g`) |
+| next / previous git hunk | `] p` / `[ p` | the first line of git's next / previous hunk — one can hold several `] g` changes (Helix `]p`, a paragraph) |
+| last / first finding | `] D` / `[ D` | push-ready's last / first finding on this branch (Helix `]D`) |
+| scroll down / up | `z j` / `z k` | the diff a line, the cursor staying put until the edge carries it (Helix `zj`) |
 | match | `m m` | the other half of this edit: what replaced the line, or what it replaced (Helix `mm`) |
-| next-thread / previous-thread | `n` / `N`, `] c` / `[ c` | the next / previous conversation, open ones first (jumps) |
+| next-thread / previous-thread | `n` / `N` | the next / previous search match while a search is kept, else conversation, open ones first (jumps) |
+| next / previous conversation | `] c` / `[ c` | the next / previous conversation, open ones first, even during a search; on a diff with none it says so (jumps) |
 | face | `⇥` | the page's other face (story ⇄ branches, the next tab, web ⇄ jobs) |
 | labels | `g w` `f` | label everything on screen; type a label to go there |
 | find | `space f` | find something on this page by name |
