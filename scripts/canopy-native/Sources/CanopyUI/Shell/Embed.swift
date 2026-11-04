@@ -31,6 +31,7 @@ public final class CanopyEmbed {
         if let route { m.open(address: route) }
         model = m
         let host = NSHostingView(rootView: AnyView(RootView().environment(m).preferredColorScheme(.dark)))
+        host.sizingOptions = []   // the host window is the size its person made it; content never grows it
         view = host
         monitor = KeyMonitor(app: m) { [weak host] e in isActive() && e.window != nil && e.window === host?.window }
         monitor.install()
