@@ -362,6 +362,8 @@ final class Canvas: NSObject {
     private var heights: [String: CGFloat] = [:]
     private var lastCursor: String?
     private var lastScrolledTick = -1
+    /// A restored place's viewport row, for the next scroll to this stop (instead of `reveal`'s least move).
+    var anchor: (stop: String, row: Int)?
     var app: AppModel?
     var theme: Theme = .dark
     private var layoutPending = false
@@ -509,8 +511,42 @@ final class Canvas: NSObject {
         if let c = m.cursor, c != lastCursor || scrollTick != lastScrolledTick {
             lastCursor = c
             lastScrolledTick = scrollTick
+            let a = anchor
+            anchor = nil
+            if let a, a.stop == c, settle(c, row: a.row) { return }
             reveal(c)
         }
+    }
+
+    /// Scroll so a stop sits `row` lines below the visible top, as near as the document's ends allow.
+    @discardableResult
+    func settle(_ stop: String, row: Int) -> Bool {
+        guard let r = stopMap[stop], let rect = text.rect(for: NSRange(location: r.location, length: 1)), rect.height > 0 else { return false }
+        let y = Canvas.anchoredTop(stopY: rect.minY, lineHeight: rect.height, row: row,
+                                   docHeight: text.frame.height, viewHeight: scroll.contentView.bounds.height)
+        if y != scroll.contentView.bounds.minY {
+            scroll.contentView.scroll(to: NSPoint(x: 0, y: y))
+            scroll.reflectScrolledClipView(scroll.contentView)
+        }
+        return true
+    }
+
+    /// A stop's viewport row: whole lines from the visible top down to it, kept on screen.
+    func viewportRow(of stop: String) -> Int? {
+        let h = scroll.contentView.bounds.height
+        guard let r = visibleRect(of: stop), r.height > 0, h >= r.height else { return nil }
+        return Canvas.viewportRow(y: r.minY, lineHeight: r.height, viewHeight: h)
+    }
+
+    /// The row a line `y` points below the visible top sits on, clamped to the rows on screen.
+    static func viewportRow(y: CGFloat, lineHeight: CGFloat, viewHeight: CGFloat) -> Int {
+        let last = max(0, Int(viewHeight / lineHeight) - 1)
+        return max(0, min(last, Int((y / lineHeight).rounded())))
+    }
+
+    /// The scroll offset that puts a line at `stopY` on viewport row `row`, clamped to the document.
+    static func anchoredTop(stopY: CGFloat, lineHeight: CGFloat, row: Int, docHeight: CGFloat, viewHeight: CGFloat) -> CGFloat {
+        max(0, min(stopY - CGFloat(row) * lineHeight, max(0, docHeight - viewHeight)))
     }
 
     /// Keep a stop on screen, moving as little as it takes (v2 scrollIntoView block: nearest).

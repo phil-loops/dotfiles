@@ -77,4 +77,41 @@ import Testing
         c.pin.onClick?("a.ts", false)
         #expect(clicked == "f|a.ts")
     }
+
+    @Test func aViewportRowRoundTripsAndStopsAtTheDocumentsEnds() {
+        let c = canvas()
+        let stop = "l|a.ts|40"
+        let line = c.text.rect(for: c.range(of: stop)!)!
+        scroll(c, to: line.minY - 5 * line.height)
+        #expect(c.viewportRow(of: stop) == 5)
+        scroll(c, to: 0)
+        #expect(c.settle(stop, row: 5))
+        #expect(c.viewportRow(of: stop) == 5)
+        #expect(c.settle("l|a.ts|1", row: 10))
+        #expect(c.scroll.contentView.bounds.minY == 0, "the top of the document stops it")
+        let maxY = c.text.frame.height - c.scroll.contentView.bounds.height
+        #expect(c.settle("l|b.ts|80", row: 0))
+        #expect(c.scroll.contentView.bounds.minY == maxY, "so does the bottom")
+    }
+
+    @Test func anAnchorPlacesTheNextScrollToItsStopOnly() {
+        let c = canvas()
+        let stop = "l|a.ts|40"
+        c.anchor = (stop, 3)
+        c.setMarks(CanvasMarks(cursor: stop), scrollTick: 1)
+        #expect(c.viewportRow(of: stop) == 3)
+        #expect(c.anchor == nil)
+        c.anchor = ("l|a.ts|60", 3)
+        c.setMarks(CanvasMarks(cursor: "l|a.ts|50"), scrollTick: 2)
+        #expect(c.anchor == nil, "a cursor that went elsewhere drops it")
+    }
+
+    @Test func viewportRowMath() {
+        #expect(Canvas.viewportRow(y: 47, lineHeight: 16, viewHeight: 320) == 3)
+        #expect(Canvas.viewportRow(y: -40, lineHeight: 16, viewHeight: 320) == 0)
+        #expect(Canvas.viewportRow(y: 900, lineHeight: 16, viewHeight: 320) == 19, "kept on screen")
+        #expect(Canvas.anchoredTop(stopY: 800, lineHeight: 16, row: 5, docHeight: 2000, viewHeight: 320) == 720)
+        #expect(Canvas.anchoredTop(stopY: 40, lineHeight: 16, row: 5, docHeight: 2000, viewHeight: 320) == 0)
+        #expect(Canvas.anchoredTop(stopY: 1990, lineHeight: 16, row: 0, docHeight: 2000, viewHeight: 320) == 1680)
+    }
 }

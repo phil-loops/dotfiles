@@ -8,6 +8,7 @@ import Foundation
 ///   `?thread=<id>`             a conversation
 ///   `?tab=<face>`              the page's other face (the review page's commits, a forest's story)
 ///   `?at=<row key>`            any other row (`b:loops:x` on a forest)
+///   `&row=<n>`                 the cursor's height on screen, in lines from the top
 extension Place {
     public init(address: String) {
         let q = Route.query(address)
@@ -28,6 +29,7 @@ extension Place {
         } else if let a = q["at"], !a.isEmpty {
             cursorKey = a
         }
+        row = q["row"].flatMap(Int.init)
     }
 
     /// The place as an address `Place(address:)` reads back. A code place on the tip is its line; one
@@ -43,6 +45,7 @@ extension Place {
             else { items = [URLQueryItem(name: "at", value: k)] }
         }
         if let t = tab, t != Place.firstFace { items.insert(URLQueryItem(name: "tab", value: t), at: 0) }
+        if let r = row { items.append(URLQueryItem(name: "row", value: String(r))) }
         guard !items.isEmpty else { return route.path }
         var c = URLComponents()
         c.queryItems = items

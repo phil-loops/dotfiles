@@ -214,6 +214,8 @@ public final class ReviewPageState: ShipHost {
     @ObservationIgnored var pendingCursor: (id: String, key: String)?
     /// An address's line on the tip (`?file=…&line=…`), to find once the diff is here.
     @ObservationIgnored var pendingLoc: (id: String, loc: Loc)?
+    /// A restored place's viewport row, for whichever of those lands the cursor.
+    @ObservationIgnored var pendingRow: (id: String, row: Int)?
     /// Where Helix's cursor was when it quit, to put the diff's cursor on once the diff (perhaps with Helix's commit) is here.
     @ObservationIgnored var pendingNear: (id: String, path: String, line: Int)?
     /// Helix's cursor as its status line last showed it, while it's open.
@@ -370,11 +372,13 @@ public final class ReviewPageState: ShipHost {
         }
         if let p = pendingCursor, p.id == id, stopIndex[p.key] != nil {
             pendingCursor = nil
-            return setCursor(p.key, focus: false)
+            setCursor(p.key, focus: false)
+            return takePendingRow()
         }
         if let p = pendingLoc, p.id == id {
             pendingLoc = nil
-            return open(p.loc)
+            open(p.loc)
+            return takePendingRow()
         }
         // a page opening for the first time puts the keyboard in the diff
         let fresh = app?.focusedPane["review"] == nil
@@ -733,6 +737,17 @@ public final class ReviewPageState: ShipHost {
             return s[max(0, min(s.count - 1, i))]
         }
         return s.first { $0.kind == .line } ?? s.first
+    }
+
+    /// Keep the diff cursor `row` lines below the canvas's visible top when it next scrolls to it.
+    func anchor(row: Int) {
+        if let k = diffCursor { diffCanvas.canvas.anchor = (k, row) }
+    }
+
+    private func takePendingRow() {
+        guard let r = pendingRow, r.id == id else { return }
+        pendingRow = nil
+        if side == nil { anchor(row: r.row) }
     }
 
     /// Put the diff cursor on a stop; `focus` moves the keyboard to the diff too.
