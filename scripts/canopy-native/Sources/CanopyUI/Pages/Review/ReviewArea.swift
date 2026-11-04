@@ -166,8 +166,10 @@ struct ReviewSurface: SurfaceProvider {
         let pg = ReviewPageState.of(app)
         guard app.pane?.id == reviewDiffPane, let s = pg.here, let f = pg.files.firstIndex(where: { $0.path == s.path }) else { return nil }
         var out = pg.files.count > 1 ? "file \(f + 1) of \(pg.files.count)" : shortPath(s.path)
-        let hunks = pg.files[f].hunks.count
-        if let h = s.row?.hunk, hunks > 1 { out += " · change \(h + 1) of \(hunks)" }
+        let starts = pg.changeStarts.filter { pg.stops[$0].path == s.path }
+        if starts.count > 1, let i = pg.stopIndex[s.key], let n = starts.lastIndex(where: { $0 <= i }) {
+            out += " · change \(n + 1) of \(starts.count)"
+        }
         if let l = s.row.map({ sideLine($0, prefer: pg.column) }) { out += " · line \(l.line)" }
         return out
     }

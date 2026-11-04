@@ -782,6 +782,26 @@ public final class ReviewPageState: ShipHost {
         }
         return firstLine ?? s[h].key
     }
+    /// Where each change starts, as stop indexes: a changed line whose line before (conversations
+    /// under it don't count) is unchanged, in another hunk or file, or across hidden lines. A change
+    /// is finer than git's hunk, which can hold two edits — `]` and the statusline both count these.
+    public var changeStarts: [Int] {
+        var out: [Int] = []
+        var prev: Stop?
+        for (k, st) in stops.enumerated() {
+            switch st.kind {
+            case .line:
+                if let row = st.row, changed(row) {
+                    let joins = prev.flatMap { p in p.row.map { changed($0) && p.path == st.path && $0.hunk == row.hunk } } ?? false
+                    if !joins { out.append(k) }
+                }
+                prev = st
+            case .thread, .pending: continue
+            case .file, .gap: prev = nil
+            }
+        }
+        return out
+    }
     /// The files in the diff's order.
     public var stopFiles: [String] { stops.filter { $0.kind == .file }.map(\.path) }
 

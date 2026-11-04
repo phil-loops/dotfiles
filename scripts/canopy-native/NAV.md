@@ -2,6 +2,8 @@
 
 > **Decided 2026-10-31 — what canopy writes:** canopy reads and talks; Helix writes code. `i` on the new half of a diff puts real Helix there, in the branch's diff-view checkout at the cursor's line and name, with the old half still beside it to read against; `:w` saves as usual and quitting Helix commits what changed — a `fixup!` of the branch's own unpushed commit that wrote the first line touched, else `edit <file>` (`/review-helix`). `o` still opens the outside Helix. Beyond that canopy makes only one-decision edits: apply a suggestion (`A`), rename (`space r`). Every edit lands as a commit you see, never as loose changes in your worktree.
 >
+> **Decided 2026-11-03 — `]`/`[` move by change, `}`/`{` by file (swapped, from usage):** five days of native telemetry had 173 `]`/`[` presses, 85 of them refused, and zero `}`/`{` — the reader reads change by change and reached for the bracket, which ran out after one to three files. A *change* is a run of changed lines with nothing unchanged between them (finer than git's hunk, which can hold two edits); `]` crosses into the next file, and at the branch's last change says `J` is next. The shifted key is the bigger unit: `j` line → `]` change → `}` file → `J` branch. The most-pressed key should almost never refuse.
+>
 > **Decided 2026-11-03 — the motion rules, tested on every motion (`everyMotionKeepsTheRules`):** (1) a key that can't act says why, and what would; (2) the keyboard goes where the cursor went — only a detail pane following its list (the diff under the commits) moves without taking it; (3) jumps land on code — `]`/`[`, `J`/`K`, picking a file, opening the page and `gg` land on the first changed line of what they reached (a viewed file, folded to its header, lands there), `G` on the last change; `}`/`{` already did. Headers and gaps are rows `j`/`k` pass through.
 >
 > **Decided 2026-11-03 (supersedes the h/l half of the note below):** `h`/`l` move one character in code — the diff and the code beside it — with a one-character cursor that `j`/`k` carry at the same column (vim's curswant) and `g d`/`space k` ask about. At the new half's start `h` crosses onto the old half of a removed line, and `l` crosses back; on a row with no code they refuse rather than leave. `⌃h`/`⌃l` move panes from anywhere (as `⌃w h`/`⌥h` do). In panes with no code (the files, the commits, lists) bare `h`/`l` still move to the pane beside. Why: "h is the old half here and the pane over there" depended on the row's colour, so you couldn't tell where a press would land.
@@ -36,8 +38,8 @@
 | cancel | `esc` | close the innermost transient thing — never changes page |
 | next-sibling / previous-sibling | `J` / `K` | the next / previous branch in merge order, staying on this kind of page (jumps) |
 | parent / child / root / tip | `g k` / `g j` / `g K` / `g J` | the branch's parent, child (labels at a fork), its stack's root, tip (jumps) |
-| next-file / previous-file | `]` / `[` | the next / previous file, at its first change (jumps) |
-| next-hunk / previous-hunk | `}` / `{` | the next / previous hunk |
+| next-file / previous-file | `}` / `{` | the next / previous file, at its first change (jumps) |
+| next-hunk / previous-hunk | `]` / `[` | the next / previous change, into the next file at the end of one |
 | next-thread / previous-thread | `n` / `N` | the next / previous conversation, open ones first (jumps) |
 | face | `⇥` | the page's other face (story ⇄ branches, the next tab, web ⇄ jobs) |
 | labels | `g w` `f` | label everything on screen; type a label to go there |
