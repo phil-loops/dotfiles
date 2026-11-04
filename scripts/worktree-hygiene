@@ -29,6 +29,10 @@ and every file git status reports as changed. Review scratch under ~/Library/Cac
 belongs to stack-open's own ladder and is skipped, as are the main checkout and dot-prefixed
 tooling trees.
 
+It shares the disk with the gates, so it never competes: deletes run at background IO priority
+(taskpolicy -b), a pass retires at most RETIRE_PER_PASS trees, and it stops at the next tree
+whenever a gates run is queued or running. Whatever it leaves waits for the next 6-hourly pass.
+
 Log: ~/.cache/worktree-hygiene/log.jsonl (one line per tree) + last.json (the last run's
 summary, which the viewer's Machine page reads).
 """
@@ -41,6 +45,18 @@ import time
 REPO = os.path.expanduser("~/coding/loops")
 CACHE = os.path.expanduser("~/.cache/worktree-hygiene")
 FAT = ("node_modules", ".next")
+RETIRE_PER_PASS = 30
+GATES_QUEUE = os.path.join(
+    subprocess.run(["getconf", "DARWIN_USER_TEMP_DIR"], capture_output=True, text=True).stdout.strip(),
+    "stack-gates-turn")
+QUIET_IO = ["/usr/sbin/taskpolicy", "-b"]
+
+
+def gates_waiting():
+    try:
+        return any(name.endswith(".queue.json") for name in os.listdir(GATES_QUEUE))
+    except OSError:
+        return False
 
 
 def git(args, cwd=REPO):
@@ -117,7 +133,7 @@ def retire(wt, apply):
                 return None
         elif parked:
             git(["branch", parked, head])
-        subprocess.run(["git", "worktree", "remove", "--force", wt], cwd=REPO, capture_output=True)
+        subprocess.run([*QUIET_IO, "git", "worktree", "remove", "--force", wt], cwd=REPO, capture_output=True)
         if os.path.exists(wt):
             return None
     if dirty:
@@ -176,14 +192,18 @@ def main():
     busy = cwds_in_use()
     now = time.time()
     acted, kept, retired = [], [], []
+    yielded = False
     for wt in trees:
         name = os.path.basename(wt)
         if "/stack-study/" in wt or name.startswith(".") or wt in (main_wt, donor):
             continue
         if not os.path.isdir(wt):
             continue
+        if apply and gates_waiting():
+            yielded = True
+            break
         in_use = any(c == wt or c.startswith(wt + "/") for c in busy)
-        if not in_use and (now - last_activity(wt)) / 86400 >= retire_days:
+        if len(retired) < RETIRE_PER_PASS and not in_use and (now - last_activity(wt)) / 86400 >= retire_days:
             how = retire(wt, apply)
             if how:
                 retired.append({"at": now, "worktree": wt, "retired": how})
@@ -212,10 +232,10 @@ def main():
                 continue
         if apply:
             if real_nm:
-                subprocess.run(["rm", "-rf", nm])
+                subprocess.run([*QUIET_IO, "rm", "-rf", nm])
                 os.symlink(main_nm, nm)
             if ".next" in removed:
-                subprocess.run(["rm", "-rf", nxt])
+                subprocess.run([*QUIET_IO, "rm", "-rf", nxt])
         acted.append({"at": now, "worktree": wt, "removed": removed, "apparentMb": freed})
     os.makedirs(CACHE, exist_ok=True)
     if apply:
@@ -224,7 +244,7 @@ def main():
                 fh.write(json.dumps(a) + "\n")
         subprocess.run(["git", "worktree", "prune"], cwd=REPO, capture_output=True)
         with open(os.path.join(CACHE, "last.json"), "w") as fh:
-            json.dump({"at": now, "days": days, "retireDays": retire_days, "retired": len(retired),
+            json.dump({"at": now, "days": days, "retireDays": retire_days, "retired": len(retired), "yielded": yielded,
                        "stripped": len(acted),
                        "apparentMb": sum(a["apparentMb"] for a in acted), "kept": len(kept)}, fh)
     for r in retired:
@@ -235,7 +255,8 @@ def main():
     for name, why in kept:
         print(f"kept {name}: {why}")
     print(f"{verb} {len(acted)} tree(s), {sum(a['apparentMb'] for a in acted)} MB apparent; "
-          f"{'retired' if apply else 'would retire'} {len(retired)}; kept {len(kept)}")
+          f"{'retired' if apply else 'would retire'} {len(retired)}; kept {len(kept)}"
+          + ("; stopped early for a gates run" if yielded else ""))
 
 
 if __name__ == "__main__":
