@@ -38,19 +38,80 @@ enum DiffCommands {
             throw Refusal(what == "file" ? "\(edge) · } { move by hunk" : edge)
         }
 
+        /// A line stop's text on one half: the old half only where it differs, and only as far as it's drawn.
+        func halfText(_ s: Stop, _ side: Side) -> String? {
+            guard s.kind == .line, let row = s.row else { return nil }
+            if side == .right { return row.right?.new != nil ? row.right?.text : nil }
+            guard row.left?.kind == .del, let t = row.left?.text as NSString? else { return nil }
+            return t.substring(to: min(t.length, max(0, pg.splitWidth(s.path) - 1)))
+        }
+        func firstNonBlank(_ t: String) -> Int {
+            let u = Array(t.utf16)
+            return u.firstIndex { $0 != 32 && $0 != 9 } ?? 0
+        }
+        /// The column j / k aim for, and the one last put down: a line too short for the goal puts the
+        /// cursor at its end, and the next line aims for the goal again (vim's curswant).
+        var goal: Int?
+        var placed: Int?
+        func charStep(_ d: Int) throws {
+            guard let h = pg.here, h.kind == .line, let row = h.row else { throw Refusal("no code on this row") }
+            let side = sideLine(row, prefer: pg.column).side
+            let t = halfText(h, side) ?? ""
+            let n = (t as NSString).length
+            let at: Int
+            if let w = pg.hereWord { at = d > 0 ? (w.count > 1 ? w.upperBound : w.lowerBound + 1) : w.lowerBound - 1 }
+            else { at = firstNonBlank(t) }
+            if at >= 0 && at < n {
+                pg.word = (h.key, side, at..<(at + 1))
+                goal = at
+                placed = at
+                pg.cursorMoved &+= 1
+                return
+            }
+            let other: Side = side == .left ? .right : .left
+            if (d < 0) == (side == .right), let o = halfText(h, other), !o.isEmpty {
+                let m = (o as NSString).length
+                let c = d < 0 ? m - 1 : firstNonBlank(o)
+                pg.column = other
+                pg.word = (h.key, other, c..<(c + 1))
+                goal = c
+                placed = c
+                pg.cursorMoved &+= 1
+                return
+            }
+            throw Refusal(d < 0 ? "start of the line" : "end of the line")
+        }
+        /// After j / k: the character cursor at the same column on the new line, as far as it reaches.
+        func keepColumn(from: Int?) {
+            guard let from else { goal = nil; placed = nil; return }
+            let c = from == placed ? goal ?? from : from
+            goal = c
+            guard let h = pg.here, let row = h.row else { return }
+            let side = sideLine(row, prefer: pg.column).side
+            let n = ((halfText(h, side) ?? "") as NSString).length
+            guard n > 0 else { return }
+            let at = min(c, n - 1)
+            pg.word = (h.key, side, at..<(at + 1))
+            placed = at
+        }
+
         // ── moving ──
 
         r.register(Command(id: "review.down", title: "Next line", scope: .review, verb: .next, modes: motion, label: "line", pair: "review.up", quiet: true,
                            local: { _, _ in
                                if app.keys.mode != .select { pg.mark = nil }
+                               let from = pg.hereWord?.lowerBound
                                app.moveCursor(1)
+                               if app.pane?.id == reviewDiffPane { keepColumn(from: from) }
                                pg.cursorMoved &+= 1
                                CodeLookup.of(app).dismiss()
                            }))
         r.register(Command(id: "review.up", title: "Previous line", scope: .review, verb: .previous, modes: motion, label: "line", quiet: true,
                            local: { _, _ in
                                if app.keys.mode != .select { pg.mark = nil }
+                               let from = pg.hereWord?.lowerBound
                                app.moveCursor(-1)
+                               if app.pane?.id == reviewDiffPane { keepColumn(from: from) }
                                pg.cursorMoved &+= 1
                                CodeLookup.of(app).dismiss()
                            }))
@@ -294,25 +355,30 @@ enum DiffCommands {
                                app.go(.forest(repo: p.repo, project: p.name))
                                if pg.integration == nil { app.setCursor(RowKey.branch(id)) }
                            }))
-        // ── left and right: the halves of a split line, then the panes beside. The old half is a
-        // stop only where it differs (a removed line), and leaving the diff forgets it, so `l` back
-        // in lands on the new half and h/l never spend a press on a half that reads the same. ──
+        // ── h / l: one character along the code under the cursor. Past a half's edge, into the other
+        // half where the old one differs (a removed line). In the panes without code (the files, the
+        // commits) they still move to the pane beside; ⌃h / ⌃l move panes from anywhere. ──
 
-        func half() -> Side? {
-            guard app.pane?.id == reviewDiffPane, let h = pg.here, h.kind == .line, let row = h.row else { return nil }
-            return sideLine(row, prefer: pg.column).side
+        func sideCharStep(_ d: Int) throws {
+            guard let line = RowKey.id(app.selected, "s").flatMap(Int.init) else { throw Refusal("no line here") }
+            let lines = (pg.sideText ?? "").components(separatedBy: "\n")
+            let t = line >= 1 && line <= lines.count ? lines[line - 1] : ""
+            let n = (t as NSString).length
+            let at = pg.sideHereWord.map { w in d > 0 ? (w.count > 1 ? w.upperBound : w.lowerBound + 1) : w.lowerBound - 1 } ?? firstNonBlank(t)
+            guard at >= 0 && at < n else { throw Refusal(d < 0 ? "start of the line" : "end of the line") }
+            pg.sideWord = (line, at..<(at + 1))
         }
-        r.register(Command(id: "review.left", title: "The old side of the line, else the pane to the left", scope: .review, verb: .left, quiet: true,
-                           local: { _, _ in
-                               if half() == .right, pg.here?.row?.left?.kind == .del { pg.column = .left; return }
-                               if !app.focus(.left) { throw Refusal("nothing to the left") }
-                               pg.column = .right
-                           }))
-        r.register(Command(id: "review.right", title: "The new side of the line, else the pane to the right", scope: .review, verb: .right, quiet: true,
-                           local: { _, _ in
-                               if half() == .left, pg.here?.row?.right?.new != nil { pg.column = .right; return }
-                               if !app.focus(.right) { throw Refusal("nothing to the right") }
-                           }))
+        func horizontal(_ d: Int) throws {
+            switch app.pane?.id {
+            case reviewDiffPane: try charStep(d)
+            case reviewCodePane where pg.side != nil: try sideCharStep(d)
+            default: if !app.focus(d < 0 ? .left : .right) { throw Refusal(d < 0 ? "nothing to the left" : "nothing to the right") }
+            }
+        }
+        r.register(Command(id: "review.left", title: "A character left (in the diff, onto the old half at the line's start)", scope: .review, verb: .left, quiet: true,
+                           local: { _, _ in try horizontal(-1) }))
+        r.register(Command(id: "review.right", title: "A character right (from the old half's end, onto the new half)", scope: .review, verb: .right, quiet: true,
+                           local: { _, _ in try horizontal(1) }))
         // ── w / b: name to name, across lines — the name g d and space k then ask about ──
 
         /// The names on a line stop's current half (the old half only as far as it's drawn).
