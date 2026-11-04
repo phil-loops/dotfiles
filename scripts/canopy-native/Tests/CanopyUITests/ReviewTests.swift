@@ -487,21 +487,22 @@ import Testing
         #expect(a.pane?.id == reviewDiffPane, "↵ reads the whole branch's diff, never 'nothing here'")
     }
 
-    /// w / b step name to name, crossing lines, and g d / space k ask about the name they land on.
+    /// w / b put a one-character cursor on each name's first character, crossing lines; g d / space k ask about that name.
     @Test func wAndBStepNameToNameAcrossLines() async throws {
         let (a, _) = try await app()
         let pg = ReviewPageState.of(a)
         keys(a, "w")
         let first = try #require(pg.here)
         let names = CodeLookup.names(first.row?.right?.text ?? "")
-        #expect(pg.hereWord == names.first)
+        let start = { (r: Range<Int>?) in r.map { $0.lowerBound ..< $0.lowerBound + 1 } }
+        #expect(pg.hereWord == start(names.first))
         var presses = 0
         while pg.here?.key == first.key && presses < 20 { keys(a, "w"); presses += 1 }
         #expect(presses == names.count, "every name on the line, then the next line's")
         let next = try #require(pg.here)
-        #expect(next.key != first.key && pg.hereWord == CodeLookup.names(next.row?.right?.text ?? "").first)
+        #expect(next.key != first.key && pg.hereWord == start(CodeLookup.names(next.row?.right?.text ?? "").first))
         keys(a, "b")
-        #expect(pg.here?.key == first.key && pg.hereWord == names.last, "back to the last name of the line before")
+        #expect(pg.here?.key == first.key && pg.hereWord == start(names.last), "back to the last name of the line before")
         keys(a, "j")
         #expect(pg.hereWord?.count == 1, "j keeps the column as a one-character cursor")
     }
@@ -637,13 +638,13 @@ import Testing
         keys(a, "g", "d")
         await until("the side pane") { pg.sideText != nil }
         keys(a, "w")
-        #expect(a.selected == "s:2" && pg.sideHereWord == 6..<9, "two (const is a keyword, not a name)")
+        #expect(a.selected == "s:2" && pg.sideHereWord == 6..<7, "two (const is a keyword, not a name)")
         keys(a, "w")
-        #expect(pg.sideHereWord == 12..<17, "three")
+        #expect(pg.sideHereWord == 12..<13, "three")
         keys(a, "w")
-        #expect(a.selected == "s:4" && pg.sideHereWord == 0..<4, "past the blank line, four")
+        #expect(a.selected == "s:4" && pg.sideHereWord == 0..<1, "past the blank line, four")
         keys(a, "b")
-        #expect(a.selected == "s:2" && pg.sideHereWord == 12..<17, "back up, three")
+        #expect(a.selected == "s:2" && pg.sideHereWord == 12..<13, "back up, three")
         let asked = ShipStub.posts(p).filter { $0.path == "/loops/lsp/definition" }.count
         keys(a, "g", "d")
         await until("the second ask") { ShipStub.posts(p).filter { $0.path == "/loops/lsp/definition" }.count > asked }
@@ -733,7 +734,7 @@ import Testing
         let (a, _) = try await app()
         let pg = ReviewPageState.of(a)
         keys(a, "w")
-        #expect(pg.here?.key == "l|a.ts|R:2" && pg.hereWord == 4..<7, "one (new is a keyword)")
+        #expect(pg.here?.key == "l|a.ts|R:2" && pg.hereWord == 4..<5, "one (new is a keyword)")
         keys(a, "*")
         #expect(PageSearch.of(a).query == "one" && !PageSearch.of(a).typing && pg.hereWord == 4..<7, "stays on the name it searched")
     }
