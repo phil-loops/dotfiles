@@ -243,6 +243,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     func saveAll() {
         workspaces.values.forEach { $0.saveState() }
         prefs.set(active.rawValue, forKey: "workspace.active")
+        // onNavigate hears page changes only, so the spot on the page is recorded here, for restore() to land on.
+        if let place = workspaces[.canopy]?.canopy?.place, !place.isEmpty {
+            showEvents.append(ShowEvent(kind: .opened, target: .canopy(place), workspace: .canopy, title: canopyTitle(place)))
+        }
     }
 
     /// Every door into Show lands here: a launcher's inbox file carries its own request; a canopy:// link or any other file
