@@ -152,7 +152,10 @@ def gates(req, raw):
     # oxfmt) gets one auto-fix attempt before the verdict. Default false since 2026-08-19 —
     # a bare gates check used to rebase stale branches as a side effect of observing, and
     # observation must never mutate. The sync strip passes fix:false explicitly anyway.
-    cmd = _gates_cmd(branch, fix=d.get("fix", False), tree=tree, skip=skip, quick=quick)
+    # a run Phil clicked jumps the queue; a run an agent asked for (a forest sweep of 14 branches,
+    # 2026-11-04) waits behind every click instead of putting his #15 in line
+    background = getattr(req, "_actor", "") != "browser"
+    cmd = _gates_cmd(branch, fix=d.get("fix", False), background=background, tree=tree, skip=skip, quick=quick)
     # detach: spawn with a progress journal and return at once — the strip tails
     # GET /gates-progress for live per-gate position instead of freezing for a tsc.
     if d.get("detach"):
@@ -164,7 +167,8 @@ def gates(req, raw):
             if not covers:
                 return req._send(200, json.dumps({
                     "ok": False, "err": "a quick gates run is going on this tree — run the full gates once it's done"}))
-            gate_queue.promote(_queue_file(old))
+            if not background:
+                gate_queue.promote(_queue_file(old))
             return req._send(200, json.dumps({"ok": True, "started": True, "already": True}))
         if covers and old.meta.get("tree") == _tree(branch):
             # an orphaned run finished while no server was watching — harvest its verdict
@@ -174,7 +178,7 @@ def gates(req, raw):
                 _record_green(branch, old.meta["tree"], result.get("gates", []))
                 repostate.invalidate()   # the verdict landed outside a POST: unstale the snapshot now
                 return req._send(200, json.dumps({"ok": True, "cached": True, "gates": result.get("gates", [])}))
-        _spawn_gates(branch, fix=d.get("fix", False), skip=skip, quick=quick)
+        _spawn_gates(branch, fix=d.get("fix", False), background=background, skip=skip, quick=quick)
         return req._send(200, json.dumps({"ok": True, "started": True}))
     # The verdict the push door hangs on: validated, never passed through. It used to ship
     # whatever stack-gates printed to the browser as HTTP 200, and decide green inside a bare
