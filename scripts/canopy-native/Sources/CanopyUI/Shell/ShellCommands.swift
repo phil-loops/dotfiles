@@ -41,18 +41,26 @@ enum ShellCommands {
                            local: { [weak app] _, _ in app?.runCmdline() }))
 
         // ── motion through the focused pane ──
+        /// A move in the focused pane that says so when it's already at that end.
+        func step(_ app: AppModel?, down: Bool, _ move: (AppModel) -> Void) throws {
+            guard let app else { return }
+            if app.rows.isEmpty { throw Refusal("nothing here to move through") }
+            let was = app.selected
+            move(app)
+            if app.selected == was { throw Refusal(down ? "already at the bottom" : "already at the top") }
+        }
         r.register(Command(id: "cursor.down", title: "Next row", scope: .global, verb: .next, modes: motion, label: "row", pair: "cursor.up", quiet: true,
-                           local: { [weak app] _, _ in app?.moveCursor(1) }))
+                           local: { [weak app] _, _ in try step(app, down: true) { $0.moveCursor(1) } }))
         r.register(Command(id: "cursor.up", title: "Previous row", scope: .global, verb: .previous, modes: motion, label: "row", quiet: true,
-                           local: { [weak app] _, _ in app?.moveCursor(-1) }))
+                           local: { [weak app] _, _ in try step(app, down: false) { $0.moveCursor(-1) } }))
         r.register(Command(id: "cursor.top", title: "First row", scope: .global, verb: .first, modes: motion, quiet: true,
-                           local: { [weak app] _, _ in app?.cursorTo(0) }))
+                           local: { [weak app] _, _ in try step(app, down: false) { $0.cursorTo(0) } }))
         r.register(Command(id: "cursor.bottom", title: "Last row", scope: .global, verb: .last, modes: motion, quiet: true,
-                           local: { [weak app] _, _ in app?.cursorTo(Int.max) }))
+                           local: { [weak app] _, _ in try step(app, down: true) { $0.cursorTo(Int.max) } }))
         r.register(Command(id: "cursor.halfdown", title: "Down half a page", scope: .global, verb: .halfDown, modes: motion, quiet: true,
-                           local: { [weak app] _, _ in app.map { $0.moveCursor(max(1, ($0.pane?.pageSize ?? 10))) } }))
+                           local: { [weak app] _, _ in try step(app, down: true) { $0.moveCursor(max(1, ($0.pane?.pageSize ?? 10))) } }))
         r.register(Command(id: "cursor.halfup", title: "Up half a page", scope: .global, verb: .halfUp, modes: motion, quiet: true,
-                           local: { [weak app] _, _ in app.map { $0.moveCursor(-max(1, ($0.pane?.pageSize ?? 10))) } }))
+                           local: { [weak app] _, _ in try step(app, down: false) { $0.moveCursor(-max(1, ($0.pane?.pageSize ?? 10))) } }))
         r.register(Command(id: "cursor.set", title: "Select row", scope: .global, needsArg: true, quiet: true,
                            local: { [weak app] key, _ in app?.setCursor(key) }))
         r.register(Command(id: "pane.open", title: "Open the row under the cursor", scope: .global, verb: .main, label: "open",
