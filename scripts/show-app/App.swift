@@ -320,6 +320,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     }
 
     func windowDidEndLiveResize(_ notification: Notification) { fitOnScreen() }
+    func windowDidResize(_ notification: Notification) { if !window.inLiveResize { fitOnScreen() } }
     func windowDidChangeScreen(_ notification: Notification) { fitOnScreen() }
 
     func windowDidBecomeKey(_ notification: Notification) {
