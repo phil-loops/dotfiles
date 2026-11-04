@@ -134,6 +134,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         if snapshotPath == nil && selfTest == nil {
             window.center()
             window.setFrameAutosaveName("show.window")
+            fitOnScreen()
         }
         _ = shell.view
         installKeys()
@@ -306,6 +307,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+
+    /// A frame autosaved on a larger display, or grown by layout, can run past the screen and under the Dock.
+    private func fitOnScreen() {
+        guard snapshotPath == nil, selfTest == nil, let visible = (window.screen ?? NSScreen.main)?.visibleFrame else { return }
+        let frame = window.frame
+        guard !visible.contains(frame) else { return }
+        let width = min(frame.width, visible.width), height = min(frame.height, visible.height)
+        let x = min(max(frame.minX, visible.minX), visible.maxX - width)
+        let y = min(max(frame.minY, visible.minY), visible.maxY - height)
+        window.setFrame(NSRect(x: x, y: y, width: width, height: height), display: true)
+    }
+
+    func windowDidEndLiveResize(_ notification: Notification) { fitOnScreen() }
+    func windowDidChangeScreen(_ notification: Notification) { fitOnScreen() }
 
     func windowDidBecomeKey(_ notification: Notification) {
         LearnDue.refresh()
