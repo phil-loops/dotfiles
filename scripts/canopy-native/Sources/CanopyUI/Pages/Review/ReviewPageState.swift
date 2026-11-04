@@ -158,7 +158,7 @@ public final class ReviewPageState: ShipHost {
         default: return max(24, usable / 2)
         }
     }
-    /// The name `w` / `b` put the cursor on: its row, half and UTF-16 range in that half's text. It
+    /// The cursor in the code: its row, half and UTF-16 range in that half's text (one character). It
     /// counts only while the cursor is still on that row and half.
     public var word: (key: String, side: Side, at: Range<Int>)?
     /// The selected name, when it's still under the cursor.

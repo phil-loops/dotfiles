@@ -433,7 +433,7 @@ enum DiffCommands {
                            local: { _, _ in try horizontal(-1) }))
         r.register(Command(id: "review.right", title: "A character right (from the old half's end, onto the new half)", scope: .review, verb: .right, quiet: true,
                            local: { _, _ in try horizontal(1) }))
-        // ── w / b: name to name, across lines — the name g d and space k then ask about ──
+        // ── w / b: the cursor to the next name's first character, across lines — g d and space k ask about that name ──
 
         /// The names on a line stop's current half (the old half only as far as it's drawn).
         func names(_ s: Stop) -> (side: Side, names: [Range<Int>])? {
@@ -453,7 +453,7 @@ enum DiffCommands {
                 let pick = d > 0 ? ns.first { from == nil || $0.lowerBound > from!.lowerBound } : ns.last { from == nil || $0.lowerBound < from!.lowerBound }
                 if let pick {
                     if app.selected != "s:\(n)" { app.setCursor("s:\(n)") }
-                    pg.sideWord = (n, pick)
+                    pg.sideWord = (n, pick.lowerBound ..< pick.lowerBound + 1)
                     return
                 }
                 from = nil
@@ -473,7 +473,7 @@ enum DiffCommands {
                     let pick = d > 0 ? ns.first { from == nil || $0.lowerBound > from!.lowerBound } : ns.last { from == nil || $0.lowerBound < from!.lowerBound }
                     if let pick {
                         if s.key != pg.here?.key { pg.setCursor(s.key) }
-                        pg.word = (s.key, side, pick)
+                        pg.word = (s.key, side, pick.lowerBound ..< pick.lowerBound + 1)
                         return
                     }
                 }
@@ -489,12 +489,14 @@ enum DiffCommands {
                 guard let n = RowKey.id(app.selected, "s").flatMap(Int.init) else { throw Refusal("no name here") }
                 let lines = (pg.sideText ?? "").components(separatedBy: "\n")
                 let text = n >= 1 && n <= lines.count ? lines[n - 1] : ""
-                guard let w = pg.sideHereWord ?? CodeLookup.names(text).first else { throw Refusal("no name on this line") }
+                let ns = CodeLookup.names(text)
+                guard let w = pg.sideHereWord.flatMap({ c in ns.first { $0.contains(c.lowerBound) } }) ?? ns.first else { throw Refusal("no name on this line") }
                 let q = (text as NSString).substring(with: NSRange(location: w.lowerBound, length: w.count))
                 if !search.seek(app, q, at: PageSearch.Hit(row: "s:\(n)", field: 0, at: w)) { throw Refusal("no matches") }
                 return
             }
-            guard app.pane?.id == reviewDiffPane, let h = pg.here, let (side, ns) = names(h), let w = pg.hereWord ?? ns.first,
+            guard app.pane?.id == reviewDiffPane, let h = pg.here, let (side, ns) = names(h),
+                  let w = pg.hereWord.flatMap({ c in ns.first { $0.contains(c.lowerBound) } }) ?? ns.first,
                   let text = (side == .left ? h.row?.left : h.row?.right)?.text else { throw Refusal("no name here") }
             let q = (text as NSString).substring(with: NSRange(location: w.lowerBound, length: w.count))
             if !search.seek(app, q, at: PageSearch.Hit(row: h.key, field: side == .right ? 0 : 1, at: w)) { throw Refusal("no matches") }
