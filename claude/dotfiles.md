@@ -3,7 +3,7 @@
 Rules first; mechanics below.
 
 - **No `zsource` / `git add -A`** (spine rule) — mechanics: `git status` as its own step, then stage **explicit paths** (`git add .zshrc`), commit, push. (Phil's `zsource` alias is his to run; `-A` once swept his in-progress ledger scripts into an unrelated commit.)
-- **Pathspec commits cannot UNTRACK — delete from disk first.** `git commit -- X` re-reads X from the working tree, silently discarding a staged `git rm --cached X` and re-committing the bytes with a success exit code (98f9041: all 23 .pyc stayed tracked). The safe form records an absence: `rm -rf X && git commit -m "…" -- X` (4f56495). Only for regenerable files; a file that must survive on disk gets copied out, untrack-committed, copied back.
+- **A pathspec commit only sees what git already tracks — land through `patch-land` even in your own lane.** `git commit -- X` re-reads tracked X from the working tree: it drops an untracked new file without a word (be58f2e: canopy's ReviewFlags.swift missed its commit, so 3c3f5ae doesn't build alone), and it can't untrack — a staged `git rm --cached X` is discarded and the bytes re-committed (98f9041). `patch-land` runs `git add` on every path the patch touches before its pathspec commit, so new files and deletions land in the same commit. Untracking a regenerable file still means `rm -rf X` first, so the commit records an absence (4f56495).
 - **Reloads don't propagate.** `source ~/.zshrc` only affects your own subshell — tell Phil to source it in his terminal.
 - **Script placement** (spine bans `~/bin`): shell functions in `.zshrc` (or dedicated files sourced from it), standalone scripts in `~/.dotfiles/scripts/`.
 
