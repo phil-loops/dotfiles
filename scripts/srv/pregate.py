@@ -62,7 +62,7 @@ def _candidate():
             # finished for this exact tree — harvest a green, let a red stand as the memo
             result = push.gate_result(run)
             if result and result.get("ok"):
-                push._record_green(b, tree)
+                push._record_green(b, tree, result.get("gates", []))
             continue
         return b
     return None

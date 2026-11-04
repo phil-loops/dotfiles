@@ -2,6 +2,7 @@
 #
 #   POST /gates          {branch}  → run stack-gates in the branch's worktree; JSON verdict.
 #                                    {detach:true} spawns it with a progress journal instead.
+#                                    {mode:"quick"} skips typecheck + lint (CI re-runs them).
 #   GET  /gates-progress ?branch=  → live per-gate journal of a detached /gates run
 #   POST /push-origin    {branch}  → THE shared-history door. Human finger only (viewer button);
 #                                    Claude never calls this. Every guard re-verified server-side.
@@ -137,34 +138,43 @@ def _journal_events(path):
 def gates(req, raw):
     d = json.loads(raw or "{}")
     branch = d.get("branch", "")
+    quick = d.get("mode") == "quick"
+    # skip: Phil's call that a gate doesn't apply to this tree — it reports as a waiver, never silently
+    skip = [g for g in d.get("skip") or [] if isinstance(g, str) and re.fullmatch(r"[a-z][a-z0-9-]*", g)]
+    asked = set(skip) | (set(QUICK_SKIPS) if quick else set())
     # A tree that already passed answers green instantly — the verdict is tree-keyed, so
-    # re-running proves nothing new. force:true opts out (a suspected-flaky green).
+    # re-running proves nothing new — unless that green skipped a gate this run asks for:
+    # a quick green never answers a full run. force:true opts out (a suspected-flaky green).
     tree = _tree(branch) if branch else ""
-    if not d.get("force") and tree and _green_tree(branch) == tree:
+    if not d.get("force") and tree and _green_tree(branch) == tree and _green_skipped(branch) <= asked:
         return req._send(200, json.dumps({"ok": True, "cached": True, "gates": []}))
     # --fix is OPT-IN (fix:true): a red gate with a remediation (fresh → rebase, format →
     # oxfmt) gets one auto-fix attempt before the verdict. Default false since 2026-08-19 —
     # a bare gates check used to rebase stale branches as a side effect of observing, and
     # observation must never mutate. The sync strip passes fix:false explicitly anyway.
-    # skip: Phil's call that a gate doesn't apply to this tree — it reports as a waiver, never silently
-    skip = [g for g in d.get("skip") or [] if isinstance(g, str) and re.fullmatch(r"[a-z][a-z0-9-]*", g)]
-    cmd = _gates_cmd(branch, fix=d.get("fix", False), tree=tree, skip=skip)
+    cmd = _gates_cmd(branch, fix=d.get("fix", False), tree=tree, skip=skip, quick=quick)
     # detach: spawn with a progress journal and return at once — the strip tails
     # GET /gates-progress for live per-gate position instead of freezing for a tsc.
     if d.get("detach"):
         old = gate_run(branch)
+        # a run that skips a gate this one asks for isn't this run: a quick run in flight never
+        # stands in for a full one, and a finished quick verdict is never harvested as one
+        covers = old is not None and set(old.meta.get("skip") or ()) <= asked
         if old and old.meta.get("tree") == tree and old.alive():
+            if not covers:
+                return req._send(200, json.dumps({
+                    "ok": False, "err": "a quick gates run is going on this tree — run the full gates once it's done"}))
             gate_queue.promote(_queue_file(old))
             return req._send(200, json.dumps({"ok": True, "started": True, "already": True}))
-        if old and old.meta.get("tree") == _tree(branch):
+        if covers and old.meta.get("tree") == _tree(branch):
             # an orphaned run finished while no server was watching — harvest its verdict
             # instead of re-paying the typecheck for the same tree
             result = gate_result(old)
-            if result and result.get("ok"):
+            if result and result.get("ok") and _skipped(result.get("gates", [])) <= asked:
                 _record_green(branch, old.meta["tree"], result.get("gates", []))
                 repostate.invalidate()   # the verdict landed outside a POST: unstale the snapshot now
                 return req._send(200, json.dumps({"ok": True, "cached": True, "gates": result.get("gates", [])}))
-        _spawn_gates(branch, fix=d.get("fix", False), skip=skip)
+        _spawn_gates(branch, fix=d.get("fix", False), skip=skip, quick=quick)
         return req._send(200, json.dumps({"ok": True, "started": True}))
     # The verdict the push door hangs on: validated, never passed through. It used to ship
     # whatever stack-gates printed to the browser as HTTP 200, and decide green inside a bare
@@ -190,7 +200,10 @@ def _queue_file(run):
     return os.path.join(GATES_TURN_DIR, run.meta["journal"] + ".queue.json")
 
 
-def _gates_cmd(branch, fix=False, background=False, tree=None, skip=()):
+QUICK_SKIPS = ("typecheck", "lint")   # stack-gates --quick's set: what CI re-runs on every push
+
+
+def _gates_cmd(branch, fix=False, background=False, tree=None, skip=(), quick=False):
     cmd = [os.path.join(ctx.SCRIPTS, "stack-gates-turn"),
            "--queue", GATES_TURN_DIR, "--branch", branch,
            "--tree", _tree(branch) if tree is None else tree,
@@ -200,10 +213,12 @@ def _gates_cmd(branch, fix=False, background=False, tree=None, skip=()):
         cmd.append("--fix")
     for g in skip:
         cmd += ["--skip", g]
+    if quick:
+        cmd.append("--quick")
     return cmd
 
 
-def _spawn_gates(branch, fix=False, background=False, skip=()):
+def _spawn_gates(branch, fix=False, background=False, skip=(), quick=False):
     with _GATE_LOCK:
         tree = _tree(branch)
         old = gate_run(branch)
@@ -211,14 +226,15 @@ def _spawn_gates(branch, fix=False, background=False, skip=()):
             if not background:
                 gate_queue.promote(_queue_file(old))
             return old
-        cmd = _gates_cmd(branch, fix=fix, background=background, tree=tree, skip=skip)
+        cmd = _gates_cmd(branch, fix=fix, background=background, tree=tree, skip=skip, quick=quick)
         key = _gate_key(branch)
         # unique per run: the gate queue keys its slot request by this name, machine-wide
         name = f"gates-{_repo_id()}-{quote(branch, safe='')}-{time.time_ns()}.jsonl"
         path = os.path.join(runs.dir_of("gates", key), name)
         try:
             run = runs.start("gates", key, cmd + ["--progress", path], cwd=ctx.repo_cwd(),
-                             meta={"repo": _repo_id(), "branch": branch, "tree": tree, "journal": name},
+                             meta={"repo": _repo_id(), "branch": branch, "tree": tree, "journal": name,
+                                   "skip": sorted(set(skip) | (set(QUICK_SKIPS) if quick else set()))},
                              seed={name: json.dumps({"event": "queued", "ts": time.time()}) + "\n"})
         except runs.Busy:   # a live run for an older tree: it finishes as an obsolete verdict on its own
             return gate_run(branch)
@@ -274,8 +290,22 @@ def _green_tree(branch):
     return repostate.snapshot().branch_key(branch, "gates-green-tree")
 
 
+def _green_skipped(branch):
+    """The gates the recorded green skipped (a quick run's typecheck + lint, Phil's --skip)."""
+    return set(repostate.snapshot().branch_key_all(branch, "gates-skipped"))
+
+
+def _skipped(gates):
+    # stack-gates marks a skip "skipped": true; a verdict from before that says so in warn
+    return {g.get("name") for g in gates or ()
+            if g.get("skipped") or (g.get("warn") or "").endswith("skipped by you")}
+
+
 def _record_green(branch, tree, gates=()):
     stackcfg.set_key(branch, "gates-green-tree", tree)
+    stackcfg.unset_all(branch, "gates-skipped")
+    for g in sorted(_skipped(gates)):
+        stackcfg.add_key(branch, "gates-skipped", g)
     # A green earned with a WAIVED gate (stack-gates marks it advisory — unsatisfiable, not
     # unmet) must say so at the door, or the waiver is a silent bypass. Tree-keyed like the
     # verdict it qualifies, so the next edit retires it with the green.
@@ -284,6 +314,12 @@ def _record_green(branch, tree, gates=()):
     for w in warns:
         if w:
             stackcfg.add_key(branch, "gates-waived", w)
+
+
+def _gates_label(waived):
+    if any("quick gates" in w for w in waived):
+        return "gates green (quick — CI checks " + ", ".join(w.split(" ", 1)[0] for w in waived if "quick gates" in w) + ")"
+    return "gates green" if not waived else f"gates green ({len(waived)} waived)"
 
 
 _WIP_SUBJECT = re.compile(r"^(wip\b|fixup!|squash!|amend!)", re.IGNORECASE)
@@ -628,7 +664,7 @@ def _origin_verdict(branch):
         # "rebase forward" without rewriting shared history.
         ward("watch", "deploy watch clear", not deploy_critical or (has_remote and ff and bool(outgoing)),
              f"main changed {len(deploy_critical)} deploy-watched file{'s' if len(deploy_critical) != 1 else ''} this branch lacks — rebase forward"),
-        ward("gates", "gates green" if not gates_waived else "gates green (1 waived)", gates_green,
+        ward("gates", _gates_label(gates_waived), gates_green,
              "not green for this exact commit — ⟲ sync runs the gates"),
         # The pre-push TODO ratchet, moved to the door: a TODO clears by naming a ticket the
         # branch acked (`branch.<b>.stack-todo-ack`), so a reviewer-requested marker ships
