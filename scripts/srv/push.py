@@ -309,6 +309,26 @@ def _review_flags(branch):
     return {"flags": [l.strip() for l in snap.branch_key_all(branch, "review-flag") if l.strip()]}
 
 
+def review_flags_get(req, u):
+    """GET /review-flags?branch=: the findings push-ready left on this tree, each split into its
+    place and its words — {"flags": [{path, line, text}]}, or {"flags": null} when none are
+    recorded for the tree the branch has now (an edit retires them)."""
+    branch = parse_qs(u.query).get("branch", [""])[0]
+    got = _review_flags(branch)
+    if got is None:
+        return req._send(200, json.dumps({"flags": None}))
+    out = []
+    for f in got["flags"]:
+        # "path:line — words", "path — words", "path Name — words" (the name is part of the words)
+        m = re.match(r"^([\w./@\[\]-]+\.\w+)(?::(\d+))?\s+(.*)$", f)
+        if not m:
+            out.append({"path": None, "line": None, "text": f})
+            continue
+        words = re.sub(r"^(?:—|-)\s*", "", m.group(3))
+        out.append({"path": m.group(1), "line": int(m.group(2)) if m.group(2) else None, "text": words})
+    req._send(200, json.dumps({"flags": out}))
+
+
 def _todo_debt(branch, tip, scan=True):
     """What the pre-push TODO guard would say about this branch — asked of the guard
     itself rather than reimplemented, so the door and the hook can never disagree about
