@@ -211,7 +211,11 @@ struct ReviewSurface: SurfaceProvider {
     }
 
     func remember(_ place: inout Place, _ app: AppModel) {
-        place.tab = ReviewPageState.of(app).tab
+        let pg = ReviewPageState.of(app)
+        place.tab = pg.tab
+        if pg.tab == "files", app.pane?.id == reviewDiffPane, let k = pg.diffCursor {
+            place.row = pg.diffCanvas.canvas.viewportRow(of: k)
+        }
     }
 
     func restore(_ place: Place, _ app: AppModel) {
@@ -224,6 +228,11 @@ struct ReviewSurface: SurfaceProvider {
         // an address names no pane: what it names is in the diff
         if place.pane == nil, place.cursorKey != nil { app.focus(pane: reviewDiffPane); app.setCursor(place.cursorKey) }
         if (place.pane ?? reviewDiffPane) == reviewDiffPane, let k = place.cursorKey, !pg.diffHere || pg.stopIndex[k] == nil { pg.pendingCursor = (pg.id, k) }
+        pg.pendingRow = nil
+        pg.diffCanvas.canvas.anchor = nil
+        if let row = place.row, (place.pane ?? reviewDiffPane) == reviewDiffPane, (place.tab ?? "files") == "files" {
+            if pg.pendingCursor?.id == pg.id || pg.pendingLoc?.id == pg.id { pg.pendingRow = (pg.id, row) } else if pg.side == nil { pg.anchor(row: row) }
+        }
         pg.cursorMoved &+= 1
     }
 

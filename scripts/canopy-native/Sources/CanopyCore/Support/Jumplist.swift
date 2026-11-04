@@ -2,8 +2,8 @@ import Foundation
 import Observation
 
 /// One place the app has been (NAV.md §4.4): the page, the focused pane and its cursor row, the
-/// page's tab and scroll, and — on a page showing code — the code place. Restoring a Place puts
-/// all of it back exactly.
+/// page's tab, the cursor's height on screen, and — on a page showing code — the code place.
+/// Restoring a Place puts all of it back exactly.
 public struct Place: Equatable, Sendable {
     public var route: Route
     /// the focused pane's id ("main", "files", …)
@@ -12,13 +12,15 @@ public struct Place: Equatable, Sendable {
     public var cursorKey: String?
     /// the page's own face: the review tab ("files" / "commits" / "conversation"), a forest's story face
     public var tab: String?
-    /// the page's scroll offset, for a surface that keeps its own (PaneList follows the cursor instead)
-    public var scroll: Double?
+    /// the cursor's viewport row: lines from the top of the visible area down to it, for a surface
+    /// that scrolls its own (PaneList follows the cursor instead). Lines, not points, so it survives
+    /// content above it changing.
+    public var row: Int?
     /// a code place (CodeNav), when the page shows code
     public var loc: Loc?
 
-    public init(route: Route, pane: String? = nil, cursorKey: String? = nil, tab: String? = nil, scroll: Double? = nil, loc: Loc? = nil) {
-        self.route = route; self.pane = pane; self.cursorKey = cursorKey; self.tab = tab; self.scroll = scroll; self.loc = loc
+    public init(route: Route, pane: String? = nil, cursorKey: String? = nil, tab: String? = nil, row: Int? = nil, loc: Loc? = nil) {
+        self.route = route; self.pane = pane; self.cursorKey = cursorKey; self.tab = tab; self.row = row; self.loc = loc
     }
 
     /// The `Surface.all` id.
@@ -31,7 +33,7 @@ public struct Place: Equatable, Sendable {
         return ""
     }
 
-    /// The same spot, ignoring scroll: two consecutive entries that are the same spot collapse.
+    /// The same spot, ignoring the viewport row: two consecutive entries that are the same spot collapse.
     public func sameSpot(_ o: Place) -> Bool {
         route == o.route && pane == o.pane && cursorKey == o.cursorKey && tab == o.tab && loc == o.loc
     }

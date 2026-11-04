@@ -7,7 +7,7 @@ extension AppModel {
     public func willJump(_ id: String) { recordJump() }
 
     /// Put a remembered place back — page, pane, cursor, code place, then the surface's tab and
-    /// scroll — without recording anything.
+    /// viewport row — without recording anything.
     public func restore(_ p: Place) {
         jumpDepth += 1
         defer { jumpDepth -= 1 }

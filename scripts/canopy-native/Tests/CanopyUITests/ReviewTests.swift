@@ -767,6 +767,18 @@ import Testing
         await until("a line the diff hasn't, beside it") { pg.side?.line == 10 && pg.side?.sha == pg.tip }
     }
 
+    @Test func anAddressesRowAnchorsTheCursorOnceTheDiffIsHere() async throws {
+        let (a, _) = try await app()
+        let pg = ReviewPageState.of(a)
+        a.open(address: "canopy://v2/b/loops/hankles-next?file=b.ts&line=6&row=4")
+        await until("the line") { pg.here?.key == "l|b.ts|R:6" }
+        #expect(pg.diffCanvas.canvas.anchor?.stop == "l|b.ts|R:6" && pg.diffCanvas.canvas.anchor?.row == 4)
+        a.open(address: "canopy://v2/b/loops/hankles-next?file=b.ts&line=6")
+        #expect(pg.diffCanvas.canvas.anchor == nil, "no row: the least move, as before")
+        a.restore(Place(route: a.router.route, pane: reviewDiffPane, cursorKey: "l|b.ts|R:6", row: 2))
+        #expect(pg.diffCanvas.canvas.anchor?.row == 2, "a jumplist entry on a diff that's here anchors at once")
+    }
+
     @Test func theDiffsKeysKeepTheRules() async throws {
         let (a, _) = try await app()
         #expect(KeyboardRule.violations(a) { $0.hasPrefix("review.") || $0.hasPrefix("inline.") } == [])

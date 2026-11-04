@@ -52,9 +52,9 @@ public protocol SurfaceProvider {
     /// Where the cursor is, in the reader's words, for the status line; nil says "<pane> i/n".
     func position(_ app: AppModel) -> String?
     /// Fill in what the jumplist keeps beyond route, pane and cursor (which the shell fills):
-    /// `place.tab`, `place.scroll`. Default: nothing. (`place.loc` comes from `app.nav` itself.)
+    /// `place.tab`, `place.row`. Default: nothing. (`place.loc` comes from `app.nav` itself.)
     func remember(_ place: inout Place, _ app: AppModel)
-    /// Put a remembered place's tab and scroll back. The shell has already navigated to
+    /// Put a remembered place's tab and viewport row back. The shell has already navigated to
     /// `place.route`, focused `place.pane`, set the cursor to `place.cursorKey`, and handed
     /// `place.loc` to `app.nav.open`. Default: nothing.
     func restore(_ place: Place, _ app: AppModel)

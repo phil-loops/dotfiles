@@ -72,9 +72,9 @@ import Testing
         let j = Jumplist()
         j.record(at("a")); j.record(at("a"))
         #expect(j.back.count == 1)
-        var scrolled = at("a"); scrolled.scroll = 40
+        var scrolled = at("a"); scrolled.row = 40
         j.record(scrolled)
-        #expect(j.back.count == 1 && j.back[0].scroll == 40, "scroll alone isn't a new spot; the newer one wins")
+        #expect(j.back.count == 1 && j.back[0].row == 40, "the row alone isn't a new spot; the newer one wins")
         j.save(at("b"))
         #expect(j.goBack(from: at("b")) == scrolled, "C-s at b then C-o from b skips b")
     }
@@ -110,6 +110,15 @@ import Testing
         #expect(commits.tab == "commits" && commits.cursorKey == "c|abc")
         #expect(commits.address == "/v2/b/loops/x?tab=commits&at=c%7Cabc")
         #expect(Place(route: .forests).address == "/v2")
+    }
+
+    @Test func anAddressCarriesTheCursorsRowOnScreen() {
+        var p = Place(route: .review(repo: "loops", branch: "x"), loc: Loc(repo: "loops", sha: "", path: "a.ts", line: 4))
+        p.row = 17
+        #expect(p.address == "/v2/b/loops/x?file=a.ts&line=4&row=17")
+        #expect(Place(address: p.link).row == 17)
+        #expect(Place(address: "/v2/b/loops/x?file=a.ts&line=4").row == nil, "no row unless it's said")
+        #expect(Place(address: "/v2/b/loops/x?at=c%7Cabc").address == "/v2/b/loops/x?at=c%7Cabc")
     }
 }
 

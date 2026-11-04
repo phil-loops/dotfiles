@@ -383,7 +383,7 @@ public final class AppModel: CommandContext {
     }
 
     /// Where we are, exactly (a jumplist entry): route, pane, cursor, code place, plus what the
-    /// surface keeps (`remember`: its tab and scroll).
+    /// surface keeps (`remember`: its tab and viewport row).
     public func here() -> Place {
         var p = Place(route: router.route, pane: pane?.id, cursorKey: selected, loc: nav.here)
         provider?.remember(&p, self)
