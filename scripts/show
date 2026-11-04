@@ -52,6 +52,10 @@ build() {
 # are pinned in Package.resolved, so builds use those pins and never ask the remotes for updates (~2s of every build).
 swiftbuild() { swift build -c release -Xswiftc -no-whole-module-optimization -Xswiftc -incremental --force-resolved-versions "$@"; }
 
+# A launch opens the build there is: building is the autobuild's job, and a newer build shows up in Show as Update. Only a
+# machine with no Show yet waits for one. Commands that run the code itself (--selftest, --snapshot, the checks) still build.
+ready() { [[ -x "$app/Contents/MacOS/Show" ]] || build; }
+
 build_held() {
   local sha
   stage
@@ -141,13 +145,13 @@ case "${1:-}" in
     for arg in "$@"; do
       if [[ "$arg" == "--focus" ]]; then focus=1; else route="$arg"; fi
     done
-    build
+    ready
     request "$(python3 -c 'import json, sys; print(json.dumps({"canopy": sys.argv[1]}))' "$route")"
     ;;
   --api)
     shift
     [[ "${1:-}" == "--focus" ]] && focus=1
-    build
+    ready
     request '{"api": true}'
     ;;
   --status)
@@ -205,7 +209,7 @@ PY
     [[ -f "$session" ]] || { echo "show: no such session: $session" >&2; exit 66; }
     python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d.get("mode", d.get("kind")) == "tutor" and d["title"] and isinstance(d["rungs"], list)' "$session" \
       || { echo "show: $session is not a tutor session (needs mode \"tutor\" + title + rungs)" >&2; exit 65; }
-    build
+    ready
     request "$(document "$session")"
     ;;
   --check-routing)
@@ -236,7 +240,7 @@ PY
     set -- ${args[@]+"${args[@]}"}
     if [[ $# -eq 0 ]]; then
       # A running Show comes to the front; a fresh one reopens the last workspace and each workspace's document.
-      build
+      ready
       open -a "$app"
       exit
     fi
@@ -257,7 +261,7 @@ else:
         || { echo "show: $deck is not a deck (needs title + sections), a plan (title + plan.stages + plan.rows) or a tutor session (mode \"tutor\" + title + rungs)" >&2; exit 65; }
       decks+=("$deck")
     done
-    build
+    ready
     targets=()
     for deck in "${decks[@]}"; do targets+=("$(document "$deck")"); done
     request "${targets[@]}"

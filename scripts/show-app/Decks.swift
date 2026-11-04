@@ -66,6 +66,8 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
     let freshness = BranchFreshness()
     /// "branch moved since this page was written", above a forest page whose branch tip changed.
     let movedLine = NSTextField(labelWithString: "")
+    /// What this deck uses that this build doesn't know (`unknownParts`), said atop each page until a build that knows it.
+    var unknown: [String] = []
 
     init(path: String, deck: Deck) {
         self.path = path
@@ -225,6 +227,7 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
 
     private func apply(_ deck: Deck, keepingSelection key: String?) {
         self.deck = deck
+        unknown = unknownParts(ofDeckAt: path)
         applyBarChrome()
         rows = []
         branchPlaces = [:]
@@ -540,10 +543,18 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
 
     /// The section's page: its body, then (outside live decks) its conversation.
     private func page(_ section: Section) -> NSAttributedString {
-        let body = renderer.render(section)
+        let body = newerBuildNotice + renderer.render(section)
         guard !deck.isLive else { return body }
         let status = delivery.status[section.key]
         return body + threadText(thread[section.key] ?? [], status: status, renderer: renderer, width: renderer.columnWidth)
+    }
+
+    /// One line naming what this build can't show, so a missing piece reads as "Update" rather than as the page.
+    private var newerBuildNotice: NSAttributedString {
+        guard !unknown.isEmpty else { return NSAttributedString() }
+        let named = unknown.prefix(3).joined(separator: ", ") + (unknown.count > 3 ? " and \(unknown.count - 3) more" : "")
+        return NSAttributedString(string: "This deck uses \(named), which this build of Show doesn't know. Update when it lights up.\n\n",
+                                  attributes: [.font: NSFont.systemFont(ofSize: 12, weight: .medium), .foregroundColor: signalColor])
     }
 
     /// Re-renders the open page after its thread or delivery changed, holding the scroll, or following the conversation down when asked.

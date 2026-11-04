@@ -208,6 +208,15 @@ final class SelfTestDriver {
                 && app.workspaces[.runs]?.current == live && app.workspaces[.review]?.current == alpha,
               Workspace.allCases.map { "\($0): \(app.workspaces[$0]?.current ?? "-")" }.joined(separator: ", "))
 
+        let newer = at("newer-deck.json")
+        write(["title": "Newer", "chart": ["kind": "bars"], "sections": [
+            ["id": "n1", "group": "G", "title": "One", "body": "x", "view": "board", "compare": ["columns": ["a"], "rows": [], "legend": "y"]],
+        ]], newer)
+        check("a deck's keys and choices this build doesn't know are named",
+              unknownParts(ofDeckAt: newer) == ["chart", "sections[0].compare.legend", "view \"board\""], unknownParts(ofDeckAt: newer).joined(separator: ", "))
+        check("decks this build knows name nothing", [alpha, beta, forest, live].allSatisfy { unknownParts(ofDeckAt: $0).isEmpty },
+              [alpha, beta, forest, live].map { unknownParts(ofDeckAt: $0).joined(separator: ", ") }.joined(separator: " | "))
+
         check("Machine is canopy's machine page on ⌘\(Workspace.machine.key)",
               app.workspaces[.machine]?.canopy?.home == "/v2/machine" && app.workspaces[.canopy]?.canopy?.home == nil)
         for workspace in [Workspace.inbox, .learn] {
