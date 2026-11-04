@@ -97,6 +97,20 @@ r="$(mkrepo)"
 names="$(cd "$r" && "$gates" | field "['gates']" | tr -d "'")"
 [[ "$names" != *"name: lint"* ]] && ok "no lint gate without it" || bad "stray lint gate: $names"
 
+# --skip / --quick: a skipped gate never runs and reports as a marked skip; --quick names itself
+r="$(mkrepo)"
+git -C "$r" config --add stack-gates.cmd "typecheck::false"
+git -C "$r" config --add stack-gates.cmd "lint::false"
+git -C "$r" config --add stack-gates.cmd "tests::false"
+out="$(cd "$r" && "$gates" --quick --skip tests)"
+[[ "$(echo "$out" | field "['ok']")" == "True" ]] && ok "--quick + --skip tests → ok:true" || bad "quick: $out"
+[[ "$(echo "$out" | field "['gates'][0]['warn']")" == "typecheck skipped (quick gates — CI checks it)" ]] \
+  && ok "--quick says so in warn" || bad "quick warn: $out"
+[[ "$(echo "$out" | field "['gates'][2]['warn']")" == "tests skipped by you" ]] && ok "--skip still says by you" || bad "skip warn: $out"
+[[ "$(echo "$out" | field "[\"gates\"][1].get(\"skipped\")")" == "True" ]] && ok "skipped gate marked skipped" || bad "skipped flag: $out"
+out="$(cd "$r" && "$gates" --quick)"
+[[ "$(echo "$out" | field "['ok']")" == "False" ]] && ok "--quick still runs tests" || bad "quick ran tests: $out"
+
 # gate exit code: process exits 0 (verdict is in JSON, not exit code)
 r="$(mkrepo)"
 git -C "$r" config --add stack-gates.cmd "b::false"
