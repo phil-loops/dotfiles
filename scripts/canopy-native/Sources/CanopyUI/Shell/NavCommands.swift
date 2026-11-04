@@ -29,7 +29,7 @@ extension NavCommands {
         r.register(Command(id: "nav.link", title: "Copy a link to here — canopy opens it at this spot", scope: .global, verb: .copy, label: "link",
                            local: { [weak app] _, _ in
                                guard let app else { return }
-                               let link = app.here().link
+                               let link = app.here().shared.link
                                Clipboard.copy(link)
                                app.runner.say("copied \(link)")
                            }))
@@ -52,7 +52,7 @@ extension NavCommands {
     /// Where you are, for a person or a session reading it: the breadcrumb (a branch's description
     /// after it), the file and line when there's one, then the canopy link that opens it.
     @MainActor static func placeInWords(_ app: AppModel) -> String {
-        let place = app.here()
+        let place = app.here().shared
         var head = (app.provider?.crumbs(app, route: place.route) ?? []).map(\.title).joined(separator: " › ")
         if case let .review(repo, branch, _) = place.route,
            let d = app.store.view(Branch.self, "\(repo):\(branch)")?.description, !d.isEmpty {

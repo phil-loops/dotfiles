@@ -120,6 +120,13 @@ import Testing
         #expect(Place(address: "/v2/b/loops/x?file=a.ts&line=4").row == nil, "no row unless it's said")
         #expect(Place(address: "/v2/b/loops/x?at=c%7Cabc").address == "/v2/b/loops/x?at=c%7Cabc")
     }
+
+    @Test func aSharedPlaceLeavesYourScrollBehind() {
+        var p = Place(route: .review(repo: "loops", branch: "x"), loc: Loc(repo: "loops", sha: "", path: "a.ts", line: 4))
+        p.row = 17
+        #expect(p.shared.address == "/v2/b/loops/x?file=a.ts&line=4")
+        #expect(p.address.hasSuffix("&row=17"), "the place itself keeps it")
+    }
 }
 
 @Suite struct FrecencyTests {

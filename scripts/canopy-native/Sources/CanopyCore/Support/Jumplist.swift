@@ -16,6 +16,13 @@ public struct Place: Equatable, Sendable {
     /// that scrolls its own (PaneList follows the cursor instead). Lines, not points, so it survives
     /// content above it changing.
     public var row: Int?
+
+    /// The place as you'd hand it to someone else: where, but not how your window was scrolled.
+    public var shared: Place {
+        var p = self
+        p.row = nil
+        return p
+    }
     /// a code place (CodeNav), when the page shows code
     public var loc: Loc?
 
