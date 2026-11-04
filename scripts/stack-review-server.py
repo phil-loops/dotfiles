@@ -695,6 +695,8 @@ if not SANDBOX:
 # that idle costs 0.3% of a core there is nothing to shed. The supervised runner sets this.
 if not os.environ.get("STACK_REVIEW_SUPERVISED"):
     threading.Thread(target=reaper, daemon=True).start()
+from srv import heapwatch
+heapwatch.install()
 threading.Thread(target=watcher, daemon=True).start()
 threading.Thread(target=pulse, daemon=True).start()
 threading.Thread(target=restack.drain_forever, daemon=True).start()   # queued restacks run the moment the driver seat frees
