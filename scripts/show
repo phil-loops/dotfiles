@@ -48,9 +48,9 @@ build() {
 }
 
 # Incremental release: whole-module optimization recompiles all of CanopyUI for a one-line change (53s), and SwiftPM
-# leaves -incremental off in release, so even per-file still rebuilt the whole module (18s); with it, 10s. --skip-update:
-# the dependencies are pinned in Package.resolved, so asking their remotes for updates is ~2s of every build for nothing.
-swiftbuild() { swift build -c release -Xswiftc -no-whole-module-optimization -Xswiftc -incremental --skip-update "$@"; }
+# leaves -incremental off in release, so even per-file still rebuilt the whole module (18s); with it, 10s. The dependencies
+# are pinned in Package.resolved, so builds use those pins and never ask the remotes for updates (~2s of every build).
+swiftbuild() { swift build -c release -Xswiftc -no-whole-module-optimization -Xswiftc -incremental --force-resolved-versions "$@"; }
 
 build_held() {
   local sha
