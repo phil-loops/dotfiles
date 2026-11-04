@@ -22,8 +22,10 @@ from . import ctx, gitgraph, watch
 
 STATS = {"graph": 0, "worktrees": 0, "memo_hit": 0, "memo_miss": 0, "spawn": 0}
 _LOCK = threading.Lock()
-_MEMO = OrderedDict()   # key -> (stdout, returncode)
+_MEMO = OrderedDict()   # key -> (stdout, returncode, stderr)
 _CAP = 20000
+_BYTE_CAP = 64 << 20     # a long-lived server swaps out a big heap, and every full GC pages it back in
+_bytes = 0
 _SHA_EXPR = re.compile(r"^\^?[0-9a-f]{40}(\^\{(tree|commit)\}|\^[0-9]?|~[0-9]*)*"
                        r"(\.\.\.?\^?[0-9a-f]{40}(\^\{(tree|commit)\}|\^[0-9]?|~[0-9]*)*)?(:.*)?$")
 _TIME_DEPENDENT = re.compile(r"%[ac]r|relative|ago|^--(since|until|after|before|max-age|min-age)")
@@ -380,10 +382,19 @@ def _lookup(key):
 
 
 def _store(key, r):
+    global _bytes
+    size = len(r.stdout) + len(r.stderr)
+    if size > _BYTE_CAP // 8:
+        return
     with _LOCK:
+        old = _MEMO.pop(key, None)
+        if old is not None:
+            _bytes -= len(old[0]) + len(old[2])
         _MEMO[key] = (r.stdout, r.returncode, r.stderr)
-        while len(_MEMO) > _CAP:
-            _MEMO.popitem(last=False)
+        _bytes += size
+        while len(_MEMO) > _CAP or _bytes > _BYTE_CAP:
+            _, (out, _, err) = _MEMO.popitem(last=False)
+            _bytes -= len(out) + len(err)
 
 
 def patch_id(args, text):
