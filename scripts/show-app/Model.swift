@@ -5,6 +5,9 @@ struct Deck: Decodable {
     let subtitle: String?
     let replyTo: String?
     let mode: String?
+    /// Read by routing (`App.route`) before the deck is decoded; named here so the deck's keys are all in one place.
+    let workspace: String?
+    let kind: String?
     let status: LiveStatus?
     let project: String?
     let repo: String?
@@ -41,6 +44,7 @@ struct Section: Decodable {
     let replyTo: String?
 
     var key: String { id ?? title }
+    static let views: Set<String> = ["plan"]
 }
 
 struct SignOff: Codable {
@@ -52,6 +56,40 @@ struct SignOff: Codable {
 
 func loadDeck(_ path: String) throws -> Deck {
     try JSONDecoder().decode(Deck.self, from: expandPlan(Data(contentsOf: URL(fileURLWithPath: path))))
+}
+
+/// The parts of a deck file this build doesn't know, like `sections[2].chart` or `view "board"`: a deck written for a
+/// newer Show. A key is known when a decoded type has a stored property of that name; a view when it's in `Section.views`.
+func unknownParts(ofDeckAt path: String) -> [String] {
+    guard let data = try? expandPlan(Data(contentsOf: URL(fileURLWithPath: path))),
+          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let deck = try? JSONDecoder().decode(Deck.self, from: data) else { return [] }
+    var parts = unknownKeys(json, in: deck, at: "")
+    for view in Set(deck.sections.compactMap(\.view)).subtracting(Section.views).sorted() {
+        parts.append("view \"\(view)\"")
+    }
+    return parts
+}
+
+private func unknownKeys(_ json: Any, in value: Any, at path: String) -> [String] {
+    var mirror = Mirror(reflecting: value)
+    if mirror.displayStyle == .optional {
+        guard let wrapped = mirror.children.first?.value else { return [] }
+        mirror = Mirror(reflecting: wrapped)
+    }
+    if let object = json as? [String: Any], mirror.displayStyle == .struct {
+        let fields = Dictionary(mirror.children.compactMap { child in child.label.map { (String($0.trimmingPrefix("_")), child.value) } },
+                                uniquingKeysWith: { first, _ in first })
+        return object.keys.sorted().flatMap { key -> [String] in
+            let here = path.isEmpty ? key : "\(path).\(key)"
+            guard let field = fields[key] else { return [here] }
+            return unknownKeys(object[key]!, in: field, at: here)
+        }
+    }
+    if let array = json as? [Any], mirror.displayStyle == .collection {
+        return zip(array, mirror.children).enumerated().flatMap { i, pair in unknownKeys(pair.0, in: pair.1.value, at: "\(path)[\(i)]") }
+    }
+    return []
 }
 
 func modificationDate(_ path: String) -> Date? {
