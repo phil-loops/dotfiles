@@ -331,7 +331,10 @@ final class SelfTestDriver {
 
         switchKey(.review)
         app.workspaces[.canopy]?.canopy?.resume(at: Self.canopyPlace)
+        let historyBefore = showEvents.state.current[.canopy]
         app.saveAll()
+        check("saving canopy's spot leaves History alone", showEvents.state.current[.canopy] == historyBefore,
+              "\(String(describing: showEvents.state.current[.canopy]))")
         prefs.synchronize()
         relaunchChild()
     }

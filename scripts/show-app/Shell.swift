@@ -1047,6 +1047,17 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
     func saveState() {
         decks.values.forEach { $0.saveNote() }
         tutor?.saveDrafts()
+        saveCanopyPlace()
+    }
+
+    /// Where canopy's spot is kept across a relaunch: view state, like a deck's selection, not an event in History.
+    var canopyPlaceKey: String { "workspace.\(workspace.rawValue).canopy-place" }
+
+    /// Keeps canopy's exact address, file and line included; a page still loading keeps the spot saved for that same page.
+    private func saveCanopyPlace() {
+        guard let place = canopy?.place, !place.isEmpty else { return }
+        if let saved = prefs.string(forKey: canopyPlaceKey), !place.contains("?"), saved.hasPrefix(place + "?") { return }
+        prefs.set(place, forKey: canopyPlaceKey)
     }
 
     // MARK: the shelf

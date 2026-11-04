@@ -191,14 +191,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         watcher = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.stayCurrent() }
     }
 
-    /// Reopens each workspace's last document or canopy page from the event log, so a relaunch into a new build comes back where it was.
+    /// Reopens each workspace's last document from the event log, and canopy at the spot it saved, so a relaunch into a new build comes back where it was.
     private func restore() {
         for (workspace, controller) in workspaces {
             if case .document(let path)? = showEvents.state.current[workspace], FileManager.default.fileExists(atPath: path),
                Workspace.route(path).workspace == workspace {
                 controller.open(path)
-            } else if case .canopy(let route)? = showEvents.state.current[workspace], !route.isEmpty, let canopy = controller.canopy {
-                canopy.resume(at: route)
+            } else if let canopy = controller.canopy, let place = prefs.string(forKey: controller.canopyPlaceKey) ?? lastCanopyRoute(workspace) {
+                canopy.resume(at: place)
             } else {
                 _ = controller.view
             }
@@ -235,18 +235,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         saveAll()
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
-        process.arguments = ["-c", NSApp.isActive ? "sleep 0.7; open -a \"$0\"" : "sleep 0.7; open -g -a \"$0\" --args --background", Bundle.main.bundlePath]
+        let waitForExit = "i=0; while kill -0 \"$1\" 2>/dev/null && [ $i -lt 200 ]; do sleep 0.05; i=$((i+1)); done; "
+        let open = NSApp.isActive ? "open -a \"$0\"" : "open -g -a \"$0\" --args --background"
+        process.arguments = ["-c", waitForExit + open, Bundle.main.bundlePath, String(ProcessInfo.processInfo.processIdentifier)]
         try? process.run()
         NSApp.terminate(nil)
+    }
+
+    private func lastCanopyRoute(_ workspace: Workspace) -> String? {
+        guard case .canopy(let route)? = showEvents.state.current[workspace], !route.isEmpty else { return nil }
+        return route
     }
 
     func saveAll() {
         workspaces.values.forEach { $0.saveState() }
         prefs.set(active.rawValue, forKey: "workspace.active")
-        // onNavigate hears page changes only, so the spot on the page is recorded here, for restore() to land on.
-        if let place = workspaces[.canopy]?.canopy?.place, !place.isEmpty {
-            showEvents.append(ShowEvent(kind: .opened, target: .canopy(place), workspace: .canopy, title: canopyTitle(place)))
-        }
     }
 
     /// Every door into Show lands here: a launcher's inbox file carries its own request; a canopy:// link or any other file
