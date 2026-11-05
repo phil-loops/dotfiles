@@ -446,6 +446,22 @@ enum DiffCommands {
                                available: { _ in baseOK(b) },
                                local: { _, _ in pg.tab = "files"; pg.setBase(b) }))
         }
+        r.register(Command(id: "review.scope", title: "Pick which commits the diff covers: all of them, or one", scope: .review,
+                           leader: LocalKey(",c"), label: "commits",
+                           available: { _ in pg.scopesCommits },
+                           local: { _, _ in
+                               let ship = ShipState.of(app)
+                               ship.loadHistory(app, pg.id)
+                               guard let rows = ship.historyRows(pg.id), !rows.isEmpty else { return app.runner.say("the commits are still loading") }
+                               let at = ship.commitScope
+                               let items = [PickItem(label: at == nil ? "● all" : "  all", text: "every commit, \(rows.count)")]
+                                   + rows.map { c in PickItem(label: (at.map(c.sha.hasPrefix) == true ? "● " : "  ") + String(c.sha.prefix(7)), text: c.subject) }
+                               app.nav.pick("the diff covers", items) { i in
+                                   pg.tab = "files"
+                                   ship.showCommit(i == 0 ? nil : rows[i - 1].sha)
+                                   app.focus(pane: reviewDiffPane)
+                               }
+                           }))
         r.register(Command(id: "review.base.next", title: "Diff against the next base", scope: .review, quiet: true,
                            available: { _ in pg.integration == nil },
                            local: { _, _ in

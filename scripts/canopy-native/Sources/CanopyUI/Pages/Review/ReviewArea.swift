@@ -28,7 +28,7 @@ enum ReviewArea: PageArea {
     /// The page's own keys that no verb places in the `?` sheet (`KeyGroup.of` places the rest).
     private static func placeInSheet(_ r: CommandRegistry) {
         r.place(.show, ["review.in", "review.back", "review.history", "review.outdated", "review.base.parent", "review.base.main",
-                        "review.base.outgoing", "review.gates.show", "review.viewed", "review.unviewed", "review.flag"])
+                        "review.base.outgoing", "review.scope", "review.gates.show", "review.viewed", "review.unviewed", "review.flag"])
         r.place(.branch, ["review.compose.edit", "review.compose.send", "review.compose.draft", "review.compose.suggest", "review.send.all",
                           "review.address.claude", "review.address.pick.list", "review.gates.quick"])
         r.place(.others, ["review.map.open"])
@@ -78,10 +78,7 @@ struct ReviewSurface: SurfaceProvider {
                                               column: words?.column ?? 0, row: (words?.row ?? -1) + 1, pageSize: 20)] : [])
         default:
             var out: [Pane] = []
-            if pg.showsHistory, let id = ShipSeam.branchID(app) {
-                out.append(Pane(id: ShipSeam.historyPane, title: "commits", rows: ShipRows.history(app, id), column: 0, row: 0, pageSize: 10))
-            }
-            if pg.showsTree { out.append(Pane(id: reviewTreePane, title: "files", rows: ReviewPage.treeRows(pg), column: 0, row: 1, pageSize: 12)) }
+            if pg.showsTree { out.append(Pane(id: reviewTreePane, title: "files", rows: ReviewPage.treeRows(pg), column: 0, row: 0, pageSize: 12)) }
             for (c, col) in pg.columns.enumerated() {
                 for (r, w) in col.enumerated() {
                     out.append(Pane(id: w.pane, title: w.doc.map { shortPath($0.path) } ?? "diff",
