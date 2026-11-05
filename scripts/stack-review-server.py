@@ -313,8 +313,15 @@ class H(BaseHTTPRequestHandler):
         link = f"canopy://{route.lstrip('/')}"
         body = (f"<!doctype html><meta charset=utf-8><title>canopy</title>"
                 f"<p>Opening in canopy… <a href=\"{html.escape(link, quote=True)}\">open it</a> if nothing happened, or run</p>"
-                f"<pre>{cmd}</pre><script>location.replace({json.dumps(link)})</script>").encode()
+                f"<pre>{cmd}</pre>{self._canopy_bootstrap() if route == '/v2' else ''}"
+                f"<script>location.replace({json.dumps(link)})</script>").encode()
         self._send(200, body, "text/html; charset=utf-8")
+
+    def _canopy_bootstrap(self):
+        # canopy's Bootstrap.fetch parses these from /v2 to learn which repos take a /<repo> prefix.
+        keys = json.dumps(keymap.load()).replace("</", "<\\/")
+        return (f"<script>window.__VIEWER_REPOS__={json.dumps(list(REPOS))};"
+                f"window.__CANOPY_KEYS__={keys};window.__CANOPY_ASSET__={json.dumps(asset_sig())}</script>")
 
     def _redirect(self, to):
         self.send_response(302)
