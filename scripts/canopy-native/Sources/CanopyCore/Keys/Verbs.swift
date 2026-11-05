@@ -301,7 +301,7 @@ public enum Verbs {
         v(.undo, .shared, ["u"], "undo the last change"),
         v(.moveUp, .shared, ["C-k"], "move it up its hand-ordered list"),
         v(.moveDown, .shared, ["C-j"], "move it down its hand-ordered list"),
-        v(.nth1, .shared, ["space 1"], "the 1st one shown: a tab, a choice"), v(.nth2, .shared, ["space 2"], "the 2nd one shown"),
+        v(.nth1, .shared, ["space 1"], "the 1st choice shown (a picker, a prompt); a tab is reached by its name, not its slot"), v(.nth2, .shared, ["space 2"], "the 2nd one shown"),
         v(.nth3, .shared, ["space 3"], "the 3rd one shown"), v(.nth4, .shared, ["space 4"], "the 4th one shown"), v(.nth5, .shared, ["space 5"], "the 5th one shown"),
         v(.nth6, .shared, ["space 6"], "the 6th one shown"), v(.nth7, .shared, ["space 7"], "the 7th one shown"), v(.nth8, .shared, ["space 8"], "the 8th one shown"),
         v(.nth9, .shared, ["space 9"], "the 9th one shown"),
