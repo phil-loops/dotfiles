@@ -106,7 +106,7 @@ public enum KeySection: String, CaseIterable, Sendable {
         case .nextFile, .previousFile, .nextHunk, .previousHunk, .nextUnviewed, .previousUnviewed,
              .nextThread, .previousThread, .nextConversation, .previousConversation, .nextComment, .previousComment,
              .nextFinding, .previousFinding, .firstFinding, .lastFinding, .nextGitHunk, .previousGitHunk,
-             .firstChange, .lastChange:
+             .firstChange, .lastChange, .nextCommit, .previousCommit:
             return .review
         case .parent, .child, .root, .tip, .nextSibling, .previousSibling, .out:
             return .stack
