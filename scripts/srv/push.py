@@ -138,6 +138,18 @@ def _journal_events(path):
 def gates(req, raw):
     d = json.loads(raw or "{}")
     branch = d.get("branch", "")
+    # next:true — Phil wants this branch's queued run now: it moves ahead of every run he didn't
+    # click. It never starts a run of its own, so it can't swap a full run for a quick one.
+    if d.get("next"):
+        if getattr(req, "_actor", "") != "browser":
+            return req._send(403, json.dumps({"ok": False, "err": "only Phil's click puts a run next"}))
+        old = gate_run(branch)
+        tier = gate_queue.waiting_tier(_queue_file(old)) if old and old.alive() else None
+        if tier is None:
+            return req._send(200, json.dumps({"ok": False, "err": "the gates are running — p pushes once they're green"}))
+        if tier != "interactive":
+            gate_queue.promote(_queue_file(old))
+        return req._send(200, json.dumps({"ok": True, "next": True, "was": tier}))
     quick = d.get("mode") == "quick"
     # skip: Phil's call that a gate doesn't apply to this tree — it reports as a waiver, never silently
     skip = [g for g in d.get("skip") or [] if isinstance(g, str) and re.fullmatch(r"[a-z][a-z0-9-]*", g)]

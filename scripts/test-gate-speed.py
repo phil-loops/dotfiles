@@ -314,6 +314,21 @@ time.sleep(float(os.environ.get('GATE_TEST_SECONDS', '0.05')))
         self.release()
         self.finish()
 
+    def test_a_waiting_request_says_what_waits_ahead_of_it_by_tier(self):
+        self.start("a")
+        _, request, progress = self.start("b")
+        _, _, clicked = self.start("clicked", "interactive")
+        self.wait_for(lambda: progress.exists() and '"position": 3' in progress.read_text())
+        waiting = [json.loads(line) for line in progress.read_text().splitlines()][-1]
+        self.assertEqual(waiting["ahead"], {"interactive": 1, "ship": 0, "background": 1})
+        self.assertEqual(waiting["tier"], "background")
+        self.assertEqual(queue.waiting_tier(request), "background")
+        queue.promote(request)
+        self.assertEqual(queue.waiting_tier(request), "interactive")
+        self.release()
+        self.finish()
+        self.assertIsNone(queue.waiting_tier(request))
+
     def test_branch_of_reads_the_journal_name(self):
         self.assertEqual(queue.branch_of("gates-0c3553e5-chart-notices-on-team-page-1793658497461662000.jsonl.queue.json"),
                          "chart-notices-on-team-page")
