@@ -206,6 +206,7 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
     @Test func aSuggestionComesFromTheHostsLines() throws {
         final class Host: ShipHost {
             var tab = "files"
+            var commitScope: String?
             func lineRange(_ app: AppModel) -> ShipLineRange? { ShipLineRange(path: "a.ts", side: .right, line: 4, startLine: 3) }
             func newLines(_ app: AppModel, path: String, from: Int, to: Int) -> [String] { (from...to).map { "line \($0)" } }
             func showThread(_ app: AppModel, id: String) {}
