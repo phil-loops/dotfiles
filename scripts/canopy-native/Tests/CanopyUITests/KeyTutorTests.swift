@@ -70,7 +70,7 @@ import Testing
             press(a, "ret")   // ↵ in the comment box: a new line, never a send
         case ("shared", 1): try? await Task.sleep(nanoseconds: 150_000_000); press(a, keyOf(sb, .undo))
         case ("shared", 3): press(a, "esc"); press(a, "esc")
-        case ("shared", 9):
+        case ("shared", 6):
             _ = await until("the words rows") { sb.rows.contains("w|title") }
             sb.setCursor("w|title")
             press(a, keyOf(sb, .copy))
@@ -129,7 +129,7 @@ import Testing
                                      "/practice/delta-tests", "/practice/review-helix", "/practice/todo-item", "/todo-item",
                                      "/practice/lsp/hover", "/practice/lsp/definition", "/practice/lsp/type-definition",
                                      "/practice/lsp/implementation", "/practice/lsp/references", "/practice/lsp/symbols",
-                                     "/practice/push-origin", "/practice/integrate", "/practice/lsp/prepare", "/practice/revert-commit"]
+                                     "/practice/push-origin", "/practice/integrate", "/practice/lsp/prepare", "/practice/revert-commit", "/practice/review-address"]
         #expect(writes.isSubset(of: expected), "unexpected writes: \(writes.subtracting(expected).sorted())")
         let notes = KeyTutorStub.notes(port)
         #expect(notes.contains { $0.hasPrefix("open https://github.invalid/") || $0.hasPrefix("open http://127.0.0.1") }, "\(notes)")

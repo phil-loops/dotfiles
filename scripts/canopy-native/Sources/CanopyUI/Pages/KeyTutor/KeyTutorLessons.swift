@@ -92,6 +92,21 @@ enum Practice {
         }
     }
 
+    /// The review page addressing `thread`, the commits that could fix it listed (`, a` then `, l`).
+    static func addressing(_ thread: String) -> @MainActor (AppModel) -> Bool {
+        { a in
+            guard review(S.root, closing: true)(a) else { return false }
+            let ship = ShipState.of(a)
+            if ship.addressing != thread {
+                ship.addressing = thread
+                ship.addressPicking = false
+            }
+            if a.keys.layer != .address { a.keys.openLayer(.address) }
+            if !ship.addressPicking { a.runner.dispatch("review.address.pick.list", via: .palette) }
+            return !ReviewCommands.addressCandidates(a).isEmpty
+        }
+    }
+
     /// The review page with the comment box open on a line, writing.
     static func composing() -> @MainActor (AppModel) -> Bool {
         { a in
@@ -136,7 +151,7 @@ enum KeyLessons {
     static let untaught: [Verb: String] = {
         var out: [Verb: String] = [:]
         for n in 3...9 { out[.slot(n)] = "the same verb as slot-1 and slot-2 with another digit; the practice lane has two forests" }
-        for n in 4...9 { out[.nth(n)] = "the same verb as nth-1…nth-3 with another digit; the review page has three tabs" }
+        for n in 2...9 { out[.nth(n)] = "the same verb as nth-1 with another digit; the practice branch offers one commit to pick" }
         out[.copyPlace] = "y's place written out for pasting; it puts nothing on screen to practice against"
         return out
     }()
@@ -380,9 +395,6 @@ enum KeyLessons {
                     check: { ShipState.of($0).composer != nil }),
             KeyStep("{cancel} twice: stop writing, then close the box.", [.cancel],
                     check: { $0.keys.mode == .normal && ShipState.of($0).composer == nil }),
-            KeyStep("{nth-1}: the conversation tab.", [.nth1], check: { P.pg($0).tab == "conversation" }),
-            KeyStep("{nth-2}: the commits tab.", [.nth2], check: { P.pg($0).tab == "commits" }),
-            KeyStep("{nth-3}: the files again.", [.nth3], check: { P.pg($0).tab == "files" }),
             KeyStep("{face} steps through the tabs too.", [.face]),
             KeyStep("{words}: what's written about it — the PR's title and why, the commits.", [.words], setup: P.review(),
                     check: { $0.pane?.id == ShipSeam.wordsPane }),
@@ -391,6 +403,8 @@ enum KeyLessons {
             KeyStep("{sync} syncs the branch: fold dirt, rebase onto its parent, shape the commits.", [.sync], setup: P.review()),
             KeyStep("{push} sends it out: push to origin, send the draft.", [.push]),
             KeyStep("{editor} opens it in Helix (practice: nothing opens).", [.editor], setup: P.review(at: "l|greet.ts|R:2")),
+            KeyStep("Addressing rowan's question, the commits that could fix it are listed, numbered. {nth-1} picks the 1st as its fix — a number picks a choice, never a tab.",
+                    [.nth1], setup: P.addressing(S.thread2), check: { $0.keys.layer == nil }),
             KeyStep("The tracker. {move-down} moves the item down its hand-ordered list.", [.moveDown], setup: P.todo()),
             KeyStep("{move-up} moves it back up.", [.moveUp]),
             KeyStep("{main}: the item's main action — its notes.", [.main]),

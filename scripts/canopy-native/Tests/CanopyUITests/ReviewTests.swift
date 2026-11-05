@@ -415,8 +415,8 @@ import Testing
         #expect(pg.hereWord?.lowerBound == 4)
     }
 
-    /// Digits are Helix's counts: 3 j is three lines, 2 } two files; esc drops a count; space N picks a tab.
-    @Test func digitsAreCountsAndSpaceDigitPicks() async throws {
+    /// Digits are Helix's counts: 3 j is three lines, 2 } two files; esc drops a count.
+    @Test func digitsAreCounts() async throws {
         let (a, _) = try await app()
         let pg = ReviewPageState.of(a)
         let start = try #require(pg.here.flatMap { pg.stopIndex[$0.key] })
@@ -432,10 +432,6 @@ import Testing
         #expect(a.keys.count == nil && pg.here?.key == three, "esc drops the count")
         keys(a, "2", "}")
         #expect(pg.here?.path == "a.ts", "two files on from a.ts, wrapping: \(pg.here?.key ?? "-")")
-        keys(a, "space", "1")
-        #expect(pg.tab == "conversation")
-        keys(a, "space", "3")
-        #expect(pg.tab == "files")
     }
 
     /// space reads by meaning: the three tabs together under places, ahead of the pickers.
@@ -466,12 +462,28 @@ import Testing
         #expect(pg.tab == "files")
     }
 
+    /// Every tab is reached by a bound key of its own name, never by its slot: space 1–3 open no tab.
+    @Test func everyTabIsReachedByItsNameNotItsSlot() async throws {
+        let (a, _) = try await app()
+        let pg = ReviewPageState.of(a)
+        for (tab, verb) in [("conversation", Verb.conversation), ("commits", .history), ("files", .changedFiles)] {
+            let key = a.registry.verbKeys.keys[verb]?.first
+            #expect(key?.isEmpty == false, "\(tab) has no key")
+            #expect(a.registry.commands.contains { $0.scope == .review && $0.verbs.contains(verb) && !$0.keys.isEmpty }, "\(verb.rawValue) is bound on no review command")
+        }
+        #expect(!a.registry.commands.contains { $0.id.hasPrefix("review.tab.") && !$0.keys.isEmpty }, "a tab command holds a slot key")
+        for n in ["1", "2", "3"] {
+            keys(a, "space", n)
+            #expect(pg.tab == "files", "space \(n) opened a tab")
+        }
+    }
+
     /// A place names the commit it shows: the address keeps it and opening the address comes back to it.
     @Test func theCommitInViewSurvivesTheAddress() async throws {
         let (a, p) = try await app()
         let pg = ReviewPageState.of(a)
         ShipStub.answer(p, "GET", "/loops/commit-diff", #"{"sha":"c1","files":[{"path":"c.ts","add":2,"del":0,"patch":"@@ -1,0 +1,2 @@\n+hi\n+there"}]}"#)
-        keys(a, "space", "2")
+        keys(a, "space", "h")
         ShipState.of(a).showCommit("c1")
         await until("the commit's diff") { pg.files.map(\.path) == ["c.ts"] }
         pg.focusDiff(a, true)
@@ -1148,13 +1160,13 @@ import Testing
         let b = try #require(pg.branch)
         ShipState.of(a).putHistory(b, [HistoryCommit(sha: "c2", subject: "second"), HistoryCommit(sha: "c1", subject: "first")])
         ShipStub.answer(p, "GET", "/loops/commit-diff", #"{"sha":"c1","files":[{"path":"c.ts","add":1,"del":0,"patch":"@@ -1,0 +1,1 @@\n+hi"}]}"#)
-        keys(a, "space", "2")
+        keys(a, "space", "h")
         #expect(pg.tab == "commits" && !a.panes.contains { $0.id == reviewDiffPane })
         a.runner.dispatch("history.select", via: .key, arg: "c1")
         #expect(!pg.scoped, "visiting a commit's words leaves the diff alone")
-        keys(a, "space", "3")
+        keys(a, "space", "g")
         #expect(!pg.scoped && pg.files.map(\.path) == ["a.ts", "b.ts"])
-        keys(a, "space", "2")
+        keys(a, "space", "h")
         a.runner.dispatch("history.select", via: .key, arg: "c1")
         keys(a, "ret")
         #expect(pg.tab == "files" && pg.commitScope == "c1" && a.pane?.id == reviewDiffPane)
@@ -1167,7 +1179,7 @@ import Testing
         let (a, p) = try await app()
         let pg = ReviewPageState.of(a)
         ShipStub.answer(p, "GET", "/loops/commit-diff", #"{"sha":"c1","files":[{"path":"c.ts","add":1,"del":0,"patch":"@@ -1,0 +1,1 @@\n+hi"}]}"#)
-        keys(a, "space", "2")
+        keys(a, "space", "h")
         ShipState.of(a).showCommit("c1")
         await until("the commit's diff") { pg.files.map(\.path) == ["c.ts"] }
         #expect(ShipState.of(a).commitScope == "c1")

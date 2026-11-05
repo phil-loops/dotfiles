@@ -431,8 +431,9 @@ enum DiffCommands {
         let tabs = ["conversation", "commits", "files"]
         r.register(Command(id: "review.tab", title: "Cycle the tabs", scope: .review, verb: .face, label: "tab",
                            local: { _, _ in pg.tab = tabs[((tabs.firstIndex(of: pg.tab) ?? 2) + 1) % tabs.count] }))
-        for (i, t) in tabs.enumerated() {
-            r.register(Command(id: "review.tab.\(t)", title: t == "files" ? "Show the code (the files tab)" : "Show the \(t) tab", scope: .review, verb: .nth(i + 1), label: t,
+        // a tab is reached by its name (space c / space h / space g), never its slot: these are for clicks and links
+        for t in tabs {
+            r.register(Command(id: "review.tab.\(t)", title: t == "files" ? "Show the code (the files tab)" : "Show the \(t) tab", scope: .review, label: t,
                                local: { _, _ in pg.tab = t }))
         }
         r.register(Command(id: "review.outdated", title: "Show or hide outdated conversations", scope: .review, leader: LocalKey(",o"), label: "outdated",
