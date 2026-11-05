@@ -447,7 +447,7 @@ enum DiffCommands {
                                local: { _, _ in pg.tab = "files"; pg.setBase(b) }))
         }
         r.register(Command(id: "review.scope", title: "Pick which commits the diff covers: all of them, or one", scope: .review,
-                           leader: LocalKey(",c"), label: "commits",
+                           leader: LocalKey(",h"), label: "commits",
                            available: { _ in pg.scopesCommits },
                            local: { _, _ in
                                let ship = ShipState.of(app)

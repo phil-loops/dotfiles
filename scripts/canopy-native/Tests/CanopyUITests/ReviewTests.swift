@@ -657,22 +657,22 @@ import Testing
         #expect(a.pane?.id == reviewTreePane && pg.treeWidth == width)
     }
 
-    /// , c picks what the diff covers: one commit, then every commit again; the files tab keeps the reader.
-    @Test func commaCPicksTheCommitsTheDiffCovers() async throws {
+    /// , h picks what the diff covers: one commit, then every commit again; the files tab keeps the reader.
+    @Test func commaHPicksTheCommitsTheDiffCovers() async throws {
         let (a, p) = try await app()
         let pg = ReviewPageState.of(a)
         let ship = ShipState.of(a)
         let b = try #require(pg.branch)
         ship.putHistory(b, [HistoryCommit(sha: "c2", subject: "use a plain delete"), HistoryCommit(sha: "c1", subject: "feat: add x")])
         ShipStub.answer(p, "GET", "/loops/commit-diff", #"{"sha":"c1","files":[{"path":"c.ts","add":2,"del":0,"patch":"@@ -1,0 +1,2 @@\n+hi\n+there"}]}"#)
-        keys(a, ",", "c")
+        keys(a, ",", "h")
         #expect(a.nav.picker?.title == "the diff covers" && a.nav.picker?.items.count == 3)
         a.nav.move(2)
         keys(a, "ret")
         #expect(a.nav.picker == nil && ship.commitScope == "c1" && pg.tab == "files")
         await until("the commit's diff") { pg.files.map(\.path) == ["c.ts"] }
         #expect(a.pane?.id == reviewDiffPane)
-        keys(a, ",", "c")
+        keys(a, ",", "h")
         keys(a, "ret")
         #expect(ship.commitScope == nil && pg.tab == "files", "the first row is every commit")
     }

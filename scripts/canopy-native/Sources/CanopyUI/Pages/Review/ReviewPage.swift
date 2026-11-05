@@ -123,7 +123,7 @@ private struct ReviewHeader: View {
 
 
 /// What the diff covers, written where the reader looks first: one commit (against its own parent),
-/// or everything against the base. `, c` picks the commits, `, b` the base; the margin carries neither.
+/// or everything against the base. `, h` picks the commits, `, b` the base; the margin carries neither.
 private struct ScopeChip: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme
@@ -139,7 +139,7 @@ private struct ScopeChip: View {
             } else {
                 Text(Self.whole(pg)).foregroundStyle(theme.inkDim)
             }
-            if pg.scopesCommits { Text(", c").foregroundStyle(theme.inkFaint).padding(.leading, 6) }
+            if pg.scopesCommits { Text(", h").foregroundStyle(theme.inkFaint).padding(.leading, 6) }
         }
         .font(Theme.text(12))
         .task(id: app.store.view(Branch.self, pg.id).map(ShipState.historyKey)) { ShipState.of(app).loadHistory(app, pg.id) }

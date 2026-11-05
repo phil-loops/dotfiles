@@ -54,16 +54,6 @@ enum ReviewCommands {
                 app.focus(pane: ShipSeam.wordsPane)
                 app.setCursor(words.shown[id].map { WordsState.githubOwns($0.pr) } == false ? "w|title" : "w|desc")
             }))
-        r.register(Command(
-            id: "review.history", title: "Step through the commits one at a time", scope: .review, leader: LocalKey(",h"), label: "commits",
-            local: { id, _ in
-                guard let app = weakApp, let id = id ?? page() else { return }
-                ship.host.tab = "commits"
-                ship.loadHistory(app, id)
-                words.load(app, id)
-                app.focus(pane: ShipSeam.historyPane)
-                app.setCursor("h|\(ship.commitScope ?? "")")
-            }))
 
         // ── history: the branch's commits one at a time (GitHub Desktop's view) ──
 
