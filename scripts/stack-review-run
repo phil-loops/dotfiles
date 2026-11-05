@@ -51,18 +51,35 @@ of the tip. Read files and run read-only git commands (`git show`, `git diff {ba
 
 Depth: {depth}. {depth_note}
 
-Find real defects: correctness bugs, broken invariants, unsafe or irreversible behavior, missing error
+Three lenses, in this order.
+
+1. The repository's own rules. Read AGENTS.md at the repository root first (and CLAUDE.md, and the
+skills under .agents/skills/ that the diff's kind of change calls for). Check the diff against every
+rule that applies: which layer each piece of code belongs in and what it may call, where tests go and
+what they test, comments, naming, PR shape. Report each violation as a finding that quotes the rule.
+
+2. Inherited habits. Code is often copied from a sibling file. For each piece of the diff that looks
+copied — boilerplate, cleanup calls, a defensive re-check of something already checked, usage
+printers, argument massaging, return values only a test reads — say what it does in THIS change. If
+it does nothing this change needs, report it as a habit, naming the sibling it likely came from. Open
+that sibling and walk both files side by side: every piece the two share is a candidate, and each one
+that this change doesn't need is its own finding — don't stop at the first.
+
+3. Defects. Find real defects: correctness bugs, broken invariants, unsafe or irreversible behavior, missing error
 handling where it matters, tests that pass for the wrong reason, comments or messages that say something
 the code does not do. For every line the diff REMOVES or rewrites, check that each condition or guard it
-dropped is accounted for (a filter, a null/undefined check, an early return). Don't nit-pick style, and
-don't report what a type checker, linter or formatter would catch.
+dropped is accounted for (a filter, a null/undefined check, an early return).
+
+Don't report personal style preferences the repository's rules don't state, or what a type checker,
+linter or formatter would catch.
 
 Verify each finding against the code before you report it. Mark it CONFIRMED only when you read the code
 that proves it, and say what you read; otherwise PLAUSIBLE. Write each summary in plain short sentences.
 
 End your answer with one JSON object and nothing after it:
 {{"findings": [{{"file": "<repo-relative path>", "line": <int>, "verdict": "CONFIRMED|PLAUSIBLE",
-"summary": "<one sentence: the defect>", "evidence": "<what you read that shows it>"}}]}}
+"lens": "rule|habit|defect", "summary": "<one sentence: the problem>",
+"evidence": "<what you read that shows it: the rule's words, the sibling, the code>"}}]}}
 An empty list means you found nothing worth a reviewer's time."""
 
 DEPTH_NOTES = {
@@ -146,9 +163,13 @@ def main():
         if not isinstance(f, dict) or not f.get("summary"):
             continue
         verdict = str(f.get("verdict", "")).upper()
+        lens = str(f.get("lens") or "defect").lower()
+        lens = lens if lens in ("rule", "habit", "defect") else "defect"
+        summary = str(f["summary"]).strip()
         findings.append({"file": str(f.get("file") or ""), "line": f.get("line") if isinstance(f.get("line"), int) else None,
-                         "verdict": verdict if verdict in ("CONFIRMED", "PLAUSIBLE") else "PLAUSIBLE",
-                         "summary": str(f["summary"]).strip(), "evidence": str(f.get("evidence") or "").strip()})
+                         "verdict": verdict if verdict in ("CONFIRMED", "PLAUSIBLE") else "PLAUSIBLE", "lens": lens,
+                         "summary": summary if lens == "defect" else f"[{lens}] {summary}",
+                         "evidence": str(f.get("evidence") or "").strip()})
     emit(a.out, {"ok": True, **head, "findings": findings, "model": MODELS[depth],
                  "secs": round(time.time() - t0, 1), "cost": usage.get("cost")})
     return 0
