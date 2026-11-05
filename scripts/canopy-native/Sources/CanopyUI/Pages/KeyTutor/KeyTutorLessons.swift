@@ -285,6 +285,8 @@ enum KeyLessons {
                     setup: P.review(at: "l|greet.ts|R:1"), check: { a in Self.hunk0(a).allSatisfy(P.pg(a).isSeen) }),
             KeyStep("{previous-hunk} back to it…", [.previousHunk]),
             KeyStep("…and {unmark} takes the mark off.", [.unmark], check: { a in !Self.hunk0(a).allSatisfy(P.pg(a).isSeen) }),
+            KeyStep("{next-unviewed}: the next change you haven't marked viewed, without marking anything.", [.nextUnviewed]),
+            KeyStep("{previous-unviewed}: the one before.", [.previousUnviewed]),
             KeyStep("{select} starts a range at the cursor: select mode.", [.select], check: { $0.keys.mode == .select }),
             KeyStep("{next-hunk} stretches it a hunk.", [.nextHunk], check: { $0.keys.mode == .select }),
             KeyStep("{mark} marks the whole range viewed, and select mode ends.", [.mark], check: { $0.keys.mode == .normal }),
@@ -292,7 +294,7 @@ enum KeyLessons {
             KeyStep("{extend} again stretches it a line.", [.extend]),
             KeyStep("{comment} comments on the range — three verbs in a row, not a chord.", [.comment],
                     check: { ShipState.of($0).composer != nil }),
-        ], recap: "{next-file} {previous-file} · {next-hunk} {previous-hunk} · {next-conversation} {previous-conversation} · {match} the other half; {mark} marks viewed and moves on, {unmark} unmarks; {select} ranges, {extend} lines, {comment} comments."),
+        ], recap: "{next-file} {previous-file} · {next-hunk} {previous-hunk} · {next-conversation} {previous-conversation} · {match} the other half; {mark} marks viewed and moves on, {unmark} unmarks, {next-unviewed} {previous-unviewed} find what's left; {select} ranges, {extend} lines, {comment} comments."),
 
         KeyLesson(id: "code", title: "Finding things and reading code", steps: [
             KeyStep("{find} finds a file on this page by name.", [.find], setup: P.review(at: "l|greet.ts|R:2"), check: { $0.keys.mode == .insert }),
