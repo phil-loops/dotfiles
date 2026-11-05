@@ -90,6 +90,28 @@ enum BranchCommands {
                     failed: "the gates are running — p pushes once they're green", alone: true)
             }))
         r.register(Command(
+            id: "branch.review.run", title: "Review this branch's diff — the findings land as review flags for this code",
+            scope: .branch, label: "review", quiet: true,
+            write: { id, _ in
+                guard let v = m.branchView(id) else { return nil }
+                return Write(
+                    path: t.atRepo(v.b.repo, "/review"), body: ["branch": .string(v.b.name)],
+                    settled: { true },
+                    said: "reviewing this code — the flags show when it's done",
+                    failed: "the review didn't start", alone: true)
+            }))
+        r.register(Command(
+            id: "branch.gates.waive", title: "Ship this exact code without the gates — the door says it was your call",
+            scope: .branch, label: "waive gates", quiet: true,
+            write: { id, _ in
+                guard let v = m.branchView(id) else { return nil }
+                return Write(
+                    path: t.atRepo(v.b.repo, "/gates-waive"), body: ["branch": .string(v.b.name)],
+                    settled: { true },
+                    said: "gates waived for this code — p pushes it",
+                    failed: "the waiver didn't take", alone: true)
+            }))
+        r.register(Command(
             id: "branch.push.arm", title: "Ready a push (the next press sends it)", scope: .branch, quiet: true,
             available: { id in m.branchView(id).map { ShipRules.canPush($0.b, $0.pr) } ?? false },
             local: { id, _ in m.armed = id }))
