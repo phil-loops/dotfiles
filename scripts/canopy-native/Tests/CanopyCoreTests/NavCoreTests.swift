@@ -57,6 +57,21 @@ import Testing
         #expect(j.goForward(from: at("c")) == nil)
     }
 
+    /// Helix's per-view jumplists: each window walks and truncates only its own jumps.
+    @Test func eachWindowWalksItsOwnJumps() {
+        func inW(_ k: String, _ w: Int) -> Place { var p = at(k); p.window = w; return p }
+        let one: (Place) -> Bool = { $0.window == 1 }, two: (Place) -> Bool = { $0.window == 2 }
+        let j = Jumplist()
+        j.record(inW("a", 1), mine: one)
+        j.record(inW("x", 2), mine: two)
+        j.record(inW("b", 1), mine: one)
+        #expect(j.goBack(from: inW("y", 2), mine: two) == inW("x", 2), "window 2's newest, past window 1's")
+        #expect(j.goBack(from: inW("c", 1), mine: one) == inW("b", 1))
+        j.record(inW("d", 1), mine: one)
+        #expect(j.fwd == [inW("y", 2)], "window 1's jump leaves window 2's forward list")
+        #expect(j.goForward(from: inW("x", 2), mine: two) == inW("y", 2))
+    }
+
     @Test func aNewJumpTruncatesTheForwardList() {
         let j = Jumplist()
         j.record(at("a")); j.record(at("b"))

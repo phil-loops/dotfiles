@@ -31,7 +31,7 @@ extension AppModel {
     /// `C-o`.
     @discardableResult
     public func jumpBack() -> Bool {
-        guard let to = jumps.goBack(from: here()) else { return false }
+        guard let to = jumps.goBack(from: here(), mine: provider?.jumpStream(self) ?? { _ in true }) else { return false }
         restore(to)
         return true
     }
@@ -39,7 +39,7 @@ extension AppModel {
     /// `C-i`.
     @discardableResult
     public func jumpForward() -> Bool {
-        guard let to = jumps.goForward(from: here()) else { return false }
+        guard let to = jumps.goForward(from: here(), mine: provider?.jumpStream(self) ?? { _ in true }) else { return false }
         restore(to)
         return true
     }

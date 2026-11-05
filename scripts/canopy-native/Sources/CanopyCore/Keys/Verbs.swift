@@ -45,6 +45,8 @@ public enum Verb: String, CaseIterable, Sendable, Comparable {
     case jumpBack = "jump-back", jumpForward = "jump-forward", saveJump = "save-jump"
     case branches, jumps, lastPicker = "last-picker"
     case paneLeft = "pane-left", paneDown = "pane-down", paneUp = "pane-up", paneRight = "pane-right", paneNext = "pane-next"
+    case splitRight = "split-right", splitBelow = "split-below", closeWindow = "close-window", onlyWindow = "only-window"
+    case pickRight = "pick-right", pickBelow = "pick-below"
     case command, menu, keys, select
     case leader
     // ── shared: bare letters a page may implement, never invent ──
@@ -210,6 +212,12 @@ public enum Verbs {
         v(.paneUp, .nav, ["C-w k", "space w k", "A-k"], "focus the pane above"),
         v(.paneRight, .nav, ["C-l", "C-w l", "space w l", "A-l"], "focus the pane to the right"),
         v(.paneNext, .nav, ["C-w w", "space w w"], "focus the next pane"),
+        v(.splitRight, .nav, ["C-w v", "C-w C-v", "space w v"], "a copy of this window beside it"),
+        v(.splitBelow, .nav, ["C-w s", "C-w C-s", "space w s"], "a copy of this window under it"),
+        v(.closeWindow, .nav, ["C-w q", "C-w C-q", "space w q"], "close this window"),
+        v(.onlyWindow, .nav, ["C-w o", "C-w C-o", "space w o"], "close the other windows"),
+        v(.pickRight, .nav, [], entry: ["C-v"], "in a picker: open the pick in a window beside this one"),
+        v(.pickBelow, .nav, [], entry: ["C-s"], "in a picker: open the pick in a window under this one"),
         v(.command, .nav, [":"], "the command line: run anything by name"),
         v(.menu, .nav, ["space ?"], "the command menu"),
         v(.keys, .nav, ["g ?"], "every key, here and now"),

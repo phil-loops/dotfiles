@@ -14,7 +14,8 @@ enum ReviewArea: PageArea {
         placeInSheet(app.registry)
         let pg = ReviewPageState.of(app)
         ShipState.of(app).host = pg
-        _ = app.nav.attach(CodeNav.Attached(open: { [weak pg] l in pg?.open(l) }, here: { [weak pg] in pg?.herePlace() }))
+        _ = app.nav.attach(CodeNav.Attached(open: { [weak pg] l in pg?.open(l) }, here: { [weak pg] in pg?.herePlace() },
+                                            split: { [weak pg] l, below in pg?.openInSplit(l, below: below) }))
         // space c's conversation is a layer over the diff: esc takes it away before anything older
         app.addCloser(first: true, isOpen: { [weak app, weak pg] in app?.router.route.surfaceID == "review" && pg?.tab == "conversation" },
                       close: { [weak app, weak pg] in
@@ -79,10 +80,11 @@ struct ReviewSurface: SurfaceProvider {
                 out.append(Pane(id: ShipSeam.historyPane, title: "commits", rows: ShipRows.history(app, id), column: 0, row: 0, pageSize: 10))
             }
             if pg.showsTree { out.append(Pane(id: reviewTreePane, title: "files", rows: ReviewPage.treeRows(pg), column: 0, row: 1, pageSize: 12)) }
-            if let s = pg.side {
-                out.append(Pane(id: reviewCodePane, title: shortPath(s.path), rows: pg.sideRows, column: 1, pageSize: 20))
-            } else {
-                out.append(Pane(id: reviewDiffPane, title: "diff", rows: pg.stopKeys, column: 1, pageSize: 20))
+            for (c, col) in pg.columns.enumerated() {
+                for (r, w) in col.enumerated() {
+                    out.append(Pane(id: w.pane, title: w.doc.map { shortPath($0.path) } ?? "diff",
+                                    rows: w.doc == nil ? pg.stopKeys : w.codeRows, column: 1 + c, row: r, pageSize: 20))
+                }
             }
             return out
         }
@@ -132,8 +134,8 @@ struct ReviewSurface: SurfaceProvider {
             let w = pg.splitWidth(pg.stops[i].path)
             let old = r.left.flatMap { $0.kind == .del ? $0.text : nil }.map { $0.count > w ? String($0.prefix(max(0, w - 1))) : $0 }
             return [r.right?.text ?? "", old ?? ""]
-        case reviewCodePane:
-            guard let n = RowKey.id(row, "s").flatMap(Int.init), let t = pg.sideText else { return [] }
+        case let p where pg.window(pane: p)?.doc != nil:
+            guard let n = RowKey.id(row, "s").flatMap(Int.init), let t = pg.window(pane: p)?.text else { return [] }
             let lines = t.components(separatedBy: "\n")
             return n >= 1 && n <= lines.count ? [lines[n - 1]] : []
         default:
@@ -151,8 +153,8 @@ struct ReviewSurface: SurfaceProvider {
             pg.column = side
             pg.word = (hit.row, side, hit.at.lowerBound ..< hit.at.lowerBound + 1)
             pg.cursorMoved &+= 1
-        case reviewCodePane:
-            if let n = RowKey.id(hit.row, "s").flatMap(Int.init) { pg.sideWord = (n, hit.at.lowerBound ..< hit.at.lowerBound + 1) }
+        case let p where pg.window(pane: p)?.doc != nil:
+            if let n = RowKey.id(hit.row, "s").flatMap(Int.init) { pg.window(pane: p)?.word = (n, hit.at.lowerBound ..< hit.at.lowerBound + 1) }
         default: break
         }
     }
@@ -208,9 +210,9 @@ struct ReviewSurface: SurfaceProvider {
         for (key, rect) in pg.diffCanvas.canvas.visibleTargets() where rows[key] != nil {
             out.append(LabelTarget(pane: reviewDiffPane, key: key, rect: rect, title: title(for: key, app) ?? key))
         }
-        if pg.side != nil {
-            for (key, rect) in pg.sideCanvas.canvas.visibleTargets() {
-                out.append(LabelTarget(pane: reviewCodePane, key: key, rect: rect, title: title(for: key, app) ?? key))
+        for w in pg.windows where w.doc != nil {
+            for (key, rect) in w.canvas.canvas.visibleTargets() {
+                out.append(LabelTarget(pane: w.pane, key: key, rect: rect, title: title(for: key, app) ?? key))
             }
         }
         return out
@@ -220,6 +222,7 @@ struct ReviewSurface: SurfaceProvider {
         let pg = ReviewPageState.of(app)
         place.tab = pg.tab
         place.commit = pg.commitScope
+        place.window = pg.focusedWindow?.id
         if pg.tab == "files" || pg.scoped, app.pane?.id == reviewDiffPane, let k = pg.diffCursor {
             place.row = pg.diffCanvas.canvas.viewportRow(of: k)
         }
@@ -227,6 +230,7 @@ struct ReviewSurface: SurfaceProvider {
 
     func restore(_ place: Place, _ app: AppModel) {
         let pg = ReviewPageState.of(app)
+        if let id = place.window, let w = pg.windows.first(where: { $0.id == id }), place.loc == nil { app.focus(pane: w.pane) }
         let scoping = place.commit != nil && place.commit != pg.commitScope
         if scoping, let k = place.cursorKey { pg.pendingCursor = (pg.id, k) }
         if scoping, let l = place.loc { pg.pendingLoc = (pg.id, l) }
@@ -242,10 +246,12 @@ struct ReviewSurface: SurfaceProvider {
         pg.diffCanvas.canvas.anchor = nil
         if let c = place.commit, scoping { ShipState.of(app).showCommit(c) }
         if let row = place.row, (place.pane ?? reviewDiffPane) == reviewDiffPane, (place.tab ?? "files") == "files" || place.commit != nil {
-            if pg.pendingCursor?.id == pg.id || pg.pendingLoc?.id == pg.id { pg.pendingRow = (pg.id, row) } else if pg.side == nil { pg.anchor(row: row) }
+            if pg.pendingCursor?.id == pg.id || pg.pendingLoc?.id == pg.id { pg.pendingRow = (pg.id, row) } else if pg.diffWindow != nil { pg.anchor(row: row) }
         }
         pg.cursorMoved &+= 1
     }
+
+    func jumpStream(_ app: AppModel) -> ((Place) -> Bool)? { ReviewPageState.of(app).jumpStream(route: app.router.route) }
 
     func crumbs(_ app: AppModel, route: Route) -> [Crumb]? {
         guard case .review(let repo, let name, _) = route else { return nil }

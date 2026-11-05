@@ -10,8 +10,10 @@ public struct Loc: Equatable, Hashable, Sendable {
     public var end: Int?
     /// a review-page diff stop, when the place is a line of the diff itself
     public var diffKey: String?
-    public init(repo: String, sha: String, path: String, line: Int, end: Int? = nil, diffKey: String? = nil) {
-        self.repo = repo; self.sha = sha; self.path = path; self.line = line; self.end = end; self.diffKey = diffKey
+    /// a file as a window showed it: it opens as the file even where the diff has the same line
+    public var asFile = false
+    public init(repo: String, sha: String, path: String, line: Int, end: Int? = nil, diffKey: String? = nil, asFile: Bool = false) {
+        self.repo = repo; self.sha = sha; self.path = path; self.line = line; self.end = end; self.diffKey = diffKey; self.asFile = asFile
     }
 }
 
@@ -61,7 +63,11 @@ public final class CodeNav {
     public struct Attached {
         public var open: (Loc) -> Void
         public var here: () -> Loc?
-        public init(open: @escaping (Loc) -> Void, here: @escaping () -> Loc?) { self.open = open; self.here = here }
+        /// Open a place in a new window beside (`below` false) or under the focused one; nil: no windows.
+        public var split: ((Loc, _ below: Bool) -> Void)?
+        public init(open: @escaping (Loc) -> Void, here: @escaping () -> Loc?, split: ((Loc, Bool) -> Void)? = nil) {
+            self.open = open; self.here = here; self.split = split
+        }
     }
 
     public private(set) var back: [Loc] = []
@@ -186,6 +192,20 @@ public final class CodeNav {
     }
 
     public func move(_ d: Int) { index = max(0, min(shown.count - 1, index + d)) }
+
+    /// Picker `C-v` / `C-s` (Helix): the picked place in a new window beside or under this one.
+    @discardableResult
+    public func chooseInSplit(below: Bool) -> Bool {
+        let s = shownIndices
+        guard chooser == nil, let split = surface?.split, let items = picker?.items, s.indices.contains(index) else { return false }
+        let l = items[s[index]].loc
+        remember()
+        picker = nil
+        onPickerChange?(false)
+        record?()
+        split(l, below)
+        return true
+    }
 
     @discardableResult
     public func choose(_ i: Int? = nil) -> Bool {
