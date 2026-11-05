@@ -287,7 +287,8 @@ public final class CommandRegistry {
     public func command(_ id: String) -> Command? { byID[id] }
 
     /// The key a hint names for a command — its first, after keys.toml.
-    public func keyOf(_ id: String) -> String { glyph(byID[id]?.keys.first ?? "space") }
+    /// The key that runs a command, or its `:` name on the command line when it has none — never a key that does something else.
+    public func keyOf(_ id: String) -> String { byID[id]?.keys.first.map(glyph) ?? ":\(id)" }
     /// The key a verb has in normal mode, after keys.toml.
     public func verbKey(_ verb: Verb) -> String { glyph(verbKeys.keys[verb]?.first ?? verbKeys.entry[verb]?.first ?? "") }
 

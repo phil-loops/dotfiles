@@ -120,6 +120,28 @@ import Testing
         return AppModel(config: c, port: 1, telemetry: false)
     }
 
+    /// A key is never shown without what it does, nor an action without its key: every button and every
+    /// "<key> does X" hint in the sources names a command that has a key here.
+    @Test func everyShownActionHasAKey() throws {
+        let a = app()
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../Sources")
+        let files = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil)!
+            .compactMap { $0 as? URL }.filter { $0.pathExtension == "swift" }
+        let pattern = try NSRegularExpression(pattern: #"KeyButton\([^)]*?id: "([^"\\]+)"|keyOf\("([^"\\]+)"\)"#)
+        var ids = Set<String>()
+        for f in files {
+            let src = try String(contentsOf: f, encoding: .utf8)
+            for m in pattern.matches(in: src, range: NSRange(src.startIndex..., in: src)) {
+                for g in 1...2 where m.range(at: g).location != NSNotFound {
+                    ids.insert((src as NSString).substring(with: m.range(at: g)))
+                }
+            }
+        }
+        #expect(ids.count > 20, "the scan finds the buttons and hints: \(ids.count)")
+        let keyless = ids.filter { id in a.registry.command(id).map { $0.keys.isEmpty && $0.leader == nil } ?? false }
+        #expect(keyless.isEmpty, "shown with no key: \(keyless.sorted())")
+    }
+
     @Test func thePalettesCommandsAreAllReachableByKey() {
         let a = app()
         #expect(KeyboardRule.violations(a) { $0.hasPrefix("menu.") || $0.hasPrefix("sheet.") || $0.hasPrefix("picker.") }.isEmpty)
