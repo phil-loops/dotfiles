@@ -80,19 +80,19 @@ enum SyncCommands {
 
         // ── the dirt decision, on the branch page ──
 
-        for (cid, label, title, action) in [
-            ("review.sync.fold", "fold", "Fold the uncommitted changes into the commit, then sync", "include"),
-            ("review.sync.stash", "stash", "Stash the uncommitted changes for the sync, and pop them after", "stash"),
-            ("review.sync.stop", "stop", "Stop the sync — leave the working tree as it is", "abort"),
+        for (cid, key, label, title, action) in [
+            ("review.sync.fold", ",i", "fold", "Fold the uncommitted changes into the commit, then sync", "include"),
+            ("review.sync.stash", ",z", "stash", "Stash the uncommitted changes for the sync, and pop them after", "stash"),
+            ("review.sync.stop", ",x", "stop", "Stop the sync — leave the working tree as it is", "abort"),
         ] {
-            r.register(Command(id: cid, title: title, scope: .review, label: label, available: deciding,
+            r.register(Command(id: cid, title: title, scope: .review, leader: LocalKey(key), label: label, group: .branch, available: deciding,
                                local: { [weak app] id, _ in
                                    guard let app, let id else { return }
                                    Task { @MainActor in await SyncMotionDriver(app: app).decide(id, via: .menu, action: action) }
                                }))
         }
         r.register(Command(
-            id: "review.sync.dirt.show", title: "Show the next dirty file's uncommitted change (or hide it)", scope: .review, quiet: true,
+            id: "review.sync.dirt.show", title: "Show the next dirty file's uncommitted change (or hide it)", scope: .review, leader: LocalKey(",f"), label: "dirty file", group: .show, quiet: true,
             available: { id in deciding(id?.split(separator: "|").first.map(String.init)) },
             local: { id, arg in
                 guard let id = id?.split(separator: "|").first.map(String.init), let m = ship.motionOf(id) else { return }
@@ -107,7 +107,7 @@ enum SyncCommands {
                 ship.dirtOpen = i < files.count ? "\(id)|\(files[i])" : nil
             }))
         r.register(Command(
-            id: "review.sync.dismiss", title: "Put the sync's steps away", scope: .review, quiet: true,
+            id: "review.sync.dismiss", title: "Put the sync's steps away", scope: .review, verb: .putAway, label: "put away", group: .branch, quiet: true,
             available: { id in ship.motionOf(id) != nil && !running(id) && !deciding(id) },
             local: { id, _ in if let id { ship.motions[id] = nil } }))
 

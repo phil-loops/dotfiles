@@ -547,7 +547,7 @@ enum ReviewCommands {
                 }
             }))
         r.register(Command(
-            id: "review.gates.skip", title: "Skip the red gate shown (else the first red one) for this code and re-run the rest", scope: .review,
+            id: "review.gates.skip", title: "Skip the red gate shown (else the first red one) for this code and re-run the rest", scope: .review, leader: LocalKey(",s"), label: "skip gate", group: .branch,
             available: { id in
                 guard let id else { return false }
                 return weakApp?.registry.command("branch.gates.skip") != nil

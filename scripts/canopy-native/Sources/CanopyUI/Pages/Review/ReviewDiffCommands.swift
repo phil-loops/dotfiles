@@ -92,7 +92,7 @@ enum DiffCommands {
         var sideGoal: Int?
         var sidePlaced: Int?
         func charStep(_ d: Int) throws {
-            guard let h = pg.here, h.kind == .line, let row = h.row else { throw Refusal("no code on this row") }
+            guard let h = pg.here, h.kind == .line, let row = h.row else { throw Refusal("no code on this row · j to a line") }
             let side = sideLine(row, prefer: pg.column).side
             let t = halfText(h, side) ?? ""
             if let r = stepped(t, from: pg.hereWord, d) {
@@ -169,7 +169,7 @@ enum DiffCommands {
         /// ]/[: the next (previous) file by the diff's order, landing on its first change.
         func file(_ dir: Int) throws {
             let fs = pg.stopFiles
-            guard let here = pg.here?.path, let i = fs.firstIndex(of: here) else { throw Refusal("no file here") }
+            guard let here = pg.here?.path, let i = fs.firstIndex(of: here) else { throw Refusal("no file here · space g picks one") }
             guard fs.count > 1 else { throw Refusal("the only file in this diff · ] g [ g move by change") }
             let j = (i + dir + fs.count) % fs.count
             guard let k = pg.landing(file: fs[j]) else { throw Refusal("nothing to land on in \(fs[j])") }
@@ -181,7 +181,7 @@ enum DiffCommands {
         /// ]T / [T: the next (previous) test file, landing on its first change.
         func testFile(_ dir: Int) throws {
             let fs = pg.stopFiles
-            guard let here = pg.here?.path, let i = fs.firstIndex(of: here) else { throw Refusal("no file here") }
+            guard let here = pg.here?.path, let i = fs.firstIndex(of: here) else { throw Refusal("no file here · space g picks one") }
             let tests = fs.enumerated().filter { isTestPath($0.element) }
             guard !tests.isEmpty else { throw Refusal("no test files in this diff") }
             let pick = dir > 0 ? tests.first { $0.offset > i } : tests.last { $0.offset < i }
@@ -296,7 +296,10 @@ enum DiffCommands {
                 throw Refusal(pg.integration == nil ? "no conversations on this diff · space c the conversation tab" : "no conversations on this diff")
             }
             if (try? seek(dir, openOne)) != nil { return }
-            try seek(dir) { $0.kind == .thread }
+            do { try seek(dir) { $0.kind == .thread } } catch {
+                let other = dir > 0 ? (pg.neighbour(1) != nil ? " · J the next branch" : "") : (pg.neighbour(-1) != nil ? " · K the branch before" : "")
+                throw Refusal((dir > 0 ? "the last conversation" : "the first conversation") + other)
+            }
         }
         r.register(Command(id: "review.thread.next", title: "Go to the next conversation (open ones first)", scope: .review,
                            verb: .nextThread, label: "thread", pair: "review.thread.prev", available: onDiff,
