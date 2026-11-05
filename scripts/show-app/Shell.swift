@@ -399,7 +399,7 @@ final class ShellController: NSViewController {
     func setBadges(_ counts: [Workspace: Int]) {
         for (workspace, button) in buttons {
             button.badge = counts[workspace] ?? 0
-            button.toolTip = "\(workspace.name) ⌘\(workspace.key)" + (button.badge > 0 ? " · \(button.badge) waiting" : "")
+            button.toolTip = "\(workspace.name) ⌘\(workspace.key)" + (button.badge > 0 ? " · \(button.badge) \(workspace == .runs ? "running or waiting" : "waiting")" : "")
         }
     }
 

@@ -12,6 +12,8 @@ struct Deck: Decodable {
     let project: String?
     let repo: String?
     let runDir: String?
+    /// A live deck: seconds without a file change before the header calls the run stale (default 30); show-job writes 600.
+    let staleAfter: Double?
     let repoPath: String?
     let plan: Plan?
     let sections: [Section]
