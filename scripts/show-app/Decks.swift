@@ -103,6 +103,22 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
     /// A line at the foot of the workspace's shelf, where the plan grid reports what it did.
     var onSay: ((String) -> Void)?
     func say(_ message: String) { onSay?(message) }
+    /// The plan canvas went on or off: the workspace folds its shelf away with the section list, or brings it back.
+    var onCanvas: ((Bool) -> Void)?
+    var canvas: Bool { planScroll.grid.canvas }
+    private var canvasKey: String { "plan.canvas." + path }
+
+    /// The plan page as a canvas: the section list folds away and the grid takes the window. `remember` keeps the choice
+    /// for this deck's plan page; entering and leaving the page don't.
+    func setCanvas(_ on: Bool, remember: Bool = true) {
+        if remember { prefs.set(on, forKey: canvasKey) }
+        guard canvas != on else { return }
+        planScroll.grid.canvas = on
+        viewController.splitViewItems.first?.isCollapsed = on
+        onCanvas?(on)
+        if on { window?.makeFirstResponder(planScroll.grid) }
+    }
+
     var title: String { deck.title }
     /// In a forest deck, each branch section's merge number and nesting depth.
     private var branchPlaces: [Int: (number: Int, depth: Int)] = [:]
@@ -110,7 +126,7 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
 
     /// Gives the section list its 250pt column the first time the deck is shown; after that the divider stays where it's dragged.
     func settleColumns() {
-        guard !settled, viewController.view.window != nil else { return }
+        guard !settled, !canvas, viewController.view.window != nil else { return }
         settled = true
         viewController.view.layoutSubtreeIfNeeded()
         viewController.splitView.setPosition(250, ofDividerAt: 0)
@@ -341,6 +357,10 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
         planScroll.isHidden = true
         planScroll.grid.onOpenSection = { [weak self] key in self?.select(section: key) }
         planScroll.grid.onSay = { [weak self] message in self?.say(message) }
+        planScroll.grid.onCanvasToggle = { [weak self] in
+            guard let self else { return }
+            self.setCanvas(!self.canvas)
+        }
         for view in [scroll, web, planScroll] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             page.addSubview(view)
@@ -724,10 +744,16 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
         applyBarChrome()
         prefs.set(section.key, forKey: selectionKey)
         planScroll.isHidden = section.view != "plan"
+        if section.view != "plan", canvas {
+            setCanvas(false, remember: false)
+        }
         if section.view == "plan" {
             textScroll.isHidden = true
             web.isHidden = true
             planScroll.grid.update(plan: deck.plan, path: path)
+            if prefs.object(forKey: canvasKey) as? Bool ?? true {
+                setCanvas(true, remember: false)
+            }
         } else if let address = section.url, let url = URL(string: address) {
             textScroll.isHidden = true
             web.isHidden = false
