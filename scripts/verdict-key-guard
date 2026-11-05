@@ -1,0 +1,76 @@
+#!/usr/bin/env python3
+"""verdict-key-guard — Claude Code PreToolUse hook (Bash): refuse a `git config` WRITE to a verdict key.
+
+Verdicts — gates green, gates waived, review flags — are written only by the viewer server, from the
+run that produced them or from Phil's click. A session that writes one forges it (2026-11-04: a
+session stamped review-flags-tree on three trees nobody reviewed). Reads (`--get*`, `--list`, a bare
+key) pass. This is a tripwire for the habitual path, not a wall: the server-side records are the fix.
+
+  echo '{"tool_input":{"command":"git config branch.x.stack-review-flags-tree abc"}}' | verdict-key-guard
+"""
+import json
+import re
+import shlex
+import sys
+
+KEYS = re.compile(r"(^|\.)(stack-)?(gates-green-tree|gates-skipped|gates-waived|gates-waived-tree|gates-waived-by|"
+                  r"review-flag|review-flags-tree|review-depth|review-run)$", re.I)
+WRITE_FLAGS = {"--add", "--unset", "--unset-all", "--replace-all", "--remove-section", "--rename-section", "--edit", "-e"}
+READ_FLAGS = {"--get", "--get-all", "--get-regexp", "--get-urlmatch", "--list", "-l"}
+VALUE_OPTS = {"--file", "-f", "--blob", "--type", "--default", "--comment"}
+SPLIT = re.compile(r"&&|\|\||[;|\n]|\$\(|`")
+
+
+def config_args(tokens):
+    """The arguments after `config` in a `git … config …` invocation, else None."""
+    if not tokens or not re.search(r"(^|/)git$", tokens[0]):
+        return None
+    i = 1
+    while i < len(tokens) and tokens[i].startswith("-"):
+        i += 2 if tokens[i] in ("-C", "-c", "--git-dir", "--work-tree") else 1
+    return tokens[i + 1:] if i < len(tokens) and tokens[i] == "config" else None
+
+
+def forges(args):
+    flags = {a.split("=", 1)[0] for a in args if a.startswith("-")}
+    pos, skip = [], False
+    for a in args:
+        if skip:
+            skip = False
+        elif a in VALUE_OPTS:
+            skip = True
+        elif not a.startswith("-"):
+            pos.append(a)
+    if not pos or not KEYS.search(pos[0]):
+        return False
+    if flags & WRITE_FLAGS:
+        return True
+    if flags & READ_FLAGS:
+        return False
+    return len(pos) >= 2   # `git config <key> <value>` sets it; a bare key reads it
+
+
+def main():
+    try:
+        cmd = (json.load(sys.stdin).get("tool_input") or {}).get("command") or ""
+    except ValueError:
+        return 0
+    for seg in SPLIT.split(cmd):
+        try:
+            tokens = shlex.split(seg, comments=True)
+        except ValueError:
+            tokens = seg.split()
+        while tokens and re.fullmatch(r"\w+=.*", tokens[0]):   # leading VAR=value assignments
+            tokens = tokens[1:]
+        args = config_args(tokens)
+        if args is not None and forges(args):
+            print("Refused: verdict keys (gates green/waived, review flags) are written only by the viewer "
+                  "server — from the run that produced them, or Phil's click. Request the run instead: "
+                  "POST /gates or POST /review (push-ready §3/§5). Waivers and gate skips are Phil's call.",
+                  file=sys.stderr)
+            return 2
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

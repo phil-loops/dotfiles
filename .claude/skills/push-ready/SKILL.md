@@ -39,42 +39,49 @@ gate bounce.
 | docs/config only, or a pure move (per-file tree parity) | `light` | low | — | — |
 
 `review=<full|standard|light|off>` overrides for one run only ("no review" = `off`) — nothing
-persists. Overriding the same way repeatedly means the table is wrong: fix the table. `off`
-writes no `review-flags-tree`, so a skipped review never reads as "reviewed, nothing flagged".
-Report the mode + reason (or "override") in §6.
+persists. Overriding the same way repeatedly means the table is wrong: fix the table. Report the
+mode + reason (or "override") in §6.
 
-Run the `code-review` skill on the `parent...branch` diff. Findings from every pass split by
-verdict:
+**The recorded verdict comes only from the server's review run — never from this session.** The
+review flags (`branch.<b>.stack-review-flag`, `stack-review-flags-tree`) are written by the viewer
+server when a `POST /review` run finishes, tree-keyed so the next edit retires them. A session
+writing them by hand forges "reviewed" (spine hard rule; a hook refuses it). `off` requests no run,
+and the viewer then shows the branch as unreviewed — honest, never "reviewed, nothing flagged".
+
+Your own passes find and fix; the run records. Run the `code-review` skill on the
+`parent...branch` diff, plus the two lenses below. Findings split by verdict:
 
 - **CONFIRMED** → apply the fix as a NEW commit on the branch (never amend). A fix to code an
   outline commit introduced is `git commit --fixup=<that sha>` (folded in §4); a fix that is its
   own idea gets its own voiced subject and joins the outline.
-- **PLAUSIBLE / unapplied** → never auto-apply. Record them for the viewer, tree-keyed like the
-  gates verdict so they die with the next edit:
-
-```bash
-git config --unset-all branch.<b>.stack-review-flag 2>/dev/null || true
-git config --add branch.<b>.stack-review-flag '<file>:<line> — <one-line finding>'   # per finding
-git config branch.<b>.stack-review-flags-tree "$(git rev-parse '<b>^{tree}')"
-```
+- **PLAUSIBLE / unapplied** → never auto-apply; a line in the §6 report.
 
 **Hankles-prompt pass**: a second lens, run as a subagent against `<parent>...<branch>`, using
 the review prompt the repo's `john-hankles` bot runs — read fresh from
 `git show origin/main:.github/workflows/code-review.yml` (the `pi --print` argument) each time,
 never copied here. Keep its review rules and STE voice; **replace its OUTPUT, RESOLVING and
-REVIEW STATE sections with this section's** — findings fold or flag like `code-review`'s,
-nothing goes to GitHub.
+REVIEW STATE sections with this section's** — nothing goes to GitHub.
 
 **Reuse pass**: the other two passes read only the diff, and duplication is only visible against
 the whole repo. For each function the branch adds, list its callees; grep the repo for existing
 functions that call two or more of the same callees. Each overlap is a finding `possible existing
-composition: <path:fn>` that folds or flags like the others (CONFIRMED → reuse it as a new commit;
-PLAUSIBLE → `stack-review-flag`). Deduplicate across the passes before recording.
+composition: <path:fn>` (CONFIRMED → reuse it as a new commit; PLAUSIBLE → the report).
 
-Record flags AFTER any confirmed fixes land (the fixes move the tree). A clean review still
-writes `review-flags-tree` with zero `review-flag` entries — that's the "reviewed, nothing
-flagged" state. Never let a finding you didn't apply silently vanish: it's either a flag or a
-line in the final report.
+**Then record — after every fix has landed and been folded (§4), since any edit moves the tree:**
+
+```bash
+curl -s -X POST http://localhost:$(stack-review-port)/review \
+  -H 'Content-Type: application/json' -H 'X-Stack-Actor: claude' \
+  -H "X-Stack-Session: ${CLAUDE_CODE_SESSION_ID:-}" -d '{"branch":"<b>"}'   # optional "depth":"full|standard|light"
+# then poll "http://localhost:$(stack-review-port)/review-progress?branch=<b>" until .result is set
+# (polling is what records the verdict)
+```
+
+The run's CONFIRMED findings go back through the fix loop above (new commit → request a new run);
+its PLAUSIBLE findings stay as the recorded flags. **Any change to a reviewed branch — a rewrite,
+a simplification, "one line" — means a new run before you call it reviewed** (2026-11-04: a
+from-scratch "simpler" rewrite dropped a guard, and the stamped verdict said nobody had looked).
+Phil can fire the same run on any branch from canopy (`branch.review.run`).
 
 ### 4 · Seal — keep the outline, fold the fixups
 
@@ -121,12 +128,15 @@ logs; send them on every curl to the viewer.)
 
 (No live server → `stack web <project>` starts one.) Triage failures: **fresh** → restack +
 re-run; **format** → `stack-gates <branch> --fix`, commit as a new commit; **typecheck/tests** →
-fix honestly, new commit, re-run. Never hand-write `gates-green-tree` (spine hard rule).
+fix honestly, new commit, re-run. Never hand-write `gates-green-tree` (spine hard rule). Skipping a
+gate (`skip`) and shipping without gates (`/gates-waive`) are Phil's clicks only — the server
+refuses a session; if a gate can't pass, say so and leave the call to him.
 
 ### 6 · Verify + hand off
 
 Done means `git config branch.<b>.stack-gates-green-tree` equals
-`git rev-parse '<b>^{tree}'` — check it, don't assume. Any commit landed after green invalidates
+`git rev-parse '<b>^{tree}'` — check it, don't assume — and, unless review was `off`,
+`stack-review-flags-tree` equals it too (written by the run, never by you). Any commit landed after green invalidates
 the verdict; re-run. Point canopy at it (`stack-review-serve <project>` reuses the live server and opens canopy;
 or `canopy /v2/b/<repo>/<branch>`) and report in a few lines: branch, tip SHA,
 per-gate results, review flags (count + one line each), the `canopy /v2/…` route, push button unlocked.
