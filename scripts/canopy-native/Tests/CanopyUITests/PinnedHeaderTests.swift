@@ -117,10 +117,25 @@ import Testing
         #expect(c.scroll.contentView.bounds.minY == head.minY, "settling layout keeps it there")
     }
 
+    @Test func aShortLastFilesHeaderStillReachesTheTop() {
+        let c = Canvas()
+        c.scroll.frame = NSRect(x: 0, y: 0, width: 600, height: 300)
+        c.text.colors = CanvasColors(.dark)
+        c.apply(file("a.ts", lines: 80) + file("b.ts", lines: 3))
+        c.text.layoutManager!.ensureLayout(for: c.text.textContainer!)
+        c.text.sizeToFit()
+        let head = c.text.rect(for: c.range(of: "f|b.ts")!)!
+        #expect(head.minY > c.text.frame.height - 300, "the file is shorter than the view")
+        c.lead = ("l|b.ts|1", "f|b.ts")
+        c.setMarks(CanvasMarks(cursor: "l|b.ts|1"), scrollTick: 1)
+        #expect(c.scroll.contentView.bounds.minY == head.minY)
+    }
+
     @Test func leadTopMath() {
-        #expect(Canvas.leadTop(headY: 800, stopMaxY: 840, docHeight: 2000, viewHeight: 320) == 800)
-        #expect(Canvas.leadTop(headY: 1900, stopMaxY: 1940, docHeight: 2000, viewHeight: 320) == 1680, "the end stops it")
-        #expect(Canvas.leadTop(headY: 800, stopMaxY: 1200, docHeight: 2000, viewHeight: 320) == nil, "the cursor would fall off")
+        #expect(Canvas.leadTop(headY: 800, stopMaxY: 840, viewHeight: 320) == 800)
+        #expect(Canvas.leadTop(headY: 800, stopMaxY: 1200, viewHeight: 320) == nil, "the cursor would fall off")
+        #expect(Canvas.roomBelow(top: 1900, docHeight: 2000, viewHeight: 320) == 220)
+        #expect(Canvas.roomBelow(top: 800, docHeight: 2000, viewHeight: 320) == 0)
     }
 
     @Test func viewportRowMath() {

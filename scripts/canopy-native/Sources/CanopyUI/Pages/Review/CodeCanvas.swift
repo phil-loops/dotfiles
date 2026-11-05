@@ -577,13 +577,18 @@ final class Canvas: NSObject {
         max(0, min(stopY - CGFloat(row) * lineHeight, max(0, docHeight - viewHeight)))
     }
 
-    /// Scroll a header to the top, as near as the document's end allows, when `stop` still fits below it.
+    /// Scroll a header to the top when `stop` still fits below it; a short last file gets room below the end.
     @discardableResult
     func top(_ head: String, keeping stop: String) -> Bool {
+        let viewHeight = scroll.contentView.bounds.height
         guard let h = stopMap[head], let hr = text.rect(for: NSRange(location: h.location, length: 1)),
               let s = stopMap[stop], let sr = text.rect(for: NSRange(location: s.location, length: 1)),
-              let y = Canvas.leadTop(headY: hr.minY, stopMaxY: sr.maxY, docHeight: text.frame.height,
-                                     viewHeight: scroll.contentView.bounds.height) else { return false }
+              let y = Canvas.leadTop(headY: hr.minY, stopMaxY: sr.maxY, viewHeight: viewHeight) else { return false }
+        let room = Canvas.roomBelow(top: y, docHeight: text.frame.height, viewHeight: viewHeight)
+        if room > scroll.contentInsets.bottom {
+            scroll.automaticallyAdjustsContentInsets = false
+            scroll.contentInsets.bottom = room
+        }
         if y != scroll.contentView.bounds.minY {
             scroll.contentView.scroll(to: NSPoint(x: 0, y: y))
             scroll.reflectScrolledClipView(scroll.contentView)
@@ -591,10 +596,15 @@ final class Canvas: NSObject {
         return true
     }
 
-    /// The scroll offset that puts a header at the top, clamped to the document; nil when the stop wouldn't show.
-    static func leadTop(headY: CGFloat, stopMaxY: CGFloat, docHeight: CGFloat, viewHeight: CGFloat) -> CGFloat? {
-        let y = max(0, min(headY, max(0, docHeight - viewHeight)))
+    /// The scroll offset that puts a header at the top; nil when the stop wouldn't show.
+    static func leadTop(headY: CGFloat, stopMaxY: CGFloat, viewHeight: CGFloat) -> CGFloat? {
+        let y = max(0, headY)
         return stopMaxY - y <= viewHeight ? y : nil
+    }
+
+    /// The blank space past the document's end a scroll to `top` needs.
+    static func roomBelow(top: CGFloat, docHeight: CGFloat, viewHeight: CGFloat) -> CGFloat {
+        max(0, top + viewHeight - docHeight)
     }
 
     /// Keep a stop on screen, moving as little as it takes (v2 scrollIntoView block: nearest).
