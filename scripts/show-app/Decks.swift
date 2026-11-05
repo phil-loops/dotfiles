@@ -36,7 +36,7 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
     let renderer = Renderer()
     let viewController = NSSplitViewController()
     let table = NSTableView()
-    let text = NSTextView()
+    let text = PageText()
     var textScroll: NSScrollView!
     let web = WKWebView(frame: .zero, configuration: {
         let configuration = WKWebViewConfiguration()
@@ -302,7 +302,7 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
             delivery.settle(within: 10)
         }
         guard let section = selectedSection, section.url == nil else { return }
-        renderer.columnWidth = text.bounds.width > 300 ? text.bounds.width - 96 - 2 * (text.textContainer?.lineFragmentPadding ?? 5) : 640
+        renderer.columnWidth = text.columnWidth
         text.textStorage?.setAttributedString(page(section))
         if let container = text.textContainer {
             text.layoutManager?.ensureLayout(for: container)
@@ -342,7 +342,7 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
         text.isSelectable = true
         text.drawsBackground = true
         text.backgroundColor = .textBackgroundColor
-        text.textContainerInset = NSSize(width: 48, height: 32)
+        text.textContainerInset = NSSize(width: 48, height: 44)
         text.isVerticallyResizable = true
         text.autoresizingMask = [.width]
         text.textContainer?.widthTracksTextView = true
@@ -608,8 +608,9 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
     }
 
     private func updateProgress() {
-        actionBar.isHidden = deck.isLive
-        progress.isHidden = deck.isLive
+        actionBar.isHidden = !deck.isInbox
+        actionDivider.isHidden = !deck.isInbox
+        progress.isHidden = true
         updateStatusLine()
         if deck.isLive {
             onTitleChange?()
@@ -717,21 +718,19 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
         }
     }
 
-    /// The list's mark for a section: ◆ a branch that moved since its page was written, ● signed, ◆ has a note, ◐ the open section, ○ not yet. Live decks carry none.
+    /// The list's mark for a section: ◆ a forest branch that moved since its page was written; in the Inbox ● handled, ◐ open, ○ not yet. Live decks carry their own.
     private func sectionMark(_ section: Section, selected: Bool) -> NSAttributedString {
         guard !deck.isLive else { return liveMark(section, current: deck.status?.current) }
         let entry = store.entries[section.key]
         let (mark, color): (String, NSColor)
         if freshness.moved(section) != nil {
             (mark, color) = ("◆", .systemOrange)
-        } else if entry?.signed == true {
+        } else if deck.isInbox, entry?.signed == true {
             (mark, color) = ("●", .secondaryLabelColor)
-        } else if entry?.note.isEmpty == false {
-            (mark, color) = ("◆", .systemOrange)
-        } else if selected {
-            (mark, color) = ("◐", .labelColor)
+        } else if deck.isInbox {
+            (mark, color) = (selected ? "◐" : "○", selected ? .labelColor : .tertiaryLabelColor)
         } else {
-            (mark, color) = ("○", .tertiaryLabelColor)
+            return NSAttributedString()
         }
         return NSAttributedString(string: mark + "  ", attributes: [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: color, .baselineOffset: 1])
     }
@@ -763,7 +762,8 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
         } else {
             web.isHidden = true
             textScroll.isHidden = false
-            renderer.columnWidth = text.bounds.width > 300 ? text.bounds.width - 96 - 2 * (text.textContainer?.lineFragmentPadding ?? 5) : 640
+            text.measure = deck.isLive ? nil : PageText.readingMeasure
+            renderer.columnWidth = text.columnWidth
             text.textStorage?.setAttributedString(page(section))
             text.scroll(.zero)
         }
@@ -831,5 +831,29 @@ func presentAlert(_ alert: NSAlert, in window: NSWindow?) {
         alert.beginSheetModal(for: window)
     } else {
         alert.runModal()
+    }
+}
+
+/// The deck page: prose held to a reading measure (about 75 characters of the serif), centred in whatever width the pane has.
+/// Live decks lift the measure, since their compare tables want the room.
+final class PageText: NSTextView {
+    static let readingMeasure: CGFloat = 660
+    var measure: CGFloat? = PageText.readingMeasure { didSet { fitMeasure() } }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        fitMeasure()
+    }
+
+    private func fitMeasure() {
+        let side = measure.map { max(48, (bounds.width - $0) / 2) } ?? 48
+        if textContainerInset.width != side {
+            textContainerInset = NSSize(width: side, height: textContainerInset.height)
+        }
+    }
+
+    /// How wide an image or table may draw on this page.
+    var columnWidth: CGFloat {
+        bounds.width > 300 ? bounds.width - 2 * textContainerInset.width - 2 * (textContainer?.lineFragmentPadding ?? 5) : PageText.readingMeasure
     }
 }

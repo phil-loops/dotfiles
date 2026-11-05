@@ -240,41 +240,27 @@ final class SelfTestDriver {
 
         app.focus(front.currentDeck!.table)
         var order: [String] = [focusName]
-        for _ in 0..<4 {
+        for _ in 0..<3 {
             tab()
             order.append(focusName)
         }
-        check("⇥ cycles list → detail → note → shelf → list", order == ["list", "detail", "note", "shelf", "list"], order.joined(separator: " → "))
+        check("⇥ cycles list → detail → shelf → list", order == ["list", "detail", "shelf", "list"], order.joined(separator: " → "))
         check("the focused column is outlined", app.shell.focusOutline?.target != nil)
         tab(shift: true)
         check("⇧⇥ goes back to the shelf", focusName == "shelf", focusName)
         tab()
 
         let deck = front.currentDeck!
+        check("a Review deck has no reply bar", deck.actionBar.isHidden)
         press("j", code: 38)
         check("j moves down the section list", deck.selectedSection?.key == "a2", deck.selectedSection?.key ?? "-")
         press("k", code: 40)
         check("k moves back up", deck.selectedSection?.key == "a1", deck.selectedSection?.key ?? "-")
         enter()
         check("↵ in the list opens the page", focusName == "detail", focusName)
-
-        press("n", code: 45)
-        check("n jumps into the reply field", focusName == "note", focusName)
-        let note = "Pushback: j k / ? n stay text"
-        type(note)
-        check("bare keys type into the reply", deck.composer.string == note, deck.composer.string)
-        escape()
-        check("⎋ leaves the reply for the list, text kept", focusName == "list" && deck.composer.string == note, "\(focusName), “\(deck.composer.string)”")
         command("s", code: 1)
-        check("⌘S signs the section off", signoff(alpha)["a1"]?.signed == true)
-        press("n", code: 45)
-        type(" more")
-        command("\r", code: 36)
-        check("⌘↩ in the reply sends it", signoff(alpha)["a1"]?.note == note + " more" && deck.composer.string.isEmpty,
-              "“\(signoff(alpha)["a1"]?.note ?? "-")”, field “\(deck.composer.string)”")
+        check("⌘S signs nothing off in Review", signoff(alpha)["a1"]?.signed != true)
         escape()
-        command("\r", code: 36)
-        check("⌘↩ from the list submits", deck.submit.title.hasPrefix("Submitted"), deck.submit.title)
 
         press("?", code: 44, .shift)
         check("? opens the key sheet", app.shell.overlay is KeySheetOverlay)

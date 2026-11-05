@@ -665,7 +665,12 @@ func shelfEntry(_ path: String) -> ShelfEntry? {
                           topic: Topics.cached(live.replyTo))
     case .api, .canopy, .machine:
         return nil
-    case .forest, .review, .inbox, .plans:
+    case .forest, .review, .plans:
+        guard let deck = try? loadDeck(path) else { return nil }
+        let unread = showEvents.state.waiting.contains(.document(path))
+        return ShelfEntry(path: path, workspace: workspace, title: deck.title, state: unread ? .waiting : .done,
+                          progress: "", touched: touched, topic: Topics.cached(deck.replyTo))
+    case .inbox:
         guard let deck = try? loadDeck(path) else { return nil }
         let store = SignOffStore(deckPath: path)
         let done = deck.sections.filter { store.entries[$0.key]?.signed == true }.count
@@ -748,6 +753,12 @@ extension ShelfState {
         case .running: return "Running"
         case .done: return "Done"
         }
+    }
+
+    /// Decks are read, not signed: one you haven't opened is new, and one you have is read.
+    func groupName(in workspace: Workspace) -> String {
+        guard Workspace.readOnly.contains(workspace) else { return groupName }
+        return self == .waiting ? "New" : "Read"
     }
 }
 
@@ -1224,7 +1235,7 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
         switch rows[row] {
         case .header(let state, let count):
             let label = NSTextField(labelWithString: "")
-            label.attributedStringValue = NSAttributedString(string: "\(state.groupName)  ", attributes: [.font: NSFont.systemFont(ofSize: 12, weight: .semibold), .foregroundColor: NSColor.secondaryLabelColor])
+            label.attributedStringValue = NSAttributedString(string: "\(state.groupName(in: workspace))  ", attributes: [.font: NSFont.systemFont(ofSize: 12, weight: .semibold), .foregroundColor: NSColor.secondaryLabelColor])
                 + NSAttributedString(string: "\(count)", attributes: [.font: NSFont.systemFont(ofSize: 12), .foregroundColor: NSColor.tertiaryLabelColor])
             return label
         case .fold(let hidden, let expanded):
@@ -1235,9 +1246,10 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
         case .dueHeader, .due, .dueFold:
             return nil
         case .entry(let entry):
-            let mark = NSTextField(labelWithString: entry.state.mark)
-            mark.font = .systemFont(ofSize: 11)
-            mark.textColor = entry.state.markColor
+            let reading = Workspace.readOnly.contains(entry.workspace)
+            let mark = NSTextField(labelWithString: reading ? (entry.state == .waiting ? "●" : "") : entry.state.mark)
+            mark.font = .systemFont(ofSize: reading ? 8 : 11)
+            mark.textColor = reading ? .controlAccentColor : entry.state.markColor
             let title = NSTextField(labelWithString: entry.title)
             title.font = .systemFont(ofSize: 13, weight: .medium)
             title.lineBreakMode = .byTruncatingTail
