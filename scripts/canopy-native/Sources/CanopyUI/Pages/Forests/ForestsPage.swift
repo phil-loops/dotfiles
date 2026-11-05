@@ -297,7 +297,6 @@ private struct BranchRowView: View {
 
     private func shipWord(_ m: ForestModel) -> String {
         if v.b.pending == "pushing" { return "pushing…" }
-        if v.st.ship == .pushed && m.opened.contains(v.b.id) { return "waiting for GitHub…" }
         return v.st.ship.word
     }
 

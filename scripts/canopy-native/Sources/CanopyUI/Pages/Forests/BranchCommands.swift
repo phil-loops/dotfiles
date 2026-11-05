@@ -66,10 +66,6 @@ enum BranchCommands {
             available: { id in m.branchView(id).map { $0.b.gates != .running } ?? false },
             write: { id, _ in m.branchView(id).map { gatesWrite($0, skip: [], quick: true) } }))
         r.register(Command(
-            id: "branch.gates.show", title: "Show a gate's output in the gates strip (again to go back to the running one)",
-            scope: .branch, needsArg: true, quiet: true,
-            local: { target, _ in m.gateShown = m.gateShown == target ? nil : target }))
-        r.register(Command(
             id: "branch.gates.skip", title: "Skip a red gate for this code and re-run the rest (\"<branch> <gates> quick\" keeps a quick run quick)",
             scope: .branch, needsArg: true, quiet: true,
             write: { target, _ in
