@@ -469,6 +469,10 @@ class H(BaseHTTPRequestHandler):
             return reviews.reseat(self, raw)
         if self.path == "/track":   # append one local usage event to .git/stack-usage.jsonl
             return usage.track(self, raw)
+        if self.path == "/project-describe":   # the forest's own line (Phil's wins; Claude's is a draft)
+            return review.project_describe(self, raw)
+        if self.path == "/project-rename":   # rename a forest: its keys and every branch's link move together
+            return review.project_rename(self, raw)
         if self.path == "/project-state":   # move a project between focus, the workbench and the archive
             return review.project_state(self, raw)
         if self.path == "/focus":      # pin/unpin or reorder the focus lane (stack-project.<p>.focus N)

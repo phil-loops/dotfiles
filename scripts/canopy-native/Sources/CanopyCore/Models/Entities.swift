@@ -46,6 +46,9 @@ public struct Project: Entity {
     public var rank: Int?
     public var ticket: String?
     public var summary: String
+    /// Who wrote `summary`: "phil" (his own words), "claude" (a draft), "branch" (borrowed from its
+    /// first branch's description); nil from a server that doesn't say.
+    public var summaryBy: String?
     public var size: Int
 }
 

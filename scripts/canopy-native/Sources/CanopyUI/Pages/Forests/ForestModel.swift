@@ -60,6 +60,9 @@ public final class ForestModel {
     public var wordsOpen: Set<String> = []
     /// the forest-page branch whose description is being edited in its row
     public var describing: String?
+    /// The forest row whose line, or whose name, is being typed in place (Forests home).
+    public var describingProject: String?
+    public var renamingProject: String?
     /// the description being typed
     public var draft = ""
     /// the gate whose output the ship strip shows instead of the running one's — "<branch id> <gate>"

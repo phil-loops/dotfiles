@@ -10,12 +10,15 @@ enum ProjectCommands {
     /// Archive is putting it away; focus and the workbench are this page's own (`, f` / `, w`).
     static let key: [ProjectState: (verb: Verb?, leader: LocalKey?)] = [.focus: (nil, LocalKey(",f")), .workbench: (nil, LocalKey(",w")), .archive: (.putAway, nil)]
     static let v1Key: [ProjectState: String] = [.focus: "f", .workbench: "w", .archive: "x"]
+    static let describeField = "forests.line"
+    static let renameField = "forests.name"
 
     static func install(_ app: AppModel) {
         unowned let app = app
         let r = app.registry
         let m = app.forestModel
         let s = app.store
+        let t = app.transport
         func exists(_ id: String?) -> Bool { id.flatMap { s.view(Project.self, $0) } != nil }
 
         func moveTo(_ state: ProjectState) -> (String, Any?) throws -> Write? {
@@ -45,6 +48,75 @@ enum ProjectCommands {
             id: "project.restore", title: "Restore from the archive", scope: .project, budget: .configWrite,
             available: { id in exists(id) && s.view(Project.self, id!)!.state == .archive },
             write: moveTo(.workbench)))
+
+        // ── its words: the forest's own line, and its one name ──
+
+        let home = { [unowned app] (id: String?) in app.router.surface.id == "forests" && exists(id) }
+        r.register(Command(
+            id: "project.describe", title: "Save the forest's line", scope: .global, budget: .configWrite, needsArg: true, quiet: true,
+            write: { id, arg in
+                guard let p = s.view(Project.self, id) else { return nil }
+                let next = BranchCommands.oneLine(arg as? String ?? "")
+                let mine = p.summaryBy == "phil"
+                if mine && next == p.summary { return nil }
+                let before = mine ? p.summary : ""
+                return Write(
+                    ops: next.isEmpty ? [] : [Op(type: .project, id: id, fields: ["summary": .string(next), "summaryBy": "phil"])],
+                    path: t.atRepo(p.repo, "/project-describe"),
+                    body: ["repo": .string(p.repo), "project": .string(p.name), "description": .string(next)],
+                    settled: { next.isEmpty ? s.table(Project.self)[id]?.summaryBy != "phil" : s.table(Project.self)[id]?.summary == next },
+                    said: next.isEmpty ? "line cleared · u undoes" : "line saved · u undoes", failed: "couldn't save the line",
+                    inverse: { _ in Inverse(id: "project.describe", target: id, arg: before) })
+            }))
+        r.register(Command(
+            id: "project.describe.edit", title: "Write the forest's line in place", scope: .project, verb: .write, label: "line",
+            available: home,
+            local: { [unowned app] id, _ in
+                guard let id, let p = s.view(Project.self, id) else { return }
+                m.renamingProject = nil
+                m.describingProject = id
+                m.draft = p.summaryBy == "phil" ? p.summary : ""
+                app.beginInsert(describeField)
+            }))
+        r.register(Command(
+            id: "project.rename", title: "Rename the forest", scope: .global, budget: .configWrite, needsArg: true, quiet: true,
+            write: { [unowned app] id, arg in
+                guard let p = s.view(Project.self, id) else { return nil }
+                let to = (arg as? String ?? "").trimmingCharacters(in: .whitespaces)
+                if to.isEmpty || to == p.name { return nil }
+                let next = "\(p.repo):\(to)"
+                return Write(
+                    path: t.atRepo(p.repo, "/project-rename"),
+                    body: ["repo": .string(p.repo), "project": .string(p.name), "to": .string(to)],
+                    settled: { s.table(Project.self)[next] != nil && s.table(Project.self)[id] == nil },
+                    said: "renamed \(p.name) to \(to) · u undoes", failed: "couldn't rename \(p.name)",
+                    inverse: { _ in Inverse(id: "project.rename", target: next, arg: p.name) },
+                    answered: { ok, _ in if ok { app.setCursor(RowKey.project(next)) } })
+            }))
+        r.register(Command(
+            id: "project.rename.edit", title: "Rename the forest in place", scope: .project, verb: .rename, label: "rename",
+            available: home,
+            local: { [unowned app] id, _ in
+                guard let id, let p = s.view(Project.self, id) else { return }
+                m.describingProject = nil
+                m.renamingProject = id
+                m.draft = p.name
+                app.beginInsert(renameField)
+            }))
+        r.register(Command(
+            id: "project.words.save", title: "Save what you're typing on the forest", scope: .forests, verb: .send, modes: [.insert],
+            label: "save", quiet: true,
+            available: { [unowned app] _ in
+                (m.describingProject != nil && app.insertField == describeField) || (m.renamingProject != nil && app.insertField == renameField)
+            },
+            local: { [unowned app] _, _ in
+                let text = m.draft
+                let (cmd, id) = m.renamingProject.map { ("project.rename", $0) } ?? ("project.describe", m.describingProject ?? "")
+                m.describingProject = nil
+                m.renamingProject = nil
+                app.keys.setMode(.normal)
+                app.runner.dispatch(cmd, via: .key, target: id, arg: text)
+            }))
 
         // ── the whole forest at once: does it merge, read it ──
 
