@@ -41,6 +41,9 @@ enum Workspace: String, CaseIterable {
     var key: String { Workspace.onRail.firstIndex(of: self).map { "\($0 + 1)" } ?? "" }
 
     /// Canopy runs in it: the Canopy workspace, and Machine, canopy's machine page on its own key.
+    /// Where decks are only read: no sign-off, no reply bar. The Inbox keeps its reply field.
+    static let readOnly: Set<Workspace> = [.forest, .review, .plans]
+
     var hostsCanopy: Bool { self == .canopy || self == .machine }
 
     /// The quiet tint on the selected rail tile and the window subtitle; Runs turns Signal orange only while a run is going.

@@ -160,14 +160,14 @@ func liveFlag(_ section: Section) -> NSAttributedString {
 // MARK: the page
 
 extension Renderer {
-    /// The small line above a section's title: its status on a live section, else its group.
+    /// The small line above a section's title: a live section's status, else nothing (the section list already shows the group).
     func eyebrow(_ section: Section) -> String {
         switch section.status {
         case "disagree": return "Disagreement"
         case "flagged": return "Flagged ⚑"
         case "agreed": return "Agreed"
         case "pending": return "Pending"
-        default: return section.group
+        default: return ""
         }
     }
 

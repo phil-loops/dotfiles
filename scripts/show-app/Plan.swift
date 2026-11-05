@@ -365,6 +365,9 @@ final class PlanView: NSView {
     /// A branch name longer than this column wraps onto a second line of its chip instead of widening the stage.
     private let maxChipColumn: CGFloat = 180
     private let chipFont = NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)
+    static let chipFill = NSColor(name: "show.planChip") { appearance in
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(white: 1, alpha: 0.09) : NSColor(white: 0, alpha: 0.06)
+    }
     private let inspectorWidth: CGFloat = 340
     private var width: CGFloat = 900
     /// Sized to the longest row or extra name, so no label truncates.
@@ -601,7 +604,7 @@ final class PlanView: NSView {
             for branch in plan.branches(at: i) {
                 let chip = NSRect(x: x(i) + 4, y: chipY, width: column(i) - 8, height: chipHeight(branch.name, stage: i))
                 let chosen = pick == .branch(branch.name) || hover == .branch(branch.name)
-                (chosen ? accent.withAlphaComponent(0.22) : NSColor.quaternaryLabelColor.withAlphaComponent(0.5)).setFill()
+                (chosen ? accent.withAlphaComponent(0.22) : PlanView.chipFill).setFill()
                 NSBezierPath(roundedRect: chip, xRadius: chipHeight / 2, yRadius: chipHeight / 2).fill()
                 let style = NSMutableParagraphStyle()
                 style.lineBreakMode = .byWordWrapping

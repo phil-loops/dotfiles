@@ -1,7 +1,9 @@
 import AppKit
 
 final class Renderer {
-    let base = NSFont.systemFont(ofSize: 14)
+    /// Pages read like a printed brief: the system serif for prose; titles, headings and labels stay in the system sans.
+    let base = NSFont(descriptor: NSFont.systemFont(ofSize: 16).fontDescriptor.withDesign(.serif) ?? NSFont.systemFont(ofSize: 16).fontDescriptor, size: 16)
+        ?? .systemFont(ofSize: 16)
     let mono = NSFont.monospacedSystemFont(ofSize: 12.5, weight: .regular)
     /// Where relative image paths resolve, and how wide an image may draw.
     var baseDirectory = decksDirectory
@@ -11,20 +13,23 @@ final class Renderer {
 
     func render(_ section: Section) -> NSAttributedString {
         let out = NSMutableAttributedString()
-        out.append(line(eyebrow(section), font: .systemFont(ofSize: 12, weight: .semibold), color: .secondaryLabelColor, after: 4))
-        out.append(line(section.title, font: .systemFont(ofSize: 26, weight: .bold), color: .labelColor, after: section.tag == nil ? 14 : 4))
+        let label = eyebrow(section)
+        if !label.isEmpty {
+            out.append(line(label, font: .systemFont(ofSize: 12, weight: .semibold), color: .secondaryLabelColor, after: 4))
+        }
+        out.append(line(section.title, font: .systemFont(ofSize: 27, weight: .semibold), color: .labelColor, after: section.tag == nil ? 18 : 4, kern: -0.4))
         if let tag = section.tag {
-            out.append(line(tag, font: mono, color: .systemBlue, after: 14))
+            out.append(line(tag, font: mono, color: .secondaryLabelColor, after: 18))
         }
         out.append(markdown(section.body ?? ""))
         out.append(liveData(section))
         return out
     }
 
-    private func line(_ text: String, font: NSFont, color: NSColor, after: CGFloat) -> NSAttributedString {
+    private func line(_ text: String, font: NSFont, color: NSColor, after: CGFloat, kern: CGFloat = 0) -> NSAttributedString {
         let p = NSMutableParagraphStyle()
         p.paragraphSpacing = after
-        return NSAttributedString(string: text + "\n", attributes: [.font: font, .foregroundColor: color, .paragraphStyle: p])
+        return NSAttributedString(string: text + "\n", attributes: [.font: font, .foregroundColor: color, .paragraphStyle: p, .kern: kern])
     }
 
     private func markdown(_ body: String) -> NSAttributedString {
@@ -51,9 +56,9 @@ final class Renderer {
             } else if let image = imageLine(text) {
                 out.append(picture(path: image.path, alt: image.alt))
             } else if text.hasPrefix("## ") {
-                out.append(paragraph(String(text.dropFirst(3)), font: .systemFont(ofSize: 17, weight: .semibold), before: 10, after: 6))
+                out.append(paragraph(String(text.dropFirst(3)), font: .systemFont(ofSize: 16, weight: .semibold), before: 16, after: 6))
             } else if text.hasPrefix("# ") {
-                out.append(paragraph(String(text.dropFirst(2)), font: .systemFont(ofSize: 20, weight: .bold), before: 12, after: 8))
+                out.append(paragraph(String(text.dropFirst(2)), font: .systemFont(ofSize: 19, weight: .semibold), before: 20, after: 8))
             } else if text.hasPrefix("- ") {
                 out.append(listItem(marker: "•", String(text.dropFirst(2)), indent: raw.prefix { $0 == " " }.count))
             } else if let match = text.range(of: #"^\d+\. "#, options: .regularExpression) {
@@ -61,7 +66,7 @@ final class Renderer {
             } else if text.hasPrefix("> ") {
                 out.append(quote(String(text.dropFirst(2))))
             } else if !text.isEmpty {
-                out.append(paragraph(text, font: base, after: 10))
+                out.append(paragraph(text, font: base, after: 12))
             }
         }
         return out
@@ -71,7 +76,7 @@ final class Renderer {
         let p = NSMutableParagraphStyle()
         p.paragraphSpacing = after
         p.paragraphSpacingBefore = before
-        p.lineSpacing = 3
+        p.lineSpacing = font == base ? 6 : 3
         p.firstLineHeadIndent = head
         p.headIndent = head
         let s = inline(text, font: font, color: color)
@@ -80,14 +85,22 @@ final class Renderer {
         return s
     }
 
+    /// `> ` is the page's one large voice: the serif at display size, hung off an accent rule.
     private func quote(_ text: String) -> NSAttributedString {
+        let rule = NSTextBlock()
+        rule.setValue(100, type: .percentageValueType, for: .width)
+        rule.setWidth(3, type: .absoluteValueType, for: .border, edge: .minX)
+        rule.setBorderColor(.controlAccentColor, for: .minX)
+        rule.setWidth(20, type: .absoluteValueType, for: .padding, edge: .minX)
+        rule.setWidth(4, type: .absoluteValueType, for: .padding, edge: .minY)
+        rule.setWidth(4, type: .absoluteValueType, for: .padding, edge: .maxY)
+        rule.setWidth(18, type: .absoluteValueType, for: .margin, edge: .maxY)
+        rule.setWidth(4, type: .absoluteValueType, for: .margin, edge: .minY)
         let p = NSMutableParagraphStyle()
-        p.paragraphSpacing = 14
-        p.paragraphSpacingBefore = 4
-        p.lineSpacing = 4
-        p.firstLineHeadIndent = 18
-        p.headIndent = 18
-        let s = inline(text, font: .systemFont(ofSize: 19, weight: .semibold), color: .labelColor)
+        p.textBlocks = [rule]
+        p.lineSpacing = 5
+        let display = NSFont(descriptor: base.fontDescriptor, size: 22) ?? base
+        let s = inline(text, font: display, color: .labelColor)
         s.append(NSAttributedString(string: "\n"))
         s.addAttribute(.paragraphStyle, value: p, range: NSRange(location: 0, length: s.length))
         return s
@@ -96,8 +109,8 @@ final class Renderer {
     private func listItem(marker: String, _ text: String, indent: Int) -> NSAttributedString {
         let left = CGFloat(8 + indent * 8)
         let p = NSMutableParagraphStyle()
-        p.paragraphSpacing = 5
-        p.lineSpacing = 3
+        p.paragraphSpacing = 6
+        p.lineSpacing = 5
         p.firstLineHeadIndent = left
         p.headIndent = left + 22
         p.tabStops = [NSTextTab(textAlignment: .left, location: left + 22)]
@@ -239,7 +252,7 @@ final class Renderer {
             var runFont = font
             let intent = run.inlinePresentationIntent ?? []
             if intent.contains(.code) {
-                runFont = NSFont.monospacedSystemFont(ofSize: font.pointSize - 1, weight: .regular)
+                runFont = NSFont.monospacedSystemFont(ofSize: round(font.pointSize * 0.84), weight: .regular)
             } else {
                 var traits: NSFontDescriptor.SymbolicTraits = []
                 if intent.contains(.stronglyEmphasized) { traits.insert(.bold) }
@@ -249,9 +262,6 @@ final class Renderer {
                 }
             }
             var attributes: [NSAttributedString.Key: Any] = [.font: runFont, .foregroundColor: color]
-            if intent.contains(.code) {
-                attributes[.backgroundColor] = NSColor.quaternaryLabelColor.withAlphaComponent(0.15)
-            }
             if let link = run.link {
                 attributes[.link] = link
             }

@@ -119,11 +119,11 @@ enum KeyTable {
                    isEnabled: { $0.composerStop != nil }) { $0.focusComposer() },
         KeyBinding(id: "go.leave", menu: "Go", title: "Leave Field or Close", key: "\u{1b}", overOverlay: true) { $0.escape() },
 
-        KeyBinding(id: "section.sign", menu: "Section", title: "Toggle Signed Off", key: "s", modifiers: .command, workspaces: [.forest, .review, .inbox, .plans],
+        KeyBinding(id: "section.sign", menu: "Section", title: "Toggle Signed Off", key: "s", modifiers: .command, workspaces: [.inbox],
                    isEnabled: { $0.signableDeck != nil }) { $0.toggleSignedOff() },
         KeyBinding(id: "section.go-to-session", menu: "Section", title: "Go to Sending Session", key: "j", modifiers: .command, workspaces: [.forest, .review, .inbox, .plans],
                    isEnabled: { $0.signableDeck?.selectedReplyTo != nil }) { $0.signableDeck?.jumpToSession() },
-        KeyBinding(id: "section.submit", menu: "Section", title: "Send Reply or Submit", key: "\r", modifiers: .command, workspaces: [.forest, .review, .inbox, .plans],
+        KeyBinding(id: "section.submit", menu: "Section", title: "Send Reply", key: "\r", modifiers: .command, workspaces: [.inbox],
                    isEnabled: { $0.signableDeck != nil }) { $0.sendOrSubmit() },
         KeyBinding(id: "section.canopy", menu: "Section", title: "Open Branch in Canopy", key: "O", modifiers: [.command, .shift], workspaces: [.forest]) { $0.openInCanopy(nil) },
 
