@@ -27,6 +27,8 @@ struct Plan: Decodable {
     struct Branch: Decodable {
         let name: String
         let stage: String
+        /// The branch's one-line purpose (its git description), shown on its card under the name.
+        let does: String?
     }
 
     struct Transition: Decodable {
@@ -363,7 +365,7 @@ final class PlanView: NSView {
     private let laneHeight: CGFloat = 24
     private let chipHeight: CGFloat = 18
     /// A branch name longer than this column wraps onto a second line of its chip instead of widening the stage.
-    private let maxChipColumn: CGFloat = 180
+    private let maxChipColumn: CGFloat = 230
     private let chipFont = NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)
     static let chipFill = NSColor(name: "show.planChip") { appearance in
         appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(white: 1, alpha: 0.09) : NSColor(white: 0, alpha: 0.06)
@@ -417,7 +419,7 @@ final class PlanView: NSView {
                 need = max(need, textWidth(row.cells[safe: i] ?? "", font(11.5, .semibold)) + 22)
             }
             for branch in plan.branches(at: i) {
-                need = max(need, min(textWidth(branch.name, chipFont) + 26, maxChipColumn))
+                need = max(need, branch.does == nil ? min(textWidth(branch.name, chipFont) + 26, maxChipColumn) : maxChipColumn)
             }
             return max(minColumn, need)
         }
@@ -436,11 +438,44 @@ final class PlanView: NSView {
         return mvpOnly ? ordered.filter(\.inMVP) : ordered
     }
 
-    /// A chip is one line, or two when its name doesn't fit the column.
-    private func chipHeight(_ name: String, stage: Int) -> CGFloat {
-        let wrapped = (chipLabel(name) as NSString).boundingRect(with: NSSize(width: column(stage) - 28, height: 1000), options: [.usesLineFragmentOrigin],
-                                                                 attributes: [.font: chipFont])
-        return max(chipHeight, ceil(wrapped.height) + 6)
+    /// A branch card: its name, then what it does, wrapped to the column.
+    private func card(_ branch: Plan.Branch, future: Bool) -> NSAttributedString {
+        let style = NSMutableParagraphStyle()
+        style.lineBreakMode = .byWordWrapping
+        let out = NSMutableAttributedString(string: chipLabel(branch.name), attributes: [
+            .font: chipFont, .paragraphStyle: style,
+            .foregroundColor: branch.does == nil && !future ? NSColor.labelColor : .secondaryLabelColor])
+        if let does = branch.does, !does.isEmpty {
+            let body = NSMutableParagraphStyle()
+            body.lineBreakMode = .byWordWrapping
+            body.paragraphSpacingBefore = 3
+            body.lineSpacing = 1
+            out.append(NSAttributedString(string: "\n" + does, attributes: [
+                .font: font(11.5), .paragraphStyle: body, .foregroundColor: future ? NSColor.secondaryLabelColor : .labelColor]))
+        }
+        return out
+    }
+
+    private func chipHeight(_ branch: Plan.Branch, stage: Int) -> CGFloat {
+        let wrapped = card(branch, future: false).boundingRect(with: NSSize(width: column(stage) - 28, height: 1000), options: [.usesLineFragmentOrigin])
+        return max(chipHeight, ceil(wrapped.height) + (branch.does == nil ? 6 : 14))
+    }
+
+    /// Whether a row's `movedBy` names this branch.
+    private func moves(_ row: Plan.Row, _ branch: String) -> Bool {
+        (row.movedBy ?? "").components(separatedBy: "→").map { $0.trimmingCharacters(in: .whitespaces) }.contains(branch)
+    }
+
+    /// The branch under the pointer or selected, whose cells the grid outlines.
+    private var linkedBranch: String? {
+        if case .branch(let name) = hover ?? pick { return name }
+        return nil
+    }
+
+    /// The row under the pointer or selected, whose branches light up.
+    private var linkedRow: Plan.Row? {
+        if case .row(let r) = hover ?? pick { return plan?.rows[safe: r] }
+        return nil
     }
 
     /// The branch name with a break allowed after each hyphen, so a long one wraps instead of truncating.
@@ -449,7 +484,7 @@ final class PlanView: NSView {
     /// Branch chips stack in their stage's column, every one shown; the tallest stack sets the chip band's height.
     private var chipBand: CGFloat {
         guard let plan else { return 0 }
-        return plan.stages.indices.map { i in plan.branches(at: i).reduce(0) { $0 + chipHeight($1.name, stage: i) + 4 } }.max() ?? 0
+        return plan.stages.indices.map { i in plan.branches(at: i).reduce(0) { $0 + chipHeight($1, stage: i) + 4 } }.max() ?? 0
     }
 
     func fit(width available: CGFloat) {
@@ -575,6 +610,12 @@ final class PlanView: NSView {
                     accent.setFill()
                     NSRect(x: cell.minX, y: cell.minY + 3, width: 2, height: cell.height - 6).fill()
                 }
+                if let branch = linkedBranch, moves(row, branch), plan.branches(at: i).contains(where: { $0.name == branch }) {
+                    accent.setStroke()
+                    let outline = NSBezierPath(roundedRect: cell, xRadius: 4, yRadius: 4)
+                    outline.lineWidth = 2
+                    outline.stroke()
+                }
                 if let flagged = issue(row: r, stage: i), flagged.stage == i {
                     (flagged.level == .error ? NSColor.systemRed : .systemOrange).setStroke()
                     let outline = NSBezierPath(roundedRect: cell, xRadius: 4, yRadius: 4)
@@ -602,15 +643,19 @@ final class PlanView: NSView {
         for i in 0..<plan.stages.count {
             var chipY = chipsTop
             for branch in plan.branches(at: i) {
-                let chip = NSRect(x: x(i) + 4, y: chipY, width: column(i) - 8, height: chipHeight(branch.name, stage: i))
+                let chip = NSRect(x: x(i) + 4, y: chipY, width: column(i) - 8, height: chipHeight(branch, stage: i))
                 let chosen = pick == .branch(branch.name) || hover == .branch(branch.name)
-                (chosen ? accent.withAlphaComponent(0.22) : PlanView.chipFill).setFill()
-                NSBezierPath(roundedRect: chip, xRadius: chipHeight / 2, yRadius: chipHeight / 2).fill()
-                let style = NSMutableParagraphStyle()
-                style.lineBreakMode = .byWordWrapping
-                (chipLabel(branch.name) as NSString).draw(with: chip.insetBy(dx: 10, dy: 3), options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine],
-                                               attributes: [.font: chipFont, .paragraphStyle: style,
-                                                            .foregroundColor: i > cursor ? NSColor.secondaryLabelColor : .labelColor])
+                let lit = linkedRow.map { moves($0, branch.name) } ?? false
+                let shape = NSBezierPath(roundedRect: chip, xRadius: branch.does == nil ? chipHeight / 2 : 7, yRadius: branch.does == nil ? chipHeight / 2 : 7)
+                (chosen ? accent.withAlphaComponent(0.22) : lit ? accent.withAlphaComponent(0.12) : PlanView.chipFill).setFill()
+                shape.fill()
+                if lit || chosen {
+                    accent.withAlphaComponent(0.8).setStroke()
+                    shape.lineWidth = 1.5
+                    shape.stroke()
+                }
+                card(branch, future: i > cursor).draw(with: chip.insetBy(dx: 10, dy: branch.does == nil ? 3 : 7),
+                                                      options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
                 hits.append((chip, .branch(branch.name)))
                 chipY += chip.height + 4
             }

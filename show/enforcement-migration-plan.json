@@ -1,560 +1,620 @@
 {
-  "mode": "plan",
-  "title": "Enforcement migration plan",
-  "subtitle": "Stages, authority, gates, extras",
-  "replyTo": "a832fa8a",
-  "plan": {
-    "fact": "Is this domain blocked from sending?",
-    "repo": "loops",
-    "stages": [
-      {
-        "id": "today",
-        "kind": null,
-        "stop": "Today: the disabled flag is the only record; DisableDomainEvent says when, not why.",
-        "safe": true
-      },
-      {
-        "id": "expand",
-        "kind": "expand",
-        "stop": "Ledger and readings tables exist and nothing writes them. Reverting leaves empty tables.",
-        "safe": true
-      },
-      {
-        "id": "record",
-        "kind": "record",
-        "stop": "Every writer appends an event beside the flag. Disables from before this deploy have no case, so the ledger is incomplete, but nothing reads it yet.",
-        "safe": true
-      },
-      {
-        "id": "backfill",
-        "kind": "backfill",
-        "stop": "Every pre-ledger disable has a legacy.unrecorded case. The ledger should now match the flags.",
-        "safe": true
-      },
-      {
-        "id": "verify",
-        "kind": "verify",
-        "stop": "Drift is reported, never acted on. Stay here until it reads zero.",
-        "safe": true
-      },
-      {
-        "id": "flip",
-        "kind": "flip",
-        "stop": "The ledger is the truth: commit writes the flag only from a before→after transition. The old queue still reads DisableDomainEvent, which is still written.",
-        "safe": true
-      },
-      {
-        "id": "readers",
-        "kind": "move",
-        "stop": "Admins work open cases from the case table; DisableDomainEvent is still written and unread by the new queue.",
-        "safe": true
-      },
-      {
-        "id": "contract",
-        "kind": "contract",
-        "stop": "The domain-wide re-enable and the disable-event queue are gone. DisableDomainEvent is still written (dropping it is an extra).",
-        "safe": true
-      }
-    ],
-    "rows": [
-      {
-        "name": "domain blocked?",
-        "kind": "authority",
-        "cells": [
-          "flag",
-          "flag",
-          "flag",
-          "flag",
-          "flag",
-          "ledger",
-          "″",
-          "″"
-        ]
-      },
-      {
-        "name": "admin disable",
-        "kind": "writer",
-        "cells": [
-          "flag",
-          "flag",
-          "flag + event",
-          "″",
-          "″",
-          "commit",
-          "″",
-          "″"
-        ],
-        "where": "models/enforcement.ts commit",
-        "movedBy": "record-domain-disables-on-the-ledger → project-disabled-from-cases"
-      },
-      {
-        "name": "SES tenant job",
-        "kind": "writer",
-        "cells": [
-          "flag",
-          "flag",
-          "flag + event",
-          "″",
-          "″",
-          "commit",
-          "″",
-          "″"
-        ],
-        "where": "jobs/ses-tenant-events.ts",
-        "movedBy": "record-domain-disables-on-the-ledger → open-a-case-for-every-cause"
-      },
-      {
-        "name": "domain create",
-        "kind": "writer",
-        "cells": [
-          "flag",
-          "flag",
-          "flag + event",
-          "″",
-          "″",
-          "insert held",
-          "″",
-          "″"
-        ],
-        "where": "models/sending-domain.ts create",
-        "movedBy": "create-domains-under-cases"
-      },
-      {
-        "name": "admin re-enable",
-        "kind": "writer",
-        "cells": [
-          "flag",
-          "flag",
-          "flag + release",
-          "″",
-          "″",
-          "release cases",
-          "″",
-          "gone"
-        ],
-        "where": "domain review re-enable",
-        "movedBy": "reenable-through-cases → stop-reenabling-domains-directly"
-      },
-      {
-        "name": "case release",
-        "kind": "writer",
-        "cells": [
-          "—",
-          "—",
-          "—",
-          "—",
-          "—",
-          "release one",
-          "″",
-          "″"
-        ],
-        "where": "models/enforcement.ts release",
-        "movedBy": "release-a-case"
-      },
-      {
-        "name": "legacy disables",
-        "kind": "record",
-        "cells": [
-          "no cause",
-          "no cause",
-          "no cause",
-          "legacy case",
-          "″",
-          "″",
-          "″",
-          "″"
-        ],
-        "where": "script-runner adoptLegacyDisables",
-        "movedBy": "adopt-legacy-disables"
-      },
-      {
-        "name": "drift check",
-        "kind": "record",
-        "cells": [
-          "—",
-          "—",
-          "—",
-          "—",
-          "must read 0",
-          "″",
-          "″",
-          "″"
-        ],
-        "where": "script-runner checkLedgerAgreesWithFlags",
-        "movedBy": "check-the-ledger-agrees-with-the-flags"
-      },
-      {
-        "name": "send path",
-        "kind": "reader",
-        "cells": [
-          "flag",
-          "flag",
-          "flag",
-          "flag",
-          "flag",
-          "flag (proj.)",
-          "″",
-          "″"
-        ],
-        "where": "SendingDomain.disabled"
-      },
-      {
-        "name": "review queue",
-        "kind": "reader",
-        "cells": [
-          "disable events",
-          "″",
-          "″",
-          "″",
-          "″",
-          "″",
-          "case table",
-          "″"
-        ],
-        "where": "admin disabled domains tab",
-        "movedBy": "queue-domains-by-open-cases"
-      },
-      {
-        "name": "DisableDomainEvent",
-        "kind": "record",
-        "cells": [
-          "written",
-          "″",
-          "″",
-          "″",
-          "″",
-          "″",
-          "″",
-          "written, unread"
-        ],
-        "where": "queries/disable-domain-event.ts",
-        "movedBy": "retire-the-disable-event-queue"
-      }
-    ],
-    "branches": [
-      {
-        "name": "add-enforcement-event-ledger",
-        "stage": "expand"
-      },
-      {
-        "name": "fold-a-teams-enforcement-events",
-        "stage": "expand"
-      },
-      {
-        "name": "purge-a-teams-ledger-with-the-team",
-        "stage": "expand"
-      },
-      {
-        "name": "set-domain-disabled-flags",
-        "stage": "expand"
-      },
-      {
-        "name": "list-teams-on-the-ledger",
-        "stage": "expand"
-      },
-      {
-        "name": "mark-a-reading-reviewed",
-        "stage": "expand"
-      },
-      {
-        "name": "detect-banned-words",
-        "stage": "expand"
-      },
-      {
-        "name": "detect-phishing",
-        "stage": "expand"
-      },
-      {
-        "name": "find-the-readings-cases-point-at",
-        "stage": "expand"
-      },
-      {
-        "name": "read-a-teams-open-cases",
-        "stage": "expand"
-      },
-      {
-        "name": "serve-a-teams-open-cases",
-        "stage": "expand"
-      },
-      {
-        "name": "list-open-cases-on-domain-review",
-        "stage": "expand"
-      },
-      {
-        "name": "record-domain-disables-on-the-ledger",
-        "stage": "record"
-      },
-      {
-        "name": "record-domain-reenables-on-the-ledger",
-        "stage": "record"
-      },
-      {
-        "name": "record-content-readings",
-        "stage": "record"
-      },
-      {
-        "name": "point-content-cases-at-their-reading",
-        "stage": "record"
-      },
-      {
-        "name": "review-readings-on-the-ledger",
-        "stage": "record"
-      },
-      {
-        "name": "review-an-emails-readings-on-the-ledger",
-        "stage": "record"
-      },
-      {
-        "name": "adopt-legacy-disables",
-        "stage": "backfill"
-      },
-      {
-        "name": "check-the-ledger-agrees-with-the-flags",
-        "stage": "verify"
-      },
-      {
-        "name": "project-disabled-from-cases",
-        "stage": "flip"
-      },
-      {
-        "name": "reenable-through-cases",
-        "stage": "flip"
-      },
-      {
-        "name": "open-a-case-for-every-cause",
-        "stage": "flip"
-      },
-      {
-        "name": "create-domains-under-cases",
-        "stage": "flip"
-      },
-      {
-        "name": "release-a-case",
-        "stage": "flip"
-      },
-      {
-        "name": "serve-case-release",
-        "stage": "flip"
-      },
-      {
-        "name": "release-cases-from-domain-review",
-        "stage": "flip"
-      },
-      {
-        "name": "add-the-case-table",
-        "stage": "readers"
-      },
-      {
-        "name": "project-cases-into-the-table",
-        "stage": "readers"
-      },
-      {
-        "name": "rebuild-the-case-table",
-        "stage": "readers"
-      },
-      {
-        "name": "list-domains-for-teams",
-        "stage": "readers"
-      },
-      {
-        "name": "list-the-case-queue",
-        "stage": "readers"
-      },
-      {
-        "name": "serve-the-case-queue",
-        "stage": "readers"
-      },
-      {
-        "name": "review-domains-by-id",
-        "stage": "readers"
-      },
-      {
-        "name": "queue-domains-by-open-cases",
-        "stage": "readers"
-      },
-      {
-        "name": "stop-reenabling-domains-directly",
-        "stage": "contract"
-      },
-      {
-        "name": "retire-the-disable-event-queue",
-        "stage": "contract"
-      }
-    ],
-    "transitions": [
-      {
-        "from": "today",
-        "to": "expand",
-        "gate": "Migrations pass squawk; the append-only trigger and CHECKs are in.",
-        "rollback": "Safe: the tables are empty and unread."
-      },
-      {
-        "from": "expand",
-        "to": "record",
-        "gate": "Ledger tables exist in prod.",
-        "rollback": "Safe while the flag is the truth, but events stop: re-run adoption before going on to verify."
-      },
-      {
-        "from": "record",
-        "to": "backfill",
-        "gate": "Every writer is recording: a disable made before record deploys would otherwise get no case.",
-        "rollback": "Safe: legacy cases sit unread while the flag is the truth.",
-        "manual": "`npm run script-runner adoptLegacyDisables` (dry run), then `DRY_RUN=false npm run script-runner adoptLegacyDisables`."
-      },
-      {
-        "from": "backfill",
-        "to": "verify",
-        "gate": "Adoption ran for real.",
-        "rollback": "Safe: a read-only script.",
-        "manual": "`npm run script-runner checkLedgerAgreesWithFlags` until it reports zero."
-      },
-      {
-        "from": "verify",
-        "to": "flip",
-        "gate": "Drift reads **zero**.",
-        "rollback": "Safe: the old code writes the flag and records events exactly as at verify, and commit's flag writes agree with them. Cases released in the new UI stay released."
-      },
-      {
-        "from": "flip",
-        "to": "readers",
-        "gate": "The flip is stable: drift still zero after a day.",
-        "rollback": "Safe: the old queue reads DisableDomainEvent, which is still written.",
-        "manual": "`DRY_RUN=false npm run script-runner rebuildEnforcementCases` once project-cases-into-the-table deploys."
-      },
-      {
-        "from": "readers",
-        "to": "contract",
-        "gate": "No one uses the old queue or the domain-wide re-enable.",
-        "rollback": "Code only: bring the route back. Nothing stored changed."
-      }
-    ],
-    "extras": [
-      {
-        "id": "content",
-        "name": "Content readings & review",
-        "start": "expand",
-        "mvp": true,
-        "end": "record",
-        "detail": "reading.reviewed, email scope and the publish effect. Already built into the core branches; the open question is whether the first PRs should show only the core schema."
-      },
-      {
-        "id": "r1",
-        "name": "R1 · payload schema version",
-        "start": "expand",
-        "mvp": false,
-        "end": "record",
-        "cliff": "record",
-        "why": "The first event written in prod fixes the payload shape forever. Without a version, retiring a reason or adding a required field later means a lenient decoder for every old event.",
-        "detail": "A schemaVersion on each event, independent of the stream position; old decoders kept as replay fixtures.\n\n**Recommendation: into the MVP (press m).** It's small: one field plus a dispatch in `parseEvent`. Miss the cliff and every event from before it must be read as an unmarked v0 forever; until then, retiring one reason stops the whole team's history from folding, including releases of unrelated cases."
-      },
-      {
-        "id": "r2",
-        "name": "R2 · cause keys",
-        "start": "record",
-        "mvp": false,
-        "end": "flip",
-        "cliff": "record",
-        "why": "Events written without a causal key can never be deduplicated against a redelivery; they need a 'no key' exception in perpetuity.",
-        "detail": "A durable key from the source occurrence and policy, deduplicated across all history, separate from 'is a case already open'.\n\n**Recommendation: leave it out and record `accepted`.** It's a real design change, and its cliff is softer than R1's: only events from before the key can't be deduplicated, which matters only if a provider resends an old notification after its case was released. Suggested reason: *pre-key events can't dedupe; redelivery window is short; the fix lands right after the flip.* If you'd rather carry no such window, press m on it too."
-      },
-      {
-        "id": "r3",
-        "name": "R3 · required evidence + provider readings",
-        "start": "flip",
-        "mvp": false,
-        "end": "readers",
-        "detail": "Automated openings must cite an existing same-team reading; SES tenant notices become readings. Checked at write time, so it can tighten later."
-      },
-      {
-        "id": "r5",
-        "name": "R5 · reading IDs in jobs",
-        "start": "record",
-        "mvp": false,
-        "end": "flip",
-        "detail": "Review and publish jobs carry the reading IDs they decided on. Jobs drain, so this only changes code."
-      },
-      {
-        "id": "r6",
-        "name": "R6 · condition cases",
-        "start": "flip",
-        "mvp": false,
-        "end": "readers",
-        "detail": "Deletion requested and provider tenant disabled close when the condition clears; needs the ledger as the authority."
-      },
-      {
-        "id": "unleash",
-        "name": "property.set (Unleash)",
-        "start": "flip",
-        "mvp": false,
-        "end": "readers",
-        "detail": "skipSafetyChecks as a policy input on the ledger. No type CHECK to widen; the legacy seed needs the rules_open_or_review exception."
-      },
-      {
-        "id": "drift",
-        "name": "Drift monitor",
-        "start": "verify",
-        "mvp": false,
-        "detail": "The verify script on a schedule, alerting on any difference."
-      },
-      {
-        "id": "ddeoff",
-        "name": "Stop writing DisableDomainEvent",
-        "start": "contract",
-        "mvp": false,
-        "detail": "Once nothing reads it; the timeline shows old rows raw as pre-ledger history."
-      },
-      {
-        "id": "timeline",
-        "name": "Team timeline",
-        "start": "readers",
-        "mvp": false,
-        "detail": "Readings, events and pre-ledger DisableDomainEvent/AdminPanelInteraction rows in one view."
-      },
-      {
-        "id": "snapshots",
-        "name": "Fold snapshots",
-        "start": "contract",
-        "mvp": false,
-        "detail": "The fold is O(events per team) per commit. Add snapshots when a team's stream passes a measured size, not before."
-      }
+ "mode": "plan",
+ "title": "Enforcement migration plan",
+ "subtitle": "Reshaped 2026-11-04: the MVP records what the flip will record. Waves 1–4 are ledger-mvp.",
+ "replyTo": "16213f6a",
+ "plan": {
+  "fact": "Is this domain blocked from sending?",
+  "repo": "loops",
+  "stages": [
+   {
+    "id": "today",
+    "kind": null,
+    "stop": "Today: the disabled flag is the only record; DisableDomainEvent says when, not why.",
+    "safe": true
+   },
+   {
+    "id": "expand",
+    "kind": "expand",
+    "stop": "Ledger and readings tables exist and nothing writes them. Reverting leaves empty tables.",
+    "safe": true
+   },
+   {
+    "id": "record",
+    "kind": "record",
+    "stop": "Every writer appends an event beside the flag. Disables from before this deploy have no case, so the ledger is incomplete, but nothing reads it yet.",
+    "safe": true
+   },
+   {
+    "id": "backfill",
+    "kind": "backfill",
+    "stop": "Every pre-ledger disable has a legacy.unrecorded case. The ledger should now match the flags.",
+    "safe": true
+   },
+   {
+    "id": "verify",
+    "kind": "verify",
+    "stop": "Drift is reported, never acted on. Stay here until it reads zero.",
+    "safe": true
+   },
+   {
+    "id": "flip",
+    "kind": "flip",
+    "stop": "The ledger is the truth: commit writes the flag only from a before→after transition. The old queue still reads DisableDomainEvent, which is still written.",
+    "safe": true
+   },
+   {
+    "id": "readers",
+    "kind": "move",
+    "stop": "Admins work open cases from the case table; DisableDomainEvent is still written and unread by the new queue.",
+    "safe": true
+   },
+   {
+    "id": "contract",
+    "kind": "contract",
+    "stop": "The domain-wide re-enable and the disable-event queue are gone. DisableDomainEvent is still written (dropping it is an extra).",
+    "safe": true
+   }
+  ],
+  "rows": [
+   {
+    "name": "domain blocked?",
+    "kind": "authority",
+    "cells": [
+     "flag",
+     "flag",
+     "flag",
+     "flag",
+     "flag",
+     "ledger",
+     "″",
+     "″"
     ]
-  },
-  "sections": [
-    {
-      "id": "decide-r1-r2",
-      "group": "Open decisions",
-      "title": "R1 and R2: in the MVP?",
-      "body": "The plan's two lint warnings. Both have their cliff at **record**, the first stage that stores real events.\n\n- **R1, payload schema version → into the MVP.** Small, and the cliff is hard: events stored without a version are an unmarked v0 forever.\n- **R2, cause keys → leave out, record `accepted`.** Bigger, and the cliff is soft: only pre-key events can't be deduplicated, and that only bites on a redelivery after release.\n\nDecide on the grid: `m` on a lane (or drag it across the dashed line) moves it in or out of the MVP. The reasoning for each sits on its extra's page too."
-    },
-    {
-      "id": "decide-content-in-first-prs",
-      "group": "Open decisions",
-      "title": "Keep content readings in the first PRs?",
-      "body": "reading.reviewed, email scope and the publish effect are already built into the core branches. The alternative is cutting them out so the first PRs show only the core schema.\n\n**Recommendation: keep them.** They're in the MVP lane already; cutting them out means a reshape for a smaller first diff, not a safer one."
-    },
-    {
-      "id": "decide-readings-retention",
-      "group": "Open decisions",
-      "title": "Readings retention on team delete",
-      "body": "Events now outlive the team (plain `teamId`, no FK; purged by one line in `finalize-team-delete.ts` for now). Readings (`SuspiciousActivity`, `AccountLimitNotice`) are still deleted with the team, so a kept event could cite a reading that's gone.\n\n**Recommendation: decide after the MVP.** While events are purged with the team too, nothing dangles. It becomes real the day that purge line is removed."
-    },
-    {
-      "id": "decide-deletion-requested",
-      "group": "Open decisions",
-      "title": "team.deletion_requested as a case",
-      "body": "This is R6 (condition cases): a case that should close when its condition clears, which rules can't do today.\n\n**Recommendation: as planned, outside the MVP** (lane R6, flip → readers). It needs the ledger to be the authority first."
-    },
-    {
-      "id": "decide-seed-exception",
-      "group": "Open decisions",
-      "title": "The seed's CHECK exception",
-      "body": "Adopting legacy disables writes events with the `legacy.unrecorded` actor, which the `rules_open_or_review` CHECK rejects. The proposal is a narrow exception for exactly that actor.\n\n**Waiting on your approval**: it loosens a guard, so it needs your yes."
-    },
-    {
-      "id": "decide-restack",
-      "group": "Open decisions",
-      "title": "Restack before any push",
-      "body": "The forests are 13 commits behind main. I restack and re-run the gates once the plan is settled, since a plan change would mean re-splitting branches and restacking twice.\n\nNothing to decide; this is here so it isn't lost."
-    }
+   },
+   {
+    "name": "admin disable",
+    "kind": "writer",
+    "cells": [
+     "flag",
+     "flag",
+     "flag + case",
+     "″",
+     "″",
+     "commit",
+     "″",
+     "″"
+    ],
+    "where": "models/enforcement.ts commit",
+    "movedBy": "record-domain-disables-on-the-ledger → project-disabled-from-cases"
+   },
+   {
+    "name": "SES tenant job",
+    "kind": "writer",
+    "cells": [
+     "flag",
+     "flag",
+     "flag + team case",
+     "″",
+     "″",
+     "commit",
+     "″",
+     "″"
+    ],
+    "where": "jobs/ses-tenant-events.ts",
+    "movedBy": "record-domain-disables-on-the-ledger → open-a-case-for-every-cause"
+   },
+   {
+    "name": "domain create",
+    "kind": "writer",
+    "cells": [
+     "flag",
+     "flag",
+     "flag + case, one tx",
+     "″",
+     "″",
+     "insert held",
+     "″",
+     "″"
+    ],
+    "where": "models/sending-domain.ts create",
+    "movedBy": "create-domains-under-cases"
+   },
+   {
+    "name": "admin re-enable",
+    "kind": "writer",
+    "cells": [
+     "flag",
+     "flag",
+     "flag + release all",
+     "″",
+     "″",
+     "release cases",
+     "″",
+     "gone"
+    ],
+    "where": "domain review re-enable",
+    "movedBy": "reenable-through-cases → stop-reenabling-domains-directly"
+   },
+   {
+    "name": "case release",
+    "kind": "writer",
+    "cells": [
+     "—",
+     "—",
+     "—",
+     "—",
+     "—",
+     "release one",
+     "″",
+     "″"
+    ],
+    "where": "models/enforcement.ts release",
+    "movedBy": "release-a-case"
+   },
+   {
+    "name": "legacy disables",
+    "kind": "record",
+    "cells": [
+     "no cause",
+     "no cause",
+     "no cause",
+     "legacy case",
+     "″",
+     "″",
+     "″",
+     "″"
+    ],
+    "where": "script-runner adoptLegacyDisables",
+    "movedBy": "adopt-legacy-disables"
+   },
+   {
+    "name": "drift check",
+    "kind": "record",
+    "cells": [
+     "—",
+     "—",
+     "—",
+     "—",
+     "must read 0",
+     "″",
+     "″",
+     "″"
+    ],
+    "where": "script-runner checkLedgerAgreesWithFlags",
+    "movedBy": "check-the-ledger-agrees-with-the-flags"
+   },
+   {
+    "name": "send path",
+    "kind": "reader",
+    "cells": [
+     "flag",
+     "flag",
+     "flag",
+     "flag",
+     "flag",
+     "flag (proj.)",
+     "″",
+     "″"
+    ],
+    "where": "SendingDomain.disabled"
+   },
+   {
+    "name": "review queue",
+    "kind": "reader",
+    "cells": [
+     "disable events",
+     "″",
+     "″",
+     "″",
+     "″",
+     "″",
+     "case table",
+     "″"
+    ],
+    "where": "admin disabled domains tab",
+    "movedBy": "queue-domains-by-open-cases"
+   },
+   {
+    "name": "DisableDomainEvent",
+    "kind": "record",
+    "cells": [
+     "written",
+     "″",
+     "″",
+     "″",
+     "″",
+     "″",
+     "″",
+     "written, unread"
+    ],
+    "where": "queries/disable-domain-event.ts",
+    "movedBy": "retire-the-disable-event-queue"
+   }
+  ],
+  "branches": [
+   {
+    "name": "add-enforcement-event-ledger",
+    "stage": "expand",
+    "does": "Adds an append-only stream of enforcement decisions per team"
+   },
+   {
+    "name": "purge-a-teams-ledger-with-the-team",
+    "stage": "expand",
+    "does": "Purges a team's enforcement events when the team is deleted"
+   },
+   {
+    "name": "fold-a-teams-enforcement-events",
+    "stage": "expand",
+    "does": "Folds a team's enforcement events into its cases, each scoped to a team, domain or email"
+   },
+   {
+    "name": "record-enforcement-events",
+    "stage": "record",
+    "does": "Drafts case openings from a cause and appends them to a team's stream under its lock, opening nothing for a cause that already holds an open case"
+   },
+   {
+    "name": "record-domain-disables-on-the-ledger",
+    "stage": "record",
+    "does": "Opens a case on the ledger for every domain disable, with its reason, actor and the reading behind it"
+   },
+   {
+    "name": "create-domains-in-one-transaction",
+    "stage": "record",
+    "does": "Creates a sending domain, its disable event, its suspicious reading and its case in one transaction"
+   },
+   {
+    "name": "record-domain-reenables-on-the-ledger",
+    "stage": "record",
+    "does": "Releases every case holding a domain on the ledger when an admin re-enables it"
+   },
+   {
+    "name": "set-domain-disabled-flags",
+    "stage": "backfill",
+    "does": "Reads and sets a team's domain disabled flags and lists the teams with a disabled domain"
+   },
+   {
+    "name": "list-teams-on-the-ledger",
+    "stage": "backfill",
+    "does": "Lists every still-existing team with events on the enforcement ledger"
+   },
+   {
+    "name": "adopt-legacy-disables",
+    "stage": "backfill",
+    "does": "Adds a script that gives every domain disabled before the ledger a legacy case, once, before the ledger becomes the truth"
+   },
+   {
+    "name": "check-the-ledger-agrees-with-the-flags",
+    "stage": "verify",
+    "does": "Adds a read-only script that reports every domain whose disabled flag disagrees with the ledger's open cases"
+   },
+   {
+    "name": "find-the-readings-cases-point-at",
+    "stage": "verify",
+    "does": "Finds a team's notices and suspicious activities by id, the readings a case can point at"
+   },
+   {
+    "name": "read-a-teams-open-cases",
+    "stage": "verify",
+    "does": "Reads a team's open cases with the domain each holds and the readings it points at"
+   },
+   {
+    "name": "serve-a-teams-open-cases",
+    "stage": "verify",
+    "does": "Serves a team's open cases to the admin panel"
+   },
+   {
+    "name": "list-open-cases-on-domain-review",
+    "stage": "verify",
+    "does": "Lists a team's open cases above the domain assessment, with the readings each points at"
+   },
+   {
+    "name": "mark-a-reading-reviewed",
+    "stage": "verify",
+    "does": "Find an email's unreviewed readings and mark readings reviewed, as the ledger's reviews project them"
+   },
+   {
+    "name": "review-readings-on-the-ledger",
+    "stage": "verify",
+    "does": "Review readings that opened no case on the ledger, marking them reviewed in the same transaction"
+   },
+   {
+    "name": "detect-banned-words",
+    "stage": "verify",
+    "does": "Find banned words in an email as a detector that returns a reading and writes nothing"
+   },
+   {
+    "name": "detect-phishing",
+    "stage": "verify",
+    "does": "Tag an email with the phishing model as a detector that returns a reading and writes nothing"
+   },
+   {
+    "name": "record-content-readings",
+    "stage": "verify",
+    "does": "Record every content detector's reading through one model, keeping the data the admin views read"
+   },
+   {
+    "name": "point-content-cases-at-their-reading",
+    "stage": "verify",
+    "does": "Point every content case at the reading that opened it"
+   },
+   {
+    "name": "review-an-emails-readings-on-the-ledger",
+    "stage": "verify",
+    "does": "Record every review of an email's readings on the ledger instead of setting the reviewed flag directly"
+   },
+   {
+    "name": "project-disabled-from-cases",
+    "stage": "flip",
+    "does": "Records case events and writes a domain's disabled flag only where those events change whether a case holds it"
+   },
+   {
+    "name": "reenable-through-cases",
+    "stage": "flip",
+    "does": "Re-enables a domain by releasing every case that holds it, letting the projection turn it on"
+   },
+   {
+    "name": "disable-domains-through-cases",
+    "stage": "flip",
+    "does": "Turns a domain off by opening the case its cause calls for, so the flag follows the cases"
+   },
+   {
+    "name": "create-domains-under-cases",
+    "stage": "flip",
+    "does": "Creates a domain through the cases, inserting it disabled when a team-wide case already holds its team"
+   },
+   {
+    "name": "release-a-case",
+    "stage": "flip",
+    "does": "Releases one open case as a person with a reason, reinstating the team's provider tenant when that turns a domain back on"
+   },
+   {
+    "name": "serve-case-release",
+    "stage": "flip",
+    "does": "Serves releasing one case to the admin panel"
+   },
+   {
+    "name": "release-cases-from-domain-review",
+    "stage": "flip",
+    "does": "Adds a release button with a reason and note to each open case on domain review"
+   },
+   {
+    "name": "add-the-case-table",
+    "stage": "readers",
+    "does": "Adds a table holding each case's current state, rebuildable from the ledger, with queries to write a case and list open ones"
+   },
+   {
+    "name": "project-cases-into-the-table",
+    "stage": "readers",
+    "does": "Writes each case an enforcement commit or legacy adoption touches into the case table, in the same transaction"
+   },
+   {
+    "name": "rebuild-the-case-table",
+    "stage": "readers",
+    "does": "Adds a script that rewrites every case in the table from the ledger"
+   },
+   {
+    "name": "list-domains-for-teams",
+    "stage": "readers",
+    "does": "Lists the sending domains of several teams at once"
+   },
+   {
+    "name": "list-the-case-queue",
+    "stage": "readers",
+    "does": "Lists open cases across teams, newest first, each with its team, the domain it holds and a domain to review"
+   },
+   {
+    "name": "serve-the-case-queue",
+    "stage": "readers",
+    "does": "Serves the open case queue to the admin panel"
+   },
+   {
+    "name": "review-domains-by-id",
+    "stage": "readers",
+    "does": "Lets domain review load by sending domain as well as by disable event"
+   },
+   {
+    "name": "queue-domains-by-open-cases",
+    "stage": "readers",
+    "does": "Lists open cases in the disabled domains tab and reviews each by its domain"
+   },
+   {
+    "name": "stop-reenabling-domains-directly",
+    "stage": "contract",
+    "does": "Removes the domain-wide re-enable, so a domain turns back on only by releasing its cases"
+   },
+   {
+    "name": "retire-the-disable-event-queue",
+    "stage": "contract",
+    "does": "Removes the disable-event queue route and the review inputs keyed by disable event"
+   }
+  ],
+  "transitions": [
+   {
+    "from": "today",
+    "to": "expand",
+    "gate": "Wave 1 merged and deployed: add-enforcement-event-ledger, purge-a-teams-ledger-with-the-team, fold-a-teams-enforcement-events. Migrations pass squawk; the append-only trigger, the CHECKs and the payload-version CHECK are in.",
+    "rollback": "Safe: the tables are empty and unread. Reverting the migration drops an empty table."
+   },
+   {
+    "from": "expand",
+    "to": "record",
+    "gate": "The ledger table exists in prod and purge has deployed (record-disables carries an `after` edge on it, so a deleted team never leaves events behind). Wave 2 merges in order: record-enforcement-events → record-domain-disables → create-domains-in-one-transaction → record-domain-reenables, ideally one deploy.",
+    "rollback": "Revert the wave-2 PRs: disables and re-enables go back to flag-only. Events already written stay valid (`v:1`) and just stop growing; adoption fills the gap later. The one risk is the reverse: a ledger write that throws rolls back its disable — every call site has a test building its cause the way production does, and notes fall back to fixed text so the person-writes-note CHECK can't fire."
+   },
+   {
+    "from": "record",
+    "to": "backfill",
+    "gate": "Wave 2 has been deployed long enough that no request still runs the old code (one deploy cycle). Wave 3 merged: set-domain-disabled-flags → list-teams-on-the-ledger → adopt-legacy-disables.",
+    "rollback": "Safe: legacy cases sit unread while the flag is the truth.",
+    "manual": "`npm run script-runner adoptLegacyDisables` (dry run: counts teams and domains), then `DRY_RUN=false npm run script-runner adoptLegacyDisables`. Run it AFTER wave 2 deploys, never before: a disable in between would get no case."
+   },
+   {
+    "from": "backfill",
+    "to": "verify",
+    "gate": "Adoption ran for real; a second dry run reports 0 domains. check-the-ledger-agrees-with-the-flags merged, and wave 4 (the domain-review panel) can ship now that every disabled domain has a case.",
+    "rollback": "Safe: a read-only script.",
+    "manual": "`npm run script-runner checkLedgerAgreesWithFlags`, daily. Known expected drift: an admin re-enabling ONE domain of a team held by a team-wide case releases the team case while the team's other domains stay off with no case — the drift report names them, and they're exactly what the flip changes (post-flip that re-enable turns the whole team on)."
+   },
+   {
+    "from": "verify",
+    "to": "flip",
+    "gate": "Drift reads **zero** on runs a week apart, apart from the named partial re-enables above, each reviewed. Content-detector branches merged (they ride between verify and flip and change no flag).",
+    "rollback": "Safe: the old code writes the flag and records events exactly as at verify, and commit's flag writes agree with them. Cases released in the new UI stay released."
+   },
+   {
+    "from": "flip",
+    "to": "readers",
+    "gate": "The flip is stable: drift still zero after a day.",
+    "rollback": "Safe: the old queue reads DisableDomainEvent, which is still written.",
+    "manual": "`DRY_RUN=false npm run script-runner rebuildEnforcementCases` once project-cases-into-the-table deploys."
+   },
+   {
+    "from": "readers",
+    "to": "contract",
+    "gate": "No one uses the old queue or the domain-wide re-enable.",
+    "rollback": "Code only: bring the route back. Nothing stored changed."
+   }
+  ],
+  "extras": [
+   {
+    "id": "content",
+    "name": "Content readings & review",
+    "start": "expand",
+    "mvp": true,
+    "end": "record",
+    "detail": "reading.reviewed, email scope and the publish effect. Already built into the core branches; the open question is whether the first PRs should show only the core schema."
+   },
+   {
+    "id": "r1",
+    "name": "R1 · payload schema version",
+    "start": "expand",
+    "mvp": true,
+    "end": "record",
+    "cliff": "record",
+    "why": "The first event written in prod fixes the payload shape forever. Without a version, retiring a reason or adding a required field later means a lenient decoder for every old event.",
+    "detail": "**Done in the MVP.** `record` stamps `v: 1` on every payload; `parseEvent` reads `payloads[type][v]`; the database refuses a payload with no numeric `v` (`EnforcementEvent_data_names_its_version`). A stored version may widen but never narrow, so old streams always replay."
+   },
+   {
+    "id": "r2",
+    "name": "R2 · cause keys",
+    "start": "record",
+    "mvp": false,
+    "end": "flip",
+    "cliff": "record",
+    "why": "Events written without a causal key can never be deduplicated against a redelivery; they need a 'no key' exception in perpetuity.",
+    "detail": "A durable key from the source occurrence and policy, deduplicated across all history, separate from 'is a case already open'.\n\n**Recommendation: leave it out and record `accepted`.** It's a real design change, and its cliff is softer than R1's: only events from before the key can't be deduplicated, which matters only if a provider resends an old notification after its case was released. Suggested reason: *pre-key events can't dedupe; redelivery window is short; the fix lands right after the flip.* If you'd rather carry no such window, press m on it too.",
+    "accepted": "Repeat causes already dedupe against open cases from day one (`unlessAlreadyOpen`: same scope, effect and reason), and team-wide causes open one team case. Only a provider redelivering an old notice after its case was released reopens it; a durable cause key can come later without touching stored events."
+   },
+   {
+    "id": "r3",
+    "name": "R3 · required evidence + provider readings",
+    "start": "flip",
+    "mvp": false,
+    "end": "readers",
+    "detail": "Automated openings must cite an existing same-team reading; SES tenant notices become readings. Checked at write time, so it can tighten later."
+   },
+   {
+    "id": "r5",
+    "name": "R5 · reading IDs in jobs",
+    "start": "record",
+    "mvp": false,
+    "end": "flip",
+    "detail": "Review and publish jobs carry the reading IDs they decided on. Jobs drain, so this only changes code."
+   },
+   {
+    "id": "r6",
+    "name": "R6 · condition cases",
+    "start": "flip",
+    "mvp": false,
+    "end": "readers",
+    "detail": "Deletion requested and provider tenant disabled close when the condition clears; needs the ledger as the authority."
+   },
+   {
+    "id": "unleash",
+    "name": "property.set (Unleash)",
+    "start": "flip",
+    "mvp": false,
+    "end": "readers",
+    "detail": "skipSafetyChecks as a policy input on the ledger. No type CHECK to widen; the legacy seed needs the rules_open_or_review exception."
+   },
+   {
+    "id": "drift",
+    "name": "Drift monitor",
+    "start": "verify",
+    "mvp": true,
+    "detail": "**In the MVP as a script** (check-the-ledger-agrees-with-the-flags, wave 3), run by hand daily during verify. A scheduled alert is the follow-up."
+   },
+   {
+    "id": "ddeoff",
+    "name": "Stop writing DisableDomainEvent",
+    "start": "contract",
+    "mvp": false,
+    "detail": "Once nothing reads it; the timeline shows old rows raw as pre-ledger history."
+   },
+   {
+    "id": "timeline",
+    "name": "Team timeline",
+    "start": "readers",
+    "mvp": false,
+    "detail": "Readings, events and pre-ledger DisableDomainEvent/AdminPanelInteraction rows in one view."
+   },
+   {
+    "id": "snapshots",
+    "name": "Fold snapshots",
+    "start": "contract",
+    "mvp": false,
+    "detail": "The fold is O(events per team) per commit. Add snapshots when a team's stream passes a measured size, not before."
+   }
   ]
+ },
+ "sections": [
+  {
+   "id": "mvp-waves",
+   "group": "MVP",
+   "title": "The MVP in four waves",
+   "body": "The rule: **the MVP records exactly what the post-flip code records for the same action**, so an event stored now means the same after the flip.\n\n| wave | branches (merge in this order) | what changes in prod |\n|---|---|---|\n| 1 · inert | [add-enforcement-event-ledger](canopy://v2/b/loops/add-enforcement-event-ledger) · [purge-a-teams-ledger-with-the-team](canopy://v2/b/loops/purge-a-teams-ledger-with-the-team) · [fold-a-teams-enforcement-events](canopy://v2/b/loops/fold-a-teams-enforcement-events) | an empty table, code nobody calls |\n| 2 · writes | [record-enforcement-events](canopy://v2/b/loops/record-enforcement-events) → [record-domain-disables-on-the-ledger](canopy://v2/b/loops/record-domain-disables-on-the-ledger) → [create-domains-in-one-transaction](canopy://v2/b/loops/create-domains-in-one-transaction) → [record-domain-reenables-on-the-ledger](canopy://v2/b/loops/record-domain-reenables-on-the-ledger) | every disable, creation and re-enable appends events in its own transaction; flags unchanged |\n| 3 · backfill + drift | [set-domain-disabled-flags](canopy://v2/b/loops/set-domain-disabled-flags) → [list-teams-on-the-ledger](canopy://v2/b/loops/list-teams-on-the-ledger) → [adopt-legacy-disables](canopy://v2/b/loops/adopt-legacy-disables) → [check-the-ledger-agrees-with-the-flags](canopy://v2/b/loops/check-the-ledger-agrees-with-the-flags) | two scripts: adopt once, check daily |\n| 4 · panel | [find-the-readings-cases-point-at](canopy://v2/b/loops/find-the-readings-cases-point-at) → [read-a-teams-open-cases](canopy://v2/b/loops/read-a-teams-open-cases) → [serve-a-teams-open-cases](canopy://v2/b/loops/serve-a-teams-open-cases) → [list-open-cases-on-domain-review](canopy://v2/b/loops/list-open-cases-on-domain-review) | admins see each open case, its reason, who opened it and the reading behind it |\n\nForest: [ledger-mvp](canopy://v2/p/loops/ledger-mvp). The grid's **t** pages hold each gate, manual step and rollback.\n\n**Gates (2026-11-04, 23:30):** all 15 branches are gates-green and server-recorded on their current trees, waves 1–4. Nothing is pushed: start with wave 1, bottom-up, PR titles and bases on the PRs page."
+  },
+  {
+   "id": "mvp-prs",
+   "group": "MVP",
+   "title": "PR titles and bodies",
+   "body": "Titles are `feat(loo-6239): <title>`. Each base is the branch above it (\"Stacked on: #N\" once that PR exists). Bodies are the why, above the Traffic Cop template.\n\n**1 · [add-enforcement-event-ledger](canopy://v2/b/loops/add-enforcement-event-ledger)** · base `main`\n\n- title: `feat(loo-6239): add the enforcement ledger`\n- body: an insert-only stream of enforcement decisions per team, numbered per team so writers take turns under an advisory lock. the database refuses edits, actorless events, a person without a note, and a payload that doesn't name its version.\n\n**1 · [purge-a-teams-ledger-with-the-team](canopy://v2/b/loops/purge-a-teams-ledger-with-the-team)** · base `add-enforcement-event-ledger`\n\n- title: `feat(loo-6239): purge a team's ledger with the team`\n- body: team deletion removes everything else the team owns, so for now its enforcement history goes too. an explicit delete, not a cascade, so keeping history later is one line. merge before record-every-domain-disable.\n\n**1 · [fold-a-teams-enforcement-events](canopy://v2/b/loops/fold-a-teams-enforcement-events)** · base `add-enforcement-event-ledger`\n\n- title: `feat(loo-6239): fold a team's enforcement events`\n- body: a pure apply turns a team's stream into its cases. every opening says what it covers, what it stops and which readings tripped it, and each payload is read at the version it was written.\n\n**2 · [record-enforcement-events](canopy://v2/b/loops/record-enforcement-events)** · base `fold-a-teams-enforcement-events`\n\n- title: `feat(loo-6239): record drafted enforcement events`\n- body: writers draft their events against the stream as it stands under the team lock, so a repeated cause opens nothing and every payload is stamped with its version.\n\n**2 · [record-domain-disables-on-the-ledger](canopy://v2/b/loops/record-domain-disables-on-the-ledger)** · base `record-enforcement-events`\n\n- title: `feat(loo-6239): record every domain disable`\n- body: every disable opens the case its cause calls for in the same transaction: a domain case, or one team case for a team-wide disable. the flag and disable event are written exactly as before.\n\n**2 · [create-domains-in-one-transaction](canopy://v2/b/loops/create-domains-in-one-transaction)** · base `record-domain-disables-on-the-ledger`\n\n- title: `feat(loo-6239): create domains in one transaction`\n- body: a suspicious new domain used to land in four separate writes, so a crash between them could leave it disabled with no reading or case. now they commit together.\n\n**2 · [record-domain-reenables-on-the-ledger](canopy://v2/b/loops/record-domain-reenables-on-the-ledger)** · base `create-domains-in-one-transaction`\n\n- title: `feat(loo-6239): record domain re-enables`\n- body: a re-enable releases every case holding the domain as the admin who did it, team-wide ones included: the same release the ledger will make once it decides.\n\n**3 · [set-domain-disabled-flags](canopy://v2/b/loops/set-domain-disabled-flags)** · base `record-domain-reenables-on-the-ledger`\n\n- title: `feat(loo-6239): set domain disabled flags`\n- body: the adoption and drift scripts need each team's disabled domains and the teams that have any.\n\n**3 · [list-teams-on-the-ledger](canopy://v2/b/loops/list-teams-on-the-ledger)** · base `set-domain-disabled-flags`\n\n- title: `feat(loo-6239): list teams on the ledger`\n- body: the drift check walks every team with events, not just the ones with a disabled domain.\n\n**3 · [adopt-legacy-disables](canopy://v2/b/loops/adopt-legacy-disables)** · base `list-teams-on-the-ledger`\n\n- title: `feat(loo-6239): adopt legacy disables`\n- body: domains disabled before the ledger have no case. this gives each one a legacy case once, as a script, after every writer records.\n\n**3 · [check-the-ledger-agrees-with-the-flags](canopy://v2/b/loops/check-the-ledger-agrees-with-the-flags)** · base `adopt-legacy-disables`\n\n- title: `feat(loo-6239): check the ledger agrees with the flags`\n- body: before the ledger becomes the truth for disabled, prove it agrees with the flags we trust today. after the flip the same check catches drift.\n\n**4 · [find-the-readings-cases-point-at](canopy://v2/b/loops/find-the-readings-cases-point-at)** · base `check-the-ledger-agrees-with-the-flags`\n\n- title: `feat(loo-6239): find a team's readings by id`\n- body: a case points at the notice or suspicious activity that tripped it; these read them back, scoped to the team.\n\n**4 · [read-a-teams-open-cases](canopy://v2/b/loops/read-a-teams-open-cases)** · base `find-the-readings-cases-point-at`\n\n- title: `feat(loo-6239): read a team's open cases`\n- body: folds the team's stream and joins each open case to its domain and readings, so a reviewer sees why without the ledger copying any reading.\n\n**4 · [serve-a-teams-open-cases](canopy://v2/b/loops/serve-a-teams-open-cases)** · base `read-a-teams-open-cases`\n\n- title: `feat(loo-6239): serve a team's open cases`\n- body: a thin admin read over the model, for the review panel.\n\n**4 · [list-open-cases-on-domain-review](canopy://v2/b/loops/list-open-cases-on-domain-review)** · base `serve-a-teams-open-cases`\n\n- title: `feat(loo-6239): list open cases on domain review`\n- body: the assessment panel shows why the team's domains can't send: each open case, who opened it, and the readings it points at.\n\n"
+  },
+  {
+   "id": "decide-r1-r2",
+   "group": "Open decisions",
+   "title": "R1 and R2: settled",
+   "body": "- **R1 is in the MVP**: every payload carries `v`, enforced by a CHECK.\n- **R2 is accepted**: repeat causes dedupe against open cases from the first event; only a redelivery after release reopens. See the R2 lane."
+  },
+  {
+   "id": "decide-content-in-first-prs",
+   "group": "Open decisions",
+   "title": "Keep content readings in the first PRs?",
+   "body": "reading.reviewed, email scope and the publish effect are already built into the core branches. The alternative is cutting them out so the first PRs show only the core schema.\n\n**Recommendation: keep them.** They're in the MVP lane already; cutting them out means a reshape for a smaller first diff, not a safer one."
+  },
+  {
+   "id": "decide-readings-retention",
+   "group": "Open decisions",
+   "title": "Readings retention on team delete",
+   "body": "Events now outlive the team (plain `teamId`, no FK; purged by one line in `finalize-team-delete.ts` for now). Readings (`SuspiciousActivity`, `AccountLimitNotice`) are still deleted with the team, so a kept event could cite a reading that's gone.\n\n**Recommendation: decide after the MVP.** While events are purged with the team too, nothing dangles. It becomes real the day that purge line is removed."
+  },
+  {
+   "id": "decide-deletion-requested",
+   "group": "Open decisions",
+   "title": "team.deletion_requested as a case",
+   "body": "This is R6 (condition cases): a case that should close when its condition clears, which rules can't do today.\n\n**Recommendation: as planned, outside the MVP** (lane R6, flip → readers). It needs the ledger to be the authority first."
+  },
+  {
+   "id": "decide-seed-exception",
+   "group": "Open decisions",
+   "title": "The seed's CHECK exception",
+   "body": "**Not needed.** Adoption opens cases (`legacy.unrecorded`, decided by the rule `legacy.unrecorded@1`), and rules may write `opened` under `rules_open_or_review`. No guard is loosened."
+  },
+  {
+   "id": "decide-restack",
+   "group": "Open decisions",
+   "title": "Restack: done",
+   "body": "All 39 branches are restacked on main `7afff5923c` (2026-11-04). 27 of the 34 above the MVP replayed with identical line changes; the flip branches were redone on top of the new record branches."
+  }
+ ]
 }
