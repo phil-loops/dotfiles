@@ -33,7 +33,7 @@ struct ReviewPage: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 default:
                     HStack(alignment: .top, spacing: 0) {
-                        if pg.showsOutline { Color.clear.frame(width: pg.outlineReserve(app.pane?.id)) }
+                        if pg.showsTree { Color.clear.frame(width: pg.treeWidth) }
                         // the windows: columns of C-w v, each a stack of C-w s
                         HStack(alignment: .top, spacing: 0) {
                             ForEach(Array(pg.columns.enumerated()), id: \.offset) { c, col in
@@ -50,25 +50,18 @@ struct ReviewPage: View {
                         // no window shows the diff: it waits, scrolled where it was
                         .background { if pg.diffWindow == nil { DiffWindow().opacity(0).allowsHitTesting(false) } }
                         .frame(minHeight: 0, maxHeight: .infinity, alignment: .top)
-                        .padding(.leading, pg.showsOutline ? 0 : 12)
+                        .padding(.leading, pg.showsTree ? 0 : 12)
                     }
                     .overlay(alignment: .topLeading) {
-                        if pg.showsOutline {
-                            let strip = pg.outlineIsStrip(app.pane?.id)
-                            Outline(strip: strip)
-                                .frame(width: strip ? pg.stripWidth : pg.outlineWidth)
+                        if pg.showsTree {
+                            FileTree()
+                                .font(Theme.text(12))
+                                .padding(.leading, 6)
+                                .frame(width: pg.treeWidth)
                                 .frame(maxHeight: .infinity, alignment: .top)
                                 .background(theme.vellumNight)
-                                .overlay(alignment: .trailing) {
-                                    if !strip && pg.showsTree { theme.vellumEdge.frame(width: 1) }
-                                }
+                                .overlay(alignment: .trailing) { theme.vellumEdge.frame(width: 1) }
                         }
-                    }
-                    .onChange(of: app.cursors["review/\(ShipSeam.historyPane)"]) { _, k in
-                        // the outline's cursor is the diff's scope: a commit, or "= on main" for the whole branch
-                        guard let k, k.hasPrefix("h|"), app.pane?.id == ShipSeam.historyPane else { return }
-                        let sha = String(k.dropFirst(2))
-                        if ShipState.of(app).commitScope != (sha.isEmpty ? nil : sha) { ShipState.of(app).showCommit(sha.isEmpty ? nil : sha) }
                     }
                 }
             }
@@ -105,6 +98,7 @@ private struct ReviewHeader: View {
                 Spacer(minLength: 16)
                 if pg.integration == nil { ShipStripView(branchID: pg.id) }
             }
+            if pg.tab == "files", pg.integration == nil { ScopeChip() }
             if let c, !waiting(c, pg).isEmpty {
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
                     ForEach(waiting(c, pg), id: \.self) { Text($0) }
@@ -128,35 +122,45 @@ private struct ReviewHeader: View {
 }
 
 
-/// The file tree: a pane of the diff's files with viewed boxes, its filter on top while finding.
-/// The review's table of contents, down the left margin: the branch's commits oldest first with
-/// what they land as at the foot (the cursor there scopes the diff), then its files when there are
-/// several. Two panes, one above the other: "history" and "files".
-private struct Outline: View {
+/// What the diff covers, written where the reader looks first: one commit (against its own parent),
+/// or everything against the base. `, c` picks the commits, `, b` the base; the margin carries neither.
+private struct ScopeChip: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme
-    /// the diff has focus: only the files, by name
-    let strip: Bool
 
     var body: some View {
         let pg = ReviewPageState.of(app)
-        VStack(alignment: .leading, spacing: 14) {
-            if pg.showsHistory && !strip { HistoryList(branchID: pg.id).fixedSize(horizontal: false, vertical: true) }
-            if pg.showsTree { FileTree(strip: strip) }
+        let sha = ShipState.of(app).commitScope
+        let commit = sha.flatMap { s in ShipState.of(app).historyRows(pg.id)?.first { $0.sha.hasPrefix(s) } }
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            if let sha {
+                Text(String(sha.prefix(7))).foregroundStyle(theme.goldLeaf)
+                Text(commit?.subject ?? "one commit").foregroundStyle(theme.ink).lineLimit(1).truncationMode(.tail)
+            } else {
+                Text(Self.whole(pg)).foregroundStyle(theme.inkDim)
+            }
+            if pg.scopesCommits { Text(", c").foregroundStyle(theme.inkFaint).padding(.leading, 6) }
         }
         .font(Theme.text(12))
-        .padding(.leading, 6)
-        .task(id: app.store.view(Branch.self, pg.id).map(ShipState.historyKey)) {
-            ShipState.of(app).loadHistory(app, pg.id)
-            WordsState.of(app).load(app, pg.id)
+        .task(id: app.store.view(Branch.self, pg.id).map(ShipState.historyKey)) { ShipState.of(app).loadHistory(app, pg.id) }
+    }
+
+    /// The unscoped diff in words: what the base makes it cover.
+    static func whole(_ pg: ReviewPageState) -> String {
+        switch pg.base {
+        case .parent:
+            let n = pg.branch?.commits ?? 0
+            return n > 1 ? "all \(n) commits · vs parent" : "the branch · vs parent"
+        case .main: return "the whole stack · vs main"
+        case .outgoing: return "what the next push sends · vs origin"
         }
     }
 }
 
+/// The file tree: a pane of the diff's files with viewed boxes, its filter on top while finding.
 private struct FileTree: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme
-    let strip: Bool
 
     var body: some View {
         @Bindable var pg = ReviewPageState.of(app)
@@ -177,17 +181,11 @@ private struct FileTree: View {
                         Text(v.viewed ? "☑" : v.seen > 0 ? "◪" : "☐").foregroundStyle(v.viewed ? theme.patina : theme.inkFaint)
                         if v.flagged > 0 { Text("⚑\(v.flagged)").foregroundStyle(theme.ember) }
                         let tint = current == path ? theme.goldLeaf : v.viewed ? theme.inkFaint : theme.ink
-                        if strip {
-                            Text(path.split(separator: "/").last.map(String.init) ?? path).foregroundStyle(tint).lineLimit(1).truncationMode(.middle)
-                        } else {
-                            PathText(path: path, tint: tint)
-                        }
+                        PathText(path: path, tint: tint)
                         Spacer(minLength: 4)
                         if v.open > 0 { Text("\(v.open)").foregroundStyle(theme.ember) }
-                        if !strip {
-                            Text("+\(v.file.add)").foregroundStyle(theme.add)
-                            Text("−\(v.file.del)").foregroundStyle(theme.del)
-                        }
+                        Text("+\(v.file.add)").foregroundStyle(theme.add)
+                        Text("−\(v.file.del)").foregroundStyle(theme.del)
                     }
                     .font(Theme.text(11.5))
                     .help(path)
@@ -357,19 +355,13 @@ private struct WindowView: View {
     }
 }
 
-/// The diff, with the commit it's scoped to above it.
+/// The diff; the header's chip says which commits it covers.
 private struct DiffWindow: View {
     @Environment(AppModel.self) private var app
 
     var body: some View {
         let pg = ReviewPageState.of(app)
-        VStack(alignment: .leading, spacing: 8) {
-            if let sha = ShipState.of(app).commitScope {
-                CommitHead(branchID: pg.id, sha: sha).padding(.horizontal, 16).padding(.top, 4)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            DiffPane(empty: pg.base == .outgoing ? "nothing to push" : "no changes").frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
+        DiffPane(empty: pg.base == .outgoing ? "nothing to push" : "no changes").frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 

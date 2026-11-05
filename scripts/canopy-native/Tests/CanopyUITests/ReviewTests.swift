@@ -586,13 +586,13 @@ import Testing
         keys(a, "j")
         #expect(pg.hereWord?.count == 1 && pg.here?.key != "l|a.ts|R:2", "j keeps the character cursor on the next line")
         keys(a, "C-h")
-        #expect(a.pane?.id == (pg.showsHistory ? ShipSeam.historyPane : reviewTreePane), "⌃h, the pane to the left")
+        #expect(a.pane?.id == reviewTreePane, "⌃h, the pane to the left")
         keys(a, "C-l")
         #expect(a.pane?.id == reviewDiffPane)
         pg.open(Loc(repo: "loops", sha: "zzz", path: "other.ts", line: 4))
         #expect(a.pane?.id == reviewCodePane && !a.panes.contains { $0.id == reviewDiffPane }, "the file is in the diff's place")
         keys(a, "C-h")
-        #expect(a.pane?.id == (pg.showsHistory ? ShipSeam.historyPane : reviewTreePane), "⌃h, the pane to the left of it")
+        #expect(a.pane?.id == reviewTreePane, "⌃h, the pane to the left of it")
         keys(a, "C-l")
         #expect(a.pane?.id == reviewCodePane)
     }
@@ -645,25 +645,36 @@ import Testing
         #expect(a.pane?.id == reviewDiffPane)
     }
 
-    @Test func theOutlineFoldsToAStripWhileTheDiffHasFocus() async throws {
+    /// The margin is the files alone, the same width wherever the keyboard is; the commits are the
+    /// header chip's and the commits tab's, never a pane beside the diff.
+    @Test func theMarginIsTheFilesAtOneWidth() async throws {
         let (a, _) = try await app()
         let pg = ReviewPageState.of(a)
-        #expect(a.pane?.id == reviewDiffPane)
-        #expect(pg.outlineIsStrip(a.pane?.id), "reading the diff, the outline is the files by name")
-        #expect(pg.stripWidth < pg.outlineWidth)
+        #expect(pg.scopesCommits)
+        #expect(a.panes.map(\.id).first == reviewTreePane && !a.panes.contains { $0.id == ShipSeam.historyPane })
+        let width = pg.treeWidth
         keys(a, "C-h")
-        #expect(a.pane?.id != reviewDiffPane)
-        #expect(!pg.outlineIsStrip(a.pane?.id), "in the outline it opens back to full width")
-        #expect(pg.outlineReserve(a.pane?.id) == pg.outlineWidth, "the diff moves over: the open outline never covers it")
-        #expect(pg.outlineReserve(reviewDiffPane) == pg.stripWidth)
+        #expect(a.pane?.id == reviewTreePane && pg.treeWidth == width)
     }
 
-    @Test func retOnTheHistoryGoesIntoTheDiff() async throws {
-        let (a, _) = try await app()
-        #expect(ReviewPageState.of(a).showsHistory)
-        a.focus(pane: ShipSeam.historyPane)
+    /// , c picks what the diff covers: one commit, then every commit again; the files tab keeps the reader.
+    @Test func commaCPicksTheCommitsTheDiffCovers() async throws {
+        let (a, p) = try await app()
+        let pg = ReviewPageState.of(a)
+        let ship = ShipState.of(a)
+        let b = try #require(pg.branch)
+        ship.putHistory(b, [HistoryCommit(sha: "c2", subject: "use a plain delete"), HistoryCommit(sha: "c1", subject: "feat: add x")])
+        ShipStub.answer(p, "GET", "/loops/commit-diff", #"{"sha":"c1","files":[{"path":"c.ts","add":2,"del":0,"patch":"@@ -1,0 +1,2 @@\n+hi\n+there"}]}"#)
+        keys(a, ",", "c")
+        #expect(a.nav.picker?.title == "the diff covers" && a.nav.picker?.items.count == 3)
+        a.nav.move(2)
         keys(a, "ret")
-        #expect(a.pane?.id == reviewDiffPane, "↵ reads the whole branch's diff, never 'nothing here'")
+        #expect(a.nav.picker == nil && ship.commitScope == "c1" && pg.tab == "files")
+        await until("the commit's diff") { pg.files.map(\.path) == ["c.ts"] }
+        #expect(a.pane?.id == reviewDiffPane)
+        keys(a, ",", "c")
+        keys(a, "ret")
+        #expect(ship.commitScope == nil && pg.tab == "files", "the first row is every commit")
     }
 
     /// w / b put a one-character cursor on each name's first character, crossing lines; g d / space k ask about that name.

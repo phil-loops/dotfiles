@@ -155,27 +155,15 @@ public final class ReviewPageState: ShipHost {
     public let split = true
     /// How many characters fit across the diff, so a split line gives each half the same width (0: not measured yet).
     public var diffColumns = 0
-    /// The commits earn the outline when there's more than one to step through.
-    public var showsHistory: Bool { integration == nil && (branch?.commits ?? 0) > 1 }
-    /// The left margin: the commits, the files, or both.
-    public var showsOutline: Bool { showsHistory || showsTree }
-    public var outlineWidth: CGFloat { showsHistory ? max(270, showsTree ? treeWidth : 0) : treeWidth }
-    /// While the diff has focus the outline is a strip: the files by name, wide enough for the longest.
-    public var stripWidth: CGFloat {
-        let longest = files.map { $0.path.split(separator: "/").last?.count ?? 0 }.max() ?? 16
-        return min(220, max(140, CGFloat(longest) * 6.6 + 48))
-    }
-    /// The width the diff gives up to the outline: all of it, so stepping the commits never hides the
-    /// diff they scope; the strip's while the reader is in the diff.
-    public func outlineReserve(_ pane: String?) -> CGFloat { outlineIsStrip(pane) ? stripWidth : outlineWidth }
-    /// The outline folds to a strip while the reader is in the diff, when there are files to list.
-    public func outlineIsStrip(_ pane: String?) -> Bool { pane == reviewDiffPane && showsTree }
-    /// The files list earns its column only when there's more than one file to move between (or a filter typed into it).
+    /// A branch with more than one commit can scope its diff to one of them (the header's chip).
+    public var scopesCommits: Bool { integration == nil && (branch?.commits ?? 0) > 1 }
+    /// The left margin is the files, when there's more than one to move between (or a filter typed
+    /// into it). Its width never follows focus: what the diff covers is the header's, not the margin's.
     public var showsTree: Bool { views.count > 1 || !filter.isEmpty }
-    /// As wide as the longest path needs, within reason.
+    /// As wide as the longest path needs, within reason; a long folder gives way from its start.
     public var treeWidth: CGFloat {
         let longest = files.map(\.path.count).max() ?? 20
-        return min(360, max(200, CGFloat(longest) * 6.6 + 80))
+        return min(260, max(180, CGFloat(longest) * 6.6 + 80))
     }
     /// Characters the old half of a split line gets in this file: none for a new file and all of it
     /// for a deleted one, which have only one side to show; else half, since both halves carry the
