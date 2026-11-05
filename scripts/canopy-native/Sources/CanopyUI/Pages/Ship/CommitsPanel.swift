@@ -38,7 +38,7 @@ public struct CommitsPanel: View {
             ship.loadHistory(app, branchID)
             WordsState.of(app).load(app, branchID)
         }
-        .task(id: ShipRows.history(app, branchID).first) {
+        .task(id: [ShipRows.history(app, branchID).first, app.pane?.id]) {
             guard ship.commitScope == nil, app.pane?.id == ShipSeam.historyPane,
                   let newest = ShipRows.history(app, branchID).first else { return }
             app.runner.dispatch("history.select", via: .key, arg: String(newest.dropFirst(2)))
