@@ -187,7 +187,7 @@ public enum Verbs {
         v(.symbols, .nav, ["space s"], "list the file's symbols"),
         v(.github, .nav, ["space o g"], "open it on GitHub"),
         v(.githubMain, .nav, ["space o m"], "open these lines on GitHub, on main"),
-        v(.githubBranch, .nav, ["space o b"], "open these lines on GitHub, at the branch (the code beside the diff: at its commit)"),
+        v(.githubBranch, .nav, ["space o b"], "open these lines on GitHub, at the branch (the open file: at its commit)"),
         v(.preview, .nav, ["space o p"], "preview it on a side port"),
         v(.goForests, .nav, ["g F"], "go to Forests"),
         v(.goDashboard, .nav, ["g S"], "go to the dashboard"),

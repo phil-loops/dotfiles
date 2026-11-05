@@ -131,7 +131,7 @@ enum DiffCommands {
             placed = r.lowerBound
         }
 
-        /// After j / k in the code beside the diff: the same column on the new line, as the diff does.
+        /// After j / k in the open file: the same column on the new line, as the diff does.
         func keepSideColumn(from: Int?) {
             let c = from.map { $0 == sidePlaced ? (sideGoal ?? $0) : $0 } ?? sideGoal
             sideGoal = c
@@ -547,7 +547,7 @@ enum DiffCommands {
             let all = tokens(text)
             return (side, side == .left ? all.filter { $0.upperBound < pg.splitWidth(s.path) } : all)
         }
-        /// The code beside the diff: name to name across its lines.
+        /// The open file: name to name across its lines.
         func sideStep(_ d: Int, _ tokens: (String) -> [Range<Int>] = CodeLookup.names, end: Bool = false) throws {
             let lines = (pg.sideText ?? "").components(separatedBy: "\n")
             guard var n = RowKey.id(app.selected, "s").flatMap(Int.init) else { throw Refusal("no line here") }
@@ -856,7 +856,6 @@ enum DiffCommands {
                                if app.nav.picker != nil { return app.nav.close() }
                                if PageSearch.of(app).active { return PageSearch.of(app).clear() }
                                if pg.tab != "files" { pg.tab = "files"; return app.focus(pane: reviewDiffPane) }
-                               if pg.side != nil { return pg.closeSide() }
                                if !pg.filter.isEmpty { pg.filter = ""; return }
                                if pg.mark != nil { pg.mark = nil; return }
                                throw Refusal(KeyEngine.nothingToCancel)
@@ -897,7 +896,7 @@ enum DiffCommands {
                            }))
         r.register(Command(id: "review.types", title: "Show the type (hover)", scope: .review, verb: .type, label: "type", available: codeOK,
                            local: { _, _ in let (p, w) = position(); CodeLookup.of(app).hover(p, w) }))
-        for (id, kind, verb, title, label) in [("review.definition", LSPGoto.definition, Verb.definition, "Go to the definition — in the diff when it's there, else beside it", "def"),
+        for (id, kind, verb, title, label) in [("review.definition", LSPGoto.definition, Verb.definition, "Go to the definition", "def"),
                                               ("review.type-definition", .typeDefinition, .typeDefinition, "Go to the definition of its type", "type def"),
                                               ("review.implementation", .implementation, .implementations, "Go to its implementations", "impl"),
                                               ("review.references", .references, .references, "List its references", "refs")] {
@@ -910,9 +909,7 @@ enum DiffCommands {
                                let path = p?.path ?? (app.pane?.id == reviewCodePane ? pg.side?.path : pg.here?.path)
                                CodeLookup.of(app).symbols(path: path, side: p?.side ?? "new", w)
                            }))
-        r.register(Command(id: "review.side.close", title: "Close the code beside the diff", scope: .review, quiet: true,
-                           available: { _ in pg.side != nil }, local: { _, _ in pg.closeSide() }))
-        r.register(Command(id: "review.side.extend", title: "Select this line, then the next (the code beside the diff)", scope: .review, verb: .extend,
+        r.register(Command(id: "review.side.extend", title: "Select this line, then the next (the open file)", scope: .review, verb: .extend,
                            modes: [.normal, .select], label: "range", group: .move, available: { _ in pg.side != nil && app.pane?.id == reviewCodePane },
                            local: { _, _ in
                                if app.keys.mode != .select { app.anchorHere(); return app.keys.setMode(.select) }
@@ -922,7 +919,7 @@ enum DiffCommands {
 
         // ── space o m / space o b: these lines on GitHub (Helix's gh-open keys) ──
 
-        /// The lines under the cursor or selection: the code beside the diff's at its commit, else the diff's at the tip.
+        /// The lines under the cursor or selection: the open file's at its commit, else the diff's at the tip.
         func githubLines() -> (path: String, lines: ClosedRange<Int>, sha: String?)? {
             if let s = pg.side, app.pane?.id == reviewCodePane {
                 let ns = app.selection.compactMap { RowKey.id($0, "s").flatMap(Int.init) }
@@ -951,7 +948,7 @@ enum DiffCommands {
         r.register(Command(id: "review.github.main", title: "Open these lines on GitHub, on main", scope: .review, verb: .githubMain,
                            modes: [.normal, .select], label: "gh main", available: { _ in githubLines() != nil },
                            local: { _, _ in try openOnGitHub(main: true) }))
-        r.register(Command(id: "review.github.branch", title: "Open these lines on GitHub at the branch — the code beside the diff, at its commit", scope: .review,
+        r.register(Command(id: "review.github.branch", title: "Open these lines on GitHub at the branch — the open file, at its commit", scope: .review,
                            verb: .githubBranch, modes: [.normal, .select], label: "gh branch", available: { _ in githubLines() != nil },
                            local: { _, _ in try openOnGitHub(main: false) }))
 

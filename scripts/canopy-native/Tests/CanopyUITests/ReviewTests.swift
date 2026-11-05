@@ -539,8 +539,9 @@ import Testing
         keys(a, "C-l")
         #expect(a.pane?.id == reviewDiffPane)
         pg.open(Loc(repo: "loops", sha: "zzz", path: "other.ts", line: 4))
+        #expect(a.pane?.id == reviewCodePane && !a.panes.contains { $0.id == reviewDiffPane }, "the file is in the diff's place")
         keys(a, "C-h")
-        #expect(a.pane?.id == reviewDiffPane, "from the code beside the diff, ⌃h is the diff")
+        #expect(a.pane?.id == (pg.showsHistory ? ShipSeam.historyPane : reviewTreePane), "⌃h, the pane to the left of it")
         keys(a, "C-l")
         #expect(a.pane?.id == reviewCodePane)
     }
@@ -669,7 +670,7 @@ import Testing
         await until("the checkout") { pg.helix?.dir != nil }
         pg.helixAt = ("lib/z.ts", 4)
         pg.landHelix(a)
-        #expect(pg.side?.path == "lib/z.ts" && a.pane?.id == reviewCodePane && a.selected == "s:4", "back beside the diff, where Helix left off")
+        #expect(pg.side?.path == "lib/z.ts" && a.pane?.id == reviewCodePane && a.selected == "s:4", "back in the window, where Helix left off")
     }
 
     /// i on the old half has nothing to edit: that's history.
@@ -701,15 +702,28 @@ import Testing
         #expect(a.nav.picker == nil)
     }
 
+    /// esc cancels; it never changes what the window shows (Helix) — C-o does.
     @Test func escOnlyCancels() async throws {
         let (a, _) = try await app()
         let pg = ReviewPageState.of(a)
         pg.open(Loc(repo: "loops", sha: "zzz", path: "other.ts", line: 4))
         #expect(pg.side != nil && a.pane?.id == reviewCodePane)
         keys(a, "esc")
-        #expect(pg.side == nil && a.pane?.id == reviewDiffPane)
-        keys(a, "esc")
+        #expect(pg.side != nil && a.pane?.id == reviewCodePane)
         #expect(a.router.route.surfaceID == "review")
+    }
+
+    /// A diff cursor put from underneath (a reload settling) waits in the diff; the file stays.
+    @Test func aDiffCursorFromUnderneathLeavesTheFileShowing() async throws {
+        let (a, _) = try await app()
+        let pg = ReviewPageState.of(a)
+        pg.open(Loc(repo: "loops", sha: "zzz", path: "other.ts", line: 4))
+        let was = a.selected
+        pg.setCursor("l|b.ts|R:6", focus: false)
+        #expect(pg.side != nil && a.pane?.id == reviewCodePane && a.selected == was)
+        #expect(pg.diffCursor == "l|b.ts|R:6")
+        pg.setCursor("l|a.ts|R:2")
+        #expect(pg.side == nil && a.pane?.id == reviewDiffPane && a.selected == "l|a.ts|R:2", "a jump into the diff shows it")
     }
 
     @Test func theBaseRidesTheAddress() async throws {
@@ -731,7 +745,8 @@ import Testing
         #expect(pg.here?.key == "l|a.ts|R:6", "the cursor lands on the line the gap ended on")
     }
 
-    @Test func gdGoesInTheDiffOrBesideIt() async throws {
+    /// g d replaces what the window shows (Helix's Action::Replace); C-o puts the diff back, C-i the file.
+    @Test func gdReplacesWhatTheWindowShows() async throws {
         let (a, p) = try await app()
         let pg = ReviewPageState.of(a)
         let tip = pg.tip
@@ -742,13 +757,18 @@ import Testing
         #expect(ask.body["branch"] == "add-hankles-limited-label" && ask.body["path"] == "a.ts" && ask.body["line"] == 2)
         keys(a, "C-o")
         #expect(pg.here?.key == "l|a.ts|R:2")
-        // somewhere the diff doesn't show: beside it, at the commit
+        // somewhere the diff doesn't show: the file at the commit, in the diff's place
         ShipStub.answer(p, "POST", "/loops/lsp/definition", #"{"ok":true,"sha":"\#(tip)","locations":[{"path":"lib/z.ts","line":2,"character":0}]}"#)
         ShipStub.answer(p, "GET", "/loops/lsp/src", #"{"path":"lib/z.ts","sha":"x","text":"one\ntwo\nthree"}"#)
         keys(a, "g", "d")
-        await until("the side pane") { pg.sideText != nil }
-        #expect(pg.side?.path == "lib/z.ts" && a.selected == "s:2")
+        await until("the file") { pg.sideText != nil }
+        #expect(pg.side?.path == "lib/z.ts" && a.selected == "s:2" && a.pane?.id == reviewCodePane)
+        #expect(!a.panes.contains { $0.id == reviewDiffPane }, "in the diff's place, not beside it")
         #expect(ReviewSurface().title(for: "s:2", a) == "2 two")
+        keys(a, "C-o")
+        #expect(pg.side == nil && a.pane?.id == reviewDiffPane && pg.here?.key == "l|a.ts|R:2", "C-o: the diff, where the jump left it")
+        keys(a, "C-i")
+        #expect(pg.side?.path == "lib/z.ts" && a.pane?.id == reviewCodePane, "C-i: the file again")
     }
 
     /// The code beside the diff reads like Helix: w / b walk its names (what g d asks about), v and x
@@ -794,7 +814,10 @@ import Testing
         await until("the browser") { opened.count == 2 }
         #expect(opened.last == "https://github.com/o/r/blob/\(tip)/lib/z.ts#L4", "at the commit the code is shown at")
 
-        keys(a, "C-h", "space", "o", "b")
+        // C-o walks back through both jumps (the second g d's start, then the diff)
+        for _ in 0..<3 where pg.side != nil { keys(a, "C-o") }
+        #expect(pg.side == nil)
+        keys(a, "space", "o", "b")
         await until("the browser") { opened.count == 3 }
         #expect(opened.last == "https://github.com/o/r/blob/add-hankles-limited-label/a.ts#L2", "the diff's line, at the branch")
     }

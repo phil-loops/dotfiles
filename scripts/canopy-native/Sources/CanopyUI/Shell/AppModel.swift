@@ -254,6 +254,13 @@ public final class AppModel: CommandContext {
         cursorIdx = max(0, rows.firstIndex(of: key ?? "") ?? 0)
     }
 
+    /// Put a pane's cursor without focusing it: a window that isn't on screen keeps its place.
+    public func setCursor(_ key: String?, pane id: String) {
+        let k = "\(router.surface.id)/\(id)"
+        cursors[k] = key
+        cursorIdxs[k] = max(0, panes.first { $0.id == id }?.rows.firstIndex(of: key ?? "") ?? 0)
+    }
+
     public func cursorTo(_ i: Int) {
         let r = rows
         guard !r.isEmpty else { return }

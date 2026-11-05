@@ -79,8 +79,11 @@ struct ReviewSurface: SurfaceProvider {
                 out.append(Pane(id: ShipSeam.historyPane, title: "commits", rows: ShipRows.history(app, id), column: 0, row: 0, pageSize: 10))
             }
             if pg.showsTree { out.append(Pane(id: reviewTreePane, title: "files", rows: ReviewPage.treeRows(pg), column: 0, row: 1, pageSize: 12)) }
-            out.append(Pane(id: reviewDiffPane, title: "diff", rows: pg.stopKeys, column: 1, pageSize: 20))
-            if pg.side != nil { out.append(Pane(id: reviewCodePane, title: pg.side.map { shortPath($0.path) } ?? "code", rows: pg.sideRows, column: 2, pageSize: 20)) }
+            if let s = pg.side {
+                out.append(Pane(id: reviewCodePane, title: shortPath(s.path), rows: pg.sideRows, column: 1, pageSize: 20))
+            } else {
+                out.append(Pane(id: reviewDiffPane, title: "diff", rows: pg.stopKeys, column: 1, pageSize: 20))
+            }
             return out
         }
     }
@@ -120,7 +123,7 @@ struct ReviewSurface: SurfaceProvider {
 
     /// In the diff `/` reads code only — a line's new half (field 0), and its old half (field 1) where
     /// that's a removed line, as far as it's drawn; headers, conversations and gaps aren't searched.
-    /// The code beside the diff: each line's text. Elsewhere (the file tree): titles.
+    /// The open file: each line's text. Elsewhere (the file tree): titles.
     func searchFields(for row: String, _ app: AppModel) -> [String] {
         let pg = ReviewPageState.of(app)
         switch PageSearch.of(app).pane {
