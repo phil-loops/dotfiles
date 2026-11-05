@@ -77,13 +77,6 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
         s["entities"] = .object(ents)
     }
 
-    func until(_ what: String, timeout: Double = 3, _ ok: () -> Bool) async {
-        let t0 = Date()
-        while !ok() {
-            if Date().timeIntervalSince(t0) > timeout { Issue.record("timed out waiting for \(what)"); return }
-            try? await Task.sleep(nanoseconds: 10_000_000)
-        }
-    }
 
     // ── the mouseless rule ──
 

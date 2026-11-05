@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Run canopy-native's whole test suite and judge it by the names of the tests that failed, every one
+# of them: prints each failing test on its own line and exits 1 if there are any. Extra args go to
+# `swift test` (e.g. --filter ReviewTests).
+set -uo pipefail
+cd "$(dirname "$0")/canopy-native" || exit 2
+log=$(mktemp -t canopy-test)
+trap 'rm -f "$log"' EXIT
+swift test "$@" >"$log" 2>&1
+status=$?
+failed=$(grep -E '^✘ Test .*\) failed' "$log" | sed -E 's/^✘ Test ([^ ]+) failed.*/\1/' | sort -u)
+summary=$(grep -E 'Test run with [0-9]+ tests' "$log" | tail -1 | sed -E 's/^. //')
+if [ -n "$failed" ]; then
+  echo "failed:"; echo "$failed" | sed 's/^/  /'
+  echo "${summary:-no summary}"
+  exit 1
+fi
+if [ $status -ne 0 ]; then
+  grep -E 'error:' "$log" | head -20
+  echo "swift test exited $status without a failing test (a build error?)"
+  exit 1
+fi
+echo "${summary:-passed}"
