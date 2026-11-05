@@ -5,7 +5,7 @@ description: Present a design, plan or walkthrough as a native macOS app (Swift 
 
 # show — a native walkthrough Phil can sign off on
 
-`show <file.json>` opens a file in the one Show window (section list, rendered markdown, a **Signed off** checkbox and a note field per section). The window never multiplies: a rail on its left edge switches between **workspaces** (four on the rail with ⌘1–⌘4; Forest, Review, Runs and API have no tile or number and come forward when a document routes to them or from History), and each keeps its own open document, typed text and scroll while another is in front.
+`show <file.json>` opens a file in the one Show window (section list, rendered markdown, a **Signed off** checkbox and a note field per section). The window never multiplies: a rail on its left edge switches between **workspaces** (five on the rail with ⌘1–⌘5; Forest, Review, Runs and API have no tile or number and come forward when a document routes to them or from History), and each keeps its own open document, typed text and scroll while another is in front.
 
 | Workspace | Key | Opens files with | Holds |
 |---|---|---|---|
@@ -13,6 +13,7 @@ description: Present a design, plan or walkthrough as a native macOS app (Swift 
 | Learn | ⌘2 | `"mode": "tutor"` | tutor sessions |
 | Machine | ⌘3 | — | canopy's machine page on its own key: every preview and dev server, its branch and port |
 | Inbox | ⌘4 | `show-note "<title>" "<markdown>"` (`"workspace": "inbox"`) | messages from Claude sessions, one per row; a reply goes to the sender, ⌘J jumps to its pane |
+| Plans | ⌘5 | `"mode": "plan"` | migration plans, each opening as a full-window canvas (see *Plans*) |
 | Forest | — | `"mode": "forest"` | a project's branches in merge order (branch-deck decks) |
 | Review | — | `"mode": "deck"` or no mode | plans and designs to sign off |
 | Runs | — | `"mode": "live"` | live runs, read-only |
@@ -26,7 +27,7 @@ An optional top-level `"workspace": "forest" | "review" | "learn" | "runs"` over
 
 **Quiet arrival.** Phil runs many sessions at once, so `show <file>` never takes focus by default: the file lands at the top of its workspace shelf's **Waiting on you** group, that workspace's rail badge ticks, and a macOS notification posts "<title> · <topic>" (clicking it opens the file and brings Show forward). Nothing switches or opens. Show only comes forward on its own when it is already frontmost (then the file opens in its workspace, as before), or when the caller passes **`--focus`**: `show --focus <file>` switches to the file's workspace, opens it and activates Show. **Pass `--focus` only when the user asked to see that deck in this turn** ("show me", "open it", "put it up now"); a deck you produced on your own initiative, a regenerated deck, or a follow-up goes without it. A bare `show` (no file), `show --api` and `show --canopy` are Phil asking, so they always come forward.
 
-**Topics.** A deck's `replyTo` (first 8 characters of the sending session's id) names its topic with no typing: `claude-say --topic <replyTo>` finds the session in the presence registry (`~/.claude/session-presence`, the one `claude-say --list` reads), takes its working directory and checked-out branch, and answers `git config branch.<b>.stack-project`; else the branch name (`main`/`master` don't count); else the worktree's directory name. Show remembers each `replyTo`'s topic, so a deck keeps it after the session ends. Shelf rows and the notification show it; a deck without `replyTo` has no topic. `claude-say --list` prints the same topic column. The only thing that crosses between workspaces is the count of documents waiting on Phil, a badge on each rail icon. The title band shows the document's title and, in the workspace's quiet tint, its progress.
+**Topics.** A deck's `replyTo` (first 8 characters of the sending session's id) names its topic with no typing: `claude-say --topic <replyTo>` finds the session in the presence registry (`~/.claude/session-presence`, the one `claude-say --list` reads), takes its working directory and checked-out branch, and answers `git config branch.<b>.stack-project`; else the branch name (`main`/`master` don't count); else the worktree's directory name. Show remembers each `replyTo`'s topic, so a deck keeps it after the session ends. Shelf rows and the notification show it; a deck without `replyTo` has no topic. `claude-say --list` prints the same topic column. The only thing that crosses between workspaces is the count of documents waiting on Phil, a badge on each rail icon. The title band shows the document's title and nothing else.
 
 **A library, not tabs.** One document is open per workspace. Each workspace's left column is a shelf of its documents from `~/.dotfiles/show` and `show/tutor/`, grouped by what they want from Phil: **Waiting on you** (◆: unsigned sections, or a tutor rung with no answer), **Running** (◉: Runs only, `status.state` `running`), and **Done** (●: fully signed, finished runs, tutor sessions waiting on Claude), which folds after 5. Each row shows the title, then its topic (when it has a `replyTo`), when it last arrived or was touched, and "4 of 9 signed". The open document's section list is a second column beside the shelf (marks: ● signed, ◆ has a note, ◐ open, ○ not yet); ⌃⌘S hides the shelf, and it collapses by itself when the window gets narrow.
 
@@ -91,7 +92,7 @@ Sidecar `<deck>.thread.json` beside the deck:
 
 ## Plans: a migration laid out before any branch exists
 
-A plan is a deck with a top-level `"plan"` object (`"mode": "plan"` by convention; it opens in Review). Use it to agree a migration's shape with Phil before reforesting: which code holds the truth at each stage, what every writer and reader does, the gate, manual step and rollback between stages, and which extras go in the MVP.
+A plan is a deck with a top-level `"plan"` object and `"mode": "plan"`, which opens it in Plans (⌘5). Use it to agree a migration's shape with Phil before reforesting: which code holds the truth at each stage, what every writer and reader does, the gate, manual step and rollback between stages, and which extras go in the MVP.
 
 ```json
 { "mode": "plan", "title": "…", "replyTo": "…", "sections": [],
