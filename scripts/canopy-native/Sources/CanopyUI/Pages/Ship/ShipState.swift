@@ -249,7 +249,14 @@ public final class ShipState {
     /// For tests and the forest page: a history read put in place.
     public func putHistory(_ b: Branch, _ rows: [HistoryCommit]) { history = (Self.historyKey(b), rows.filter(\.own)) }
 
-    /// Show one commit's diff (nil: the whole branch). The diff itself is area B's to load.
+    /// The commit whose words the commits tab shows: its list's cursor, and nothing else — moving
+    /// it never changes what the diff covers.
+    public static func wordsCommit(_ app: AppModel) -> String? {
+        guard let k = app.cursors["review/\(ShipSeam.historyPane)"], k.hasPrefix("h|"), k.count > 2 else { return nil }
+        return String(k.dropFirst(2))
+    }
+
+    /// Show one commit's diff, or a run's ("from..to"; nil: the whole branch). The diff itself is area B's to load.
     public func showCommit(_ sha: String?) {
         host.commitScopeChanged(sha)
     }

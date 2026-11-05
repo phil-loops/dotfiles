@@ -12,6 +12,8 @@ public struct Scope: OpenString {
     public static let row: Scope = "row", project: Scope = "project", branch: Scope = "branch"
     public static let review: Scope = "review", line: Scope = "line", thread: Scope = "thread"
     public static let pending: Scope = "pending", gap: Scope = "gap", history: Scope = "history", commit: Scope = "commit"
+    /// the cursor on the review header's branch line (what the diff covers)
+    public static let branchLine: Scope = "branch-line"
     public static let todo: Scope = "todo", item: Scope = "item", forest: Scope = "forest"
     public static let machine: Scope = "machine", server: Scope = "server"
     public static let wiki: Scope = "wiki", article: Scope = "article"
@@ -325,7 +327,7 @@ public final class CommandRegistry {
 
     public static let defaultSurfaceScopes: [String: [Scope]] = [
         "forests": [.branch, .project, .row, .forests],
-        "review": [.history, .commit, .pending, .thread, .line, .gap, .review],
+        "review": [.branchLine, .history, .commit, .pending, .thread, .line, .gap, .review],
         "dashboard": [.dashboard],
         "todo": [.item, .todo],
         "forest": [.branch, .row, .forest, .project],
@@ -337,7 +339,7 @@ public final class CommandRegistry {
     public static let scopeTitles: [String: String] = [
         "global": "Everywhere", "forests": "On Forests", "row": "On a forest or branch", "project": "On a forest",
         "branch": "On a branch", "dashboard": "On the dashboard", "review": "Reviewing a branch", "line": "On a diff line",
-        "thread": "On a conversation", "pending": "On a pending comment", "gap": "On hidden lines", "history": "In the history",
+        "branch-line": "On the branch's line", "thread": "On a conversation", "pending": "On a pending comment", "gap": "On hidden lines", "history": "In the history",
         "commit": "In one commit", "todo": "On the tracker", "item": "On an item", "forest": "On a forest's page",
         "machine": "On the machine", "server": "On a server", "wiki": "On the wiki", "article": "On a page in the list",
         "tutor": "On the tutor", "concept": "On a concept", "lesson": "On a session you keep", "session": "In a session",

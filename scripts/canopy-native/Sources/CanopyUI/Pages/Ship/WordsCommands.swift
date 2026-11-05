@@ -175,7 +175,6 @@ enum WordsCommands {
                 if ship.composer != nil { return app.runner.dispatch("review.compose.edit", via: .key) }
                 guard let row, case let sha = String(row.dropFirst(2)), let w = WordsRow("w|s|\(sha)"),
                       let id = branchOf(app, nil) else { return }
-                if ship.commitScope != sha { ship.showCommit(sha) }
                 ship.historyFocus = .diff
                 app.focus(pane: ShipSeam.wordsPane)
                 app.setCursor("w|s|\(sha)")

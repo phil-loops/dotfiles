@@ -709,24 +709,54 @@ import Testing
         #expect(a.pane?.id == reviewTreePane && pg.treeWidth == width)
     }
 
-    /// , h picks what the diff covers: one commit, then every commit again; the files tab keeps the reader.
-    @Test func commaHPicksTheCommitsTheDiffCovers() async throws {
+    /// , h puts a cursor on the branch's line; ↵ ↵ picks two ends. The same commit twice is that
+    /// commit alone, a commit to a later one is the run between, the parent to the tip the branch.
+    @Test func commaHPicksTheStretchOnTheBranchLine() async throws {
         let (a, p) = try await app()
         let pg = ReviewPageState.of(a)
         let ship = ShipState.of(a)
         let b = try #require(pg.branch)
-        ship.putHistory(b, [HistoryCommit(sha: "c2", subject: "use a plain delete"), HistoryCommit(sha: "c1", subject: "feat: add x")])
-        ShipStub.answer(p, "GET", "/loops/commit-diff", #"{"sha":"c1","files":[{"path":"c.ts","add":2,"del":0,"patch":"@@ -1,0 +1,2 @@\n+hi\n+there"}]}"#)
+        ship.putHistory(b, [HistoryCommit(sha: "c3", subject: "third"), HistoryCommit(sha: "c2", subject: "second"), HistoryCommit(sha: "c1", subject: "first")])
+        ShipStub.answer(p, "GET", "/loops/commit-diff", #"{"sha":"c2","files":[{"path":"c.ts","add":2,"del":0,"patch":"@@ -1,0 +1,2 @@\n+hi\n+there"}]}"#)
+        let l = try #require(pg.line)
+        #expect(l.points.map(\.key) == ["p|main", "p|parent", "c|c1", "c|c2", "c|c3"] || l.points.map(\.key) == ["p|parent", "c|c1", "c|c2", "c|c3"])
+        #expect(pg.lit.map { [$0.lo, $0.hi] } == [l.parentIndex, l.tip], "the whole branch lights parent → tip")
         keys(a, ",", "h")
-        #expect(a.nav.picker?.title == "the diff covers" && a.nav.picker?.items.count == 3)
-        a.nav.move(2)
-        keys(a, "ret")
-        #expect(a.nav.picker == nil && ship.commitScope == "c1" && pg.tab == "files")
+        #expect(a.pane?.id == reviewLinePane && a.selected == "c|c3", "the cursor starts at the lit stretch's end")
+        keys(a, "h")
+        #expect(a.selected == "c|c2")
+        keys(a, "ret", "ret")
+        #expect(pg.commitScope == "c2" && a.pane?.id == reviewDiffPane, "the same commit twice: that commit alone")
         await until("the commit's diff") { pg.files.map(\.path) == ["c.ts"] }
-        #expect(a.pane?.id == reviewDiffPane)
+        keys(a, ",", "h", "h", "h", "ret", "l", "l", "ret")
+        #expect(pg.commitScope == "c1..c2", "the parent to c2: the run of c1 and c2, \(pg.commitScope ?? "-")")
+        #expect(pg.lit.map { [$0.lo, $0.hi] } == [l.parentIndex, l.parentIndex + 2])
         keys(a, ",", "h")
+        a.setCursor(l.points[l.parentIndex].key)
         keys(a, "ret")
-        #expect(ship.commitScope == nil && pg.tab == "files", "the first row is every commit")
+        a.setCursor("c|c3")
+        keys(a, "ret")
+        #expect(pg.commitScope == nil && pg.base == .parent, "the start of the line to the tip: the whole branch")
+        keys(a, ",", "h", "ret", "esc")
+        #expect(pg.lineAnchor == nil && a.pane?.id == reviewLinePane, "esc drops the picked end first")
+        keys(a, "esc")
+        #expect(a.pane?.id == reviewDiffPane)
+    }
+
+    /// ] h / [ h step a one-commit window along the line without leaving the diff.
+    @Test func bracketHStepsOneCommitAtATime() async throws {
+        let (a, _) = try await app()
+        let pg = ReviewPageState.of(a)
+        let b = try #require(pg.branch)
+        ShipState.of(a).putHistory(b, [HistoryCommit(sha: "c2", subject: "second"), HistoryCommit(sha: "c1", subject: "first")])
+        keys(a, "]", "h")
+        #expect(pg.commitScope == "c1" && a.pane?.id == reviewDiffPane, "from the whole branch, its first commit")
+        keys(a, "]", "h")
+        #expect(pg.commitScope == "c2")
+        keys(a, "]", "h")
+        #expect(pg.commitScope == "c2" && a.runner.note == "already on the last commit")
+        keys(a, "[", "h")
+        #expect(pg.commitScope == "c1")
     }
 
     /// w / b put a one-character cursor on each name's first character, crossing lines; g d / space k ask about that name.
@@ -1110,24 +1140,25 @@ import Testing
         #expect(ShipState.of(a).composer == nil, "esc closes Ship's box")
     }
 
-    @Test func theCommitsTabShowsTheSelectedCommitsDiff() async throws {
+    /// The commits tab draws no diff and changes nothing by being visited: ↵ on a commit is the one
+    /// way it scopes the code tab, which is where the diff is read.
+    @Test func theCommitsTabReadsWordsAndRetReadsTheDiff() async throws {
         let (a, p) = try await app()
         let pg = ReviewPageState.of(a)
+        let b = try #require(pg.branch)
+        ShipState.of(a).putHistory(b, [HistoryCommit(sha: "c2", subject: "second"), HistoryCommit(sha: "c1", subject: "first")])
         ShipStub.answer(p, "GET", "/loops/commit-diff", #"{"sha":"c1","files":[{"path":"c.ts","add":1,"del":0,"patch":"@@ -1,0 +1,1 @@\n+hi"}]}"#)
         keys(a, "space", "2")
-        #expect(pg.tab == "commits")
-        pg.commitScopeChanged("c1")
-        await until("the commit's diff") { pg.files.map(\.path) == ["c.ts"] }
-        #expect(a.panes.map(\.id).contains(reviewDiffPane))
-        pg.focusDiff(a, true)
-        #expect(pg.here?.key == "l|c.ts|R:1")
-        let words = try #require(a.panes.first { $0.id == ShipSeam.wordsPane })
-        let diff = try #require(a.panes.first { $0.id == reviewDiffPane })
-        #expect(diff.column == words.column && diff.row == words.row + 1, "the diff sits under the commit's words, as drawn")
+        #expect(pg.tab == "commits" && !a.panes.contains { $0.id == reviewDiffPane })
+        a.runner.dispatch("history.select", via: .key, arg: "c1")
+        #expect(!pg.scoped, "visiting a commit's words leaves the diff alone")
         keys(a, "space", "3")
-        #expect(pg.scoped && pg.files.map(\.path) == ["c.ts"], "the outline's scope carries into the files view")
-        ShipState.of(a).showCommit(nil)
-        #expect(pg.scoped == false && pg.files.map(\.path) == ["a.ts", "b.ts"], "= on main: the whole branch again")
+        #expect(!pg.scoped && pg.files.map(\.path) == ["a.ts", "b.ts"])
+        keys(a, "space", "2")
+        a.runner.dispatch("history.select", via: .key, arg: "c1")
+        keys(a, "ret")
+        #expect(pg.tab == "files" && pg.commitScope == "c1" && a.pane?.id == reviewDiffPane)
+        await until("the commit's diff") { pg.files.map(\.path) == ["c.ts"] }
     }
 
     /// The commit a branch's commits tab shows belongs to that branch: on the next branch nothing from
@@ -1223,5 +1254,46 @@ import Testing
         print("big diff: \(n) stops in \(Int(stopsMs))ms · canvas text \(text.length) chars in \(Int(buildMs))ms · j \(String(format: "%.2f", keyMs))ms · segment keys \(Int(segKeysMs))ms")
         #expect(keyMs < 20)
         #expect(buildMs < 3000)
+    }
+}
+
+/// The branch line's model, alone: two points to what the diff covers, and back.
+@MainActor @Suite struct ReviewLineTests {
+    let stacked = ReviewLine(parentIsMain: false, commits: [HistoryCommit(sha: "c3", subject: "", pushed: false),
+                                                            HistoryCommit(sha: "c2", subject: "", pushed: true),
+                                                            HistoryCommit(sha: "c1", subject: "", pushed: true)])
+
+    @Test func twoPointsBecomeWhatTheDiffCovers() {
+        let l = stacked
+        #expect(l.points == [.main, .parent, .commit("c1"), .commit("c2"), .commit("c3")] && l.origin == 3)
+        #expect(l.choose(4, 4) == .commits(from: nil, to: "c3"), "the same commit twice: that commit")
+        #expect(l.choose(2, 4) == .commits(from: "c2", to: "c3"), "after c1 up to c3")
+        #expect(l.choose(4, 1) == .base(.parent), "either order; the parent to the tip is the branch")
+        #expect(l.choose(1, 3) == .commits(from: "c1", to: "c2"))
+        #expect(l.choose(0, 4) == .base(.main))
+        #expect(l.choose(0, 3) == .refuse("against main the diff runs to the tip"))
+        #expect(l.choose(0, 1) == .refuse("a stretch ends on a commit"))
+        #expect(ReviewLine.Choice.commits(from: "c2", to: "c3").scope == "c2..c3")
+    }
+
+    @Test func whatsLitReadsBackWhatWasChosen() {
+        let l = stacked
+        for (a, b) in [(2, 4), (1, 3), (3, 3), (0, 4), (1, 4)] {
+            let c = l.choose(a, b)
+            let base: ReviewBase = { if case .base(let x) = c { return x } else { return .parent } }()
+            let lit = l.lit(base: base, scope: c.scope)
+            #expect(lit.map { [$0.lo, $0.hi] } == [a == b ? a - 1 : min(a, b), max(a, b)], "\(a)…\(b) → \(c)")
+        }
+        #expect(l.lit(base: .outgoing, scope: nil).map { [$0.lo, $0.hi] } == [3, 4], "origin to the tip: what the next push sends")
+    }
+
+    @Test func stepsWalkOneCommitAndSayWhereTheyStop() {
+        let l = stacked
+        #expect(l.step(from: l.lit(base: .parent, scope: nil), by: 1) == .commits(from: nil, to: "c1"))
+        #expect(l.step(from: l.lit(base: .parent, scope: nil), by: -1) == .commits(from: nil, to: "c3"))
+        #expect(l.step(from: l.lit(base: .parent, scope: "c2"), by: 1) == .commits(from: nil, to: "c3"))
+        #expect(l.step(from: l.lit(base: .parent, scope: "c3"), by: 1) == .refuse("already on the last commit"))
+        #expect(l.step(from: l.lit(base: .parent, scope: "c1"), by: -1) == .refuse("already on the first commit"))
+        #expect(l.step(from: l.lit(base: .parent, scope: "c2..c3"), by: 1) == .commits(from: nil, to: "c2"))
     }
 }

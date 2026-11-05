@@ -68,12 +68,18 @@ enum Practice {
     }
 
     /// The review page on `branch`, its diff landed, the cursor on `stop` (a stop key) if given.
-    static func review(_ branch: String = S.root, at stop: String? = nil) -> @MainActor (AppModel) -> Bool {
+    /// The review page on `branch`, its diff covering the whole branch; `closing` first puts away an open comment box.
+    static func review(_ branch: String = S.root, at stop: String? = nil, closing: Bool = false) -> @MainActor (AppModel) -> Bool {
         { a in
+            if closing, ShipState.of(a).composer != nil {
+                if a.keys.mode == .insert { a.keys.handle("esc") }
+                ShipState.of(a).composer = nil
+            }
             if !onBranch(a, branch) { a.go(.review(repo: S.repo, branch: branch)) }
             let p = pg(a)
-            guard onBranch(a, branch), p.payload?.key.hasPrefix("\(S.id(branch))@") == true, !p.stops.isEmpty else { return false }
+            guard onBranch(a, branch), p.payload?.key.hasPrefix("\(S.id(branch))@") == true, !p.stops.isEmpty, p.line != nil else { return false }
             if p.tab != "files" { p.tab = "files" }
+            if p.scoped { p.commitScopeChanged(nil) }
             if let stop {
                 // a fresh look at the diff: what earlier steps marked viewed (and folded) unfolds
                 if !p.viewedOverride.isEmpty { p.viewedOverride = [:] }
@@ -295,7 +301,12 @@ enum KeyLessons {
             KeyStep("{extend} again stretches it a line.", [.extend]),
             KeyStep("{comment} comments on the range — three verbs in a row, not a chord.", [.comment],
                     check: { ShipState.of($0).composer != nil }),
-        ], recap: "{next-file} {previous-file} · {next-hunk} {previous-hunk} · {next-conversation} {previous-conversation} · {match} the other half; {mark} marks viewed and moves on, {unmark} unmarks, {next-unviewed} {previous-unviewed} find what's left, {flags} what you flagged; {select} ranges, {extend} lines, {comment} comments."),
+            KeyStep("The line under the title is the branch: main, then each commit. The lit stretch is what the diff covers. {next-commit} covers the first commit alone.",
+                    [.nextCommit], setup: P.review(at: "l|greet.ts|R:1", closing: true), check: { P.pg($0).commitScope == S.firstCommit }),
+            KeyStep("{next-commit} again: the next one, the tip.", [.nextCommit], check: { P.pg($0).scoped && P.pg($0).commitScope != S.firstCommit }),
+            KeyStep("{previous-commit} steps back. , h puts a cursor on the line, where ↵ ↵ picks any two ends.", [.previousCommit],
+                    check: { P.pg($0).commitScope == S.firstCommit }),
+        ], recap: "{next-file} {previous-file} · {next-hunk} {previous-hunk} · {next-conversation} {previous-conversation} · {match} the other half; {mark} marks viewed and moves on, {unmark} unmarks, {next-unviewed} {previous-unviewed} find what's left, {flags} what you flagged; {select} ranges, {extend} lines, {comment} comments; {next-commit} {previous-commit} one commit at a time."),
 
         KeyLesson(id: "code", title: "Finding things and reading code", steps: [
             KeyStep("{find} finds a file on this page by name.", [.find], setup: P.review(at: "l|greet.ts|R:2"), check: { $0.keys.mode == .insert }),

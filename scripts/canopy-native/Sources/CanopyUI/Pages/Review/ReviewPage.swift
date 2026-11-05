@@ -29,7 +29,7 @@ struct ReviewPage: View {
                 case "conversation":
                     ConversationPanel(branchID: pg.id).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 case "commits":
-                    CommitsPanel(branchID: pg.id, diff: pg.scoped ? AnyView(DiffPane(empty: "reading the commit…")) : nil)
+                    CommitsPanel(branchID: pg.id)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 default:
                     HStack(alignment: .top, spacing: 0) {
@@ -98,7 +98,7 @@ private struct ReviewHeader: View {
                 Spacer(minLength: 16)
                 if pg.integration == nil { ShipStripView(branchID: pg.id) }
             }
-            if pg.tab == "files", pg.integration == nil { ScopeChip() }
+            if pg.tab == "files", pg.integration == nil { BranchLine().padding(.top, 4) }
             if let c, !waiting(c, pg).isEmpty {
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
                     ForEach(waiting(c, pg), id: \.self) { Text($0) }
@@ -122,37 +122,78 @@ private struct ReviewHeader: View {
 }
 
 
-/// What the diff covers, written where the reader looks first: one commit (against its own parent),
-/// or everything against the base. `, h` picks the commits, `, b` the base; the margin carries neither.
-private struct ScopeChip: View {
+/// The branch's line (ReviewLine), drawn where the reader looks first: main, the parent, then each
+/// commit oldest first; the stretch the diff covers is lit, origin's copy marked. `, h` puts a
+/// cursor on it (ringed; nothing moves), ↵ ↵ picks the ends. Beside it, the stretch in words.
+private struct BranchLine: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme
 
     var body: some View {
         let pg = ReviewPageState.of(app)
-        let sha = ShipState.of(app).commitScope
-        let commit = sha.flatMap { s in ShipState.of(app).historyRows(pg.id)?.first { $0.sha.hasPrefix(s) } }
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            if let sha {
-                Text(String(sha.prefix(7))).foregroundStyle(theme.goldLeaf)
-                Text(commit?.subject ?? "one commit").foregroundStyle(theme.ink).lineLimit(1).truncationMode(.tail)
+        let ship = ShipState.of(app)
+        HStack(alignment: .center, spacing: 0) {
+            if let l = pg.line {
+                let lit = pg.lit
+                let cursor = app.pane?.id == reviewLinePane ? app.cursors["review/\(reviewLinePane)"].flatMap(l.index(key:)) : nil
+                let rows = Dictionary((ship.historyRows(pg.id) ?? []).map { ($0.sha, $0) }, uniquingKeysWith: { a, _ in a })
+                let named = Set([lit?.lo, lit?.hi, cursor, pg.lineAnchor, l.parentIndex, 0, l.tip].compactMap { $0 })
+                ForEach(Array(l.points.enumerated()), id: \.offset) { i, p in
+                    if i > 0 {
+                        let on = lit.map { i > $0.lo && i <= $0.hi } ?? false
+                        Rectangle().fill(on ? theme.goldLeaf : theme.rule).frame(width: l.points.count > 12 ? 10 : 18, height: on ? 2 : 1)
+                    }
+                    let on = lit.map { i > $0.lo && i <= $0.hi } ?? false
+                    let isStart = lit?.lo == i
+                    VStack(spacing: 1) {
+                        Circle()
+                            .fill(on ? theme.goldLeaf : isStart ? theme.ink : theme.inkFaint)
+                            .frame(width: 7, height: 7)
+                            .overlay { if cursor == i { Circle().stroke(theme.ink, lineWidth: 1.2).frame(width: 13, height: 13) } }
+                            .overlay { if pg.lineAnchor == i { Circle().stroke(theme.goldLeaf, lineWidth: 1.2).frame(width: 13, height: 13) } }
+                        Text(named.contains(i) || l.points.count <= 8 ? label(p, pg) : " ")
+                            .font(Theme.text(10)).foregroundStyle(on || isStart || cursor == i ? theme.ink : theme.inkFaint)
+                            .lineLimit(1).fixedSize()
+                        Text(l.origin == i ? "origin" : " ").font(Theme.text(9)).foregroundStyle(theme.patina)
+                    }
+                    .help(help(p, rows))
+                }
+                Text(words(pg, l, rows, cursor)).font(Theme.text(12)).foregroundStyle(theme.inkDim)
+                    .lineLimit(1).truncationMode(.tail).padding(.leading, 14)
+                Text(", h").font(Theme.text(11)).foregroundStyle(theme.inkFaint).padding(.leading, 8)
             } else {
-                Text(Self.whole(pg)).foregroundStyle(theme.inkDim)
+                Text("reading the commits…").font(Theme.text(11)).foregroundStyle(theme.inkFaint)
             }
-            if pg.scopesCommits { Text(", h").foregroundStyle(theme.inkFaint).padding(.leading, 6) }
         }
-        .font(Theme.text(12))
         .task(id: app.store.view(Branch.self, pg.id).map(ShipState.historyKey)) { ShipState.of(app).loadHistory(app, pg.id) }
     }
 
-    /// The unscoped diff in words: what the base makes it cover.
-    static func whole(_ pg: ReviewPageState) -> String {
+    private func label(_ p: ReviewLine.Point, _ pg: ReviewPageState) -> String {
+        switch p {
+        case .main: return "main"
+        case .parent: return (pg.branch?.parent).flatMap { $0.isEmpty ? nil : $0 } ?? "main"
+        case .commit(let s): return String(s.prefix(7))
+        }
+    }
+
+    private func help(_ p: ReviewLine.Point, _ rows: [String: HistoryCommit]) -> String {
+        guard case .commit(let s) = p else { return "" }
+        return rows[s]?.subject ?? s
+    }
+
+    /// The lit stretch in words, or the commit under the line's cursor while it's there.
+    private func words(_ pg: ReviewPageState, _ l: ReviewLine, _ rows: [String: HistoryCommit], _ cursor: Int?) -> String {
+        if let c = cursor, case .commit(let s) = l.points[c] { return rows[s]?.subject ?? "" }
+        if let scope = pg.commitScope {
+            let e = ReviewLine.ends(scope)
+            if e.from == nil { return rows.first { $0.key.hasPrefix(e.to) }?.value.subject ?? "one commit" }
+            guard let lit = pg.lit else { return "a run of commits" }
+            return "\(lit.hi - lit.lo) commits"
+        }
         switch pg.base {
-        case .parent:
-            let n = pg.branch?.commits ?? 0
-            return n > 1 ? "all \(n) commits · vs parent" : "the branch · vs parent"
-        case .main: return "the whole stack · vs main"
-        case .outgoing: return "what the next push sends · vs origin"
+        case .parent: return pg.branch.map { $0.commits > 1 ? "all \($0.commits) commits" : "the branch" } ?? ""
+        case .main: return "the whole stack, from main"
+        case .outgoing: return "what the next push sends"
         }
     }
 }

@@ -446,22 +446,58 @@ enum DiffCommands {
                                available: { _ in baseOK(b) },
                                local: { _, _ in pg.tab = "files"; pg.setBase(b) }))
         }
-        r.register(Command(id: "review.scope", title: "Pick which commits the diff covers: all of them, or one", scope: .review,
-                           leader: LocalKey(",h"), label: "commits",
-                           available: { _ in pg.scopesCommits },
+        // ── the branch's line: what the diff covers (ReviewLine) ──
+
+        let lineDrawn = { (_: String?) -> Bool in pg.line != nil }
+        r.register(Command(id: "review.line", title: "Pick what the diff covers on the branch's line: h / l move, ↵ ↵ picks the two ends",
+                           scope: .review, leader: LocalKey(",h"), label: "line",
+                           available: { _ in pg.integration == nil },
                            local: { _, _ in
-                               let ship = ShipState.of(app)
-                               ship.loadHistory(app, pg.id)
-                               guard let rows = ship.historyRows(pg.id), !rows.isEmpty else { return app.runner.say("the commits are still loading") }
-                               let at = ship.commitScope
-                               let items = [PickItem(label: at == nil ? "● all" : "  all", text: "every commit, \(rows.count)")]
-                                   + rows.map { c in PickItem(label: (at.map(c.sha.hasPrefix) == true ? "● " : "  ") + String(c.sha.prefix(7)), text: c.subject) }
-                               app.nav.pick("the diff covers", items) { i in
-                                   pg.tab = "files"
-                                   ship.showCommit(i == 0 ? nil : rows[i - 1].sha)
-                                   app.focus(pane: reviewDiffPane)
-                               }
+                               ShipState.of(app).loadHistory(app, pg.id)
+                               guard let l = pg.line else { throw Refusal("the commits are still loading") }
+                               pg.tab = "files"
+                               pg.lineAnchor = nil
+                               app.focus(pane: reviewLinePane)
+                               app.setCursor(l.points[pg.lit?.hi ?? l.tip].key)
                            }))
+        let moveOnLine = { (by: Int) in
+            guard let l = pg.line, let at = app.selected.flatMap(l.index(key:)) else { return }
+            let to = at + by
+            guard l.points.indices.contains(to) else { throw Refusal(by < 0 ? "the start of the line" : "the tip") }
+            app.setCursor(l.points[to].key)
+        }
+        r.register(Command(id: "line.left", title: "Along the line, toward main", scope: .branchLine, verb: .left, quiet: true,
+                           available: lineDrawn, local: { _, _ in try moveOnLine(-1) }))
+        r.register(Command(id: "line.right", title: "Along the line, toward the tip", scope: .branchLine, verb: .right, quiet: true,
+                           available: lineDrawn, local: { _, _ in try moveOnLine(1) }))
+        r.register(Command(id: "line.pick", title: "Pick this end of the stretch; the second ↵ picks the other (the same commit twice: that commit alone)",
+                           scope: .branchLine, verb: .main, label: "pick", available: lineDrawn,
+                           local: { _, _ in
+                               guard let l = pg.line, let at = app.selected.flatMap(l.index(key:)) else { return }
+                               guard let a = pg.lineAnchor else {
+                                   pg.lineAnchor = at
+                                   return app.runner.say("now the other end")
+                               }
+                               try pg.apply(l.choose(a, at))
+                               pg.lineAnchor = nil
+                               app.focus(pane: reviewDiffPane)
+                           }))
+        r.register(Command(id: "line.cancel", title: "Drop the picked end, else back to the diff", scope: .branchLine, verb: .cancel, label: "back",
+                           local: { _, _ in
+                               if pg.lineAnchor != nil { pg.lineAnchor = nil; return }
+                               app.focus(pane: reviewDiffPane)
+                           }))
+        let stepCommit = { (by: Int) in
+            ShipState.of(app).loadHistory(app, pg.id)
+            guard let l = pg.line else { throw Refusal(pg.integration != nil ? "a forest's whole diff has no commits to step" : "the commits are still loading") }
+            try pg.apply(l.step(from: pg.lit, by: by))
+        }
+        r.register(Command(id: "review.commit.next", title: "The diff covers the next commit alone", scope: .review, verb: .nextCommit,
+                           label: "commit", pair: "review.commit.prev", available: { _ in pg.integration == nil },
+                           local: { _, _ in try stepCommit(1) }))
+        r.register(Command(id: "review.commit.prev", title: "The diff covers the previous commit alone", scope: .review, verb: .previousCommit,
+                           label: "commit", available: { _ in pg.integration == nil },
+                           local: { _, _ in try stepCommit(-1) }))
         r.register(Command(id: "review.base.next", title: "Diff against the next base", scope: .review, quiet: true,
                            available: { _ in pg.integration == nil },
                            local: { _, _ in
@@ -915,7 +951,7 @@ enum DiffCommands {
             }
             let w = CodeLookup.Where.branch(repo: t.repo, name: t.name, base: pg.baseSha)
             if let p = pg.pointer, p.seq == pg.cursorMoved, p.key == pg.here?.key {
-                if pg.scoped, let sha = pg.commitScope { return (p.pos, .commit(repo: t.repo, sha: sha)) }
+                if pg.scoped, let sha = pg.scopeEnd { return (p.pos, .commit(repo: t.repo, sha: sha)) }
                 return (p.pos, w)
             }
             guard let h = pg.here, h.kind == .line, let row = h.row else { return (nil, w) }
@@ -923,7 +959,7 @@ enum DiffCommands {
             let l = (old ? row.left : row.right)!
             let pos = pg.hereWord.flatMap { CodeLookup.position(path: h.path, line: (old ? l.old : l.new) ?? 1, text: l.text, at: $0.lowerBound, side: old ? "old" : "new") }
                 ?? CodeLookup.position(path: h.path, line: (old ? l.old : l.new) ?? 1, text: l.text, side: old ? "old" : "new")
-            if pg.scoped, let sha = pg.commitScope { return (pos, .commit(repo: t.repo, sha: sha)) }
+            if pg.scoped, let sha = pg.scopeEnd { return (pos, .commit(repo: t.repo, sha: sha)) }
             return (pos, w)
         }
         let codeOK: (String?) -> Bool = { _ in onFiles(nil) || pg.code != nil || pg.scoped }
