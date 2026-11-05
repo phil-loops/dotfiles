@@ -84,7 +84,7 @@ public struct InlineDiffView: View {
                 threadsAt["\(t.side == .left ? "L" : "R"):\(t.local!.line)", default: []].append(t)
             }
         }
-        let fv = FileView(file: f, rows: rows, threadsAt: threadsAt, pendingAt: [:], aside: [], open: 0, viewed: false, blocks: [], seen: 0, seenHunks: [], gaps: gaps)
+        let fv = FileView(file: f, rows: rows, threadsAt: threadsAt, pendingAt: [:], aside: [], open: 0, viewed: false, blocks: [], seen: 0, gaps: gaps)
         let c = CanvasColors(theme)
         let key = "i|\(k)|\(pg.split)|\(inl.texts[k]?.count ?? -1)|\((inl.reveals[k] ?? [:]).sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" })|\(threadsAt.keys.sorted())"
         let lines = rows.count + gaps.count + threadsAt.count * 3

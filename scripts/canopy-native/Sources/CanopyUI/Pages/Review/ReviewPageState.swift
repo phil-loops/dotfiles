@@ -50,9 +50,13 @@ public struct FileView: Equatable {
     /// every change block viewed
     public var viewed: Bool
     public var blocks: [Block]
-    /// how many of its blocks are viewed, and the hunks whose blocks all are
+    /// how many of its blocks are viewed, and how many flagged
     public var seen: Int
-    public var seenHunks: Set<Int>
+    public var flagged: Int = 0
+    /// each changed row's block (an index into `blocks`), by row key
+    public var rowBlock: [String: Int] = [:]
+    /// each block's mark, in `blocks` order
+    public var marks: [Mark] = []
     /// unchanged lines the diff still hides (each a cursor stop; ↵ shows more)
     public var gaps: [Gap]
 
@@ -96,6 +100,31 @@ public func sideLine(_ r: DiffRow, prefer: Side = .right) -> (side: Side, line: 
 
 /// A row that changed: either half added or removed.
 public func changed(_ r: DiffRow) -> Bool { r.left?.kind != .ctx || r.right?.kind != .ctx }
+
+/// What Phil has made of a change block: not read yet, read, or read and flagged to come back to.
+/// The raw values are the server's states (POST /viewed).
+public enum Mark: String, Equatable, Sendable { case unread = "none", viewed, flagged }
+
+extension FileView {
+    /// The mark on a changed row's block; nil for an unchanged row.
+    public func mark(of r: DiffRow) -> Mark? { rowBlock[r.key].map { marks[$0] } }
+}
+
+/// Each changed line's block as an anchor ("L:<old>" / "R:<new>") → index into `blocksOf(f)`, walking the
+/// hunks the way blocksOf does — line numbers, so rows from a diff with more context still find their block.
+public func blockAnchors(_ f: FileDiff) -> [String: Int] {
+    var out: [String: Int] = [:]
+    var b = -1
+    for h in f.hunks {
+        var inRun = false
+        for l in h.lines {
+            if l.kind == .ctx { inRun = false; continue }
+            if !inRun { b += 1; inRun = true }
+            out[anchorOf(l)] = b
+        }
+    }
+    return out
+}
 
 public let reviewDiffPane = "diff"
 public let reviewTreePane = "files"
@@ -190,8 +219,8 @@ public final class ReviewPageState: ShipHost {
     public var showOutdated = false
     /// where `x` dropped its mark (the other end of a range comment)
     public var mark: String?
-    /// block key → viewed, ahead of the server's copy while a write is in flight
-    public var viewedOverride: [String: Bool] = [:]
+    /// block key → its mark, ahead of the server's copy while a write is in flight
+    public var viewedOverride: [String: Mark] = [:]
     /// the file tree's filter (space f), and the page search (/)
     public var filter = ""
     public var search = ""
@@ -527,15 +556,37 @@ public final class ReviewPageState: ShipHost {
     /// Replies not on GitHub yet, by thread id.
     public func repliesTo(_ threadID: String) -> [DraftItem] { items.filter { $0.kind == "reply" && $0.threadId == threadID } }
 
-    public var serverViewed: Set<String> { Set(app?.store.view(Viewed.self, id)?.keys ?? []) }
+    /// The server's marks across this repo's branches: a change read on one branch reads as read wherever
+    /// it shows — a child carrying it, the cumulative view (decided 2026-11-05; per branch before then).
+    public var serverMarks: (viewed: Set<String>, flagged: Set<String>) {
+        guard let app, let repo = target?.repo else { return ([], []) }
+        var viewed = Set<String>(), flagged = Set<String>()
+        for e in app.store.table(Viewed.self).values where e.repo == repo {
+            viewed.formUnion(e.keys)
+            flagged.formUnion(e.flagged ?? [])
+        }
+        return (viewed, flagged)
+    }
 
-    public func isSeen(_ key: String) -> Bool { viewedOverride[key] ?? serverViewed.contains(key) }
+    public func serverMark(_ key: String) -> Mark {
+        let s = serverMarks
+        return s.flagged.contains(key) ? .flagged : s.viewed.contains(key) ? .viewed : .unread
+    }
+
+    public func mark(_ b: Block) -> Mark { mark(b, serverMarks) }
+
+    func mark(_ b: Block, _ s: (viewed: Set<String>, flagged: Set<String>)) -> Mark {
+        if let o = viewedOverride[b.key] { return o }
+        if s.flagged.contains(b.key) { return .flagged }
+        return s.viewed.contains(b.key) || s.viewed.contains(b.legacy) ? .viewed : .unread
+    }
+
+    public func isSeen(_ b: Block) -> Bool { mark(b) == .viewed }
 
     /// An override the server now agrees with has done its job; dropping it lets later changes through.
     private func storeMoved() {
         guard !viewedOverride.isEmpty else { return }
-        let srv = serverViewed
-        let keep = viewedOverride.filter { srv.contains($0.key) != $0.value }
+        let keep = viewedOverride.filter { serverMark($0.key) != $0.value }
         if keep.count != viewedOverride.count { viewedOverride = keep }
     }
 
@@ -598,7 +649,7 @@ public final class ReviewPageState: ShipHost {
         var review: Int
         var ops: [Int]
         var context: Int
-        var override: [String: Bool]
+        var override: [String: Mark]
         var showOutdated: Bool
     }
 
@@ -627,13 +678,14 @@ public final class ReviewPageState: ShipHost {
                 let (file, gaps) = expand(raw, c?.lines, c?.reveal ?? [:])
                 let rows = c == nil ? rowsOf(file, sp, salt) : (sp ? splitRows(file) : unifiedRows(file))
                 return FileView(file: file, rows: rows, threadsAt: [:], pendingAt: [:], aside: [], open: 0, viewed: false,
-                                blocks: [], seen: 0, seenHunks: [], gaps: gaps)
+                                blocks: [], seen: 0, gaps: gaps)
             }
         }
         var byPath: [String: [CanopyCore.Thread]] = [:]
         for t in threads { byPath[t.path, default: []].append(t) }
         var pend: [String: [DraftItem]] = [:]
         for c in items where c.kind == "comment" { if let p = c.path { pend[p, default: []].append(c) } }
+        let server = serverMarks
         return fs.map { raw in
             let c = contextOf(raw.path)
             let (file, gaps) = expand(raw, c?.lines, c?.reveal ?? [:])
@@ -650,14 +702,17 @@ public final class ReviewPageState: ShipHost {
             for c in pend[file.path] ?? [] { pendingAt["\(c.side == .left ? "L" : "R"):\(c.line ?? 0)", default: []].append(c) }
             let open = (byPath[file.path] ?? []).filter { !$0.resolved && !$0.outdated }.count
             let blocks = blocksOfCached(raw, salt)
-            let seenKeys = blocks.filter { isSeen($0.key) }
-            var seenHunks = Set<Int>()
-            for i in raw.hunks.indices where blocks.contains(where: { $0.hunk == i }) && blocks.allSatisfy({ $0.hunk != i || isSeen($0.key) }) {
-                seenHunks.insert(i)
+            let marks = blocks.map { mark($0, server) }
+            let lineBlock = blockAnchors(raw)
+            var rowBlock: [String: Int] = [:]
+            for r in rows {
+                guard let l = [r.left, r.right].compactMap({ $0 }).first(where: { $0.kind != .ctx }), let b = lineBlock[anchorOf(l)] else { continue }
+                rowBlock[r.key] = b
             }
-            let viewed = !blocks.isEmpty && seenKeys.count == blocks.count
-            return FileView(file: file, rows: rows, threadsAt: threadsAt, pendingAt: pendingAt, aside: aside, open: open, viewed: viewed,
-                            blocks: blocks, seen: seenKeys.count, seenHunks: seenHunks, gaps: gaps)
+            let seen = marks.filter { $0 == .viewed }.count
+            return FileView(file: file, rows: rows, threadsAt: threadsAt, pendingAt: pendingAt, aside: aside, open: open,
+                            viewed: !blocks.isEmpty && seen == blocks.count, blocks: blocks, seen: seen,
+                            flagged: marks.filter { $0 == .flagged }.count, rowBlock: rowBlock, marks: marks, gaps: gaps)
         }
     }
 
@@ -665,7 +720,7 @@ public final class ReviewPageState: ShipHost {
     public var branchViewed: Int {
         branchFiles.filter { f in
             let bs = blocksOfCached(f, payload?.key ?? "")
-            return !bs.isEmpty && bs.allSatisfy { isSeen($0.key) }
+            return !bs.isEmpty && bs.allSatisfy(isSeen)
         }.count
     }
 
@@ -677,6 +732,12 @@ public final class ReviewPageState: ShipHost {
     }
 
     public func fileOf(_ path: String) -> FileView? { views.first { $0.file.path == path } }
+
+    /// The mark on the change a stop sits on; nil off a changed line.
+    public func markAt(_ k: Int) -> Mark? {
+        guard stops.indices.contains(k), let row = stops[k].row, let fv = fileOf(stops[k].path) else { return nil }
+        return fv.mark(of: row)
+    }
 
     struct StopsSig: Equatable {
         var views: ViewsSig

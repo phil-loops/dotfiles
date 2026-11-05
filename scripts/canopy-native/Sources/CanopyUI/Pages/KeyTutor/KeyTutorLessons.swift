@@ -403,8 +403,8 @@ enum KeyLessons {
         ], recap: "{command} runs anything by name, {menu} lists every command, {keys} shows every key. :keytutor brings you back here; :keytutor <lesson> jumps to one."),
     ]
 
-    static func hunk0(_ a: AppModel) -> [String] {
-        Practice.pg(a).fileOf("greet.ts")?.blocks.filter { $0.hunk == 0 }.map(\.key) ?? ["?"]
+    static func hunk0(_ a: AppModel) -> [Block] {
+        Practice.pg(a).fileOf("greet.ts")?.blocks.filter { $0.hunk == 0 } ?? []
     }
 
     /// The lesson a typed name means, fuzzily ("rev" → review).

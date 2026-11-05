@@ -168,15 +168,36 @@ import Testing
         #expect(b.count == 1 && b[0].hunk == -1)
     }
 
-    /// The keys are the server's: they must be exactly the web app's (node over review/diff.ts).
-    @Test func blockKeysAreTheWebAppsBitForBit() {
-        #expect(Self.keys(Self.narrow) == ["1ax3zbksxx", "1ru9mehgcvd"])
-        #expect(blocksOf(parsePatch("dir/ünï €.ts", "@@ -1,1 +1,1 @@\n-𝒳 old\n+new 😀 é")).map(\.key) == ["1o2so8t1nlx"])
+    /// Marks made before 2026-11-05 are stored under the web app's keys: `legacy` must be exactly those.
+    @Test func legacyBlockKeysAreTheWebAppsBitForBit() {
+        func legacy(_ patch: String, _ path: String = "x.ts") -> [String] { blocksOf(parsePatch(path, patch)).map(\.legacy) }
+        #expect(legacy(Self.narrow) == ["1ax3zbksxx", "1ru9mehgcvd"])
+        #expect(legacy("@@ -1,1 +1,1 @@\n-𝒳 old\n+new 😀 é", "dir/ünï €.ts") == ["1o2so8t1nlx"])
         var bin = parsePatch("img.png", "")
         bin.status = .binary
-        #expect(blocksOf(bin).map(\.key) == ["pkzjdhyy6l"])
+        #expect(blocksOf(bin).map(\.legacy) == ["pkzjdhyy6l"] && blocksOf(bin).map(\.key) == ["pkzjdhyy6l"])
         let twice = ["@@ -1,3 +1,3 @@", " a", "-c", "+C", " b", "@@ -9,3 +9,3 @@", " y", "-c", "+C", " z"].joined(separator: "\n")
-        #expect(Self.keys(twice) == ["1ax3zbksxx", "1ax3zbksxx.1"])
+        #expect(legacy(twice) == ["1ax3zbksxx", "1ax3zbksxx.1"])
+    }
+
+    @Test func aReformatKeepsAKey() {
+        let reflowed = ["@@ -2,3 +2,3 @@", " b", "-c", "+  C", " d", "@@ -7,3 +7,3 @@", " g", "-h", "+H ", " i"].joined(separator: "\n")
+        #expect(Self.keys(reflowed) == Self.keys(Self.narrow))
+        let wrapped = ["@@ -1,3 +1,4 @@", " a", "-f(x, y)", "+f(x,", "+  y)", " b"].joined(separator: "\n")
+        let flat = ["@@ -1,3 +1,3 @@", " a", "-f(x, y)", "+f(x,y)", " b"].joined(separator: "\n")
+        #expect(Self.keys(wrapped) == Self.keys(flat))
+    }
+
+    /// The bug the ordinal had: a copy added above a read change took its number, and with it the mark.
+    @Test func aNewCopyOfAChangeNeverTakesTheOldOnesKey() {
+        let once = ["@@ -9,3 +9,3 @@", " y", "-c", "+C", " z"].joined(separator: "\n")
+        let copyAbove = ["@@ -1,3 +1,3 @@", " a", "-c", "+C", " b", "@@ -9,3 +9,3 @@", " y", "-c", "+C", " z"].joined(separator: "\n")
+        let read = Self.keys(once)[0]
+        let now = Self.keys(copyAbove)
+        #expect(!now.contains(read), "neither copy keeps the lone change's key: both come back to read")
+        #expect(now[0] != now[1])
+        let copyBelow = ["@@ -9,3 +9,3 @@", " y", "-c", "+C", " z", "@@ -20,3 +20,3 @@", " p", "-c", "+C", " q"].joined(separator: "\n")
+        #expect(Self.keys(copyBelow)[0] == now[1], "a copy's key follows its own neighbours, not its place in the file")
     }
 
     // ── types.ts positions ──
@@ -462,14 +483,13 @@ import Testing
         let (a, p) = try await app()
         let pg = ReviewPageState.of(a)
         ShipStub.answer(p, "POST", "/loops/viewed", #"{"ok":true,"count":1,"on":true}"#)
-        let hunk0 = pg.fileOf("a.ts")!.blocks.filter { $0.hunk == 0 }.map(\.key)
+        let hunk0 = pg.fileOf("a.ts")!.blocks.filter { $0.hunk == 0 }
         keys(a, ",", "m")
         #expect(hunk0.allSatisfy(pg.isSeen))
         #expect(pg.here?.key == "l|a.ts|R:22", "on to the next unviewed hunk")
         await until("the post") { ShipStub.posts(p).contains { $0.path == "/loops/viewed" } }
         let post = ShipStub.posts(p).last { $0.path == "/loops/viewed" }!
-        #expect(post.body["on"] == .bool(true))
-        #expect(post.body["keys"] == .array(hunk0.map(JSONValue.string)))
+        #expect(post.body["marks"] == .object(Dictionary(uniqueKeysWithValues: hunk0.map { ($0.key, JSONValue.string("viewed")) })))
         // the last hunk of a.ts: m finishes the file and moves to b.ts
         keys(a, ",", "m")
         #expect(pg.fileOf("a.ts")!.viewed)
@@ -479,6 +499,37 @@ import Testing
         #expect(pg.here?.key == "f|a.ts", "a viewed file is just its header")
         keys(a, ",", "M")
         #expect(!pg.fileOf("a.ts")!.viewed)
+    }
+
+    @Test func bangFlagsAChangeUStopsOnItAndBangAgainTakesItOff() async throws {
+        let (a, p) = try await app()
+        let pg = ReviewPageState.of(a)
+        ShipStub.answer(p, "POST", "/loops/viewed", #"{"ok":true}"#)
+        let start = pg.here?.key
+        let first = pg.fileOf("a.ts")!.blocks[0]
+        keys(a, ",", "!")
+        #expect(pg.mark(first) == .flagged)
+        #expect(pg.here?.key != start, "flagging moves on, like reading")
+        await until("the post") { ShipStub.posts(p).contains { $0.path == "/loops/viewed" } }
+        #expect(ShipStub.posts(p).last { $0.path == "/loops/viewed" }!.body["marks"] == .object([first.key: .string("flagged")]))
+        // read everything else: ] u still finds the flagged one
+        for v in pg.views { for b in v.blocks where b != first { pg.viewedOverride[b.key] = .viewed } }
+        keys(a, "]", "u")
+        #expect(pg.here?.key == start, "] u stops on a flagged change")
+        #expect(pg.fileOf("a.ts")!.flagged == 1 && !pg.fileOf("a.ts")!.viewed, "flagged is read, not viewed: the file stays open")
+        keys(a, ",", "!")
+        #expect(pg.mark(first) == .unread, ", ! on a flagged change takes the flag off")
+    }
+
+    @Test func mOnAChangeMarksJustThatChangeNotItsWholeHunk() async throws {
+        let (a, p) = try await app()
+        let pg = ReviewPageState.of(a)
+        ShipStub.answer(p, "POST", "/loops/viewed", #"{"ok":true}"#)
+        guard let fv = pg.fileOf("a.ts"), let row = pg.here?.row, let b = fv.rowBlock[row.key] else { Issue.record("no change under the cursor"); return }
+        keys(a, ",", "m")
+        let after = pg.fileOf("a.ts")!
+        #expect(after.marks[b] == .viewed)
+        #expect(after.marks.enumerated().allSatisfy { $0.offset == b || $0.element == .unread }, "only the change under the cursor")
     }
 
     @Test func selectModeMarksEveryHunkInTheRange() async throws {

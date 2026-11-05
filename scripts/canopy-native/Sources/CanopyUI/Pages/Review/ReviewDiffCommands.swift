@@ -249,16 +249,12 @@ enum DiffCommands {
                            label: "unviewed change", pair: "review.unviewed.prev", available: onDiff, local: { _, _ in try unviewed(1) }))
         r.register(Command(id: "review.unviewed.prev", title: "Go to the previous change not yet viewed", scope: .review, verb: .previousUnviewed, modes: motion,
                            label: "unviewed change", available: onDiff, local: { _, _ in try unviewed(-1) }))
-        /// ]u / [u: the start of the next (previous) change whose hunk isn't marked viewed, wrapping round the branch,
+        /// ]u / [u: the start of the next (previous) change not read yet or flagged, wrapping round the branch,
         /// so what's left to read is one key away without marking anything.
         func unviewed(_ dir: Int) throws {
-            let s = pg.stops
             let i = idx()
-            let open = pg.changeStarts.filter { k in
-                guard let row = s[k].row, let fv = pg.fileOf(s[k].path) else { return false }
-                return !fv.viewed && !fv.seenHunks.contains(row.hunk)
-            }
-            guard !open.isEmpty else { throw Refusal("every change on this branch is viewed · , M takes a mark back") }
+            let open = pg.changeStarts.filter { pg.markAt($0).map { $0 != .viewed } ?? false }
+            guard !open.isEmpty else { throw Refusal("every change on this branch is read, none flagged · , M takes a mark back") }
             let ahead = dir > 0 ? open.first { $0 > i } : open.last { $0 < i }
             let target = ahead ?? (dir > 0 ? open.first! : open.last!)
             if ahead == nil { app.runner.say(dir > 0 ? "wrapped to the first unviewed change" : "wrapped to the last unviewed change") }
@@ -1001,35 +997,43 @@ enum DiffCommands {
                                pg.cursorMoved &+= 1
                            }))
 
-        // ── viewed: , m marks and moves on, , M takes it back ──
+        // ── marks: , m reads a change and moves on, , ! flags it to come back to, , M takes either off ──
 
-        r.register(Command(id: "review.viewed", title: "Mark viewed and go on to the next unviewed — the hunk, the file on its header, the range in select",
+        r.register(Command(id: "review.viewed", title: "Mark read and go on to the next unread change — the change, its hunk on an unchanged line, the file on its header, the range in select",
                            scope: .review, budget: .configWrite, verb: .mark, leader: LocalKey(",m"), modes: motion, label: "viewed", pair: "review.unviewed",
                            available: { _ in onDiff(nil) && pg.here != nil && !pg.scoped },
                            write: { _, _ in
-                               let w = viewed(app, pg, on: true)
+                               let w = marked(app, pg, .viewed)
                                if app.keys.mode == .select { app.keys.setMode(.normal) }
                                return w
                            }))
-        r.register(Command(id: "review.unviewed", title: "Mark unviewed — the hunk, the file on its header, the range in select",
+        r.register(Command(id: "review.unviewed", title: "Take the mark off — read or flagged; the change, its hunk on an unchanged line, the file on its header, the range in select",
                            scope: .review, budget: .configWrite, verb: .unmark, leader: LocalKey(",M"), modes: motion, label: "unviewed",
                            available: { _ in onDiff(nil) && pg.here != nil && !pg.scoped },
                            write: { _, _ in
-                               let w = viewed(app, pg, on: false)
+                               let w = marked(app, pg, .unread)
+                               if app.keys.mode == .select { app.keys.setMode(.normal) }
+                               return w
+                           }))
+        r.register(Command(id: "review.flag", title: "Flag it to come back to and go on — ] u stops on it; on a flagged change, take the flag off",
+                           scope: .review, budget: .configWrite, leader: LocalKey(",!"), modes: motion, label: "flag",
+                           available: { _ in onDiff(nil) && pg.here != nil && !pg.scoped },
+                           write: { _, _ in
+                               let w = marked(app, pg, .flagged)
                                if app.keys.mode == .select { app.keys.setMode(.normal) }
                                return w
                            }))
         r.register(Command(id: "review.viewed.file", title: "Mark a file viewed (or not)", scope: .review, budget: .configWrite, needsArg: true, quiet: true,
                            write: { _, arg in
                                guard let path = arg as? String, let fv = pg.fileOf(path) else { return nil }
-                               let on = !fv.blocks.allSatisfy { pg.isSeen($0.key) }
-                               if on { advance(pg, from: path, hunk: nil) }
-                               return viewedSet(app, pg, fv.blocks.map(\.key), on: on)
+                               let want: Mark = fv.viewed ? .unread : .viewed
+                               if want == .viewed { advance(pg, from: path, after: nil) }
+                               return markSet(app, pg, blockMarks(pg, fv, Array(fv.blocks.indices), want))
                            }))
-        r.register(Command(id: "review.viewed.set", title: "Put viewed marks back", scope: .review, budget: .configWrite, needsArg: true, quiet: true,
+        r.register(Command(id: "review.viewed.set", title: "Put marks back", scope: .review, budget: .configWrite, needsArg: true, quiet: true,
                            write: { _, arg in
-                               guard let a = arg as? ViewedArg else { return nil }
-                               return viewedSet(app, pg, a.keys, on: a.on)
+                               guard let a = arg as? MarkArg else { return nil }
+                               return markSet(app, pg, (a.marks, a.before))
                            }))
 
         // ── the commits tab's inline diffs (InlineDiff.tsx, inline.ts) ──
@@ -1050,73 +1054,109 @@ enum DiffCommands {
     }
 
 
-    struct ViewedArg { var keys: [String]; var on: Bool }
+    struct MarkArg { var marks: [String: Mark]; var before: [String: Mark] }
 
-    /// Set change blocks viewed or not (POST /viewed): shown at once, rolled back if refused.
-    static func viewedSet(_ app: AppModel, _ pg: ReviewPageState, _ keys: [String], on: Bool, said: String? = nil) -> Write? {
-        guard !keys.isEmpty, let t = pg.target else { return nil }
+    /// Set blocks' marks (POST /viewed): shown at once, rolled back if refused; undo puts each one's mark back.
+    static func markSet(_ app: AppModel, _ pg: ReviewPageState, _ change: (marks: [String: Mark], before: [String: Mark]), said: String? = nil) -> Write? {
+        let marks = change.marks
+        guard !marks.isEmpty, let t = pg.target else { return nil }
         let was = pg.viewedOverride
-        for k in keys { pg.viewedOverride[k] = on }
-        return Write(path: pg.repoPath("/viewed"), body: ["branch": .string(t.name), "keys": .array(keys.map(JSONValue.string)), "on": .bool(on)],
-                     settled: { keys.allSatisfy { pg.serverViewed.contains($0) == on } },
-                     said: said, failed: "couldn't mark it \(on ? "viewed" : "unviewed")",
-                     inverse: { _ in Inverse(id: "review.viewed.set", target: pg.id, arg: ViewedArg(keys: keys, on: !on)) },
+        for (k, m) in marks { pg.viewedOverride[k] = m }
+        let body: [String: JSONValue] = ["branch": .string(t.name), "keys": .array(marks.keys.sorted().map(JSONValue.string)),
+                                         "marks": .object(marks.mapValues { .string($0.rawValue) })]
+        return Write(path: pg.repoPath("/viewed"), body: .object(body),
+                     settled: { marks.allSatisfy { pg.serverMark($0.key) == $0.value } },
+                     said: said, failed: "couldn't change the marks",
+                     inverse: { _ in Inverse(id: "review.viewed.set", target: pg.id, arg: MarkArg(marks: change.before, before: marks)) },
                      rollback: { pg.viewedOverride = was })
     }
 
-    /// What m / M act on: the select range's hunks, else the hunk under the cursor, else (a file
-    /// header, a conversation, the lines past the last hunk) the whole file.
-    static func viewedTargets(_ app: AppModel, _ pg: ReviewPageState) -> [(path: String, hunk: Int?)] {
-        func of(_ s: Stop) -> (path: String, hunk: Int?) {
-            let hunks = pg.fileOf(s.path)?.file.hunks.count ?? 0
-            if let row = s.row { return (s.path, row.hunk) }
-            if s.kind == .gap, let at = s.at, at < hunks { return (s.path, at) }
-            return (s.path, nil)
+    /// The keys to send for giving `blocks` of a file `want`, and each one's mark now (for undo). A block
+    /// read under its pre-2026-11-05 key has that key cleared too when it stops being read.
+    static func blockMarks(_ pg: ReviewPageState, _ fv: FileView, _ blocks: [Int], _ want: Mark) -> (marks: [String: Mark], before: [String: Mark]) {
+        var marks: [String: Mark] = [:], before: [String: Mark] = [:]
+        for b in blocks where fv.marks[b] != want {
+            let block = fv.blocks[b]
+            marks[block.key] = want
+            before[block.key] = fv.marks[b]
+            if block.legacy != block.key, want != .viewed, pg.serverMark(block.legacy) == .viewed {
+                marks[block.legacy] = .unread
+                before[block.legacy] = .viewed
+            }
+        }
+        return (marks, before)
+    }
+
+    /// What , m / , ! / , M act on, per file: the select range's changes, else the change under the
+    /// cursor; an unchanged line or a gap takes its hunk's changes; a file header (a conversation, the
+    /// lines past the last hunk) the whole file.
+    static func markTargets(_ app: AppModel, _ pg: ReviewPageState) -> [(path: String, blocks: [Int])] {
+        func of(_ s: Stop) -> (path: String, blocks: [Int])? {
+            guard let fv = pg.fileOf(s.path) else { return nil }
+            let all = Array(fv.blocks.indices)
+            func hunk(_ h: Int) -> [Int]? {
+                let bs = Set(fv.rows.filter { $0.hunk == h }.compactMap { fv.rowBlock[$0.key] })
+                return bs.isEmpty ? nil : bs.sorted()
+            }
+            if let row = s.row { return (s.path, fv.rowBlock[row.key].map { [$0] } ?? hunk(row.hunk) ?? all) }
+            if s.kind == .gap, let at = s.at, let bs = hunk(at) { return (s.path, bs) }
+            return (s.path, all)
         }
         if app.keys.mode == .select, app.pane?.id == reviewDiffPane {
-            var out: [(path: String, hunk: Int?)] = []
+            var out: [(path: String, blocks: [Int])] = []
             for k in app.selection {
-                guard let i = pg.stopIndex[k] else { continue }
-                let t = of(pg.stops[i])
-                if !out.contains(where: { $0.path == t.path && $0.hunk == t.hunk }) { out.append(t) }
+                guard let i = pg.stopIndex[k], let t = of(pg.stops[i]) else { continue }
+                if let j = out.firstIndex(where: { $0.path == t.path }) {
+                    out[j].blocks = Array(Set(out[j].blocks + t.blocks)).sorted()
+                } else {
+                    out.append(t)
+                }
             }
             return out
         }
-        return pg.here.map { [of($0)] } ?? []
+        return pg.here.flatMap(of).map { [$0] } ?? []
     }
 
-    static func viewed(_ app: AppModel, _ pg: ReviewPageState, on: Bool) -> Write? {
-        let targets = viewedTargets(app, pg)
-        var keys: [String] = []
+    /// , m / , ! / , M: give the targets a mark. , ! on changes already all flagged takes the flag off.
+    /// Reading or flagging moves on to the next unread change.
+    static func marked(_ app: AppModel, _ pg: ReviewPageState, _ state: Mark) -> Write? {
+        let targets = markTargets(app, pg)
+        let all = targets.flatMap { t in (pg.fileOf(t.path).map { fv in t.blocks.map { (fv, $0) } } ?? []) }
+        guard !all.isEmpty else { return nil }
+        let want: Mark = state == .flagged && all.allSatisfy({ $0.0.marks[$0.1] == .flagged }) ? .unread : state
+        if want != .unread, let last = targets.last { advance(pg, from: last.path, after: last.blocks.max()) }
+        var change: (marks: [String: Mark], before: [String: Mark]) = ([:], [:])
+        var count = 0
         for t in targets {
             guard let fv = pg.fileOf(t.path) else { continue }
-            keys += fv.blocks.filter { t.hunk == nil || $0.hunk == t.hunk }.map(\.key)
+            let c = blockMarks(pg, fv, t.blocks, want)
+            change.marks.merge(c.marks) { $1 }
+            change.before.merge(c.before) { $1 }
+            count += t.blocks.filter { fv.marks[$0] != want }.count
         }
-        let todo = keys.filter { pg.isSeen($0) != on }
-        if on, let last = targets.last { advance(pg, from: last.path, hunk: last.hunk) }
-        guard !todo.isEmpty else {
-            if !on { app.runner.say("not viewed yet") }
+        guard count > 0 else {
+            if want == .unread { app.runner.say("no mark on it yet") }
             return nil
         }
-        let one = targets.count == 1 ? targets[0] : nil
-        let whole = one.map { t in t.hunk == nil || todo.count == pg.fileOf(t.path)?.blocks.count } ?? false
-        let said = one == nil ? "\(on ? "viewed" : "unviewed") \(targets.count) hunks — u puts them back"
-            : whole ? nil : "\(on ? "viewed" : "unviewed") a hunk of \(shortPath(one!.path)) — u puts it back"
-        return viewedSet(app, pg, todo, on: on, said: said)
+        let what = count == 1 ? "a change in \(shortPath(targets[0].path))" : "\(count) changes"
+        let said: String
+        switch want {
+        case .viewed: said = "viewed \(what) — u puts it back"
+        case .flagged: said = "flagged \(what) — ] u comes back to it"
+        case .unread: said = state == .flagged ? "unflagged \(what)" : "took the mark off \(what) — u puts it back"
+        }
+        return markSet(app, pg, change, said: said)
     }
 
-    /// On to the next thing still to read: the next unviewed hunk in this file, else the next unviewed file.
-    static func advance(_ pg: ReviewPageState, from path: String, hunk: Int?) {
+    /// On to the next unread change after `block` of `path` (the file's last when nil), else the first
+    /// unread one above; flagged changes were read, so they wait for ] u.
+    static func advance(_ pg: ReviewPageState, from path: String, after block: Int?) {
         guard let fv = pg.fileOf(path) else { return }
-        if let hunk {
-            let next = fv.file.hunks.indices.first { i in i > hunk && !fv.seenHunks.contains(i) && fv.blocks.contains { $0.hunk == i } }
-            if let next, let row = fv.rows.first(where: { $0.hunk == next && ($0.left?.kind != .ctx || $0.right?.kind != .ctx) }) {
-                return pg.setCursor("l|\(path)|\(row.key)")
-            }
-        }
-        let vs = pg.views
-        let at = vs.firstIndex { $0.file.path == path } ?? -1
-        let after = vs[(at + 1)...].first { !$0.viewed }
-        pg.setCursor(pg.landing(file: after?.file.path ?? path) ?? "f|\(path)")
+        let last = block ?? (fv.blocks.count - 1)
+        let s = pg.stops
+        let here = s.lastIndex { $0.path == path && ($0.row.flatMap { fv.rowBlock[$0.key] }.map { $0 <= last } ?? false) }
+            ?? s.firstIndex { $0.path == path } ?? 0
+        let unread = pg.changeStarts.filter { pg.markAt($0) == .unread }
+        if let next = unread.first(where: { $0 > here }) ?? unread.first { pg.setCursor(s[next].key) }
     }
 }

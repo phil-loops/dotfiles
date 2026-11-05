@@ -175,6 +175,7 @@ private struct FileTree: View {
                 if let v = views[path] {
                     HStack(spacing: 6) {
                         Text(v.viewed ? "☑" : v.seen > 0 ? "◪" : "☐").foregroundStyle(v.viewed ? theme.patina : theme.inkFaint)
+                        if v.flagged > 0 { Text("⚑\(v.flagged)").foregroundStyle(theme.ember) }
                         let tint = current == path ? theme.goldLeaf : v.viewed ? theme.inkFaint : theme.ink
                         if strip {
                             Text(path.split(separator: "/").last.map(String.init) ?? path).foregroundStyle(tint).lineLimit(1).truncationMode(.middle)
@@ -280,7 +281,23 @@ private struct DiffPane: View {
         } else if let r = pg.range, let s = r.startLine {
             marks.range = (r.path, r.side, s, r.line)
         }
-        for v in pg.views { for h in v.seenHunks { marks.seen.insert("\(v.file.path)#\(h)") } }
+        for v in pg.views where v.seen > 0 || v.flagged > 0 {
+            var byHunk: [Int: [DiffRow]] = [:]
+            for r in v.rows { byHunk[r.hunk, default: []].append(r) }
+            for rows in byHunk.values {
+                let ms = rows.compactMap(v.mark(of:))
+                let through = !ms.isEmpty && ms.allSatisfy { $0 == .viewed }
+                for r in rows {
+                    let stop = "l|\(v.file.path)|\(r.key)"
+                    switch v.mark(of: r) {
+                    case .viewed?: marks.seen.insert(stop)
+                    case .flagged?: marks.flagged.insert(stop)
+                    case nil where through: marks.seen.insert(stop)
+                    default: break
+                    }
+                }
+            }
+        }
         if focused && app.keys.mode == .select { marks.selection = Set(app.selection) }
         return CanvasView(handle: pg.diffCanvas, segments: ReviewDocument.segments(pg, app, colors), marks: marks, scrollTick: pg.cursorMoved,
                           onClick: { stop, shift in

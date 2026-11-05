@@ -87,7 +87,7 @@ import Testing
     @Test func everyFileViewedStillMovesAndSays() async throws {
         let (a, _) = try await base.app()
         let pg = ReviewPageState.of(a)
-        for f in pg.files { pg.viewedOverride[f.path] = true }
+        for v in pg.views { for b in v.blocks { pg.viewedOverride[b.key] = .viewed } }
         for k in ["g g", "G", "] g", "[ g", "g n", "g p", "}", "{", "j", "k", "h", "l", "n"] {
             let before = pg.here?.key
             for part in k.split(separator: " ") { keys(a, String(part)) }

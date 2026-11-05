@@ -86,7 +86,8 @@
 | main | `↵` | the thing's main action |
 | write | `i` | start writing: the field for the thing under the cursor |
 | mark / unmark | `, m` / `, M` (each page's own) | mark it (viewed, done, answered) and go on / take the mark off |
-| next / previous unviewed | `] u` / `[ u` | the next change not yet marked viewed, across files, wrapping round the branch; marks nothing |
+| flag | `, !` (review) | flag the change to come back to and go on; on a flagged change, take the flag off |
+| next / previous unviewed | `] u` / `[ u` | the next change not read yet or flagged, across files, wrapping round the branch; marks nothing |
 | put-away | `X` | put it away: archive, drop, delete, kill, forget, cut |
 | apply | `A` | apply the suggested fix |
 | copy | `y` | copy it; where a page has nothing of its own to copy, a link to here (below) |
