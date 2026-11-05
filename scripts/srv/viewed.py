@@ -171,6 +171,8 @@ def post(req, raw):
         path = _store()
         if not path:
             raise ValueError("not in a git repo")
+        if not _branch_exists(branch):
+            raise ValueError(f"no branch {branch}")
         with _LOCK:
             data = _migrated(_read(path))
             ids = _ids()

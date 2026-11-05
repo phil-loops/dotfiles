@@ -94,6 +94,9 @@ check("a deleted branch's marks are pruned", len(ids) == 2 and "loops:gone" not 
 # bad input is refused
 check("an unknown state is refused", post({"branch": "beta", "keys": ["x"], "state": "maybe"}).status == 400)
 check("a malformed key is refused", post({"branch": "beta", "keys": ["X!"], "state": "viewed"}).status == 400)
+check("a branch that doesn't exist is refused, and gets no review id",
+      post({"branch": "__probe__", "keys": ["x"], "state": "viewed"}).status == 400
+      and subprocess.run(["git", "-C", repo, "config", "branch.__probe__.stack-review-id"], capture_output=True).returncode != 0)
 r = post({"branch": "beta", "marks": {"mmm": "flagged", "nnn": "viewed"}})
 check("a mixed marks body sets each", r.status == 200 and "mmm" in marks()["loops:beta"]["flagged"] and "nnn" in marks()["loops:beta"]["keys"], marks())
 check("a context-suffixed key is accepted", post({"branch": "beta", "keys": ["abc.d3f"], "state": "viewed"}).status == 200)
