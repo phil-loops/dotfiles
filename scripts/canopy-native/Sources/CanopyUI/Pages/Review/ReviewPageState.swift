@@ -128,6 +128,8 @@ public func blockAnchors(_ f: FileDiff) -> [String: Int] {
 
 public let reviewDiffPane = "diff"
 public let reviewTreePane = "files"
+/// the branch's line in the header: its points, the cursor `, h` puts there
+public let reviewLinePane = "line"
 public let reviewCodePane = "code"
 
 @MainActor
@@ -214,7 +216,8 @@ public final class ReviewPageState: ShipHost {
     public var search = ""
     /// the forest map overlay is up (space m) — its layer's cursor
     public var mapIndex = 0
-    /// the commit whose diff the commits tab shows (Ship's commitScope, mirrored), and its files
+    /// what the diff covers when it isn't a base's whole stretch: one commit ("sha") or a run of
+    /// them ("from..to", both ends included) — the branch line's lit stretch (ReviewLine). Its files beside it.
     public private(set) var commitScope: String?
     public private(set) var commitFiles: (sha: String, files: [NodeFile])?
 
@@ -313,6 +316,31 @@ public final class ReviewPageState: ShipHost {
     public var keyOf: String { "\(id)@\(at)|\(baseRef(target?.name ?? ""))" }
     public var baseSha: String { payload?.data.baseSha ?? "" }
     public var scoped: Bool { commitScope != nil }
+    /// the commit the scoped diff ends on: its new side is that commit's tree
+    public var scopeEnd: String? { commitScope.map { ReviewLine.ends($0).to } }
+
+    /// The branch's line, once its history is read; none on a forest's integration page.
+    public var line: ReviewLine? {
+        guard integration == nil, let app, let b = branch, let rows = ShipState.of(app).historyRows(id) else { return nil }
+        return ReviewLine(parentIsMain: b.parent.isEmpty || b.parent == "main", commits: rows)
+    }
+    /// The stretch the diff covers on the line.
+    public var lit: (lo: Int, hi: Int)? { line?.lit(base: base, scope: commitScope) }
+    /// the point ↵ picked first on the line, waiting for the other end
+    public var lineAnchor: Int?
+
+    /// Make the diff cover what was chosen on the line; a refusal says why and changes nothing.
+    public func apply(_ c: ReviewLine.Choice) throws {
+        switch c {
+        case .refuse(let why): throw Refusal(why)
+        case .base(let b):
+            if commitScope != nil { commitScopeChanged(nil) }
+            if b != base { setBase(b) }
+        case .commits:
+            if commitScope != c.scope { commitScopeChanged(c.scope) }
+        }
+        tab = "files"
+    }
 
     func repoPath(_ p: String) -> String { app?.transport.atRepo(target?.repo ?? "", p) ?? p }
 
@@ -323,6 +351,8 @@ public final class ReviewPageState: ShipHost {
     public func sync() {
         guard let t = target else { return }
         arrive()
+        // the header's line is the page's: its commits load with the diff (a no-op once read at this tip)
+        if integration == nil, let app { ShipState.of(app).loadHistory(app, id) }
         let key = keyOf
         if payload?.key == key { return }
         if let hit = cache[key] { return land(key, hit) }
@@ -461,16 +491,19 @@ public final class ReviewPageState: ShipHost {
         return order[i + d]
     }
 
-    // ── one commit's diff (the commits tab) ──
+    // ── a stretch of commits ──
 
-    /// ShipHost.commitScopeChanged: show one commit's diff (GET /commit-diff), or the branch again.
+    /// ShipHost.commitScopeChanged: show one commit's diff or a run's ("from..to", GET /commit-diff),
+    /// or the branch again.
     public func commitScopeChanged(_ sha: String?) {
         commitScope = sha
+        lineAnchor = nil
         mark = nil
         let waiting = pendingCursor?.id == id || pendingLoc?.id == id
         if !waiting, let k = stopFiles.first.flatMap(landing(file:)) { setCursor(k, focus: false) }
         guard let sha, commitFiles?.sha != sha, let app else { return }
-        let path = repoPath("/commit-diff?sha=\(sha.uriComponent)")
+        let ends = ReviewLine.ends(sha)
+        let path = repoPath("/commit-diff?sha=\(ends.to.uriComponent)" + (ends.from.map { "&from=\($0.uriComponent)" } ?? ""))
         Task { @MainActor [weak self] in
             struct CommitDiff: Decodable { var sha: String?; var files: [NodeFile] }
             guard let got = try? await app.transport.getJSON(path, as: CommitDiff.self), let self, self.commitScope == sha else { return }
@@ -487,13 +520,9 @@ public final class ReviewPageState: ShipHost {
     }
 
     private func tabMoved(_ from: String) {
-        if tab == "conversation" && commitScope != nil { commitScope = nil }
         guard let app, case .review = app.router.route else { return }
         if tab == "files" { app.focus(pane: reviewDiffPane) }
-        if tab == "commits" {
-            app.focus(pane: ShipSeam.historyPane)
-            app.setCursor("h|\(commitScope ?? "")")
-        }
+        if tab == "commits" { app.focus(pane: ShipSeam.historyPane) }
     }
 
     // ── context ──

@@ -29,7 +29,8 @@ enum ReviewCommands {
         func repoPath(_ p: String) -> String { tr.atRepo(page().flatMap(ShipRows.splitID)?.repo ?? "", p) }
         func name() -> String { page().flatMap(ShipRows.splitID)?.name ?? "" }
         let integration = { () -> Bool in page().flatMap(ShipRows.splitID).map { Route.integrationOf($0.name) != nil } ?? false }
-        let canWrite = { () -> Bool in conv() != nil && ship.commitScope == nil }
+        // a commit's or a run's diff isn't the PR's: its lines take notes for Claude, not GitHub comments
+        let canWrite = { () -> Bool in conv() != nil && (ship.host.tab == "conversation" || ship.commitScope == nil) }
         let canNote = { () -> Bool in canWrite() || ship.commitScope != nil }
         let noting = { () -> Bool in ship.composer?.noteSha != nil }
         let open = { (u: URL) in ship.openURL(u) }
@@ -48,7 +49,7 @@ enum ReviewCommands {
                 guard let app = weakApp, let id = id ?? page() else { return }
                 ship.host.tab = "commits"
                 ship.historyFocus = .list
-                ship.showCommit(nil)
+                app.setCursor(nil, pane: ShipSeam.historyPane)
                 ship.loadHistory(app, id)
                 words.load(app, id)
                 app.focus(pane: ShipSeam.wordsPane)
@@ -61,44 +62,35 @@ enum ReviewCommands {
             guard let app = weakApp else { return }
             app.focus(pane: ShipSeam.historyPane)
             app.moveCursor(by)
-            let sha = app.selected.flatMap { $0.hasPrefix("h|") ? String($0.dropFirst(2)) : nil }
-            ship.showCommit(sha?.isEmpty == false ? sha : nil)
         }
         r.register(Command(id: "history.next", title: "Next commit", scope: .history, verb: .next, modes: [.normal, .select],
                            label: "commit", pair: "history.prev", quiet: true, local: { _, _ in stepHistory(1) }))
         r.register(Command(id: "history.prev", title: "Previous commit", scope: .history, verb: .previous, modes: [.normal, .select],
                            label: "commit", quiet: true, local: { _, _ in stepHistory(-1) }))
         r.register(Command(
-            id: "history.select", title: "Show one commit's diff", scope: .review, needsArg: true, quiet: true,
+            id: "history.select", title: "Put the commits tab on one commit's words", scope: .review, needsArg: true, quiet: true,
             local: { _, arg in
                 guard let app = weakApp else { return }
                 let sha = (arg as? String).flatMap { $0.isEmpty ? nil : $0 }
                 ship.host.tab = "commits"
                 ship.historyFocus = .list
                 app.focus(pane: ShipSeam.historyPane)
-                app.setCursor("h|\(sha ?? "")")
-                ship.showCommit(sha)
+                app.setCursor(sha.map { "h|\($0)" })
             }))
-        let enterDiff = { (_: String?, _: Any?) in
-            guard let app = weakApp else { return }
-            ship.historyFocus = .diff
-            ship.host.focusDiff(app, true)
-        }
-        r.register(Command(id: "history.open", title: "Read the diff: this commit's, or the whole branch's", scope: .history, verb: .main, label: "read",
-                           local: enterDiff))
-        r.register(Command(id: "history.exit", title: "Back to the whole branch's code", scope: .history, verb: .cancel, label: "back",
+        // the commits tab only reads and writes words; ↵ is the one way it changes what the diff covers
+        r.register(Command(id: "history.open", title: "Read this commit's diff on the code tab", scope: .history, verb: .main, label: "read",
+                           available: { _ in weakApp.map(ShipState.wordsCommit) != nil },
+                           local: { _, _ in
+                               guard let app = weakApp, let sha = ShipState.wordsCommit(app) else { return }
+                               ship.showCommit(sha)
+                               ship.host.tab = "files"
+                               app.focus(pane: reviewDiffPane)
+                           }))
+        r.register(Command(id: "history.exit", title: "Back to the code tab", scope: .history, verb: .cancel, label: "back",
                            local: { _, _ in
                                if let app = weakApp, ShipSeam.backOut(app) { return }
-                               ship.showCommit(nil)
                                ship.host.tab = "files"
                            }))
-        let backToList = { (_: String?, _: Any?) in
-            guard let app = weakApp else { return }
-            ship.historyFocus = .list
-            ship.host.focusDiff(app, false)
-        }
-        r.register(Command(id: "commit.back", title: "Go back to the commit list", scope: .commit, verb: .out, label: "list", local: backToList))
-        r.register(Command(id: "commit.exit", title: "Go back to the commit list", scope: .commit, verb: .cancel, label: "list", local: backToList))
 
         // ── address: the commit that fixes a thread (wiki canopy-v2-address) ──
 
@@ -195,7 +187,7 @@ enum ReviewCommands {
         let lineComposer = { () -> ShipComposer? in
             guard let app = weakApp, let r = ship.host.lineRange(app) else { return nil }
             // on one commit's diff the box is a note for Claude about that commit, not a GitHub comment
-            let sha = ship.commitScope
+            let sha = ship.commitScope.map { ReviewLine.ends($0).to }
             let key = "\(sha.map { "n|\($0)" } ?? "c")|\(r.path)|\(r.side.rawValue)|\(r.line)|\(r.startLine.map(String.init) ?? "")"
             return .line(key: key, path: r.path, side: r.side, line: r.line, startLine: r.startLine, sha: sha)
         }

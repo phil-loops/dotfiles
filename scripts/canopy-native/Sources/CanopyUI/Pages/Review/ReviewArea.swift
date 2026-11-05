@@ -28,7 +28,7 @@ enum ReviewArea: PageArea {
     /// The page's own keys that no verb places in the `?` sheet (`KeyGroup.of` places the rest).
     private static func placeInSheet(_ r: CommandRegistry) {
         r.place(.show, ["review.in", "review.back", "review.outdated", "review.base.parent", "review.base.main",
-                        "review.base.outgoing", "review.scope", "review.gates.show", "review.viewed", "review.unviewed", "review.flag"])
+                        "review.base.outgoing", "review.line", "review.commit.next", "review.commit.prev", "review.gates.show", "review.viewed", "review.unviewed", "review.flag"])
         r.place(.branch, ["review.compose.edit", "review.compose.send", "review.compose.draft", "review.compose.suggest", "review.send.all",
                           "review.address.claude", "review.address.pick.list", "review.gates.quick"])
         r.place(.others, ["review.map.open"])
@@ -72,12 +72,10 @@ struct ReviewSurface: SurfaceProvider {
         case "conversation":
             return guest
         case "commits":
-            // the commit's diff sits under its words, as drawn: C-w k from the diff reaches them
-            let words = guest.first { $0.id == ShipSeam.wordsPane }
-            return guest + (pg.scoped ? [Pane(id: reviewDiffPane, title: "commit", rows: pg.stopKeys,
-                                              column: words?.column ?? 0, row: (words?.row ?? -1) + 1, pageSize: 20)] : [])
+            return guest
         default:
             var out: [Pane] = []
+            if let l = pg.line { out.append(Pane(id: reviewLinePane, title: "line", rows: l.points.map(\.key), column: 1, row: -1, pageSize: 4)) }
             if pg.showsTree { out.append(Pane(id: reviewTreePane, title: "files", rows: ReviewPage.treeRows(pg), column: 0, row: 0, pageSize: 12)) }
             for (c, col) in pg.columns.enumerated() {
                 for (r, w) in col.enumerated() {
@@ -94,6 +92,7 @@ struct ReviewSurface: SurfaceProvider {
         guard app.keys.layer != .map else { return [] }
         if app.insertField == ReviewPage.filterField { return [.filter] }
         var out = ShipSeam.scopes(app)
+        if app.pane?.id == reviewLinePane { out.insert(.branchLine, at: 0) }
         if app.pane?.id == reviewDiffPane, let h = pg.here {
             let s = Scope(rawValue: h.kind.rawValue)
             if h.kind != .file, !out.contains(s) { out.append(s) }

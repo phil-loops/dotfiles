@@ -33,6 +33,7 @@ public enum Verb: String, CaseIterable, Sendable, Comparable {
     case match, changedFiles = "changed-files"
     case nextFunction = "next-function", previousFunction = "previous-function", nextType = "next-type", previousType = "previous-type"
     case nextFinding = "next-finding", previousFinding = "previous-finding", firstChange = "first-change", lastChange = "last-change"
+    case nextCommit = "next-commit", previousCommit = "previous-commit"
     case repeatMotion = "repeat-motion", viewCenter = "view-center", viewTop = "view-top", viewBottom = "view-bottom"
     case searchWord = "search-word"
     case type, definition, typeDefinition = "type-definition", implementations, references, symbols
@@ -216,6 +217,8 @@ public enum Verbs {
         v(.previousFinding, .nav, ["[ d"], "the previous finding (Helix [d)"),
         v(.lastFinding, .nav, ["] D"], "the last finding (Helix ]D)"),
         v(.firstFinding, .nav, ["[ D"], "the first finding (Helix [D)"),
+        v(.nextCommit, .nav, ["] h"], "the diff covers the next commit alone (from the whole branch: its first)"),
+        v(.previousCommit, .nav, ["[ h"], "the diff covers the previous commit alone (from the whole branch: its last)"),
         v(.firstChange, .nav, ["[ G"], jump: true, "the branch's first change (Helix [G)"),
         v(.lastChange, .nav, ["] G"], jump: true, "the branch's last change (Helix ]G)"),
         v(.repeatMotion, .nav, ["A-."], "repeat the last f / t / F / T (Helix alt-.)"),
@@ -323,7 +326,7 @@ public enum Verbs {
         .nextSibling, .previousSibling, .parent, .nextFile, .previousFile, .nextHunk, .previousHunk, .nextUnviewed, .previousUnviewed,
         .nextThread, .previousThread, .nextConversation, .previousConversation, .nextFunction, .previousFunction,
         .nextType, .previousType, .nextFinding, .previousFinding, .nextTest, .previousTest, .nextGitHunk, .previousGitHunk,
-        .repeatMotion, .scrollDown, .scrollUp, .extend, .jumpBack, .jumpForward, .nextComment, .previousComment, .wordEnd,
+        .repeatMotion, .scrollDown, .scrollUp, .extend, .nextCommit, .previousCommit, .jumpBack, .jumpForward, .nextComment, .previousComment, .wordEnd,
     ]
 
     public static let byVerb: [Verb: VerbSpec] = Dictionary(table.map { ($0.verb, $0) }, uniquingKeysWith: { a, _ in a })

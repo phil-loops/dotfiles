@@ -12,6 +12,8 @@ enum KeyTutorSandbox {
     static let greetings = "\(repo):greetings"
     static let farewells = "\(repo):farewells"
     /// The stack, in merge order: add-greeting forks into header and footer; banner sits on header.
+    /// every practice branch's first commit; its tip is the second (`] h` / `[ h` step between them)
+    static let firstCommit = "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c"
     static let root = "add-greeting", header = "use-greeting-in-header", footer = "use-greeting-in-footer"
     static let banner = "wave-in-the-banner", farewell = "add-farewell"
     static func id(_ name: String) -> String { "\(repo):\(name)" }
@@ -196,7 +198,8 @@ enum KeyTutorSandbox {
         case ("GET", "/file"), ("GET", "/lsp/src"): return (200, file(query["path"] ?? "x.ts"))
         case ("GET", "/sync"): return (200, #"{"behind":1,"syncable":true,"restack":false,"published":false,"dirty":[],"dirtyWorktree":"","why":""}"#)
         case ("GET", "/commits"):
-            return (200, #"[{"sha":"\#(tip(b))","subject":"feat: add greeting","author":"you","date":"2026-10-29","body":"","own":true}]"#)
+            return (200, #"[{"sha":"\#(tip(b))","subject":"say hello in one place","author":"you","date":"2026-10-29","body":"","own":true},{"sha":"\#(Self.firstCommit)","subject":"feat: add greeting","author":"you","date":"2026-10-28","body":"","own":true}]"#)
+        case ("GET", "/commit-diff"): return (200, json(node(b)))
         case ("GET", "/outline"):
             let t = tip(b)
             return (200, #"{"ok":true,"branch":"\#(b)","parent":"main","base":"origin/main","head":"\#(t)","description":"adds a greeting the pages can share","story":"","ticket":"","commits":[{"sha":"\#(t)","short":"\#(t.prefix(10))","subject":"feat: add greeting","body":"","author":"you","date":"2026-10-29","pushed":false,"merge":false,"carried":false,"locked":"","files":3,"add":9,"del":5}],"pr":{"exists":false},"draft":{"title":"feat: add greeting","titleSaved":false,"body":"so every page can say hello the same way","bodySaved":false,"derivedBody":null,"bodyPending":false},"reseat":null,"undo":null}"#)

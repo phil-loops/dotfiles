@@ -1,25 +1,23 @@
 import CanopyCore
 import SwiftUI
 
-/// The commits tab (Review.tsx History + Commits.tsx): the branch's commits down the side, newest
-/// first, opening on the newest. j/k step through; a commit's words sit over its own diff (`diff`,
-/// area B's). With no commit shown (the `words` verb) it holds what lands on main. Two panes:
-/// "history" and "words" (`C-w l`).
+/// The commits tab (Review.tsx History + Commits.tsx): the branch's words. Its commits down the
+/// side, newest first; j/k step through and the cursor's commit shows its words beside — only its
+/// words: ↵ reads its diff on the code tab, the one place a diff is drawn. With no commit under the
+/// cursor (the `words` verb) it holds what lands on main. Two panes: "history" and "words" (`C-w l`).
 public struct CommitsPanel: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme
     let branchID: String
-    let diff: AnyView?
 
-    public init(branchID: String, diff: AnyView? = nil) { self.branchID = branchID; self.diff = diff }
+    public init(branchID: String) { self.branchID = branchID }
 
     public var body: some View {
-        let ship = ShipState.of(app)
         HStack(alignment: .top, spacing: 0) {
             HistoryList(branchID: branchID).frame(width: 300)
             VStack(alignment: .leading, spacing: 10) {
                 Group {
-                    if let sha = ship.commitScope {
+                    if let sha = ShipState.wordsCommit(app) {
                         CommitHead(branchID: branchID, sha: sha)
                     } else {
                         WordsEditor(branchID: branchID, landing: true, landingOnly: true)
@@ -27,7 +25,6 @@ public struct CommitsPanel: View {
                 }
                 .padding(.horizontal, 20)
                 .fixedSize(horizontal: false, vertical: true)
-                if let diff { diff.frame(maxWidth: .infinity, maxHeight: .infinity) }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .overlay(alignment: .leading) { theme.rule.opacity(0.5).frame(width: 1) }
@@ -35,13 +32,8 @@ public struct CommitsPanel: View {
         .font(Theme.text(12))
         .padding(.leading, 10)
         .task(id: app.store.view(Branch.self, branchID).map(ShipState.historyKey)) {
-            ship.loadHistory(app, branchID)
+            ShipState.of(app).loadHistory(app, branchID)
             WordsState.of(app).load(app, branchID)
-        }
-        .task(id: [ShipRows.history(app, branchID).first, app.pane?.id]) {
-            guard ship.commitScope == nil, app.pane?.id == ShipSeam.historyPane,
-                  let newest = ShipRows.history(app, branchID).first else { return }
-            app.runner.dispatch("history.select", via: .key, arg: String(newest.dropFirst(2)))
         }
     }
 }
@@ -61,7 +53,7 @@ struct HistoryList: View {
         let keys = ShipRows.history(app, branchID)
         VStack(alignment: .leading, spacing: 4) {
             PaneList(pane: ShipSeam.historyPane, rows: keys, header: { key in Self.group(key, keys, byKey, conv) }) { key, _ in
-                let scoped = key == "h|\(ship.commitScope ?? "")"
+                let scoped = key == "h|\(ShipState.wordsCommit(app) ?? "")"
                 if let c = byKey[key] {
                     VStack(alignment: .leading, spacing: 1) {
                         Text(c.subject).foregroundStyle(scoped ? theme.goldLeaf : theme.ink).lineLimit(2)

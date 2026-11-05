@@ -84,7 +84,7 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
         let (a, _) = try app()
         let mine = Set(ShipState.of(a).commandIDs)
         #expect(mine.count > 60)
-        for id in ["review.push", "review.sync", "branch.sync", "words.save", "review.compose.send", "history.next", "commit.back", "branch.pr", "forest.preview"] {
+        for id in ["review.push", "review.sync", "branch.sync", "words.save", "review.compose.send", "history.next", "history.open", "branch.pr", "forest.preview"] {
             #expect(mine.contains(id), "\(id)")
         }
         #expect(KeyboardRule.violations(a) { mine.contains($0) } == [])
@@ -374,6 +374,8 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
         #expect(!WordsEditor.echoesCommit(o, "feat: add x"))
     }
 
+    /// The history's cursor picks whose words the commits tab shows, and nothing else: only ↵ makes
+    /// the diff cover that commit, on the code tab.
     @Test func historyStepsSelectOneCommit() throws {
         let (a, _) = try app()
         let ship = ShipState.of(a)
@@ -382,9 +384,13 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
                             HistoryCommit(sha: "ccc3333", subject: "someone else's", own: false)])
         #expect(ShipRows.history(a, Self.branch) == ["h|aaa1111", "h|bbb2222"])
         a.runner.dispatch("history.select", via: .key, arg: "bbb2222")
-        #expect(ship.commitScope == "bbb2222" && ship.host.tab == "commits")
+        #expect(ShipState.wordsCommit(a) == "bbb2222" && ship.host.tab == "commits")
+        #expect(ship.commitScope == nil, "looking at a commit's words doesn't change what the diff covers")
+        a.runner.dispatch("history.open", via: .key)
+        #expect(ship.commitScope == "bbb2222")
+        a.runner.dispatch("history.select", via: .key, arg: "aaa1111")
         a.runner.dispatch("history.exit", via: .key)
-        #expect(ship.commitScope == nil)
+        #expect(ship.commitScope == "bbb2222", "leaving the commits tab leaves the diff alone")
     }
 
     func outline(ticket: String? = nil) -> WordsOutline {

@@ -77,7 +77,7 @@ public enum ShipRows {
         let w = WordsState.of(app)
         let ship = ShipState.of(app)
         guard let o = w.shown[id] else { return full ? [] : ["w|desc"] }
-        if !full, let sha = ship.commitScope {
+        if !full, ship.host.tab == "commits", let sha = ShipState.wordsCommit(app) {
             guard let c = o.commits.first(where: { $0.sha.hasPrefix(sha) }), c.locked.isEmpty else { return [] }
             return ["w|s|\(c.sha)", "w|b|\(c.sha)"]
         }
