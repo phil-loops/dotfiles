@@ -278,8 +278,12 @@ struct LiveHeaderText {
     let state: String?
     let current: String?
     let counts: (look: Int, agreed: Int, pending: Int)
+    /// Whether any section carries a status; a deck without them (a show-job job) has no ◆ ● ○ counts to show.
+    let hasMarks: Bool
     let updated: String?
     let stale: Bool
+    /// The deck sets its own `staleAfter`, so a stale header reads "stalled?" (a job that reports every few minutes).
+    let stalled: Bool
     let stopping: Bool
     let failed: Bool
     let fraction: CGFloat?
@@ -303,8 +307,10 @@ struct LiveHeaderText {
         state = stopping ? "Stopping after this round" : raw.isEmpty ? nil : raw.prefix(1).uppercased() + raw.dropFirst()
         current = status?.current.flatMap { $0.isEmpty ? nil : $0 }
         counts = liveCounts(deck)
+        hasMarks = deck.sections.contains { $0.status != nil }
         updated = modified.map { "updated " + sinceText($0, now: now) }
-        stale = raw == "running" && modified.map { now.timeIntervalSince($0) > 30 } == true
+        stale = raw == "running" && modified.map { now.timeIntervalSince($0) > (deck.staleAfter ?? 30) } == true
+        stalled = stale && deck.staleAfter != nil
     }
 
     /// The progress count, the state, and the current item; a failed run gives `current` as its reason.
@@ -313,7 +319,7 @@ struct LiveHeaderText {
     }
 
     var second: [String] {
-        ["◆ \(counts.look)", "● \(counts.agreed)", "○ \(counts.pending)", updated ?? ""].filter { !$0.isEmpty }
+        (hasMarks ? ["◆ \(counts.look)", "● \(counts.agreed)", "○ \(counts.pending)"] : []) + [updated.map { stalled ? "stalled? " + $0 : $0 } ?? ""].filter { !$0.isEmpty }
     }
 
     var plain: String { first.joined(separator: " · ") + (failed ? "  [signal]" : "") + "\n" + second.joined(separator: " · ") + (stale ? "  [stale]" : "") }
@@ -421,7 +427,7 @@ final class LivePanel: NSObject {
         }
         let text = LiveHeaderText(deck: deck, modified: modified, stopRequested: stopRequested)
         header.isHidden = false
-        bar.isHidden = false
+        bar.isHidden = deck.runDir == nil
         progressBar.isHidden = text.fraction == nil
         progressBar.fraction = text.fraction ?? 0
         progressBar.fill = text.failed ? signalColor : text.stopping ? .tertiaryLabelColor : .secondaryLabelColor
@@ -449,9 +455,10 @@ final class LivePanel: NSObject {
             NSAttributedString(string: mark + " ", attributes: [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: color, .baselineOffset: 1])
                 + NSAttributedString(string: "\(n)", attributes: [.font: digits, .foregroundColor: NSColor.secondaryLabelColor])
         }
-        var line = count("◆", text.counts.look, signalColor) + dot + count("●", text.counts.agreed, .secondaryLabelColor) + dot + count("○", text.counts.pending, .tertiaryLabelColor)
+        var line = text.hasMarks ? count("◆", text.counts.look, signalColor) + dot + count("●", text.counts.agreed, .secondaryLabelColor) + dot + count("○", text.counts.pending, .tertiaryLabelColor) : NSAttributedString()
         if let updated = text.updated {
-            line = line + dot + NSAttributedString(string: updated, attributes: [.font: NSFont.systemFont(ofSize: 12, weight: text.stale ? .medium : .regular), .foregroundColor: text.stale ? signalColor : NSColor.secondaryLabelColor])
+            let shown = text.stalled ? "stalled?  " + updated : updated
+            line = line + (line.length > 0 ? dot : NSAttributedString()) + NSAttributedString(string: shown, attributes: [.font: NSFont.systemFont(ofSize: 12, weight: text.stale ? .medium : .regular), .foregroundColor: text.stale ? signalColor : NSColor.secondaryLabelColor])
         }
         second.attributedStringValue = line
 

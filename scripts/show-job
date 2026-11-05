@@ -1,0 +1,222 @@
+#!/usr/bin/env python3
+"""show-job — report a long-running job's progress to Show's Runs workspace.
+
+  show-job set <id> --title T [--row "label done/total note"]... [--line "text"]...
+  show-job done <id> [--note "text"]
+  show-job fail <id> --note "why"
+
+`set` sends the job's whole current state every call (never a patch): call it every 30s or so. Show lists the job on the
+Runs shelf, draws a bar per row with its rate and ETA, and marks it "stalled?" when no `set` has come for 10 minutes.
+`done` and `fail` end it and post one note to Show's Inbox. A finished job stays on the shelf until ⌫ dismisses it.
+
+Rows and lines carry counts, timings and labels only — never email, contact or customer text.
+
+~/.cache/show/jobs/<id>.json (SHOW_JOBS overrides the folder) is the live Show deck; <id>.job.json beside it holds the job's
+state and its last 60 readings per row. This command is their only writer; neither format is a contract.
+"""
+import argparse
+import fcntl
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from datetime import datetime
+from pathlib import Path
+
+JOBS = Path(os.environ.get("SHOW_JOBS", Path.home() / ".cache/show/jobs")).expanduser()
+REGISTRY = Path(os.environ.get("SHOW_LIVE_RUNS", Path.home() / "Library/Application Support/Show/live-runs.json")).expanduser()
+SCRIPTS = Path(__file__).resolve().parent
+READINGS = 60
+STALE_AFTER = 600
+RATE_WINDOW = 600
+
+
+def parse_row(text):
+    """'label done/total note' → {label, done, total, note}: the first N/M token splits the label from the note."""
+    m = re.search(r"(?:^|\s)(\d+)/(\d+)(?=\s|$)", text)
+    if not m:
+        raise SystemExit(f"show-job: a row needs done/total, as in \"sonnet 412/2389 warm cache\": {text!r}")
+    label = text[:m.start()].strip() or "progress"
+    return {"label": label, "done": int(m.group(1)), "total": int(m.group(2)), "note": text[m.end():].strip()}
+
+
+def rate_of(readings, now):
+    """Items per second over the last RATE_WINDOW seconds of readings, or None before two readings span time."""
+    recent = [r for r in readings if now - r[0] <= RATE_WINDOW] or readings[-2:]
+    if len(recent) < 2 or recent[-1][0] <= recent[0][0]:
+        return None
+    return max(0.0, (recent[-1][1] - recent[0][1]) / (recent[-1][0] - recent[0][0]))
+
+
+def duration(secs):
+    secs = int(secs)
+    if secs < 60:
+        return f"{secs}s"
+    if secs < 3600:
+        return f"{secs // 60}m"
+    return f"{secs // 3600}h {secs % 3600 // 60:02d}m"
+
+
+def rate_text(rate):
+    if rate is None:
+        return "—"
+    if rate == 0:
+        return "0/min"
+    return f"{rate * 60:.1f}/min" if rate * 60 < 100 else f"{rate:.1f}/s"
+
+
+def bar(done, total, width=10):
+    filled = round(width * min(1, done / total)) if total else 0
+    return "●" * filled + "○" * (width - filled)
+
+
+def eta_text(row, rate):
+    left = row["total"] - row["done"]
+    if left <= 0:
+        return "done"
+    if not rate:
+        return "—"
+    return duration(left / rate)
+
+
+def body(job, now):
+    lines = ["| | | done | rate | ETA | |", "|---|---|---|---|---|---|"]
+    for row in job["rows"]:
+        rate = rate_of(row["readings"], now) if job["state"] == "running" else None
+        pct = f"{100 * row['done'] / row['total']:.0f}%" if row["total"] else ""
+        lines.append(f"| {row['label']} | {bar(row['done'], row['total'])} | {row['done']:,}/{row['total']:,} · {pct} | "
+                     f"{rate_text(rate)} | {eta_text(row, rate) if job['state'] == 'running' else ''} | {row['note']} |")
+    out = "\n".join(lines) if job["rows"] else ""
+    if job["lines"]:
+        out += "\n\n" + "\n".join(f"- {line}" for line in job["lines"])
+    started = datetime.fromtimestamp(job["started_at"]).strftime("%H:%M")
+    took = duration((job.get("ended_at") or now) - job["started_at"])
+    tail = {"running": f"started {started} · running {took}",
+            "done": f"started {started} · finished in {took}",
+            "failed": f"started {started} · failed after {took}"}[job["state"]]
+    if job.get("end_note"):
+        tail += f"\n\n> {job['end_note']}"
+    owner = job.get("owner") or {}
+    who = " · ".join(f"{k} {v}" for k, v in owner.items() if v)
+    return out + f"\n\n{tail}" + (f" · from {who}" if who else "")
+
+
+def deck(job, now):
+    rows = job["rows"]
+    unfinished = [r for r in rows if r["done"] < r["total"]]
+    current = None
+    if job["state"] == "running" and unfinished:
+        current = unfinished[0]["label"]
+    elif job["state"] == "failed":
+        current = job.get("end_note") or "failed"
+    out = {
+        "mode": "live",
+        "title": job["title"],
+        "staleAfter": STALE_AFTER,
+        "status": {"state": job["state"], "done": sum(r["done"] for r in rows), "total": sum(r["total"] for r in rows),
+                   "current": current},
+        "sections": [{"id": "progress", "title": "Progress", "body": body(job, now)}],
+    }
+    if job.get("owner", {}).get("session"):
+        out["replyTo"] = job["owner"]["session"]
+    return out
+
+
+def owner():
+    return {k: v for k, v in {
+        "session": os.environ.get("CLAUDE_CODE_SESSION_ID", "")[:8],
+        "agent": "claude" if os.environ.get("CLAUDECODE") else "codex" if any(k.startswith("CODEX") for k in os.environ) else "",
+        "pane": os.environ.get("TMUX_PANE", ""),
+        "cwd": os.path.basename(os.getcwd()),
+    }.items() if v}
+
+
+def register(path, title):
+    """List the job on Show's Runs shelf through live-runs.json, the registry Show reads; newest first."""
+    REGISTRY.parent.mkdir(parents=True, exist_ok=True)
+    with open(REGISTRY.with_suffix(".lock"), "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            runs = json.loads(REGISTRY.read_text())
+        except (OSError, ValueError):
+            runs = []
+        runs = [{"path": str(path), "title": title, "openedAt": datetime.now().astimezone().isoformat(timespec="seconds")}] + [
+            r for r in runs if r.get("path") != str(path) and Path(r.get("path", "")).exists()]
+        write(REGISTRY, runs)
+
+
+def write(path, value):
+    temp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    temp.write_text(json.dumps(value, indent=1, ensure_ascii=False) + "\n")
+    os.replace(temp, path)
+
+
+def note(job):
+    word = {"done": "finished", "failed": "failed"}[job["state"]]
+    took = duration(job["ended_at"] - job["started_at"])
+    rows = "\n".join(f"- {r['label']}: {r['done']:,}/{r['total']:,}" for r in job["rows"])
+    text = f"**{job['title']}** {word} after {took}." + (f"\n\n> {job['end_note']}" if job.get("end_note") else "") + (f"\n\n{rows}" if rows else "")
+    subprocess.run([os.environ.get("SHOW_NOTE", str(SCRIPTS / "show-note")), f"Job {word}: {job['title']}", text], check=False)
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(prog="show-job", description=__doc__.split("\n\n")[0])
+    sub = parser.add_subparsers(dest="verb", required=True)
+    s = sub.add_parser("set")
+    s.add_argument("id")
+    s.add_argument("--title", required=True)
+    s.add_argument("--row", action="append", default=[])
+    s.add_argument("--line", action="append", default=[])
+    d = sub.add_parser("done")
+    d.add_argument("id")
+    d.add_argument("--note", default="")
+    f = sub.add_parser("fail")
+    f.add_argument("id")
+    f.add_argument("--note", required=True)
+    args = parser.parse_args(argv)
+
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", args.id):
+        raise SystemExit(f"show-job: an id is letters, digits, '.', '_' and '-': {args.id!r}")
+    JOBS.mkdir(parents=True, exist_ok=True)
+    path = JOBS / f"{args.id}.json"
+    state = JOBS / f"{args.id}.job.json"
+    now = time.time()
+    with open(JOBS / f".{args.id}.lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            old = json.loads(state.read_text())
+        except (OSError, ValueError):
+            old = None
+
+        if args.verb == "set":
+            fresh = not old or old.get("state") != "running"
+            past = {} if fresh else {r["label"]: r.get("readings", []) for r in old["rows"]}
+            rows = []
+            for text in args.row:
+                row = parse_row(text)
+                row["readings"] = (past.get(row["label"], []) + [[round(now, 1), row["done"]]])[-READINGS:]
+                rows.append(row)
+            job = {"id": args.id, "title": args.title, "state": "running", "owner": owner(),
+                   "started_at": now if fresh else old["started_at"], "updated_at": now, "rows": rows, "lines": args.line}
+            write(state, job)
+            write(path, deck(job, now))
+            if fresh:
+                register(path, args.title)
+            return 0
+
+        if not old:
+            raise SystemExit(f"show-job: no job {args.id!r} — `show-job set {args.id} …` starts one")
+        if old["state"] != "running":
+            print(f"show-job: {args.id} already {old['state']}", file=sys.stderr)
+            return 0
+        job = dict(old, state="done" if args.verb == "done" else "failed", ended_at=now, updated_at=now, end_note=args.note)
+        write(state, job)
+        write(path, deck(job, now))
+        note(job)
+        return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

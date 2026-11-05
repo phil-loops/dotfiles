@@ -227,7 +227,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         let entries = scanLibrary()
         workspaces.values.forEach { $0.setEntries(entries) }
         var counts: [Workspace: Int] = [:]
-        for entry in entries where entry.state == .waiting {
+        for entry in entries where entry.state == .waiting || (entry.workspace == .runs && entry.state == .running) {
             counts[entry.workspace, default: 0] += 1
         }
         counts[.canopy] = showEvents.state.waiting.filter { $0.workspace == .canopy }.count
