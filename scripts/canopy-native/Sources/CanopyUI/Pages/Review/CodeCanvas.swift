@@ -376,6 +376,8 @@ final class Canvas: NSObject {
     private var cursorMovedAt = Date.distantPast
     /// A restored place's viewport row, for the next scroll to this stop (instead of `reveal`'s least move).
     var anchor: (stop: String, row: Int)?
+    /// A jump's landing (Helix centres it): when the cursor reaches this stop, it goes mid-view.
+    var middle: String?
     /// A file jump's landing: when the cursor reaches `stop`, `head` (its file's header) goes to the top.
     var lead: (stop: String, head: String)?
     /// The header held at the top while layout settles after that jump.
@@ -528,12 +530,14 @@ final class Canvas: NSObject {
             lastCursor = c
             lastScrolledTick = scrollTick
             cursorMovedAt = Date()
-            let a = anchor, l = lead
+            let a = anchor, l = lead, m = middle
             anchor = nil
             lead = nil
+            middle = nil
             leading = nil
             if let a, a.stop == c, settle(c, row: a.row) { return }
             if let l, l.stop == c, top(l.head, keeping: c) { leading = l.head; return }
+            if m == c, place(c, at: 0.5) { return }
             reveal(c)
         }
     }
@@ -622,11 +626,11 @@ final class Canvas: NSObject {
         }
     }
 
-    /// Scroll so a 1-based paragraph (a code view's line) sits a third down.
+    /// Scroll so a 1-based paragraph (a code view's line) sits mid-view, as Helix lands a jump.
     func center(_ stop: String) {
         guard let r = stopMap[stop], let rect = text.rect(for: NSRange(location: r.location, length: 1)) else { return }
         let h = scroll.contentView.bounds.height
-        scroll.contentView.scroll(to: NSPoint(x: 0, y: max(0, rect.minY - h / 3)))
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: max(0, rect.midY - h / 2)))
         scroll.reflectScrolledClipView(scroll.contentView)
     }
 

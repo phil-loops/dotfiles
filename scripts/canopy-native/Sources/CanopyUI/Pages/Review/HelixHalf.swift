@@ -16,7 +16,7 @@ public struct HelixOpen: Equatable {
     public var sha: String
     /// over the whole diff (`o`), not just its new half (`i`)
     public var whole = false
-    /// opened from the code beside the diff: quitting puts that pane back where Helix left off
+    /// opened from the open file: quitting puts that pane back where Helix left off
     public var fromSide = false
 }
 
@@ -103,7 +103,7 @@ extension ReviewPageState {
         helixAt = nil
         let k = stopNear(path: at.path, line: at.line)
         if h.fromSide, k == nil {
-            // a file the diff doesn't show: back beside it, at the tip Helix edited
+            // a file the diff doesn't show: back in the window, at the tip Helix edited
             show(Loc(repo: t.repo, sha: h.sha, path: at.path, line: at.line))
         } else {
             pendingNear = (id, at.path, at.line)

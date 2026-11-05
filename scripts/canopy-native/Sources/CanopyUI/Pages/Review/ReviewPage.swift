@@ -3,7 +3,7 @@ import SwiftUI
 
 /// The review page (Review.tsx): GitHub's pull-request review, local. The header (title, the ship
 /// strip, the tabs), then the tab — files changed (a file tree with viewed boxes, the diff with its
-/// conversations folded in at their lines, a file opened beside it), the conversation (Ship), or the
+/// conversations folded in at their lines, or a file in its place), the conversation (Ship), or the
 /// commits (Ship's history, the selected commit's diff drawn here). Everything it does is a command.
 struct ReviewPage: View {
     @Environment(AppModel.self) private var app
@@ -39,11 +39,14 @@ struct ReviewPage: View {
                                 CommitHead(branchID: pg.id, sha: sha).padding(.horizontal, 16).padding(.top, 4)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
+                            // a file in the diff's place: the diff stays underneath, scrolled where it was
                             DiffPane(empty: pg.base == .outgoing ? "nothing to push" : "no changes").frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .opacity(pg.side == nil ? 1 : 0)
+                                .allowsHitTesting(pg.side == nil)
+                                .overlay { if pg.side != nil { CodeWindow() } }
                         }
                         .frame(minHeight: 0, maxHeight: .infinity, alignment: .top)
                         .padding(.leading, pg.showsOutline ? 0 : 12)
-                        if pg.side != nil { SidePane().frame(width: 520) }
                     }
                     .overlay(alignment: .topLeading) {
                         if pg.showsOutline {
@@ -315,9 +318,9 @@ private struct DiffPane: View {
     }
 }
 
-/// A place outside the diff, open beside it at the commit it was found at (side.ts + CodePane.tsx):
-/// its own pane, so j/k walk it and g d keeps going from wherever it lands.
-private struct SidePane: View {
+/// The file the window shows in the diff's place, at the commit it was found at: its own pane, so
+/// j/k walk it and g d keeps going from wherever it lands; C-o brings the diff back.
+private struct CodeWindow: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme
 
@@ -325,7 +328,7 @@ private struct SidePane: View {
         let pg = ReviewPageState.of(app)
         if let l = pg.side {
             CodePaneView(handle: pg.sideCanvas, pane: reviewCodePane, path: l.path, refLabel: l.sha, text: pg.sideText,
-                         lit: l.line...max(l.line, l.end ?? l.line), repo: l.repo, sha: l.sha, close: "review.side.close",
+                         lit: l.line...max(l.line, l.end ?? l.line), repo: l.repo, sha: l.sha,
                          word: pg.sideHereWord.flatMap { w in pg.sideWord.map { ($0.line, w) } }, searched: true)
         }
     }

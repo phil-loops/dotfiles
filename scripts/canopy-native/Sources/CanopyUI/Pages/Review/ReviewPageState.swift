@@ -166,7 +166,7 @@ public final class ReviewPageState: ShipHost {
         guard let w = word, let h = here, h.key == w.key, let row = h.row, sideLine(row, prefer: column).side == w.side else { return nil }
         return w.at
     }
-    /// The name `w` / `b` put the cursor on in the code beside the diff: its line and UTF-16 range.
+    /// The name `w` / `b` put the cursor on in the open file: its line and UTF-16 range.
     public var sideWord: (line: Int, at: Range<Int>)?
     /// The side pane's selected name, when the cursor is still on its line.
     public var sideHereWord: Range<Int>? {
@@ -229,8 +229,9 @@ public final class ReviewPageState: ShipHost {
     /// This branch's diff is here (not the last page's, still showing while this one comes).
     var diffHere: Bool { payload != nil && shownID == id }
 
-    // ── side.ts: a place outside the diff, open beside it ──
+    // ── the window: it shows the diff, or one file at one commit in the diff's place (Helix's view) ──
 
+    /// The file the window shows instead of the diff; nil: the diff.
     public private(set) var side: Loc?
     public private(set) var sideText: String?
     @ObservationIgnored private var srcCache: [String: [String]] = [:]
@@ -818,9 +819,17 @@ public final class ReviewPageState: ShipHost {
         return true
     }
 
-    /// Put the diff cursor on a stop; `focus` moves the keyboard to the diff too.
+    /// Put the diff cursor on a stop. `focus`: a jump into the diff — the window shows the diff again
+    /// and the keyboard goes there; without it, a window showing a file keeps it and the diff's cursor
+    /// waits underneath.
     public func setCursor(_ key: String?, focus: Bool = true) {
         guard let app else { return }
+        if focus { showDiff() }
+        if side != nil {
+            app.setCursor(key, pane: reviewDiffPane)
+            cursorMoved &+= 1
+            return
+        }
         let was = app.pane?.id
         app.focus(pane: reviewDiffPane)
         app.setCursor(key)
@@ -866,7 +875,7 @@ public final class ReviewPageState: ShipHost {
 
     // ── side.ts ──
 
-    /// Open a place: in the diff when it's a line of it, else beside the diff at its commit.
+    /// Open a place in the window: the diff when it's a line of it, else the file at its commit, in the diff's place.
     public func open(_ l: Loc) {
         if l.sha.isEmpty, l.repo == target?.repo {
             // an address's line: on the tip, which only the diff can place
@@ -881,7 +890,7 @@ public final class ReviewPageState: ShipHost {
             return
         }
         if let key = inDiff(l) {
-            side = nil
+            diffCanvas.canvas.middle = key
             setCursor(key)
             return
         }
@@ -938,7 +947,8 @@ public final class ReviewPageState: ShipHost {
         return Loc(repo: t.repo, sha: tip, path: h.path, line: row.right?.new ?? row.left?.old ?? 1, diffKey: h.key)
     }
 
-    public func closeSide() {
+    /// The window shows the diff again.
+    func showDiff() {
         guard side != nil else { return }
         side = nil
         sideText = nil
