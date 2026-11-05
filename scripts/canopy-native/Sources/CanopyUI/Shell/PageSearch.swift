@@ -28,6 +28,8 @@ public final class PageSearch {
     public internal(set) var current: Hit?
     @ObservationIgnored var pane = ""
     @ObservationIgnored var origin: String?
+    /// Begun with `?`: typing lands on the match before the cursor, and n / N run the other way (Helix).
+    public internal(set) var backward = false
 
     public static func of(_ app: AppModel) -> PageSearch { app.state { PageSearch() } }
 
@@ -75,7 +77,8 @@ public final class PageSearch {
         return Dictionary(grouping: hits(app), by: \.row)
     }
 
-    func start(_ app: AppModel) {
+    func start(_ app: AppModel, backward: Bool = false) {
+        self.backward = backward
         pane = app.pane?.id ?? ""
         origin = app.selected
         current = nil
@@ -92,6 +95,7 @@ public final class PageSearch {
         origin = app.selected
         query = q
         typing = false
+        backward = false
         let all = hits(app)
         if let here, let same = all.first(where: { $0.row == here.row && $0.field == here.field && $0.at.contains(here.at.lowerBound) }) {
             land(app, same)
@@ -105,9 +109,10 @@ public final class PageSearch {
         query = q
         guard let p = app.panes.first(where: { $0.id == pane }), !p.rows.isEmpty else { return }
         let from = origin.flatMap { p.rows.firstIndex(of: $0) } ?? 0
-        let order = Array(p.rows[from...]) + Array(p.rows[..<from])
+        let order = backward ? Array(p.rows[...from].reversed()) + Array(p.rows[(from + 1)...].reversed())
+                             : Array(p.rows[from...]) + Array(p.rows[..<from])
         for row in order {
-            if let hit = hits(in: row, app).first { return land(app, hit) }
+            if let hit = backward ? hits(in: row, app).last : hits(in: row, app).first { return land(app, hit) }
         }
         current = nil
         if let o = origin { app.setCursor(o) }
@@ -156,7 +161,8 @@ public final class PageSearch {
     }
 
     /// n / N: the next match after the cursor, match by match (wrapping); false when nothing matches.
-    func step(_ app: AppModel, _ d: Int) -> Bool {
+    func step(_ app: AppModel, _ dir: Int) -> Bool {
+        let d = backward ? -dir : dir
         let all = hits(app)
         guard !all.isEmpty, let p = app.panes.first(where: { $0.id == pane }) else { return false }
         let rowAt = Dictionary(uniqueKeysWithValues: p.rows.enumerated().map { ($1, $0) })

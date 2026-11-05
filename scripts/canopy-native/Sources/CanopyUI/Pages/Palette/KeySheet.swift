@@ -199,6 +199,7 @@ final class SheetState {
     /// C-n / C-p scroll and ↵ runs the first key that matches. false hands the key to the keymap.
     func type(_ key: String, _ app: AppModel) -> Bool {
         if key == "tab" { return practiceFirst(app) }
+        if key == "?" && query.isEmpty { app.sheetOpen = false; return true }   // the key that opened it (g ?) ends in ?
         let printable = key.count == 1 && key != "?"
         if query.isEmpty {
             guard printable, key != "j", key != "k" else { return false }

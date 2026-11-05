@@ -13,7 +13,7 @@ import Testing
     @Test func oneQuestionMarkIsWhereYouAreWhatsOnScreenAndEveryKey() {
         let a = app()
         ExplainState.of(a).note(.init(id: "x", word: "to push", text: "commits only on this machine", rect: CGRect(x: 0, y: 10, width: 50, height: 12)))
-        a.keys.handle("?")
+        a.keys.handle("g"); a.keys.handle("?")
         #expect(a.sheetOpen, "one press")
         let m = KeySheet.model(a)
         #expect(m.entries.first == .heading("On screen", gold: false))
@@ -25,7 +25,7 @@ import Testing
 
     @Test func withNothingExplainedTheSheetStillSaysWhereYouAre() {
         let a = app()
-        a.keys.handle("?")
+        a.keys.handle("g"); a.keys.handle("?")
         let m = KeySheet.model(a)
         #expect(a.sheetOpen && !m.whereNow.isEmpty)
         #expect(!m.entries.contains { if case .note = $0 { return true }; return false }, "no empty section")
@@ -36,7 +36,7 @@ import Testing
         let e = ExplainState.of(a)
         e.note(.init(id: "p", word: "to push", text: "commits only on this machine", rect: CGRect(x: 0, y: 10, width: 50, height: 12)))
         e.note(.init(id: "d", word: "draft", text: "goes out when you open the PR", rect: CGRect(x: 0, y: 30, width: 50, height: 12)))
-        a.keys.handle("?")
+        a.keys.handle("g"); a.keys.handle("?")
         for k in ["m", "a", "c", "h"] { a.keys.handle(k) }
         #expect(KeySheet.model(a).notes.map(\.id) == ["p"])
     }

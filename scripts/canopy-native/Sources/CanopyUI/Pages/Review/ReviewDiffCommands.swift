@@ -277,20 +277,41 @@ enum DiffCommands {
                            label: "test", pair: "review.test.prev", available: onDiff, local: { _, _ in try testFile(1) }))
         r.register(Command(id: "review.test.prev", title: "Go to the previous test file", scope: .review, verb: .previousTest, modes: motion,
                            label: "test", available: onDiff, local: { _, _ in try testFile(-1) }))
+        /// ]c / [c: the first line of the next (previous) comment in the diff's code.
+        func comment(_ dir: Int) throws {
+            let s = pg.stops
+            func isComment(_ st: Stop) -> Bool {
+                guard st.kind == .line, let row = st.row else { return false }
+                let text = (row.right?.text ?? row.left?.text ?? "").trimmingCharacters(in: .whitespaces)
+                return ["//", "/*", "* ", "*/", "#", "-- ", "<!--"].contains { text.hasPrefix($0) } || text == "*"
+            }
+            var starts: [Int] = []
+            var prev = false
+            for (n, st) in s.enumerated() where st.kind == .line {
+                let c = isComment(st)
+                if c && !prev { starts.append(n) }
+                prev = c
+            }
+            let i = idx()
+            guard let target = dir > 0 ? starts.first(where: { $0 > i }) : starts.last(where: { $0 < i }) else {
+                throw Refusal(starts.isEmpty ? "no comments in this diff's code" : dir > 0 ? "the last comment" : "the first comment")
+            }
+            if app.keys.mode != .select { pg.mark = nil }
+            goTo(target)
+        }
+        r.register(Command(id: "review.comment.next", title: "Go to the next comment in the code", scope: .review, verb: .nextComment, modes: motion,
+                           label: "comment", pair: "review.comment.prev", available: onDiff, local: { _, _ in try comment(1) }))
+        r.register(Command(id: "review.comment.prev", title: "Go to the previous comment in the code", scope: .review, verb: .previousComment, modes: motion,
+                           label: "comment", available: onDiff, local: { _, _ in try comment(-1) }))
         r.register(Command(id: "review.githunk.next", title: "Go to the next git hunk", scope: .review, verb: .nextGitHunk, modes: motion,
                            label: "hunk", pair: "review.githunk.prev", available: onDiff, local: { _, _ in try gitHunk(1) }))
         r.register(Command(id: "review.githunk.prev", title: "Go to the previous git hunk", scope: .review, verb: .previousGitHunk, modes: motion,
                            label: "hunk", available: onDiff, local: { _, _ in try gitHunk(-1) }))
-        /// n/N: open conversations first, then any. While a search is kept n/N step its matches; ]c [c never do.
-        func thread(_ dir: Int, searchFirst: Bool = true) throws {
+        /// ]r / [r: open conversations first, then any.
+        func thread(_ dir: Int) throws {
             func openOne(_ s: Stop) -> Bool {
                 guard s.kind == .thread, let t = s.id.flatMap({ app.store.view(CanopyCore.Thread.self, $0) }) else { return false }
                 return !t.resolved && !t.outdated
-            }
-            let search = PageSearch.of(app)
-            if searchFirst && search.active && !search.typing {
-                if !search.step(app, dir) { throw Refusal("no matches") }
-                return
             }
             if !pg.stops.contains(where: { $0.kind == .thread }) {
                 throw Refusal(pg.integration == nil ? "no conversations on this diff · space c the conversation tab" : "no conversations on this diff")
@@ -301,18 +322,12 @@ enum DiffCommands {
                 throw Refusal((dir > 0 ? "the last conversation" : "the first conversation") + other)
             }
         }
-        r.register(Command(id: "review.thread.next", title: "Go to the next conversation (open ones first)", scope: .review,
-                           verb: .nextThread, label: "thread", pair: "review.thread.prev", available: onDiff,
-                           local: { _, _ in try thread(1) }))
-        r.register(Command(id: "review.thread.prev", title: "Go to the previous conversation (open ones first)", scope: .review,
-                           verb: .previousThread, label: "thread", available: onDiff,
-                           local: { _, _ in try thread(-1) }))
-        r.register(Command(id: "review.conversation.next", title: "Go to the next conversation, even during a search", scope: .review,
+        r.register(Command(id: "review.conversation.next", title: "Go to the next conversation (open ones first)", scope: .review,
                            verb: .nextConversation, label: "conversation", pair: "review.conversation.prev", available: onDiff,
-                           local: { _, _ in try thread(1, searchFirst: false) }))
-        r.register(Command(id: "review.conversation.prev", title: "Go to the previous conversation, even during a search", scope: .review,
+                           local: { _, _ in try thread(1) }))
+        r.register(Command(id: "review.conversation.prev", title: "Go to the previous conversation (open ones first)", scope: .review,
                            verb: .previousConversation, label: "conversation", available: onDiff,
-                           local: { _, _ in try thread(-1, searchFirst: false) }))
+                           local: { _, _ in try thread(-1) }))
         r.register(Command(id: "review.cursor.set", title: "Put the cursor here", scope: .review, needsArg: true, quiet: true,
                            local: { key, shift in
                                guard let key else { return }
@@ -601,6 +616,8 @@ enum DiffCommands {
                            local: { _, _ in try step(1) }))
         r.register(Command(id: "review.word.previous", title: "The previous name", scope: .review, verb: .previousWord, quiet: true,
                            local: { _, _ in try step(-1) }))
+        r.register(Command(id: "review.word.end", title: "The end of the name", scope: .review, verb: .wordEnd, quiet: true,
+                           local: { _, _ in try step(1, end: true) }))
         r.register(Command(id: "review.longword.next", title: "The next run of non-blank characters", scope: .review, verb: .nextLongWord, quiet: true,
                            local: { _, _ in try step(1, longWords) }))
         r.register(Command(id: "review.longword.previous", title: "The previous run of non-blank characters", scope: .review, verb: .previousLongWord, quiet: true,
