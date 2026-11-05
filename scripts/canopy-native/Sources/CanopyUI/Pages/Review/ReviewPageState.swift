@@ -809,6 +809,15 @@ public final class ReviewPageState: ShipHost {
     /// The files in the diff's order.
     public var stopFiles: [String] { stops.filter { $0.kind == .file }.map(\.path) }
 
+    /// Put the cursor on a file's first change, its header at the top of the diff.
+    @discardableResult
+    public func goTo(file path: String) -> Bool {
+        guard let k = landing(file: path) else { return false }
+        diffCanvas.canvas.lead = (k, "f|\(path)")
+        setCursor(k)
+        return true
+    }
+
     /// Put the diff cursor on a stop; `focus` moves the keyboard to the diff too.
     public func setCursor(_ key: String?, focus: Bool = true) {
         guard let app else { return }

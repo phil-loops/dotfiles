@@ -106,6 +106,23 @@ import Testing
         #expect(c.anchor == nil, "a cursor that went elsewhere drops it")
     }
 
+    @Test func aFileJumpPutsItsHeaderAtTheTop() {
+        let c = canvas()
+        let head = c.text.rect(for: c.range(of: "f|b.ts")!)!
+        c.lead = ("l|b.ts|1", "f|b.ts")
+        c.setMarks(CanvasMarks(cursor: "l|b.ts|1"), scrollTick: 1)
+        #expect(c.scroll.contentView.bounds.minY == head.minY)
+        #expect(c.lead == nil)
+        c.keepCursorInView()
+        #expect(c.scroll.contentView.bounds.minY == head.minY, "settling layout keeps it there")
+    }
+
+    @Test func leadTopMath() {
+        #expect(Canvas.leadTop(headY: 800, stopMaxY: 840, docHeight: 2000, viewHeight: 320) == 800)
+        #expect(Canvas.leadTop(headY: 1900, stopMaxY: 1940, docHeight: 2000, viewHeight: 320) == 1680, "the end stops it")
+        #expect(Canvas.leadTop(headY: 800, stopMaxY: 1200, docHeight: 2000, viewHeight: 320) == nil, "the cursor would fall off")
+    }
+
     @Test func viewportRowMath() {
         #expect(Canvas.viewportRow(y: 47, lineHeight: 16, viewHeight: 320) == 3)
         #expect(Canvas.viewportRow(y: -40, lineHeight: 16, viewHeight: 320) == 0)
