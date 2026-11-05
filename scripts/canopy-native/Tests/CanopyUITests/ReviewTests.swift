@@ -445,6 +445,22 @@ import Testing
         #expect(pg.tab == "files")
     }
 
+    /// A tab is a place, named by its key: space h the history, space c the conversation, space g the files; again goes back.
+    @Test func eachTabHasANamedKey() async throws {
+        let (a, _) = try await app()
+        let pg = ReviewPageState.of(a)
+        keys(a, "space", "h")
+        #expect(pg.tab == "commits")
+        keys(a, "space", "h")
+        #expect(pg.tab == "files", "the same key brings the diff back")
+        keys(a, "space", "c")
+        #expect(pg.tab == "conversation")
+        keys(a, "space", "h")
+        #expect(pg.tab == "commits", "from one face straight to another")
+        keys(a, "space", "g")
+        #expect(pg.tab == "files")
+    }
+
     /// A place names the commit it shows: the address keeps it and opening the address comes back to it.
     @Test func theCommitInViewSurvivesTheAddress() async throws {
         let (a, p) = try await app()
