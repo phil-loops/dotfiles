@@ -27,6 +27,10 @@ public protocol ShipHost: AnyObject {
     func newLines(_ app: AppModel, path: String, from: Int, to: Int) -> [String]
     /// Put the cursor on a thread at its line (the files tab), showing outdated ones if it is.
     func showThread(_ app: AppModel, id: String)
+    /// The one commit whose diff shows (nil: the whole branch). The host owns it, so it resets with the
+    /// branch it belongs to; Ship reads it from here and never keeps a copy (2026-11-05: a copy outlived
+    /// its branch and the next branch's commits tab opened blank).
+    var commitScope: String? { get }
     /// The commit whose diff shows moved (nil: the whole branch) — load and show it.
     func commitScopeChanged(_ sha: String?)
     /// history.enter / commit.back: move focus between the history list and the commit's diff.
@@ -51,8 +55,10 @@ public struct ShipLineRange: Equatable, Sendable {
 
 /// Ship's own host until B sets one: it keeps the tab, and has no diff to read from.
 @MainActor
+@Observable
 public final class StandInHost: ShipHost {
     public var tab = "conversation"
+    public private(set) var commitScope: String?
     public var range: ShipLineRange?
     public init() {}
     public func lineRange(_ app: AppModel) -> ShipLineRange? { range }
@@ -62,7 +68,7 @@ public final class StandInHost: ShipHost {
         app.focus(pane: ShipSeam.conversationPane)
         app.setCursor("t|\(id)")
     }
-    public func commitScopeChanged(_ sha: String?) {}
+    public func commitScopeChanged(_ sha: String?) { commitScope = sha }
     public func focusDiff(_ app: AppModel, _ on: Bool) { app.focus(pane: on ? ShipSeam.wordsPane : ShipSeam.historyPane) }
     public func clearMark() { range = range.map { ShipLineRange(path: $0.path, side: $0.side, line: $0.line) } }
 }

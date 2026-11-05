@@ -71,8 +71,8 @@ public final class ShipState {
     // ── the commits tab ──
     public enum HistoryFocus: String, Sendable { case list, diff }
     public private(set) var history: (key: String, rows: [HistoryCommit])?
-    /// the one commit whose diff shows (nil: the whole branch, "lands on main")
-    public var commitScope: String?
+    /// the one commit whose diff shows (nil: the whole branch, "lands on main") — the host's, read through
+    public var commitScope: String? { host.commitScope }
     public var historyFocus: HistoryFocus = .list
 
     /// Where unsent words are kept across launches; the keytutor's practice app keeps its own.
@@ -251,7 +251,6 @@ public final class ShipState {
 
     /// Show one commit's diff (nil: the whole branch). The diff itself is area B's to load.
     public func showCommit(_ sha: String?) {
-        commitScope = sha
         host.commitScopeChanged(sha)
     }
 }

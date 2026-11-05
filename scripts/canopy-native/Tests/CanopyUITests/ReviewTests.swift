@@ -1053,7 +1053,6 @@ import Testing
         ShipStub.answer(p, "GET", "/loops/commit-diff", #"{"sha":"c1","files":[{"path":"c.ts","add":1,"del":0,"patch":"@@ -1,0 +1,1 @@\n+hi"}]}"#)
         keys(a, "space", "2")
         #expect(pg.tab == "commits")
-        ShipState.of(a).commitScope = "c1"
         pg.commitScopeChanged("c1")
         await until("the commit's diff") { pg.files.map(\.path) == ["c.ts"] }
         #expect(a.panes.map(\.id).contains(reviewDiffPane))
@@ -1066,6 +1065,21 @@ import Testing
         #expect(pg.scoped && pg.files.map(\.path) == ["c.ts"], "the outline's scope carries into the files view")
         ShipState.of(a).showCommit(nil)
         #expect(pg.scoped == false && pg.files.map(\.path) == ["a.ts", "b.ts"], "= on main: the whole branch again")
+    }
+
+    /// The commit a branch's commits tab shows belongs to that branch: on the next branch nothing from
+    /// the last one is still selected, so its tab opens on its own newest commit (2026-11-05: it opened blank).
+    @Test func theShownCommitResetsWithTheBranch() async throws {
+        let (a, p) = try await app()
+        let pg = ReviewPageState.of(a)
+        ShipStub.answer(p, "GET", "/loops/commit-diff", #"{"sha":"c1","files":[{"path":"c.ts","add":1,"del":0,"patch":"@@ -1,0 +1,1 @@\n+hi"}]}"#)
+        keys(a, "space", "2")
+        ShipState.of(a).showCommit("c1")
+        await until("the commit's diff") { pg.files.map(\.path) == ["c.ts"] }
+        #expect(ShipState.of(a).commitScope == "c1")
+        a.open(address: "canopy://v2/b/loops/hankles-next")
+        await until("the next branch arrives") { pg.commitScope == nil }
+        #expect(ShipState.of(a).commitScope == nil, "Ship reads the page's commit, never a copy left from the last branch")
     }
 
     @Test func anAddressLandsOnItsLineOnceTheDiffIsHereAndYCopiesItBack() async throws {
