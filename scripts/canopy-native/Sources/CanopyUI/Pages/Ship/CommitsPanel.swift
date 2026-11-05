@@ -116,7 +116,11 @@ struct CommitHead: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 10) {
                 Text(c?.date ?? "").foregroundStyle(theme.inkFaint)
-                if editable { Text("\(app.registry.keyOf("words.edit")) edit").foregroundStyle(theme.goldLeaf.opacity(0.8)) }
+                if editable {
+                    // a hint names keys that work from here: from the diff, i is Helix's, so the words are a pane up first
+                    let up = app.pane?.id == reviewDiffPane ? "\(app.registry.verbKey(.paneUp)) " : ""
+                    Text("\(up)\(app.registry.keyOf("words.edit")) edit").foregroundStyle(theme.goldLeaf.opacity(0.8))
+                }
             }
             .font(Theme.text(11))
             if editable {
