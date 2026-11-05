@@ -50,7 +50,7 @@ SLOTS = int(os.environ.get("HEAVY_TURN_SLOTS", "2"))
 MEM_FLOOR = int(os.environ.get("HEAVY_TURN_MEM_FLOOR", "30"))
 JOURNAL = Path(os.environ.get("HEAVY_TURN_JOURNAL",
                               os.path.expanduser("~/.cache/heavy-turn/journal.tsv")))
-CLASS_CAPS = {"gates": 1, "clone": 1, "preview": 1}
+CLASS_CAPS = {"gates": 1, "clone": 1, "preview": 1, "review-warm": 1}
 POLL = 0.5
 
 
