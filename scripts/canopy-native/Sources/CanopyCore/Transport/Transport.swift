@@ -85,7 +85,7 @@ public final class Transport: @unchecked Sendable {
         return "/\(repo.uriComponent)\(path)"
     }
 
-    func request(_ path: String, method: String = "GET", rid: String, json: Data? = nil, via: Via? = nil) -> URLRequest {
+    func request(_ path: String, method: String = "GET", rid: String, json: Data? = nil, via: Via? = nil, write: Bool = false) -> URLRequest {
         var r = URLRequest(url: url(path))
         r.httpMethod = method
         r.setValue(Self.actor, forHTTPHeaderField: "X-Stack-Actor")
@@ -95,6 +95,8 @@ public final class Transport: @unchecked Sendable {
             r.httpBody = json
         }
         if let via { r.setValue(via.rawValue, forHTTPHeaderField: "X-Stack-Via") }
+        // the server numbers a write it answers ok (`wrote`), so the runner knows when a read has seen it
+        if write { r.setValue("1", forHTTPHeaderField: "X-Stack-Write") }
         return r
     }
 
@@ -139,7 +141,7 @@ public final class Transport: @unchecked Sendable {
             return Sent(ok: false, outcome: .failed, err: "encode", rid: rid)
         }
         do {
-            let (data, resp) = try await session.data(for: request(path, method: "POST", rid: rid, json: json, via: via))
+            let (data, resp) = try await session.data(for: request(path, method: "POST", rid: rid, json: json, via: via, write: true))
             let http = resp as? HTTPURLResponse
             let status = http?.statusCode ?? 0
             let obj = (try? JSONDecoder().decode(JSONValue.self, from: data))?.object ?? [:]

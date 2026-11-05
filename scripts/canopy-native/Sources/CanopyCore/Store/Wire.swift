@@ -70,65 +70,70 @@ public struct TypedTables: Decodable {
 
 public typealias RawTables = [String: [String: JSONValue]]
 
-/// GET /state: {epoch, versions, entities, ms}.
+/// GET /state: {epoch, versions, asOf, entities, ms}.
 public struct Snapshot {
     public var epoch: String
     public var versions: Versions
+    /// Per domain, the server's write count its reads had reached (srv/state.py).
+    public var asOf: [String: Int]
     public var entities: TypedTables
     public var raw: RawTables
     public var ms: Double?
 
-    private struct Head: Decodable { var epoch: String; var versions: Versions; var ms: Double? }
+    private struct Head: Decodable { var epoch: String; var versions: Versions; var asOf: [String: Int]?; var ms: Double? }
     private struct Typed: Decodable { var entities: TypedTables? }
     private struct Raw: Decodable { var entities: RawTables? }
 
-    public init(epoch: String, versions: Versions, entities: TypedTables = .init(), raw: RawTables = [:], ms: Double? = nil) {
-        self.epoch = epoch; self.versions = versions; self.entities = entities; self.raw = raw; self.ms = ms
+    public init(epoch: String, versions: Versions, asOf: [String: Int] = [:], entities: TypedTables = .init(), raw: RawTables = [:], ms: Double? = nil) {
+        self.epoch = epoch; self.versions = versions; self.asOf = asOf; self.entities = entities; self.raw = raw; self.ms = ms
     }
 
     public static func decode(_ data: Data) throws -> Snapshot {
         let d = JSONDecoder()
         let head = try d.decode(Head.self, from: data)
         return Snapshot(
-            epoch: head.epoch, versions: head.versions,
+            epoch: head.epoch, versions: head.versions, asOf: head.asOf ?? [:],
             entities: try d.decode(Typed.self, from: data).entities ?? .init(),
             raw: try d.decode(Raw.self, from: data).entities ?? [:], ms: head.ms)
     }
 }
 
-/// One `patch` event of /v2/events: {domain, version, upserts: {type: {id: obj}}, deletes: {type: [id]}}.
+/// One `patch` event of /v2/events: {domain, version, asOf, upserts: {type: {id: obj}}, deletes: {type: [id]}}.
 public struct Patch {
     public var domain: String
     public var version: Int
+    /// The server's write count this domain's reads had reached; nil from a server that doesn't say.
+    public var asOf: Int?
     public var upserts: TypedTables
     public var rawUpserts: RawTables
     public var deletes: [String: [String]]
 
-    private struct Head: Decodable { var domain: String; var version: Int; var deletes: [String: [String]]? }
+    private struct Head: Decodable { var domain: String; var version: Int; var asOf: Int?; var deletes: [String: [String]]? }
     private struct Typed: Decodable { var upserts: TypedTables? }
     private struct Raw: Decodable { var upserts: RawTables? }
 
-    public init(domain: String, version: Int, upserts: TypedTables = .init(), rawUpserts: RawTables = [:], deletes: [String: [String]] = [:]) {
-        self.domain = domain; self.version = version; self.upserts = upserts; self.rawUpserts = rawUpserts; self.deletes = deletes
+    public init(domain: String, version: Int, asOf: Int? = nil, upserts: TypedTables = .init(), rawUpserts: RawTables = [:], deletes: [String: [String]] = [:]) {
+        self.domain = domain; self.version = version; self.asOf = asOf; self.upserts = upserts; self.rawUpserts = rawUpserts; self.deletes = deletes
     }
 
     public static func decode(_ data: Data) throws -> Patch {
         let d = JSONDecoder()
         let head = try d.decode(Head.self, from: data)
         return Patch(
-            domain: head.domain, version: head.version,
+            domain: head.domain, version: head.version, asOf: head.asOf,
             upserts: try d.decode(Typed.self, from: data).upserts ?? .init(),
             rawUpserts: try d.decode(Raw.self, from: data).upserts ?? [:],
             deletes: head.deletes ?? [:])
     }
 
     /// Build a patch from raw objects (tests, and anything synthesizing one locally).
-    public static func make(domain: String, version: Int, upserts: RawTables = [:], deletes: [String: [String]] = [:]) throws -> Patch {
-        let body: JSONValue = .object([
+    public static func make(domain: String, version: Int, asOf: Int? = nil, upserts: RawTables = [:], deletes: [String: [String]] = [:]) throws -> Patch {
+        var body: JSONObject = [
             "domain": .string(domain), "version": .number(Double(version)),
             "upserts": .object(upserts.mapValues { .object($0) }),
             "deletes": .object(deletes.mapValues { .array($0.map(JSONValue.string)) }),
-        ])
+        ]
+        if let asOf { body["asOf"] = .number(Double(asOf)) }
         return try decode(JSONEncoder().encode(body))
     }
 }

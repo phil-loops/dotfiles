@@ -5,7 +5,7 @@
 #      thread, draft: {id: obj}}, ms}
 #   GET /v2/events?epoch=E&git=N&remote=M&review=R[&archived=1]   (SSE)
 #     event: hello   {epoch, versions}                         first, always
-#     event: patch   {domain, version, upserts: {type: {id: obj}}, deletes: {type: [id]}}
+#     event: patch   {domain, version, asOf, upserts: {type: {id: obj}}, deletes: {type: [id]}}
 #     event: resync  {epoch, versions}                         refetch /state, then reconnect
 #
 # A branch carries its merge-order position in its forest (`order`, stack-merge-rank's), its
@@ -34,6 +34,10 @@
 #           viewed                 blocks Phil has viewed per branch (srv/viewed.py)
 #   todo    todo                   the viewer's own feature tracker (srv/todo.py, ~/.dotfiles/canopy/todo),
 #                                  global rather than per repo; rebuilt when a file's stat moves
+# A write the client sends (X-Stack-Write) is answered with `wrote: N`; a domain's `asOf` (on each
+# patch, and per domain in /state) is the write count its inputs were read at, so the client holds
+# its optimistic change until asOf reaches N — never until some older read happens to look equal.
+# A domain whose reads catch up past a write without changing anything still sends an empty patch.
 # A version is per domain, monotonic within an epoch (one server process), and a patch's version is
 # the previous one + 1 — so a client that sees a gap, or connects with a version older than the
 # ring holds or from another epoch, gets `resync`. A client connecting without versions is assumed
@@ -61,6 +65,7 @@ _TRUNKS = ("main", "master")
 class _Domain:
     def __init__(self):
         self.version = 0
+        self.as_of = 0
         self.fp = None
         self.ents = {}
         self.ring = collections.deque(maxlen=RING)
@@ -314,12 +319,14 @@ def _diff(old, new):
     return ups, dels
 
 
-def _commit(domain, new, fp):
-    """Swap in a domain's new entities; a non-empty diff becomes the next version's patch."""
+def _commit(domain, new, fp, as_of):
+    """Swap in a domain's new entities (None: unchanged) read at write count `as_of`; a non-empty
+    diff, or reads that caught up past a write, becomes the next version's patch."""
     D = _D[domain]
+    new = D.ents if new is None else new
     ups, dels = _diff(D.ents, new)
     D.fp = fp
-    if not ups and not dels:
+    if not ups and not dels and as_of <= D.as_of:
         D.ents = new
         return
     moved = {"show": [], "hide": []}
@@ -332,9 +339,11 @@ def _commit(domain, new, fp):
     for pid in dels.get("project", []):
         moved["hide"].append(pid)
     D.ents = new
+    D.as_of = max(D.as_of, as_of)
     with _COND:
         D.version += 1
-        D.ring.append({"domain": domain, "version": D.version, "upserts": ups, "deletes": dels, "moved": moved})
+        D.ring.append({"domain": domain, "version": D.version, "asOf": D.as_of,
+                       "upserts": ups, "deletes": dels, "moved": moved})
         _COND.notify_all()
 
 
@@ -364,19 +373,22 @@ def _merge(parts, types):
 def refresh():
     """Bring every domain up to date (single-flight); each change appends one patch."""
     with _REFRESH:
+        tick = ctx.WRITES[0]
         probes = _each_repo(_git_fp)
         fp = tuple((n, probes[n][2]) for n in sorted(probes))
+        git_as_of = min((p[0].as_of for p in probes.values()), default=tick)
+        built = None
         if fp != _D["git"].fp:
-            built = _each_repo(lambda n: _git_entities(n, probes[n][0], probes[n][1]) if n in probes else {})
-            _commit("git", _merge(built.values(), ("repo", "project", "branch")), fp)
+            built = _merge(_each_repo(lambda n: _git_entities(n, probes[n][0], probes[n][1]) if n in probes else {}).values(),
+                           ("repo", "project", "branch"))
+        _commit("git", built, fp, git_as_of)
         git = _D["git"].ents
         remote = _each_repo(lambda n: _remote_entities(n, git))
-        _commit("remote", _merge(remote.values(), ("pr", "landed", "warm")), None)
+        _commit("remote", _merge(remote.values(), ("pr", "landed", "warm")), None, tick)
         review = _each_repo(lambda n: {**reviewdesk.entities(n), **viewed.entities(n)})
-        _commit("review", _merge(review.values(), REVIEW_TYPES), None)
+        _commit("review", _merge(review.values(), REVIEW_TYPES), None, tick)
         tfp = todo.fingerprint()
-        if tfp != _D["todo"].fp:
-            _commit("todo", todo.entities(), tfp)
+        _commit("todo", todo.entities() if tfp != _D["todo"].fp else None, tfp, tick)
         _each_repo(lambda n: reviewdesk.release_due())
 
 
@@ -394,13 +406,14 @@ def snapshot(archived):
     for D in _D.values():
         for t, objs in D.ents.items():
             ents[t] = {i: o for i, o in objs.items() if _visible(t, o, hidden)}
-    return {"epoch": EPOCH, "versions": {d: _D[d].version for d in DOMAINS}, "entities": ents}
+    return {"epoch": EPOCH, "versions": {d: _D[d].version for d in DOMAINS},
+            "asOf": {d: _D[d].as_of for d in DOMAINS}, "entities": ents}
 
 
 def _project_patch(patch, archived):
     """A ring patch as one client sees it: without archived=1, hidden projects' branches/PRs
     become deletes, and a project leaving the archive brings its branches/PRs back."""
-    out = {"domain": patch["domain"], "version": patch["version"],
+    out = {"domain": patch["domain"], "version": patch["version"], "asOf": patch.get("asOf", 0),
            "upserts": {t: dict(o) for t, o in patch["upserts"].items()},
            "deletes": {t: list(i) for t, i in patch["deletes"].items()}}
     if archived:
@@ -438,6 +451,17 @@ def _behind(domain, since):
 def poke():
     """A POST just wrote to a repo: refresh now rather than on the next tick."""
     _WAKE.set()
+
+
+def written():
+    """A client write just finished: number it. Every repo snapshot is dropped first, so a read
+    stamped with this number or later started after the write and sees it."""
+    _each_repo(lambda n: repostate.invalidate())
+    with _COND:
+        ctx.WRITES[0] += 1
+        n = ctx.WRITES[0]
+    poke()
+    return n
 
 
 def _refresher():

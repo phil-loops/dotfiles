@@ -48,6 +48,8 @@ public final class Runner {
     @ObservationIgnored public var onRun: ((String) -> Void)?
     @ObservationIgnored public let telemetry: Telemetry
     @ObservationIgnored public weak var context: CommandContext?
+    /// Refetch the whole store (the event stream's resync): what a write the server never shows waits on.
+    @ObservationIgnored public var resync: (() -> Void)?
 
     @ObservationIgnored private var seq = 0
     @ObservationIgnored private var tail: Task<Sent, Never>?
@@ -168,7 +170,7 @@ public final class Runner {
                 if let inv = w.inverse?(r.body ?? [:]), !undoing { self.undo.append(inv) }
                 if let said = w.said, !w.silent { self.say(said) }
                 self.runs[runKey] = Run(state: .landing, t0: started)
-                self.reconcile(s, w) { self.runs[runKey] = Run(state: .done, t0: started, t1: Date()) }
+                self.reconcile(s, w, wrote: r.body?["wrote"]?.int) { self.runs[runKey] = Run(state: .done, t0: started, t1: Date()) }
             } else {
                 self.store.dropOps(seq: s)
                 w.rollback?()
@@ -189,8 +191,21 @@ public final class Runner {
         }
     }
 
-    private func reconcile(_ s: Int, _ w: Write, onDone: @escaping () -> Void) {
-        if w.settled() {
+    /// Let go of a write's overlay once the store holds it: a read stamped at or past the write's
+    /// number (`wrote`) has reached every domain its ops touch, and the write's own check agrees.
+    /// A value that merely looks equal is not enough — an older read can match (a lane moved
+    /// A→B→A). A server that never shows the write within `settleWait` gets a resync, and the
+    /// overlay goes when that fresh copy lands, never back to a stale one in between.
+    private func reconcile(_ s: Int, _ w: Write, wrote: Int?, onDone: @escaping () -> Void) {
+        let store = self.store
+        let epoch = store.epoch
+        let domains = Set(w.ops.map(\.type.domain))
+        let seen = {
+            guard let wrote else { return true }
+            return store.epoch != epoch || domains.allSatisfy { (store.asOf[$0] ?? 0) >= wrote }
+        }
+        let landed = { seen() && w.settled() }
+        if landed() {
             store.dropOps(seq: s)
             return onDone()
         }
@@ -202,8 +217,16 @@ public final class Runner {
             self?.store.dropOps(seq: s)
             onDone()
         }
-        awaiting[s] = (w.settled, done)
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.settleWait) { done() }
+        awaiting[s] = (landed, done)
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.settleWait) { [weak self] in
+            guard let self, !finished else { return }
+            guard wrote != nil, let resync = self.resync else { return done() }
+            let h = store.hydrations
+            self.awaiting[s] = ({ landed() || store.hydrations > h }, done)
+            self.say("not confirmed yet · resyncing")
+            resync()
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.settleWait) { done() }
+        }
     }
 
     /// The latest run of command `id` on `target` this launch.
