@@ -17,6 +17,7 @@ import threading
 from urllib.parse import quote, parse_qs
 
 from . import ctx, stage, sync, repostate, shellout, stackcfg, gate_queue, runs
+from . import actor, verdicts   # own line: Phil-only checks + the waiver
 
 
 def delta_tests(req, raw):
@@ -141,7 +142,7 @@ def gates(req, raw):
     # next:true — Phil wants this branch's queued run now: it moves ahead of every run he didn't
     # click. It never starts a run of its own, so it can't swap a full run for a quick one.
     if d.get("next"):
-        if getattr(req, "_actor", "") != "browser":
+        if not actor.is_phil(req):
             return req._send(403, json.dumps({"ok": False, "err": "only Phil's click puts a run next"}))
         old = gate_run(branch)
         tier = gate_queue.waiting_tier(_queue_file(old)) if old and old.alive() else None
@@ -153,6 +154,8 @@ def gates(req, raw):
     quick = d.get("mode") == "quick"
     # skip: Phil's call that a gate doesn't apply to this tree — it reports as a waiver, never silently
     skip = [g for g in d.get("skip") or [] if isinstance(g, str) and re.fullmatch(r"[a-z][a-z0-9-]*", g)]
+    if skip and not actor.is_phil(req):
+        return req._send(403, json.dumps({"ok": False, "err": "only Phil's click skips a gate"}))
     asked = set(skip) | (set(QUICK_SKIPS) if quick else set())
     # A tree that already passed answers green instantly — the verdict is tree-keyed, so
     # re-running proves nothing new — unless that green skipped a gate this run asks for:
@@ -361,10 +364,11 @@ def _tree(rev):
 
 
 def _review_flags(branch):
-    """push-ready's unapplied review findings (stack-branch.<b>.review-flag, multivar), valid
+    """The review run's findings (branch.<b>.stack-review-flag, multivar — srv/verdicts.py writes them), valid
     only for the tree they were written against (review-flags-tree — same staleness contract
     as gates-green-tree). Stale/absent → None (the UI hides); an EMPTY fresh list is a state:
     reviewed-clean."""
+    verdicts.harvest(branch)
     snap = repostate.snapshot()
     tree = snap.branch_key(branch, "review-flags-tree")
     if not tree or tree != snap.tree(branch):
@@ -373,7 +377,7 @@ def _review_flags(branch):
 
 
 def review_flags_get(req, u):
-    """GET /review-flags?branch=: the findings push-ready left on this tree, each split into its
+    """GET /review-flags?branch=: the findings the last review run left on this tree, each split into its
     place and its words — {"flags": [{path, line, text}]}, or {"flags": null} when none are
     recorded for the tree the branch has now (an edit retires them)."""
     branch = parse_qs(u.query).get("branch", [""])[0]
@@ -650,6 +654,8 @@ def _origin_verdict(branch):
     wip = [c for c in outgoing if not c["voiced"]]
     tip = snap.local(branch)
     gates_green = _green_tree(branch) == snap.tree(tip)
+    # Phil's waiver for this exact tree ships it without gates — said at the door, never as green
+    waived_by = None if gates_green else verdicts.waived(branch, snap.tree(tip))
     # Waivers recorded alongside the green (a gate that was unsatisfiable, not unmet). Shown
     # at the door so the green says what it cost; retired with the green when the tree moves.
     gates_waived = snap.branch_key_all(branch, "gates-waived") if gates_green else []
@@ -691,7 +697,8 @@ def _origin_verdict(branch):
         # "rebase forward" without rewriting shared history.
         ward("watch", "deploy watch clear", not deploy_critical or (has_remote and ff and bool(outgoing)),
              f"main changed {len(deploy_critical)} deploy-watched file{'s' if len(deploy_critical) != 1 else ''} this branch lacks — rebase forward"),
-        ward("gates", _gates_label(gates_waived), gates_green,
+        ward("gates", f"gates waived · {waived_by}" if waived_by else _gates_label(gates_waived),
+             gates_green or waived_by,
              "not green for this exact commit — ⟲ sync runs the gates"),
         # The pre-push TODO ratchet, moved to the door: a TODO clears by naming a ticket the
         # branch acked (`branch.<b>.stack-todo-ack`), so a reviewer-requested marker ships
@@ -713,7 +720,7 @@ def _origin_verdict(branch):
         "fork": {"sha": fork, "date": fork_date}, "mainSince": main_since,
         "deployCritical": deploy_critical,
         "files": files[:20], "moreFiles": max(0, len(files) - 20),
-        "commit": commit, "gatesGreen": gates_green, "gatesWaived": gates_waived,
+        "commit": commit, "gatesGreen": gates_green, "gatesWaived": gates_waived, "gatesWaivedBy": waived_by,
         "todoDebt": todo,
         "web": _origin_web(branch),
         "published": published,

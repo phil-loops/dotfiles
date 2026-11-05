@@ -19,7 +19,7 @@ ACTORS = ("browser", "claude", "extension", "cli", "headless", "helix", "server"
 # Paths only the extension polls/calls; its service-worker fetches may arrive without an Origin.
 EXT_PATHS = ("/ext-mtime", "/open-url", "/pr-forest")
 # High-rate polls: never worth a peer-process walk, and the request log coalesces them.
-POLL_PATHS = ("/ext-mtime", "/gates-progress", "/sig", "/heartbeat", "/events", "/processes",
+POLL_PATHS = ("/ext-mtime", "/gates-progress", "/review-progress", "/sig", "/heartbeat", "/events", "/processes",
               "/pulse", "/track")
 
 _CLI_UA = re.compile(r"^(curl|python-urllib|python-requests|wget|httpie|node|undici|go-http|got)\b", re.I)
@@ -86,6 +86,22 @@ def _peer_actor(client_port):
     found = ("claude", _presence_sid(claude_pid)) if claude_pid else ("cli", None)
     _peer_cache[pid] = (time.time(), found)
     return found
+
+
+# The app Phil drives. "browser" is only a header — any curl can send it — so an action only Phil may
+# take also checks that the peer process IS that app (2026-11-05: review verdicts a session could forge).
+_PHIL_APP = re.compile(r"/Show\.app/Contents/MacOS/Show$")
+
+
+def is_phil(req):
+    """True only for a request from Phil's own app: it claims "browser" AND its peer process is Show."""
+    if getattr(req, "_actor", "") != "browser":
+        return False
+    try:
+        pid = _peer_pid(req.client_address[1])
+    except Exception:
+        return False
+    return bool(pid) and bool(_PHIL_APP.search(_sh(["ps", "-o", "comm=", "-p", str(pid)]).strip()))
 
 
 def _presence_sid(claude_pid):

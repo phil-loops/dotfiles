@@ -27,6 +27,7 @@ from srv import footprint   # own line: same reason
 from srv import repostate   # own line: same reason
 from srv import procsig   # own line: same reason
 from srv import actor, reqlog   # own line: same reason
+from srv import verdicts   # own line: same reason
 os.environ["STACK_VIA"] = "viewer"   # git hooks under this server attribute to it, not to whoever launched it
 from srv import pregate   # own line: same reason
 from srv import v1redirect   # own line: same reason
@@ -331,6 +332,8 @@ class H(BaseHTTPRequestHandler):
             return sync.diverged_detail(self, u)
         elif u.path == "/force-scope":  # read-only: may /force-origin replace origin's copy (the guards it re-checks)
             return sync.force_scope_get(self, u)
+        elif u.path == "/review-progress":  # a review run's state; a finished verdict is recorded on read
+            return verdicts.review_progress(self, u)
         elif u.path == "/review-flags":  # read-only: push-ready's findings on this tree, by place
             return push.review_flags_get(self, u)
         elif u.path == "/prep-route":  # what "prep to push" would do next (read-only verdict + delegate)
@@ -504,6 +507,10 @@ class H(BaseHTTPRequestHandler):
             return review.prep(self, raw)
         if self.path == "/gates":    # sync strip: run repo gates → per-gate verdict (detach:true → journal)
             return push.gates(self, raw)
+        if self.path == "/review":   # spawn a review run of the branch's diff; the run's verdict is recorded
+            return verdicts.review(self, raw)
+        if self.path == "/gates-waive":   # Phil ships this exact tree without gates (his click only)
+            return verdicts.waive(self, raw)
         if self.path == "/delta-tests":  # prep-to-merge: run the tests related to the branch's delta
             return push.delta_tests(self, raw)
         if self.path == "/push-origin":  # shared-history door: FF-only single-clean-commit push; human finger only
