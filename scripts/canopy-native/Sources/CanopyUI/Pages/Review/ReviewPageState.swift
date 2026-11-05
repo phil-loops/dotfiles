@@ -382,6 +382,13 @@ public final class ReviewPageState: ShipHost {
         if !first || payload != nil { resetForNewBranch(t.id) }
     }
 
+    /// The repo list moved: a diff read before it may have come from the wrong repo, so read again.
+    public func forgetDiffs() {
+        cache = [:]
+        payload = nil
+        sync()
+    }
+
     /// Take a diff as read (tests hand one in directly).
     public func land(_ key: String, _ data: NodePayload) {
         arrive()

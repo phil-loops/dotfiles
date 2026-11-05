@@ -265,6 +265,16 @@ import Testing
         return (a, p)
     }
 
+    /// A branch opened before canopy knew its repo was read from the wrong place; a moved repo list rereads it.
+    @Test func aMovedRepoListRereadsTheDiff() async throws {
+        let (a, p) = try await app()
+        let pg = ReviewPageState.of(a)
+        #expect(pg.baseSha != "moved")
+        ShipStub.answer(p, "GET", "/loops/node", #"{"branch":"add-hankles-limited-label","baseSha":"moved","files":[]}"#)
+        ShipStub.answer(p, "GET", "/v2", #"<script>window.__VIEWER_REPOS__=["loops","monotoad"];window.__CANOPY_KEYS__={"keys":{},"errors":[]};window.__CANOPY_ASSET__="a1"</script>"#)
+        await a.loadBootstrap()
+        await until("the reread diff") { pg.baseSha == "moved" }
+    }
 
     func keys(_ a: AppModel, _ ks: String...) { for k in ks { a.keys.handle(k) } }
 
