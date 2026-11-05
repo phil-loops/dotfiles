@@ -5,7 +5,7 @@ import SwiftUI
 /// listing what can follow it here — the real key beside what it does, so pressing through it
 /// rehearses the shortcut. Generic: its rows are whatever the registry binds under the prefix in the
 /// live mode and scopes (`KeyEngine.whichKeyRows`), the narrowest scope's meaning winning. It never
-/// takes focus.
+/// takes focus. Rows read by section (places, pickers, code…), each under a dim label, letters sorted inside one.
 struct WhichKeyView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme
@@ -22,7 +22,10 @@ struct WhichKeyView: View {
                 if rows.isEmpty {
                     Text("nothing here").foregroundStyle(theme.inkFaint)
                 }
-                ForEach(rows, id: \.key) { r in
+                ForEach(Array(rows.enumerated()), id: \.element.key) { i, r in
+                    if let s = r.section, s != (i > 0 ? rows[i - 1].section : nil) {
+                        Text(s).foregroundStyle(theme.inkFaint).font(Theme.text(10.5)).padding(.top, i > 0 ? 6 : 0)
+                    }
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
                         Text(glyph(r.key)).foregroundStyle(theme.goldLeaf).frame(minWidth: 32, alignment: .leading)
                         if let v = r.verb { Text(v).foregroundStyle(theme.ink) }
