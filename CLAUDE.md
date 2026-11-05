@@ -30,7 +30,7 @@ Non-negotiable, in every repo, regardless of what a task seems to call for.
 **Forest viewer & gates**
 
 - **Never curl-probe a mutating viewer endpoint with a real branch name** — they rebase, push, restack and seal real branches (`/sync`, `/prep-push`, `/push-origin`, `/restack`). Probe with a nonexistent branch (`__probe__`) or empty body and assert 400/404.
-- **Never hand-write the `branch.<b>.stack-gates-green-tree` config key for a real branch** — that forges a green gates verdict without running the gates.
+- **Never write a verdict key by hand — `stack-gates-green-tree`, `stack-gates-waived-tree`, `stack-review-flags-tree`, `stack-review-flag`** — they're the viewer server's record of a run (`POST /gates`, `POST /review`) or of Phil's click (a gate skip, a waiver); writing one forges "gated" or "reviewed". Any edit to a reviewed branch means a new review run. (2026-11-04: stamped review-flags-tree on three unreviewed rewrites; a dropped guard reached the PR. `verdict-key-guard` hook refuses the habitual path.)
 
 # Just do both
 

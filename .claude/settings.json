@@ -25,6 +25,15 @@
             "command": "/Users/philbrockman/.dotfiles/scripts/own-hook"
           }
         ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/philbrockman/.dotfiles/scripts/verdict-key-guard"
+          }
+        ]
       }
     ],
     "SessionStart": [
