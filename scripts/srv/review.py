@@ -551,6 +551,56 @@ def project_state(req, raw):
     req._send(200, json.dumps({"ok": True, "project": proj, "state": state}))
 
 
+def project_describe(req, raw):
+    # POST /project-describe {project, repo?, description}: the forest's own line, which wins over
+    # its first branch's description. Who wrote it rides beside it — Phil's (a canopy click) is
+    # never rewritten by Claude; Claude's is a draft it may refresh. Empty clears it.
+    d = json.loads(raw or "{}")
+    proj, repo = d.get("project", ""), d.get("repo", "")
+    text = " ".join((d.get("description") or "").split())
+    if not proj:
+        return req._send(400, json.dumps({"ok": False, "error": "no project"}))
+    key, by = f"stack-project.{proj}.description", f"stack-project.{proj}.description-by"
+    if text:
+        _focus_git(repo, "config", key, text)
+        _focus_git(repo, "config", by, "phil" if getattr(req, "_actor", "") == "browser" else "claude")
+    else:
+        _focus_git(repo, "config", "--unset", key)
+        _focus_git(repo, "config", "--unset", by)
+    _focus_wrote(repo)
+    ctx.bump_pulse()
+    req._send(200, json.dumps({"ok": True, "project": proj, "description": text}))
+
+
+_PROJECT_NAME = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+
+
+def project_rename(req, raw):
+    # POST /project-rename {project, repo?, to}: one forest, one name — every key filed under the
+    # old one moves together (its stack-project.<p>.* section: branch list, focus, ticket, line,
+    # archive) and each member branch's project link is rewritten, both spellings. Refuses a
+    # name another forest or branch already uses.
+    d = json.loads(raw or "{}")
+    proj, repo, to = d.get("project", ""), d.get("repo", ""), (d.get("to") or "").strip()
+    if not proj:
+        return req._send(400, json.dumps({"ok": False, "error": "no project"}))
+    if not _PROJECT_NAME.match(to):
+        return req._send(200, json.dumps({"ok": False, "err": "a forest name is lowercase letters, digits and dashes"}))
+    if to == proj:
+        return req._send(200, json.dumps({"ok": True, "project": proj}))
+    keys = _focus_git(repo, "config", "--get-regexp", r"^(branch\..*\.stack-project|stack-branch\..*\.project)$").stdout.splitlines()
+    links = [ln.split(" ", 1) for ln in keys if " " in ln]
+    if any(v == to for _, v in links) or _focus_git(repo, "config", "--get-regexp", rf"^stack-project\.{re.escape(to)}\.").stdout.strip():
+        return req._send(200, json.dumps({"ok": False, "err": f"{to} is already a forest"}))
+    _focus_git(repo, "config", "--rename-section", f"stack-project.{proj}", f"stack-project.{to}")
+    for k, v in links:
+        if v == proj:
+            _focus_git(repo, "config", k, to)
+    _focus_wrote(repo)
+    ctx.bump_pulse()
+    req._send(200, json.dumps({"ok": True, "project": to, "was": proj}))
+
+
 def _scratch_worktree_for(branch):
     # stack-open's scratch worktrees are DETACHED and record their branch in a stack-open-branch
     # marker; match it so open-in-nvim edits can be committed/discarded from the uncommitted rail.

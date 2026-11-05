@@ -264,11 +264,14 @@ def _git_entities(name, snap, jobs):
         rank = int(focus) if focus.isdigit() and int(focus) > 0 else None
         listed = snap.get_all(f"stack-project.{p}.branch")
         roots.sort(key=lambda b: (listed.index(b) if b in listed else len(listed), b))
-        summary = next((snap.description(b) for b in roots if snap.description(b)), "")
+        own = snap.get(f"stack-project.{p}.description")
+        summary = own or next((snap.description(b) for b in roots if snap.description(b)), "")
+        # who wrote the line: Phil's own words, Claude's draft, or none — borrowed from a branch
+        by = ("phil" if snap.get(f"stack-project.{p}.description-by") == "phil" else "claude") if own else "branch"
         ents["project"][f"{name}:{p}"] = {
             "id": f"{name}:{p}", "repo": name, "name": p,
             "state": "archive" if archived else "focus" if rank else "workbench", "rank": rank,
-            "ticket": snap.get(f"stack-project.{p}.ticket") or None, "summary": summary[:160],
+            "ticket": snap.get(f"stack-project.{p}.ticket") or None, "summary": summary[:160], "summaryBy": by,
             "size": sizes.get(p, 0),
         }
     return ents

@@ -306,6 +306,24 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:]) -> AppModel {
         #expect(a.registry.command("project.focus")!.keys == [", f"], "focus is the page's own: under the leader")
     }
 
+    @Test func aForestsLineAndNameAreTypedInPlace() throws {
+        let a = world()
+        a.runner.dispatch("project.describe.edit", via: .key, target: "r:bench")
+        #expect(a.forestModel.describingProject == "r:bench" && a.forestModel.draft == "", "a borrowed line isn't yours to edit: start empty")
+        let w = try #require(try a.registry.command("project.describe")!.write!("r:bench", "  my  words "))
+        #expect(w.path == "/project-describe" && w.body == ["repo": "r", "project": "bench", "description": "my words"])
+        #expect(w.ops.first?.fields == ["summary": "my words", "summaryBy": "phil"])
+        #expect(w.inverse?([:])?.arg as? String == "", "undo clears it back to the borrowed line")
+        a.runner.dispatch("project.rename.edit", via: .key, target: "r:bench")
+        #expect(a.forestModel.renamingProject == "r:bench" && a.forestModel.describingProject == nil && a.forestModel.draft == "bench")
+        let n = try #require(try a.registry.command("project.rename")!.write!("r:bench", "bench-two"))
+        #expect(n.path == "/project-rename" && n.body == ["repo": "r", "project": "bench", "to": "bench-two"])
+        #expect(n.inverse?([:])?.target == "r:bench-two" && n.inverse?([:])?.arg as? String == "bench")
+        #expect(try a.registry.command("project.rename")!.write!("r:bench", "bench") == nil, "the same name is no rename")
+        #expect(a.registry.command("project.describe.edit")!.keys == ["i"], "the write verb: the field under the cursor")
+        #expect(a.registry.command("project.rename.edit")!.keys == ["space r"], "the rename verb, as on a symbol")
+    }
+
     @Test func cjAndCkReorderTheFocusLane() throws {
         let a = world()
         let w = try a.registry.command("focus.down")!.write!("r:tree", nil)!

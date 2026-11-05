@@ -252,6 +252,59 @@ def run_checks(repo, shas, only):
         git(repo, "config", "--unset", "stack-project.fixture.focus")
         repostate.invalidate()
 
+    if want("forestwords"):
+        print("forestwords — a forest's own line, and rename as one move")
+        from srv import state
+
+        class Req:
+            def __init__(self, actor):
+                self._actor, self.sent = actor, None
+
+            def _send(self, code, body, ctype="application/json"):
+                self.sent = (code, json.loads(body))
+
+        def post(fn, body, actor="browser"):
+            r = Req(actor)
+            fn(r, json.dumps(body))
+            return r.sent
+
+        def proj(name):
+            state.refresh()
+            return state._D["git"].ents["project"].get(f"{os.path.basename(repo)}:{name}")
+
+        check("forestwords: without its own line, a forest borrows a branch's, marked so",
+              proj("fixture")["summaryBy"] == "branch" and proj("fixture")["summary"].endswith("one line of purpose"))
+        post(review.project_describe, {"project": "fixture", "description": "  the  fixture's own   words "})
+        p = proj("fixture")
+        check("forestwords: Phil's line wins, one spaced line, marked his",
+              p["summary"] == "the fixture's own words" and p["summaryBy"] == "phil", str(p))
+        post(review.project_describe, {"project": "fixture", "description": "a draft"}, actor="claude")
+        check("forestwords: a line from anyone else is a draft", proj("fixture")["summaryBy"] == "claude")
+        post(review.project_describe, {"project": "fixture", "description": ""})
+        check("forestwords: an empty line clears it back to the branch's", proj("fixture")["summaryBy"] == "branch")
+        git(repo, "config", "stack-project.fixture.focus", "3")
+        code, body = post(review.project_rename, {"project": "fixture", "to": "Bad Name"})
+        check("forestwords: a rename refuses a name that isn't a forest name", body["ok"] is False, str(body))
+        git(repo, "config", "stack-project.other.branch", "legacy")
+        code, body = post(review.project_rename, {"project": "fixture", "to": "other"})
+        check("forestwords: a rename refuses a name already in use", body["ok"] is False and "already" in body["err"], str(body))
+        git(repo, "config", "--unset", "stack-project.other.branch")
+        code, body = post(review.project_rename, {"project": "fixture", "to": "renamed"})
+        repostate.invalidate()
+        snap = repostate.snapshot()
+        moved = [b for b in ("base", "child", "pub", "two", "pubtwo", "wip") if snap.project(b) == "renamed"]
+        check("forestwords: a rename moves every member branch's link", body["ok"] and len(moved) == 6, f"{body} {moved}")
+        check("forestwords: …and the forest's own keys, focus included",
+              snap.get("stack-project.renamed.focus") == "3" and len(snap.get_all("stack-project.renamed.branch")) == 6
+              and not snap.get_all("stack-project.fixture.branch"))
+        check("forestwords: the legacy spelling follows too",
+              git(repo, "config", "stack-branch.base.project") == "renamed")
+        check("forestwords: the stream shows the forest under its new name only",
+              proj("renamed") is not None and proj("fixture") is None)
+        post(review.project_rename, {"project": "renamed", "to": "fixture"})
+        git(repo, "config", "--unset", "stack-project.fixture.focus")
+        repostate.invalidate()
+
     if want("namespace"):
         print("namespace dual-read")
         snap = repostate.snapshot()

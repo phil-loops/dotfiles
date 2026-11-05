@@ -71,6 +71,10 @@ struct ForestsPage: View {
         }
         .padding(.horizontal, 16).padding(.bottom, 8)
         .onChange(of: m.closedIDs(), initial: true) { _, _ in m.syncClosings() }
+        .onChange(of: app.keys.mode) { from, _ in
+            // esc out of insert drops the line or name being typed
+            if from == .insert { m.describingProject = nil; m.renamingProject = nil }
+        }
         .task { await tick(m) }
         // the cursor landing on a branch warms its review page's diff (Forests.tsx warmSelected)
         .onChange(of: cursor, initial: true) { _, k in
@@ -165,7 +169,7 @@ private struct ForestRowView: View {
     let selected: Bool
 
     var body: some View {
-        let m = app.forestModel
+        @Bindable var m = app.forestModel
         let p = f.p
         let closing = m.closing.contains(p.id)
         let verdict = m.verdict(p.id)
@@ -173,9 +177,14 @@ private struct ForestRowView: View {
             // the focus lane reorders by key (C-k / C-j); the grip only says it can
             Text("⋮").foregroundStyle(theme.inkFaint).opacity(p.state == .focus && cursor ? 1 : 0).frame(width: 12)
             HStack(spacing: 6) {
-                Text(p.name).font(Theme.display(17))
-                    .foregroundStyle(cursor ? theme.goldLeaf : f.closed ? theme.inkFaint : theme.ink)
-                    .lineLimit(1).truncationMode(.tail)
+                if m.renamingProject == p.id {
+                    ModalTextField(ProjectCommands.renameField, prompt: "lowercase-with-dashes", text: $m.draft)
+                        .font(Theme.display(17)).foregroundStyle(theme.ink).padding(2).background(theme.vellumRaise)
+                } else {
+                    Text(p.name).font(Theme.display(17))
+                        .foregroundStyle(cursor ? theme.goldLeaf : f.closed ? theme.inkFaint : theme.ink)
+                        .lineLimit(1).truncationMode(.tail)
+                }
                 if verdict?.state == .conflicts {
                     Text("✕").font(Theme.text(11)).foregroundStyle(theme.del)
                         .explains("forest|✕|\(p.id)", RowName(word: "✕", meaning: "its branches don't merge onto main together"))
@@ -186,8 +195,21 @@ private struct ForestRowView: View {
                 Text("✦ canopy closed").font(Theme.display(13)).foregroundStyle(closing ? theme.goldLeaf.opacity(0.8) : theme.inkFaint)
                     .explains("forest|closed|\(p.id)", RowName(word: "✦ closed", meaning: "every branch has landed; it can go to the archive"))
                     .frame(maxWidth: .infinity, alignment: .leading)
+            } else if m.describingProject == p.id || m.renamingProject == p.id {
+                HStack(spacing: 8) {
+                    if m.describingProject == p.id {
+                        ModalTextField(ProjectCommands.describeField, prompt: "one line: what this forest is for", text: $m.draft)
+                            .foregroundStyle(theme.ink).padding(2).background(theme.vellumRaise)
+                    }
+                    Text("\(app.registry.keyOf("project.words.save")) saves · esc leaves it").font(Theme.text(11)).foregroundStyle(theme.inkFaint).fixedSize()
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             } else {
-                Text(p.summary).foregroundStyle(theme.inkDim).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+                // Phil's own words read plainly; Claude's draft and a borrowed branch line read fainter
+                Text(p.summary).foregroundStyle(p.summaryBy == "phil" ? theme.inkDim : theme.inkFaint).lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .explains("forest|line|\(p.id)", RowName(word: "the line", meaning: p.summaryBy == "phil" ? "your words for this forest"
+                        : "\(p.summaryBy == "claude" ? "Claude's draft" : "its first branch's") · \(app.registry.keyOf("project.describe.edit")) writes your own"))
             }
             if cursor, !meta(verdict).isEmpty { Text(meta(verdict)).font(Theme.text(11)).foregroundStyle(theme.inkFaint).fixedSize() }
             if !f.closed && !f.branches.isEmpty {
