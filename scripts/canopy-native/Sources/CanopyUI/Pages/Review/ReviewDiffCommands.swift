@@ -219,7 +219,7 @@ enum DiffCommands {
                                app.moveCursor(1)
                                if app.selected == was { throw Refusal("nothing further down") }
                                if app.pane?.id == reviewDiffPane { keepColumn(from: from, was: wasKey) }
-                               if app.pane?.id == reviewCodePane, pg.side != nil { keepSideColumn(from: sideFrom) }
+                               if pg.code != nil { keepSideColumn(from: sideFrom) }
                                pg.cursorMoved &+= 1
                                CodeLookup.of(app).dismiss()
                            }))
@@ -233,7 +233,7 @@ enum DiffCommands {
                                app.moveCursor(-1)
                                if app.selected == was { throw Refusal("nothing further up") }
                                if app.pane?.id == reviewDiffPane { keepColumn(from: from, was: wasKey) }
-                               if app.pane?.id == reviewCodePane, pg.side != nil { keepSideColumn(from: sideFrom) }
+                               if pg.code != nil { keepSideColumn(from: sideFrom) }
                                pg.cursorMoved &+= 1
                                CodeLookup.of(app).dismiss()
                            }))
@@ -529,7 +529,7 @@ enum DiffCommands {
         func horizontal(_ d: Int) throws {
             switch app.pane?.id {
             case reviewDiffPane: try charStep(d)
-            case reviewCodePane where pg.side != nil: try sideCharStep(d)
+            case let p where pg.window(pane: p)?.doc != nil: try sideCharStep(d)
             default: if !app.focus(d < 0 ? .left : .right) { throw Refusal(d < 0 ? "nothing to the left" : "nothing to the right") }
             }
         }
@@ -568,7 +568,7 @@ enum DiffCommands {
             throw Refusal(d > 0 ? "no more names below" : "no more names above")
         }
         func step(_ d: Int, _ tokens: @escaping (String) -> [Range<Int>] = CodeLookup.names, end: Bool = false) throws {
-            if app.pane?.id == reviewCodePane, pg.side != nil { return try sideStep(d, tokens, end: end) }
+            if pg.code != nil { return try sideStep(d, tokens, end: end) }
             // names live in code: from a list pane, w / b go into the diff and step there
             if app.pane?.id != reviewDiffPane { app.focus(pane: reviewDiffPane) }
             guard app.pane?.id == reviewDiffPane, var i = pg.here.flatMap({ pg.stopIndex[$0.key] }) else { throw Refusal("no diff to step through") }
@@ -593,7 +593,7 @@ enum DiffCommands {
         /// `*`: the name under the cursor (w's, else the line's first), as a kept search from there.
         func searchWord() throws {
             let search = PageSearch.of(app)
-            if app.pane?.id == reviewCodePane, pg.side != nil {
+            if pg.code != nil {
                 guard let n = RowKey.id(app.selected, "s").flatMap(Int.init) else { throw Refusal("no name here") }
                 let lines = (pg.sideText ?? "").components(separatedBy: "\n")
                 let text = n >= 1 && n <= lines.count ? lines[n - 1] : ""
@@ -628,7 +628,7 @@ enum DiffCommands {
 
         /// Put the character cursor at the offset `pick` chooses on the line under the cursor, diff or side.
         func onLine(_ edge: String, _ pick: (String, Range<Int>?) -> Int?) throws {
-            if app.pane?.id == reviewCodePane, pg.side != nil {
+            if pg.code != nil {
                 guard let line = RowKey.id(app.selected, "s").flatMap(Int.init) else { throw Refusal("no line here") }
                 let lines = (pg.sideText ?? "").components(separatedBy: "\n")
                 let t = line >= 1 && line <= lines.count ? lines[line - 1] : ""
@@ -690,7 +690,7 @@ enum DiffCommands {
             r.register(Command(id: id, title: "\(what.prefix(1).uppercased() + what.dropFirst()) a character you type next, along the line", scope: .review,
                                verb: verb, modes: motion, quiet: true,
                                local: { _, _ in
-                                   let inCode = (app.pane?.id == reviewCodePane && pg.side != nil) || (app.pane?.id == reviewDiffPane && pg.here?.kind == .line)
+                                   let inCode = (pg.code != nil) || (app.pane?.id == reviewDiffPane && pg.here?.kind == .line)
                                    guard inCode else { throw Refusal("f / t find a character along a line of code — g w labels the screen") }
                                    seeking = (back, till)
                                    app.keys.openLayer(findCharLayer)
@@ -865,7 +865,7 @@ enum DiffCommands {
 
         func position() -> (CodeLookup.Position?, CodeLookup.Where?) {
             guard let t = pg.target else { return (nil, nil) }
-            if let s = pg.side, app.pane?.id == reviewCodePane {
+            if let s = pg.code?.doc {
                 let n = RowKey.id(app.selected, "s").flatMap(Int.init) ?? s.line
                 let lines = (pg.sideText ?? "").components(separatedBy: "\n")
                 let text = n >= 1 && n <= lines.count ? lines[n - 1] : ""
@@ -886,7 +886,7 @@ enum DiffCommands {
             if pg.scoped, let sha = pg.commitScope { return (pos, .commit(repo: t.repo, sha: sha)) }
             return (pos, w)
         }
-        let codeOK: (String?) -> Bool = { _ in onFiles(nil) || app.pane?.id == reviewCodePane || pg.scoped }
+        let codeOK: (String?) -> Bool = { _ in onFiles(nil) || pg.code != nil || pg.scoped }
         r.register(Command(id: "review.rename", title: "Rename the name under the cursor (a commit you see first)", scope: .review, verb: .rename, label: "rename",
                            available: { _ in onFiles(nil) && !pg.scoped && pg.integration == nil && app.pane?.id == reviewDiffPane },
                            local: { _, _ in
@@ -906,11 +906,19 @@ enum DiffCommands {
         r.register(Command(id: "review.symbols", title: "List the file's symbols", scope: .review, verb: .symbols, label: "symbols", available: codeOK,
                            local: { _, _ in
                                let (p, w) = position()
-                               let path = p?.path ?? (app.pane?.id == reviewCodePane ? pg.side?.path : pg.here?.path)
+                               let path = p?.path ?? (pg.code != nil ? pg.code?.doc?.path : pg.here?.path)
                                CodeLookup.of(app).symbols(path: path, side: p?.side ?? "new", w)
                            }))
+        r.register(Command(id: "review.window.right", title: "A copy of this window beside it", scope: .review, verb: .splitRight, group: .move, quiet: true,
+                           local: { _, _ in try pg.split(below: false) }))
+        r.register(Command(id: "review.window.below", title: "A copy of this window under it", scope: .review, verb: .splitBelow, group: .move, quiet: true,
+                           local: { _, _ in try pg.split(below: true) }))
+        r.register(Command(id: "review.window.close", title: "Close this window", scope: .review, verb: .closeWindow, group: .move, quiet: true,
+                           local: { _, _ in try pg.closeWindow() }))
+        r.register(Command(id: "review.window.only", title: "Close the other windows", scope: .review, verb: .onlyWindow, group: .move, quiet: true,
+                           local: { _, _ in try pg.onlyWindow() }))
         r.register(Command(id: "review.side.extend", title: "Select this line, then the next (the open file)", scope: .review, verb: .extend,
-                           modes: [.normal, .select], label: "range", group: .move, available: { _ in pg.side != nil && app.pane?.id == reviewCodePane },
+                           modes: [.normal, .select], label: "range", group: .move, available: { _ in pg.code != nil },
                            local: { _, _ in
                                if app.keys.mode != .select { app.anchorHere(); return app.keys.setMode(.select) }
                                guard let n = RowKey.id(app.selected, "s").flatMap(Int.init), n < pg.sideRows.count else { return }
@@ -921,7 +929,7 @@ enum DiffCommands {
 
         /// The lines under the cursor or selection: the open file's at its commit, else the diff's at the tip.
         func githubLines() -> (path: String, lines: ClosedRange<Int>, sha: String?)? {
-            if let s = pg.side, app.pane?.id == reviewCodePane {
+            if let s = pg.code?.doc {
                 let ns = app.selection.compactMap { RowKey.id($0, "s").flatMap(Int.init) }
                 guard let lo = ns.min(), let hi = ns.max() else { return nil }
                 return (s.path, lo...hi, s.sha)

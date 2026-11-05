@@ -89,7 +89,7 @@ extension AppModel {
     /// Remember where we are as a jump's origin (unless a jump is already under way).
     public func recordJump() {
         guard jumpDepth == 0 else { return }
-        jumps.record(here())
+        jumps.record(here(), mine: provider?.jumpStream(self) ?? { _ in true })
     }
 }
 

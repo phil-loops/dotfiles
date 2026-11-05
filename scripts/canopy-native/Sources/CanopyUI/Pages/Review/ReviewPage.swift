@@ -34,17 +34,21 @@ struct ReviewPage: View {
                 default:
                     HStack(alignment: .top, spacing: 0) {
                         if pg.showsOutline { Color.clear.frame(width: pg.outlineReserve(app.pane?.id)) }
-                        VStack(alignment: .leading, spacing: 8) {
-                            if let sha = ShipState.of(app).commitScope {
-                                CommitHead(branchID: pg.id, sha: sha).padding(.horizontal, 16).padding(.top, 4)
-                                    .fixedSize(horizontal: false, vertical: true)
+                        // the windows: columns of C-w v, each a stack of C-w s
+                        HStack(alignment: .top, spacing: 0) {
+                            ForEach(Array(pg.columns.enumerated()), id: \.offset) { c, col in
+                                if c > 0 { theme.vellumEdge.frame(width: 1) }
+                                VStack(spacing: 0) {
+                                    ForEach(Array(col.enumerated()), id: \.element.id) { r, w in
+                                        if r > 0 { theme.vellumEdge.frame(height: 1) }
+                                        WindowView(window: w).frame(maxWidth: .infinity, maxHeight: .infinity)
+                                    }
+                                }
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
                             }
-                            // a file in the diff's place: the diff stays underneath, scrolled where it was
-                            DiffPane(empty: pg.base == .outgoing ? "nothing to push" : "no changes").frame(maxWidth: .infinity, maxHeight: .infinity)
-                                .opacity(pg.side == nil ? 1 : 0)
-                                .allowsHitTesting(pg.side == nil)
-                                .overlay { if pg.side != nil { CodeWindow() } }
                         }
+                        // no window shows the diff: it waits, scrolled where it was
+                        .background { if pg.diffWindow == nil { DiffWindow().opacity(0).allowsHitTesting(false) } }
                         .frame(minHeight: 0, maxHeight: .infinity, alignment: .top)
                         .padding(.leading, pg.showsOutline ? 0 : 12)
                     }
@@ -318,18 +322,36 @@ private struct DiffPane: View {
     }
 }
 
-/// The file the window shows in the diff's place, at the commit it was found at: its own pane, so
-/// j/k walk it and g d keeps going from wherever it lands; C-o brings the diff back.
-private struct CodeWindow: View {
+/// One window: the diff, or a file at the commit it was found at — its own pane, so j/k walk it and
+/// g d keeps going from wherever it lands; C-o brings back what it showed before.
+private struct WindowView: View {
     @Environment(AppModel.self) private var app
-    @Environment(\.theme) private var theme
+    let window: ReviewWindow
+
+    var body: some View {
+        if let l = window.doc {
+            let line = RowKey.id(app.cursors["\(app.router.surface.id)/\(window.pane)"], "s").flatMap(Int.init)
+            CodePaneView(handle: window.canvas, pane: window.pane, path: l.path, refLabel: l.sha, text: window.text,
+                         lit: l.line...max(l.line, l.end ?? l.line), repo: l.repo, sha: l.sha,
+                         word: window.word.flatMap { $0.line == line ? $0 : nil }, searched: true)
+        } else {
+            DiffWindow()
+        }
+    }
+}
+
+/// The diff, with the commit it's scoped to above it.
+private struct DiffWindow: View {
+    @Environment(AppModel.self) private var app
 
     var body: some View {
         let pg = ReviewPageState.of(app)
-        if let l = pg.side {
-            CodePaneView(handle: pg.sideCanvas, pane: reviewCodePane, path: l.path, refLabel: l.sha, text: pg.sideText,
-                         lit: l.line...max(l.line, l.end ?? l.line), repo: l.repo, sha: l.sha,
-                         word: pg.sideHereWord.flatMap { w in pg.sideWord.map { ($0.line, w) } }, searched: true)
+        VStack(alignment: .leading, spacing: 8) {
+            if let sha = ShipState.of(app).commitScope {
+                CommitHead(branchID: pg.id, sha: sha).padding(.horizontal, 16).padding(.top, 4)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            DiffPane(empty: pg.base == .outgoing ? "nothing to push" : "no changes").frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 }

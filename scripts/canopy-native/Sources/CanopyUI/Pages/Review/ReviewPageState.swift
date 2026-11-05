@@ -108,7 +108,8 @@ public final class ReviewPageState: ShipHost {
 
     /// The diff's canvas and the side pane's, kept here so commands and the label layer can reach them.
     @ObservationIgnored let diffCanvas = CanvasHandle()
-    @ObservationIgnored let sideCanvas = CanvasHandle()
+    /// The focused file's canvas (else the first window's).
+    var sideCanvas: CanvasHandle { (code ?? windows[0]).canvas }
 
     public static func of(_ app: AppModel) -> ReviewPageState { app.state { ReviewPageState(app) } }
 
@@ -167,10 +168,13 @@ public final class ReviewPageState: ShipHost {
         return w.at
     }
     /// The name `w` / `b` put the cursor on in the open file: its line and UTF-16 range.
-    public var sideWord: (line: Int, at: Range<Int>)?
-    /// The side pane's selected name, when the cursor is still on its line.
+    public var sideWord: (line: Int, at: Range<Int>)? {
+        get { (code ?? windows.first { $0.doc != nil })?.word }
+        set { (code ?? windows.first { $0.doc != nil })?.word = newValue }
+    }
+    /// The focused file's selected name, when the cursor is still on its line.
     public var sideHereWord: Range<Int>? {
-        guard let w = sideWord, let app, app.pane?.id == reviewCodePane, RowKey.id(app.selected, "s").flatMap(Int.init) == w.line else { return nil }
+        guard let c = code, let w = c.word, let app, RowKey.id(app.selected, "s").flatMap(Int.init) == w.line else { return nil }
         return w.at
     }
     /// The repo's GitHub page per repo ("https://github.com/<owner>/<name>"), once origin is read.
@@ -229,12 +233,15 @@ public final class ReviewPageState: ShipHost {
     /// This branch's diff is here (not the last page's, still showing while this one comes).
     var diffHere: Bool { payload != nil && shownID == id }
 
-    // ── the window: it shows the diff, or one file at one commit in the diff's place (Helix's view) ──
+    // ── the windows (ReviewWindows.swift): each shows the diff or one file at one commit (Helix's views) ──
 
-    /// The file the window shows instead of the diff; nil: the diff.
-    public private(set) var side: Loc?
-    public private(set) var sideText: String?
+    /// In reading order; the diff shows in at most one.
+    public internal(set) var windows: [ReviewWindow] = [ReviewWindow(id: 1, column: 0)]
+    /// The focused file (else the first window's file); nil: no window shows one.
+    public var side: Loc? { (code ?? windows.first { $0.doc != nil })?.doc }
+    public var sideText: String? { (code ?? windows.first { $0.doc != nil })?.text }
     @ObservationIgnored private var srcCache: [String: [String]] = [:]
+    func cachedLines(_ k: String) -> [String]? { srcCache[k] }
 
     // ── the target ──
 
@@ -349,8 +356,7 @@ public final class ReviewPageState: ShipHost {
         viewedOverride = [:]
         commitScope = nil
         commitFiles = nil
-        side = nil
-        sideText = nil
+        windows = [ReviewWindow(id: 1, column: 0)]
         if let c = carry, c.id == newID { tab = c.tab } else { carry = nil; tab = "files" }
         guard let app else { return }
         // a jumplist entry being restored already put its cursor
@@ -756,7 +762,7 @@ public final class ReviewPageState: ShipHost {
     private func takePendingRow() {
         guard let r = pendingRow, r.id == id else { return }
         pendingRow = nil
-        if side == nil { anchor(row: r.row) }
+        if diffWindow != nil { anchor(row: r.row) }
     }
 
     /// A click on a line's code: the cursor on that row, on the half clicked where that half is its
@@ -824,8 +830,8 @@ public final class ReviewPageState: ShipHost {
     /// waits underneath.
     public func setCursor(_ key: String?, focus: Bool = true) {
         guard let app else { return }
-        if focus { showDiff() }
-        if side != nil {
+        if focus { showDiff(in: jumpWindow) }
+        if diffWindow == nil {
             app.setCursor(key, pane: reviewDiffPane)
             cursorMoved &+= 1
             return
@@ -889,7 +895,7 @@ public final class ReviewPageState: ShipHost {
             pendingCursor = (id, k)
             return
         }
-        if let key = inDiff(l) {
+        if !l.asFile, let key = inDiff(l) {
             diffCanvas.canvas.middle = key
             setCursor(key)
             return
@@ -903,24 +909,7 @@ public final class ReviewPageState: ShipHost {
         return stops.first { $0.kind == .line && $0.path == l.path && $0.row?.right?.new == l.line }?.key
     }
 
-    func show(_ l: Loc) {
-        let same = side
-        side = l
-        sideWord = nil
-        guard let app else { return }
-        app.focus(pane: reviewCodePane)
-        app.setCursor("s:\(l.line)")
-        if let same, same.repo == l.repo, same.sha == l.sha, same.path == l.path { return }
-        sideText = nil
-        let k = "\(l.repo)|\(l.sha)|\(l.path)"
-        if let lines = srcCache[k] { sideText = lines.joined(separator: "\n"); app.setCursor("s:\(l.line)"); return }
-        Task { @MainActor [weak self] in
-            let lines = await self?.linesOf(l) ?? []
-            guard let self, self.side == l else { return }
-            self.sideText = lines.joined(separator: "\n")
-            if self.app?.pane?.id == reviewCodePane { self.app?.setCursor("s:\(l.line)") }
-        }
-    }
+    func show(_ l: Loc) { show(l, in: jumpWindow) }
 
     /// A file at a commit, as lines (GET /lsp/src → {text}); cached.
     public func linesOf(_ l: Loc) async -> [String] {
@@ -935,31 +924,20 @@ public final class ReviewPageState: ShipHost {
         return lines
     }
 
-    /// Where code navigation is now: the side pane's line while it's open and focused, else the
-    /// diff cursor's line.
+    /// Where code navigation is now: the focused window's line (the file's, or the diff cursor's);
+    /// outside the windows, the first window's.
     public func herePlace() -> Loc? {
-        if let s = side, app?.pane?.id == reviewCodePane {
-            let line = RowKey.id(app?.selected, "s").flatMap(Int.init) ?? s.line
-            return Loc(repo: s.repo, sha: s.sha, path: s.path, line: line)
+        let w = focusedWindow ?? windows[0]
+        if let s = w.doc {
+            let line = (w === focusedWindow ? RowKey.id(app?.selected, "s").flatMap(Int.init) : nil) ?? s.line
+            return Loc(repo: s.repo, sha: s.sha, path: s.path, line: line, asFile: true)
         }
-        if let s = side { return s }
         guard let h = here, h.kind == .line, let row = h.row, let t = target else { return nil }
         return Loc(repo: t.repo, sha: tip, path: h.path, line: row.right?.new ?? row.left?.old ?? 1, diffKey: h.key)
     }
 
-    /// The window shows the diff again.
-    func showDiff() {
-        guard side != nil else { return }
-        side = nil
-        sideText = nil
-        app?.focus(pane: reviewDiffPane)
-    }
-
-    /// The side pane's rows: one per line of the file ("s:<n>").
-    var sideRows: [String] {
-        guard side != nil, let t = sideText else { return [] }
-        return (1...max(1, t.components(separatedBy: "\n").count)).map { "s:\($0)" }
-    }
+    /// The focused file's rows.
+    var sideRows: [String] { (code ?? windows.first { $0.doc != nil })?.codeRows ?? [] }
 }
 
 // ── ShipHost: what the review page tells Ship (area C) ──
@@ -986,7 +964,7 @@ public extension ReviewPageState {
     /// `o`: Helix over the whole page, on the file and line under the cursor.
     func openHelixWhole(_ app: AppModel) -> Bool {
         guard helix == nil, integration == nil, let t = target else { return false }
-        if let s = side, app.pane?.id == reviewCodePane {
+        if let s = code?.doc {
             let line = RowKey.id(app.selected, "s").flatMap(Int.init) ?? s.line
             openHelix(app, branch: t.name, path: s.path, line: line, col: (sideHereWord?.lowerBound ?? 0) + 1, whole: true, fromSide: true)
             return true

@@ -771,6 +771,69 @@ import Testing
         #expect(pg.side?.path == "lib/z.ts" && a.pane?.id == reviewCodePane, "C-i: the file again")
     }
 
+    /// C-w v / C-w s copy the focused window (of the diff: the file at the cursor's line on the tip)
+    /// and go into the copy; C-w q closes one (never the last), C-w o all the others.
+    @Test func windowsSplitCloseAndOnly() async throws {
+        let (a, p) = try await app()
+        let pg = ReviewPageState.of(a)
+        ShipStub.answer(p, "GET", "/loops/lsp/src", #"{"path":"a.ts","sha":"x","text":"one\ntwo\nthree"}"#)
+        keys(a, "C-w", "v")
+        #expect(pg.windows.count == 2 && pg.diffWindow === pg.windows[0])
+        let copy = try #require(pg.code)
+        await until("the copy's text") { copy.text != nil }
+        #expect(copy.doc?.path == "a.ts" && copy.doc?.sha == pg.tip && copy.doc?.line == 2 && a.selected == "s:2")
+        #expect(a.panes.first { $0.id == copy.pane }?.column == 2, "beside the diff")
+        keys(a, "C-w", "s")
+        #expect(pg.windows.count == 3 && pg.code?.column == copy.column, "under the copy, same column")
+        keys(a, "C-w", "q")
+        #expect(pg.windows.count == 2)
+        keys(a, "C-w", "h")
+        #expect(a.pane?.id == reviewDiffPane)
+        keys(a, "C-w", "o")
+        #expect(pg.windows.count == 1 && pg.diffWindow != nil)
+        keys(a, "C-w", "q")
+        #expect(pg.windows.count == 1 && a.runner.note?.contains("last window") == true)
+    }
+
+    /// A jump in one window leaves the others; C-o walks the window's own jumps; a jump to the diff
+    /// from a copy goes to the window the diff is in.
+    @Test func eachWindowJumpsOnItsOwn() async throws {
+        let (a, p) = try await app()
+        let pg = ReviewPageState.of(a)
+        let tip = pg.tip
+        ShipStub.answer(p, "GET", "/loops/lsp/src", #"{"path":"lib/z.ts","sha":"x","text":"one\ntwo\nthree"}"#)
+        keys(a, "C-w", "v")
+        let copy = try #require(pg.code)
+        await until("the copy's text") { copy.text != nil }
+        ShipStub.answer(p, "POST", "/loops/lsp/definition", #"{"ok":true,"sha":"\#(tip)","locations":[{"path":"lib/z.ts","line":3,"character":0}]}"#)
+        keys(a, "g", "d")
+        await until("the jump in the copy") { copy.doc?.path == "lib/z.ts" }
+        #expect(pg.diffWindow === pg.windows[0] && pg.here?.key == "l|a.ts|R:2", "the diff's window didn't move")
+        keys(a, "C-w", "h", "C-o")
+        #expect(a.pane?.id == reviewDiffPane && copy.doc?.path == "lib/z.ts", "the diff's C-o isn't the copy's jump")
+        keys(a, "C-w", "l", "C-o")
+        #expect(copy.doc?.path == "a.ts", "the copy's C-o is")
+        ShipStub.answer(p, "POST", "/loops/lsp/definition", #"{"ok":true,"sha":"\#(tip)","locations":[{"path":"b.ts","line":6,"character":0}]}"#)
+        keys(a, "g", "d")
+        await until("the jump to the diff") { pg.here?.key == "l|b.ts|R:6" }
+        #expect(a.pane?.id == reviewDiffPane && copy.doc != nil, "the diff lives in one window: the keyboard goes there")
+    }
+
+    /// Picker C-v opens the pick in a window beside this one; ret, in this one.
+    @Test func pickerCtrlVOpensThePickBeside() async throws {
+        let (a, p) = try await app()
+        let pg = ReviewPageState.of(a)
+        let tip = pg.tip
+        ShipStub.answer(p, "POST", "/loops/lsp/references", #"{"ok":true,"sha":"\#(tip)","locations":[{"path":"lib/z.ts","line":3,"character":0},{"path":"lib/y.ts","line":1,"character":0}]}"#)
+        ShipStub.answer(p, "GET", "/loops/lsp/src", #"{"path":"lib/z.ts","sha":"x","text":"one\ntwo\nthree"}"#)
+        keys(a, "g", "r")
+        await until("the picker") { a.nav.picker != nil }
+        keys(a, "C-v")
+        #expect(a.nav.picker == nil && pg.windows.count == 2 && pg.code?.doc?.path == "lib/z.ts" && pg.diffWindow === pg.windows[0])
+        keys(a, "C-o")
+        #expect(pg.code?.doc?.path == "lib/z.ts", "a new window has no jumps of its own yet")
+    }
+
     /// The code beside the diff reads like Helix: w / b walk its names (what g d asks about), v and x
     /// select lines, space o m / space o b open them on GitHub.
     @Test func theCodeBesideTheDiffMovesLikeHelix() async throws {

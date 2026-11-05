@@ -58,6 +58,9 @@ public protocol SurfaceProvider {
     /// `place.route`, focused `place.pane`, set the cursor to `place.cursorKey`, and handed
     /// `place.loc` to `app.nav.open`. Default: nothing.
     func restore(_ place: Place, _ app: AppModel)
+    /// Which jumplist entries C-o / C-i walk from here — a page with windows walks the focused
+    /// window's own (Helix's per-view jumplist). Default: nil, every entry.
+    func jumpStream(_ app: AppModel) -> ((Place) -> Bool)?
 }
 
 public extension SurfaceProvider {
@@ -75,6 +78,7 @@ public extension SurfaceProvider {
     func position(_ app: AppModel) -> String? { nil }
     func remember(_ place: inout Place, _ app: AppModel) {}
     func restore(_ place: Place, _ app: AppModel) {}
+    func jumpStream(_ app: AppModel) -> ((Place) -> Bool)? { nil }
 }
 
 /// One step of the header's "canopy › forest › branch"; `command` makes it a button.

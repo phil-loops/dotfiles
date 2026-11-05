@@ -154,6 +154,11 @@ enum ShellCommands {
                            available: picking, local: { [weak app] _, _ in app?.nav.move(-1) }))
         r.register(Command(id: "picker.open", title: "Open the picked place", scope: .global, verb: .send, modes: [.picker], quiet: true,
                            available: picking, local: { [weak app] i, _ in app?.nav.choose(i.flatMap(Int.init)) }))
+        for (below, verb) in [(false, Verb.pickRight), (true, .pickBelow)] {
+            r.register(Command(id: below ? "picker.below" : "picker.right", title: below ? "Open the pick under this window" : "Open the pick beside this window",
+                               scope: .global, verb: verb, modes: [.picker], quiet: true, available: picking,
+                               local: { [weak app] _, _ in if app?.nav.chooseInSplit(below: below) != true { throw Refusal("no windows here · ret opens it") } }))
+        }
         r.register(Command(id: "picker.close", title: "Close the picker", scope: .global, quiet: true, available: picking,
                            local: { [weak app] _, _ in app?.nav.close() }))
     }

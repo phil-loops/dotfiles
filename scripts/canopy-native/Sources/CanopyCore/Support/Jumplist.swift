@@ -27,6 +27,8 @@ public struct Place: Equatable, Sendable {
     public var loc: Loc?
     /// the one commit the review page is showing instead of the whole branch
     public var commit: String?
+    /// the page's window the spot is in (the review page's splits), whose own jumps C-o walks
+    public var window: Int?
 
     public init(route: Route, pane: String? = nil, cursorKey: String? = nil, tab: String? = nil, row: Int? = nil, loc: Loc? = nil) {
         self.route = route; self.pane = pane; self.cursorKey = cursorKey; self.tab = tab; self.row = row; self.loc = loc
@@ -44,7 +46,7 @@ public struct Place: Equatable, Sendable {
 
     /// The same spot, ignoring the viewport row: two consecutive entries that are the same spot collapse.
     public func sameSpot(_ o: Place) -> Bool {
-        route == o.route && pane == o.pane && cursorKey == o.cursorKey && tab == o.tab && loc == o.loc && commit == o.commit
+        route == o.route && pane == o.pane && cursorKey == o.cursorKey && tab == o.tab && loc == o.loc && commit == o.commit && window == o.window
     }
 }
 
@@ -63,10 +65,11 @@ public final class Jumplist {
 
     public init() {}
 
-    /// A jump is about to leave `here`: remember it, drop the forward list.
-    public func record(_ here: Place) {
+    /// A jump is about to leave `here`: remember it, drop the forward list (the part of it `mine`
+    /// keeps: a window's jumps leave another window's alone, as Helix's per-view jumplists do).
+    public func record(_ here: Place, mine: (Place) -> Bool = { _ in true }) {
         push(here)
-        fwd = []
+        fwd.removeAll(where: mine)
         alternate = here
     }
 
@@ -85,9 +88,11 @@ public final class Jumplist {
         if back.count > capacity { back.removeFirst(back.count - capacity) }
     }
 
-    /// `C-o`: the place to restore, or nil when there's nowhere to go. `here` moves to the forward list.
-    public func goBack(from here: Place) -> Place? {
-        while let to = back.popLast() {
+    /// `C-o`: the place to restore — the newest entry `mine` keeps (a window's own) — or nil when
+    /// there's nowhere to go. `here` moves to the forward list.
+    public func goBack(from here: Place, mine: (Place) -> Bool = { _ in true }) -> Place? {
+        while let i = back.lastIndex(where: mine) {
+            let to = back.remove(at: i)
             if to.sameSpot(here) { continue }
             fwd.append(here)
             return to
@@ -96,8 +101,9 @@ public final class Jumplist {
     }
 
     /// `C-i`: the inverse of goBack.
-    public func goForward(from here: Place) -> Place? {
-        while let to = fwd.popLast() {
+    public func goForward(from here: Place, mine: (Place) -> Bool = { _ in true }) -> Place? {
+        while let i = fwd.lastIndex(where: mine) {
+            let to = fwd.remove(at: i)
             if to.sameSpot(here) { continue }
             push(here)
             return to
