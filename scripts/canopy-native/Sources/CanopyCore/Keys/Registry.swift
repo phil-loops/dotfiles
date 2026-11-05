@@ -149,7 +149,7 @@ public enum KeyGroup: String, CaseIterable, Sendable {
             return .move
         case .nextSibling, .previousSibling, .parent, .child, .root, .tip, .out:
             return .others
-        case .face, .conversation, .type, .symbols, .nth1, .nth2, .nth3, .nth4, .nth5, .nth6, .nth7, .nth8, .nth9:
+        case .face, .conversation, .history, .type, .symbols, .nth1, .nth2, .nth3, .nth4, .nth5, .nth6, .nth7, .nth8, .nth9:
             return .show
         case .push, .sync, .words, .editor, .github, .githubMain, .githubBranch, .preview, .rename:
             return .branch

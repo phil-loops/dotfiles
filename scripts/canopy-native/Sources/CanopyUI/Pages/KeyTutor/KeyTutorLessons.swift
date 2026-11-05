@@ -310,6 +310,8 @@ enum KeyLessons {
             KeyStep("{cancel} closes it.", [.cancel], check: { $0.keys.layer == nil }),
             KeyStep("{conversation} puts the conversation where the diff was; {cancel} brings the diff back.", [.conversation],
                     check: { P.pg($0).tab == "conversation" }),
+            KeyStep("{history} puts the branch's commits there instead: its history, one commit per row.", [.history],
+                    setup: P.review(at: "l|greet.ts|R:2"), check: { P.pg($0).tab == "commits" }),
             KeyStep("{changed-files} lists just the files this branch changes, as Helix's changed-file picker does.", [.changedFiles],
                     setup: P.review(at: "l|greet.ts|R:2"), check: { P.pg($0).tab == "files" }),
             KeyStep("{next-word} puts the cursor on the next name, line after line.", [.nextWord], setup: P.review(at: "l|greet.ts|R:2"),

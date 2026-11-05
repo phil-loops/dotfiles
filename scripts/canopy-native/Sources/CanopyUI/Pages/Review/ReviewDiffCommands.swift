@@ -880,6 +880,14 @@ enum DiffCommands {
                                pg.tab = "conversation"
                                if let first = app.panes.first { app.focus(pane: first.id) }
                            }))
+        r.register(Command(id: "review.history", title: "The commits (the branch's history), in place of the diff (esc brings the diff back)", scope: .review,
+                           verb: .history, label: "history", available: { _ in pg.integration == nil },
+                           local: { _, _ in
+                               if pg.tab == "commits" { pg.tab = "files"; return app.focus(pane: reviewDiffPane) }
+                               PageSearch.of(app).clear()
+                               pg.tab = "commits"
+                               if let first = app.panes.first { app.focus(pane: first.id) }
+                           }))
         r.register(Command(id: "review.back", title: "Back out", scope: .review, verb: .cancel, label: "back", quiet: true,
                            local: { _, _ in
                                if ShipSeam.backOut(app) { return }
