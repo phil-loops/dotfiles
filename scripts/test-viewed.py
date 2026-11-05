@@ -101,5 +101,18 @@ r = post({"branch": "beta", "marks": {"mmm": "flagged", "nnn": "viewed"}})
 check("a mixed marks body sets each", r.status == 200 and "mmm" in marks()["loops:beta"]["flagged"] and "nnn" in marks()["loops:beta"]["keys"], marks())
 check("a context-suffixed key is accepted", post({"branch": "beta", "keys": ["abc.d3f"], "state": "viewed"}).status == 200)
 
+# a flag keeps where it was made, for the list of flags
+post({"branch": "beta", "marks": {"fff": "flagged"}, "where": {"fff": {"path": "a/b.ts", "line": 12, "text": "  const x =\n  1"}}})
+f = next((f for f in marks()["loops:beta"]["flags"] if f["key"] == "fff"), {})
+check("a flag keeps its file, line and text", f.get("path") == "a/b.ts" and f.get("line") == 12 and f.get("text") == "const x = 1", f)
+post({"branch": "beta", "marks": {"fff": "flagged"}, "where": {"fff": {"path": "a/b.ts", "line": 14, "text": "x"}}})
+g = next((f for f in marks()["loops:beta"]["flags"] if f["key"] == "fff"), {})
+check("…a re-flag moves it and keeps when", g.get("line") == 14 and g.get("at") == f.get("at"), g)
+check("a flag made without where still lists", any(f["key"] == "mmm" and f["path"] == "" for f in marks()["loops:beta"]["flags"]), marks()["loops:beta"]["flags"])
+check("a bad where is dropped, the flag kept", post({"branch": "beta", "marks": {"ggg": "flagged"}, "where": {"ggg": {"path": 3}}}).status == 200
+      and "ggg" in marks()["loops:beta"]["flagged"])
+post({"branch": "beta", "marks": {"fff": "viewed"}})
+check("reading a flag drops it from the list", all(f["key"] != "fff" for f in marks()["loops:beta"]["flags"]), marks()["loops:beta"]["flags"])
+
 print("viewed: all passed" if failures == 0 else f"viewed: {failures} failed")
 sys.exit(1 if failures else 0)

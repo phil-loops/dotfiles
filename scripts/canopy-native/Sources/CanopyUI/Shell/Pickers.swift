@@ -56,6 +56,31 @@ extension AppModel {
         }
     }
 
+    /// `space !`: every change flagged with `, !` in this repo, the branch you're on first, then newest
+    /// first; picking one opens its branch with the cursor on the change.
+    func pickFlags() throws {
+        let repo = router.route.branchID.flatMap { store.view(Branch.self, $0)?.repo } ?? currentForest.flatMap { store.view(Project.self, $0)?.repo }
+        let here = router.route.branchID
+        let all = store.list(Viewed.self)
+            .filter { repo == nil || $0.repo == repo }
+            .flatMap { v in (v.flags ?? []).map { (v, $0) } }
+            .sorted { a, b in
+                let (ah, bh) = (a.0.id == here, b.0.id == here)
+                return ah != bh ? ah : a.1.at > b.1.at
+            }
+        guard !all.isEmpty else { throw Refusal("nothing flagged · , ! flags a change") }
+        let items = all.map { v, f in
+            PickItem(label: "\(v.branch)  \(f.path.isEmpty ? "?" : "\(shortPath(f.path)):\(f.line)")", text: f.text.isEmpty ? f.path : f.text)
+        }
+        nav.pick("flagged", items) { [weak self] i in
+            guard let self else { return }
+            let (v, f) = all[i]
+            self.recordJump()
+            self.go(.review(repo: v.repo, branch: v.branch))
+            ReviewPageState.of(self).land(flag: f)
+        }
+    }
+
     /// The focus lane as the forests home shows it (rank, then name, then repo; shelved ones out): `g 1`…`g 9`.
     var focusLane: [Project] { forestModel.projects().focus }
 
@@ -88,6 +113,8 @@ extension NavCommands {
                            local: { [weak app] _, _ in try app?.pickBranch() }))
         r.register(Command(id: "nav.jumps", title: "Pick from the jumplist", scope: .global, verb: .jumps, label: "jumplist",
                            local: { [weak app] _, _ in try app?.pickJump() }))
+        r.register(Command(id: "nav.flags", title: "Pick a change you flagged, on any branch of this repo", scope: .global, verb: .flags, label: "flagged",
+                           local: { [weak app] _, _ in try app?.pickFlags() }))
         r.register(Command(id: "nav.picker.last", title: "Reopen the last picker, query and all", scope: .global, verb: .lastPicker, label: "last picker",
                            available: { [weak app] _ in app?.nav.canReopen ?? false },
                            local: { [weak app] _, _ in app?.nav.reopen() }))

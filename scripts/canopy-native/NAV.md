@@ -88,6 +88,7 @@
 | mark / unmark | `, m` / `, M` (each page's own) | mark it (viewed, done, answered) and go on / take the mark off |
 | flag | `, !` (review) | flag the change to come back to and go on; on a flagged change, take the flag off |
 | next / previous unviewed | `] u` / `[ u` | the next change not read yet or flagged, across files, wrapping round the branch; marks nothing |
+| flagged | `space !` | pick from every change flagged in this repo (this branch's first, then newest); opens its branch on the change |
 | put-away | `X` | put it away: archive, drop, delete, kill, forget, cut |
 | apply | `A` | apply the suggested fix |
 | copy | `y` | copy it; where a page has nothing of its own to copy, a link to here (below) |
