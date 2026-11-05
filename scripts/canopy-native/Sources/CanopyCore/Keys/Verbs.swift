@@ -20,6 +20,7 @@ public enum Verb: String, CaseIterable, Sendable, Comparable {
     case parent, child, root, tip
     case nextFile = "next-file", previousFile = "previous-file"
     case nextHunk = "next-hunk", previousHunk = "previous-hunk"
+    case nextUnviewed = "next-unviewed", previousUnviewed = "previous-unviewed"
     case nextThread = "next-thread", previousThread = "previous-thread"
     case nextConversation = "next-conversation", previousConversation = "previous-conversation"
     case nextTest = "next-test", previousTest = "previous-test", nextGitHunk = "next-git-hunk", previousGitHunk = "previous-git-hunk"
@@ -145,6 +146,8 @@ public enum Verbs {
         v(.previousFile, .nav, ["g p", "{"], jump: true, "the previous file, at its first change (Helix's previous buffer)"),
         v(.nextHunk, .nav, ["] g"], "the next change, into the next file at the end of one (Helix ]g)"),
         v(.previousHunk, .nav, ["[ g"], "the previous change (Helix [g)"),
+        v(.nextUnviewed, .nav, ["] u"], "the next change not yet marked viewed, across files, wrapping to the top"),
+        v(.previousUnviewed, .nav, ["[ u"], "the previous change not yet marked viewed, wrapping to the bottom"),
         v(.nextThread, .nav, ["n"], jump: true, "the next search match (Helix n)"),
         v(.previousThread, .nav, ["N"], jump: true, "the previous search match (Helix N)"),
         v(.nextConversation, .nav, ["] r"], jump: true, "the next conversation, open ones first"),
@@ -265,7 +268,7 @@ public enum Verbs {
     public static let countable: Set<Verb> = [
         .next, .previous, .halfDown, .halfUp, .pageDown, .pageUp, .left, .right,
         .nextWord, .previousWord, .nextLongWord, .previousLongWord, .longWordEnd,
-        .nextSibling, .previousSibling, .parent, .nextFile, .previousFile, .nextHunk, .previousHunk,
+        .nextSibling, .previousSibling, .parent, .nextFile, .previousFile, .nextHunk, .previousHunk, .nextUnviewed, .previousUnviewed,
         .nextThread, .previousThread, .nextConversation, .previousConversation, .nextFunction, .previousFunction,
         .nextType, .previousType, .nextFinding, .previousFinding, .nextTest, .previousTest, .nextGitHunk, .previousGitHunk,
         .repeatMotion, .scrollDown, .scrollUp, .extend, .jumpBack, .jumpForward, .nextComment, .previousComment, .wordEnd,

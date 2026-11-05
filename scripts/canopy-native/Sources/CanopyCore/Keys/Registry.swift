@@ -141,7 +141,7 @@ public enum KeyGroup: String, CaseIterable, Sendable {
              .left, .right, .nextWord, .previousWord, .lineStart, .lineEnd, .firstNonBlank,
              .findChar, .tillChar, .findCharBack, .tillCharBack, .nextFunction, .previousFunction, .nextType, .previousType,
              .nextFinding, .previousFinding, .firstChange, .lastChange, .repeatMotion, .viewCenter, .viewTop, .viewBottom,
-             .nextFile, .previousFile, .nextHunk, .previousHunk, .nextThread, .previousThread, .match, .changedFiles,
+             .nextFile, .previousFile, .nextHunk, .previousHunk, .nextUnviewed, .previousUnviewed, .nextThread, .previousThread, .match, .changedFiles,
              .nextConversation, .previousConversation, .nextTest, .previousTest, .nextGitHunk, .previousGitHunk,
              .nextComment, .previousComment, .wordEnd, .searchBack,
              .lastFinding, .firstFinding, .nextLongWord, .previousLongWord, .longWordEnd, .scrollDown, .scrollUp,

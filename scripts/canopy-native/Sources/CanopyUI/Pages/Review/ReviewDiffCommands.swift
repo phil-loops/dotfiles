@@ -245,6 +245,26 @@ enum DiffCommands {
                            label: "change", pair: "review.hunk.prev", available: onDiff, local: { _, _ in try change(1) }))
         r.register(Command(id: "review.hunk.prev", title: "Go to the previous change", scope: .review, verb: .previousHunk, modes: motion,
                            label: "change", available: onDiff, local: { _, _ in try change(-1) }))
+        r.register(Command(id: "review.unviewed.next", title: "Go to the next change not yet viewed", scope: .review, verb: .nextUnviewed, modes: motion,
+                           label: "unviewed change", pair: "review.unviewed.prev", available: onDiff, local: { _, _ in try unviewed(1) }))
+        r.register(Command(id: "review.unviewed.prev", title: "Go to the previous change not yet viewed", scope: .review, verb: .previousUnviewed, modes: motion,
+                           label: "unviewed change", available: onDiff, local: { _, _ in try unviewed(-1) }))
+        /// ]u / [u: the start of the next (previous) change whose hunk isn't marked viewed, wrapping round the branch,
+        /// so what's left to read is one key away without marking anything.
+        func unviewed(_ dir: Int) throws {
+            let s = pg.stops
+            let i = idx()
+            let open = pg.changeStarts.filter { k in
+                guard let row = s[k].row, let fv = pg.fileOf(s[k].path) else { return false }
+                return !fv.viewed && !fv.seenHunks.contains(row.hunk)
+            }
+            guard !open.isEmpty else { throw Refusal("every change on this branch is viewed · , M takes a mark back") }
+            let ahead = dir > 0 ? open.first { $0 > i } : open.last { $0 < i }
+            let target = ahead ?? (dir > 0 ? open.first! : open.last!)
+            if ahead == nil { app.runner.say(dir > 0 ? "wrapped to the first unviewed change" : "wrapped to the last unviewed change") }
+            if app.keys.mode != .select { pg.mark = nil }
+            goTo(target)
+        }
         /// ]/[: the start of the next (previous) change — a run of changed lines with nothing unchanged
         /// between them, finer than git's hunk (which can hold two edits) — crossing into the next file.
         func change(_ dir: Int) throws {
