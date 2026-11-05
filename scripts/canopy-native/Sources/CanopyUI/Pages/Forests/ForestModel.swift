@@ -34,7 +34,7 @@ public struct IntegrationVerdict: Equatable {
 
 /// The forests area's state and derived views — model.ts's forest half plus ui.ts's forest bits and
 /// integrate.ts. Made once per window (`app.forestModel`); Ship reads `forests`, `branchView`,
-/// `armed`, `opened`, `gateShown` and `compareURL` from here. The force scope is Ship's (`ShipState`).
+/// `armed` and `compareURL` from here. The force scope is Ship's (`ShipState`).
 @MainActor
 @Observable
 public final class ForestModel {
@@ -54,8 +54,6 @@ public final class ForestModel {
     public var armed: String?
     /// the forest being launched: every node pushed and opened, top to bottom
     public var launching: String?
-    /// branches whose compare form was opened from here — "waiting for GitHub" until the PR shows
-    public var opened: Set<String> = []
     /// branches (and landed chapters, by row key) showing their whole commit messages
     public var wordsOpen: Set<String> = []
     /// the forest-page branch whose description is being edited in its row
@@ -65,8 +63,6 @@ public final class ForestModel {
     public var renamingProject: String?
     /// the description being typed
     public var draft = ""
-    /// the gate whose output the ship strip shows instead of the running one's — "<branch id> <gate>"
-    public var gateShown: String?
     /// a forest page's face: its branches as they stand, or the feature's story (remembered)
     public var face: Face = ForestModel.savedFace {
         didSet { defaults.set(face.rawValue, forKey: Self.faceKey) }

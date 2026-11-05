@@ -8,11 +8,12 @@ public struct ReviewFlag: Decodable, Equatable, Sendable {
     public var text: String
 }
 
-/// The review page's findings, read once per branch tip.
+/// The review page's findings, read once per branch tip once a review has run on it. "No review
+/// yet" is asked again each time, since a review can land on a tip after the first look.
 @MainActor
 final class ReviewFlags {
     private struct Reply: Decodable { var flags: [ReviewFlag]? }
-    private var cache: [String: [ReviewFlag]?] = [:]
+    private var cache: [String: [ReviewFlag]] = [:]
 
     static func of(_ app: AppModel) -> ReviewFlags { app.state { ReviewFlags() } }
 
@@ -23,7 +24,7 @@ final class ReviewFlags {
         if let got = cache[key] { return got }
         let path = app.transport.atRepo(t.repo, "/review-flags?branch=\(t.name.uriComponent)")
         let got = (try? await app.transport.getJSON(path, as: Reply.self))?.flags
-        cache[key] = .some(got)
+        if let got { cache[key] = got }
         return got
     }
 }
