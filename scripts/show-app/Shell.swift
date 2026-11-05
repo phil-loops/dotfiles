@@ -880,6 +880,21 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
         showHint()
     }
 
+    /// The shelf as it was before a plan canvas folded it away; nil while no canvas is up.
+    private var shelfBeforeCanvas: Bool?
+
+    /// A plan canvas folds the shelf away; leaving it puts the shelf back as it was.
+    func canvasChanged(_ on: Bool) {
+        guard let item = split.splitViewItems.first else { return }
+        if on {
+            if shelfBeforeCanvas == nil { shelfBeforeCanvas = item.isCollapsed }
+            item.isCollapsed = true
+        } else if let before = shelfBeforeCanvas {
+            shelfBeforeCanvas = nil
+            item.isCollapsed = before
+        }
+    }
+
     /// Puts the dividers where they read best at 1180pt: a 210pt shelf, then the open document's own columns.
     func settleColumns() {
         split.view.layoutSubtreeIfNeeded()
@@ -887,6 +902,7 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
             split.splitViewItems.first?.isCollapsed = true
             return
         }
+        guard shelfBeforeCanvas == nil else { return }
         split.splitView.setPosition(210, ofDividerAt: 0)
     }
 
@@ -946,11 +962,16 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
                     guard let self, let controller, self.currentDeck === controller else { return }
                     self.onTitleChange?()
                 }
+                controller.onCanvas = { [weak self, weak controller] on in
+                    guard let self, let controller, self.currentDeck === controller else { return }
+                    self.canvasChanged(on)
+                }
                 decks[path] = controller
             }
             display(controller.viewController)
             controller.settleColumns()
-            controller.window?.makeFirstResponder(controller.table)
+            canvasChanged(controller.canvas)
+            controller.window?.makeFirstResponder(controller.canvas ? controller.planScroll.grid : controller.table)
         }
         showEvents.append(ShowEvent(kind: .opened, target: .document(path), workspace: workspace, title: documentTitle, back: remember ? nil : true))
         syncShelfSelection()

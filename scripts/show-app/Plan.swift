@@ -304,7 +304,8 @@ extension Array {
 
 // MARK: - The grid
 
-/// The scroll view around the grid; it re-fits the grid to its width whenever it re-tiles.
+/// The scroll view around the grid: a canvas that pans both ways and zooms (pinch, or = − 0 on the grid). It re-fits the
+/// grid to the visible width whenever it re-tiles, zooms or scrolls, so the docked inspector stays in view.
 final class PlanScroll: NSScrollView {
     let grid = PlanView()
 
@@ -316,13 +317,21 @@ final class PlanScroll: NSScrollView {
         autohidesScrollers = true
         drawsBackground = true
         backgroundColor = .textBackgroundColor
+        allowsMagnification = true
+        minMagnification = 0.5
+        maxMagnification = 2
+        contentView.postsBoundsChangedNotifications = true
+        NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification, object: contentView, queue: .main) { [weak self] _ in
+            guard let self else { return }
+            self.grid.fit(width: self.contentView.bounds.width)
+        }
     }
 
     required init?(coder: NSCoder) { fatalError("unused") }
 
     override func tile() {
         super.tile()
-        grid.fit(width: contentSize.width)
+        grid.fit(width: contentView.bounds.width)
     }
 }
 
@@ -337,6 +346,9 @@ final class PlanView: NSView {
     /// Opens a synthesized page (`t-…`, `x-…`) in the deck's section list.
     var onOpenSection: ((String) -> Void)?
     var onSay: ((String) -> Void)?
+    /// `f` (or ⎋ while on) asks for the canvas: the page takes the whole window.
+    var onCanvasToggle: (() -> Void)?
+    var canvas = false { didSet { needsDisplay = true } }
     private(set) var cursor = 0
     private(set) var pick: Pick?
     private var hover: Pick?
@@ -346,15 +358,21 @@ final class PlanView: NSView {
     private var mvpLineY: CGFloat = 0
 
     private let margin: CGFloat = 20
-    private let labelWidth: CGFloat = 150
     private let minColumn: CGFloat = 92
     private let rowHeight: CGFloat = 26
     private let laneHeight: CGFloat = 24
     private let chipHeight: CGFloat = 18
+    /// A branch name longer than this column wraps onto a second line of its chip instead of widening the stage.
+    private let maxChipColumn: CGFloat = 180
+    private let chipFont = NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)
+    private let inspectorWidth: CGFloat = 340
     private var width: CGFloat = 900
-
-    /// Chips shown per stage before a "+N more" chip, which selects the stage so the inspector lists them all.
-    static let chipsShown = 4
+    /// Sized to the longest row or extra name, so no label truncates.
+    private var labelWidth: CGFloat = 150
+    /// Each stage's column, sized to its widest cell, chip or name, then widened evenly to fill the page.
+    private var columns: [CGFloat] = []
+    /// The inspector sits in a gutter right of the grid when the page is wide enough, else under it.
+    private var docked = false
 
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
@@ -375,8 +393,39 @@ final class PlanView: NSView {
     // MARK: geometry
 
     private var stageCount: Int { max(plan?.stages.count ?? 1, 1) }
-    private var column: CGFloat { max(minColumn, (width - margin * 2 - labelWidth) / CGFloat(stageCount)) }
-    private func x(_ stage: Int) -> CGFloat { margin + labelWidth + CGFloat(stage) * column }
+    private func column(_ stage: Int) -> CGFloat { columns[safe: stage] ?? minColumn }
+    private func x(_ stage: Int) -> CGFloat { margin + labelWidth + columns.prefix(max(stage, 0)).reduce(0, +) }
+    /// The grid's right edge; lines and lanes stop here, and the docked inspector starts past it.
+    private var gridRight: CGFloat { x(stageCount) }
+    private func stage(atX px: CGFloat) -> Int {
+        (0..<stageCount).first { px < x($0) + column($0) } ?? stageCount - 1
+    }
+
+    private func textWidth(_ text: String, _ font: NSFont) -> CGFloat {
+        ceil((text as NSString).size(withAttributes: [.font: font]).width)
+    }
+
+    /// The width each column needs for its content, before any widening.
+    private func naturalColumns() -> [CGFloat] {
+        guard let plan else { return [minColumn] }
+        return plan.stages.indices.map { i in
+            var need = textWidth(plan.stages[i].id, font(12, .bold)) + 32
+            for row in plan.rows {
+                need = max(need, textWidth(row.cells[safe: i] ?? "", font(11.5, .semibold)) + 22)
+            }
+            for branch in plan.branches(at: i) {
+                need = max(need, min(textWidth(branch.name, chipFont) + 26, maxChipColumn))
+            }
+            return max(minColumn, need)
+        }
+    }
+
+    private func naturalLabelWidth() -> CGFloat {
+        let rows: [CGFloat] = (plan?.rows ?? []).map { textWidth($0.name, font(12, .semibold)) + 30 }
+        let extras: [CGFloat] = (plan?.extras ?? []).map { textWidth("⚠ " + $0.name, font(12, .medium)) + 20 }
+        let widest: CGFloat = (rows + extras).max() ?? 150
+        return min(max(widest, 150), 360)
+    }
 
     private var visibleExtras: [Plan.Extra] {
         let all = plan?.extras ?? []
@@ -384,17 +433,34 @@ final class PlanView: NSView {
         return mvpOnly ? ordered.filter(\.inMVP) : ordered
     }
 
-    /// Branch chips stack in their stage's column; the tallest column sets the chip band's height.
-    private var chipRows: Int {
+    /// A chip is one line, or two when its name doesn't fit the column.
+    private func chipHeight(_ name: String, stage: Int) -> CGFloat {
+        let wrapped = (chipLabel(name) as NSString).boundingRect(with: NSSize(width: column(stage) - 28, height: 1000), options: [.usesLineFragmentOrigin],
+                                                                 attributes: [.font: chipFont])
+        return max(chipHeight, ceil(wrapped.height) + 6)
+    }
+
+    /// The branch name with a break allowed after each hyphen, so a long one wraps instead of truncating.
+    private func chipLabel(_ name: String) -> String { name.replacingOccurrences(of: "-", with: "-\u{200B}") }
+
+    /// Branch chips stack in their stage's column, every one shown; the tallest stack sets the chip band's height.
+    private var chipBand: CGFloat {
         guard let plan else { return 0 }
-        return (0..<plan.stages.count).map { min(plan.branches(at: $0).count, PlanView.chipsShown + 1) }.max() ?? 0
+        return plan.stages.indices.map { i in plan.branches(at: i).reduce(0) { $0 + chipHeight($1.name, stage: i) + 4 } }.max() ?? 0
     }
 
     func fit(width available: CGFloat) {
-        width = max(available, margin * 2 + labelWidth + CGFloat(stageCount) * minColumn)
-        let height = layoutHeight()
+        labelWidth = naturalLabelWidth()
+        let natural = naturalColumns()
+        let needed = margin * 2 + labelWidth + natural.reduce(0, +)
+        docked = available >= needed + inspectorWidth + margin
+        let room = available - (docked ? inspectorWidth + margin : 0)
+        let spare = max(0, room - needed) / CGFloat(natural.count)
+        columns = natural.map { $0 + min(spare, 120) }
+        width = max(available, needed)
+        let height = max(layoutHeight(), enclosingScrollView?.contentView.bounds.height ?? 0)
         if frame.size != NSSize(width: width, height: height) {
-            setFrameSize(NSSize(width: width, height: max(height, enclosingScrollView?.contentSize.height ?? 0)))
+            setFrameSize(NSSize(width: width, height: height))
         }
         needsDisplay = true
     }
@@ -402,7 +468,7 @@ final class PlanView: NSView {
     private func layoutHeight() -> CGFloat {
         let rows = CGFloat(plan?.rows.count ?? 0)
         let lanes = CGFloat(visibleExtras.count)
-        return 120 + rows * rowHeight + 40 + CGFloat(chipRows) * (chipHeight + 4) + 50 + lanes * laneHeight + 40 + 240
+        return 120 + rows * rowHeight + 40 + chipBand + 50 + lanes * laneHeight + 40 + (docked ? 0 : 240)
     }
 
     // MARK: drawing
@@ -435,20 +501,20 @@ final class PlanView: NSView {
         let accent = NSColor.controlAccentColor
         var y: CGFloat = 22
 
-        draw(plan.fact ?? "Plan", in: NSRect(x: margin, y: y, width: width - margin * 2 - 220, height: 22), font: font(15, .semibold), color: .labelColor)
+        draw(plan.fact ?? "Plan", in: NSRect(x: margin, y: y, width: gridRight - margin - 220, height: 22), font: font(15, .semibold), color: .labelColor)
         let errorCount = issues.filter { $0.level == .error }.count
         let lintLine = issues.isEmpty ? "✓ lint clean" : "✗ \(errorCount)  ⚠ \(issues.count - errorCount)"
-        draw(lintLine + (mvpOnly ? "   · MVP only" : ""), in: NSRect(x: width - margin - 220, y: y, width: 220, height: 22), font: font(12, .medium),
+        draw(lintLine + (mvpOnly ? "   · MVP only" : ""), in: NSRect(x: gridRight - 220, y: y, width: 220, height: 22), font: font(12, .medium),
              color: errorCount > 0 ? .systemRed : issues.isEmpty ? .secondaryLabelColor : .systemOrange, align: .right)
         y += 40
 
         let gridTop = y
-        let cursorRect = NSRect(x: x(cursor), y: gridTop - 6, width: column, height: CGFloat(plan.rows.count) * rowHeight + 70)
+        let cursorRect = NSRect(x: x(cursor), y: gridTop - 6, width: column(cursor), height: CGFloat(plan.rows.count) * rowHeight + 70)
         accent.withAlphaComponent(0.08).setFill()
         NSBezierPath(roundedRect: cursorRect, xRadius: 6, yRadius: 6).fill()
 
         for (i, stage) in plan.stages.enumerated() {
-            let rect = NSRect(x: x(i), y: y, width: column, height: 20)
+            let rect = NSRect(x: x(i), y: y, width: column(i), height: 20)
             let selected = pick == .stage(i)
             draw(stage.id, in: rect.insetBy(dx: 6, dy: 0), font: font(12, i == cursor ? .bold : .semibold),
                  color: selected ? accent : i == cursor ? .labelColor : .secondaryLabelColor, align: .center)
@@ -474,14 +540,14 @@ final class PlanView: NSView {
         }
         y += 18
         NSColor.separatorColor.setFill()
-        NSRect(x: margin, y: y, width: width - margin * 2, height: 1).fill()
+        NSRect(x: margin, y: y, width: gridRight - margin, height: 1).fill()
         y += 6
 
         draw("CORE", in: NSRect(x: margin, y: y, width: labelWidth, height: 14), font: font(9.5, .bold), color: .tertiaryLabelColor)
         y += 16
         for (r, row) in plan.rows.enumerated() {
             let values = plan.resolved(row)
-            let rowRect = NSRect(x: margin, y: y, width: width - margin * 2, height: rowHeight)
+            let rowRect = NSRect(x: margin, y: y, width: gridRight - margin, height: rowHeight)
             if pick == .row(r) || hover == .row(r) {
                 NSColor.labelColor.withAlphaComponent(pick == .row(r) ? 0.07 : 0.035).setFill()
                 NSBezierPath(roundedRect: rowRect, xRadius: 4, yRadius: 4).fill()
@@ -494,7 +560,7 @@ final class PlanView: NSView {
             for i in 0..<plan.stages.count {
                 let raw = row.cells[safe: i] ?? ""
                 let value = values[safe: i] ?? ""
-                let cell = NSRect(x: x(i) + 4, y: y + 2, width: column - 8, height: rowHeight - 4)
+                let cell = NSRect(x: x(i) + 4, y: y + 2, width: column(i) - 8, height: rowHeight - 4)
                 let changed = i > 0 && value != values[safe: i - 1]
                 let future = i > cursor
                 let alpha: CGFloat = future ? 0.4 : 1
@@ -532,30 +598,27 @@ final class PlanView: NSView {
         let chipsTop = y
         for i in 0..<plan.stages.count {
             var chipY = chipsTop
-            let all = plan.branches(at: i)
-            for branch in all.prefix(all.count > PlanView.chipsShown + 1 ? PlanView.chipsShown : all.count) {
-                let chip = NSRect(x: x(i) + 4, y: chipY, width: column - 8, height: chipHeight)
+            for branch in plan.branches(at: i) {
+                let chip = NSRect(x: x(i) + 4, y: chipY, width: column(i) - 8, height: chipHeight(branch.name, stage: i))
                 let chosen = pick == .branch(branch.name) || hover == .branch(branch.name)
                 (chosen ? accent.withAlphaComponent(0.22) : NSColor.quaternaryLabelColor.withAlphaComponent(0.5)).setFill()
                 NSBezierPath(roundedRect: chip, xRadius: chipHeight / 2, yRadius: chipHeight / 2).fill()
-                draw(branch.name, in: chip.insetBy(dx: 8, dy: 0), font: .monospacedSystemFont(ofSize: 10, weight: .regular),
-                     color: (i > cursor ? NSColor.secondaryLabelColor : .labelColor))
+                let style = NSMutableParagraphStyle()
+                style.lineBreakMode = .byWordWrapping
+                (chipLabel(branch.name) as NSString).draw(with: chip.insetBy(dx: 10, dy: 3), options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine],
+                                               attributes: [.font: chipFont, .paragraphStyle: style,
+                                                            .foregroundColor: i > cursor ? NSColor.secondaryLabelColor : .labelColor])
                 hits.append((chip, .branch(branch.name)))
-                chipY += chipHeight + 4
-            }
-            if all.count > PlanView.chipsShown + 1 {
-                let chip = NSRect(x: x(i) + 4, y: chipY, width: column - 8, height: chipHeight)
-                draw("+\(all.count - PlanView.chipsShown) more", in: chip.insetBy(dx: 8, dy: 0), font: font(10.5, .medium), color: .secondaryLabelColor)
-                hits.append((chip, .stage(i)))
+                chipY += chip.height + 4
             }
         }
-        y = chipsTop + max(CGFloat(chipRows) * (chipHeight + 4), 18) + 18
+        y = chipsTop + max(chipBand, 18) + 18
 
         NSColor.separatorColor.setFill()
-        NSRect(x: margin, y: y, width: width - margin * 2, height: 1).fill()
+        NSRect(x: margin, y: y, width: gridRight - margin, height: 1).fill()
         y += 8
         draw("EXTRAS", in: NSRect(x: margin, y: y, width: labelWidth, height: 14), font: font(9.5, .bold), color: .tertiaryLabelColor)
-        draw("▼ cliff: leaving it out costs more from this stage on", in: NSRect(x: x(0), y: y, width: width - x(0) - margin, height: 14),
+        draw("▼ cliff: leaving it out costs more from this stage on", in: NSRect(x: x(0), y: y, width: gridRight - x(0), height: 14),
              font: font(10), color: .tertiaryLabelColor)
         y += 20
         let extras = visibleExtras
@@ -583,7 +646,7 @@ final class PlanView: NSView {
         let accent = NSColor.controlAccentColor
         let line = NSBezierPath()
         line.move(to: NSPoint(x: margin, y: mvpLineY))
-        line.line(to: NSPoint(x: width - margin, y: mvpLineY))
+        line.line(to: NSPoint(x: gridRight, y: mvpLineY))
         line.setLineDash([4, 3], count: 2, phase: 0)
         accent.withAlphaComponent(0.6).setStroke()
         line.stroke()
@@ -596,7 +659,7 @@ final class PlanView: NSView {
 
     private func drawLane(_ extra: Plan.Extra, plan: Plan, y: CGFloat) {
         let accent = NSColor.controlAccentColor
-        let laneRect = NSRect(x: margin, y: y, width: width - margin * 2, height: laneHeight)
+        let laneRect = NSRect(x: margin, y: y, width: gridRight - margin, height: laneHeight)
         let chosen = pick == .extra(extra.id)
         if chosen || hover == .extra(extra.id) || dragging?.extra == extra.id {
             NSColor.labelColor.withAlphaComponent(chosen ? 0.07 : 0.035).setFill()
@@ -609,7 +672,7 @@ final class PlanView: NSView {
         hits.append((laneRect, .extra(extra.id)))
         guard let start = plan.stageIndex(extra.start) else { return }
         let end = plan.stageIndex(extra.end) ?? plan.stages.count - 1
-        let bar = NSRect(x: x(start) + 6, y: y + 8, width: max(CGFloat(end - start + 1) * column - 12, 10), height: 8)
+        let bar = NSRect(x: x(start) + 6, y: y + 8, width: max(x(end) + column(end) - x(start) - 12, 10), height: 8)
         (extra.inMVP ? accent : NSColor.tertiaryLabelColor).withAlphaComponent(extra.inMVP ? 0.85 : 0.5).setFill()
         NSBezierPath(roundedRect: bar, xRadius: 4, yRadius: 4).fill()
         if let cliff = plan.stageIndex(extra.cliff) {
@@ -624,13 +687,32 @@ final class PlanView: NSView {
         }
     }
 
+    /// Under the grid on a narrow page; on a wide one, a card in the gutter right of it that follows the scroll.
     private func drawInspector(plan: Plan, top: CGFloat) {
-        let box = NSRect(x: margin, y: top, width: width - margin * 2, height: 210)
+        let text = inspectorText(plan: plan, subject: hover ?? pick ?? .stage(cursor))
+        let hint = "←→ stage · ↑↓ row · t transition · m MVP in/out (or drag across the line) · v MVP only · ↵ open page · o canopy · "
+            + (canvas ? "f or ⎋ leaves canvas" : "f canvas") + " · = − zoom · 0 fit / actual size"
+        var box = NSRect(x: margin, y: top, width: width - margin * 2, height: 210)
+        if docked {
+            let left = gridRight + margin
+            let inner = inspectorWidth - 32
+            let needed = text.boundingRect(with: NSSize(width: inner, height: 10_000), options: [.usesLineFragmentOrigin]).height
+            let hintHeight = ceil((hint as NSString).boundingRect(with: NSSize(width: inner, height: 1000), options: [.usesLineFragmentOrigin],
+                                                                  attributes: [.font: font(10.5)]).height)
+            let visible = visibleRect
+            let height = min(ceil(needed) + hintHeight + 40, max(visible.height - 32, 160))
+            box = NSRect(x: left, y: max(visible.minY + 16, 62), width: inspectorWidth, height: height)
+            NSColor.labelColor.withAlphaComponent(0.05).setFill()
+            NSBezierPath(roundedRect: box, xRadius: 10, yRadius: 10).fill()
+            let body = NSRect(x: box.minX + 16, y: box.minY + 14, width: inner, height: box.height - hintHeight - 34)
+            text.draw(with: body, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
+            (hint as NSString).draw(with: NSRect(x: body.minX, y: box.maxY - hintHeight - 12, width: inner, height: hintHeight),
+                                    options: [.usesLineFragmentOrigin], attributes: [.font: font(10.5), .foregroundColor: NSColor.tertiaryLabelColor])
+            return
+        }
         NSColor.labelColor.withAlphaComponent(0.035).setFill()
         NSBezierPath(roundedRect: box, xRadius: 8, yRadius: 8).fill()
-        let text = inspectorText(plan: plan, subject: hover ?? pick ?? .stage(cursor))
         text.draw(with: box.insetBy(dx: 16, dy: 12), options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
-        let hint = "←→ stage · ↑↓ row · m MVP in/out (or drag across the line) · v MVP only · ↵ open page · o canopy"
         draw(hint, in: NSRect(x: margin, y: box.maxY + 8, width: box.width, height: 16), font: font(10.5), color: .tertiaryLabelColor)
     }
 
@@ -752,12 +834,12 @@ final class PlanView: NSView {
             if let stage = plan?.stageIndex(plan?.branches?.first { $0.name == name }?.stage) { cursor = stage }
         case .row, .extra:
             if let point, point.x > x(0) {
-                cursor = min(max(Int((point.x - x(0)) / column), 0), stageCount - 1)
+                cursor = stage(atX: point.x)
             }
         }
         prefs.set(cursor, forKey: "plan.cursor." + path)
         needsDisplay = true
-        scrollToVisible(NSRect(x: x(cursor) - 20, y: visibleRect.minY, width: column + 40, height: 1))
+        scrollToVisible(NSRect(x: x(cursor) - 20, y: visibleRect.minY, width: column(cursor) + 40, height: 1))
     }
 
     /// ↵ or a double-click: a transition or extra opens its sign-off page, a branch opens in canopy.
@@ -828,6 +910,15 @@ final class PlanView: NSView {
             openBranch(name)
         case (_, "t"):
             choose(.transition(max(min(cursor - 1, plan.stages.count - 2), 0)))
+        case (_, "f"):
+            onCanvasToggle?()
+        case (53, _) where canvas:
+            onCanvasToggle?()
+        case (_, "="), (_, "+"), (_, "-"), (_, "0"):
+            guard let scroll = enclosingScrollView else { return }
+            let fitted = scroll.contentSize.width / (margin * 2 + labelWidth + naturalColumns().reduce(0, +))
+            let target = key == "0" ? (scroll.magnification < 0.99 ? 1 : min(fitted, 1)) : scroll.magnification * (key == "-" ? 1 / 1.15 : 1.15)
+            scroll.animator().magnification = min(max(target, scroll.minMagnification), scroll.maxMagnification)
         default:
             super.keyDown(with: event)
         }
