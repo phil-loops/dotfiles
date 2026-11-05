@@ -81,7 +81,7 @@
 | apply | `A` | apply the suggested fix |
 | copy | `y` | copy it; where a page has nothing of its own to copy, a link to here (below) |
 | copy place | `Y` | copy where you are, in words: the breadcrumb (a branch's description after it), the file and line, then the link — for pasting into a chat |
-| push | `p` | send it out: push to origin, send the draft |
+| push | `p` | send it out: push to origin, send the draft; while the gates wait in line, put them ahead of every run you didn't click |
 | sync | `s` | sync it: fold or stash dirt, rebase onto its parent, shape the commits |
 | words | `e` | the words: what's written about it, in full |
 | editor | `o` | open it in Helix |

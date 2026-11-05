@@ -34,6 +34,12 @@ import Testing
         let checkout = GateProgress(running: true, elapsed: 4452, events: [GateEvent(event: "setup", ts: 0, step: "checkout")])
         let s = GatesRun.waiting(checkout, rows: GatesRun.rows(checkout, now: 4452), inFlight: true, now: 4452)
         #expect(s?.text == "stuck preparing the checkout" && s?.stuck == true)
+        let agentsAhead = GateProgress(running: true, events: [GateEvent(event: "setup", ts: 0, step: "queue", position: 9, behind: "adopt-legacy-disables",
+                                                                         ahead: ["interactive": 0, "ship": 3, "background": 5], tier: "background")])
+        #expect(GatesRun.waiting(agentsAhead, rows: [], inFlight: true, now: 1)?.text == "#9 in line · behind 3 ready to ship, 5 agent · p puts it next")
+        let clicked = GateProgress(running: true, events: [GateEvent(event: "setup", ts: 0, step: "queue", position: 2, behind: "a",
+                                                                     ahead: ["interactive": 1, "ship": 0, "background": 0], tier: "interactive")])
+        #expect(GatesRun.waiting(clicked, rows: [], inFlight: true, now: 1)?.text == "#2 in line for gates · a running")
         let next = GateProgress(running: true, events: [GateEvent(event: "setup", ts: 0, step: "queue", position: 1, behind: "stack-donor")])
         #expect(GatesRun.waiting(next, rows: [], inFlight: true, now: 1)?.text == "waiting on stack-donor")
         let planned = GateProgress(running: true, elapsed: 3, events: [GateEvent(event: "setup", ts: 0, step: "env"), plan])

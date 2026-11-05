@@ -53,7 +53,7 @@ public struct ShipStripView: View {
         let live: Run.State? = push.flatMap { [.sending, .landing, .failed].contains($0.run.state) ? $0.run.state : nil }
         let forcing = route == "branch.force.arm" || route == "branch.force.confirm"
         let acts = route == "branch.gates.run" || route == "branch.push.arm" || route == "branch.push.confirm" || forcing
-        let waiting = route == "branch.gates.wait"
+        let waiting = route == "branch.gates.next"
         let running = rows.first { $0.state == .running }
         let red = rows.filter { $0.state == .red }
         let waived = rows.filter { $0.state == .waived }
