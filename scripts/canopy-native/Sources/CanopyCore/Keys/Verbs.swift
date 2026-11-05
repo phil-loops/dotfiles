@@ -28,6 +28,7 @@ public enum Verb: String, CaseIterable, Sendable, Comparable {
     case scrollDown = "scroll-down", scrollUp = "scroll-up"
     case face
     case labels, find, search, map, conversation
+    case nextComment = "next-comment", previousComment = "previous-comment", wordEnd = "word-end", searchBack = "search-back"
     case match, changedFiles = "changed-files"
     case nextFunction = "next-function", previousFunction = "previous-function", nextType = "next-type", previousType = "previous-type"
     case nextFinding = "next-finding", previousFinding = "previous-finding", firstChange = "first-change", lastChange = "last-change"
@@ -104,8 +105,8 @@ public enum Verbs {
 
     /// The table, in the order NAV.md lists it.
     public static let table: [VerbSpec] = [
-        v(.next, .nav, ["j", "down"], entry: ["down", "C-n", "C-j", "tab"], "the next row, line or item"),
-        v(.previous, .nav, ["k", "up"], entry: ["up", "C-p", "C-k"], "the previous row, line or item"),
+        v(.next, .nav, ["j", "down", "g j"], entry: ["down", "C-n", "C-j", "tab"], "the next row, line or item"),
+        v(.previous, .nav, ["k", "up", "g k"], entry: ["up", "C-p", "C-k"], "the previous row, line or item"),
         v(.first, .nav, ["g g"], jump: true, "the first row"),
         v(.last, .nav, ["G", "g e"], jump: true, "the last row"),
         v(.halfDown, .nav, ["C-d"], "down half a page"),
@@ -119,6 +120,7 @@ public enum Verbs {
         v(.right, .nav, ["l", "right"], "a character right in code (from the old half's end onto the new), else the pane to the right"),
         v(.nextWord, .nav, ["w"], "the next name in the code, across lines — what g d and space k ask about"),
         v(.previousWord, .nav, ["b"], "the previous name in the code"),
+        v(.wordEnd, .nav, ["e"], "the end of the name (Helix e)"),
         v(.nextLongWord, .nav, ["W"], "the next WORD (Helix W)"),
         v(.previousLongWord, .nav, ["B"], "the previous WORD (Helix B)"),
         v(.longWordEnd, .nav, ["E"], "the end of the WORD (Helix E)"),
@@ -133,18 +135,20 @@ public enum Verbs {
         v(.cancel, .nav, ["esc"], "close the innermost transient thing — never changes page"),
         v(.nextSibling, .nav, ["J"], jump: true, "the next branch in merge order, staying on this kind of page"),
         v(.previousSibling, .nav, ["K"], jump: true, "the previous branch in merge order, staying on this kind of page"),
-        v(.parent, .nav, ["g k"], jump: true, "the branch's parent"),
-        v(.child, .nav, ["g j"], jump: true, "the branch's child (labels at a fork)"),
+        v(.parent, .nav, ["[ b"], jump: true, "the branch's parent, down the stack"),
+        v(.child, .nav, ["] b"], jump: true, "the branch's child, up the stack (labels at a fork)"),
         v(.root, .nav, ["g K"], jump: true, "the root of the branch's stack"),
         v(.tip, .nav, ["g J"], jump: true, "the tip of the branch's stack"),
         v(.nextFile, .nav, ["g n", "}"], jump: true, "the next file, at its first change (Helix's next buffer)"),
         v(.previousFile, .nav, ["g p", "{"], jump: true, "the previous file, at its first change (Helix's previous buffer)"),
         v(.nextHunk, .nav, ["] g"], "the next change, into the next file at the end of one (Helix ]g)"),
         v(.previousHunk, .nav, ["[ g"], "the previous change (Helix [g)"),
-        v(.nextThread, .nav, ["n"], jump: true, "the next match while searching, else the next conversation"),
-        v(.previousThread, .nav, ["N"], jump: true, "the previous match, else the previous conversation"),
-        v(.nextConversation, .nav, ["] c"], jump: true, "the next conversation, open ones first"),
-        v(.previousConversation, .nav, ["[ c"], jump: true, "the previous conversation"),
+        v(.nextThread, .nav, ["n"], jump: true, "the next search match (Helix n)"),
+        v(.previousThread, .nav, ["N"], jump: true, "the previous search match (Helix N)"),
+        v(.nextConversation, .nav, ["] r"], jump: true, "the next conversation, open ones first"),
+        v(.previousConversation, .nav, ["[ r"], jump: true, "the previous conversation"),
+        v(.nextComment, .nav, ["] c"], "the next comment in the diff's code (Helix ]c)"),
+        v(.previousComment, .nav, ["[ c"], "the previous comment (Helix [c)"),
         v(.nextTest, .nav, ["] T"], jump: true, "the next test file (Helix ]T)"),
         v(.previousTest, .nav, ["[ T"], jump: true, "the previous test file (Helix [T)"),
         v(.nextGitHunk, .nav, ["] p"], "the next git hunk (Helix ]p)"),
@@ -169,8 +173,9 @@ public enum Verbs {
         v(.face, .nav, ["tab"], "the page's other face (story ⇄ branches, the next tab, web ⇄ jobs)"),
         v(.labels, .nav, ["g w"], "label everything on screen; type a label to go there"),
         v(.find, .nav, ["space f"], "find something on this page by name"),
-        v(.changedFiles, .nav, ["space g"], "the files this branch changes, to pick one (Helix's changed-file picker)"),
+        v(.changedFiles, .nav, ["space g", "space b"], "the files this branch changes, to pick one (Helix's changed-file picker)"),
         v(.search, .nav, ["/"], "search this page's text"),
+        v(.searchBack, .nav, ["?"], "search this page's text backwards (Helix ?)"),
         v(.searchWord, .nav, ["*"], "search for the name under the cursor (n / N then step through its uses)"),
         v(.map, .nav, ["space m"], "the map around what you're on"),
         v(.conversation, .nav, ["space c"], "the conversation, in place of what you're reading; esc brings it back"),
@@ -197,7 +202,7 @@ public enum Verbs {
         v(.jumpBack, .nav, ["C-o"], "jump back (the jumplist)"),
         v(.jumpForward, .nav, ["C-i"], "jump forward again"),
         v(.saveJump, .nav, ["C-s"], "save this spot to the jumplist"),
-        v(.branches, .nav, ["space b"], "find a branch in any forest"),
+        v(.branches, .nav, ["space B"], "find a branch in any forest"),
         v(.jumps, .nav, ["space j"], "pick from the jumplist"),
         v(.lastPicker, .nav, ["space '"], "reopen the last picker"),
         v(.paneLeft, .nav, ["C-h", "C-w h", "space w h", "A-h"], "focus the pane to the left"),
@@ -207,7 +212,7 @@ public enum Verbs {
         v(.paneNext, .nav, ["C-w w", "space w w"], "focus the next pane"),
         v(.command, .nav, [":"], "the command line: run anything by name"),
         v(.menu, .nav, ["space ?"], "the command menu"),
-        v(.keys, .nav, ["?"], "every key, here and now"),
+        v(.keys, .nav, ["g ?"], "every key, here and now"),
         v(.select, .nav, ["v"], "select a range (again to stop)"),
         v(.leader, .nav, [","], "this page's own keys follow (which-key lists them)"),
 
@@ -221,7 +226,7 @@ public enum Verbs {
         v(.copyPlace, .nav, ["Y"], "copy where you are, in words: the page, the file and line, then the link"),
         v(.push, .shared, ["p"], "send it out: push to origin, send the draft"),
         v(.sync, .shared, ["s"], "sync it: fold or stash dirt, rebase onto its parent, shape the commits"),
-        v(.words, .shared, ["e"], "the words: what's written about it, in full"),
+        v(.words, .shared, ["d"], "the words: what's written about it, in full"),
         v(.editor, .shared, ["o"], "open it in Helix"),
         v(.rename, .shared, ["space r"], "rename the name under the cursor across the program: a commit you see first"),
         v(.comment, .shared, ["c"], "comment on it"),
@@ -255,7 +260,7 @@ public enum Verbs {
         .nextSibling, .previousSibling, .parent, .nextFile, .previousFile, .nextHunk, .previousHunk,
         .nextThread, .previousThread, .nextConversation, .previousConversation, .nextFunction, .previousFunction,
         .nextType, .previousType, .nextFinding, .previousFinding, .nextTest, .previousTest, .nextGitHunk, .previousGitHunk,
-        .repeatMotion, .scrollDown, .scrollUp, .extend, .jumpBack, .jumpForward,
+        .repeatMotion, .scrollDown, .scrollUp, .extend, .jumpBack, .jumpForward, .nextComment, .previousComment, .wordEnd,
     ]
 
     public static let byVerb: [Verb: VerbSpec] = Dictionary(table.map { ($0.verb, $0) }, uniquingKeysWith: { a, _ in a })

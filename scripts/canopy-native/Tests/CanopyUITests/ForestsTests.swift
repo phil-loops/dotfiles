@@ -378,15 +378,15 @@ private func showRows(_ a: AppModel) {
     @Test func gkAndGjWalkTheDAGWithLabelsAtAFork() {
         let a = page()
         a.setCursor("b:r:d")
-        a.keys.handle("g"); a.keys.handle("k")
+        a.keys.handle("["); a.keys.handle("b")
         #expect(a.selected == "b:r:c")
-        a.keys.handle("g"); a.keys.handle("k")
+        a.keys.handle("["); a.keys.handle("b")
         #expect(a.selected == "b:r:a")
         a.runner.dispatch("forest.parent", via: .palette)
         #expect(a.selected == "b:r:a" && a.runner.note?.contains("sits on main") == true, "\(a.runner.note ?? "")")
         // a forks into b and c: g j asks which, through the label layer over just the children
         showRows(a)
-        a.keys.handle("g"); a.keys.handle("j")
+        a.keys.handle("]"); a.keys.handle("b")
         #expect(a.keys.layer == .labels)
         #expect(a.labeling?.items.map(\.key) == ["b:r:b", "b:r:c"])
         #expect(a.forestModel.childChoice == nil, "the restriction lasts one layer")
@@ -394,7 +394,7 @@ private func showRows(_ a: AppModel) {
         for k in c { a.keys.handle(String(k)) }
         #expect(a.keys.layer == nil && a.selected == "b:r:c" && a.router.route == .forest(repo: "r", project: "tree"), "a pick only moves the cursor")
         a.setCursor("b:r:c")
-        a.keys.handle("g"); a.keys.handle("j")
+        a.keys.handle("]"); a.keys.handle("b")
         #expect(a.selected == "b:r:d", "one child: no question")
     }
 
@@ -436,9 +436,9 @@ private func showRows(_ a: AppModel) {
         // landed first, then in flight (a has a PR), then what's left
         #expect(a.rows == ["d:r:tree#9", "b:r:a", "b:r:b", "b:r:c", "b:r:d"])
         #expect(a.selected == "d:r:tree#9")
-        a.keys.handle("e")
+        a.keys.handle("d")
         #expect(a.forestModel.wordsOpen.contains("d:r:tree#9"))
-        a.keys.handle("j"); a.keys.handle("e")
+        a.keys.handle("j"); a.keys.handle("d")
         #expect(a.forestModel.wordsOpen.contains("r:a"))
         a.keys.handle("tab")
         #expect(a.forestModel.face == .branches)

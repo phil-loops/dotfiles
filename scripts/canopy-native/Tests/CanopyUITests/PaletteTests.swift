@@ -232,7 +232,7 @@ import Testing
 
     @Test func typingFiltersTheSheetInPlace() {
         let a = app(.todo)
-        a.keys.handle("?")
+        a.keys.handle("g"); a.keys.handle("?")
         let sheet = a.state { SheetState() }
         a.keys.handle("j")
         #expect(sheet.top == 1 && sheet.query.isEmpty, "j still scrolls before anything's typed")
@@ -271,7 +271,7 @@ import Testing
 
     @Test func theSheetSaysWhatIsUnderTheCursorAndScrollsByKey() {
         let a = app(.todo)
-        a.keys.handle("?")
+        a.keys.handle("g"); a.keys.handle("?")
         #expect(a.keys.layer == .sheet)
         let m = KeySheet.model(a)
         #expect(m.here == "the Todo page")

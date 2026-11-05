@@ -143,6 +143,7 @@ public enum KeyGroup: String, CaseIterable, Sendable {
              .nextFinding, .previousFinding, .firstChange, .lastChange, .repeatMotion, .viewCenter, .viewTop, .viewBottom,
              .nextFile, .previousFile, .nextHunk, .previousHunk, .nextThread, .previousThread, .match, .changedFiles,
              .nextConversation, .previousConversation, .nextTest, .previousTest, .nextGitHunk, .previousGitHunk,
+             .nextComment, .previousComment, .wordEnd, .searchBack,
              .lastFinding, .firstFinding, .nextLongWord, .previousLongWord, .longWordEnd, .scrollDown, .scrollUp,
              .labels, .find, .search, .searchWord, .map, .paneLeft, .paneDown, .paneUp, .paneRight, .paneNext:
             return .move

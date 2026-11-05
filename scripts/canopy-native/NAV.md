@@ -2,6 +2,8 @@
 
 > **Decided 2026-10-31 — what canopy writes:** canopy reads and talks; Helix writes code. `i` on the new half of a diff puts real Helix there, in the branch's diff-view checkout at the cursor's line and name, with the old half still beside it to read against; `:w` saves as usual and quitting Helix commits what changed — a `fixup!` of the branch's own unpushed commit that wrote the first line touched, else `edit <file>` (`/review-helix`). `o` still opens the outside Helix. Beyond that canopy makes only one-decision edits: apply a suggestion (`A`), rename (`space r`). Every edit lands as a commit you see, never as loose changes in your worktree.
 >
+> **Decided 2026-11-04 — Helix's meaning, no exceptions:** every key Helix binds to a move or a lookup does exactly that here; canopy's own things live only on keys Helix leaves unbound or spends on editing. So `n`/`N` only step a search, `]c`/`[c` walk the code's comments, `e` is end of word, `g j`/`g k` move a line, `?` searches backwards and `space b` picks among the diff's files. Moved: conversations `]r`/`[r`, words `d`, parent/child `[b`/`]b`, branch finder `space B`, the key sheet `g ?`. The `?` exception below is retired.
+
 > **Decided 2026-11-03 (latest) — every key that moves or looks means what it means in Helix:** the rule is Helix's meaning wins for any key that *moves the cursor or looks something up*; a key whose Helix meaning *edits text* (`p` `s` `c` `r` `o` `A` `d`, `X`, `J`/`K`) is free for canopy's verb on the thing, since a reviewer doesn't edit. Changes: `f`/`t`/`F`/`T` find a typed character along a line of code (labels stay on `g w`); `g h`/`g l`/`g s` (and `home`/`end`) the line's start, end and first non-blank; `g e` the last line; `g t`/`g c`/`g b` the screen's top, middle and bottom on every page; `C-f`/`C-b` a page; `g i` implementations; `space s` the file's symbols; `space w h/j/k/l/w` the panes, as `C-w`. Canopy's own places take **g + a capital**: `g F` Forests, `g S` dashboard, `g O` tracker, `g M` machine, `g W` wiki, `g T` tutor (the same letters, shifted — lowercase `g` is Helix's). Leaving the app takes **`space o`**: `space o g` GitHub, `space o m`/`space o b` lines on GitHub, `space o p` preview. One exception kept on purpose: `?` stays every key here (pressed 16 times in five days; Helix's backward search is `N` after `/`). Also Helix's: `]f`/`[f` functions and `]t`/`[t` types by the file's LSP symbols (landing where the diff first shows each); `]d`/`[d` push-ready's review findings, Helix's diagnostics for a reviewer (read out on the status line, `GET /review-flags`); `]G`/`[G` the last and first change; `z z`/`z c`, `z t`, `z b` place the cursor's line on screen; `alt-.` repeats the last `f`/`t`. Old keys that now mean nothing say where their verb went (`g f` → `g F`, `g o`, `g m`, `g I`, `g P`, `space S`) — `Verbs.moved`, to drop once the habit has moved.
 
 > **Decided 2026-11-03 (later) — keys mean what they mean in Helix (supersedes the bracket keys below):** Phil reads in canopy and edits in Helix all day, so a key meaning two things across them is the inconsistency to remove. A review's files are Helix's buffers: `g n`/`g p` next/previous file (`}`/`{` stay), `space g` the changed-file list. `]` opens Helix's "next" menu: `] g` change, `] c` conversation (`[` the same backwards). `m` is Helix's match key: `m m` goes to the other half of the edit. Marking (viewed, done, answered) is a page's own key, `, m` / `, M` — it was pressed 3 times in five days. Preview moved to `g P`. For the transition the old keys say where their verb went (`] ]` → `] g`, bare `M` → `, M`, and which-key under `m` lists `, m`) — `Verbs.moved`; drop it once the habit has moved. The clashes it left (`f`, `g h`, `g s`, `g f`, `g i`, `g t`) are settled in the note above.
@@ -42,7 +44,7 @@
 | in / out | `ret` / `-` | one level in / up on the ladder (forests → forest → branch → file → line) |
 | cancel | `esc` | close the innermost transient thing — never changes page |
 | next-sibling / previous-sibling | `J` / `K` | the next / previous branch in merge order, staying on this kind of page (jumps) |
-| parent / child / root / tip | `g k` / `g j` / `g K` / `g J` | the branch's parent, child (labels at a fork), its stack's root, tip (jumps) |
+| parent / child / root / tip | `[ b` / `] b` / `g K` / `g J` | the branch's parent, child (labels at a fork), its stack's root, tip (jumps) |
 | next-file / previous-file | `g n` / `g p` (`}` / `{`) | the next / previous file, at its first change, wrapping past the last — Helix's next / previous buffer (jumps) |
 | next-test / previous-test | `] T` / `[ T` | the next / previous test file, at its first change (Helix `]T`; jumps) |
 | next-hunk / previous-hunk | `] g` / `[ g` | the next / previous change, into the next file at the end of one (Helix `]g`) |
@@ -50,8 +52,9 @@
 | last / first finding | `] D` / `[ D` | push-ready's last / first finding on this branch (Helix `]D`) |
 | scroll down / up | `z j` / `z k` | the diff a line, the cursor staying put until the edge carries it (Helix `zj`) |
 | match | `m m` | the other half of this edit: what replaced the line, or what it replaced (Helix `mm`) |
-| next-thread / previous-thread | `n` / `N` | the next / previous search match while a search is kept, else conversation, open ones first (jumps) |
-| next / previous conversation | `] c` / `[ c` | the next / previous conversation, open ones first, even during a search; on a diff with none it says so (jumps) |
+| next-thread / previous-thread | `n` / `N` | the next / previous search match, only (Helix; jumps) |
+| next / previous comment | `] c` / `[ c` | the next / previous comment in the diff's code (Helix `]c`) |
+| next / previous conversation | `] r` / `[ r` | the next / previous conversation, open ones first, even during a search; on a diff with none it says so (jumps) |
 | face | `⇥` | the page's other face (story ⇄ branches, the next tab, web ⇄ jobs) |
 | labels | `g w` `f` | label everything on screen; type a label to go there |
 | find | `space f` | find something on this page by name |
@@ -69,9 +72,11 @@
 | alternate | `g a` | the alternate place (where the last jump left from) |
 | slot-1 … slot-9 | `g 1` … `g 9` | the Nth focus forest |
 | jump-back / jump-forward / save-jump | `C-o` / `C-i` / `C-s` | the jumplist |
-| branches / jumps / last-picker | `space b` / `space j` / `space '` | pickers: any branch, the jumplist, the last picker again |
+| branches / jumps / last-picker | `space B` / `space j` / `space '` | pickers: any branch, the jumplist, the last picker again |
 | pane-left / -down / -up / -right / pane-next | `C-w h/j/k/l` `A-h/j/k/l` / `C-w w` | focus a pane |
-| command / menu / keys / select | `:` / `space ?` / `?` / `v` | the command line, the menu, the key sheet, select mode |
+| command / menu / keys / select | `:` / `space ?` / `g ?` / `v` | the command line, the menu, the key sheet, select mode |
+| search back | `?` | search the page backwards; `n` / `N` then run the other way (Helix) |
+| word end | `e` | the end of the name (Helix `e`) |
 | leader | `,` | this page's own keys follow |
 | *shared* | | |
 | main | `↵` | the thing's main action |
@@ -83,7 +88,7 @@
 | copy place | `Y` | copy where you are, in words: the breadcrumb (a branch's description after it), the file and line, then the link — for pasting into a chat |
 | push | `p` | send it out: push to origin, send the draft; while the gates wait in line, put them ahead of every run you didn't click |
 | sync | `s` | sync it: fold or stash dirt, rebase onto its parent, shape the commits |
-| words | `e` | the words: what's written about it, in full |
+| words | `d` | the words: what's written about it, in full |
 | editor | `o` | open it in Helix |
 | comment / reply | `c` / `r` | comment on it / reply to it |
 | extend | `x` | extend the selection a line (`x x c` comments on a range: three verbs, not a chord) |

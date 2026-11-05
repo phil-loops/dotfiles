@@ -278,7 +278,7 @@ import Testing
         #expect(pg.here?.key == "l|b.ts|R:6", "the next file's first change, not its header")
         keys(a, "{")
         #expect(pg.here?.key == "l|a.ts|R:2", "the previous file's first change")
-        keys(a, "n")
+        keys(a, "]", "r")
         #expect(pg.here?.key == "t|\(Self.branch)#T1")
         #expect(a.liveScopes().contains(.thread))
         keys(a, "G")
@@ -368,12 +368,23 @@ import Testing
         #expect(isTestPath("a/__tests__/b.ts") && isTestPath("c_spec.rb") && !isTestPath("contest.ts"))
     }
 
-    /// ] c reaches the conversation; n / N keep stepping a search but ] c never does.
-    @Test func bracketCGoesToTheConversation() async throws {
+    /// ] r reaches a conversation; ] c a comment in the code (Helix); n with no search says so.
+    @Test func bracketRIsConversationsBracketCIsComments() async throws {
         let (a, _) = try await app()
         let pg = ReviewPageState.of(a)
-        keys(a, "]", "c")
+        keys(a, "]", "r")
         #expect(pg.here?.kind == .thread, "landed on \(pg.here?.key ?? "-")")
+        keys(a, "n")
+        #expect(a.runner.note == "no search · / or ? searches")
+        let patch = ["@@ -1,3 +1,4 @@", " a", "+// why b", " b", " c"].joined(separator: "\n")
+        let o: JSONValue = ["branch": "add-hankles-limited-label", "baseSha": "base123",
+                            "files": .array([["path": "z.ts", "add": 1, "del": 0, "patch": .string(patch)]])]
+        let (b, _) = try await app(String(decoding: try JSONEncoder().encode(o), as: UTF8.self))
+        let pb = ReviewPageState.of(b)
+        keys(b, "g", "g", "]", "c")
+        #expect(pb.here?.row?.right?.text == "// why b", "\(pb.here?.key ?? "-")")
+        keys(b, "]", "c")
+        #expect(b.runner.note == "the last comment")
     }
 
     /// W / B step over runs of non-blank characters; E lands on a run's last character.
@@ -490,7 +501,7 @@ import Testing
         #expect(a.router.route == .review(repo: "loops", branch: "hankles-next"))
         await until("the neighbour's diff") { pg.payload?.key.hasPrefix("loops:hankles-next@") == true }
         #expect(pg.here?.key == "l|b.ts|R:6" && a.pane?.id == reviewDiffPane, "the same file's first change, keyboard with it")
-        keys(a, "g", "k")
+        keys(a, "[", "b")
         #expect(a.router.route == .review(repo: "loops", branch: "add-hankles-limited-label"))
     }
 
@@ -955,7 +966,7 @@ import Testing
     @Test func theDiffsKeysKeepTheRules() async throws {
         let (a, _) = try await app()
         #expect(KeyboardRule.violations(a) { $0.hasPrefix("review.") || $0.hasPrefix("inline.") } == [])
-        for (id, verb) in ["review.file.next": Verb.nextFile, "review.hunk.next": .nextHunk, "review.thread.next": .nextThread,
+        for (id, verb) in ["review.file.next": Verb.nextFile, "review.hunk.next": .nextHunk, "review.conversation.next": .nextConversation, "review.comment.next": .nextComment,
                            "review.branch.next": .nextSibling, "review.parent": .parent, "review.filter": .find, "review.files": .changedFiles, "review.unviewed": .unmark, "review.match": .match] {
             #expect(a.registry.command(id)?.verbs == [verb], "\(id)")
         }

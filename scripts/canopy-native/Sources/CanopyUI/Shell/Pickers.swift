@@ -73,9 +73,9 @@ extension AppModel {
     }
 
     /// `/`: search the page's rows by their text; picking one moves the cursor there (a jump).
-    func searchPage() throws {
+    func searchPage(backward: Bool = false) throws {
         guard pane != nil, !panes.isEmpty else { throw Refusal("nothing on this page to search") }
-        PageSearch.of(self).start(self)
+        PageSearch.of(self).start(self, backward: backward)
     }
 }
 
@@ -93,16 +93,23 @@ extension NavCommands {
                            local: { [weak app] _, _ in app?.nav.reopen() }))
         r.register(Command(id: "page.search", title: "Search this page in place", scope: .global, verb: .search, label: "search",
                            local: { [weak app] _, _ in try app?.searchPage() }))
+        r.register(Command(id: "page.search.back", title: "Search this page backwards", scope: .global, verb: .searchBack, label: "search back",
+                           local: { [weak app] _, _ in try app?.searchPage(backward: true) }))
         let typing: (String?) -> Bool = { [weak app] _ in app.map { PageSearch.of($0).typing } ?? false }
         r.register(Command(id: "page.search.keep", title: "Keep the search (n / N step its matches)", scope: .global, verb: .send, modes: [.search], label: "keep", quiet: true,
                            available: typing, local: { [weak app] _, _ in app.map { PageSearch.of($0).keep($0) } }))
         r.register(Command(id: "page.search.cancel", title: "Drop the search, back where it began", scope: .global, verb: .cancel, modes: [.search], quiet: true,
                            available: typing, local: { [weak app] _, _ in app.map { PageSearch.of($0).cancel($0) } }))
-        let searching: (String?) -> Bool = { [weak app] _ in app.map { PageSearch.of($0).active && !PageSearch.of($0).typing } ?? false }
+        /// n / N: only ever the search's matches, as in Helix.
+        func stepSearch(_ app: AppModel, _ d: Int) throws {
+            let search = PageSearch.of(app)
+            guard search.active && !search.typing else { throw Refusal("no search · / or ? searches") }
+            if !search.step(app, d) { throw Refusal("no matches") }
+        }
         r.register(Command(id: "page.search.next", title: "The next match", scope: .global, verb: .nextThread, quiet: true,
-                           available: searching, local: { [weak app] _, _ in if let app, !PageSearch.of(app).step(app, 1) { throw Refusal("no matches") } }))
+                           local: { [weak app] _, _ in try app.map { try stepSearch($0, 1) } }))
         r.register(Command(id: "page.search.prev", title: "The previous match", scope: .global, verb: .previousThread, quiet: true,
-                           available: searching, local: { [weak app] _, _ in if let app, !PageSearch.of(app).step(app, -1) { throw Refusal("no matches") } }))
+                           local: { [weak app] _, _ in try app.map { try stepSearch($0, -1) } }))
         app.addCloser(first: true, isOpen: { [weak app] in app.map { PageSearch.of($0).active } ?? false },
                       close: { [weak app] in app.map { PageSearch.of($0).clear() } })
         for n in 1...9 {

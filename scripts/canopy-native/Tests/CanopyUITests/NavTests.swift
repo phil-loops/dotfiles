@@ -29,7 +29,7 @@ import Testing
         for c in a.registry.commands where c.verbs.contains(where: { $0.spec.jump }) {
             #expect(c.recordsJump, "\(c.id) records a jump")
         }
-        for id in ["cursor.top", "review.file.next", "review.thread.prev", "forest.branch.next", "review.tip"] {
+        for id in ["cursor.top", "review.file.next", "review.conversation.prev", "forest.branch.next", "review.tip"] {
             #expect(a.registry.command(id)?.recordsJump == true, "\(id)")
         }
     }
@@ -295,7 +295,7 @@ import Testing
     @Test func spaceBRanksByFrecencyAndOpensTheReview() throws {
         let a = try app()
         a.frecency.visit("loops:add-email-reading-format")
-        press(a, "space b")
+        press(a, "space B")
         #expect(a.keys.active == .picker)
         #expect(a.nav.shown.first?.label == "add-email-reading-format", "the visited branch first")
         a.keys.handle("ret")
@@ -307,7 +307,7 @@ import Testing
     @Test func spaceBKeepsFrecencyWhileYouType() throws {
         let a = try app()
         a.frecency.visit("loops:add-hankles-limited-label")
-        press(a, "space b")
+        press(a, "space B")
         a.nav.typed("m")   // both names hold an "m"; add-email-reading-format's comes sooner
         #expect(a.nav.shown.map(\.label) == ["add-hankles-limited-label", "add-email-reading-format"], "among close matches, the visited branch leads")
         a.keys.handle("esc")
@@ -317,7 +317,7 @@ import Testing
 
     @Test func spaceQuoteReopensTheLastPicker() throws {
         let a = try app()
-        press(a, "space b")
+        press(a, "space B")
         a.nav.typed("hankles")
         a.keys.handle("esc")
         #expect(a.keys.active == .normal)
@@ -399,7 +399,7 @@ import Testing
         let keyOf = { (id: String) in a.registry.command(id)?.keys ?? [] }
         #expect(keyOf("mode.select") == ["v"])
         #expect(keyOf("nav.labels") == ["g w"])
-        #expect(keyOf("nav.branches") == ["space b"])
+        #expect(keyOf("nav.branches") == ["space B"])
         #expect(keyOf("page.search") == ["/"])
         #expect(keyOf("nav.back") == ["C-o"] && keyOf("nav.forward") == ["C-i"] && keyOf("nav.save") == ["C-s"])
         #expect(a.registry.keyProblems.isEmpty)

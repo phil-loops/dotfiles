@@ -237,7 +237,7 @@ import Testing
         let (a, t, _) = try host()
         t.leave()
         #expect(a.router.route.surfaceID != "keytutor")
-        a.keys.handle("?")
+        a.keys.handle("g"); a.keys.handle("?")
         for k in ["u", "n", "d", "o"] { a.keys.handle(k) }
         let verbs = SheetState.firstVerbs(a)
         let at = try #require(KeyTutor.teaching(verbs), "a lesson teaches undo")

@@ -213,7 +213,7 @@ import Testing
 
     @Test func escBacksOutOneLevelAtATime() {
         let a = app()
-        a.keys.handle("?")
+        a.keys.handle("g"); a.keys.handle("?")
         #expect(a.keys.layer == .sheet)
         a.keys.handle("g")
         #expect(a.keys.pendingKeys.isEmpty, "g means nothing in the sheet layer")
