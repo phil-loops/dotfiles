@@ -113,7 +113,9 @@ def holder_of(pid):
 
 
 def standing(root, request):
-    """(place in line, what the slot is busy with) for a queued request, as the chip says it."""
+    """Where a queued request stands, as the chip says it: its place in line, what holds the slot,
+    how many runs wait ahead of it in each tier, and its own tier."""
+    names = {rank: name for name, rank in TIERS.items()}
     with locked(root):
         queued, running = [], ""
         for path in root.glob("*.queue.json"):
@@ -127,14 +129,30 @@ def standing(root, request):
                 queued.append((record["priority"], record["created"], str(path)))
             elif record.get("state") == "running":
                 running = branch_of(path.name)
-        order = [q[2] for q in sorted(queued)]
+        queued.sort()
+        order = [q[2] for q in queued]
         place = order.index(str(request)) + 1 if str(request) in order else 0
+        ahead = {name: 0 for name in TIERS}
+        for priority, _, _ in queued[:max(place - 1, 0)]:
+            ahead[names.get(priority, "background")] += 1
+        tier = names.get(queued[place - 1][0], "") if place else ""
         if not running:
             try:
                 running = holder_of((root / "slot1" / "pid").read_text().strip())
             except OSError:
                 running = ""
-        return place, running
+        return {"position": place, "behind": running, "ahead": ahead, "tier": tier}
+
+
+def waiting_tier(request):
+    """The tier a still-queued request waits in, or None once it holds the slot or is gone."""
+    try:
+        record = json.loads(Path(request).read_text())
+    except (OSError, ValueError):
+        return None
+    if record.get("state") != "queued" or not alive(record.get("pid")):
+        return None
+    return {rank: name for name, rank in TIERS.items()}.get(record.get("priority"))
 
 
 def setup_event(progress, step, **fields):
@@ -213,7 +231,7 @@ def main(argv=None):
                 now = standing(root, request)
                 if now != said:
                     said = now
-                    setup_event(progress, "queue", position=now[0], behind=now[1])
+                    setup_event(progress, "queue", **now)
             slot = claim(root, request)
             if slot is None:
                 time.sleep(0.2)
