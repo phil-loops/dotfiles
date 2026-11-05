@@ -288,13 +288,16 @@ public struct Warm: Entity {
     public var prs: Bool
 }
 
-/// The change blocks Phil has viewed on a branch (srv/viewed.py).
+/// The change blocks Phil has read on a branch, and those he flagged (srv/viewed.py).
 public struct Viewed: Entity {
     public static let kind = EntityType.viewed
     public var id: String
     public var repo: String
     public var branch: String
+    /// blocks read
     public var keys: [String]
+    /// blocks read and flagged to come back to
+    public var flagged: [String]?
 }
 
 public struct TodoState: OpenString {

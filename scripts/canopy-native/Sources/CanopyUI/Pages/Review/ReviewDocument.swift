@@ -124,7 +124,7 @@ enum ReviewDocument {
         var out: [Segment] = []
         for fv in pg.views {
             let path = fv.file.path
-            let hk = "h|\(path)|\(fv.viewed)|\(fv.seen > 0)|\(fv.file.add)|\(fv.file.del)|\(fv.file.status.rawValue)|\(pg.scoped)"
+            let hk = "h|\(path)|\(fv.viewed)|\(fv.seen > 0)|\(fv.flagged)|\(fv.file.add)|\(fv.file.del)|\(fv.file.status.rawValue)|\(pg.scoped)"
             out.append(Segment(key: hk) { header(fv, scoped: pg.scoped, c) })
             if fv.viewed {
                 out.append(Segment(key: "b|\(path)|viewed") { NSAttributedString() })
@@ -157,6 +157,7 @@ enum ReviewDocument {
         let b = DocBuilder()
         let path = fv.file.path
         if !scoped { b.put(fv.viewed ? "☑ " : fv.seen > 0 ? "◪ " : "☐ ", [.foregroundColor: fv.viewed ? c.patina : c.inkFaint]) }
+        if !scoped, fv.flagged > 0 { b.put("⚑\(fv.flagged) ", [.foregroundColor: c.ember]) }
         b.put(path, [.font: DocFont.bold, .foregroundColor: fv.viewed ? c.inkDim : c.ink])
         if fv.file.status != .modified { b.put("  \(fv.file.status.rawValue)", [.foregroundColor: c.inkFaint]) }
         if let o = fv.file.oldPath { b.put("  ← \(o)", [.foregroundColor: c.inkFaint]) }

@@ -94,8 +94,10 @@ struct CanvasMarks: Equatable {
     var hits: [String: [Range<Int>]] = [:]
     /// the range `x` marked, or the lines the selected conversation covers: path, side, from…to
     var range: (path: String, side: Side, from: Int, to: Int)?
-    /// "<path>#<hunk>" whose changes are all viewed (dimmed)
+    /// row stops to dim: read changes, and the unchanged lines of a hunk read through
     var seen: Set<String> = []
+    /// row stops of changes flagged to come back to (an ember bar)
+    var flagged: Set<String> = []
     /// the select-mode range's stops
     var selection: Set<String> = []
     /// code view: the lit lines
@@ -105,7 +107,7 @@ struct CanvasMarks: Equatable {
 
     static func == (a: CanvasMarks, b: CanvasMarks) -> Bool {
         a.cursor == b.cursor && a.column == b.column && a.word?.stop == b.word?.stop && a.word?.at == b.word?.at && a.hits == b.hits && a.range?.path == b.range?.path && a.range?.side == b.range?.side && a.range?.from == b.range?.from &&
-            a.range?.to == b.range?.to && a.seen == b.seen && a.selection == b.selection && a.lit == b.lit && a.focused == b.focused
+            a.range?.to == b.range?.to && a.seen == b.seen && a.flagged == b.flagged && a.selection == b.selection && a.lit == b.lit && a.focused == b.focused
     }
 }
 
@@ -307,16 +309,21 @@ final class CanvasTextView: NSTextView {
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
-        // viewed hunks dim, so what's left to read stands out (v2: opacity .5 unless under the cursor)
-        guard let colors, !marks.seen.isEmpty, let lm = layoutManager, let tc = textContainer, let ts = textStorage, ts.length > 0 else { return }
+        // read changes dim, so what's left stands out (v2: opacity .5 unless under the cursor); flagged ones
+        // carry an ember bar down their left edge
+        guard let colors, !marks.seen.isEmpty || !marks.flagged.isEmpty, let lm = layoutManager, let tc = textContainer, let ts = textStorage, ts.length > 0 else { return }
         let origin = textContainerOrigin
         let glyphs = lm.glyphRange(forBoundingRect: NSRect(x: dirtyRect.minX - origin.x, y: dirtyRect.minY - origin.y, width: dirtyRect.width, height: dirtyRect.height), in: tc)
-        colors.bg.withAlphaComponent(0.5).setFill()
         lm.enumerateLineFragments(forGlyphRange: glyphs) { frag, _, _, gr, _ in
             let ci = lm.characterIndexForGlyph(at: gr.location)
-            guard let inf = ts.attribute(.rvRow, at: ci, effectiveRange: nil) as? RowInfo, inf.kind == .line, inf.stop != self.marks.cursor,
-                  self.marks.seen.contains("\(inf.path)#\(inf.hunk)") else { return }
-            NSRect(x: 0, y: frag.minY + origin.y, width: self.bounds.width, height: frag.height).fill(using: .sourceOver)
+            guard let inf = ts.attribute(.rvRow, at: ci, effectiveRange: nil) as? RowInfo, inf.kind == .line else { return }
+            let band = NSRect(x: 0, y: frag.minY + origin.y, width: self.bounds.width, height: frag.height)
+            if let stop = inf.stop, self.marks.flagged.contains(stop) {
+                colors.ember.withAlphaComponent(0.08).setFill(); band.fill(using: .sourceOver)
+                colors.ember.setFill(); NSRect(x: band.minX, y: band.minY, width: 3, height: band.height).fill()
+            } else if let stop = inf.stop, stop != self.marks.cursor, self.marks.seen.contains(stop) {
+                colors.bg.withAlphaComponent(0.5).setFill(); band.fill(using: .sourceOver)
+            }
         }
     }
 }

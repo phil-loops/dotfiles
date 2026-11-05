@@ -240,9 +240,15 @@ public func expand(_ f: FileDiff, _ lines: [String]?, _ reveal: [Int: Int]) -> (
 
 /// A run of consecutive changed lines — the unit "viewed" is kept on (wiki canopy-v2-viewed).
 public struct Block: Equatable, Sendable {
+    /// the path and the block's changed text with whitespace dropped (a reformat keeps it); an exact
+    /// duplicate in the same file adds the unchanged lines around it, so a new copy never inherits a mark
     public var key: String
+    /// the key until 2026-11-05 (exact text, duplicates numbered in file order), still read so marks made then count
+    public var legacy: String
     /// the hunk it sits in, or -1 for a file with no changed lines to show (binary, a pure rename)
     public var hunk: Int
+    /// which run of changed lines in its hunk, from 0
+    public var run: Int
 }
 
 /// cyrb53 over UTF-16 code units, bit-for-bit the web app's (a key must be equal for equal text on
@@ -263,32 +269,54 @@ public func cyrb53(_ s: String) -> String {
     return String(v, radix: 36)
 }
 
-/// The file's change blocks, keyed by path + their -/+ text (no line numbers, no context), so a key
-/// survives rebases, shifts, edited neighbours and git regrouping hunks. Identical blocks in one
-/// file are told apart by order. A file with no changed lines gets one block for itself.
+/// The file's change blocks. `key` hashes the path and the block's `-` then `+` text with whitespace
+/// dropped: no line numbers and no context, so it survives rebases, shifts, edited neighbours, git
+/// regrouping hunks and a reformat. Two blocks with the same text in one file are told apart by the
+/// unchanged line before and after each (then by order, if those match too). `legacy` is the key as
+/// it was until 2026-11-05. A file with no changed lines gets one block for itself.
 public func blocksOf(_ f: FileDiff) -> [Block] {
-    var out: [Block] = []
-    var seen: [String: Int] = [:]
-    func push(_ body: String, _ hunk: Int) {
-        let base = cyrb53("\(f.path)\u{0}\(body)")
-        let n = seen[base] ?? 0
-        seen[base] = n + 1
-        out.append(Block(key: n > 0 ? "\(base).\(n)" : base, hunk: hunk))
-    }
+    struct Run { var hunk: Int; var run: Int; var lines: [DiffLine]; var before: String; var after: String }
+    var runs: [Run] = []
     for (i, h) in f.hunks.enumerated() {
-        var run: [DiffLine] = []
-        func flush() {
-            if !run.isEmpty {
-                let body = run.filter { $0.kind == .del }.map { "-\($0.text)" } + run.filter { $0.kind == .add }.map { "+\($0.text)" }
-                push(body.joined(separator: "\n"), i)
-            }
-            run = []
-        }
+        var cur: [DiffLine] = [], before = "", lastCtx = "", n = 0
         for l in h.lines {
-            if l.kind == .ctx { flush() } else { run.append(l) }
+            if l.kind == .ctx {
+                if !cur.isEmpty {
+                    runs.append(Run(hunk: i, run: n, lines: cur, before: before, after: l.text))
+                    n += 1
+                    cur = []
+                }
+                lastCtx = l.text
+            } else {
+                if cur.isEmpty { before = lastCtx }
+                cur.append(l)
+            }
         }
-        flush()
+        if !cur.isEmpty { runs.append(Run(hunk: i, run: n, lines: cur, before: before, after: "")) }
     }
-    if out.isEmpty { push("\u{0}\(f.status.rawValue)\u{0}\(f.oldPath ?? "")", -1) }
-    return out
+    if runs.isEmpty {
+        let k = cyrb53("\(f.path)\u{0}\u{0}\(f.status.rawValue)\u{0}\(f.oldPath ?? "")")
+        return [Block(key: k, legacy: k, hunk: -1, run: 0)]
+    }
+    func squash(_ s: String) -> String { String(String.UnicodeScalarView(s.unicodeScalars.filter { !CharacterSet.whitespacesAndNewlines.contains($0) })) }
+    func exact(_ r: Run) -> String {
+        (r.lines.filter { $0.kind == .del }.map { "-\($0.text)" } + r.lines.filter { $0.kind == .add }.map { "+\($0.text)" }).joined(separator: "\n")
+    }
+    func loose(_ r: Run) -> String {
+        r.lines.filter { $0.kind == .del }.map { squash($0.text) }.joined() + "\u{1}" + r.lines.filter { $0.kind == .add }.map { squash($0.text) }.joined()
+    }
+    let bases = runs.map { cyrb53("\(f.path)\u{0}\(loose($0))") }
+    var copies: [String: Int] = [:]
+    for b in bases { copies[b, default: 0] += 1 }
+    var legacySeen: [String: Int] = [:], keySeen: [String: Int] = [:]
+    return runs.enumerated().map { j, r in
+        let lb = cyrb53("\(f.path)\u{0}\(exact(r))")
+        let ln = legacySeen[lb] ?? 0
+        legacySeen[lb] = ln + 1
+        var key = bases[j]
+        if copies[key, default: 0] > 1 { key += "." + cyrb53(squash(r.before) + "\u{1}" + squash(r.after)) }
+        let kn = keySeen[key] ?? 0
+        keySeen[key] = kn + 1
+        return Block(key: kn > 0 ? "\(key).\(kn)" : key, legacy: ln > 0 ? "\(lb).\(ln)" : lb, hunk: r.hunk, run: r.run)
+    }
 }
