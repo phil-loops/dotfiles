@@ -266,6 +266,16 @@ class H(BaseHTTPRequestHandler):
                     self._refused = reqlog.error_class(d.get("err") or d.get("error"))
             except Exception:
                 pass
+        # a client write (X-Stack-Write) answered ok gets its number, which the state stream's
+        # asOf reaches once a read has seen it — what lets the client let go of its optimism
+        if (self.command == "POST" and self.headers.get("X-Stack-Write") and 200 <= code < 300
+                and not getattr(self, "_refused", None) and ctype == "application/json" and b[:1] == b"{"):
+            try:
+                d = json.loads(b)
+                d["wrote"] = state.written()
+                b = json.dumps(d).encode()
+            except Exception:
+                pass
         self.send_response(code)
         if getattr(self, "_refused", None):
             self.send_header("X-Stack-Refused", self._refused)

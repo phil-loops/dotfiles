@@ -75,6 +75,7 @@ public final class AppModel: CommandContext {
         stream = EventStream(transport: transport, store: store)
         pulse = Pulse(transport: transport)
         runner.context = self
+        runner.resync = { [weak stream] in stream?.resync() }
         runner.onRun = { [weak self] id in self?.keyUses.visit(id) }
 
         let tel = telemetry

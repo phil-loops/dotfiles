@@ -26,6 +26,11 @@ public final class Store {
     public private(set) var epoch = ""
     public private(set) var versions: Versions = [Domain.git: 0, Domain.remote: 0, Domain.review: 0, Domain.todo: 0]
     public var conn: Conn = .connecting
+    /// Per domain, the server's write count its last read had reached: a write answered as number N
+    /// is in the store once its domains' asOf reach N.
+    public private(set) var asOf: [String: Int] = [:]
+    /// How many times the store has been hydrated whole: a resync shows here.
+    public private(set) var hydrations = 0
 
     public private(set) var repo: [String: Repo] = [:]
     public private(set) var project: [String: Project] = [:]
@@ -80,6 +85,8 @@ public final class Store {
         decodeFailures = e.failures
         epoch = s.epoch
         versions = s.versions
+        asOf = s.asOf
+        hydrations += 1
         ready = true
         revision += 1
         changed()
@@ -112,6 +119,7 @@ public final class Store {
         let failed = u.failures
         if !failed.isEmpty { decodeFailures = Array((decodeFailures + failed).suffix(50)) }
         versions[p.domain] = p.version
+        if let a = p.asOf { asOf[p.domain] = max(asOf[p.domain] ?? 0, a) }
         revision += 1
         changed()
         return .ok

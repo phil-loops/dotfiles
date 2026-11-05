@@ -34,6 +34,8 @@ _SAFETY_AGE = 30.0
 
 
 class RepoState:
+    as_of = 0   # ctx.WRITES when its inputs were last read: every write up to this number is in it
+
     def __init__(self, refs_raw, cfg_raw):
         self.fingerprint = hashlib.sha1((refs_raw + "\x1e" + cfg_raw).encode()).hexdigest()
         self.at = time.monotonic()
@@ -232,15 +234,18 @@ def snapshot(fresh_prs=False):
         if fresh_prs:
             cur.pr_heads(fresh=True)
         return cur
+    as_of = ctx.WRITES[0]
     refs, cfg = _read()
     fp = hashlib.sha1((refs + "\x1e" + cfg).encode()).hexdigest()
     with _LOCK:
         cur = _SNAP.get(repo)
         if cur and cur.fingerprint == fp:
             cur.checked = now
+            cur.as_of = max(cur.as_of, as_of)
             snap = cur
         else:
             snap = RepoState(refs, cfg)
+            snap.as_of = as_of
             _SNAP[repo] = snap
         snap.gen = gen
     if fresh_prs:

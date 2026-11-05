@@ -211,6 +211,47 @@ def run_checks(repo, shas, only):
         git(repo, "config", "--unset", "stack-branch.base.role")
         repostate.invalidate()
 
+    if want("asof"):
+        print("asof — a write is numbered, and a read says which writes it has seen")
+        from srv import ctx, state
+
+        def rank():
+            return state._D["git"].ents.get("project", {}).get(f"{os.path.basename(repo)}:fixture", {}).get("rank")
+
+        state.refresh()
+        before = repostate.snapshot().as_of
+        git(repo, "config", "stack-project.fixture.focus", "1")
+        n = state.written()
+        check("asof: a write gets the next number", n == ctx.WRITES[0] and n > before)
+        check("asof: a snapshot read after the write is stamped with it", repostate.snapshot().as_of >= n)
+        state.refresh()
+        check("asof: the git domain's asOf reaches the write, carrying it",
+              state._D["git"].as_of >= n and rank() == 1, f"asOf {state._D['git'].as_of}, rank {rank()}")
+        last = state._D["git"].ring[-1]
+        check("asof: the patch says so", last.get("asOf") == state._D["git"].as_of, str(last.get("asOf")))
+        # A→B→A: the lane goes back to rank 1. Until a read sees the second write, the domain's
+        # asOf stays below its number — so rank 1 from the FIRST write can't pass for it.
+        git(repo, "config", "stack-project.fixture.focus", "2")
+        state.written()
+        state.refresh()
+        git(repo, "config", "stack-project.fixture.focus", "1")
+        n3 = state.written()
+        check("asof: an older read that looks equal is not the write", state._D["git"].as_of < n3)
+        state.refresh()
+        check("asof: the next read is", state._D["git"].as_of >= n3 and rank() == 1)
+        v = state._D["git"].version
+        n4 = state.written()
+        state.refresh()
+        quiet = state._D["git"].ring[-1]
+        check("asof: a write that changed nothing still sends an (empty) patch",
+              state._D["git"].version == v + 1 and quiet["asOf"] >= n4 and not quiet["upserts"] and not quiet["deletes"],
+              str(quiet))
+        state.refresh()
+        check("asof: and a quiet tick after it sends none", state._D["git"].version == v + 1)
+        check("asof: /state reports each domain's asOf", state.snapshot(False)["asOf"]["git"] >= n4)
+        git(repo, "config", "--unset", "stack-project.fixture.focus")
+        repostate.invalidate()
+
     if want("namespace"):
         print("namespace dual-read")
         snap = repostate.snapshot()

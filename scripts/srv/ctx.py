@@ -18,6 +18,9 @@ SCRIPTS = ""    # ~/.dotfiles/scripts
 CWD = ""        # the repo the server was launched in (the default when no ?repo= is selected)
 MAIN_WT = ""    # the repo's primary worktree (checkout-here / restack targets)
 REPOS = {}      # multi-repo registry: name -> main worktree path (drives /projects aggregation)
+# How many client writes this process has answered. A read stamps the count it started from, so a
+# write answered as number N is visible in any read stamped N or later (state.written).
+WRITES = [0]
 
 # Per-request active repo. The server is ThreadingHTTPServer (one thread per request), so a
 # request can pin its repo here and every ctx.run/ctx.repo_cwd in that handler operates on it

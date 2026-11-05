@@ -143,6 +143,49 @@ final class Ctx: CommandContext {
         #expect(!runner.undoLast())
     }
 
+    /// The focus-lane burst (2026-11-05): press 4 put a forest at rank 1, press 5 moved it down, press 6
+    /// back up. A read from before press 5 already shows rank 1 — it must not pass for press 6.
+    @Test func aWriteLandsOnlyOnAReadThatHasSeenIt() async throws {
+        let (runner, store, _) = try setup()
+        let id = "loops:agents-md"
+        var obj = store.raw["project"]![id]!.object!
+        func patch(_ v: Int, asOf: Int, rank: Int) throws -> Patch {
+            obj["rank"] = .number(Double(rank))
+            return try Patch.make(domain: Domain.git, version: v, asOf: asOf, upserts: ["project": [id: .object(obj)]])
+        }
+        let v = store.versions[Domain.git] ?? 0
+        #expect(store.applyPatch(try patch(v + 1, asOf: 4, rank: 1)) == .ok)
+        Stub.answers["/focus"] = .init(status: 200, body: #"{"ok":true,"wrote":6}"#)
+        runner.registry.register(Command(id: "t.rank", title: "R", scope: .project, write: { target, _ in
+            Write(ops: [Op(type: .project, id: target, fields: ["rank": 1])], path: "/focus", body: [:],
+                  settled: { store.table(Project.self)[target]?.rank == 1 }, failed: "no")
+        }))
+        runner.dispatch("t.rank", via: .key, target: id)
+        for _ in 0..<50 where runner.runOf("t.rank", id)?.state == .sending { try await Task.sleep(nanoseconds: 20_000_000) }
+        #expect(runner.runOf("t.rank", id)?.state == .landing)
+        #expect(!store.ops.isEmpty)
+        #expect(store.applyPatch(try patch(v + 2, asOf: 5, rank: 2)) == .ok)
+        #expect(store.view(Project.self, id)?.rank == 1)
+        #expect(!store.ops.isEmpty)
+        #expect(store.applyPatch(try patch(v + 3, asOf: 6, rank: 1)) == .ok)
+        #expect(store.ops.isEmpty)
+        #expect(runner.runOf("t.rank", id)?.state == .done)
+    }
+
+    @Test func aWriteFromAServerThatDoesntNumberItSettlesOnItsCheck() async throws {
+        let (runner, store, _) = try setup()
+        Stub.answers["/describe"] = .init(status: 200, body: #"{"ok":true}"#)
+        let id = "loops:add-hankles-limited-label"
+        runner.registry.register(Command(id: "t.old", title: "W", scope: .branch, write: { target, _ in
+            Write(ops: [Op(type: .branch, id: target, fields: ["description": "new"])], path: "/describe", body: [:],
+                  settled: { true }, failed: "no")
+        }))
+        runner.dispatch("t.old", via: .key, target: id)
+        for _ in 0..<50 where runner.runOf("t.old", id)?.state == .sending { try await Task.sleep(nanoseconds: 20_000_000) }
+        #expect(runner.runOf("t.old", id)?.state == .done)
+        #expect(store.ops.isEmpty)
+    }
+
     @Test func keyEngineDrivesTheRunner() throws {
         let (runner, _, ctx) = try setup()
         var hits: [String] = []

@@ -6,6 +6,16 @@ import Foundation
 
 public enum EntityType: String, CaseIterable, Codable, Sendable {
     case repo, project, branch, pr, landed, conv, thread, draft, viewed, todo, warm
+
+    /// The server domain whose patches carry this type (srv/state.py's DOMAINS).
+    public var domain: String {
+        switch self {
+        case .repo, .project, .branch: Domain.git
+        case .pr, .landed, .warm: Domain.remote
+        case .conv, .thread, .draft, .viewed: Domain.review
+        case .todo: Domain.todo
+        }
+    }
 }
 
 public protocol Entity: Codable, Sendable, Identifiable, Equatable where ID == String {
