@@ -32,18 +32,18 @@ gate bounce.
 **Which passes run follows from what the diff touches** — one band per branch (forests.md
 *ladder*) makes this clean. Derive it, state it with the reason, never store it:
 
-| the `parent...branch` diff touches | mode | `code-review` | hankles-prompt pass |
-|---|---|---|---|
-| `queries/`, `models/`, a migration, auth/permission paths | `full` | high | ✓ |
-| wiring, endpoints, jobs, UI | `standard` | medium | ✓ |
-| docs/config only, or a pure move (per-file tree parity) | `light` | low | — |
+| the `parent...branch` diff touches | mode | `code-review` | hankles-prompt pass | reuse pass |
+|---|---|---|---|---|
+| `queries/`, `models/`, a migration, auth/permission paths | `full` | high | ✓ | ✓ |
+| wiring, endpoints, jobs, UI | `standard` | medium | ✓ | ✓ |
+| docs/config only, or a pure move (per-file tree parity) | `light` | low | — | — |
 
 `review=<full|standard|light|off>` overrides for one run only ("no review" = `off`) — nothing
 persists. Overriding the same way repeatedly means the table is wrong: fix the table. `off`
 writes no `review-flags-tree`, so a skipped review never reads as "reviewed, nothing flagged".
 Report the mode + reason (or "override") in §6.
 
-Run the `code-review` skill on the `parent...branch` diff. Findings from either pass split by
+Run the `code-review` skill on the `parent...branch` diff. Findings from every pass split by
 verdict:
 
 - **CONFIRMED** → apply the fix as a NEW commit on the branch (never amend). A fix to code an
@@ -63,7 +63,13 @@ the review prompt the repo's `john-hankles` bot runs — read fresh from
 `git show origin/main:.github/workflows/code-review.yml` (the `pi --print` argument) each time,
 never copied here. Keep its review rules and STE voice; **replace its OUTPUT, RESOLVING and
 REVIEW STATE sections with this section's** — findings fold or flag like `code-review`'s,
-nothing goes to GitHub. Deduplicate across the two passes before recording.
+nothing goes to GitHub.
+
+**Reuse pass**: the other two passes read only the diff, and duplication is only visible against
+the whole repo. For each function the branch adds, list its callees; grep the repo for existing
+functions that call two or more of the same callees. Each overlap is a finding `possible existing
+composition: <path:fn>` that folds or flags like the others (CONFIRMED → reuse it as a new commit;
+PLAUSIBLE → `stack-review-flag`). Deduplicate across the passes before recording.
 
 Record flags AFTER any confirmed fixes land (the fixes move the tree). A clean review still
 writes `review-flags-tree` with zero `review-flag` entries — that's the "reviewed, nothing
