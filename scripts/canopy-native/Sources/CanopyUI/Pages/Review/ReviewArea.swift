@@ -72,8 +72,10 @@ struct ReviewSurface: SurfaceProvider {
         case "conversation":
             return guest
         case "commits":
-            let n = guest.map(\.column).max().map { $0 + 1 } ?? 0
-            return guest + (pg.scoped ? [Pane(id: reviewDiffPane, title: "commit", rows: pg.stopKeys, column: n, pageSize: 20)] : [])
+            // the commit's diff sits under its words, as drawn: C-w k from the diff reaches them
+            let words = guest.first { $0.id == ShipSeam.wordsPane }
+            return guest + (pg.scoped ? [Pane(id: reviewDiffPane, title: "commit", rows: pg.stopKeys,
+                                              column: words?.column ?? 0, row: (words?.row ?? -1) + 1, pageSize: 20)] : [])
         default:
             var out: [Pane] = []
             if pg.showsHistory, let id = ShipSeam.branchID(app) {
