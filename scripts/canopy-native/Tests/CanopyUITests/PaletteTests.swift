@@ -196,6 +196,18 @@ import Testing
 
     /// Typing while `?` is up narrows it in place: j/k scroll until something's typed, then type too;
     /// backspace edits, a synonym finds what the title doesn't say, ↵ runs the first match.
+    /// Filtering shows each matching move with what it does; unfiltered, the moves stay one row of keys.
+    @Test func aSearchSaysWhatEachMoveDoes() {
+        let next = SheetLine(key: "g n", cmd: SheetCmd(id: "review.file.next", title: "Go to the next file", scope: "review", keys: ["g n"], available: true))
+        func model(_ q: String) -> KeySheet.Model {
+            KeySheet.Model(here: "this line", whereNow: "", notes: [], query: q, problems: [], warnings: [],
+                           now: [], hints: [], everywhere: [], moves: [next], notNow: [], customized: [])
+        }
+        #expect(model("file").entries.contains(.line(next, dim: false)))
+        #expect(!model("").entries.contains(.line(next, dim: false)))
+        #expect(model("").entries.contains { if case .moves = $0 { return true }; return false })
+    }
+
     @Test func typingFiltersTheSheetInPlace() {
         let a = app(.todo)
         a.keys.handle("?")

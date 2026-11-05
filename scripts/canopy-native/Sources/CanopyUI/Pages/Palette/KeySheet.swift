@@ -166,7 +166,11 @@ extension KeySheet.Model {
         if everywhere.count > shown {
             out.append(.empty("\(everywhere.count - KeySheet.anywhereShown) more work anywhere — : finds any of them by name"))
         }
-        if !moves.isEmpty {
+        if !moves.isEmpty && !query.isEmpty {
+            // a search answers with what each key does, not a row of bare keys
+            out.append(.heading("Move", gold: false))
+            out += moves.map { .line($0, dim: false) }
+        } else if !moves.isEmpty {
             out.append(.heading("Move", gold: false))
             out.append(.moves(moves.map { $0.key.components(separatedBy: " · ").first ?? $0.key }.map { k in k.split(separator: " ").map { glyph(String($0)) }.joined(separator: " ") }.joined(separator: " · ")))
         }
