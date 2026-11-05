@@ -98,7 +98,9 @@ voiced (no wip/fixup). Sealing them costs the reviewer the "changes since" view.
 ### 5 · Gate through the server — the CLI does not record
 
 `stack-gates` run directly prints a verdict but writes nothing; only the viewer server records
-`gates-green-tree`, and an unrecorded verdict leaves the push button locked. So:
+`gates-green-tree`, and an unrecorded verdict leaves the push button locked. A follow-up commit
+onto a branch with an open PR gates quick — add `"mode":"quick"`: typecheck and lint skip, since
+CI runs both on that push, and the door says so; a branch's first push gates full. So:
 
 ```bash
 curl -s -X POST http://localhost:$(stack-review-port)/gates \
