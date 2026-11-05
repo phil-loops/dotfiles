@@ -243,6 +243,7 @@ public final class ReviewPageState: ShipHost {
     @ObservationIgnored var pendingRow: (id: String, row: Int)?
     /// Where Helix's cursor was when it quit, to put the diff's cursor on once the diff (perhaps with Helix's commit) is here.
     @ObservationIgnored var pendingNear: (id: String, path: String, line: Int)?
+    @ObservationIgnored var pendingFlag: (id: String, flag: Flag)?
     /// Helix's cursor as its status line last showed it, while it's open.
     @ObservationIgnored var helixAt: (path: String, line: Int)?
     /// The branch the page last showed (a new one starts fresh).
@@ -377,7 +378,7 @@ public final class ReviewPageState: ShipHost {
         if let c = carry, c.id == newID { tab = c.tab } else { carry = nil; tab = "files" }
         guard let app else { return }
         // a jumplist entry being restored already put its cursor
-        if pendingCursor?.id == newID || pendingLoc?.id == newID { return }
+        if pendingCursor?.id == newID || pendingLoc?.id == newID || pendingFlag?.id == newID { return }
         let was = app.pane?.id
         app.focus(pane: reviewDiffPane)
         app.setCursor(nil)
@@ -392,6 +393,10 @@ public final class ReviewPageState: ShipHost {
         let s = stops
         if let n = pendingNear, n.id == id, let k = stopNear(path: n.path, line: n.line) {
             pendingNear = nil
+            return setCursor(k)
+        }
+        if let p = pendingFlag, p.id == id, let k = stopOf(block: p.flag.key, in: p.flag.path) ?? stopNear(path: p.flag.path, line: p.flag.line) {
+            pendingFlag = nil
             return setCursor(k)
         }
         if let c = carry, c.id == id {
@@ -720,6 +725,34 @@ public final class ReviewPageState: ShipHost {
     }
 
     public func fileOf(_ path: String) -> FileView? { views.first { $0.file.path == path } }
+
+    /// Where the change with block key `key` is: its file, its first changed line and that line's text.
+    public func flagPlace(_ key: String) -> (path: String, line: Int, text: String)? {
+        for fv in views {
+            guard let b = fv.blocks.firstIndex(where: { $0.key == key }) else { continue }
+            let row = fv.rows.first { fv.rowBlock[$0.key] == b }
+            let l = row?.right ?? row?.left
+            return (fv.file.path, l?.new ?? l?.old ?? 0, l?.text ?? "")
+        }
+        return nil
+    }
+
+    /// The first changed row of the change with block key `key` in `path`, as a stop key.
+    public func stopOf(block key: String, in path: String) -> String? {
+        guard let fv = fileOf(path), let b = fv.blocks.firstIndex(where: { $0.key == key }),
+              let row = fv.rows.first(where: { fv.rowBlock[$0.key] == b }) else { return nil }
+        return "l|\(path)|\(row.key)"
+    }
+
+    /// Put the cursor on a flagged change: on its block when the diff still has it, else the nearest
+    /// line to where it was; on a page still loading, once its diff is here.
+    public func land(flag f: Flag) {
+        if diffHere, let k = stopOf(block: f.key, in: f.path) ?? stopNear(path: f.path, line: f.line) {
+            pendingFlag = nil
+            return setCursor(k)
+        }
+        pendingFlag = (id, f)
+    }
 
     /// The mark on the change a stop sits on; nil off a changed line.
     public func markAt(_ k: Int) -> Mark? {

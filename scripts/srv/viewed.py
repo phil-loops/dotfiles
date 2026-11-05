@@ -2,8 +2,12 @@
 
   store   $GIT_COMMON_DIR/stack-viewed.json
             {"version": 2, "subjects": {<id>: {"viewed": {key: at}, "flagged": {key: at}}}}
-  domain  review / viewed: {"<repo>:<branch>": {id, repo, branch, keys, flagged}}
-  POST /viewed {branch, marks: {key: "viewed"|"flagged"|"none"}}   (or {branch, keys, state}, or the older {keys, on})
+  domain  review / viewed: {"<repo>:<branch>": {id, repo, branch, keys, flagged, flags}}
+  POST /viewed {branch, marks: {key: "viewed"|"flagged"|"none"}, where?: {key: {path, line, text}}}
+               (or {branch, keys, state}, or the older {keys, on})
+
+A flag is a bookmark Phil comes back to, so it keeps where it was made (`where`: the file, the line
+and the changed line's text) for canopy's list of flags; `flags` carries that per flagged key.
 
 A block key is computed by the page (Diff.swift blocksOf) from a run of changed lines' own text, so
 the store only holds keys. A subject is a branch's review id, `branch.<b>.stack-review-id` in git
@@ -114,6 +118,12 @@ def _subjects(data):
     return {b: {"viewed": keys, "flagged": {}} for b, keys in data.items() if isinstance(keys, dict)}
 
 
+def _flag(key, v):
+    place = v if isinstance(v, dict) else {"at": v}
+    return {"key": key, "at": place.get("at", 0), "path": place.get("path", ""),
+            "line": place.get("line", 0), "text": place.get("text", "")}
+
+
 def entities(name):
     """The review domain's `viewed` entities for one repo — a stat or two per tick when nothing changed."""
     out = {}
@@ -121,8 +131,19 @@ def entities(name):
         viewed, flagged = s.get("viewed") or {}, s.get("flagged") or {}
         if viewed or flagged:
             out[f"{name}:{b}"] = {"id": f"{name}:{b}", "repo": name, "branch": b,
-                                  "keys": sorted(viewed), "flagged": sorted(flagged)}
+                                  "keys": sorted(viewed), "flagged": sorted(flagged),
+                                  "flags": sorted((_flag(k, v) for k, v in flagged.items()), key=lambda f: (f["path"], f["line"]))}
     return {"viewed": out}
+
+
+def _where(raw):
+    """{key: {path, line, text}} from a POST, dropping anything malformed; text is cut to one short line."""
+    out = {}
+    for k, w in (raw.items() if isinstance(raw, dict) else []):
+        if isinstance(w, dict) and isinstance(w.get("path"), str) and isinstance(w.get("line"), int) and 0 < len(w["path"]) <= 500:
+            text = w.get("text") if isinstance(w.get("text"), str) else ""
+            out[k] = {"path": w["path"], "line": w["line"], "text": " ".join(text.split())[:160]}
+    return out
 
 
 def _migrated(data):
@@ -136,9 +157,10 @@ def _migrated(data):
     return {"version": 2, "subjects": subjects}
 
 
-def apply(data, branch_id, keys, state, now):
+def apply(data, branch_id, keys, state, now, where=None):
     """Pure: the store after marking `keys` with `state` on one subject. "none" clears them everywhere,
-    since the page reads marks across subjects."""
+    since the page reads marks across subjects. A flag with a `where` keeps it (a re-flag moves it)."""
+    where = where or {}
     data = json.loads(json.dumps(data))
     subjects = data.setdefault("subjects", {})
     mine = subjects.setdefault(branch_id, {"viewed": {}, "flagged": {}})
@@ -150,7 +172,12 @@ def apply(data, branch_id, keys, state, now):
         else:
             other = "flagged" if state == "viewed" else "viewed"
             mine.setdefault(other, {}).pop(k, None)
-            mine.setdefault(state, {}).setdefault(k, now)
+            marks = mine.setdefault(state, {})
+            if state == "flagged" and k in where:
+                at = marks[k].get("at", now) if isinstance(marks.get(k), dict) else marks.get(k, now)
+                marks[k] = {"at": at, **where[k]}
+            else:
+                marks.setdefault(k, now)
     for i in [i for i, s in subjects.items() if not s.get("viewed") and not s.get("flagged")]:
         subjects.pop(i)
     return data
@@ -168,6 +195,7 @@ def post(req, raw):
             marks = {k: mark for k in keys} if isinstance(keys, list) and all(isinstance(k, str) for k in keys) else None
         if not branch or not marks or not all(isinstance(k, str) and _KEY.fullmatch(k) and v in STATES for k, v in marks.items()):
             raise ValueError("need {branch, marks: {block key: viewed|flagged|none}}")
+        where = _where(d.get("where"))
         path = _store()
         if not path:
             raise ValueError("not in a git repo")
@@ -181,7 +209,7 @@ def post(req, raw):
             for mark in STATES:
                 group = [k for k, v in marks.items() if v == mark]
                 if group:
-                    data = apply(data, mine, group, mark, now)
+                    data = apply(data, mine, group, mark, now, where)
             tmp = f"{path}.tmp"
             with open(tmp, "w") as f:
                 json.dump(data, f, separators=(",", ":"), sort_keys=True)

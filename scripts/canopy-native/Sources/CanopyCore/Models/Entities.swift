@@ -301,6 +301,17 @@ public struct Viewed: Entity {
     public var keys: [String]
     /// blocks read and flagged to come back to
     public var flagged: [String]?
+    /// each flag and where it was made, for the list of flags (`space !`)
+    public var flags: [Flag]?
+}
+
+/// A flagged change as it was when flagged: its block key, the file, the line and the changed line's text.
+public struct Flag: Codable, Equatable, Sendable {
+    public var key: String
+    public var at: Int
+    public var path: String
+    public var line: Int
+    public var text: String
 }
 
 public struct TodoState: OpenString {

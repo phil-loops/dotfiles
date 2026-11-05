@@ -521,6 +521,37 @@ import Testing
         #expect(pg.mark(first) == .unread, ", ! on a flagged change takes the flag off")
     }
 
+    @Test func aFlagKeepsWhereItWasAndSpaceBangComesBackToIt() async throws {
+        let (a, p) = try await app()
+        let pg = ReviewPageState.of(a)
+        ShipStub.answer(p, "POST", "/loops/viewed", #"{"ok":true}"#)
+        // a change that isn't where a page lands by itself
+        guard let last = pg.views.last, let first = last.blocks.last, let start = pg.stopOf(block: first.key, in: last.file.path),
+              start != pg.here?.key, let place = pg.flagPlace(first.key) else { Issue.record("no later change to flag"); return }
+        pg.setCursor(start)
+        keys(a, ",", "!")
+        await until("the post") { ShipStub.posts(p).contains { $0.path == "/loops/viewed" } }
+        let body = ShipStub.posts(p).last { $0.path == "/loops/viewed" }!.body
+        #expect(body["where"] == .object([first.key: .object(["path": .string(last.file.path), "line": .number(Double(place.line)), "text": .string(place.text)])]),
+                "a flag says where it was made")
+        let flag = #"{"key":"\#(first.key)","at":1,"path":"\#(last.file.path)","line":\#(place.line),"text":"x"}"#
+        a.store.applyPatch(try Patch.decode(Data(#"{"domain":"review","version":\#((a.store.versions["review"] ?? 0) + 1),"upserts":{"viewed":{"\#(Self.branch)":{"id":"\#(Self.branch)","repo":"loops","branch":"add-hankles-limited-label","keys":[],"flagged":["\#(first.key)"],"flags":[\#(flag)]}}}}"#.utf8)))
+        keys(a, "g", "g")
+        #expect(pg.here?.key != start)
+        keys(a, "space", "!")
+        #expect(a.nav.picker?.title == "flagged")
+        a.keys.handle("ret")
+        #expect(pg.here?.key == start, "picking the flag puts the cursor back on its change")
+        // from another branch: the flag's branch opens with the cursor on it once its diff is here
+        ShipStub.answer(p, "GET", "/loops/node", Self.payload)
+        keys(a, "g", "g", "J")
+        await until("the neighbour's diff") { pg.payload?.key.hasPrefix("loops:hankles-next@") == true }
+        keys(a, "space", "!")
+        a.keys.handle("ret")
+        #expect(a.router.route == .review(repo: "loops", branch: "add-hankles-limited-label"))
+        await until("its diff") { pg.here?.key == start }
+    }
+
     @Test func mOnAChangeMarksJustThatChangeNotItsWholeHunk() async throws {
         let (a, p) = try await app()
         let pg = ReviewPageState.of(a)

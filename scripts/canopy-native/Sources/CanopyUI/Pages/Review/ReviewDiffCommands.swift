@@ -1078,8 +1078,14 @@ enum DiffCommands {
         guard !marks.isEmpty, let t = pg.target else { return nil }
         let was = pg.viewedOverride
         for (k, m) in marks { pg.viewedOverride[k] = m }
-        let body: [String: JSONValue] = ["branch": .string(t.name), "keys": .array(marks.keys.sorted().map(JSONValue.string)),
+        var body: [String: JSONValue] = ["branch": .string(t.name), "keys": .array(marks.keys.sorted().map(JSONValue.string)),
                                          "marks": .object(marks.mapValues { .string($0.rawValue) })]
+        let places = marks.filter { $0.value == .flagged }.compactMap { k, _ in pg.flagPlace(k).map { (k, $0) } }
+        if !places.isEmpty {
+            body["where"] = .object(Dictionary(uniqueKeysWithValues: places.map { k, p in
+                (k, JSONValue.object(["path": .string(p.path), "line": .number(Double(p.line)), "text": .string(p.text)]))
+            }))
+        }
         return Write(path: pg.repoPath("/viewed"), body: .object(body),
                      settled: { marks.allSatisfy { pg.serverMark($0.key) == $0.value } },
                      said: said, failed: "couldn't change the marks",
