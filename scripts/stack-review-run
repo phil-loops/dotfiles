@@ -1,0 +1,158 @@
+#!/usr/bin/env python3
+"""stack-review-run — review one branch's diff with a headless, read-only claude and write the verdict.
+
+  stack-review-run --branch <b> --out <verdict.json> [--depth light|standard|full] [--repo DIR]
+
+The viewer server spawns this (POST /review) and records the verdict it writes — tree-keyed review
+flags in git config — so a review verdict only ever comes from a review that ran. Run by hand it
+prints the verdict and records nothing.
+
+The diff is <parent>...<branch> (parent = branch.<b>.stack-parent, else main). With no --depth, the
+depth follows from what the diff touches (push-ready's table): queries/models/migrations/auth →
+full, any other code → standard, docs/config only → light. The model reads the code in a detached
+worktree at the tip and never edits; its findings come back CONFIRMED (verified against the code,
+with evidence) or PLAUSIBLE.
+
+Bounded like stack-second-reader (shares its machine-wide claude slots and memory floor).
+"""
+import argparse
+import importlib.machinery
+import importlib.util
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+os.environ.setdefault("STACK_SECOND_READER_TIMEOUT", os.environ.get("STACK_REVIEW_RUN_TIMEOUT", "1500"))
+_loader = importlib.machinery.SourceFileLoader("second_reader", os.path.join(HERE, "stack-second-reader"))
+_spec = importlib.util.spec_from_loader("second_reader", _loader)
+sr = importlib.util.module_from_spec(_spec)
+_loader.exec_module(sr)
+
+DIFF_CAP = 120_000
+FULL = re.compile(r"(^|/)(queries|models|migrations)/|(^|/)(auth|permission|session|middleware)[^/]*\.|/auth/|schema\.prisma$")
+LIGHT = re.compile(r"\.(md|mdx|txt|json|ya?ml|toml|ini|cfg|lock)$|(^|/)(docs?|\.github)/")
+MODELS = {"light": "sonnet", "standard": "opus", "full": "opus"}
+
+PROMPT = """You review one branch of a stacked-PR forest before it is pushed. Do not modify anything.
+
+Branch `{branch}`, diffed against `{parent}` (merge base {base}); tip {tip}. You are in a detached checkout
+of the tip. Read files and run read-only git commands (`git show`, `git diff {base} {tip} -- <path>`,
+`git grep`, `git log`) as needed. The diff:
+
+```diff
+{diff}
+```
+
+Depth: {depth}. {depth_note}
+
+Find real defects: correctness bugs, broken invariants, unsafe or irreversible behavior, missing error
+handling where it matters, tests that pass for the wrong reason, comments or messages that say something
+the code does not do. For every line the diff REMOVES or rewrites, check that each condition or guard it
+dropped is accounted for (a filter, a null/undefined check, an early return). Don't nit-pick style, and
+don't report what a type checker, linter or formatter would catch.
+
+Verify each finding against the code before you report it. Mark it CONFIRMED only when you read the code
+that proves it, and say what you read; otherwise PLAUSIBLE. Write each summary in plain short sentences.
+
+End your answer with one JSON object and nothing after it:
+{{"findings": [{{"file": "<repo-relative path>", "line": <int>, "verdict": "CONFIRMED|PLAUSIBLE",
+"summary": "<one sentence: the defect>", "evidence": "<what you read that shows it>"}}]}}
+An empty list means you found nothing worth a reviewer's time."""
+
+DEPTH_NOTES = {
+    "light": "Docs/config only: check that what they say is true of the code, and nothing else.",
+    "standard": "Review the whole diff carefully.",
+    "full": "This touches data access, models, migrations or auth: trace every caller of what changed and "
+            "every path into it, and check authorization and data-loss cases explicitly.",
+}
+
+
+def git(repo, *args):
+    return subprocess.run(["git", "-C", repo, *args], capture_output=True, text=True)
+
+
+def depth_for(files):
+    if any(FULL.search(f) for f in files):
+        return "full"
+    if files and all(LIGHT.search(f) for f in files):
+        return "light"
+    return "standard"
+
+
+def emit(path, verdict):
+    text = json.dumps(verdict, indent=1)
+    if path:
+        tmp = path + ".tmp"
+        with open(tmp, "w") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    print(text, flush=True)
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--branch", required=True)
+    ap.add_argument("--out")
+    ap.add_argument("--depth", choices=("light", "standard", "full"))
+    ap.add_argument("--repo", default=os.getcwd())
+    a = ap.parse_args()
+    repo, branch = a.repo, a.branch
+
+    tip = git(repo, "rev-parse", "--verify", f"{branch}^{{commit}}").stdout.strip()
+    if not tip:
+        return emit(a.out, {"ok": False, "branch": branch, "err": f"no branch {branch}"}) or 1
+    tree = git(repo, "rev-parse", f"{tip}^{{tree}}").stdout.strip()
+    parent = git(repo, "config", f"branch.{branch}.stack-parent").stdout.strip() or "main"
+    base = git(repo, "merge-base", parent, tip).stdout.strip()
+    files = [f for f in git(repo, "diff", "--name-only", base, tip).stdout.splitlines() if f]
+    depth = a.depth or depth_for(files)
+    head = {"branch": branch, "tip": tip, "tree": tree, "parent": parent, "base": base,
+            "depth": depth, "auto": not a.depth, "files": len(files)}
+    if not files:
+        return emit(a.out, {"ok": True, **head, "findings": [], "note": "empty diff"})
+
+    diff = git(repo, "diff", base, tip).stdout
+    if len(diff) > DIFF_CAP:
+        diff = diff[:DIFF_CAP] + f"\n… diff truncated at {DIFF_CAP} chars — read the rest with git diff\n"
+    prompt = PROMPT.format(branch=branch, parent=parent, base=base, tip=tip, diff=diff,
+                           depth=depth, depth_note=DEPTH_NOTES[depth])
+
+    wt = tempfile.mkdtemp(prefix="stack-review-run-")
+    t0 = time.time()
+    try:
+        r = git(repo, "worktree", "add", "--detach", wt, tip)
+        if r.returncode != 0:
+            return emit(a.out, {"ok": False, **head, "err": f"worktree: {r.stderr.strip()[:300]}"}) or 1
+        try:
+            text, usage = sr.run_claude(prompt, wt, MODELS[depth], meta={"kind": "review-run", "branch": branch})
+        except RuntimeError as e:
+            return emit(a.out, {"ok": False, **head, "err": str(e)[:500]}) or 1
+    finally:
+        git(repo, "worktree", "remove", "--force", wt)
+        shutil.rmtree(wt, ignore_errors=True)
+
+    got = sr.last_json_object(text)
+    if not isinstance(got, dict) or not isinstance(got.get("findings"), list):
+        return emit(a.out, {"ok": False, **head, "err": "the review returned no findings JSON",
+                            "raw": (text or "")[-2000:]}) or 1
+    findings = []
+    for f in got["findings"]:
+        if not isinstance(f, dict) or not f.get("summary"):
+            continue
+        verdict = str(f.get("verdict", "")).upper()
+        findings.append({"file": str(f.get("file") or ""), "line": f.get("line") if isinstance(f.get("line"), int) else None,
+                         "verdict": verdict if verdict in ("CONFIRMED", "PLAUSIBLE") else "PLAUSIBLE",
+                         "summary": str(f["summary"]).strip(), "evidence": str(f.get("evidence") or "").strip()})
+    emit(a.out, {"ok": True, **head, "findings": findings, "model": MODELS[depth],
+                 "secs": round(time.time() - t0, 1), "cost": usage.get("cost")})
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
