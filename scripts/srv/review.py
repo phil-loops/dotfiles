@@ -481,6 +481,18 @@ def _focus_git(repo, *args):
     return ctx.run(base + list(args))
 
 
+def _focus_wrote(*repos):
+    # the snapshot serves until the stat watcher notices; a reorder read back from a stale one
+    # shows the lane an order it already left, so drop each written repo's snapshot now
+    here = getattr(ctx._local, "repo", None)
+    try:
+        for repo in set(repos):
+            ctx.set_repo(ctx.REPOS.get(repo) if repo else here)
+            repostate.invalidate()
+    finally:
+        ctx.set_repo(here)
+
+
 def focus_set(req, raw):
     # Pin/unpin a forest to the focus lane, or reorder the whole lane (stack-project.<p>.focus N,
     # 1-based). {order:[{repo,project}...]} rewrites ranks 1..N in one shot (the drag-reorder path);
@@ -491,6 +503,7 @@ def focus_set(req, raw):
             proj, repo = e.get("project", ""), e.get("repo", "")
             if proj:
                 _focus_git(repo, "config", f"stack-project.{proj}.focus", str(i + 1))
+        _focus_wrote(*(e.get("repo", "") for e in d["order"]))
         return req._send(200, json.dumps({"ok": True, "count": len(d["order"])}))
     proj, repo = d.get("project", ""), d.get("repo", "")
     if not proj:
@@ -502,8 +515,10 @@ def focus_set(req, raw):
         ranks = [int(v) for v in (ln.rpartition(" ")[2] for ln in lines)
                  if v.strip().lstrip("-").isdigit()]
         _focus_git(repo, "config", key, str((max(ranks, default=0)) + 1))
+        _focus_wrote(repo)
         return req._send(200, json.dumps({"ok": True, "project": proj, "focus": True}))
     _focus_git(repo, "config", "--unset", key)
+    _focus_wrote(repo)
     req._send(200, json.dumps({"ok": True, "project": proj, "focus": False}))
 
 
@@ -531,6 +546,7 @@ def project_state(req, raw):
             _focus_git(repo, "config", arch_key, "true")
         else:
             _focus_git(repo, "config", "--unset", arch_key)
+    _focus_wrote(repo)
     ctx.bump_pulse()
     req._send(200, json.dumps({"ok": True, "project": proj, "state": state}))
 
