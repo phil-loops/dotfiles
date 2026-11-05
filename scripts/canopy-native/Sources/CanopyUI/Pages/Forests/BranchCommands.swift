@@ -22,11 +22,11 @@ enum BranchCommands {
             guard let s = forceScope(id, app), v.b.pending == nil else { return nil }
             if s.eligible { return m.armed == id ? "branch.force.confirm" : "branch.force.arm" }
             if !s.guards.allSatisfy({ $0.ok || $0.k == "gates" }) { return nil }
-            return v.b.gates == .running ? "branch.gates.wait" : "branch.gates.run"
+            return v.b.gates == .running ? "branch.gates.next" : "branch.gates.run"
         }
         if ShipRules.canPush(v.b, v.pr) { return m.armed == id ? "branch.push.confirm" : "branch.push.arm" }
         if !ShipRules.pushableButGates(v.b, v.pr) { return nil }
-        return v.b.gates == .running ? "branch.gates.wait" : "branch.gates.run"
+        return v.b.gates == .running ? "branch.gates.next" : "branch.gates.run"
     }
 
     /// The force scope Ship read for this tip (`ShipState`: GET /force-scope, once per tip), if any.
@@ -79,8 +79,16 @@ enum BranchCommands {
                 return gatesWrite(v, skip: skip, quick: parts.dropFirst(2).contains("quick"))
             }))
         r.register(Command(
-            id: "branch.gates.wait", title: "The gates are running", scope: .branch, quiet: true,
-            local: { _, _ in throw Refusal("the gates are running — p pushes once they're green") }))
+            id: "branch.gates.next", title: "Put this branch's queued gates ahead of every run you didn't click",
+            scope: .branch, quiet: true,
+            write: { id, _ in
+                guard let v = m.branchView(id) else { return nil }
+                return Write(
+                    path: t.atRepo(v.b.repo, "/gates"), body: ["branch": .string(v.b.name), "next": true],
+                    settled: { true },
+                    said: "these gates go next — p pushes once they're green",
+                    failed: "the gates are running — p pushes once they're green", alone: true)
+            }))
         r.register(Command(
             id: "branch.push.arm", title: "Ready a push (the next press sends it)", scope: .branch, quiet: true,
             available: { id in m.branchView(id).map { ShipRules.canPush($0.b, $0.pr) } ?? false },

@@ -30,15 +30,21 @@ public struct GateEvent: Decodable, Equatable, Sendable {
     /// in the queue: this run's place in line (1 = next), and what the gates slot is busy with
     public var position: Int?
     public var behind: String?
+    /// in the queue: how many runs wait ahead in each tier ("interactive" = Phil's clicks, "ship",
+    /// "background" = agents'), and this run's own tier
+    public var ahead: [String: Int]?
+    public var tier: String?
 
-    enum K: String, CodingKey { case event, gate, gates, ok, ms, ts, warn, step, position, behind }
+    enum K: String, CodingKey { case event, gate, gates, ok, ms, ts, warn, step, position, behind, ahead, tier }
 
     public init(event: String, gate: String? = nil, planned: [String]? = nil, verdicts: [Verdict]? = nil,
                 ok: Bool? = nil, ms: Double? = nil, ts: Double? = nil, warn: String? = nil,
-                step: String? = nil, position: Int? = nil, behind: String? = nil) {
+                step: String? = nil, position: Int? = nil, behind: String? = nil,
+                ahead: [String: Int]? = nil, tier: String? = nil) {
         self.event = event; self.gate = gate; self.planned = planned; self.verdicts = verdicts
         self.ok = ok; self.ms = ms; self.ts = ts; self.warn = warn
         self.step = step; self.position = position; self.behind = behind
+        self.ahead = ahead; self.tier = tier
     }
 
     public init(from d: Decoder) throws {
@@ -54,6 +60,8 @@ public struct GateEvent: Decodable, Equatable, Sendable {
         step = try? c.decode(String.self, forKey: .step)
         position = try? c.decode(Int.self, forKey: .position)
         behind = try? c.decode(String.self, forKey: .behind)
+        ahead = try? c.decode([String: Int].self, forKey: .ahead)
+        tier = try? c.decode(String.self, forKey: .tier)
     }
 }
 
@@ -146,7 +154,14 @@ public enum GatesRun {
         let busy = e.behind.flatMap { $0.isEmpty ? nil : $0 }
         switch e.step {
         case "queue":
-            if let p = e.position, p > 1 { return "#\(p) in line for gates\(busy.map { " · \($0) running" } ?? "")" }
+            if let p = e.position, p > 1 {
+                guard let ahead = e.ahead, let tier = e.tier, tier != "interactive" else {
+                    return "#\(p) in line for gates\(busy.map { " · \($0) running" } ?? "")"
+                }
+                let kinds = [("interactive", "yours"), ("ship", "ready to ship"), ("background", "agent")]
+                    .compactMap { k, word in ahead[k].flatMap { $0 > 0 ? "\($0) \(word)" : nil } }
+                return "#\(p) in line · behind \(kinds.joined(separator: ", ")) · p puts it next"
+            }
             return busy.map { "waiting on \($0)" } ?? "waiting for a gates slot"
         case "checkout": return "preparing the checkout"
         case "env": return "repairing the environment"
