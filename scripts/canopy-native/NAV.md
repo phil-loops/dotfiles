@@ -12,6 +12,8 @@
 >
 > **Decided 2026-11-03 — the motion rules, tested on every motion (`everyMotionKeepsTheRules`):** (1) a key that can't act says why, and what would; (2) the keyboard goes where the cursor went — only a detail pane following its list (the diff under the commits) moves without taking it; (3) jumps land on code — `]`/`[`, `J`/`K`, picking a file, opening the page and `gg` land on the first changed line of what they reached (a viewed file, folded to its header, lands there), `G` on the last change; `}`/`{` already did. Headers and gaps are rows `j`/`k` pass through.
 >
+> **Decided 2026-11-04 — windows, as Helix has them (canopy-todo `helix-windows`; read from Helix's `goto_impl`, `jump_to_location`, `Editor::switch`, `JumpList`):** a window shows one thing — the diff, or one file at one commit. A jump replaces what the focused window shows (`Action::Replace`) and centres the line; `C-o` brings back what it replaced; `esc` never changes what a window shows. Stage 1 (landed): one window; `g d` to a file the diff hasn't puts the file in the diff's place, the diff waiting underneath where it was. Next: per-window jumplists, `C-w v/s/q/o`, picker `C-v`/`C-s`; the diff shows in at most one window (a copy of it is the file at the cursor's line on the tip); the window set joins the saved place.
+
 > **Decided 2026-11-03 (supersedes the h/l half of the note below):** `h`/`l` move one character in code — the diff and the code beside it — with a one-character cursor that `j`/`k` carry at the same column (vim's curswant) and `g d`/`space k` ask about. At the new half's start `h` crosses onto the old half of a removed line, and `l` crosses back; on a row with no code they refuse rather than leave. `⌃h`/`⌃l` move panes from anywhere (as `⌃w h`/`⌥h` do). In panes with no code (the files, the commits, lists) bare `h`/`l` still move to the pane beside. Why: "h is the old half here and the pane over there" depended on the row's colour, so you couldn't tell where a press would land.
 >
 > **Decided 2026-10-31 (supersedes the zoom-ladder h/l below):** hjkl move the cursor in what you see; structure has its own keys. `h`/`l` are left/right — the old/new half of a split diff line, else the pane to that side. `ret` goes in, `-` goes up a level (vim-vinegar's parent), `C-o` retraces time, `esc` cancels. The old rule borrowed Miller columns' h/l without Miller columns' layout: canopy's levels are pages that replace each other, so "out" was never to the left of anything, and on the pages that do have a left and a right (a split diff, list ⇄ detail) h/l meant something you couldn't see.
@@ -63,10 +65,10 @@
 | search name | `*` | search for the name under the cursor |
 | map | `space m` | the map around what you're on |
 | type | `space k` | the type under the cursor (hover) |
-| definition / type-definition / implementations / references | `g d` / `g y` / `g I` / `g r` | code navigation |
+| definition / type-definition / implementations / references | `g d` / `g y` / `g I` / `g r` | code navigation: the place replaces what the window shows (the diff, or a file at its commit in the diff's place), centred; `C-o` brings back what it replaced |
 | symbols | `space S` | list the file's symbols |
 | github | `g h` | open it on GitHub |
-| lines on GitHub | `space o m` / `space o b` | the lines under the cursor or selection on GitHub, on main / at the branch (the code beside the diff: at its commit) — Helix's gh-open keys |
+| lines on GitHub | `space o m` / `space o b` | the lines under the cursor or selection on GitHub, on main / at the branch (the open file: at its commit) — Helix's gh-open keys |
 | preview | `g P` | preview it on a side port |
 | go-forests / go-dashboard / go-todo / go-machine / go-wiki / go-tutor | `g f` / `g s` / `g o` / `g m` / `g i` / `g t` | go to that page |
 | alternate | `g a` | the alternate place (where the last jump left from) |
@@ -112,7 +114,7 @@
 | Dashboard | `r` the range |
 | Tracker | `s` start the item |
 
-**Addresses name a place, not just a page.** An address is a jumplist entry written out (`Place.address`, `CanopyCore/Router/Address.swift`), so a link from anywhere lands where `C-o` would: `/v2/b/<repo>/<branch>?file=<path>&line=<n>` (the line on the tip's side; beside the diff when the diff hasn't it; `&sha=` another commit), `?file=<path>`, `?thread=<id>`, `?tab=<face>`, else `?at=<row key>`. Following one — `canopy <address>`, a `canopy://` link, Show's embed, the browser extension — is a jump, so `C-o` comes back. `y` copies the link to where you are.
+**Addresses name a place, not just a page.** An address is a jumplist entry written out (`Place.address`, `CanopyCore/Router/Address.swift`), so a link from anywhere lands where `C-o` would: `/v2/b/<repo>/<branch>?file=<path>&line=<n>` (the line on the tip's side; the file in the diff's place when the diff hasn't it; `&sha=` another commit), `?file=<path>`, `?thread=<id>`, `?tab=<face>`, else `?at=<row key>`. Following one — `canopy <address>`, a `canopy://` link, Show's embed, the browser extension — is a jump, so `C-o` comes back. `y` copies the link to where you are.
 
 **keys-native.toml** (`~/.dotfiles/canopy/keys-native.toml`, this app's own) overrides a verb by name (`mark = "v"`, `put-away = ["D"]`, `leader = ";"`) and every page doing it follows; the table's rules are re-checked after (a key on two verbs is flagged atop `?`). It's a separate file because `keys.toml` is shared with v2, which keys it by command id and would flag a verb line there as "no such command" — and a `[native]` table too, since the server's `keymap.py` reads every top-level entry of `keys.toml` and reports a table as "native: wants a key or a list of keys". v2 never opens `keys-native.toml`. Native still reads `keys.toml` (from the server's bootstrap): its command-id lines are read past with a warning naming the verb to set in `keys-native.toml` (in `--dump` and dim atop `?`); a verb line left there still applies, with a warning to move it, and `keys-native.toml` wins over it. Saving `keys.toml` reloads both files (the server's asset signature moves); after saving `keys-native.toml` alone, `:keys.reload`.
 
