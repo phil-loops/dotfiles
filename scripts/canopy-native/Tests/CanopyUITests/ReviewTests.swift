@@ -265,13 +265,6 @@ import Testing
         return (a, p)
     }
 
-    func until(_ what: String, timeout: Double = 3, _ ok: () -> Bool) async {
-        let t0 = Date()
-        while !ok() {
-            if Date().timeIntervalSince(t0) > timeout { Issue.record("timed out waiting for \(what)"); return }
-            try? await Task.sleep(nanoseconds: 10_000_000)
-        }
-    }
 
     func keys(_ a: AppModel, _ ks: String...) { for k in ks { a.keys.handle(k) } }
 

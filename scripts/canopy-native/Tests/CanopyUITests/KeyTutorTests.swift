@@ -21,14 +21,6 @@ import Testing
         return (a, t, p)
     }
 
-    func until(_ what: String, timeout: Double = 3, _ ok: () -> Bool) async -> Bool {
-        let t0 = Date()
-        while !ok() {
-            if Date().timeIntervalSince(t0) > timeout { Issue.record("timed out waiting for \(what)"); return false }
-            try? await Task.sleep(nanoseconds: 10_000_000)
-        }
-        return true
-    }
 
     func press(_ a: AppModel, _ seq: String) { for k in seq.split(separator: " ") { a.keys.handle(String(k)) } }
 
@@ -112,7 +104,7 @@ import Testing
             let name = "\(t.lesson.id) step \(t.stepIndex + 1): \(t.plain(t.step?.text ?? ""))"
             guard await until("\(name) to be ready", { t.ready }) else { t.skip(); continue }
             await act(a, t, sb)
-            let moved = await until(name, timeout: 2) { (t.lessonIndex, t.stepIndex) != at || t.recapping || t.finished }
+            let moved = await until(name) { (t.lessonIndex, t.stepIndex) != at || t.recapping || t.finished }
             if !moved {
                 Issue.record("\(name) didn't finish · practice at \(sb.router.route.path) · mode \(sb.keys.active.rawValue) · here \(ReviewPageState.of(sb).here?.key ?? "-") · note \(sb.runner.note ?? "-") · picker \(sb.nav.picker?.title ?? "-") · composer \(String(describing: ShipState.of(sb).composer))")
                 t.skip()
