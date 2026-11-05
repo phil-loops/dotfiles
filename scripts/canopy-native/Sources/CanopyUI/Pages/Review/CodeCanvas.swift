@@ -376,6 +376,10 @@ final class Canvas: NSObject {
     private var cursorMovedAt = Date.distantPast
     /// A restored place's viewport row, for the next scroll to this stop (instead of `reveal`'s least move).
     var anchor: (stop: String, row: Int)?
+    /// A file jump's landing: when the cursor reaches `stop`, `head` (its file's header) goes to the top.
+    var lead: (stop: String, head: String)?
+    /// The header held at the top while layout settles after that jump.
+    private var leading: String?
     var app: AppModel?
     var theme: Theme = .dark
     private var layoutPending = false
@@ -524,9 +528,12 @@ final class Canvas: NSObject {
             lastCursor = c
             lastScrolledTick = scrollTick
             cursorMovedAt = Date()
-            let a = anchor
+            let a = anchor, l = lead
             anchor = nil
+            lead = nil
+            leading = nil
             if let a, a.stop == c, settle(c, row: a.row) { return }
+            if let l, l.stop == c, top(l.head, keeping: c) { leading = l.head; return }
             reveal(c)
         }
     }
@@ -568,6 +575,26 @@ final class Canvas: NSObject {
     /// The scroll offset that puts a line at `stopY` on viewport row `row`, clamped to the document.
     static func anchoredTop(stopY: CGFloat, lineHeight: CGFloat, row: Int, docHeight: CGFloat, viewHeight: CGFloat) -> CGFloat {
         max(0, min(stopY - CGFloat(row) * lineHeight, max(0, docHeight - viewHeight)))
+    }
+
+    /// Scroll a header to the top, as near as the document's end allows, when `stop` still fits below it.
+    @discardableResult
+    func top(_ head: String, keeping stop: String) -> Bool {
+        guard let h = stopMap[head], let hr = text.rect(for: NSRange(location: h.location, length: 1)),
+              let s = stopMap[stop], let sr = text.rect(for: NSRange(location: s.location, length: 1)),
+              let y = Canvas.leadTop(headY: hr.minY, stopMaxY: sr.maxY, docHeight: text.frame.height,
+                                     viewHeight: scroll.contentView.bounds.height) else { return false }
+        if y != scroll.contentView.bounds.minY {
+            scroll.contentView.scroll(to: NSPoint(x: 0, y: y))
+            scroll.reflectScrolledClipView(scroll.contentView)
+        }
+        return true
+    }
+
+    /// The scroll offset that puts a header at the top, clamped to the document; nil when the stop wouldn't show.
+    static func leadTop(headY: CGFloat, stopMaxY: CGFloat, docHeight: CGFloat, viewHeight: CGFloat) -> CGFloat? {
+        let y = max(0, min(headY, max(0, docHeight - viewHeight)))
+        return stopMaxY - y <= viewHeight ? y : nil
     }
 
     /// Keep a stop on screen, moving as little as it takes (v2 scrollIntoView block: nearest).
@@ -706,6 +733,7 @@ final class Canvas: NSObject {
     /// Layout moved under a cursor that just moved: put it back on screen.
     func keepCursorInView() {
         guard let c = lastCursor, Date().timeIntervalSince(cursorMovedAt) < 1 else { return }
+        if let h = leading, top(h, keeping: c) { return }
         reveal(c)
     }
 

@@ -172,9 +172,8 @@ enum DiffCommands {
             guard let here = pg.here?.path, let i = fs.firstIndex(of: here) else { throw Refusal("no file here · space g picks one") }
             guard fs.count > 1 else { throw Refusal("the only file in this diff · ] g [ g move by change") }
             let j = (i + dir + fs.count) % fs.count
-            guard let k = pg.landing(file: fs[j]) else { throw Refusal("nothing to land on in \(fs[j])") }
             if app.keys.mode != .select { pg.mark = nil }
-            pg.setCursor(k)
+            guard pg.goTo(file: fs[j]) else { throw Refusal("nothing to land on in \(fs[j])") }
             CodeLookup.of(app).dismiss()
             if (j > i) != (dir > 0) { app.runner.say(dir > 0 ? "wrapped to the first file" : "wrapped to the last file") }
         }
@@ -185,11 +184,11 @@ enum DiffCommands {
             let tests = fs.enumerated().filter { isTestPath($0.element) }
             guard !tests.isEmpty else { throw Refusal("no test files in this diff") }
             let pick = dir > 0 ? tests.first { $0.offset > i } : tests.last { $0.offset < i }
-            guard let pick, let k = pg.landing(file: pick.element) else {
+            guard let pick, pg.landing(file: pick.element) != nil else {
                 throw Refusal(dir > 0 ? "no test file after this one" : "no test file before this one")
             }
             if app.keys.mode != .select { pg.mark = nil }
-            pg.setCursor(k)
+            pg.goTo(file: pick.element)
             CodeLookup.of(app).dismiss()
         }
         /// ]p / [p: the first line of the next (previous) git hunk — a hunk can hold several of ] g's changes.
@@ -339,7 +338,7 @@ enum DiffCommands {
         r.register(Command(id: "review.file.go", title: "Go to a file", scope: .review, needsArg: true, quiet: true, recordsJump: true,
                            local: { _, arg in
                                pg.tab = "files"
-                               if let path = arg as? String, let k = pg.landing(file: path) { pg.setCursor(k) }
+                               if let path = arg as? String { pg.goTo(file: path) }
                            }))
         r.register(Command(id: "review.in", title: "Into the diff at the file", scope: .review, verb: .main, label: "in",
                            available: { _ in app.pane?.id == reviewTreePane && onFiles(nil) },
