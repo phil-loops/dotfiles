@@ -87,14 +87,14 @@ A plan is a deck with a top-level `"plan"` object and `"mode": "plan"`, which op
   "plan": { "fact": "Is this domain blocked from sending?", "repo": "loops",
     "stages": [{ "id": "verify", "kind": "verify", "stop": "what holds if we stop here", "safe": true }],
     "rows": [{ "name": "domain blocked?", "kind": "authority|writer|reader|record", "where": "file or symbol", "movedBy": "branch", "cells": ["flag", "″", "ledger"] }],
-    "branches": [{ "name": "<branch>", "stage": "<stage id>" }],
+    "branches": [{ "name": "<branch>", "stage": "<stage id>", "does": "<its git description>" }],
     "transitions": [{ "from": "verify", "to": "flip", "gate": "…", "manual": "…", "rollback": "…" }],
     "extras": [{ "id": "r1", "name": "…", "mvp": false, "start": "expand", "end": "record", "cliff": "record", "why": "…", "detail": "…", "accepted": "…" }] } }
 ```
 
 - Stage kinds `expand record backfill verify flip move contract` drive the lint. A cell `″` repeats the one to its left, `—` means absent, `gone` means retired.
 - Show expands the plan into pages: **plan** (the interactive grid), one **t-<from>-<to>** page per transition (gate, manual step, rollback, what changes, what deploys, stopping here) and one **x-<id>** page per extra. The file's own `sections` follow.
-- The grid: ←→ (h/l) move the stage cursor (later columns fade), ↑↓ (j/k) the row, `t` the transition, ↵ / double-click opens the selected page, `o` opens a branch chip in canopy, `v` shows the MVP only, `m` (or dragging a lane across the dashed line) moves an extra in or out of the MVP **by writing the file**. Hover or selection fills the inspector, docked right of the grid when the page is wide enough. 
+- The grid: ←→ (h/l) move the stage cursor (later columns fade), ↑↓ (j/k) the row, `t` the transition, ↵ / double-click opens the selected page, `o` opens a branch chip in canopy, `v` shows the MVP only, `m` (or dragging a lane across the dashed line) moves an extra in or out of the MVP **by writing the file**. Hover or selection fills the inspector, docked right of the grid when the page is wide enough. A branch's `does` (fill it from `git config branch.<b>.description`) shows on its card under the name; hovering or selecting a card outlines the cells it changes (rows whose `movedBy` names it), and hovering a row lights the cards that change it. 
 - The plan page opens as a **canvas**: the shelf and section list fold away and the grid takes the window, columns sized to their content (every branch chip shown, long names wrapped). `f` (or ⎋) leaves it, and the choice sticks per deck; leaving the plan page brings the columns back. It pans both ways and zooms: pinch, `=` / `−`, `0` toggles fit-to-width and actual size.
 - **Lint** (`Show --check-plan <file>`, exit 1 on errors; also drawn on the grid): one authority per stage, moving only at a `flip`; no row dropping out and coming back; no reader moving and nothing `gone` before the flip; a rollback line on every transition; branch and extra stages that exist; an extra left out past its ▼ cliff warns unless `accepted` says why.
 - The cliff is the stage from which leaving an extra out costs more, usually the first stored event of a shape it changes. An extra whose cliff comes before the stage you ship is in the MVP or explicitly accepted.
