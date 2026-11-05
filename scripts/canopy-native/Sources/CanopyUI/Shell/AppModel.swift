@@ -133,7 +133,9 @@ public final class AppModel: CommandContext {
             bootstrap = Bootstrap(repos: store.repo.keys.sorted(), keys: keys, keyErrors: errors + ["bootstrap: \(error) — read keys.toml directly"])
             Log.line("bootstrap failed (\(error)); keys.toml read directly")
         }
+        let reposMoved = transport.repos != bootstrap.repos
         transport.repos = bootstrap.repos
+        if reposMoved { (states[ObjectIdentifier(ReviewPageState.self)] as? ReviewPageState)?.forgetDiffs() }
         applyKeyFiles()
     }
 
