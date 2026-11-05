@@ -323,8 +323,12 @@ import Testing
         a.keys.handle("g")
         let rows = a.keys.whichKeyRows()
         #expect(rows.contains { $0.key == "F" && $0.what == "go to Forests" })
-        let ks: [String] = rows.map(\.key)
-        let lower: [String] = ks.map { $0.lowercased() }
-        #expect(lower == lower.sorted())
+        let order = KeySection.allCases.map(\.rawValue) + KeyGroup.allCases.map(\.rawValue)
+        let ranks = rows.map { r in r.section.flatMap { order.firstIndex(of: $0) } ?? order.count }
+        #expect(ranks == ranks.sorted(), "sections in order: \(rows.map { "\($0.section ?? "-") \($0.key)" })")
+        for s in Set(rows.map(\.section)) {
+            let lower = rows.filter { $0.section == s }.map { $0.key.lowercased() }
+            #expect(lower == lower.sorted(), "letters sorted inside \(s ?? "-")")
+        }
     }
 }

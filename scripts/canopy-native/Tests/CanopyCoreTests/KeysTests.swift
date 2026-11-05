@@ -3,6 +3,12 @@ import Testing
 @testable import CanopyCore
 
 @Suite struct KeysTests {
+    /// Every key under a prefix (space, g, [, z, C-w) has a which-key section, so a box never ends in an unsorted tail.
+    @Test func everyPrefixedVerbHasASection() {
+        let missing = Verbs.table.filter { spec in spec.keys.contains { $0.contains(" ") } && KeySection.of(spec.verb) == nil }
+        #expect(missing.isEmpty, "\(missing.map(\.verb))")
+    }
+
     // keys.test.ts, ported
     @Test func chordsAndScopes() {
         var km = Keymap([

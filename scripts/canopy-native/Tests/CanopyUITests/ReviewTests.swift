@@ -445,6 +445,18 @@ import Testing
         #expect(pg.tab == "files")
     }
 
+    /// space reads by meaning: the three tabs together under places, ahead of the pickers.
+    @Test func spaceGroupsItsKeysByMeaning() async throws {
+        let (a, _) = try await app()
+        a.keys.handle("space")
+        let rows = a.keys.whichKeyRows()
+        let places = rows.filter { $0.section == "places" }.map(\.key)
+        #expect(["c", "g", "h"].allSatisfy(places.contains), "\(places)")
+        let firstPicker = try #require(rows.firstIndex { $0.section == "pickers" })
+        #expect(rows.firstIndex { $0.key == "h" }! < firstPicker)
+        a.keys.handle("esc")
+    }
+
     /// A tab is a place, named by its key: space h the history, space c the conversation, space g the files; again goes back.
     @Test func eachTabHasANamedKey() async throws {
         let (a, _) = try await app()

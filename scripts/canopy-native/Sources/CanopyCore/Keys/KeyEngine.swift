@@ -248,20 +248,28 @@ public final class KeyEngine {
             for k in c.keysByMode[active] ?? [] where k.hasPrefix(prefix + " ") {
                 let rest = String(k.dropFirst(prefix.count + 1))
                 let verb = c.verbs.first { vk.of($0, in: active).contains(k) }
-                if seen.insert(rest).inserted { rows.append(WhichKeyRow(key: rest, verb: verb?.name, what: shortTitle(c.title))) }
+                if seen.insert(rest).inserted {
+                    rows.append(WhichKeyRow(key: rest, verb: verb?.name, what: shortTitle(c.title),
+                                            section: verb.flatMap(KeySection.of)?.rawValue ?? (verb == nil ? c.sheetGroup?.rawValue : nil)))
+                }
             }
         }
         for mv in Verbs.moved where mv.old == prefix && !seen.contains(mv.now) {
-            rows.append(WhichKeyRow(key: mv.now, verb: mv.verb.name, what: "moved off \(mv.old) — esc, then \(mv.now)"))
+            rows.append(WhichKeyRow(key: mv.now, verb: mv.verb.name, what: "moved off \(mv.old) — esc, then \(mv.now)",
+                                    section: KeySection.of(mv.verb)?.rawValue))
         }
         // a run of numbered slots (g 1 … g 9) reads as one row
         let digits = rows.filter { $0.key.count == 1 && $0.key.first!.isNumber }
         if digits.count > 2, let one = digits.min(by: { $0.key < $1.key }), let top = digits.max(by: { $0.key < $1.key }) {
             rows.removeAll { $0.key.count == 1 && $0.key.first!.isNumber }
             rows.append(WhichKeyRow(key: "\(one.key)–\(top.key)", verb: one.verb.map { $0.replacingOccurrences(of: "1", with: "N") },
-                                    what: one.what.replacingOccurrences(of: one.key, with: "N")))
+                                    what: one.what.replacingOccurrences(of: one.key, with: "N"), section: one.section))
         }
+        // by meaning first (Helix's written order), then by letter inside a section
+        let order = KeySection.allCases.map(\.rawValue) + KeyGroup.allCases.map(\.rawValue)
+        func rank(_ r: WhichKeyRow) -> Int { r.section.flatMap { order.firstIndex(of: $0) } ?? order.count }
         return rows.sorted { a, b in
+            if rank(a) != rank(b) { return rank(a) < rank(b) }
             let la = a.key.lowercased(), lb = b.key.lowercased()
             return la != lb ? la < lb : a.key < b.key
         }
@@ -337,7 +345,11 @@ public struct WhichKeyRow: Equatable, Sendable {
     public var key: String
     public var verb: String?
     public var what: String
-    public init(key: String, verb: String?, what: String) { self.key = key; self.verb = verb; self.what = what }
+    /// the section it reads under: a verb's `KeySection`, or a leader key's sheet group
+    public var section: String?
+    public init(key: String, verb: String?, what: String, section: String? = nil) {
+        self.key = key; self.verb = verb; self.what = what; self.section = section
+    }
     /// "m · mark — mark viewed and go on", or the bare title under the leader
     public var line: String { verb.map { "\($0) — \(what)" } ?? what }
 }

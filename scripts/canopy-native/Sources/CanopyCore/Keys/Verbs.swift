@@ -84,6 +84,56 @@ public enum VerbTier: String, Sendable {
     case insert
 }
 
+/// Which-key's sections: what can follow a prefix reads by meaning, as Helix's infobox keeps its
+/// keymap's written order, not by letter. The sections show in this order; letters sort inside one.
+public enum KeySection: String, CaseIterable, Sendable {
+    case places, pickers, code, review, stack
+    case screen = "on screen", view, windows, outside, choose, help
+
+    /// The section a verb reads in. No default: a new verb has to say where it goes.
+    public static func of(_ verb: Verb) -> KeySection? {
+        switch verb {
+        case .conversation, .history, .changedFiles, .map, .alternate,
+             .goForests, .goDashboard, .goTodo, .goMachine, .goWiki, .goTutor,
+             .slot1, .slot2, .slot3, .slot4, .slot5, .slot6, .slot7, .slot8, .slot9:
+            return .places
+        case .find, .branches, .jumps, .flags, .lastPicker:
+            return .pickers
+        case .type, .definition, .typeDefinition, .implementations, .references, .symbols, .rename, .match,
+             .nextFunction, .previousFunction, .nextType, .previousType, .nextTest, .previousTest:
+            return .code
+        case .nextFile, .previousFile, .nextHunk, .previousHunk, .nextUnviewed, .previousUnviewed,
+             .nextThread, .previousThread, .nextConversation, .previousConversation, .nextComment, .previousComment,
+             .nextFinding, .previousFinding, .firstFinding, .lastFinding, .nextGitHunk, .previousGitHunk,
+             .firstChange, .lastChange:
+            return .review
+        case .parent, .child, .root, .tip, .nextSibling, .previousSibling, .out:
+            return .stack
+        case .next, .previous, .first, .last, .windowTop, .windowCenter, .windowBottom,
+             .lineStart, .lineEnd, .firstNonBlank, .labels:
+            return .screen
+        case .viewCenter, .viewTop, .viewBottom, .scrollDown, .scrollUp:
+            return .view
+        case .paneLeft, .paneDown, .paneUp, .paneRight, .paneNext, .splitRight, .splitBelow,
+             .closeWindow, .onlyWindow, .pickRight, .pickBelow:
+            return .windows
+        case .github, .githubMain, .githubBranch, .preview:
+            return .outside
+        case .nth1, .nth2, .nth3, .nth4, .nth5, .nth6, .nth7, .nth8, .nth9:
+            return .choose
+        case .keys, .menu, .command:
+            return .help
+        // bare keys: no prefix's box shows them
+        case .halfDown, .halfUp, .pageDown, .pageUp, .left, .right, .nextWord, .previousWord,
+             .findChar, .tillChar, .findCharBack, .tillCharBack, .cancel, .nextLongWord, .previousLongWord, .longWordEnd,
+             .face, .search, .wordEnd, .searchBack, .repeatMotion, .searchWord, .jumpBack, .jumpForward, .saveJump,
+             .select, .leader, .main, .write, .mark, .unmark, .putAway, .apply, .copy, .push, .sync, .words, .editor,
+             .comment, .reply, .extend, .undo, .copyPlace, .moveUp, .moveDown, .send, .newline:
+            return nil
+        }
+    }
+}
+
 /// One row of the table: a verb's default keys and the meaning every implementer must honor.
 public struct VerbSpec: Sendable {
     public let verb: Verb
