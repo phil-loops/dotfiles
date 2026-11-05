@@ -665,7 +665,7 @@ func shelfEntry(_ path: String) -> ShelfEntry? {
                           topic: Topics.cached(live.replyTo))
     case .api, .canopy, .machine:
         return nil
-    case .forest, .review, .inbox:
+    case .forest, .review, .inbox, .plans:
         guard let deck = try? loadDeck(path) else { return nil }
         let store = SignOffStore(deckPath: path)
         let done = deck.sections.filter { store.entries[$0.key]?.signed == true }.count
@@ -945,7 +945,7 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
             tutor?.show(path: path)
         case .api, .canopy, .machine:
             return
-        case .forest, .review, .runs, .inbox:
+        case .forest, .review, .runs, .inbox, .plans:
             let controller: DeckController
             if let existing = decks[path] {
                 controller = existing
@@ -1023,6 +1023,8 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
             display(emptyState("No forest open", entries.isEmpty ? "Claude opens a project's branches here with `show <deck>`." : "Pick a project from the shelf, or press ⌘O."))
         case .inbox:
             display(emptyState("Inbox is empty", "Claude sessions post messages here with `show-note`."))
+        case .plans:
+            display(emptyState("No plan open", entries.isEmpty ? "A deck with `\"mode\": \"plan\"` opens here as a canvas." : "Pick a plan from the shelf, or press ⌘O."))
         case .review:
             display(emptyState("Nothing to review", entries.isEmpty ? "Claude opens a deck here with `show <deck>`." : "Pick a deck from the shelf, or press ⌘O."))
         }

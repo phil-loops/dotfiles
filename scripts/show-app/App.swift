@@ -17,7 +17,7 @@ var prefs = UserDefaults.standard
 
 /// The workspaces on the rail, top to bottom; the nth answers to ⌘n. Nothing crosses between them except the rail's waiting badges.
 enum Workspace: String, CaseIterable {
-    case canopy, learn, machine, inbox, forest, review, runs, api
+    case canopy, learn, machine, inbox, plans, forest, review, runs, api
 
     var name: String { self == .api ? "API" : rawValue.capitalized }
 
@@ -31,11 +31,12 @@ enum Workspace: String, CaseIterable {
         case .canopy: return "leaf"
         case .machine: return "server.rack"
         case .inbox: return "tray"
+        case .plans: return "map"
         }
     }
 
     /// The workspaces with a rail tile and a ⌘ number; the rest open only when a document routes to them.
-    static let onRail: [Workspace] = [.canopy, .learn, .machine, .inbox]
+    static let onRail: [Workspace] = [.canopy, .learn, .machine, .inbox, .plans]
 
     var key: String { Workspace.onRail.firstIndex(of: self).map { "\($0 + 1)" } ?? "" }
 
@@ -53,6 +54,7 @@ enum Workspace: String, CaseIterable {
         case .canopy: return forestTint
         case .machine: return .secondaryLabelColor
         case .inbox: return .secondaryLabelColor
+        case .plans: return .secondaryLabelColor
         }
     }
 
@@ -72,6 +74,7 @@ enum Workspace: String, CaseIterable {
         case "forest": return (.forest, "mode \"forest\"")
         case "tutor": return (.learn, head?.mode == nil ? "kind \"tutor\"" : "mode \"tutor\"")
         case "live": return (.runs, "mode \"live\"")
+        case "plan": return (.plans, "mode \"plan\"")
         case let other?: return (.review, "mode \"\(other)\"")
         case nil: return (.review, "no mode")
         }
@@ -359,9 +362,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     func updateTitle() {
         guard let controller = workspaces[active] else { return }
-        let detail = controller.current == nil ? "" : controller.subtitle
         shell.runsRunning = workspaces[.runs]?.isRunning ?? false
-        shell.setTitle(controller.documentTitle, subtitle: [active.name, detail].filter { !$0.isEmpty }.joined(separator: " · "), running: controller.isRunning)
+        shell.setTitle(controller.documentTitle, subtitle: "", running: controller.isRunning)
         window.title = controller.documentTitle
     }
 

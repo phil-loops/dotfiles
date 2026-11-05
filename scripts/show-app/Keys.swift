@@ -119,11 +119,11 @@ enum KeyTable {
                    isEnabled: { $0.composerStop != nil }) { $0.focusComposer() },
         KeyBinding(id: "go.leave", menu: "Go", title: "Leave Field or Close", key: "\u{1b}", overOverlay: true) { $0.escape() },
 
-        KeyBinding(id: "section.sign", menu: "Section", title: "Toggle Signed Off", key: "s", modifiers: .command, workspaces: [.forest, .review, .inbox],
+        KeyBinding(id: "section.sign", menu: "Section", title: "Toggle Signed Off", key: "s", modifiers: .command, workspaces: [.forest, .review, .inbox, .plans],
                    isEnabled: { $0.signableDeck != nil }) { $0.toggleSignedOff() },
-        KeyBinding(id: "section.go-to-session", menu: "Section", title: "Go to Sending Session", key: "j", modifiers: .command, workspaces: [.forest, .review, .inbox],
+        KeyBinding(id: "section.go-to-session", menu: "Section", title: "Go to Sending Session", key: "j", modifiers: .command, workspaces: [.forest, .review, .inbox, .plans],
                    isEnabled: { $0.signableDeck?.selectedReplyTo != nil }) { $0.signableDeck?.jumpToSession() },
-        KeyBinding(id: "section.submit", menu: "Section", title: "Send Reply or Submit", key: "\r", modifiers: .command, workspaces: [.forest, .review, .inbox],
+        KeyBinding(id: "section.submit", menu: "Section", title: "Send Reply or Submit", key: "\r", modifiers: .command, workspaces: [.forest, .review, .inbox, .plans],
                    isEnabled: { $0.signableDeck != nil }) { $0.sendOrSubmit() },
         KeyBinding(id: "section.canopy", menu: "Section", title: "Open Branch in Canopy", key: "O", modifiers: [.command, .shift], workspaces: [.forest]) { $0.openInCanopy(nil) },
 
@@ -131,6 +131,7 @@ enum KeyTable {
         KeyBinding(id: "workspace.learn", menu: "Workspace", title: "Learn", key: Workspace.learn.key, modifiers: .command, overOverlay: true) { $0.switchTo(.learn) },
         KeyBinding(id: "workspace.machine", menu: "Workspace", title: "Machine", key: Workspace.machine.key, modifiers: .command, overOverlay: true) { $0.switchTo(.machine) },
         KeyBinding(id: "workspace.inbox", menu: "Workspace", title: "Inbox", key: Workspace.inbox.key, modifiers: .command, overOverlay: true) { $0.openInbox() },
+        KeyBinding(id: "workspace.plans", menu: "Workspace", title: "Plans", key: Workspace.plans.key, modifiers: .command, overOverlay: true) { $0.switchTo(.plans) },
         KeyBinding(id: "workspace.rail", menu: "Workspace", title: "Toggle Rail", key: "r", modifiers: [.command, .control], overOverlay: true) { $0.shell.toggleRail() },
 
         KeyBinding(id: "tutor.send", menu: "Tutor", title: "Send", key: "\r", modifiers: .command, workspaces: [.learn]) { $0.tutor?.sendFocused() },
@@ -239,7 +240,7 @@ extension AppDelegate {
 
     /// The open sign-off deck in Forest or Review, the one ⌘S and ⌘↩ act on.
     var signableDeck: DeckController? {
-        guard active == .forest || active == .review, let deck = workspaces[active]?.currentDeck, !deck.deck.isLive else { return nil }
+        guard [.forest, .review, .plans].contains(active), let deck = workspaces[active]?.currentDeck, !deck.deck.isLive else { return nil }
         return deck
     }
 
