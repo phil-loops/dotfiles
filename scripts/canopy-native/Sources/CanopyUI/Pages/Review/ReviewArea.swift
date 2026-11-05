@@ -27,7 +27,7 @@ enum ReviewArea: PageArea {
 
     /// The page's own keys that no verb places in the `?` sheet (`KeyGroup.of` places the rest).
     private static func placeInSheet(_ r: CommandRegistry) {
-        r.place(.show, ["review.in", "review.back", "review.history", "review.outdated", "review.base.parent", "review.base.main",
+        r.place(.show, ["review.in", "review.back", "review.outdated", "review.base.parent", "review.base.main",
                         "review.base.outgoing", "review.scope", "review.gates.show", "review.viewed", "review.unviewed", "review.flag"])
         r.place(.branch, ["review.compose.edit", "review.compose.send", "review.compose.draft", "review.compose.suggest", "review.send.all",
                           "review.address.claude", "review.address.pick.list", "review.gates.quick"])
