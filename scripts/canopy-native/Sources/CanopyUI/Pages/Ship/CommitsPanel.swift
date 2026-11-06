@@ -1,96 +1,25 @@
 import CanopyCore
 import SwiftUI
 
-/// The commits tab (Review.tsx History + Commits.tsx): the branch's words. Its commits down the
-/// side, newest first; j/k step through and the cursor's commit shows its words beside — only its
-/// words: ↵ reads its diff on the code tab, the one place a diff is drawn. With no commit under the
-/// cursor (the `words` verb) it holds what lands on main. Two panes: "history" and "words" (`C-w l`).
-public struct CommitsPanel: View {
+/// Above the diff: the words of the stretch the branch's line lights, which is the one place they
+/// show. One commit: its subject and why. The whole branch, parent to tip: what lands on main, its
+/// title and why. Any other stretch has no words of its own. The row that is the page's title (the
+/// description, or an open PR's title) is drawn as the title itself, never twice.
+struct StretchWords: View {
     @Environment(AppModel.self) private var app
-    @Environment(\.theme) private var theme
-    let branchID: String
-
-    public init(branchID: String) { self.branchID = branchID }
-
-    public var body: some View {
-        HStack(alignment: .top, spacing: 0) {
-            HistoryList(branchID: branchID).frame(width: 300)
-            VStack(alignment: .leading, spacing: 10) {
-                Group {
-                    if let sha = ShipState.wordsCommit(app) {
-                        CommitHead(branchID: branchID, sha: sha)
-                    } else {
-                        WordsEditor(branchID: branchID, landing: true, landingOnly: true)
-                    }
-                }
-                .padding(.horizontal, 20)
-                .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .overlay(alignment: .leading) { theme.rule.opacity(0.5).frame(width: 1) }
-        }
-        .font(Theme.text(12))
-        .padding(.leading, 10)
-        .task(id: app.store.view(Branch.self, branchID).map(ShipState.historyKey)) {
-            ShipState.of(app).loadHistory(app, branchID)
-            WordsState.of(app).load(app, branchID)
-        }
-    }
-}
-
-/// The history list: the branch's own commits newest first, grouped by whether they're still to
-/// push or already shared ("on #N", or "pushed" before a PR).
-struct HistoryList: View {
-    @Environment(AppModel.self) private var app
-    @Environment(\.theme) private var theme
     let branchID: String
 
     var body: some View {
-        let ship = ShipState.of(app)
-        let rows = ship.historyRows(branchID)
-        let byKey = Dictionary((rows ?? []).map { ("h|\($0.sha)", $0) }, uniquingKeysWith: { a, _ in a })
-        let conv = app.store.view(Conv.self, branchID)
-        let keys = ShipRows.history(app, branchID)
-        VStack(alignment: .leading, spacing: 4) {
-            PaneList(pane: ShipSeam.historyPane, rows: keys, header: { key in Self.group(key, keys, byKey, conv) }) { key, _ in
-                let scoped = key == "h|\(ShipState.wordsCommit(app) ?? "")"
-                if let c = byKey[key] {
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(c.subject).foregroundStyle(scoped ? theme.goldLeaf : theme.ink).lineLimit(2)
-                        if scoped { Text(c.sha.prefix(7)).foregroundStyle(theme.inkFaint).font(Theme.text(10.5)) }
-                        ForEach(addresses(c.sha), id: \.self) { a in Text("→ \(a)").font(Theme.text(10.5)).foregroundStyle(theme.inkDim) }
-                    }
-                }
-            }
-            if rows == nil { Text("reading the commits…").foregroundStyle(theme.inkFaint) }
-            else if rows?.isEmpty == true { Text("no commits of its own").foregroundStyle(theme.inkFaint) }
-            if let waiting = Self.waiting(toPush: (rows ?? []).filter { $0.pushed == false }.count, edits: WordsState.of(app).pending(branchID)) {
-                Text(waiting).foregroundStyle(theme.goldLeaf.opacity(0.8)).font(Theme.text(11)).padding(.top, 6)
+        Group {
+            if let sha = ShipState.wordsCommit(app) {
+                CommitHead(branchID: branchID, sha: sha)
+            } else if ShipState.of(app).host.wholeBranch {
+                WordsEditor(branchID: branchID, landing: true, landingOnly: true)
             }
         }
-    }
-
-    /// What this machine holds that nobody else has seen yet, or nil when everything is out.
-    static func waiting(toPush: Int, edits: Int) -> String? {
-        let parts = [toPush > 0 ? "\(toPush) commit\(toPush == 1 ? "" : "s") to push" : nil,
-                     edits > 0 ? "\(edits) unsaved edit\(edits == 1 ? "" : "s")" : nil].compactMap { $0 }
-        return parts.isEmpty ? nil : "waiting to go out: " + parts.joined(separator: ", ")
-    }
-
-    /// The group a commit row opens, if it's the first of its kind: shared ("on #N", or "pushed"
-    /// before a PR exists) or "to push"; nothing when the server didn't say.
-    static func group(_ key: String, _ keys: [String], _ byKey: [String: HistoryCommit], _ conv: Conv?) -> HistoryGroup? {
-        guard let c = byKey[key], c.pushed != nil, let i = keys.firstIndex(of: key) else { return nil }
-        let shared = c.pushed == true
-        let prev = i > 0 ? byKey[keys[i - 1]] : nil
-        if let prev, (prev.pushed == true) == shared { return nil }
-        return shared ? (conv.map { .onPR($0.number) } ?? .pushed) : .toPush
-    }
-
-    /// The threads a commit declares it addresses, as "author on file:line".
-    private func addresses(_ sha: String) -> [String] {
-        ShipRows.threads(app, branchID).filter { $0.fixedBy.contains { $0.sha.hasPrefix(sha) } }
-            .map { "\($0.comments.first?.author ?? "") on \(shipLeaf($0.path)):\($0.local?.line ?? $0.line ?? 0)" }
+        .font(Theme.text(12))
+        .fixedSize(horizontal: false, vertical: true)
+        .task(id: app.store.view(Branch.self, branchID)?.tip) { WordsState.of(app).load(app, branchID) }
     }
 }
 
@@ -148,14 +77,15 @@ public struct WordsEditor: View {
     public var body: some View {
         let w = WordsState.of(app)
         let full = landing && !landingOnly
-        let rows = ShipRows.words(app, branchID, full: full)
+        let o = w.shown[branchID]
+        // off the forest's words face, the row that is the page title is drawn as the title
+        let rows = ShipRows.words(app, branchID, full: full).filter { k in full || !(WordsRow(k).map { Self.isPageTitle($0, o) } ?? false) }
         VStack(alignment: .leading, spacing: 4) {
             if w.shown[branchID] == nil && landing {
                 Text("reading the commits…").foregroundStyle(theme.inkFaint)
             }
             let orphans = w.orphans(branchID)
             if orphans > 0 { Text("\(orphans) edit\(orphans == 1 ? "" : "s") dropped · branch moved").foregroundStyle(theme.inkFaint) }
-            let o = w.shown[branchID]
             PaneList(pane: ShipSeam.wordsPane, rows: rows, header: { key in Self.reachHeader(key, rows, o) }) { key, on in row(key, on: on) }
             let pending = w.pending(branchID)
             if pending > 0 {
@@ -166,16 +96,18 @@ public struct WordsEditor: View {
             }
         }
         .task(id: app.store.view(Branch.self, branchID)?.tip) { w.load(app, branchID) }
-        .onChange(of: app.insertField) { old, _ in
-            // the description saves on leaving it (v2: on ↵ or blur)
-            guard old == "words.desc|\(branchID)", let text = ShipState.of(app).describing[branchID] else { return }
-            ShipState.of(app).describing[branchID] = nil
-            guard Self.oneLine(text) != app.store.view(Branch.self, branchID)?.description else { return }
-            if app.registry.command("branch.describe") != nil {
-                app.runner.dispatch("branch.describe", via: .key, target: branchID, arg: text)
-            } else {
-                app.runner.say("the description saves through branch.describe (area A) — not installed")
-            }
+        .onChange(of: app.insertField) { old, _ in Self.saveDescription(app, branchID, leaving: old) }
+    }
+
+    /// The description saves on leaving its field (v2: on ↵ or blur), wherever it was written.
+    static func saveDescription(_ app: AppModel, _ branchID: String, leaving old: String?) {
+        guard old == "words.desc|\(branchID)", let text = ShipState.of(app).describing[branchID] else { return }
+        ShipState.of(app).describing[branchID] = nil
+        guard oneLine(text) != app.store.view(Branch.self, branchID)?.description else { return }
+        if app.registry.command("branch.describe") != nil {
+            app.runner.dispatch("branch.describe", via: .key, target: branchID, arg: text)
+        } else {
+            app.runner.say("the description saves through branch.describe (area A) — not installed")
         }
     }
 
@@ -225,8 +157,6 @@ public struct WordsEditor: View {
                         if writing {
                             ModalTextField(field, prompt: "one verb-first line",
                                            text: Binding(get: { ship.describing[branchID] ?? saved }, set: { ship.describing[branchID] = $0.replacingOccurrences(of: "\n", with: " ") }))
-                        } else if landingOnly, Self.isPageTitle(r, o) {
-                            Text("↑ the page title").foregroundStyle(theme.inkFaint)
                         } else {
                             Text(saved.isEmpty ? "—" : saved).foregroundStyle(theme.ink)
                         }
@@ -238,7 +168,7 @@ public struct WordsEditor: View {
                     case .title:
                         let v = w.prValue(branchID)
                         if let pr = o?.pr, WordsState.githubOwns(pr) {
-                            Text(landingOnly ? "↑ the page title" : pr.title ?? "—").foregroundStyle(landingOnly ? theme.inkFaint : theme.inkDim)
+                            Text(pr.title ?? "—").foregroundStyle(theme.inkDim)
                         } else if !writing, Self.echoesCommit(o, v.subject) {
                             Text("same as its one commit").foregroundStyle(theme.inkFaint)
                         } else if writing {
@@ -345,27 +275,6 @@ public struct WordsEditor: View {
                 return "\(t.comments.first?.author ?? "") on \(shipLeaf(t.path)):\(t.local?.line ?? t.line ?? 0)"
             }
             return url.replacingOccurrences(of: "https://github.com/", with: "")
-        }
-    }
-}
-
-/// A group of the history's commits, by who has seen them.
-enum HistoryGroup: Term, Equatable {
-    case toPush, pushed, onPR(Int)
-
-    var word: String {
-        switch self {
-        case .toPush: "to push"
-        case .pushed: "pushed"
-        case .onPR(let n): "on #\(n)"
-        }
-    }
-
-    var meaning: String? {
-        switch self {
-        case .toPush: "commits only on this machine, free to reword"
-        case .pushed: "on origin, no PR yet"
-        case .onPR(let n): "in the open PR, so reviewers have seen them — read-only"
         }
     }
 }

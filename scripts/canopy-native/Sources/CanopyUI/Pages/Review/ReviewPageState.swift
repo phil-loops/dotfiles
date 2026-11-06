@@ -529,7 +529,6 @@ public final class ReviewPageState: ShipHost {
     private func tabMoved(_ from: String) {
         guard let app, case .review = app.router.route else { return }
         if tab == "files" { app.focus(pane: reviewDiffPane) }
-        if tab == "commits" { app.focus(pane: ShipSeam.historyPane) }
     }
 
     // ── context ──
@@ -1066,8 +1065,7 @@ public extension ReviewPageState {
     }
     func newLines(_ app: AppModel, path: String, from: Int, to: Int) -> [String] { newLines(path: path, from: from, to: to) }
     func showThread(_ app: AppModel, id: String) { showThread(id) }
-    /// history.enter / commit.back: focus moves between the history list and the commit's diff.
-    func focusDiff(_ app: AppModel, _ on: Bool) { app.focus(pane: on ? reviewDiffPane : ShipSeam.historyPane) }
+    var wholeBranch: Bool { integration == nil && commitScope == nil && base == .parent }
     func clearMark() { mark = nil }
 
     func beginEdit(_ app: AppModel) -> Bool {

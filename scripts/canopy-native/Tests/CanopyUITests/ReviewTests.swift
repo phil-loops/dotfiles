@@ -444,30 +444,27 @@ import Testing
         #expect(pg.here?.path == "a.ts", "two files on from a.ts, wrapping: \(pg.here?.key ?? "-")")
     }
 
-    /// space reads by meaning: the three tabs together under places, ahead of the pickers.
+    /// space reads by meaning: the tabs together under places, ahead of the pickers.
     @Test func spaceGroupsItsKeysByMeaning() async throws {
         let (a, _) = try await app()
         a.keys.handle("space")
         let rows = a.keys.whichKeyRows()
         let places = rows.filter { $0.section == "places" }.map(\.key)
-        #expect(["c", "g", "h"].allSatisfy(places.contains), "\(places)")
+        #expect(["c", "g"].allSatisfy(places.contains), "\(places)")
         let firstPicker = try #require(rows.firstIndex { $0.section == "pickers" })
-        #expect(rows.firstIndex { $0.key == "h" }! < firstPicker)
+        #expect(rows.firstIndex { $0.key == "c" }! < firstPicker)
         a.keys.handle("esc")
     }
 
-    /// A tab is a place, named by its key: space h the history, space c the conversation, space g the files; again goes back.
+    /// A tab is a place, named by its key: space c the conversation, space g the files; again goes back.
     @Test func eachTabHasANamedKey() async throws {
         let (a, _) = try await app()
         let pg = ReviewPageState.of(a)
-        keys(a, "space", "h")
-        #expect(pg.tab == "commits")
-        keys(a, "space", "h")
-        #expect(pg.tab == "files", "the same key brings the diff back")
         keys(a, "space", "c")
         #expect(pg.tab == "conversation")
-        keys(a, "space", "h")
-        #expect(pg.tab == "commits", "from one face straight to another")
+        keys(a, "space", "c")
+        #expect(pg.tab == "files", "the same key brings the diff back")
+        keys(a, "space", "c")
         keys(a, "space", "g")
         #expect(pg.tab == "files")
     }
@@ -476,7 +473,7 @@ import Testing
     @Test func everyTabIsReachedByItsNameNotItsSlot() async throws {
         let (a, _) = try await app()
         let pg = ReviewPageState.of(a)
-        for (tab, verb) in [("conversation", Verb.conversation), ("commits", .history), ("files", .changedFiles)] {
+        for (tab, verb) in [("conversation", Verb.conversation), ("files", .changedFiles)] {
             let key = a.registry.verbKeys.keys[verb]?.first
             #expect(key?.isEmpty == false, "\(tab) has no key")
             #expect(a.registry.commands.contains { $0.scope == .review && $0.verbs.contains(verb) && !$0.keys.isEmpty }, "\(verb.rawValue) is bound on no review command")
@@ -493,10 +490,9 @@ import Testing
         let (a, p) = try await app()
         let pg = ReviewPageState.of(a)
         ShipStub.answer(p, "GET", "/loops/commit-diff", #"{"sha":"c1","files":[{"path":"c.ts","add":2,"del":0,"patch":"@@ -1,0 +1,2 @@\n+hi\n+there"}]}"#)
-        keys(a, "space", "h")
         ShipState.of(a).showCommit("c1")
         await until("the commit's diff") { pg.files.map(\.path) == ["c.ts"] }
-        pg.focusDiff(a, true)
+        a.focus(pane: reviewDiffPane)
         keys(a, "j")
         let at = a.here()
         #expect(at.commit == "c1" && at.address.contains("commit=c1"), "\(at.address)")
@@ -508,7 +504,7 @@ import Testing
         b.open(address: at.address)
         await until("back on the commit") { pb.commitScope == "c1" && pb.files.map(\.path) == ["c.ts"] }
         await until("at the same line") { pb.here?.key == pg.here?.key }
-        #expect(pb.tab == "commits" && pb.here?.key == pg.here?.key, "\(pb.here?.key ?? "-") vs \(pg.here?.key ?? "-")")
+        #expect(pb.tab == "files" && pb.here?.key == pg.here?.key, "\(pb.here?.key ?? "-") vs \(pg.here?.key ?? "-")")
     }
 
     @Test func jumpsComeBackWithCtrlO() async throws {
@@ -745,12 +741,12 @@ import Testing
     }
 
     /// The margin is the files alone, the same width wherever the keyboard is; the commits are the
-    /// header chip's and the commits tab's, never a pane beside the diff.
+    /// header line's, never a pane beside the diff.
     @Test func theMarginIsTheFilesAtOneWidth() async throws {
         let (a, _) = try await app()
         let pg = ReviewPageState.of(a)
         #expect(pg.scopesCommits)
-        #expect(a.panes.map(\.id).first == reviewTreePane && !a.panes.contains { $0.id == ShipSeam.historyPane })
+        #expect(a.panes.map(\.id).first == reviewTreePane && !a.panes.contains { $0.column == 0 && $0.id != reviewTreePane })
         let width = pg.treeWidth
         keys(a, "C-h")
         #expect(a.pane?.id == reviewTreePane && pg.treeWidth == width)
@@ -1187,25 +1183,31 @@ import Testing
         #expect(ShipState.of(a).composer == nil, "esc closes Ship's box")
     }
 
-    /// The commits tab draws no diff and changes nothing by being visited: ↵ on a commit is the one
-    /// way it scopes the code tab, which is where the diff is read.
-    @Test func theCommitsTabReadsWordsAndRetReadsTheDiff() async throws {
+    /// Words sit with the stretch they describe: the whole branch shows what lands on main, one
+    /// commit its own subject and why, any other stretch none; the description is the page title.
+    @Test func theWordsAboveTheDiffAreTheLitStretchs() async throws {
         let (a, p) = try await app()
         let pg = ReviewPageState.of(a)
-        let b = try #require(pg.branch)
-        ShipState.of(a).putHistory(b, [HistoryCommit(sha: "c2", subject: "second"), HistoryCommit(sha: "c1", subject: "first")])
+        let w = WordsState.of(a)
+        w.setShown(pg.id, WordsOutline(branch: "add-hankles-limited-label", head: "h", commits: [OutlineCommit(sha: "c1", subject: "first"), OutlineCommit(sha: "c2", subject: "second")],
+                                       draft: .init(title: "feat: add a label", body: "")))
+        #expect(pg.tab == "files" && !pg.scoped && pg.base == .parent)
+        #expect(a.panes.contains { $0.id == ShipSeam.wordsPane && $0.rows == ["w|desc", "w|title", "w|body"] }, "the whole branch: what lands on main")
+        #expect(a.pane?.id == reviewDiffPane, "the keyboard starts on the diff")
+        keys(a, "C-w", "k")
+        #expect(a.pane?.id == ShipSeam.wordsPane, "C-w k from the diff reaches the words above it")
+        a.focus(pane: reviewDiffPane)
         ShipStub.answer(p, "GET", "/loops/commit-diff", #"{"sha":"c1","files":[{"path":"c.ts","add":1,"del":0,"patch":"@@ -1,0 +1,1 @@\n+hi"}]}"#)
-        keys(a, "space", "h")
-        #expect(pg.tab == "commits" && !a.panes.contains { $0.id == reviewDiffPane })
-        a.runner.dispatch("history.select", via: .key, arg: "c1")
-        #expect(!pg.scoped, "visiting a commit's words leaves the diff alone")
-        keys(a, "space", "g")
-        #expect(!pg.scoped && pg.files.map(\.path) == ["a.ts", "b.ts"])
-        keys(a, "space", "h")
-        a.runner.dispatch("history.select", via: .key, arg: "c1")
-        keys(a, "ret")
-        #expect(pg.tab == "files" && pg.commitScope == "c1" && a.pane?.id == reviewDiffPane)
-        await until("the commit's diff") { pg.files.map(\.path) == ["c.ts"] }
+        ShipState.of(a).showCommit("c1")
+        #expect(ShipRows.words(a, pg.id) == ["w|desc", "w|s|c1", "w|b|c1"], "one commit: its own words")
+        ShipState.of(a).showCommit("c1..c2")
+        #expect(ShipRows.words(a, pg.id) == ["w|desc"], "a run of commits has no words of its own")
+        ShipState.of(a).showCommit(nil)
+        pg.setBase(.main)
+        #expect(ShipRows.words(a, pg.id) == ["w|desc"], "from main is more than this branch: not what it lands as")
+        a.runner.dispatch("review.words", via: .key)
+        #expect(pg.base == .parent && !pg.scoped && a.pane?.id == ShipSeam.wordsPane && a.selected == "w|title", "d lights the whole branch, on its title")
+        #expect(!a.registry.commands.contains { $0.id.hasPrefix("history.") || $0.id == "review.tab.commits" }, "the commits tab is gone")
     }
 
     /// The commit a branch's commits tab shows belongs to that branch: on the next branch nothing from
@@ -1214,7 +1216,6 @@ import Testing
         let (a, p) = try await app()
         let pg = ReviewPageState.of(a)
         ShipStub.answer(p, "GET", "/loops/commit-diff", #"{"sha":"c1","files":[{"path":"c.ts","add":1,"del":0,"patch":"@@ -1,0 +1,1 @@\n+hi"}]}"#)
-        keys(a, "space", "h")
         ShipState.of(a).showCommit("c1")
         await until("the commit's diff") { pg.files.map(\.path) == ["c.ts"] }
         #expect(ShipState.of(a).commitScope == "c1")

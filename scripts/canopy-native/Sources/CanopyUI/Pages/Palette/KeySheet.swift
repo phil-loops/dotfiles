@@ -53,7 +53,6 @@ enum KeySheet {
         case .article: return app.state { WikiState() }.page(t)?.title ?? "this page"
         case .concept: return t.map { $0.replacingOccurrences(of: "-", with: " ") } ?? "this concept"
         case .lesson, .session: return "this session"
-        case .history: return "this commit"
         case .line: return "this line"
         case .thread: return "this conversation"
         case .gap: return "the hidden lines"

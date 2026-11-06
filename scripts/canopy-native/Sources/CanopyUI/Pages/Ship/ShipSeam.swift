@@ -2,13 +2,12 @@ import CanopyCore
 import Foundation
 
 // The seam between the review page (area B) and Ship (area C). B owns the surface, the diff, the
-// tabs and the cursor stops; Ship owns the strip, the conversation, the ledger, the commits tab and
-// the words. B wires Ship in with four calls in its ReviewSurface and one assignment:
+// tabs and the cursor stops; Ship owns the strip, the conversation, the ledger and the words. B wires Ship in with four calls in its ReviewSurface and one assignment:
 //
 //   ShipState.of(app).host = <B's page state>             // conforms to ShipHost
-//   panes:      … + ShipSeam.panes(app)                  // the conversation / history / words panes for the tab
-//   scopes:     ShipSeam.scopes(app) + …                 // thread, pending, history, commit, words — narrowest first
-//   target:     ShipSeam.target(for: scope, app) ?? …    // review → the branch id, thread/pending/history/words from the row
+//   panes:      … + ShipSeam.panes(app)                  // the conversation pane on its tab; B places the words pane over the diff
+//   scopes:     ShipSeam.scopes(app) + …                 // thread, pending, commit, words — narrowest first
+//   target:     ShipSeam.target(for: scope, app) ?? …    // review → the branch id, thread/pending/words from the row
 //   primary:    ShipSeam.primary(for: row, app) ?? …     // ret on a thread folds it, on a words row writes it
 //   review.back (esc): `if ShipSeam.backOut(app) { return }` first
 //
@@ -19,7 +18,7 @@ import Foundation
 /// What the review page tells Ship.
 @MainActor
 public protocol ShipHost: AnyObject {
-    /// the review page's tab: "conversation", "commits" or "files"
+    /// the review page's tab: "conversation" or "files"
     var tab: String { get set }
     /// The commentable line range under the cursor (and the mark `x` dropped), or nil off a line.
     func lineRange(_ app: AppModel) -> ShipLineRange?
@@ -29,12 +28,12 @@ public protocol ShipHost: AnyObject {
     func showThread(_ app: AppModel, id: String)
     /// The one commit whose diff shows (nil: the whole branch). The host owns it, so it resets with the
     /// branch it belongs to; Ship reads it from here and never keeps a copy (2026-11-05: a copy outlived
-    /// its branch and the next branch's commits tab opened blank).
+    /// its branch and the next branch's commit words opened blank).
     var commitScope: String? { get }
     /// The commit whose diff shows moved (nil: the whole branch) — load and show it.
     func commitScopeChanged(_ sha: String?)
-    /// history.enter / commit.back: move focus between the history list and the commit's diff.
-    func focusDiff(_ app: AppModel, _ on: Bool)
+    /// Whether the diff covers the whole branch, its parent to its tip: what lands on main.
+    var wholeBranch: Bool { get }
     /// The cursor's line was commented or written to: drop `x`'s mark.
     func clearMark()
     /// `i` with no comment open: open Helix on the new-half line under the cursor; false: nothing to edit here.
@@ -69,7 +68,7 @@ public final class StandInHost: ShipHost {
         app.setCursor("t|\(id)")
     }
     public func commitScopeChanged(_ sha: String?) { commitScope = sha }
-    public func focusDiff(_ app: AppModel, _ on: Bool) { app.focus(pane: on ? ShipSeam.wordsPane : ShipSeam.historyPane) }
+    public var wholeBranch: Bool { commitScope == nil }
     public func clearMark() { range = range.map { ShipLineRange(path: $0.path, side: $0.side, line: $0.line) } }
 }
 
@@ -86,7 +85,6 @@ public extension KeyMode {
 @MainActor
 public enum ShipSeam {
     public static let conversationPane = "conversation"
-    public static let historyPane = "history"
     public static let wordsPane = "words"
 
     /// The review page's branch id.
@@ -101,9 +99,6 @@ public enum ShipSeam {
         switch ShipState.of(app).host.tab {
         case "conversation":
             return [Pane(id: conversationPane, title: "conversation", rows: ShipRows.conversation(app, id), pageSize: 8)]
-        case "commits":
-            return [Pane(id: historyPane, title: "commits", rows: ShipRows.history(app, id), column: 0, pageSize: 10),
-                    Pane(id: wordsPane, title: "words", rows: ShipRows.words(app, id), column: 1, pageSize: 6)]
         default:
             return []
         }
@@ -118,7 +113,6 @@ public enum ShipSeam {
         if row.hasPrefix("p|") { out.append(.pending) }
         if row.hasPrefix("w|") { out.append(.words) }
         let ship = ShipState.of(app)
-        if ship.host.tab == "commits", app.pane?.id == historyPane { out.append(.history) }
         if ship.host.tab == "files", ship.commitScope != nil { out.append(.commit) }
         return out
     }
@@ -131,7 +125,6 @@ public enum ShipSeam {
         case .thread: return row.flatMap { $0.hasPrefix("t|") ? String($0.dropFirst(2)) : nil }
         case .pending: return row.flatMap { $0.hasPrefix("p|") ? String($0.dropFirst(2)) : nil }
         case .words: return row.flatMap { $0.hasPrefix("w|") ? $0 : nil }
-        case .history: return branchID(app)
         default: return nil
         }
     }
@@ -140,7 +133,6 @@ public enum ShipSeam {
     public static func primary(for row: String, _ app: AppModel) -> RouteTo? {
         if row.hasPrefix("t|") { return RouteTo("review.fold", target: String(row.dropFirst(2))) }
         if row.hasPrefix("w|") { return RouteTo("words.edit", target: row) }
-        if row.hasPrefix("h|") { return RouteTo("history.open", target: branchID(app)) }
         return nil
     }
 
@@ -153,7 +145,6 @@ public enum ShipSeam {
         if s.dirtOpen != nil { s.dirtOpen = nil; return true }
         if s.inspecting != nil { s.inspecting = nil; return true }
         if s.gateShown != nil { s.gateShown = nil; return true }
-        if s.host.tab == "commits" && s.historyFocus == .diff { s.historyFocus = .list; s.host.focusDiff(app, false); return true }
         return false
     }
 

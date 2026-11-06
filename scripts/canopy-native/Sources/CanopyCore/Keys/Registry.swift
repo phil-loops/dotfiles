@@ -11,7 +11,7 @@ public struct Scope: OpenString {
     public static let global: Scope = "global", forests: Scope = "forests", dashboard: Scope = "dashboard"
     public static let row: Scope = "row", project: Scope = "project", branch: Scope = "branch"
     public static let review: Scope = "review", line: Scope = "line", thread: Scope = "thread"
-    public static let pending: Scope = "pending", gap: Scope = "gap", history: Scope = "history", commit: Scope = "commit"
+    public static let pending: Scope = "pending", gap: Scope = "gap", commit: Scope = "commit"
     /// the cursor on the review header's branch line (what the diff covers)
     public static let branchLine: Scope = "branch-line"
     public static let todo: Scope = "todo", item: Scope = "item", forest: Scope = "forest"
@@ -151,7 +151,7 @@ public enum KeyGroup: String, CaseIterable, Sendable {
             return .move
         case .nextSibling, .previousSibling, .parent, .child, .root, .tip, .out:
             return .others
-        case .face, .conversation, .history, .type, .symbols, .nth1, .nth2, .nth3, .nth4, .nth5, .nth6, .nth7, .nth8, .nth9:
+        case .face, .conversation, .type, .symbols, .nth1, .nth2, .nth3, .nth4, .nth5, .nth6, .nth7, .nth8, .nth9:
             return .show
         case .push, .sync, .words, .editor, .github, .githubMain, .githubBranch, .preview, .rename:
             return .branch
@@ -327,7 +327,7 @@ public final class CommandRegistry {
 
     public static let defaultSurfaceScopes: [String: [Scope]] = [
         "forests": [.branch, .project, .row, .forests],
-        "review": [.branchLine, .history, .commit, .pending, .thread, .line, .gap, .review],
+        "review": [.branchLine, .commit, .pending, .thread, .line, .gap, .review],
         "dashboard": [.dashboard],
         "todo": [.item, .todo],
         "forest": [.branch, .row, .forest, .project],

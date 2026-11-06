@@ -160,34 +160,6 @@ enum WordsCommands {
                 app.setCursor(row)
                 app.beginInsert(w.field(id), lines: w.lines)
             }))
-
-        r.register(Command(
-            id: "history.write", title: "Reword the commit under the cursor, or go on writing an open comment", scope: .history, verb: .write, label: "reword",
-            available: { [weak app] row in
-                guard let app else { return false }
-                if ShipState.of(app).composer != nil { return true }
-                guard let row, let id = branchOf(app, nil), let sha = outlineSha(app, id, row),
-                      let w = WordsRow("w|s|\(sha)") else { return false }
-                return editable(app, id, w)
-            },
-            local: { [weak app] row, _ in
-                guard let app else { return }
-                let ship = ShipState.of(app)
-                if ship.composer != nil { return app.runner.dispatch("review.compose.edit", via: .key) }
-                guard let row, let id = branchOf(app, nil), let sha = outlineSha(app, id, row),
-                      let w = WordsRow("w|s|\(sha)") else { return }
-                ship.historyFocus = .diff
-                app.focus(pane: ShipSeam.wordsPane)
-                app.setCursor("w|s|\(sha)")
-                app.beginInsert(w.field(id), lines: w.lines)
-            }))
-    }
-
-    /// The outline's full sha for a history row, whose sha is abbreviated.
-    static func outlineSha(_ app: AppModel, _ id: String, _ row: String) -> String? {
-        let short = row.dropFirst(2)
-        guard !short.isEmpty else { return nil }
-        return WordsState.of(app).shown[id]?.commits.first { $0.sha.hasPrefix(short) }?.sha
     }
 
     /// Whether a words row can be written here: the PR's text until GitHub owns it, a commit until it's locked.

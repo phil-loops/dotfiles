@@ -3,7 +3,7 @@ import Foundation
 import Observation
 
 /// words.ts: a branch's commits as /outline tells them, and the edits waiting to be saved — the
-/// review page's words (`e`, the commits tab) and the forest page's share it. One per window
+/// review page's words (above the diff) and the forest page's share it. One per window
 /// (`app.state { WordsState() }`); `WordsState.of(app)`.
 @MainActor
 @Observable

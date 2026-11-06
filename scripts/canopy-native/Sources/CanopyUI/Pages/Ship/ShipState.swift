@@ -33,7 +33,7 @@ public struct SyncMotion: Equatable, Sendable {
 
 /// The Ship area's state, one per window (`ShipState.of(app)`): the sync motions, the reads the
 /// ship strip makes per branch, the review ledger's composer and folds, the address sheet, and the
-/// commits tab's history.
+/// branch's history (the line's commits).
 @MainActor
 @Observable
 public final class ShipState {
@@ -68,12 +68,10 @@ public final class ShipState {
     public var addressing: String?
     public var addressPicking = false
 
-    // ── the commits tab ──
-    public enum HistoryFocus: String, Sendable { case list, diff }
+    // ── the branch's history: the line's commits ──
     public private(set) var history: (key: String, rows: [HistoryCommit])?
     /// the one commit whose diff shows (nil: the whole branch, "lands on main") — the host's, read through
     public var commitScope: String? { host.commitScope }
-    public var historyFocus: HistoryFocus = .list
 
     /// Where unsent words are kept across launches; the keytutor's practice app keeps its own.
     @ObservationIgnored public var defaults = UserDefaults.standard
@@ -249,11 +247,10 @@ public final class ShipState {
     /// For tests and the forest page: a history read put in place.
     public func putHistory(_ b: Branch, _ rows: [HistoryCommit]) { history = (Self.historyKey(b), rows.filter(\.own)) }
 
-    /// The commit whose words the commits tab shows: its list's cursor, and nothing else — moving
-    /// it never changes what the diff covers.
+    /// The one commit the diff covers, when it covers just one: its words sit above the diff.
     public static func wordsCommit(_ app: AppModel) -> String? {
-        guard let k = app.cursors["review/\(ShipSeam.historyPane)"], k.hasPrefix("h|"), k.count > 2 else { return nil }
-        return String(k.dropFirst(2))
+        guard let s = of(app).commitScope, !s.contains("..") else { return nil }
+        return s
     }
 
     /// Show one commit's diff, or a run's ("from..to"; nil: the whole branch). The diff itself is area B's to load.
