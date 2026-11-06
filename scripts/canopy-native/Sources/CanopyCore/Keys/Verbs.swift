@@ -45,7 +45,7 @@ public enum Verb: String, CaseIterable, Sendable, Comparable {
     case slot1 = "slot-1", slot2 = "slot-2", slot3 = "slot-3", slot4 = "slot-4", slot5 = "slot-5"
     case slot6 = "slot-6", slot7 = "slot-7", slot8 = "slot-8", slot9 = "slot-9"
     case jumpBack = "jump-back", jumpForward = "jump-forward", saveJump = "save-jump"
-    case branches, jumps, flags, lastPicker = "last-picker"
+    case branches, jumps, flags, grep, lastPicker = "last-picker"
     case paneLeft = "pane-left", paneDown = "pane-down", paneUp = "pane-up", paneRight = "pane-right", paneNext = "pane-next"
     case splitRight = "split-right", splitBelow = "split-below", closeWindow = "close-window", onlyWindow = "only-window"
     case pickRight = "pick-right", pickBelow = "pick-below"
@@ -98,7 +98,7 @@ public enum KeySection: String, CaseIterable, Sendable {
              .goForests, .goDashboard, .goTodo, .goMachine, .goWiki, .goTutor,
              .slot1, .slot2, .slot3, .slot4, .slot5, .slot6, .slot7, .slot8, .slot9:
             return .places
-        case .find, .branches, .jumps, .flags, .lastPicker:
+        case .find, .branches, .jumps, .flags, .grep, .lastPicker:
             return .pickers
         case .type, .definition, .typeDefinition, .implementations, .references, .symbols, .rename, .match,
              .nextFunction, .previousFunction, .nextType, .previousType, .nextTest, .previousTest:
@@ -233,6 +233,7 @@ public enum Verbs {
         v(.find, .nav, ["space f"], "find something on this page by name"),
         v(.changedFiles, .nav, ["space g", "space b"], "the files this branch changes, to pick one (Helix's changed-file picker)"),
         v(.search, .nav, ["/"], "search this page's text"),
+        v(.grep, .nav, ["space /"], "search the branch's changes for text, every file (Helix's global search)"),
         v(.searchBack, .nav, ["?"], "search this page's text backwards (Helix ?)"),
         v(.searchWord, .nav, ["*"], "search for the name under the cursor (n / N then step through its uses)"),
         v(.map, .nav, ["space m"], "the map around what you're on"),

@@ -595,6 +595,31 @@ import Testing
         await until("its diff") { pg.here?.key == start }
     }
 
+    @Test func spaceSlashFindsTextInAnyFileOfTheBranchAndLandsOnIt() async throws {
+        let (a, _) = try await app()
+        let pg = ReviewPageState.of(a)
+        guard let fv = pg.views.last, let row = fv.rows.last(where: { ($0.right ?? $0.left)?.text.trimmingCharacters(in: .whitespaces).isEmpty == false }),
+              let text = (row.right ?? row.left)?.text.trimmingCharacters(in: .whitespaces) else { Issue.record("no line to find"); return }
+        let want = "l|\(fv.file.path)|\(row.key)"
+        keys(a, "g", "g")
+        #expect(pg.here?.key != want)
+        keys(a, "space", "/")
+        #expect(a.nav.picker?.title == "search the branch")
+        a.nav.typed(text)
+        #expect(a.nav.shown.contains { $0.text == text }, "the line is found by its text")
+        #expect(a.nav.shown.allSatisfy { $0.text?.localizedCaseInsensitiveContains(text) == true }, "only lines holding the text, not fuzzy matches")
+        let i = a.nav.shown.lastIndex { $0.text == text }!
+        for _ in 0..<i { a.keys.handle("down") }
+        a.keys.handle("ret")
+        #expect(pg.here?.key == want, "choosing a line puts the cursor on it")
+    }
+
+    @Test func branchSearchIsSmartCase() {
+        #expect(AppModel.grep(["Foo bar", "foo", "x"], "foo") == [0, 1])
+        #expect(AppModel.grep(["Foo bar", "foo", "x"], "Foo") == [0])
+        #expect(AppModel.grep(["a", "b"], "") == [0, 1])
+    }
+
     @Test func mOnAChangeMarksJustThatChangeNotItsWholeHunk() async throws {
         let (a, p) = try await app()
         let pg = ReviewPageState.of(a)

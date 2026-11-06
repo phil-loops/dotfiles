@@ -333,6 +333,10 @@ enum KeyLessons {
             KeyStep("{previous-thread}: the match before; {cancel} clears the search.", [.previousThread]),
             KeyStep("{search-back} searches backwards; {cancel} drops it.", [.searchBack], check: { PageSearch.of($0).typing }),
             KeyStep("{cancel}.", [.cancel], check: { !PageSearch.of($0).typing }),
+            KeyStep("{grep} searches every file the branch changes for text, as Helix's global search.", [.grep],
+                    setup: P.review(at: "l|greet.ts|R:2"), check: { $0.nav.picker?.title == "search the branch" }),
+            KeyStep("Type wave, then {send}: the cursor lands on that line.", [.send],
+                    check: { $0.nav.picker == nil && P.pg($0).here?.kind == .line }, hint: "type a word from the diff, then {send}"),
             KeyStep("{map}: the map of the stack around you.", [.map], check: { $0.keys.layer == .map }),
             KeyStep("{cancel} closes it.", [.cancel], check: { $0.keys.layer == nil }),
             KeyStep("{conversation} puts the conversation where the diff was; {cancel} brings the diff back.", [.conversation],
@@ -373,7 +377,7 @@ enum KeyLessons {
             KeyStep("{github-main} opens the lines you're on (or have selected) on GitHub, on main — Helix's key for it too.", [.githubMain]),
             KeyStep("{github-branch}: the same lines at the branch instead.", [.githubBranch]),
             KeyStep("{preview} previews it on a side port — practice, so nothing starts.", [.preview]),
-        ], recap: "{find} by name, {search} by text, {map} the stack; {type} {definition} {type-definition} {implementations} {references} {symbols} read code; {github} {github-main} {github-branch} and {preview} leave the app."),
+        ], recap: "{find} by name, {search} by text, {grep} across the branch, {map} the stack; {type} {definition} {type-definition} {implementations} {references} {symbols} read code; {github} {github-main} {github-branch} and {preview} leave the app."),
 
         KeyLesson(id: "writing", title: "Writing", steps: [
             KeyStep("You're writing a comment (insert mode). Type a line, then ↵: in a many-line box like this, ↵ is a new line, like {newline}. Sending is always deliberate.",
