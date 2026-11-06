@@ -25,17 +25,6 @@ if ! git rev-parse --verify --quiet "refs/heads/${branch}" >/dev/null; then
   exit 1
 fi
 
-# Recorded base wins — but only if it still exists and is an ancestor of the
-# branch (an external rebase can leave it stale; fall through to recompute).
-local recorded=$(git config "branch.${branch}.stack-base" 2>/dev/null || git config "stack-branch.${branch}.base" 2>/dev/null || true)
-if [[ -n "$recorded" ]] \
-   && git rev-parse --verify --quiet "$recorded" >/dev/null \
-   && git merge-base --is-ancestor "$recorded" "$branch" 2>/dev/null; then
-  print -- "$recorded"
-  exit 0
-fi
-
-# Derive from the fork point with the parent (default main).
 local parent=$(git config "branch.${branch}.stack-parent" 2>/dev/null || git config "stack-branch.${branch}.parent" 2>/dev/null || echo main)
 git rev-parse --verify --quiet "$parent" >/dev/null || parent=main
 
@@ -43,6 +32,21 @@ local base=$(git merge-base "$parent" "$branch" 2>/dev/null || true)
 if [[ -z "$base" ]]; then
   print -u2 "stack-base: cannot derive base for ${branch} (parent=${parent})"
   exit 1
+fi
+
+# Recorded base wins while it is an ancestor of the branch and the branch hasn't moved past it.
+# A record strictly behind the fork point means the branch was rebased forward, and keeping it
+# would let a squash swallow the parent's advance; a fork point older than the record is a
+# rewritten parent, which is the case the record exists to survive.
+local recorded=$(git config "branch.${branch}.stack-base" 2>/dev/null || git config "stack-branch.${branch}.base" 2>/dev/null || true)
+if [[ -n "$recorded" ]] \
+   && git rev-parse --verify --quiet "$recorded" >/dev/null \
+   && git merge-base --is-ancestor "$recorded" "$branch" 2>/dev/null; then
+  local rec_sha=$(git rev-parse "$recorded")
+  if [[ "$rec_sha" == "$base" ]] || ! git merge-base --is-ancestor "$rec_sha" "$base" 2>/dev/null; then
+    print -- "$recorded"
+    exit 0
+  fi
 fi
 
 # Persist so it's authoritative from here on.
