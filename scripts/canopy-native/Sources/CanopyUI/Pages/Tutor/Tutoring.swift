@@ -45,8 +45,6 @@ final class TutorState {
     var question = ""
     var terminal: [TerminalSession] = []
     var error = ""
-    /// a two-press removal waiting for its second press ("forget <id>", "cut <id>")
-    var armed: String?
     /// the pane focus was on when the drawer opened, to return to
     @ObservationIgnored var beforeDrawer: String?
     /// the pinned code's canvas (review's CodePaneView)

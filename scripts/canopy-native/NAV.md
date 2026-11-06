@@ -18,6 +18,8 @@
 >
 > **Decided 2026-11-05 — what the diff covers is one setting, drawn as the branch's line:** every diff is the stretch between two points on one line — main, the parent, then the tree after each of the branch's commits, the last being the tip (`ReviewLine`). The header draws it with the stretch lit and origin's copy marked; `, h` puts a cursor on it, `↵` `↵` picks the two ends (the same commit twice: that commit alone), `] h` / `[ h` step a one-commit window without leaving the diff; `, b p`/`m`/`o` are presets for the start. The margin is the files alone, one width whatever has focus. Why: the commit picker and the base switch set one thing two ways, and visiting the commits tab used to scope the code tab as a side effect.
 
+> **Decided 2026-11-05 — `↵` only opens; a confirm lasts one key:** `↵` is the thing's main action, and a main action opens or shows — it never sends anything and never readies a send (the runner refuses either inside a `↵`). A forest row's `↵` opens the branch or forest whatever its stage; `p` pushes, `space o g` goes to the PR, the move keys archive and restore. A two-press act (push, force, kill, reap, forget, cut) is readied in one place, the runner's `armed`, and the next command, an unbound key or a page change drops it unless that command readied it again; `esc` drops it before closing anything else. Why: `↵` `↵` on a ready branch pushed it, and a push readied on one page could be sent from another.
+
 > **Decided 2026-11-04 — windows, as Helix has them (canopy-todo `helix-windows`; read from Helix's `goto_impl`, `jump_to_location`, `Editor::switch`, `JumpList`):** a window shows one thing — the diff, or one file at one commit. A jump replaces what the focused window shows (`Action::Replace`) and centres the line; `C-o` brings back what it replaced; `esc` never changes what a window shows. Landed: `C-w v`/`C-w s` copy the focused window beside/under it (a copy of the diff is the file at the cursor's line on the tip — the diff shows in at most one window, and a jump to a diff line from a copy goes to the window it's in); `C-w q` closes one (never the last), `C-w o` the others; picker `C-v`/`C-s` open the pick in a new window; each window's `C-o`/`C-i` walk only its own jumps (`Place.window`; other pages' entries belong to the first window). Next: the window set joins the saved place (Show's restore).
 
 > **Decided 2026-11-03 (supersedes the h/l half of the note below):** `h`/`l` move one character in code — the diff and the code beside it — with a one-character cursor that `j`/`k` carry at the same column (vim's curswant) and `g d`/`space k` ask about. At the new half's start `h` crosses onto the old half of a removed line, and `l` crosses back; on a row with no code they refuse rather than leave. `⌃h`/`⌃l` move panes from anywhere (as `⌃w h`/`⌥h` do). In panes with no code (the files, the commits, lists) bare `h`/`l` still move to the pane beside. Why: "h is the old half here and the pane over there" depended on the row's colour, so you couldn't tell where a press would land.
@@ -89,7 +91,7 @@
 | word end | `e` | the end of the name (Helix `e`) |
 | leader | `,` | this page's own keys follow |
 | *shared* | | |
-| main | `↵` | the thing's main action |
+| main | `↵` | the thing's main action: opens or shows, never sends |
 | write | `i` | start writing: the field for the thing under the cursor |
 | mark / unmark | `, m` / `, M` (each page's own) | mark it (viewed, done, answered) and go on / take the mark off |
 | flag | `, !` (review) | flag the change to come back to and go on; on a flagged change, take the flag off |
@@ -259,7 +261,7 @@ Caveat: this is 6 days of one user while v2 was still being built, so treat it a
 Forests ─l→ Forest ─l→ Branch(review) ─l→ File ─l→ Hunk ─l→ Line / Thread
         ←h─        ←h─                ←h─      ←h─      ←h─
 ```
-- `ret` goes in one level. `ret` keeps v2's "the thing's main action" meaning: on a branch row that's open, on a thread it's fold, and so on.
+- `ret` goes in one level. `ret` keeps v2's "the thing's main action" meaning: on a branch row that's open, on a thread it's fold, and so on. It never sends or readies a send (Decided 2026-11-05).
 - `-` goes up one level. This is **deterministic**: `-` on a review page always lands on its forest with the cursor on that branch, however you got there (v2 `review.leave` already does this).
 - A detail pane beside a list is space, not structure: `l` moves focus right into it and `h` back to the list, without changing the selection.
 

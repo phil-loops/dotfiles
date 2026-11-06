@@ -50,8 +50,6 @@ public final class ForestModel {
     public var closing: Set<String> = []
     public var expanded: Set<String> = []
     public var readyOnly = false
-    /// the branch whose push (or force) waits for its second keypress
-    public var armed: String?
     /// the forest being launched: every node pushed and opened, top to bottom
     public var launching: String?
     /// branches (and landed chapters, by row key) showing their whole commit messages

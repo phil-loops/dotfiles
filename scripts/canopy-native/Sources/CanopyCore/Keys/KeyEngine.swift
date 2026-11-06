@@ -201,6 +201,7 @@ public final class KeyEngine {
             }
             return true
         }
+        if !mode.takesText { runner.disarm() }
         let verb = Verb.allCases.first { registry.verbKeys.of($0, in: mode).contains(seq) }
         if verb == nil, !mode.takesText, let mv = Verbs.moved.first(where: { $0.old == seq }) {
             runner.say("\(seq) moved: \(mv.verb.name) is \(mv.now) now, as in Helix")

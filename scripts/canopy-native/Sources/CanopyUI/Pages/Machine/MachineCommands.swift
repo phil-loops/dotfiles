@@ -62,14 +62,13 @@ enum MachineCommands {
                            available: { [weak m] id in m?.server(id) != nil },
                            route: { [weak m] id in
                                guard let m, let id, m.server(id) != nil else { return nil }
-                               return RouteTo(m.armed == killArm(id) ? "machine.stop" : "machine.kill.arm", target: id)
+                               return RouteTo(wapp?.runner.armed == killArm(id) ? "machine.stop" : "machine.kill.arm", target: id)
                            }))
         r.register(Command(id: "machine.kill.arm", title: "Ready a kill (the next press sends it)", scope: .server, needsArg: true, quiet: true,
                            available: { [weak m] id in m?.server(id) != nil },
-                           local: { [weak m] id, _ in m?.armed = id.map(killArm) }))
+                           local: { id, _ in if let id { try wapp?.runner.arm(killArm(id)) } }))
         r.register(Command(id: "machine.stop", title: "Kill a server", scope: .server, budget: .gitWrite, needsArg: true, v1: ["machine.kill"], quiet: true,
                            write: { [weak m] id, _ in
-                               m?.armed = nil
                                guard let s = m?.server(id) else { return nil }
                                return Write(path: "/preview-kill", body: ["dir": .string(s.dir), "port": .string(s.port)],
                                             settled: { [weak m] in m?.server(id) == nil },
@@ -80,15 +79,14 @@ enum MachineCommands {
                            available: { [weak m] _ in !(m?.servers.isEmpty ?? true) },
                            route: { [weak m] _ in
                                guard let m, !m.servers.isEmpty else { return nil }
-                               return RouteTo(m.armed == "kill all" ? "machine.stop.all" : "machine.killall.arm")
+                               return RouteTo(wapp?.runner.armed == "kill all" ? "machine.stop.all" : "machine.killall.arm")
                            }))
         r.register(Command(id: "machine.killall.arm", title: "Ready killing every server (the next press sends it)", scope: .machine,
                            needsArg: true, quiet: true,
-                           local: { [weak m] _, _ in m?.armed = "kill all" }))
+                           local: { _, _ in try wapp?.runner.arm("kill all") }))
         r.register(Command(id: "machine.stop.all", title: "Kill every server", scope: .machine, needsArg: true, v1: ["click:kill all"], quiet: true,
                            local: { [weak m] _, _ in
                                guard let m else { return }
-                               m.armed = nil
                                for s in m.servers { wapp?.runner.dispatch("machine.stop", via: .key, target: s.sid) }
                            }))
 
@@ -96,15 +94,14 @@ enum MachineCommands {
                            available: { [weak m] _ in !(m?.servers.isEmpty ?? true) },
                            route: { [weak m] _ in
                                guard let m, !m.servers.isEmpty else { return nil }
-                               return RouteTo(m.armed == "reap" ? "machine.reap.confirm" : "machine.reap.arm")
+                               return RouteTo(wapp?.runner.armed == "reap" ? "machine.reap.confirm" : "machine.reap.arm")
                            }))
         r.register(Command(id: "machine.reap.arm", title: "Ready a reap (the next press sends it)", scope: .machine, needsArg: true, quiet: true,
-                           local: { [weak m] _, _ in m?.armed = "reap" }))
+                           local: { _, _ in try wapp?.runner.arm("reap") }))
         r.register(Command(id: "machine.reap.confirm", title: "Reap orphaned servers", scope: .machine, budget: .gitWrite, needsArg: true,
                            v1: ["click:reap orphaned"], quiet: true,
-                           write: { [weak m] _, _ in
-                               m?.armed = nil
-                               return Write(path: "/preview-reap", body: [:], settled: { true }, said: "reaped", failed: "reap failed")
+                           write: { _, _ in
+                               Write(path: "/preview-reap", body: [:], settled: { true }, said: "reaped", failed: "reap failed")
                            }))
 
         r.register(Command(id: "machine.main", title: "Run main (on the port beside it, else a free one)", scope: .machine, budget: .slowIO,
@@ -132,6 +129,5 @@ enum MachineCommands {
                            }))
 
         // esc backs out of a readied kill before anything else on the page
-        app.addCloser(isOpen: { [weak m] in m?.armed != nil }, close: { [weak m] in m?.armed = nil })
     }
 }

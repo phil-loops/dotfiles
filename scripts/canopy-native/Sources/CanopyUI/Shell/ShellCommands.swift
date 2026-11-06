@@ -26,8 +26,12 @@ enum ShellCommands {
                            local: { [weak app] _, _ in if let app { app.sheetOpen.toggle() } }))
         r.register(Command(
             id: "overlay.close", title: "Back out", scope: .global, verb: .cancel, label: "back", quiet: true,
-            available: { [weak app] _ in app?.closers.contains { $0.isOpen() } ?? false },
-            local: { [weak app] _, _ in app?.closers.first { $0.isOpen() }?.close() }))
+            available: { [weak app] _ in app.map { $0.runner.armed != nil || $0.closers.contains { $0.isOpen() } } ?? false },
+            // a readied act is the innermost thing on screen: esc drops it before closing anything
+            local: { [weak app] _, _ in
+                guard let app, app.runner.armed == nil else { return }
+                app.closers.first { $0.isOpen() }?.close()
+            }))
 
         // ── the `:` line: printable keys go to its field; these are its own ──
         r.register(Command(id: "cmdline.next", title: "Next completion", scope: .global, verb: .next, modes: [.command], quiet: true,

@@ -382,10 +382,10 @@ let learningFixture = #"""
         #expect(routed("tutor.evidence.confidence")?.arg as? [String: String] == ["confidence": ""])
         #expect(routed("tutor.evidence.cut")?.id == "tutor.evidence.arm")
         a.keys.handle("X")
-        #expect(t.armed == "cut ev2")
+        #expect(a.runner.armed == "cut ev2")
         #expect(routed("tutor.evidence.cut")?.id == "tutor.evidence.delete")
         a.keys.handle("esc")
-        #expect(t.armed == nil && t.drawer != nil, "esc disarms first, then closes")
+        #expect(a.runner.armed == nil && t.drawer != nil, "esc disarms first, then closes")
     }
 
     @Test func forgettingASessionTakesTwoPresses() {
@@ -394,7 +394,7 @@ let learningFixture = #"""
         a.focus(pane: "sessions")
         #expect(a.selected == "s:S1")
         a.keys.handle("X")
-        #expect(t.armed == "forget S1" && t.sessions.count == 1)
+        #expect(a.runner.armed == "forget S1" && t.sessions.count == 1)
         a.keys.handle("X")
         #expect(t.sessions.isEmpty)
     }
