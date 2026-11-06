@@ -31,7 +31,7 @@ task ci:run              # full CI pipeline locally
 
 Run `task --list` for the full set.
 
-**Exception — in a worktree whose `node_modules` is a symlink to the main checkout's** (the `cw` default): `@loops/*` resolve to the main checkout's `packages/` and its `.gen`, built for whatever commit that checkout is parked on, so a test or typecheck there can red (or green) on another commit's code. Run `seed-gen --sync .` first (~10s; the gates run it too) — it gives the tree its own packages dist and `.gen` when they differ. Then run the command under the task, not the task: `task test`, `task lint*` and `task build:packages` run `npm install`, which replaces the symlink with a private 1.5GB install. A focused test is `npx tsx --tsconfig typescript/tsconfig.test-runtime.json --test-reporter=dot --test <file>` (query tests need `.env` linked too).
+**Exception — in a worktree whose `node_modules` is a symlink to the main checkout's** (the `cw` default): `@loops/*` resolve to the main checkout's `packages/` and its `.gen`, built for whatever commit that checkout is parked on, until a `seed-gen --sync` gives the tree its own packages dist and `.gen`. `cw` and the checkout/merge/rewrite hooks start that sync detached (heavy-turn batch, log in the worktree's git dir as `seed-gen-sync.log`); right after one, `seed-gen --sync .` waits for it and is then a no-op, so run it before trusting a test or typecheck. Then run the command under the task, not the task: `task test`, `task lint*` and `task build:packages` run `npm install`, which replaces the symlink with a private 1.5GB install. A focused test is `npx tsx --tsconfig typescript/tsconfig.test-runtime.json --test-reporter=dot --test <file>` (query tests need `.env` linked too).
 
 ## Migrations
 
