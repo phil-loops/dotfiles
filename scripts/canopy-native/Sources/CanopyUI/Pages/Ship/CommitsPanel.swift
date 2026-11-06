@@ -285,12 +285,11 @@ public struct WordsEditor: View {
                             .font(Theme.text(11))
                     }
                 }
-            }
-            .overlay(alignment: .trailing) {
-                if on && !writing && WordsCommands.editable(app, branchID, r) {
-                    Text("\(app.registry.keyOf("words.edit")) write\(WordsCommands.fixes(app, branchID, key).isEmpty ? "" : " · \(app.registry.keyOf("words.fix")) fix")")
-                        .font(Theme.text(10.5)).foregroundStyle(theme.inkFaint)
-                }
+                Spacer(minLength: 8)
+                // the hint keeps its own width whether shown or not, so text wraps before it and the cursor never reflows a row
+                Text("\(app.registry.keyOf("words.edit")) write\(WordsCommands.fixes(app, branchID, key).isEmpty ? "" : " · \(app.registry.keyOf("words.fix")) fix")")
+                    .font(Theme.text(10.5)).foregroundStyle(theme.inkFaint)
+                    .opacity(on && !writing && WordsCommands.editable(app, branchID, r) ? 1 : 0)
             }
         }
     }
