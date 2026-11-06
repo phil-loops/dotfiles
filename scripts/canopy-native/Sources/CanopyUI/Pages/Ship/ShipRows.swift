@@ -71,18 +71,21 @@ public enum ShipRows {
         (ShipState.of(app).historyRows(id) ?? []).map { "h|\($0.sha)" }
     }
 
-    /// The words pane: on the review page, what lands on main (or the one commit the history shows);
+    /// The words pane: on the review page, the description and the words of what the diff covers;
     /// `full` (the forest's words face) adds every commit, the body opening under the cursor's.
     public static func words(_ app: AppModel, _ id: String, full: Bool = false) -> [String] {
         let w = WordsState.of(app)
         let ship = ShipState.of(app)
         guard let o = w.shown[id] else { return full ? [] : ["w|desc"] }
-        if !full, ship.host.tab == "commits", let sha = ShipState.wordsCommit(app) {
-            guard let c = o.commits.first(where: { $0.sha.hasPrefix(sha) }), c.locked.isEmpty else { return [] }
-            return ["w|s|\(c.sha)", "w|b|\(c.sha)"]
+        if !full {
+            // one commit's words, or what lands on main when the diff is the whole branch
+            if let sha = ShipState.wordsCommit(app) {
+                guard let c = o.commits.first(where: { $0.sha.hasPrefix(sha) }), c.locked.isEmpty else { return ["w|desc"] }
+                return ["w|desc", "w|s|\(c.sha)", "w|b|\(c.sha)"]
+            }
+            return ship.host.wholeBranch ? ["w|desc", "w|title", "w|body"] : ["w|desc"]
         }
         var out = ["w|desc", "w|title", "w|body"]
-        guard full else { return out }
         let at = app.cursors["\(app.router.surface.id)/\(wordsPane)"] ?? ""
         for c in o.commits {
             out.append("w|s|\(c.sha)")

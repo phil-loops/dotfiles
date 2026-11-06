@@ -28,7 +28,7 @@ public enum Verb: String, CaseIterable, Sendable, Comparable {
     case nextLongWord = "next-long-word", previousLongWord = "previous-long-word", longWordEnd = "long-word-end"
     case scrollDown = "scroll-down", scrollUp = "scroll-up"
     case face
-    case labels, find, search, map, conversation, history
+    case labels, find, search, map, conversation
     case nextComment = "next-comment", previousComment = "previous-comment", wordEnd = "word-end", searchBack = "search-back"
     case match, changedFiles = "changed-files"
     case nextFunction = "next-function", previousFunction = "previous-function", nextType = "next-type", previousType = "previous-type"
@@ -94,7 +94,7 @@ public enum KeySection: String, CaseIterable, Sendable {
     /// The section a verb reads in. No default: a new verb has to say where it goes.
     public static func of(_ verb: Verb) -> KeySection? {
         switch verb {
-        case .conversation, .history, .changedFiles, .map, .alternate,
+        case .conversation, .changedFiles, .map, .alternate,
              .goForests, .goDashboard, .goTodo, .goMachine, .goWiki, .goTutor,
              .slot1, .slot2, .slot3, .slot4, .slot5, .slot6, .slot7, .slot8, .slot9:
             return .places
@@ -238,7 +238,6 @@ public enum Verbs {
         v(.searchWord, .nav, ["*"], "search for the name under the cursor (n / N then step through its uses)"),
         v(.map, .nav, ["space m"], "the map around what you're on"),
         v(.conversation, .nav, ["space c"], "the conversation, in place of what you're reading; esc brings it back"),
-        v(.history, .nav, ["space h"], "the history: the branch's commits, j k to one"),
         v(.type, .nav, ["space k"], "the type under the cursor (hover)"),
         v(.definition, .nav, ["g d"], "go to the definition"),
         v(.typeDefinition, .nav, ["g y"], "go to the definition of its type"),

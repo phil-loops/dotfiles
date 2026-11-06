@@ -37,7 +37,7 @@ enum DiffCommands {
         let onFiles: (String?) -> Bool = { [weak pg] _ in pg?.tab == "files" && app.keys.layer != .map }
         let onDiff: (String?) -> Bool = { [weak pg] _ in
             guard let pg else { return false }
-            return (pg.tab == "files" || (pg.tab == "commits" && pg.scoped)) && app.keys.layer != .map
+            return pg.tab == "files" && app.keys.layer != .map
         }
 
         /// The diff cursor's index, and a move to one.
@@ -428,10 +428,10 @@ enum DiffCommands {
 
         // ── the page ──
 
-        let tabs = ["conversation", "commits", "files"]
+        let tabs = ["conversation", "files"]
         r.register(Command(id: "review.tab", title: "Cycle the tabs", scope: .review, verb: .face, label: "tab",
                            local: { _, _ in pg.tab = tabs[((tabs.firstIndex(of: pg.tab) ?? 2) + 1) % tabs.count] }))
-        // a tab is reached by its name (space c / space h / space g), never its slot: these are for clicks and links
+        // a tab is reached by its name (space c / space g), never its slot: these are for clicks and links
         for t in tabs {
             r.register(Command(id: "review.tab.\(t)", title: t == "files" ? "Show the code (the files tab)" : "Show the \(t) tab", scope: .review, label: t,
                                local: { _, _ in pg.tab = t }))
@@ -917,14 +917,6 @@ enum DiffCommands {
                                pg.tab = "conversation"
                                if let first = app.panes.first { app.focus(pane: first.id) }
                            }))
-        r.register(Command(id: "review.history", title: "The commits (the branch's history), in place of the diff (esc brings the diff back)", scope: .review,
-                           verb: .history, label: "history", available: { _ in pg.integration == nil },
-                           local: { _, _ in
-                               if pg.tab == "commits" { pg.tab = "files"; return app.focus(pane: reviewDiffPane) }
-                               PageSearch.of(app).clear()
-                               pg.tab = "commits"
-                               if let first = app.panes.first { app.focus(pane: first.id) }
-                           }))
         r.register(Command(id: "review.back", title: "Back out", scope: .review, verb: .cancel, label: "back", quiet: true,
                            local: { _, _ in
                                if ShipSeam.backOut(app) { return }
@@ -1097,7 +1089,7 @@ enum DiffCommands {
                                return markSet(app, pg, (a.marks, a.before))
                            }))
 
-        // ── the commits tab's inline diffs (InlineDiff.tsx, inline.ts) ──
+        // ── a commit's inline diffs (InlineDiff.tsx, inline.ts) ──
 
         r.register(Command(id: "inline.expand", title: "Show 20 more lines around a commit's change", scope: .review, needsArg: true, quiet: true,
                            local: { t, arg in

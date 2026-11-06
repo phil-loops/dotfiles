@@ -1,10 +1,10 @@
 import CanopyCore
 import SwiftUI
 
-/// The review page (Review.tsx): GitHub's pull-request review, local. The header (title, the ship
-/// strip, the tabs), then the tab — files changed (a file tree with viewed boxes, the diff with its
-/// conversations folded in at their lines, or a file in its place), the conversation (Ship), or the
-/// commits (Ship's history, the selected commit's diff drawn here). Everything it does is a command.
+/// The review page (Review.tsx): GitHub's pull-request review, local. The header (the description
+/// as its title, the ship strip, the branch's line), the words of the stretch the line lights, then
+/// the diff (a file tree with viewed boxes, the diff with its conversations folded in at their
+/// lines, or a file in its place) or the conversation (Ship). Everything it does is a command.
 struct ReviewPage: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme
@@ -28,10 +28,8 @@ struct ReviewPage: View {
                 switch pg.tab {
                 case "conversation":
                     ConversationPanel(branchID: pg.id).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                case "commits":
-                    CommitsPanel(branchID: pg.id)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 default:
+                    if pg.integration == nil { StretchWords(branchID: pg.id).padding(.horizontal, 16).padding(.bottom, 6) }
                     HStack(alignment: .top, spacing: 0) {
                         if pg.showsTree { Color.clear.frame(width: pg.treeWidth) }
                         // the windows: columns of C-w v, each a stack of C-w s
@@ -83,6 +81,7 @@ private struct ReviewHeader: View {
         let pg = ReviewPageState.of(app)
         let c = pg.conv
         let b = pg.branch
+        let ship = ShipState.of(app)
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 Group {
@@ -90,11 +89,19 @@ private struct ReviewHeader: View {
                         Text(c.title)
                     } else if let p = pg.integration {
                         Text("✦ \(app.store.view(Project.self, p)?.name ?? p) — every branch merged onto main")
+                    } else if app.insertField == WordsRow.desc.field(pg.id) {
+                        ModalTextField(WordsRow.desc.field(pg.id), prompt: "one verb-first line", text: Binding(
+                            get: { ship.describing[pg.id] ?? b?.description ?? "" },
+                            set: { ship.describing[pg.id] = $0.replacingOccurrences(of: "\n", with: " ") }))
                     } else {
                         Text(b.map { $0.description.isEmpty ? $0.name : $0.description } ?? pg.target?.name ?? "")
                     }
                 }
                 .font(Theme.display(17)).foregroundStyle(theme.ink).lineLimit(1).layoutPriority(1)
+                // the title is the words row it shows (the description, or an open PR's title): the words pane's cursor lands here
+                .padding(.horizontal, 4).padding(.vertical, 1)
+                .background(RoundedRectangle(cornerRadius: 3).fill(onTitle(pg, c) ? theme.goldLeaf.opacity(0.14) : .clear))
+                .padding(.horizontal, -4)
                 Spacer(minLength: 16)
                 if pg.integration == nil { ShipStripView(branchID: pg.id) }
             }
@@ -107,6 +114,13 @@ private struct ReviewHeader: View {
             }
         }
         .padding(.horizontal, 16).padding(.top, 2).padding(.bottom, 8)
+        .onChange(of: app.insertField) { old, _ in WordsEditor.saveDescription(app, ReviewPageState.of(app).id, leaving: old) }
+    }
+
+    /// Whether the words pane's cursor is on the row the title shows.
+    private func onTitle(_ pg: ReviewPageState, _ c: Conv?) -> Bool {
+        guard app.pane?.id == ShipSeam.wordsPane, pg.integration == nil else { return false }
+        return app.cursors["review/\(ShipSeam.wordsPane)"] == (c == nil ? "w|desc" : "w|title")
     }
 
     private func waiting(_ c: Conv, _ pg: ReviewPageState) -> [String] {

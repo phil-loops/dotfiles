@@ -84,7 +84,7 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
         let (a, _) = try app()
         let mine = Set(ShipState.of(a).commandIDs)
         #expect(mine.count > 60)
-        for id in ["review.push", "review.sync", "branch.sync", "words.save", "review.compose.send", "history.next", "history.open", "branch.pr", "forest.preview"] {
+        for id in ["review.push", "review.sync", "branch.sync", "words.save", "review.compose.send", "review.words", "branch.pr", "forest.preview"] {
             #expect(mine.contains(id), "\(id)")
         }
         #expect(KeyboardRule.violations(a) { mine.contains($0) } == [])
@@ -204,7 +204,7 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
             func newLines(_ app: AppModel, path: String, from: Int, to: Int) -> [String] { (from...to).map { "line \($0)" } }
             func showThread(_ app: AppModel, id: String) {}
             func commitScopeChanged(_ sha: String?) {}
-            func focusDiff(_ app: AppModel, _ on: Bool) {}
+            var wholeBranch: Bool { true }
             func clearMark() {}
         }
         let (a, _) = try app()
@@ -309,18 +309,8 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
 
     // ── the history and the words ──
 
-    @Test func historyGroupsCommitsByWhetherTheyreShared() {
-        let keys = ["h|ccc", "h|bbb", "h|aaa"]
-        let byKey = ["h|aaa": HistoryCommit(sha: "aaa", subject: "a", pushed: true),
-                     "h|bbb": HistoryCommit(sha: "bbb", subject: "b", pushed: true),
-                     "h|ccc": HistoryCommit(sha: "ccc", subject: "c", pushed: false)]
-        #expect(keys.map { HistoryList.group($0, keys, byKey, nil) } == [.toPush, .pushed, nil])
-        let unknown = ["h|aaa": HistoryCommit(sha: "aaa", subject: "a")]
-        #expect(HistoryList.group("h|aaa", ["h|aaa"], unknown, nil) == nil)
-    }
-
     @Test func everyWordTheForestsAndHistoryDrawSaysWhatItMeans() {
-        let terms: [any Term] = [HistoryGroup.toPush, HistoryGroup.pushed, HistoryGroup.onPR(7), Reach.onlyHere, Reach.draft, Reach.local, Reach.onPR(7), Reach.locked("on origin")] + ShipStage.allCases.map { $0 as any Term }
+        let terms: [any Term] = [Reach.onlyHere, Reach.draft, Reach.local, Reach.onPR(7), Reach.locked("on origin")] + ShipStage.allCases.map { $0 as any Term }
             + LoopStep.ID.allCases.map { LoopStep(id: $0, state: .now) as any Term } + [ProjectState.focus, ProjectState.workbench, ProjectState.archive]
         for t in terms { #expect(t.meaning.map { !$0.isEmpty && !$0.hasPrefix(t.word) } == true, "\(t.word) has a meaning that doesn't repeat it") }
     }
@@ -356,12 +346,6 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
         #expect(WordsEditor.isPageTitle(.desc, o))
     }
 
-    @Test func theHistorySaysWhatsWaitingToGoOut() {
-        #expect(HistoryList.waiting(toPush: 0, edits: 0) == nil)
-        #expect(HistoryList.waiting(toPush: 2, edits: 1) == "waiting to go out: 2 commits to push, 1 unsaved edit")
-        #expect(HistoryList.waiting(toPush: 1, edits: 0) == "waiting to go out: 1 commit to push")
-    }
-
     @Test func landsAsDoesntEchoALoneCommit() {
         var o = WordsOutline(branch: "b", head: "h", commits: [OutlineCommit(sha: "aaa", subject: "feat: add x")])
         o.draft = .init(title: "feat: add x", body: "")
@@ -374,23 +358,15 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
         #expect(!WordsEditor.echoesCommit(o, "feat: add x"))
     }
 
-    /// The history's cursor picks whose words the commits tab shows, and nothing else: only ↵ makes
-    /// the diff cover that commit, on the code tab.
-    @Test func historyStepsSelectOneCommit() throws {
+    /// The one commit the diff covers is whose words show; a run of commits has none.
+    @Test func theCommitInViewIsWhoseWordsShow() throws {
         let (a, _) = try app()
         let ship = ShipState.of(a)
-        let b = try #require(a.store.view(Branch.self, Self.branch))
-        ship.putHistory(b, [HistoryCommit(sha: "aaa1111", subject: "rename"), HistoryCommit(sha: "bbb2222", subject: "fail louder"),
-                            HistoryCommit(sha: "ccc3333", subject: "someone else's", own: false)])
-        #expect(ShipRows.history(a, Self.branch) == ["h|aaa1111", "h|bbb2222"])
-        a.runner.dispatch("history.select", via: .key, arg: "bbb2222")
-        #expect(ShipState.wordsCommit(a) == "bbb2222" && ship.host.tab == "commits")
-        #expect(ship.commitScope == nil, "looking at a commit's words doesn't change what the diff covers")
-        a.runner.dispatch("history.open", via: .key)
-        #expect(ship.commitScope == "bbb2222")
-        a.runner.dispatch("history.select", via: .key, arg: "aaa1111")
-        a.runner.dispatch("history.exit", via: .key)
-        #expect(ship.commitScope == "bbb2222", "leaving the commits tab leaves the diff alone")
+        #expect(ShipState.wordsCommit(a) == nil)
+        ship.showCommit("bbb2222")
+        #expect(ShipState.wordsCommit(a) == "bbb2222")
+        ship.showCommit("aaa1111..bbb2222")
+        #expect(ShipState.wordsCommit(a) == nil)
     }
 
     func outline(ticket: String? = nil) -> WordsOutline {
@@ -449,21 +425,16 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
         #expect(a.insertField == "words.s|\(Self.branch)|c2")
     }
 
-    @Test func iOnALocalCommitInTheHistoryRewordsIt() throws {
-        let (a, _) = try app()
-        WordsState.of(a).setShown(Self.branch, outline())
-        a.runner.dispatch("history.write", via: .key, target: "h|c1")
-        #expect(a.insertField == nil)
-        a.runner.dispatch("history.write", via: .key, target: "h|c2")
-        #expect(a.insertField == "words.s|\(Self.branch)|c2")
-    }
-
-    @Test func iRewordsAHistoryRowWhoseShaIsAbbreviated() throws {
+    @Test func iOnTheCommitInViewRewordsItEvenByItsShortSha() throws {
         let (a, _) = try app()
         var o = outline()
         o.commits[1].sha = "c2fe55ccc30758ddbb1a"
         WordsState.of(a).setShown(Self.branch, o)
-        a.runner.dispatch("history.write", via: .key, target: "h|c2fe55c")
+        ShipState.of(a).showCommit("c1")
+        #expect(ShipRows.words(a, Self.branch) == ["w|desc"], "a commit on origin can't be reworded: only the description")
+        ShipState.of(a).showCommit("c2fe55c")
+        #expect(ShipRows.words(a, Self.branch) == ["w|desc", "w|s|c2fe55ccc30758ddbb1a", "w|b|c2fe55ccc30758ddbb1a"])
+        a.runner.dispatch("words.edit", via: .key, target: "w|s|c2fe55ccc30758ddbb1a")
         #expect(a.insertField == "words.s|\(Self.branch)|c2fe55ccc30758ddbb1a")
     }
 

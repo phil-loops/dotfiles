@@ -71,11 +71,9 @@ struct ReviewSurface: SurfaceProvider {
         switch pg.tab {
         case "conversation":
             return guest
-        case "commits":
-            return guest
         default:
             var out: [Pane] = []
-            if let l = pg.line { out.append(Pane(id: reviewLinePane, title: "line", rows: l.points.map(\.key), column: 1, row: -1, pageSize: 4)) }
+            if let l = pg.line { out.append(Pane(id: reviewLinePane, title: "line", rows: l.points.map(\.key), column: 1, row: -2, pageSize: 4)) }
             if pg.showsTree { out.append(Pane(id: reviewTreePane, title: "files", rows: ReviewPage.treeRows(pg), column: 0, row: 0, pageSize: 12)) }
             for (c, col) in pg.columns.enumerated() {
                 for (r, w) in col.enumerated() {
@@ -83,6 +81,8 @@ struct ReviewSurface: SurfaceProvider {
                                     rows: w.doc == nil ? pg.stopKeys : w.codeRows, column: 1 + c, row: r, pageSize: 20))
                 }
             }
+            // after the diff, so the diff is where the keyboard starts; C-w k from it reaches the words
+            if pg.integration == nil { out.append(Pane(id: ShipSeam.wordsPane, title: "words", rows: ShipRows.words(app, pg.id), column: 1, row: -1, pageSize: 6)) }
             return out
         }
     }

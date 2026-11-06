@@ -91,7 +91,7 @@ public enum Loop {
         case .gates, .push: "branch.push"
         case .pr, .merged: "branch.pr"
         case .review: "branch.open"
-        case .words: "review.tab.commits"
+        case .words: "review.words"
         }
     }
 }

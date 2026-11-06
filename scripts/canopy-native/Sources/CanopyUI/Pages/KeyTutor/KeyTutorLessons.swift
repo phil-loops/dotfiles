@@ -85,7 +85,7 @@ enum Practice {
                 if !p.viewedOverride.isEmpty { p.viewedOverride = [:] }
                 if !p.filter.isEmpty { p.filter = "" }
                 guard p.stops.contains(where: { $0.key == stop }) else { return false }
-                if a.pane?.id != reviewDiffPane { p.focusDiff(a, true) }
+                if a.pane?.id != reviewDiffPane { a.focus(pane: reviewDiffPane) }
                 if p.here?.key != stop { p.setCursor(stop) }
             }
             return true
@@ -341,8 +341,6 @@ enum KeyLessons {
             KeyStep("{cancel} closes it.", [.cancel], check: { $0.keys.layer == nil }),
             KeyStep("{conversation} puts the conversation where the diff was; {cancel} brings the diff back.", [.conversation],
                     check: { P.pg($0).tab == "conversation" }),
-            KeyStep("{history} puts the branch's commits there instead: its history, one commit per row.", [.history],
-                    setup: P.review(at: "l|greet.ts|R:2"), check: { P.pg($0).tab == "commits" }),
             KeyStep("{changed-files} lists just the files this branch changes, as Helix's changed-file picker does.", [.changedFiles],
                     setup: P.review(at: "l|greet.ts|R:2"), check: { P.pg($0).tab == "files" }),
             KeyStep("{next-word} puts the cursor on the next name, line after line.", [.nextWord], setup: P.review(at: "l|greet.ts|R:2"),
@@ -400,7 +398,7 @@ enum KeyLessons {
             KeyStep("{cancel} twice: stop writing, then close the box.", [.cancel],
                     check: { $0.keys.mode == .normal && ShipState.of($0).composer == nil }),
             KeyStep("{face} steps through the tabs too.", [.face]),
-            KeyStep("{words}: what's written about it — the PR's title and why, the commits.", [.words], setup: P.review(),
+            KeyStep("{words}: what lands on main, the PR's title and why, above the whole branch's diff.", [.words], setup: P.review(),
                     check: { $0.pane?.id == ShipSeam.wordsPane }),
             KeyStep("On the title row ({next} to it), {copy} copies it — practice: your clipboard is left alone.", [.copy],
                     check: { KeyTutorStub.notes($0.config.port ?? 0).contains { $0.hasPrefix("copy ") } }),

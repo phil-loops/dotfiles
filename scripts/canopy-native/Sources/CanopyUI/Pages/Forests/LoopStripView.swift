@@ -40,7 +40,7 @@ public struct LoopStripView: View {
         let text = Text(s.word).foregroundColor(s.flag == true ? theme.goldLeaf : color(s.state))
             + Text(s.note.map { " \($0)" } ?? "").foregroundColor(theme.inkDim)
         if s.id == .words {
-            Button { app.runner.dispatch("review.tab.commits", via: .click) } label: { text }.buttonStyle(.plain)
+            Button { app.runner.dispatch("review.words", via: .click) } label: { text }.buttonStyle(.plain)
         } else if let cmd = Loop.command(s.id) {
             // the step in the way is something to do: a label runs its next move
             text.labelTarget(pane: "loop", key: "step:\(branchID):\(s.id.rawValue)", title: s.word, run: RouteTo(cmd, target: branchID))

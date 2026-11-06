@@ -43,54 +43,18 @@ enum ReviewCommands {
             available: { id in pushRoute(weakApp, id) != nil },
             route: { id in pushRoute(weakApp, id).map { RouteTo($0, target: id) } }))
         r.register(Command(
-            id: "review.words", title: "Edit what lands on main: the PR's title and why", scope: .review, verb: .words, label: "words",
+            id: "review.words", title: "Edit what lands on main: the PR's title and why, above the whole branch's diff", scope: .review, verb: .words, label: "words",
             available: { _ in !integration() },
             local: { id, _ in
                 guard let app = weakApp, let id = id ?? page() else { return }
-                ship.host.tab = "commits"
-                ship.historyFocus = .list
-                app.setCursor(nil, pane: ShipSeam.historyPane)
-                ship.loadHistory(app, id)
+                let pg = ReviewPageState.of(app)
+                if pg.base != .parent { pg.setBase(.parent) }
+                if pg.scoped { ship.showCommit(nil) }
+                ship.host.tab = "files"
                 words.load(app, id)
                 app.focus(pane: ShipSeam.wordsPane)
                 app.setCursor(words.shown[id].map { WordsState.githubOwns($0.pr) } == false ? "w|title" : "w|desc")
             }))
-
-        // ── history: the branch's commits one at a time (GitHub Desktop's view) ──
-
-        let stepHistory = { (by: Int) in
-            guard let app = weakApp else { return }
-            app.focus(pane: ShipSeam.historyPane)
-            app.moveCursor(by)
-        }
-        r.register(Command(id: "history.next", title: "Next commit", scope: .history, verb: .next, modes: [.normal, .select],
-                           label: "commit", pair: "history.prev", quiet: true, local: { _, _ in stepHistory(1) }))
-        r.register(Command(id: "history.prev", title: "Previous commit", scope: .history, verb: .previous, modes: [.normal, .select],
-                           label: "commit", quiet: true, local: { _, _ in stepHistory(-1) }))
-        r.register(Command(
-            id: "history.select", title: "Put the commits tab on one commit's words", scope: .review, needsArg: true, quiet: true,
-            local: { _, arg in
-                guard let app = weakApp else { return }
-                let sha = (arg as? String).flatMap { $0.isEmpty ? nil : $0 }
-                ship.host.tab = "commits"
-                ship.historyFocus = .list
-                app.focus(pane: ShipSeam.historyPane)
-                app.setCursor(sha.map { "h|\($0)" })
-            }))
-        // the commits tab only reads and writes words; ↵ is the one way it changes what the diff covers
-        r.register(Command(id: "history.open", title: "Read this commit's diff on the code tab", scope: .history, verb: .main, label: "read",
-                           available: { _ in weakApp.map(ShipState.wordsCommit) != nil },
-                           local: { _, _ in
-                               guard let app = weakApp, let sha = ShipState.wordsCommit(app) else { return }
-                               ship.showCommit(sha)
-                               ship.host.tab = "files"
-                               app.focus(pane: reviewDiffPane)
-                           }))
-        r.register(Command(id: "history.exit", title: "Back to the code tab", scope: .history, verb: .cancel, label: "back",
-                           local: { _, _ in
-                               if let app = weakApp, ShipSeam.backOut(app) { return }
-                               ship.host.tab = "files"
-                           }))
 
         // ── address: the commit that fixes a thread (wiki canopy-v2-address) ──
 
