@@ -96,19 +96,6 @@ public struct WordsEditor: View {
             }
         }
         .task(id: app.store.view(Branch.self, branchID)?.tip) { w.load(app, branchID) }
-        .onChange(of: app.insertField) { old, _ in Self.saveDescription(app, branchID, leaving: old) }
-    }
-
-    /// The description saves on leaving its field (v2: on ↵ or blur), wherever it was written.
-    static func saveDescription(_ app: AppModel, _ branchID: String, leaving old: String?) {
-        guard old == "words.desc|\(branchID)", let text = ShipState.of(app).describing[branchID] else { return }
-        ShipState.of(app).describing[branchID] = nil
-        guard oneLine(text) != app.store.view(Branch.self, branchID)?.description else { return }
-        if app.registry.command("branch.describe") != nil {
-            app.runner.dispatch("branch.describe", via: .key, target: branchID, arg: text)
-        } else {
-            app.runner.say("the description saves through branch.describe (area A) — not installed")
-        }
     }
 
     /// The description as the server stores it: one line, runs of space folded (srv/outline.py).
@@ -154,13 +141,17 @@ public struct WordsEditor: View {
                     switch r {
                     case .desc:
                         let saved = app.store.view(Branch.self, branchID)?.description ?? ""
+                        let edit = LineEdit.of(app)
                         if writing {
-                            ModalTextField(field, prompt: "one verb-first line",
-                                           text: Binding(get: { ship.describing[branchID] ?? saved }, set: { ship.describing[branchID] = $0.replacingOccurrences(of: "\n", with: " ") }))
+                            ModalTextField(field, prompt: "one verb-first line", text: edit.binding(field, saved: saved))
                         } else {
-                            Text(saved.isEmpty ? "—" : saved).foregroundStyle(theme.ink)
+                            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                let shown = edit.text(field, saved: saved)
+                                Text(shown.isEmpty ? "—" : shown).foregroundStyle(theme.ink)
+                                if edit.unsaved(field, saved: saved) { UnsavedMark() }
+                            }
                         }
-                        let text = ship.describing[branchID] ?? saved
+                        let text = edit.text(field, saved: saved)
                         HStack(spacing: 8) {
                             if text.range(of: " and ", options: .caseInsensitive) != nil { Text("“and” · a split point?").foregroundStyle(theme.goldLeaf) }
                         }

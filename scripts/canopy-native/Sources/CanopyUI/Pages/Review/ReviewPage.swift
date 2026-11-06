@@ -90,11 +90,16 @@ private struct ReviewHeader: View {
                     } else if let p = pg.integration {
                         Text("✦ \(app.store.view(Project.self, p)?.name ?? p) — every branch merged onto main")
                     } else if app.insertField == WordsRow.desc.field(pg.id) {
-                        ModalTextField(WordsRow.desc.field(pg.id), prompt: "one verb-first line", text: Binding(
-                            get: { ship.describing[pg.id] ?? b?.description ?? "" },
-                            set: { ship.describing[pg.id] = $0.replacingOccurrences(of: "\n", with: " ") }))
+                        ModalTextField(WordsRow.desc.field(pg.id), prompt: "one verb-first line",
+                                       text: LineEdit.of(app).binding(WordsRow.desc.field(pg.id), saved: b?.description ?? ""))
+                    } else if let b {
+                        let text = LineEdit.of(app).text(WordsRow.desc.field(pg.id), saved: b.description)
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text(text.isEmpty ? b.name : text)
+                            if LineEdit.of(app).unsaved(WordsRow.desc.field(pg.id), saved: b.description) { UnsavedMark() }
+                        }
                     } else {
-                        Text(b.map { $0.description.isEmpty ? $0.name : $0.description } ?? pg.target?.name ?? "")
+                        Text(pg.target?.name ?? "")
                     }
                 }
                 .font(Theme.display(17)).foregroundStyle(theme.ink).lineLimit(1).layoutPriority(1)
@@ -114,7 +119,6 @@ private struct ReviewHeader: View {
             }
         }
         .padding(.horizontal, 16).padding(.top, 2).padding(.bottom, 8)
-        .onChange(of: app.insertField) { old, _ in WordsEditor.saveDescription(app, ReviewPageState.of(app).id, leaving: old) }
     }
 
     /// Whether the words pane's cursor is on the row the title shows.

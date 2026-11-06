@@ -351,13 +351,15 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:]) -> AppModel {
     @Test func aForestsLineAndNameAreTypedInPlace() throws {
         let a = world()
         a.runner.dispatch("project.describe.edit", via: .key, target: "r:bench")
-        #expect(a.forestModel.describingProject == "r:bench" && a.forestModel.draft == "", "a borrowed line isn't yours to edit: start empty")
+        let line = ProjectCommands.describeField("r:bench")
+        #expect(a.insertField == line && LineEdit.of(a).text(line, saved: ProjectCommands.ownLine(a.store.view(Project.self, "r:bench")!)) == "",
+                "a borrowed line isn't yours to edit: start empty")
         let w = try #require(try a.registry.command("project.describe")!.write!("r:bench", "  my  words "))
         #expect(w.path == "/project-describe" && w.body == ["repo": "r", "project": "bench", "description": "my words"])
         #expect(w.ops.first?.fields == ["summary": "my words", "summaryBy": "phil"])
         #expect(w.inverse?([:])?.arg as? String == "", "undo clears it back to the borrowed line")
         a.runner.dispatch("project.rename.edit", via: .key, target: "r:bench")
-        #expect(a.forestModel.renamingProject == "r:bench" && a.forestModel.describingProject == nil && a.forestModel.draft == "bench")
+        #expect(a.insertField == ProjectCommands.renameField("r:bench") && LineEdit.of(a).text(ProjectCommands.renameField("r:bench"), saved: "bench") == "bench")
         let n = try #require(try a.registry.command("project.rename")!.write!("r:bench", "bench-two"))
         #expect(n.path == "/project-rename" && n.body == ["repo": "r", "project": "bench", "to": "bench-two"])
         #expect(n.inverse?([:])?.target == "r:bench-two" && n.inverse?([:])?.arg as? String == "bench")
@@ -504,18 +506,32 @@ private func showRows(_ a: AppModel) {
         #expect(a.forestModel.face == .branches)
     }
 
-    @Test func iDescribesInPlaceAndEscLeavesIt() {
+    @Test func iDescribesInPlaceAndRetSavesIt() {
         let a = page()
+        let field = BranchCommands.describeField("r:a"), edit = LineEdit.of(a)
         a.keys.handle("i")
-        #expect(a.keys.mode == .insert && a.insertField == BranchCommands.describeField && a.forestModel.describing == "r:a")
-        #expect(a.forestModel.draft == "a does it")
+        #expect(a.keys.mode == .insert && a.insertField == field)
+        #expect(edit.text(field, saved: "a does it") == "a does it")
         #expect(!a.keys.handle("j"), "typing goes to the field")
-        a.forestModel.draft = "  a   does  more "
+        edit.binding(field, saved: "a does it").wrappedValue = "  a   does  more "
         a.keys.handle("ret")
-        #expect(a.keys.mode == .normal && a.forestModel.describing == nil)
+        #expect(a.keys.mode == .normal && edit.drafts[field] == nil)
         #expect(a.store.view(Branch.self, "r:a")?.description == "a does more", "shown at once, one line")
         let w = try! a.registry.command("branch.describe")!.write!("r:a", "a does it")
         #expect(w == nil || w?.body["description"] == "a does it")
+    }
+
+    @Test func escKeepsADescriptionUnsavedAndTheReviewPageSeesTheSameDraft() {
+        let a = page()
+        let field = BranchCommands.describeField("r:a"), edit = LineEdit.of(a)
+        a.keys.handle("i")
+        edit.binding(field, saved: "a does it").wrappedValue = "a does it better"
+        a.keys.handle("esc")
+        #expect(a.keys.mode == .normal && a.store.view(Branch.self, "r:a")?.description == "a does it", "esc saves nothing")
+        #expect(edit.unsaved(field, saved: "a does it"), "and throws nothing away")
+        a.keys.handle("i")
+        #expect(edit.text(field, saved: "a does it") == "a does it better", "going back in picks up the draft")
+        #expect(field == WordsRow.desc.field("r:a"), "one field for the description, here and on the review page")
     }
 
     @Test func integrationWithNoServerIsFailedNotConflicts() async {

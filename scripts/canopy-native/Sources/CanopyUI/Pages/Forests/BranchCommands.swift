@@ -10,8 +10,8 @@ enum BranchCommands {
     /// The description as the server stores it: one line, runs of space folded (srv/outline.py).
     static func oneLine(_ s: String) -> String { s.split(whereSeparator: \.isWhitespace).joined(separator: " ") }
 
-    /// The id the description field's ModalTextField types into.
-    static let describeField = "forest.describe"
+    /// The field a branch's description is written in, here and on its review page: one draft.
+    static func describeField(_ id: String) -> String { WordsRow.desc.field(id) }
 
     /// What `p` does: arm, then send — or, when only the gates stand in the way, run them. A branch
     /// diverged from origin can't push; inside the force scope `p` arms a force-with-lease instead.
@@ -36,6 +36,15 @@ enum BranchCommands {
     /// Whether this branch has a push or a force waiting for its second press.
     static func isArmed(_ id: String, _ app: AppModel) -> Bool {
         app.runner.armed == pushArm(id) || app.runner.armed == forceArm(id)
+    }
+
+    /// The branch whose description is being typed, if any.
+    static func describing(_ app: AppModel) -> String? { LineEdit.target(app.insertField, prefix: "words.desc") }
+
+    /// ↵ on a description: save the draft (and leave the field).
+    static func saveDescription(_ app: AppModel, _ id: String) {
+        let saved = app.store.view(Branch.self, id)?.description ?? ""
+        LineEdit.of(app).save(app, describeField(id), saved: saved, command: "branch.describe", target: id)
     }
 
     /// The force scope Ship read for this tip (`ShipState`: GET /force-scope, once per tip), if any.
@@ -185,22 +194,14 @@ enum BranchCommands {
             id: "branch.describe.edit", title: "Edit the branch's description in place", scope: .branch, verb: .write, label: "describe",
             available: { id in app.router.surface.id == "forest" && m.face == .branches && m.branchView(id) != nil },
             local: { id, _ in
-                guard let id, let b = s.view(Branch.self, id) else { return }
-                m.describing = id
-                m.draft = b.description
-                app.beginInsert(describeField)
+                guard let id, s.view(Branch.self, id) != nil else { return }
+                LineEdit.of(app).open(app, describeField(id))
             }))
         r.register(Command(
             id: "branch.describe.save", title: "Save the description you're typing", scope: .forest, verb: .send, modes: [.insert],
             label: "save", quiet: true,
-            available: { _ in m.describing != nil && app.insertField == describeField },
-            local: { _, _ in
-                guard let id = m.describing else { return }
-                let text = m.draft
-                m.describing = nil
-                app.keys.setMode(.normal)
-                app.runner.dispatch("branch.describe", via: .key, target: id, arg: text)
-            }))
+            available: { _ in describing(app) != nil },
+            local: { _, _ in if let id = describing(app) { saveDescription(app, id) } }))
 
         // ── holding work for the morning ──
 
@@ -241,9 +242,7 @@ enum BranchCommands {
                 return holdWrite(row, ids, until: nil)
             }))
 
-        // esc backs out of a launch or a description being typed (commands/app.ts overlay.close)
-        app.addCloser(isOpen: { m.launching != nil || m.describing != nil }, close: {
-            if m.describing != nil { m.describing = nil } else { m.launching = nil }
-        })
+        // esc backs out of a launch (commands/app.ts overlay.close)
+        app.addCloser(isOpen: { m.launching != nil }, close: { m.launching = nil })
     }
 }

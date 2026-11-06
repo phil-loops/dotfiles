@@ -54,13 +54,6 @@ public final class ForestModel {
     public var launching: String?
     /// branches (and landed chapters, by row key) showing their whole commit messages
     public var wordsOpen: Set<String> = []
-    /// the forest-page branch whose description is being edited in its row
-    public var describing: String?
-    /// The forest row whose line, or whose name, is being typed in place (Forests home).
-    public var describingProject: String?
-    public var renamingProject: String?
-    /// the description being typed
-    public var draft = ""
     /// Each forest page's face: its branches as they stand, or the feature's story. A forest
     /// shows its branches until you flip it; the jumplist keeps the face with the place.
     public var faces: [String: Face] = [:]

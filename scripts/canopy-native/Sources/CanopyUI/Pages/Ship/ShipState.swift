@@ -81,8 +81,6 @@ public final class ShipState {
     @ObservationIgnored public var openURL: (URL) -> Void = { NSWorkspace.shared.open($0) }
     /// Puts text on the clipboard (`y`). The keytutor's practice app swaps it.
     @ObservationIgnored public var copyText: (String) -> Void = { Clipboard.copy($0) }
-    /// A branch's description as it's being typed, by branch id (saved on leaving insert).
-    public var describing: [String: String] = [:]
 
     public init() {}
 

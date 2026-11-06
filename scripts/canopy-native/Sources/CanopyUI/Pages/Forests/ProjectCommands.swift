@@ -10,8 +10,19 @@ enum ProjectCommands {
     /// Archive is putting it away; focus and the workbench are this page's own (`, f` / `, w`).
     static let key: [ProjectState: (verb: Verb?, leader: LocalKey?)] = [.focus: (nil, LocalKey(",f")), .workbench: (nil, LocalKey(",w")), .archive: (.putAway, nil)]
     static let v1Key: [ProjectState: String] = [.focus: "f", .workbench: "w", .archive: "x"]
-    static let describeField = "forests.line"
-    static let renameField = "forests.name"
+    /// The fields a forest's line and its name are written in.
+    static func describeField(_ id: String) -> String { "forests.line|\(id)" }
+    static func renameField(_ id: String) -> String { "forests.name|\(id)" }
+    /// What a forest's line field starts from: Phil's own words, else empty (a borrowed line isn't his to edit).
+    static func ownLine(_ p: Project) -> String { p.summaryBy == "phil" ? p.summary : "" }
+
+    /// The forest field being typed in, with the command that saves it.
+    static func editing(_ app: AppModel) -> (field: String, command: String, project: Project)? {
+        let f = app.insertField
+        if let id = LineEdit.target(f, prefix: "forests.line"), let p = app.store.view(Project.self, id) { return (f!, "project.describe", p) }
+        if let id = LineEdit.target(f, prefix: "forests.name"), let p = app.store.view(Project.self, id) { return (f!, "project.rename", p) }
+        return nil
+    }
 
     static func install(_ app: AppModel) {
         unowned let app = app
@@ -72,11 +83,8 @@ enum ProjectCommands {
             id: "project.describe.edit", title: "Write the forest's line in place", scope: .project, verb: .write, label: "line",
             available: home,
             local: { [unowned app] id, _ in
-                guard let id, let p = s.view(Project.self, id) else { return }
-                m.renamingProject = nil
-                m.describingProject = id
-                m.draft = p.summaryBy == "phil" ? p.summary : ""
-                app.beginInsert(describeField)
+                guard let id, s.view(Project.self, id) != nil else { return }
+                LineEdit.of(app).open(app, describeField(id))
             }))
         r.register(Command(
             id: "project.rename", title: "Rename the forest", scope: .global, budget: .configWrite, needsArg: true, quiet: true,
@@ -97,25 +105,17 @@ enum ProjectCommands {
             id: "project.rename.edit", title: "Rename the forest in place", scope: .project, verb: .rename, label: "rename",
             available: home,
             local: { [unowned app] id, _ in
-                guard let id, let p = s.view(Project.self, id) else { return }
-                m.describingProject = nil
-                m.renamingProject = id
-                m.draft = p.name
-                app.beginInsert(renameField)
+                guard let id, s.view(Project.self, id) != nil else { return }
+                LineEdit.of(app).open(app, renameField(id))
             }))
         r.register(Command(
             id: "project.words.save", title: "Save what you're typing on the forest", scope: .forests, verb: .send, modes: [.insert],
             label: "save", quiet: true,
-            available: { [unowned app] _ in
-                (m.describingProject != nil && app.insertField == describeField) || (m.renamingProject != nil && app.insertField == renameField)
-            },
+            available: { [unowned app] _ in editing(app) != nil },
             local: { [unowned app] _, _ in
-                let text = m.draft
-                let (cmd, id) = m.renamingProject.map { ("project.rename", $0) } ?? ("project.describe", m.describingProject ?? "")
-                m.describingProject = nil
-                m.renamingProject = nil
-                app.keys.setMode(.normal)
-                app.runner.dispatch(cmd, via: .key, target: id, arg: text)
+                guard let (field, cmd, p) = editing(app) else { return }
+                let saved = cmd == "project.rename" ? p.name : ownLine(p)
+                LineEdit.of(app).save(app, field, saved: saved, command: cmd, target: p.id)
             }))
 
         // ── the whole forest at once: does it merge, read it ──
