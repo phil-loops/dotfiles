@@ -81,6 +81,32 @@ extension AppModel {
         }
     }
 
+    /// `space /`: every line of the branch's diff, matched as typed text (smart case, as Helix's
+    /// global search); choosing one lands the diff's cursor on it (a jump).
+    func searchBranch() throws {
+        guard case .review = router.route else { throw Refusal("space / searches a branch's changes · open a branch") }
+        let pg = ReviewPageState.of(self)
+        let hits = pg.views.flatMap { fv in fv.rows.map { (fv.file.path, $0) } }
+        guard !hits.isEmpty else { throw Refusal("no changes here to search") }
+        let items = hits.map { path, r -> PickItem in
+            let l = r.right ?? r.left
+            return PickItem(label: "\(shortPath(path)):\(l?.new ?? l?.old ?? 0)", text: (l?.text ?? "").trimmingCharacters(in: .whitespaces))
+        }
+        nav.pick("search the branch", items, rank: { want in Self.grep(items.map { $0.text ?? "" }, want) }) { [weak self] i in
+            guard let self else { return }
+            let (path, r) = hits[i]
+            self.recordJump()
+            pg.setCursor(pg.stopIndex["l|\(path)|\(r.key)"] != nil ? "l|\(path)|\(r.key)" : "f|\(path)")
+        }
+    }
+
+    /// The lines holding `want` as typed, in order; case matters only once `want` has a capital.
+    nonisolated static func grep(_ lines: [String], _ want: String) -> [Int] {
+        guard !want.isEmpty else { return Array(lines.indices) }
+        let fold = want == want.lowercased()
+        return lines.indices.filter { lines[$0].range(of: want, options: fold ? .caseInsensitive : []) != nil }
+    }
+
     /// The focus lane as the forests home shows it (rank, then name, then repo; shelved ones out): `g 1`…`g 9`.
     var focusLane: [Project] { forestModel.projects().focus }
 
@@ -115,6 +141,8 @@ extension NavCommands {
                            local: { [weak app] _, _ in try app?.pickJump() }))
         r.register(Command(id: "nav.flags", title: "Pick a change you flagged, on any branch of this repo", scope: .global, verb: .flags, label: "flagged",
                            local: { [weak app] _, _ in try app?.pickFlags() }))
+        r.register(Command(id: "nav.grep", title: "Search the branch's changes for text (Helix's global search)", scope: .global, verb: .grep, label: "search branch",
+                           local: { [weak app] _, _ in try app?.searchBranch() }))
         r.register(Command(id: "nav.picker.last", title: "Reopen the last picker, query and all", scope: .global, verb: .lastPicker, label: "last picker",
                            available: { [weak app] _ in app?.nav.canReopen ?? false },
                            local: { [weak app] _, _ in app?.nav.reopen() }))

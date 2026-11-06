@@ -64,6 +64,7 @@ import Testing
         case ("along", 7): a.keys.handle("A-.")
         case ("code", 1): ReviewPageState.of(sb).filter = "head"; press(a, keyOf(sb, .send))
         case ("code", 3): PageSearch.of(sb).typed(sb, "wave"); press(a, keyOf(sb, .send))
+        case ("code", 9): sb.nav.typed("wave"); press(a, keyOf(sb, .send))
         case ("writing", 0):
             let ship = ShipState.of(sb)
             if let c = ship.composer { ship.setText(c.key, "reads well") }   // what typing into the box does
