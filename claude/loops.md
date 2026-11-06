@@ -31,6 +31,8 @@ task ci:run              # full CI pipeline locally
 
 Run `task --list` for the full set.
 
+**Exception — in a worktree whose `node_modules` is a symlink to the main checkout's** (the `cw` default): `@loops/*` resolve to the main checkout's `packages/` and its `.gen`, built for whatever commit that checkout is parked on, so a test or typecheck there can red (or green) on another commit's code. Run `seed-gen --sync .` first (~10s; the gates run it too) — it gives the tree its own packages dist and `.gen` when they differ. Then run the command under the task, not the task: `task test`, `task lint*` and `task build:packages` run `npm install`, which replaces the symlink with a private 1.5GB install. A focused test is `npx tsx --tsconfig typescript/tsconfig.test-runtime.json --test-reporter=dot --test <file>` (query tests need `.env` linked too).
+
 ## Migrations
 
 **A new migration must pass squawk before it ships**, absent a stated reason. Run it the moment the file exists — CI (`lint-migrations`) runs the same check:
@@ -43,12 +45,15 @@ npx -y squawk-cli packages/prisma/migrations/<dir>/migration.sql
 
 ## Typecheck
 
-Whenever a change touches a typed boundary (zod validators, tRPC inputs, model/query signatures, exported types) run a full project typecheck before declaring done. **Default to `npx tsc`** — on main, tsc is the native fast compiler (~7–10s full runtime check), so the routine check and the CI-exact verdict are the same command:
+Whenever a change touches a typed boundary (zod validators, tRPC inputs, model/query signatures, exported types) run a full project typecheck before declaring done. **Default to `npx tsc` on CI's three configs** — tsc is the native fast compiler (seconds each), and these are what CI and the push gates check:
 
 ```bash
-npx tsc --project typescript/tsconfig.runtime.json --noEmit   # the default full typecheck
-npx tsc --project typescript/tsconfig.test.json --noEmit      # + tests
+npx tsc --project typescript/tsconfig.next.json --noEmit
+npx tsc --project typescript/tsconfig.test.json --noEmit
+npx tsc --project typescript/tsconfig.runtime-build.json --noEmit
 ```
+
+Never `tsconfig.runtime.json`: it checks every file under nodenext resolution, which no CI job does, and reds on main itself (stripe's cjs typings lack `CustomerSubscriptionUpdatedEvent`; 2026-11-05 a session chased that "error" across three branches). `task lint:typecheck` is the same surface but runs `npm install` first (below).
 
 (A parked branch that predates the TS7 upgrade or the config split may still carry a single `tsconfig.node.json` and pin the slow tsc 6: the global `tsgo` preview exists for those trees. Typecheck runs in the viewer push gates, not the pre-push hook, which only blocks WIP commits and TODOs.)
 
