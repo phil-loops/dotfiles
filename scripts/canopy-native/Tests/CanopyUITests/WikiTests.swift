@@ -99,6 +99,25 @@ import Testing
 
     var wiki: (AppModel) -> WikiState { { $0.state { WikiState() } } }
 
+    @Test func thePagesAreReadAgainWhenTheServersStampMoves() async throws {
+        let a = try app()
+        let w = wiki(a)
+        var reads = 0
+        w.fetch = { _ in reads += 1; return PagesReply(pages: [], ref: "r\(reads)") }
+        func stamp(_ s: String) throws {
+            let j: [String: Any] = ["epoch": "e", "versions": ["wiki": 1], "entities": ["wiki": ["pages": ["id": "pages", "stamp": s]]]]
+            a.store.hydrate(try Snapshot.decode(JSONSerialization.data(withJSONObject: j)))
+        }
+        try stamp("a")
+        w.load(a)
+        await until("the first read") { reads == 1 && w.read?.ref == "r1" }
+        w.load(a)
+        try stamp("b")
+        w.load(a)
+        await until("a page file moved") { reads == 2 && w.read?.ref == "r2" }
+        #expect(reads == 2, "the same stamp reads nothing")
+    }
+
     @Test func theWikisCommandsAreAllReachableByKey() throws {
         let a = try app()
         #expect(KeyboardRule.violations(a) { $0.hasPrefix("wiki.") || $0 == "find.wiki" }.isEmpty)

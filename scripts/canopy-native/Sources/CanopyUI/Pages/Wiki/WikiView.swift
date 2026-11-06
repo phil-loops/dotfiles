@@ -38,7 +38,7 @@ struct WikiView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .onAppear { wiki.load(app) }
+        .task(id: WikiState.stamp(app)) { wiki.load(app) }
         .onChange(of: wiki.current(app)?.slug, initial: true) { _, slug in if slug != nil { wiki.arrive(app) } }
     }
 }
