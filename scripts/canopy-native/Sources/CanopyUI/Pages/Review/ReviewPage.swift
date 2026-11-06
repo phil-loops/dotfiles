@@ -120,7 +120,7 @@ private struct ReviewHeader: View {
     /// Whether the words pane's cursor is on the row the title shows.
     private func onTitle(_ pg: ReviewPageState, _ c: Conv?) -> Bool {
         guard app.pane?.id == ShipSeam.wordsPane, pg.integration == nil else { return false }
-        return app.cursors["review/\(ShipSeam.wordsPane)"] == (c == nil ? "w|desc" : "w|title")
+        return app.cursor(in: ShipSeam.wordsPane) == (c == nil ? "w|desc" : "w|title")
     }
 
     private func waiting(_ c: Conv, _ pg: ReviewPageState) -> [String] {
@@ -149,7 +149,7 @@ private struct BranchLine: View {
         HStack(alignment: .center, spacing: 0) {
             if let l = pg.line {
                 let lit = pg.lit
-                let cursor = app.pane?.id == reviewLinePane ? app.cursors["review/\(reviewLinePane)"].flatMap(l.index(key:)) : nil
+                let cursor = app.pane?.id == reviewLinePane ? app.cursor(in: reviewLinePane).flatMap(l.index(key:)) : nil
                 let rows = Dictionary((ship.historyRows(pg.id) ?? []).map { ($0.sha, $0) }, uniquingKeysWith: { a, _ in a })
                 let named = Set([lit?.lo, lit?.hi, cursor, pg.lineAnchor, l.parentIndex, 0, l.tip].compactMap { $0 })
                 ForEach(Array(l.points.enumerated()), id: \.offset) { i, p in
@@ -400,7 +400,7 @@ private struct WindowView: View {
 
     var body: some View {
         if let l = window.doc {
-            let line = RowKey.id(app.cursors["\(app.router.surface.id)/\(window.pane)"], "s").flatMap(Int.init)
+            let line = RowKey.id(app.cursor(in: window.pane), "s").flatMap(Int.init)
             CodePaneView(handle: window.canvas, pane: window.pane, path: l.path, refLabel: l.sha, text: window.text,
                          lit: l.line...max(l.line, l.end ?? l.line), repo: l.repo, sha: l.sha,
                          word: window.word.flatMap { $0.line == line ? $0 : nil }, searched: true)
@@ -467,7 +467,7 @@ public struct CodePaneView: View {
             } else if let text {
                 let lines = text.hasSuffix("\n") ? Array(text.components(separatedBy: "\n").dropLast()) : text.components(separatedBy: "\n")
                 let c = CanvasColors(theme)
-                let cursor = app.cursors["\(app.router.surface.id)/\(pane)"] ?? lit.map { "s:\($0.lowerBound)" }
+                let cursor = app.cursor(in: pane) ?? lit.map { "s:\($0.lowerBound)" }
                 CanvasView(handle: handle, segments: [Segment(key: "code|\(repo)|\(sha)|\(path)|\(lines.count)") { ReviewDocument.code(lines, path: path, c) }],
                            marks: marks(cursor: cursor, focused: focused),
                            centerOn: lit.map { "s:\($0.lowerBound)|\(repo)|\(sha)|\(path)" },

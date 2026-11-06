@@ -41,9 +41,6 @@ enum KeyTutorSandbox {
         ship.openURL = { u in KeyTutorStub.note(port, "open \(u.absoluteString)") }
         ship.copyText = { s in KeyTutorStub.note(port, "copy \(s)") }
         ship.defaults = MemoryDefaults()
-        let fm = app.forestModel
-        fm.defaults = MemoryDefaults()
-        fm.face = .branches
         app.state { Workstation(app: app) }.openURL = { u in KeyTutorStub.note(port, "open \(u.absoluteString)") }
         ReviewPageState.of(app).githubWeb = { _ in "https://github.com/practice/canopy" }
         let tutor = TutorArea.state(app)

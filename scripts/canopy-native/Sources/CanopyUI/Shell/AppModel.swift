@@ -191,7 +191,7 @@ public final class AppModel: CommandContext {
 
     private func modeChanged(_ from: KeyMode, _ to: KeyMode) {
         if from == .insert { insertField = nil }
-        if from == .select && keys.mode != .select { anchors[paneKey] = nil }
+        if from == .select && keys.mode != .select { anchors[focusedKey] = nil }
         if from == .picker { nav.close() }
         if from == .labels { labeling = nil }
         if from == .search, PageSearch.of(self).typing { PageSearch.of(self).cancel(self) }
@@ -211,19 +211,32 @@ public final class AppModel: CommandContext {
         return ps.first { $0.id == id } ?? ps.first
     }
 
-    private var paneKey: String { "\(router.surface.id)/\(pane?.id ?? "main")" }
+    /// The page a cursor and select anchor belong to: its kind and the thing it shows, so two
+    /// forests or two branches each keep their own. Focus (which pane your hands are in) stays
+    /// with the kind of page: following a link keeps you reading.
+    public var placeKey: String { "\(router.route.surfaceID):\(router.route.arg)" }
+
+    /// A pane's key on this page.
+    public func paneKey(_ pane: String) -> String { "\(placeKey)/\(pane)" }
+
+    /// A pane's cursor on this page, focused or not.
+    public func cursor(in pane: String) -> String? { cursors[paneKey(pane)] }
+
+    public func cursorIdx(in pane: String) -> Int { cursorIdxs[paneKey(pane)] ?? 0 }
+
+    private var focusedKey: String { paneKey(pane?.id ?? "main") }
 
     public var rows: [String] { pane?.rows ?? [] }
 
     /// The focused pane's cursor row.
     public var cursor: String? {
-        get { cursors[paneKey] }
-        set { cursors[paneKey] = newValue }
+        get { cursors[focusedKey] }
+        set { cursors[focusedKey] = newValue }
     }
 
     public var cursorIdx: Int {
-        get { cursorIdxs[paneKey] ?? 0 }
-        set { cursorIdxs[paneKey] = newValue }
+        get { cursorIdxs[focusedKey] ?? 0 }
+        set { cursorIdxs[focusedKey] = newValue }
     }
 
     /// The cursor's row while it's visible, else whatever now sits in its place — so removing a
@@ -236,7 +249,7 @@ public final class AppModel: CommandContext {
 
     /// `selected` for a pane already in hand: a pane's rows can cost a page's whole model to list.
     func selected(in p: Pane) -> String? {
-        let r = p.rows, k = "\(router.surface.id)/\(p.id)"
+        let r = p.rows, k = paneKey(p.id)
         if let c = cursors[k], r.contains(c) { return c }
         guard !r.isEmpty else { return nil }
         return r[max(0, min(cursorIdxs[k] ?? 0, r.count - 1))]
@@ -245,7 +258,7 @@ public final class AppModel: CommandContext {
     func selection(in p: Pane) -> [String] {
         let r = p.rows
         guard let sel = selected(in: p), let at = r.firstIndex(of: sel) else { return [] }
-        guard keys.mode == .select, let a = anchors["\(router.surface.id)/\(p.id)"] else { return [sel] }
+        guard keys.mode == .select, let a = anchors[paneKey(p.id)] else { return [sel] }
         let lo = max(0, min(a, at)), hi = min(r.count - 1, max(a, at))
         return Array(r[lo...hi])
     }
@@ -260,7 +273,7 @@ public final class AppModel: CommandContext {
 
     /// Put a pane's cursor without focusing it: a window that isn't on screen keeps its place.
     public func setCursor(_ key: String?, pane id: String) {
-        let k = "\(router.surface.id)/\(id)"
+        let k = paneKey(id)
         cursors[k] = key
         cursorIdxs[k] = max(0, panes.first { $0.id == id }?.rows.firstIndex(of: key ?? "") ?? 0)
     }
@@ -281,7 +294,7 @@ public final class AppModel: CommandContext {
 
     /// Drop the select anchor at the cursor (`v`).
     public func anchorHere() {
-        anchors[paneKey] = rows.firstIndex(of: selected ?? "") ?? cursorIdx
+        anchors[focusedKey] = rows.firstIndex(of: selected ?? "") ?? cursorIdx
     }
 
     public func focus(pane id: String) {

@@ -65,7 +65,7 @@ public enum Dump {
         let completion = app.completions.first?.id ?? ""
         app.keys.handle("ret")
         let afterColon = app.router.route.path
-        app.router.goBack()
+        _ = app.jumpBack()
         let focus = s.list(Project.self).filter { $0.state == .focus }.sorted { ($0.rank ?? 0) < ($1.rank ?? 0) }.map(\.name)
 
         let out: JSONValue = [

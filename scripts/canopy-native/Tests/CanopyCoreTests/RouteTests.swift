@@ -50,24 +50,15 @@ import Testing
         #expect(Route.integrationOf("add-x") == nil)
     }
 
-    @MainActor @Test func historyBackAndForward() {
+    @MainActor @Test func navigatingSkipsWhereYouAlreadyAre() {
         let r = Router()
         var navs: [String] = []
         r.onNavigate = { _, to in navs.append(to.path) }
         r.navigate(.todo)
         r.navigate(.todo)
         r.navigate("/v2/machine")
-        #expect(r.back == [.forests, .todo])
-        #expect(r.goBack())
-        #expect(r.route == .todo)
-        #expect(r.forward == [.machine])
-        r.navigate(.dashboard)
-        #expect(r.forward.isEmpty)
-        #expect(r.goBack() && r.goBack())
-        #expect(r.route == .forests)
-        #expect(!r.goBack())
-        #expect(r.goForward())
-        #expect(navs == ["/v2/todo", "/v2/machine", "/v2/todo", "/v2/dashboard", "/v2/todo", "/v2", "/v2/todo"])
+        #expect(r.route == .machine)
+        #expect(navs == ["/v2/todo", "/v2/machine"])
     }
 
     @Test func theQueryIsKeptForThePageNotTheRoute() {

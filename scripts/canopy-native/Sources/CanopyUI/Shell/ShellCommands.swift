@@ -112,13 +112,6 @@ enum ShellCommands {
             r.register(Command(id: "nav.\(s.id)", title: "Go to \(s.title)", scope: .global, verb: go[s.id],
                                local: { [weak app] _, _ in app?.go(Route(s.path)) }))
         }
-        // the window's history: ⌘[ / ⌘] in the menu bar, and `:route.back` / `:route.forward`
-        r.register(Command(id: "route.back", title: "Go back a page", scope: .global, quiet: true,
-                           available: { [weak app] _ in !(app?.router.back.isEmpty ?? true) },
-                           local: { [weak app] _, _ in app?.router.goBack() }))
-        r.register(Command(id: "route.forward", title: "Go forward a page", scope: .global, quiet: true,
-                           available: { [weak app] _ in !(app?.router.forward.isEmpty ?? true) },
-                           local: { [weak app] _, _ in app?.router.goForward() }))
 
         // what the space menu finds by name: the arg is the branch or forest id ("<repo>:<name>")
         r.register(Command(id: "find.branch", title: "Open a branch you found", scope: .global, needsArg: true, quiet: true,
