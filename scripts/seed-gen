@@ -21,7 +21,8 @@
 #   default (hooks; async, never blocks):
 #     main checkout        rebuild when generation inputs or emitted artifacts change
 #     scratch review tree  symlink main's .gen — a read surface, nothing there writes it
-#     any other worktree   copy main's .gen — `task dev` there must not write through
+#     any other worktree   copy main's .gen — `task dev` there must not write through — then
+#                          start a detached, heavy-turn-queued --sync so the tree describes its HEAD
 #
 #   --sync (stack-gates; foreground): make THIS tree's .gen describe THIS tree's HEAD —
 #     reseed from main if absent, trade a symlink for a private copy rather than write
@@ -675,6 +676,15 @@ if [[ "$(realpath_of "$dir")" != "$(realpath_of "$src")" ]]; then
   # HEAD is a --sync-built .gen — that one is real, keep it.)
   if [[ ! -L "$dir/.gen" && "$(cat "$dir/.gen/.seed-gen-sha" 2>/dev/null)" != "$(git -C "$dir" rev-parse HEAD 2>/dev/null)" ]]; then
     rm -f "$dir/.gen/.seed-gen-sha"
+  fi
+  # The copy describes main's HEAD and @loops/* still resolve to main's packages dist, so a test
+  # here runs another commit's code until a --sync makes the tree describe its own HEAD. Start one
+  # detached on every seed (worktree creation and each checkout/merge/rewrite hook): it waits for
+  # this run's lock, queues as batch work, and is a fast no-op when the tree is already current.
+  if [[ -z "${SEED_GEN_NO_BACKGROUND_SYNC:-}" ]]; then
+    self="$(cd "$(dirname "$0")" && pwd -P)"
+    nohup "$self/heavy-turn" --batch --class seed-gen -- "$self/seed-gen" --sync "$dir" \
+      >"$_gitdir/seed-gen-sync.log" 2>&1 </dev/null &
   fi
   exit 0
 fi
