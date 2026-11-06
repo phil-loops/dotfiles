@@ -52,10 +52,10 @@ import threading
 import time
 from urllib.parse import parse_qs
 
-from . import ctx, outbox, push, repostate, reviewdesk, sync, todo, viewed, watch
+from . import ctx, outbox, push, repostate, reviewdesk, sync, todo, viewed, watch, wiki
 
 EPOCH = f"{os.getpid():x}{int(time.time()):x}"
-DOMAINS = ("git", "remote", "review", "todo")
+DOMAINS = ("git", "remote", "review", "todo", "wiki")
 RING = 128
 REVIEW_TYPES = ("conv", "thread", "draft", "viewed")
 TICK = 0.5
@@ -392,6 +392,8 @@ def refresh():
         _commit("review", _merge(review.values(), REVIEW_TYPES), None, tick)
         tfp = todo.fingerprint()
         _commit("todo", todo.entities() if tfp != _D["todo"].fp else None, tfp, tick)
+        wfp = wiki.fingerprint()
+        _commit("wiki", wiki.entities(wfp) if wfp != _D["wiki"].fp else None, wfp, tick)
         _each_repo(lambda n: reviewdesk.release_due())
 
 

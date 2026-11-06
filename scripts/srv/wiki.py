@@ -17,6 +17,7 @@
 # Resolution, budget and the duplicate-prose detector are mail_map's, imported rather
 # than reimplemented; this module adds page kinds and multi-root loading. mail_map.py
 # folds in here once its content files go quiet (they're live in another session today).
+import hashlib
 import json
 import os
 import sys
@@ -110,6 +111,37 @@ def _load():
             }
     pages = sorted(seen.values(), key=lambda p: (p["order"], p["slug"]))
     return pages, problems
+
+
+def fingerprint():
+    """Moves when any page file, in any repo's home, is added, removed or saved — a stat per
+    file, no reads."""
+    out = []
+    try:
+        homes = sorted(os.path.join(WIKI_ROOT, d) for d in os.listdir(WIKI_ROOT))
+    except OSError:
+        homes = []
+    for directory in homes + sorted(LEGACY.values()):
+        try:
+            names = sorted(os.listdir(directory))
+        except OSError:
+            continue
+        for name in names:
+            if not name.endswith(".md"):
+                continue
+            try:
+                st = os.stat(os.path.join(directory, name))
+            except OSError:
+                continue
+            out.append((directory, name, st.st_mtime_ns, st.st_size))
+    return tuple(out)
+
+
+def entities(fp):
+    """The `wiki` domain of /state: one stamp that moves with the pages. The bodies stay on
+    GET /wiki-pages; canopy reads them again when the stamp moves."""
+    stamp = hashlib.sha1(repr(fp).encode()).hexdigest()[:12]
+    return {"wiki": {"pages": {"id": "pages", "stamp": stamp}}}
 
 
 def _repo_ref():

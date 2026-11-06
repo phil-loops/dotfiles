@@ -2,8 +2,9 @@ import CanopyCore
 import Foundation
 import Observation
 
-/// The wiki (wikiread.ts), read once per launch — GET /wiki-pages holds every page's body — and
-/// kept: moving between pages never waits. A citation's lines come from GET /wiki-src at origin/main.
+/// The wiki (wikiread.ts): GET /wiki-pages holds every page's body, kept so moving between pages
+/// never waits, and read again whenever the server's `wiki` stamp moves (a page file was saved,
+/// added or removed). A citation's lines come from GET /wiki-src at origin/main.
 /// Also the page's cursor model: three panes — the page list, the page's stops (each link, and each
 /// block with none, in reading order), and the open citation's lines.
 @MainActor
@@ -11,6 +12,10 @@ import Observation
 final class WikiState {
     var read: PagesReply?
     @ObservationIgnored private var asked = false
+    /// The `wiki` stamp the pages in hand were read at (nil: a server without one).
+    @ObservationIgnored private var readAt: String?
+    /// How the pages are read; tests swap it.
+    @ObservationIgnored var fetch: (AppModel) async throws -> PagesReply = { try await $0.transport.getJSON("/wiki-pages", as: PagesReply.self) }
     @ObservationIgnored private var docs: [String: ProseDoc] = [:]
 
     /// The citation open beside the page: its anchor, then its lines once they arrive.
@@ -22,15 +27,24 @@ final class WikiState {
 
     static let listPane = "pages", pagePane = "page", sourcePane = "source"
 
-    /// Read the pages, once — the menu's finder asks too.
+    /// The server's stamp for the wiki's pages: moves when any page file does.
+    static func stamp(_ app: AppModel) -> String? { app.store.raw["wiki"]?["pages"]?["stamp"]?.string }
+
+    /// Read the pages unless the ones in hand are as new as the stamp — the menu's finder asks too.
     func load(_ app: AppModel) {
-        guard !asked else { return }
+        let at = Self.stamp(app)
+        guard !asked || at != readAt else { return }
         asked = true
-        let t = app.transport
+        readAt = at
+        let fetch = self.fetch
         Task { @MainActor in
             do {
-                read = try await t.getJSON("/wiki-pages", as: PagesReply.self)
+                let r = try await fetch(app)
+                guard readAt == at else { return }
+                docs = [:]
+                read = r
             } catch {
+                guard readAt == at else { return }
                 asked = false
                 read = PagesReply(err: String(describing: error))
             }
@@ -53,7 +67,7 @@ final class WikiState {
         return slug.map { page($0) } ?? pages.first
     }
 
-    /// A page's body as the renderer draws it, read back into blocks (cached: pages don't change).
+    /// A page's body as the renderer draws it, read back into blocks (cached until the pages are read again).
     func doc(_ p: WikiPage) -> ProseDoc {
         if let d = docs[p.slug] { return d }
         let d = Prose.doc(WikiText.html(p.body) { [weak self] s in self?.page(s)?.title })
