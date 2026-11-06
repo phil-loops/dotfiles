@@ -1,14 +1,12 @@
 import Foundation
 import Observation
 
-/// The one way the app changes surface (router.ts), with the browser's back/forward stacks.
+/// The one way the app changes surface (router.ts). Going back is the jumplist's (`C-o`), the one history.
 /// Every navigation calls `onNavigate` — telemetry's `nav` event hangs there.
 @MainActor
 @Observable
 public final class Router {
     public private(set) var route: Route
-    public private(set) var back: [Route] = []
-    public private(set) var forward: [Route] = []
     /// The query of the address that brought you here (`navigate(_ address:)`, a deep link, the
     /// launch address); any other move clears it. A page reads it on arrival with `takeQuery`.
     public private(set) var query: [String: String] = [:]
@@ -36,9 +34,6 @@ public final class Router {
         query = [:]
         let from = route
         willNavigate?(from, to)
-        back.append(from)
-        if back.count > 200 { back.removeFirst(back.count - 200) }
-        forward = []
         route = to
         onNavigate?(from, to)
     }
@@ -68,29 +63,5 @@ public final class Router {
         let from = route
         route = to
         onNavigate?(from, to)
-    }
-
-    @discardableResult
-    public func goBack() -> Bool {
-        guard let to = back.last, allowed(to) else { return false }
-        query = [:]
-        back.removeLast()
-        let from = route
-        forward.append(from)
-        route = to
-        onNavigate?(from, to)
-        return true
-    }
-
-    @discardableResult
-    public func goForward() -> Bool {
-        guard let to = forward.last, allowed(to) else { return false }
-        query = [:]
-        forward.removeLast()
-        let from = route
-        back.append(from)
-        route = to
-        onNavigate?(from, to)
-        return true
     }
 }

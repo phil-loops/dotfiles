@@ -61,12 +61,14 @@ public final class ForestModel {
     public var renamingProject: String?
     /// the description being typed
     public var draft = ""
-    /// a forest page's face: its branches as they stand, or the feature's story (remembered)
-    public var face: Face = ForestModel.savedFace {
-        didSet { defaults.set(face.rawValue, forKey: Self.faceKey) }
+    /// Each forest page's face: its branches as they stand, or the feature's story. A forest
+    /// shows its branches until you flip it; the jumplist keeps the face with the place.
+    public var faces: [String: Face] = [:]
+    /// The open forest's face.
+    public var face: Face {
+        get { pageProject.flatMap { faces[$0] } ?? .branches }
+        set { if let p = pageProject { faces[p] = newValue } }
     }
-    /// Where the face is remembered; the keytutor's practice app keeps its own.
-    @ObservationIgnored public var defaults = UserDefaults.standard
     /// the clock stands use to decide whether a hold came due; the pages tick it
     public var now = Date()
     /// g j at a fork: the children the label layer offers, for the one `showLabels` call that reads them
@@ -76,8 +78,6 @@ public final class ForestModel {
     @ObservationIgnored var wasClosed: Set<String>?
 
     public enum Face: String { case branches, story }
-    static let faceKey = "v2.forest.face"
-    static var savedFace: Face { UserDefaults.standard.string(forKey: faceKey) == "story" ? .story : .branches }
 
     init(store: Store, router: Router, transport: Transport) {
         self.store = store; self.router = router; self.transport = transport

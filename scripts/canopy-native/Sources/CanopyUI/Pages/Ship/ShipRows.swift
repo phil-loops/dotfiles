@@ -86,7 +86,7 @@ public enum ShipRows {
             return ship.host.wholeBranch ? ["w|desc", "w|title", "w|body"] : ["w|desc"]
         }
         var out = ["w|desc", "w|title", "w|body"]
-        let at = app.cursors["\(app.router.surface.id)/\(wordsPane)"] ?? ""
+        let at = app.cursor(in: wordsPane) ?? ""
         for c in o.commits {
             out.append("w|s|\(c.sha)")
             if c.locked.isEmpty && (at == "w|s|\(c.sha)" || at == "w|b|\(c.sha)") { out.append("w|b|\(c.sha)") }

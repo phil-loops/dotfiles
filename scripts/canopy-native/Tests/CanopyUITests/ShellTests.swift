@@ -137,7 +137,7 @@ import Testing
         let a = app()
         a.keys.handle("g"); a.keys.handle("O")
         #expect(a.router.route == .todo)
-        a.runner.dispatch("route.back", via: .menu)
+        a.runner.dispatch("nav.back", via: .menu)
         #expect(a.router.route == .forests)
         a.runner.dispatch("find.branch", via: .menu, arg: "loops:a/b")
         #expect(a.router.route == .review(repo: "loops", branch: "a/b"))
@@ -240,7 +240,7 @@ import Testing
         #expect(a.keys.mode == .normal)
         #expect(a.router.route == .machine)
         a.keys.handle(":")
-        a.cmdline = "route.back"
+        a.cmdline = "nav.back"
         a.keys.handle("ret")
         #expect(a.router.route == .forests)
     }

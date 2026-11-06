@@ -283,6 +283,28 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:]) -> AppModel {
         #expect(BranchCommands.pushRoute("r:c", a) == "branch.gates.run")
     }
 
+    @Test func eachForestKeepsItsOwnCursor() {
+        let a = world()
+        a.go(.forest(repo: "r", project: "tree"))
+        a.setCursor("b:r:b")
+        a.go(.forest(repo: "r", project: "solo"))
+        #expect(a.cursor == nil, "a forest you haven't been to starts fresh")
+        a.setCursor("b:r:s")
+        a.go(.forest(repo: "r", project: "tree"))
+        #expect(a.selected == "b:r:b")
+    }
+
+    @Test func eachForestKeepsItsOwnFace() {
+        let a = world()
+        a.go(.forest(repo: "r", project: "tree"))
+        a.runner.dispatch("forest.face", via: .key)
+        #expect(a.forestModel.face == .story)
+        a.go(.forest(repo: "r", project: "solo"))
+        #expect(a.forestModel.face == .branches, "flipping one forest leaves the others alone")
+        a.go(.forest(repo: "r", project: "tree"))
+        #expect(a.forestModel.face == .story)
+    }
+
     @Test func retOnAReadyBranchOpensItAndNeverPushes() {
         let a = world()
         a.setCursor("p:r:solo"); a.keys.handle("ret")

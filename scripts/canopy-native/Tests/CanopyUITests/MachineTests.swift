@@ -81,7 +81,7 @@ import Testing
     }
 
     @Test func killTakesASecondPressAndEscDisarms() throws {
-        let (a, m) = try app()
+        let (a, _) = try app()
         let kill = a.registry.command("machine.kill")!
         #expect(kill.route!("3001")?.id == "machine.kill.arm")
         a.keys.handle("X")
@@ -98,7 +98,7 @@ import Testing
     }
 
     @Test func killAllAndReapArmToo() throws {
-        let (a, m) = try app()
+        let (a, _) = try app()
         a.keys.handle(","); a.keys.handle("x")
         #expect(a.runner.armed == "kill all")
         #expect(a.registry.command("machine.killall")!.route!("machine")?.id == "machine.stop.all")

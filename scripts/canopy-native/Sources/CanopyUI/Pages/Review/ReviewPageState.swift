@@ -853,10 +853,8 @@ public final class ReviewPageState: ShipHost {
 
     // ── the cursor ──
 
-    var diffPaneKey: String { "review/\(reviewDiffPane)" }
-
     /// The diff pane's cursor key (the shell keeps it), whichever pane has focus.
-    public var diffCursor: String? { app?.cursors[diffPaneKey] }
+    public var diffCursor: String? { app?.cursor(in: reviewDiffPane) }
 
     /// The stop under the cursor: the cursor's own while it exists, else whatever now sits in its
     /// place, else the first line (page.ts here).
@@ -865,7 +863,7 @@ public final class ReviewPageState: ShipHost {
         guard !s.isEmpty else { return nil }
         if let k = diffCursor {
             if let i = stopIndex[k] { return s[i] }
-            let i = app?.cursorIdxs[diffPaneKey] ?? 0
+            let i = app?.cursorIdx(in: reviewDiffPane) ?? 0
             return s[max(0, min(s.count - 1, i))]
         }
         return stopFiles.first.flatMap(landing(file:)).flatMap { stopIndex[$0] }.map { s[$0] } ?? s.first

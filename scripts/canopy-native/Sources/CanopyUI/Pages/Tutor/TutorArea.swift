@@ -153,9 +153,8 @@ enum TutorRows {
     static func codeCursor(_ app: AppModel, _ t: TutorState) -> Int? {
         let rows = codeLines(t)
         guard !rows.isEmpty else { return nil }
-        let key = "tutor/\(TutorPane.code)"
-        if let c = app.cursors[key], rows.contains(c) { return Int(c.dropFirst(2)) }
-        let i = max(0, min(app.cursorIdxs[key] ?? 0, rows.count - 1))
+        if let c = app.cursor(in: TutorPane.code), rows.contains(c) { return Int(c.dropFirst(2)) }
+        let i = max(0, min(app.cursorIdx(in: TutorPane.code), rows.count - 1))
         return Int(rows[i].dropFirst(2))
     }
 
