@@ -413,4 +413,11 @@ public final class AppModel: CommandContext {
         provider?.remember(&p, self)
         return p
     }
+
+    /// Where we are, for keeping across a relaunch: `here()` plus the page's window set.
+    public func savedHere() -> Place {
+        var p = here()
+        provider?.rememberLayout(&p, self)
+        return p
+    }
 }

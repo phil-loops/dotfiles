@@ -21,6 +21,7 @@ public struct Place: Equatable, Sendable {
     public var shared: Place {
         var p = self
         p.row = nil
+        p.windows = nil
         return p
     }
     /// a code place (CodeNav), when the page shows code
@@ -29,6 +30,17 @@ public struct Place: Equatable, Sendable {
     public var commit: String?
     /// the page's window the spot is in (the review page's splits), whose own jumps C-o walks
     public var window: Int?
+    /// The page's whole window set, only in a saved place (what Show brings back on relaunch): jumps
+    /// and shared links leave it out, so going back never rearranges your windows.
+    public var windows: [WindowSpec]?
+
+    /// One window of a saved set: its id, its column, and the file at the line it's on (nil: the diff).
+    public struct WindowSpec: Equatable, Sendable {
+        public var id: Int
+        public var column: Int
+        public var file: Loc?
+        public init(id: Int, column: Int, file: Loc? = nil) { self.id = id; self.column = column; self.file = file }
+    }
 
     public init(route: Route, pane: String? = nil, cursorKey: String? = nil, tab: String? = nil, row: Int? = nil, loc: Loc? = nil) {
         self.route = route; self.pane = pane; self.cursorKey = cursorKey; self.tab = tab; self.row = row; self.loc = loc
