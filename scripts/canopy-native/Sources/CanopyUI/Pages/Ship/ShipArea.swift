@@ -32,9 +32,8 @@ enum InsertCommands {
             verb: .send, modes: [.normal, .insert], label: "save", quiet: true,
             local: { _, _ in
                 guard let app = weakApp, let id = WordsCommands.branchOf(app, nil) else { return }
-                let describing = app.insertField?.hasPrefix("words.desc|") == true
+                if BranchCommands.describing(app) == id { return BranchCommands.saveDescription(app, id) }
                 app.keys.setMode(.normal)
-                if describing { return }
                 guard WordsState.of(app).pending(id) > 0 else { throw Refusal("nothing to save") }
                 app.runner.dispatch("words.save", via: .key, target: id)
             }))

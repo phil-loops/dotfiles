@@ -23,10 +23,6 @@ struct ForestPage: View {
             }
         }
         .padding(.horizontal, 16).padding(.bottom, 8)
-        .onChange(of: app.keys.mode) { from, _ in
-            // esc out of insert drops the description being typed
-            if from == .insert && m.describing != nil { m.describing = nil }
-        }
     }
 
     private func page(_ p: Project, _ f: ForestView) -> some View {
@@ -131,17 +127,22 @@ private struct ForestBranchView: View {
                 LoopStripView(branchID: b.id, size: 11).fixedSize()
             }
             VStack(alignment: .leading, spacing: 6) {
-                if m.describing == b.id {
-                    ModalTextField(BranchCommands.describeField, prompt: "one line: what the branch does", text: $m.draft)
+                let field = BranchCommands.describeField(b.id), edit = LineEdit.of(app)
+                if app.insertField == field {
+                    ModalTextField(field, prompt: "one line: what the branch does", text: edit.binding(field, saved: b.description))
                         .foregroundStyle(theme.ink)
                         .padding(4)
                         .background(theme.vellumRaise)
-                    Text("\(app.registry.keyOf("branch.describe.save")) saves · esc leaves it").font(Theme.text(11)).foregroundStyle(theme.inkFaint)
+                    Text("\(app.registry.keyOf("branch.describe.save")) saves · esc keeps it unsaved").font(Theme.text(11)).foregroundStyle(theme.inkFaint)
                 } else {
-                    Text(b.description.isEmpty ? "no description" : b.description)
-                        .foregroundStyle(b.description.isEmpty ? theme.inkFaint : theme.inkDim)
-                        .italic(b.description.isEmpty)
-                        .lineLimit(1)
+                    let text = edit.text(field, saved: b.description)
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(text.isEmpty ? "no description" : text)
+                            .foregroundStyle(text.isEmpty ? theme.inkFaint : theme.inkDim)
+                            .italic(text.isEmpty)
+                            .lineLimit(1)
+                        if edit.unsaved(field, saved: b.description) { UnsavedMark() }
+                    }
                 }
                 if m.wordsOpen.contains(b.id) {
                     CommitWords(branchID: b.id).font(Theme.text(12))
