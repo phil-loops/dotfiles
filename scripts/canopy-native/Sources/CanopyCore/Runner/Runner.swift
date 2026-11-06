@@ -40,6 +40,9 @@ public final class Runner {
     /// The command a key just ran (ok) or that had nothing to do (not ok), for ~half a second.
     public private(set) var fired: (id: String, ok: Bool, at: Date)?
     public private(set) var runs: [String: Run] = [:]
+    /// The one act waiting on its confirming press ("push r:b", "kill 3001"). A confirm lasts one
+    /// command: whatever runs next clears it, unless that command armed it again.
+    public private(set) var armed: String?
 
     @ObservationIgnored public let registry: CommandRegistry
     @ObservationIgnored public let store: Store
@@ -57,6 +60,9 @@ public final class Runner {
     @ObservationIgnored private var awaiting: [Int: (settled: () -> Bool, done: () -> Void)] = [:]
     @ObservationIgnored private var noteGen = 0
     @ObservationIgnored private var firedGen = 0
+    @ObservationIgnored private var armings = 0
+    /// While a `.main` command (↵) runs: it opens things and never sends or arms them.
+    @ObservationIgnored private var opening = false
     public static let settleWait: TimeInterval = 5
 
     public init(registry: CommandRegistry, store: Store, transport: Transport, telemetry: Telemetry) {
@@ -80,6 +86,15 @@ public final class Runner {
         }
     }
 
+    /// Ready a dangerous act for its second press. ↵ never arms: it only opens.
+    public func arm(_ key: String) throws {
+        if opening { throw Refusal("↵ only opens — this takes its own key") }
+        armed = key
+        armings += 1
+    }
+
+    public func disarm() { armed = nil }
+
     /// `explained`: a refusal already said why, so the key's "nothing here" doesn't cover it.
     private func echo(_ id: String, _ via: Via, _ ok: Bool, explained: Bool = false) {
         guard via == .key else { return }
@@ -98,14 +113,25 @@ public final class Runner {
         guard let cmd = registry.command(id) else { return }
         if via == .menu || via == .palette { context?.closeMenu() }
         let named = from ?? id
+        let opens = opening || cmd.verbs.contains(.main)
         if let route = cmd.route {
             let next = route(explicit ?? context?.target(for: cmd.scope))
             if let next, next.id != id {
+                let was = opening
+                opening = opens
+                defer { opening = was }
                 dispatch(next.id, via: via, target: next.target ?? explicit, arg: next.arg ?? arg, undoing: undoing, from: named)
             } else {
+                armed = nil
                 echo(named, via, false)
             }
             return
+        }
+        let armedBefore = armings
+        defer { if armings == armedBefore { armed = nil } }
+        if opens, cmd.write != nil {
+            say("↵ only opens — this takes its own key")
+            return echo(named, via, false, explained: true)
         }
         let t0 = Date()
         let target = explicit ?? context?.target(for: cmd.scope)
@@ -124,6 +150,9 @@ public final class Runner {
         }
 
         if let local = cmd.local {
+            let was = opening
+            opening = opens
+            defer { opening = was }
             do {
                 try local(target, arg)
                 echo(named, via, true)

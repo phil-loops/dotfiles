@@ -91,6 +91,7 @@ public final class AppModel: CommandContext {
         nav.record = { [weak self] in self?.recordJump() }
         router.onNavigate = { [weak self] from, to in
             self?.keys.reset()
+            self?.runner.disarm()
             if let b = to.branchID { self?.frecency.visit(b) }
             self?.telemetry.emit(["type": "nav", "from": .string(from.surfaceID), "to": .string(to.surfaceID), "path": .string(to.path), "paintMs": nil])
             Log.line("nav \(from.path) → \(to.path)")

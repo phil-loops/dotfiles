@@ -6,24 +6,17 @@ import Foundation
 /// to the stack's root and tip, `space f` to find on the page. (`g 1–9` is the shell's.)
 @MainActor
 enum ForestNav {
-    /// What `ret` does on a row — the row's one primary action (commands/project.ts row.primary).
+    /// What `ret` does on a row: opens it. Pushing, the PR, archiving each have their own key.
     static func primary(for row: String?, _ app: AppModel) -> RouteTo? {
         let m = app.forestModel
         if let id = RowKey.id(row, "b") {
-            guard let v = m.branchView(id) else { return nil }
-            switch v.st.action {
-            case .push: return RouteTo("branch.push", target: id)
-            case .pr: return RouteTo("branch.pr", target: id)
-            default: return RouteTo("branch.open", target: id)
-            }
+            return m.branchView(id) == nil ? nil : RouteTo("branch.open", target: id)
         }
         if let d = RowKey.id(row, "d"), app.store.view(Landed.self, d) != nil {
             return RouteTo("story.why", arg: RowKey.landed(d))
         }
         let pid = RowKey.id(row, "p") ?? (app.router.surface.id == "forest" ? m.pageProject : nil)
         guard let p = pid.flatMap({ app.store.view(Project.self, $0) }) else { return nil }
-        if p.state == .archive { return RouteTo("project.restore", target: p.id) }
-        if m.forest(p.id)?.closed == true { return RouteTo("project.archive", target: p.id) }
         return RouteTo("forest.page", target: p.id)
     }
 

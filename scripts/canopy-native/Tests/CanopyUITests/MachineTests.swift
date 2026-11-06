@@ -85,11 +85,11 @@ import Testing
         let kill = a.registry.command("machine.kill")!
         #expect(kill.route!("3001")?.id == "machine.kill.arm")
         a.keys.handle("X")
-        #expect(m.armed == "kill 3001")
+        #expect(a.runner.armed == "kill 3001")
         #expect(kill.route!("3001")?.id == "machine.stop", "the second press sends")
         #expect(kill.route!("3000")?.id == "machine.kill.arm", "arming one server never arms another")
         a.keys.handle("esc")
-        #expect(m.armed == nil)
+        #expect(a.runner.armed == nil)
         #expect(kill.route!("3001")?.id == "machine.kill.arm")
 
         let stop = try a.registry.command("machine.stop")!.write!("3001", nil)!
@@ -100,15 +100,14 @@ import Testing
     @Test func killAllAndReapArmToo() throws {
         let (a, m) = try app()
         a.keys.handle(","); a.keys.handle("x")
-        #expect(m.armed == "kill all")
+        #expect(a.runner.armed == "kill all")
         #expect(a.registry.command("machine.killall")!.route!("machine")?.id == "machine.stop.all")
         a.keys.handle("esc")
         a.keys.handle(","); a.keys.handle("c")
-        #expect(m.armed == "reap")
+        #expect(a.runner.armed == "reap")
         #expect(a.registry.command("machine.reap")!.route!("machine")?.id == "machine.reap.confirm")
         let reap = try a.registry.command("machine.reap.confirm")!.write!("machine", nil)!
         #expect(reap.path == "/preview-reap" && reap.body == [:])
-        #expect(m.armed == nil)
     }
 
     @Test func restartSwapMainAndStackBuildTheirWrites() throws {

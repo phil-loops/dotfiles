@@ -17,16 +17,25 @@ enum BranchCommands {
     /// diverged from origin can't push; inside the force scope `p` arms a force-with-lease instead.
     static func pushRoute(_ id: String?, _ app: AppModel) -> String? {
         let m = app.forestModel
-        guard let v = m.branchView(id) else { return nil }
+        guard let id, let v = m.branchView(id) else { return nil }
         if v.b.diverged {
             guard let s = forceScope(id, app), v.b.pending == nil else { return nil }
-            if s.eligible { return m.armed == id ? "branch.force.confirm" : "branch.force.arm" }
+            if s.eligible { return app.runner.armed == forceArm(id) ? "branch.force.confirm" : "branch.force.arm" }
             if !s.guards.allSatisfy({ $0.ok || $0.k == "gates" }) { return nil }
             return v.b.gates == .running ? "branch.gates.next" : "branch.gates.run"
         }
-        if ShipRules.canPush(v.b, v.pr) { return m.armed == id ? "branch.push.confirm" : "branch.push.arm" }
+        if ShipRules.canPush(v.b, v.pr) { return app.runner.armed == pushArm(id) ? "branch.push.confirm" : "branch.push.arm" }
         if !ShipRules.pushableButGates(v.b, v.pr) { return nil }
         return v.b.gates == .running ? "branch.gates.next" : "branch.gates.run"
+    }
+
+    /// What the runner holds while a branch's push, or its force, waits for the second press.
+    static func pushArm(_ id: String) -> String { "push \(id)" }
+    static func forceArm(_ id: String) -> String { "force \(id)" }
+
+    /// Whether this branch has a push or a force waiting for its second press.
+    static func isArmed(_ id: String, _ app: AppModel) -> Bool {
+        app.runner.armed == pushArm(id) || app.runner.armed == forceArm(id)
     }
 
     /// The force scope Ship read for this tip (`ShipState`: GET /force-scope, once per tip), if any.
@@ -110,12 +119,11 @@ enum BranchCommands {
         r.register(Command(
             id: "branch.push.arm", title: "Ready a push (the next press sends it)", scope: .branch, quiet: true,
             available: { id in m.branchView(id).map { ShipRules.canPush($0.b, $0.pr) } ?? false },
-            local: { id, _ in m.armed = id }))
+            local: { id, _ in if let id { try app.runner.arm(pushArm(id)) } }))
         r.register(Command(
             id: "branch.push.confirm", title: "Send the readied push", scope: .branch, budget: .gitWrite, v1: ["push-origin"], quiet: true,
-            available: { id in id != nil && m.armed == id },
+            available: { id in id.map { app.runner.armed == pushArm($0) } ?? false },
             write: { id, _ in
-                m.armed = nil
                 guard let v = m.branchView(id) else { return nil }
                 return Write(
                     ops: [Op(type: .branch, id: id, fields: ["pending": "pushing"])],
@@ -130,13 +138,12 @@ enum BranchCommands {
         r.register(Command(
             id: "branch.force.arm", title: "Ready a force-with-lease over origin (the next press sends it)", scope: .branch, quiet: true,
             available: { id in m.branchView(id)?.b.diverged == true && forceScope(id, app)?.eligible == true },
-            local: { id, _ in m.armed = id }))
+            local: { id, _ in if let id { try app.runner.arm(forceArm(id)) } }))
         r.register(Command(
             id: "branch.force.confirm", title: "Send the readied force-with-lease", scope: .branch, budget: .gitWrite, v1: ["force-origin"], quiet: true,
-            available: { id in id != nil && m.armed == id && forceScope(id, app)?.eligible == true },
+            available: { id in id.map { app.runner.armed == forceArm($0) } == true && forceScope(id, app)?.eligible == true },
             write: { id, _ in
                 let sc = forceScope(id, app)
-                m.armed = nil
                 guard let v = m.branchView(id), let sc else { return nil }
                 return Write(
                     ops: [Op(type: .branch, id: id, fields: ["pending": "pushing"])],
@@ -234,11 +241,9 @@ enum BranchCommands {
                 return holdWrite(row, ids, until: nil)
             }))
 
-        // esc backs out of an armed push, a launch, a description being typed (commands/app.ts overlay.close)
-        app.addCloser(isOpen: { m.armed != nil || m.launching != nil || m.describing != nil }, close: {
-            if m.describing != nil { m.describing = nil }
-            else if m.armed != nil { m.armed = nil }
-            else { m.launching = nil }
+        // esc backs out of a launch or a description being typed (commands/app.ts overlay.close)
+        app.addCloser(isOpen: { m.launching != nil || m.describing != nil }, close: {
+            if m.describing != nil { m.describing = nil } else { m.launching = nil }
         })
     }
 }

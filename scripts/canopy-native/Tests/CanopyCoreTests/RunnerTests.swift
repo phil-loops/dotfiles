@@ -44,6 +44,35 @@ final class Ctx: CommandContext {
         return (runner, store, ctx)
     }
 
+    @Test func aConfirmLastsOneCommandAndRetNeverArmsOrSends() throws {
+        let (runner, _, ctx) = try setup()
+        let r = runner.registry
+        ctx.targets[.row] = "r1"
+        var built = 0
+        r.register(Command(id: "t.arm", title: "A", scope: .row, local: { t, _ in try runner.arm("x \(t ?? "")") }))
+        r.register(Command(id: "t.move", title: "M", scope: .global, local: { _, _ in }))
+        r.register(Command(id: "t.send", title: "S", scope: .row, write: { _, _ in
+            built += 1
+            return Write(path: "/ok", body: [:], settled: { true }, failed: "no")
+        }))
+        r.register(Command(id: "t.open.arm", title: "OA", scope: .row, verb: .main, route: { t in RouteTo("t.arm", target: t) }))
+        r.register(Command(id: "t.open.send", title: "OS", scope: .row, verb: .main, route: { t in RouteTo("t.send", target: t) }))
+
+        runner.dispatch("t.arm", via: .key)
+        #expect(runner.armed == "x r1")
+        runner.dispatch("t.move", via: .key)
+        #expect(runner.armed == nil, "any other command drops the confirm")
+
+        runner.dispatch("t.arm", via: .key)
+        runner.dispatch("t.arm", via: .key)
+        #expect(runner.armed == "x r1", "arming again keeps it")
+
+        runner.dispatch("t.open.arm", via: .key)
+        #expect(runner.armed == nil, "ret never arms")
+        runner.dispatch("t.open.send", via: .key)
+        #expect(built == 0, "ret never sends")
+    }
+
     @Test func postRefusalSemantics() async {
         Stub.answers = [
             "/ok": .init(status: 200, body: #"{"ok":true,"n":1}"#),

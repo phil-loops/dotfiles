@@ -94,8 +94,6 @@ struct MachinePage: View {
         .padding(.horizontal, 16).padding(.bottom, 8)
         .onAppear { stop = m.watch() }
         .onDisappear { stop?(); stop = nil }
-        // v2 drops a readied kill when the cursor moves
-        .onChange(of: app.selected) { _, _ in m.armed = nil }
     }
 }
 
@@ -115,8 +113,8 @@ private struct Servers: View {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 SectionHead(text: "serving · \(n)")
                 Spacer()
-                if m.armed == "reap" { Lever(id: "machine.reap", word: "again reaps · esc", danger: true) }
-                if m.armed == "kill all" { Lever(id: "machine.killall", word: "again kills \(n) · esc", danger: true) }
+                if app.runner.armed == "reap" { Lever(id: "machine.reap", word: "again reaps · esc", danger: true) }
+                if app.runner.armed == "kill all" { Lever(id: "machine.killall", word: "again kills \(n) · esc", danger: true) }
             }
             .padding(.leading, 28).padding(.trailing, 16).padding(.bottom, 4)
             if n == 0 { Text("nothing serving").foregroundStyle(theme.inkFaint).padding(.leading, 28) }
@@ -164,7 +162,7 @@ private struct ServerRow: View {
         let id = s.sid
         let h = HEALTH[s.health] ?? Health(word: s.health, dot: \.inkFaint, text: \.inkDim)
         let doing = busy(app, "machine.stop", id) ? "killing…" : busy(app, "machine.restart", id) ? "restarting…" : busy(app, "machine.swap", id) ? "swapping…" : ""
-        let armed = m.armed == "kill \(id)"
+        let armed = app.runner.armed == "kill \(id)"
         VStack(alignment: .leading, spacing: 0) {
             CursorRow(pane: "servers", key: RowKey.server(id)) { on in
                 VStack(alignment: .leading, spacing: 0) {

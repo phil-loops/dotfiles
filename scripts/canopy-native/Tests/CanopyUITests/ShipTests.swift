@@ -265,10 +265,10 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
         // area A's real route: the fixture branch is synced with an open PR, so there's nothing to push
         #expect(BranchCommands.pushRoute(Self.branch, a) == nil)
         a.keys.handle("p")
-        #expect(a.forestModel.armed == nil)
+        #expect(a.runner.armed == nil)
         // a green branch with commits origin lacks arms on p, and p again would send it
-        a.forestModel.armed = Self.branch
-        #expect(a.registry.command("review.push")?.route?(Self.branch) == nil || a.forestModel.armed == Self.branch)
+        try a.runner.arm(BranchCommands.pushArm(Self.branch))
+        #expect(a.registry.command("review.push")?.route?(Self.branch) == nil || a.runner.armed == BranchCommands.pushArm(Self.branch))
     }
 
     @Test func goToThePROpensIt() throws {

@@ -417,7 +417,7 @@ struct SessionsSection: View {
             VStack(spacing: 0) {
                 ForEach(t.recent, id: \.id) { s in
                     TutorRow(pane: TutorPane.sessions, key: RowKey.lesson(s.id)) { on in
-                        let arming = t.armed == "forget \(s.id)"
+                        let arming = app.runner.armed == "forget \(s.id)"
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
                             Text(t.titleOf(s)).font(Theme.text(12.5)).foregroundStyle(on ? theme.goldLeaf : theme.inkDim).lineLimit(1)
                             Spacer()
@@ -826,7 +826,7 @@ struct EvidenceRow: View {
 
     var body: some View {
         let t = TutorArea.state(app)
-        let arming = t.armed == "cut \(e.id)"
+        let arming = app.runner.armed == "cut \(e.id)"
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 6) {
                 Text(e.outcome == "miss" ? "✗" : "✓").foregroundStyle(e.outcome == "miss" ? theme.del : e.outcome == "hit" ? theme.add : theme.inkDim)

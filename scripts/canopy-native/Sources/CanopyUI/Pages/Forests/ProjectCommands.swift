@@ -185,7 +185,6 @@ enum ProjectCommands {
             local: { [unowned app] id, _ in
                 guard let id else { return }
                 app.setCursor(RowKey.project(id))
-                m.armed = nil
                 m.expanded.remove(id)
                 if m.launching == id { m.launching = nil }
             }))
@@ -200,9 +199,9 @@ enum ProjectCommands {
                 } else { m.expanded.insert(id) }
             }))
 
-        // ↵: the selected row's one primary action
+        // ↵: open the selected row
         r.register(Command(
-            id: "row.primary", title: "Do the row's thing", scope: .row, verb: .main, label: "go", quiet: true,
+            id: "row.primary", title: "Open the row", scope: .row, verb: .main, label: "go", quiet: true,
             route: { [unowned app] row in ForestNav.primary(for: row ?? app.selected, app) }))
 
         r.register(Command(
@@ -261,7 +260,6 @@ enum ProjectCommands {
         r.register(Command(
             id: "ready.toggle", title: "Show only what's ready for you", scope: .forests, leader: LocalKey(",r"), label: "ready", v1: ["nav:outbox"],
             local: { _, _ in
-                m.armed = nil
                 m.readyOnly.toggle()
             }))
         r.register(Command(

@@ -58,7 +58,7 @@ enum TutorCommands {
             local: { [weak t, weak app] _, _ in
                 guard let t, let app else { return }
                 if CodeLookup.of(app).pop != nil { CodeLookup.of(app).dismiss() }
-                else if t.armed != nil { t.armed = nil }
+                else if app.runner.armed != nil { app.runner.disarm() }
                 else if t.drawer != nil { t.closeDrawer() }
                 else if t.evidenceOpen { t.evidenceOpen = false }
                 else if let c = app.closers.first(where: { $0.isOpen() }) { c.close() }
@@ -231,15 +231,14 @@ enum TutorCommands {
             available: kept,
             route: { [weak t] id in
                 guard let t, let id, kept(id) else { return nil }
-                return RouteTo(t.armed == forgetArm(id) ? "tutor.forget.confirm" : "tutor.forget.arm", target: id)
+                return RouteTo(app.runner.armed == forgetArm(id) ? "tutor.forget.confirm" : "tutor.forget.arm", target: id)
             }))
         r.register(Command(
             id: "tutor.forget.arm", title: "Ready forgetting a session (the next press does it)", scope: .lesson, needsArg: true, quiet: true,
-            local: { [weak t] id, _ in t?.armed = id.map(forgetArm) }))
+            local: { [weak app] id, _ in if let id { try app?.runner.arm(forgetArm(id)) } }))
         r.register(Command(
             id: "tutor.forget.confirm", title: "Forget a session", scope: .lesson, needsArg: true, v1: ["click:forget this session (its evidenc"], quiet: true,
             local: { [weak t] id, _ in
-                t?.armed = nil
                 if let id { t?.forget(id) }
             }))
         r.register(Command(
@@ -335,15 +334,14 @@ enum TutorCommands {
             available: { id in id.flatMap(evidence) != nil },
             route: { [weak t] id in
                 guard let t, let id, evidence(id) != nil else { return nil }
-                return RouteTo(t.armed == cutArm(id) ? "tutor.evidence.delete" : "tutor.evidence.arm", target: id)
+                return RouteTo(app.runner.armed == cutArm(id) ? "tutor.evidence.delete" : "tutor.evidence.arm", target: id)
             }))
         r.register(Command(
             id: "tutor.evidence.arm", title: "Ready cutting a credit (the next press does it)", scope: .credit, needsArg: true, quiet: true,
-            local: { [weak t] id, _ in t?.armed = id.map(cutArm) }))
+            local: { [weak app] id, _ in if let id { try app?.runner.arm(cutArm(id)) } }))
         r.register(Command(
             id: "tutor.evidence.delete", title: "Cut a credit", scope: .credit, budget: .configWrite, needsArg: true, v1: ["click:cut this evidence"], quiet: true,
-            write: { [weak t] id, _ in
-                t?.armed = nil
+            write: { id, _ in
                 guard evidence(id) != nil else { return nil }
                 return Write(path: "/learning-evidence", body: ["op": "delete", "id": .string(id)], settled: { true }, said: "cut",
                              failed: "the credit wasn't cut", answered: { [weak t] _, _ in t?.refresh() })

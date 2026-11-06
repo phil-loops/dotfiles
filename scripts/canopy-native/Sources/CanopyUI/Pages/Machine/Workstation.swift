@@ -21,8 +21,6 @@ final class Workstation {
     var mainPort = "3000"
     /// what a swapped port served before, so it can swing back
     var swapped: [String: (dir: String, label: String)] = [:]
-    /// a kill (or kill all, or reap) readied by its first press (ui.ts armed)
-    var armed: String?
 
     /// How `machine.open` opens a server's url; tests swap it so nothing leaves the process.
     @ObservationIgnored public var openURL: (URL) -> Void = { NSWorkspace.shared.open($0) }

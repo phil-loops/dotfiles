@@ -234,8 +234,8 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:]) -> AppModel {
         #expect(a.rows == ["p:r:tree", "p:r:solo", "p:r:bench"])
         a.keys.handle(","); a.keys.handle("a")
         #expect(a.rows == ["p:r:tree", "p:r:solo", "p:r:bench", "p:r:done", "p:r:old"])
-        #expect(ForestNav.primary(for: "p:r:old", a)?.id == "project.restore")
-        #expect(ForestNav.primary(for: "p:r:done", a)?.id == "project.archive")
+        #expect(ForestNav.primary(for: "p:r:old", a)?.id == "forest.page", "ret opens an archived forest; restoring is its own key")
+        #expect(ForestNav.primary(for: "p:r:done", a)?.id == "forest.page")
     }
 
     @Test func retOpensTheForestsPageAndMinusFoldsAnOpenSpine() {
@@ -271,24 +271,44 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:]) -> AppModel {
         #expect(a.selected == "b:r:s")
         #expect(BranchCommands.pushRoute("r:s", a) == "branch.push.arm")
         a.keys.handle("p")
-        #expect(a.forestModel.armed == "r:s")
+        #expect(a.runner.armed == "push r:s")
         #expect(BranchCommands.pushRoute("r:s", a) == "branch.push.confirm")
         a.keys.handle("esc")
-        #expect(a.forestModel.armed == nil)
+        #expect(a.runner.armed == nil)
         #expect(a.registry.command("branch.push.confirm")!.available!("r:s") == false, "an unarmed confirm sends nothing")
-        a.forestModel.armed = "r:s"
+        try! a.runner.arm("push r:s")
         let sent = try! a.registry.command("branch.push.confirm")!.write!("r:s", nil)!
         #expect(sent.path == "/push-origin" && sent.body == ["branch": "s", "stay": true])
-        #expect(a.forestModel.armed == nil)
         // a branch with only the gates in the way: p runs them
         #expect(BranchCommands.pushRoute("r:c", a) == "branch.gates.run")
+    }
+
+    @Test func retOnAReadyBranchOpensItAndNeverPushes() {
+        let a = world()
+        a.setCursor("p:r:solo"); a.keys.handle("ret")
+        #expect(a.selected == "b:r:s" && BranchCommands.pushRoute("r:s", a) == "branch.push.arm")
+        #expect(ForestNav.primary(for: "b:r:s", a)?.id == "branch.open")
+        a.keys.handle("ret")
+        #expect(a.runner.armed == nil && a.router.surface.id == "review", "ret goes in; p is the push")
+    }
+
+    @Test func anArmedPushLastsOneKey() {
+        let a = world()
+        a.setCursor("p:r:solo"); a.keys.handle("ret")
+        a.keys.handle("p")
+        #expect(a.runner.armed == "push r:s")
+        a.keys.handle("k")
+        #expect(a.runner.armed == nil, "moving drops it")
+        a.keys.handle("p")
+        a.go(.forests)
+        #expect(a.runner.armed == nil, "leaving the page drops it")
     }
 
     @Test func aRefusedForceKeepsTheScopeItsAnswerCarries() throws {
         let a = world()
         let ship = ShipState.of(a)
         ship.putForceScope(a, "r:s", ForceScope(eligible: true, guards: [], lease: "aaaaaaa", prNumber: nil, prUrl: nil))
-        a.forestModel.armed = "r:s"
+        try a.runner.arm("force r:s")
         let w = try #require(try a.registry.command("branch.force.confirm")!.write!("r:s", nil))
         #expect(w.path == "/force-origin" && w.body == ["branch": "s", "lease": "aaaaaaa"])
         w.answered?(false, ["forceScope": ["eligible": false, "guards": [["k": "pr", "label": "PR merged", "ok": false]], "lease": "bbbbbbb"]])

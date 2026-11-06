@@ -259,7 +259,7 @@ private struct BranchRowView: View {
 
     var body: some View {
         let m = app.forestModel
-        let armed = m.armed == v.b.id
+        let armed = BranchCommands.isArmed(v.b.id, app)
         // gold means "you're acting here": the cursor row and anything in flight; merely ready reads brighter
         let live = v.b.pending != nil || armed
         let word = shipWord(m)
@@ -278,7 +278,7 @@ private struct BranchRowView: View {
             if cursor, !meta.isEmpty {
                 Text(meta).font(Theme.text(11)).foregroundStyle(v.b.gates == .red && v.pr == nil ? theme.del : theme.inkFaint).fixedSize()
             }
-            if m.armed == v.b.id { Text(hint(m)).foregroundStyle(theme.goldLeaf).fixedSize() }
+            if armed { Text(armHint).foregroundStyle(theme.goldLeaf).fixedSize() }
         }
         .frame(height: 32)
         .padding(.leading, 40).padding(.trailing, 16)
@@ -300,15 +300,8 @@ private struct BranchRowView: View {
         return v.st.ship.word
     }
 
-    private func hint(_ m: ForestModel) -> String {
-        let go = app.registry.keyOf("row.primary")
-        if m.armed == v.b.id { return "\(go) again sends it to origin · \(app.registry.keyOf("overlay.close"))" }
-        if v.b.pending != nil { return "" }
-        switch v.st.action {
-        case .push: return "\(go) push"
-        case .pr: return v.pr.map { "\(go) view #\($0.number)" } ?? "\(go) open PR"
-        default: return "\(go) open"
-        }
+    private var armHint: String {
+        "\(app.registry.keyOf("branch.push")) again sends it to origin · \(app.registry.keyOf("overlay.close"))"
     }
 
     private var meta: String {
