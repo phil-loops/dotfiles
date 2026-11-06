@@ -120,6 +120,17 @@ extension ReviewPageState {
         return copy
     }
 
+    /// Put a saved window set back (Show's relaunch): each window in its column, a file one at its
+    /// line. A set that breaks the rules — no windows, two showing the diff, a repeated id — is left out.
+    func lay(_ specs: [Place.WindowSpec]) {
+        guard !specs.isEmpty, specs.filter({ $0.file == nil }).count <= 1, Set(specs.map(\.id)).count == specs.count else { return }
+        windows = specs.map { ReviewWindow(id: $0.id, column: $0.column) }
+        normalizeColumns()
+        for (w, s) in zip(windows, specs) {
+            if let f = s.file { show(f, in: w) }
+        }
+    }
+
     /// C-w q: close the focused window; the last one stays.
     func closeWindow() throws {
         guard let w = focusedWindow else { throw Refusal("no window here · C-w l goes to one") }

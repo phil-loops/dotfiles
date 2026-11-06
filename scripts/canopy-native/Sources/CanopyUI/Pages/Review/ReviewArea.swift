@@ -226,6 +226,25 @@ struct ReviewSurface: SurfaceProvider {
         }
     }
 
+    /// The window set, when it's more than the diff alone: each window's column, and its file at the
+    /// line its cursor is on.
+    func rememberLayout(_ place: inout Place, _ app: AppModel) {
+        let pg = ReviewPageState.of(app)
+        guard pg.windows.count > 1 || pg.windows.first?.doc != nil else { return }
+        place.windows = pg.windows.map { w in
+            var f = w.doc
+            if let n = RowKey.id(app.cursor(in: w.pane), "s").flatMap(Int.init) { f?.line = n }
+            return Place.WindowSpec(id: w.id, column: w.column, file: f)
+        }
+    }
+
+    func restoreLayout(_ place: Place, _ app: AppModel) {
+        let pg = ReviewPageState.of(app)
+        guard let specs = place.windows else { return }
+        pg.lay(specs)
+        if let w = pg.windows.first(where: { $0.id == place.window }) { app.focus(pane: w.pane) }
+    }
+
     func restore(_ place: Place, _ app: AppModel) {
         let pg = ReviewPageState.of(app)
         if let id = place.window, let w = pg.windows.first(where: { $0.id == id }), place.loc == nil { app.focus(pane: w.pane) }

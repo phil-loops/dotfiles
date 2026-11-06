@@ -12,9 +12,11 @@ extension AppModel {
         jumpDepth += 1
         defer { jumpDepth -= 1 }
         if p.route != router.route { router.navigate(p.route) }
+        if p.windows != nil { provider?.restoreLayout(p, self) }
         if let id = p.pane { focus(pane: id) }
         if let k = p.cursorKey { setCursor(k) }
-        if let l = p.loc { nav.open(l) }
+        // a window set puts each window's file at its line itself
+        if let l = p.loc, p.windows == nil { nav.open(l) }
         provider?.restore(p, self)
     }
 

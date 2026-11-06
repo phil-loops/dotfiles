@@ -982,6 +982,29 @@ import Testing
         #expect(pg.windows.count == 1 && a.runner.note?.contains("last window") == true)
     }
 
+    /// Show's saved place carries the windows, so a relaunch brings them back with the keyboard in
+    /// the same one; a jump never does (C-o doesn't rearrange windows).
+    @Test func aSavedPlaceBringsTheWindowsBack() async throws {
+        let (a, p) = try await app()
+        let pg = ReviewPageState.of(a)
+        ShipStub.answer(p, "GET", "/loops/lsp/src", #"{"path":"a.ts","sha":"x","text":"one\ntwo\nthree"}"#)
+        keys(a, "C-w", "v")
+        let copy = try #require(pg.code)
+        await until("the copy's text") { copy.text != nil }
+        keys(a, "j")
+        #expect(a.selected == "s:3")
+        #expect(a.here().windows == nil, "a jump keeps no window set")
+        let saved = a.savedHere().address
+        keys(a, "C-w", "o")
+        keys(a, "C-w", "h")
+        #expect(pg.windows.count == 1)
+        a.open(address: saved)
+        #expect(pg.windows.map(\.id) == [1, copy.id] && pg.diffWindow === pg.windows[0])
+        #expect(pg.windows[1].doc?.path == "a.ts" && pg.windows[1].column == 1)
+        await until("the file again") { pg.windows[1].text != nil }
+        #expect(a.pane?.id == pg.windows[1].pane && a.selected == "s:3", "the keyboard where it was, on the line it was")
+    }
+
     /// A jump in one window leaves the others; C-o walks the window's own jumps; a jump to the diff
     /// from a copy goes to the window the diff is in.
     @Test func eachWindowJumpsOnItsOwn() async throws {

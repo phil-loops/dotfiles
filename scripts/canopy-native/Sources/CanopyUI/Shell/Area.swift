@@ -57,6 +57,10 @@ public protocol SurfaceProvider {
     /// Put a remembered place's tab and viewport row back. The shell has already navigated to
     /// `place.route`, focused `place.pane`, set the cursor to `place.cursorKey`, and handed
     /// `place.loc` to `app.nav.open`. Default: nothing.
+    /// A saved place's extra (Show's relaunch): the page's window set, beyond what a jump keeps.
+    func rememberLayout(_ place: inout Place, _ app: AppModel)
+    /// Put a saved window set back, the keyboard in `place.window`, before the place's pane and cursor are.
+    func restoreLayout(_ place: Place, _ app: AppModel)
     func restore(_ place: Place, _ app: AppModel)
     /// Which jumplist entries C-o / C-i walk from here — a page with windows walks the focused
     /// window's own (Helix's per-view jumplist). Default: nil, every entry.
@@ -77,6 +81,8 @@ public extension SurfaceProvider {
     func searchLanded(_ hit: PageSearch.Hit, _ app: AppModel) {}
     func position(_ app: AppModel) -> String? { nil }
     func remember(_ place: inout Place, _ app: AppModel) {}
+    func rememberLayout(_ place: inout Place, _ app: AppModel) {}
+    func restoreLayout(_ place: Place, _ app: AppModel) {}
     func restore(_ place: Place, _ app: AppModel) {}
     func jumpStream(_ app: AppModel) -> ((Place) -> Bool)? { nil }
 }

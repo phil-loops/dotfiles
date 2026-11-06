@@ -107,6 +107,19 @@ import Testing
         #expect(p.surface == "review" && p.arg == "loops/a/b" && p.base == "main")
     }
 
+    @Test func aSavedPlaceCarriesItsWindowsAndASharedOneDoesnt() {
+        var p = Place(route: .review(repo: "loops", branch: "a/b"), pane: "review.code.2")
+        p.window = 2
+        p.windows = [.init(id: 1, column: 0),
+                     .init(id: 2, column: 1, file: Loc(repo: "loops", sha: "abc", path: "src/x, y+z.ts", line: 7, asFile: true)),
+                     .init(id: 3, column: 1, file: Loc(repo: "loops", sha: "", path: "b.ts", line: 1, asFile: true))]
+        #expect(p.address.contains("win=1,0&win=2,1,7,abc,src/x,%20y%2Bz.ts&win=3,1,1,,b.ts"))
+        #expect(Place(address: p.address).windows == p.windows, "the set comes back as it was, commas in a path and all")
+        #expect(Place(address: p.address).window == 2, "with the keyboard in the same window")
+        #expect(Place(address: p.shared.address).windows == nil, "a link you hand on leaves your windows out")
+        #expect(Place(address: "/v2/b/loops/x?win=1,0&win=nope").windows == [.init(id: 1, column: 0)], "a window it can't read is left out")
+    }
+
     @Test func anAddressIsAPlaceWrittenOut() {
         let review = Route.review(repo: "loops", branch: "a/b", base: "main")
         let line = Place(route: review, pane: "review.diff", tab: "files",
