@@ -499,6 +499,56 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
         #expect(a.insertField == "words.s|\(Self.branch)|c2" && ShipState.wordsCommit(a) == "c2")
     }
 
+    /// The rule (NAV.md 2026-11-08, name the target, don't walk to it): every named words target is
+    /// reached from every kind of starting place in two keys or one `:` command — the cursor is a
+    /// default, never a precondition. A new target or a new starting place gets the rule for free.
+    @Test func everyNamedWordIsReachedFromAnywhere() throws {
+        let starts: [(String, @MainActor (AppModel) -> Void)] = [
+            ("the diff", { _ in }),
+            ("one commit's diff", { ShipState.of($0).showCommit("c3") }),
+            ("the file list", { $0.focus(pane: reviewTreePane) }),
+            ("the words, on the description", { a in a.focus(pane: ShipSeam.wordsPane); a.setCursor("w|desc") }),
+            ("the branch's line", { a in a.keys.handle(","); a.keys.handle("h") }),
+        ]
+        let targets: [(String, [String]?, String, String)] = [
+            ("title", ["D", "t"], "title", "words.title|"),
+            ("why", ["D", "w"], "why", "words.body|"),
+            ("description", ["D", "d"], "desc", "words.desc|"),
+            ("a commit's subject", nil, "reword c2", "words.s|\(Self.branch)|c2"),
+        ]
+        for (name, keys, line, field) in targets {
+            for (from, setup) in starts {
+                for way in [keys.map { "keys \($0.joined(separator: " "))" }, ":\(line)"].compactMap({ $0 }) {
+                    let (a, _) = try app()
+                    WordsState.of(a).setShown(Self.branch, ownedOutline())
+                    setup(a)
+                    if way.hasPrefix(":") { run(a, line) } else { keys?.forEach { a.keys.handle($0) } }
+                    #expect(a.insertField?.hasPrefix(field) == true, "\(name) from \(from) by \(way): writing \(a.insertField ?? "nothing")\(a.runner.note.map { ", said \($0)" } ?? "")")
+                }
+            }
+        }
+    }
+
+    /// Every words row shows its words: the title of a one-commit branch is the commit's subject, never a pointer to it.
+    @Test func everyWordsRowShowsItsWords() throws {
+        let (a, _) = try app()
+        let w = WordsState.of(a)
+        var o = ownedOutline()
+        o.commits = [o.commits[0]]
+        w.setShown(Self.branch, o)
+        for row in ShipRows.words(a, Self.branch, full: true) {
+            let shown: String = switch WordsRow(row)! {
+            case .desc: a.store.view(Branch.self, Self.branch)?.description ?? ""
+            case .title: w.prValue(Self.branch).subject
+            case .body: OutlineHints.splitTemplate(w.prValue(Self.branch).body).own
+            case .subject(let sha), .commitBody(let sha): w.shown[Self.branch]!.commits.first { $0.sha == sha }!.subject
+            }
+            if row != "w|body" { #expect(!shown.isEmpty, "\(row) shows nothing") }
+        }
+        #expect(w.prValue(Self.branch).subject == "chore: add a one-shot label")
+        #expect(WordsEditor.ownerNote(w.shown[Self.branch]) == "c1's own words — i rewords it")
+    }
+
     /// The one commit the diff covers is whose words show; a run of commits has none.
     @Test func theCommitInViewIsWhoseWordsShow() throws {
         let (a, _) = try app()
