@@ -149,7 +149,7 @@ public enum KeyGroup: String, CaseIterable, Sendable {
              .lastFinding, .firstFinding, .nextLongWord, .previousLongWord, .longWordEnd, .scrollDown, .scrollUp,
              .labels, .find, .search, .searchWord, .map, .paneLeft, .paneDown, .paneUp, .paneRight, .paneNext:
             return .move
-        case .nextSibling, .previousSibling, .parent, .child, .root, .tip, .out:
+        case .nextSibling, .previousSibling, .root, .tip, .out:
             return .others
         case .face, .conversation, .type, .symbols, .nth1, .nth2, .nth3, .nth4, .nth5, .nth6, .nth7, .nth8, .nth9:
             return .show

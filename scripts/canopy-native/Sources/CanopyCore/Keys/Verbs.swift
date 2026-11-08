@@ -17,7 +17,7 @@ public enum Verb: String, CaseIterable, Sendable, Comparable {
     case findChar = "find-char", tillChar = "till-char", findCharBack = "find-char-back", tillCharBack = "till-char-back"
     case cancel
     case nextSibling = "next-sibling", previousSibling = "previous-sibling"
-    case parent, child, root, tip
+    case root, tip
     case nextFile = "next-file", previousFile = "previous-file"
     case nextHunk = "next-hunk", previousHunk = "previous-hunk"
     case nextUnviewed = "next-unviewed", previousUnviewed = "previous-unviewed"
@@ -109,7 +109,7 @@ public enum KeySection: String, CaseIterable, Sendable {
              .nextFinding, .previousFinding, .firstFinding, .lastFinding, .nextGitHunk, .previousGitHunk,
              .firstChange, .lastChange, .nextCommit, .previousCommit:
             return .review
-        case .parent, .child, .root, .tip, .nextSibling, .previousSibling, .out:
+        case .root, .tip, .nextSibling, .previousSibling, .out:
             return .stack
         case .wordsTitle, .wordsWhy, .wordsDescription, .wordsCommit:
             return .words
@@ -190,10 +190,8 @@ public enum Verbs {
         v(.tillCharBack, .nav, ["T"], "back to just after the previous of a character you type, in code"),
         v(.out, .nav, ["-"], "up a level: line → file → branch → forest → forests (↵ goes in)"),
         v(.cancel, .nav, ["esc"], "close the innermost transient thing — never changes page"),
-        v(.nextSibling, .nav, ["J"], jump: true, "the next branch in merge order, staying on this kind of page"),
-        v(.previousSibling, .nav, ["K"], jump: true, "the previous branch in merge order, staying on this kind of page"),
-        v(.parent, .nav, ["[ b"], jump: true, "the branch's parent, down the stack"),
-        v(.child, .nav, ["] b"], jump: true, "the branch's child, up the stack (labels at a fork)"),
+        v(.nextSibling, .nav, ["J", "] b"], jump: true, "the next branch in merge order (the forest's numbered list), staying on this kind of page"),
+        v(.previousSibling, .nav, ["K", "[ b"], jump: true, "the previous branch in merge order, staying on this kind of page"),
         v(.root, .nav, ["g K"], jump: true, "the root of the branch's stack"),
         v(.tip, .nav, ["g J"], jump: true, "the tip of the branch's stack"),
         v(.nextFile, .nav, ["g n", "}"], jump: true, "the next file, at its first change (Helix's next buffer)"),
@@ -330,7 +328,7 @@ public enum Verbs {
     public static let countable: Set<Verb> = [
         .next, .previous, .halfDown, .halfUp, .pageDown, .pageUp, .left, .right,
         .nextWord, .previousWord, .nextLongWord, .previousLongWord, .longWordEnd,
-        .nextSibling, .previousSibling, .parent, .nextFile, .previousFile, .nextHunk, .previousHunk, .nextUnviewed, .previousUnviewed,
+        .nextSibling, .previousSibling, .nextFile, .previousFile, .nextHunk, .previousHunk, .nextUnviewed, .previousUnviewed,
         .nextThread, .previousThread, .nextConversation, .previousConversation, .nextFunction, .previousFunction,
         .nextType, .previousType, .nextFinding, .previousFinding, .nextTest, .previousTest, .nextGitHunk, .previousGitHunk,
         .repeatMotion, .scrollDown, .scrollUp, .extend, .nextCommit, .previousCommit, .jumpBack, .jumpForward, .nextComment, .previousComment, .wordEnd,

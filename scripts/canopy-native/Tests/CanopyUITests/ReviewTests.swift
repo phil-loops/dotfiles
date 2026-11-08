@@ -651,6 +651,19 @@ import Testing
         #expect(a.router.route == .review(repo: "loops", branch: "add-hankles-limited-label"))
     }
 
+    /// :requires reaches what a fan-in branch builds on beyond its parent (/node's requires); main isn't a branch to review.
+    @Test func colonRequiresReviewsWhatItBuildsOn() async throws {
+        let withReq = Self.payload.replacingOccurrences(of: #""branch":"add-hankles-limited-label""#, with: #""branch":"add-hankles-limited-label","requires":["hankles-next"]"#)
+        #expect(withReq != Self.payload)
+        let (a, _) = try await app(withReq)
+        let pg = ReviewPageState.of(a)
+        await until("the diff") { pg.payload?.data.requires == ["hankles-next"] }
+        a.cmdline = "requires"; a.cmdIndex = 0; a.runCmdline()
+        #expect(a.router.route == .review(repo: "loops", branch: "hankles-next"), "one dep beyond main: no question")
+        keys(a, "[", "b")
+        #expect(a.router.route == .review(repo: "loops", branch: "add-hankles-limited-label"), "[ b: the previous in merge order")
+    }
+
     @Test func minusClimbsToTheForestWithTheBranchUnderTheCursor() async throws {
         let (a, _) = try await app()
         keys(a, "-")
@@ -1286,7 +1299,7 @@ import Testing
         let (a, _) = try await app()
         #expect(KeyboardRule.violations(a) { $0.hasPrefix("review.") || $0.hasPrefix("inline.") } == [])
         for (id, verb) in ["review.file.next": Verb.nextFile, "review.hunk.next": .nextHunk, "review.conversation.next": .nextConversation, "review.comment.next": .nextComment,
-                           "review.branch.next": .nextSibling, "review.parent": .parent, "review.filter": .find, "review.files": .changedFiles, "review.unviewed": .unmark, "review.match": .match] {
+                           "review.branch.next": .nextSibling, "review.filter": .find, "review.files": .changedFiles, "review.unviewed": .unmark, "review.match": .match] {
             #expect(a.registry.command(id)?.verbs == [verb], "\(id)")
         }
         #expect(a.registry.command("review.viewed")?.keys == [", m"])

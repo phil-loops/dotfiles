@@ -395,14 +395,28 @@ enum DiffCommands {
                 MainActor.assumeIsolated { then(kids[i]) }
             }
         }
-        r.register(Command(id: "review.parent", title: "Review its parent branch", scope: .review, verb: .parent, label: "parent",
-                           available: isBranch, local: { _, _ in try hop(pg.branch?.parentId.flatMap { app.store.view(Branch.self, $0) }) }))
-        r.register(Command(id: "review.child", title: "Review a child branch (which one, at a fan-out)", scope: .review, verb: .child,
-                           label: "child", available: isBranch,
+        r.register(Command(id: "review.parent", title: "Review its parent branch", scope: .review, label: "parent",
+                           recordsJump: true, available: isBranch, local: { _, _ in try hop(pg.branch?.parentId.flatMap { app.store.view(Branch.self, $0) }) }))
+        r.register(Command(id: "review.child", title: "Review a child branch (which one, at a fan-out)", scope: .review,
+                           label: "child", recordsJump: true, available: isBranch,
                            local: { _, _ in
                                let kids = children(pg.id)
                                if kids.count > 1 { return pickChild(kids) { b in MainActor.assumeIsolated { _ = try? hop(b) } } }
                                try hop(kids.first)
+                           }))
+        r.register(Command(id: "review.requires", title: "Review a branch this one builds on — its parent, or a requires dep (which one, at a fan-in)",
+                           scope: .review, label: "requires", recordsJump: true, available: isBranch,
+                           local: { _, _ in
+                               guard let me = pg.branch else { return }
+                               let reqs = pg.payload?.data.requires ?? []
+                               let deps = ([me.parent] + reqs).compactMap { n in
+                                   app.store.list(Branch.self).first { $0.repo == me.repo && $0.name == n }
+                               }
+                               guard !deps.isEmpty else { throw Refusal("\(me.name) builds on \(me.parent) alone") }
+                               if deps.count == 1 { return try hop(deps[0]) }
+                               app.nav.pick("builds on · \(deps.count)", deps.map { d in
+                                   PickItem(label: d.name, text: (d.name == me.parent ? "parent" : "requires") + (d.description.isEmpty ? "" : " · \(d.description)"))
+                               }) { i in MainActor.assumeIsolated { _ = try? hop(deps[i]) } }
                            }))
         r.register(Command(id: "review.root", title: "Review the stack's root", scope: .review, verb: .root, label: "root",
                            available: isBranch,

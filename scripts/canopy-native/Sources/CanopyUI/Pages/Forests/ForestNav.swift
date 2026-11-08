@@ -67,16 +67,16 @@ enum ForestNav {
                 go(order[prev], app)
             }))
         r.register(Command(
-            id: "forest.parent", title: "Go to the branch's parent", scope: .forest, verb: .parent, label: "parent", pair: "forest.child",
-            available: onBranch,
+            id: "forest.parent", title: "Go to the branch's parent", scope: .forest, label: "parent", pair: "forest.child",
+            recordsJump: true, available: onBranch,
             local: { _, _ in
                 guard let v = here(app) else { return }
                 guard let p = parent(of: v, app) else { throw Refusal("\(leaf(v.b.name)) sits on \(v.b.parent)") }
                 go(p, app)
             }))
         r.register(Command(
-            id: "forest.child", title: "Go to the branch's child (labels at a fork)", scope: .forest, verb: .child, label: "child",
-            available: onBranch,
+            id: "forest.child", title: "Go to the branch's child (labels at a fork)", scope: .forest, label: "child",
+            recordsJump: true, available: onBranch,
             local: { _, _ in
                 guard let v = here(app) else { return }
                 let kids = children(of: v.b.id, app)
@@ -90,6 +90,39 @@ enum ForestNav {
                     try app.showLabels()
                 }
             }))
+        r.register(Command(
+            id: "forest.requires", title: "Go to a branch this one builds on — its parent, or a requires dep (which one, at a fan-in)",
+            scope: .forest, label: "requires", recordsJump: true, available: onBranch,
+            local: { _, _ in
+                guard let v = here(app) else { return }
+                let path = app.transport.atRepo(v.b.repo, "/node?branch=\(v.b.name.uriComponent)")
+                let t = app.transport
+                Task { @MainActor in
+                    let reqs = (try? await t.getJSON(path, as: NodePayload.self))?.requires ?? []
+                    let deps = ([v.b.parent] + reqs).compactMap { n in mergeOrder(app).first { $0.b.name == n } }
+                    guard !deps.isEmpty else { return app.runner.say("\(leaf(v.b.name)) builds on \(v.b.parent) alone") }
+                    if deps.count == 1 { return go(deps[0], app) }
+                    app.nav.pick("builds on · \(deps.count)", deps.map { d in
+                        PickItem(label: leaf(d.b.name), text: d.b.name == v.b.parent ? "parent" : "requires")
+                    }) { i in MainActor.assumeIsolated { go(deps[i], app) } }
+                }
+            }))
+
+        // Ancestry by name (NAV.md 2026-11-08: one next — merge order; ancestry is named, not stepped):
+        // `:parent`, `:child`, `:requires` on whichever page is up.
+        for (name, title) in [("parent", "Go to the branch's parent"), ("child", "Go to the branch's child (which one, at a fan-out)"),
+                              ("requires", "Go to a branch this one builds on: its parent or a requires dep")] {
+            r.register(Command(
+                id: name, title: title, scope: .global, label: name,
+                available: { _ in ["review", "forest"].contains(app.router.surface.id) },
+                route: { _ in
+                    switch app.router.surface.id {
+                    case "review": RouteTo("review.\(name)")
+                    case "forest": RouteTo("forest.\(name)")
+                    default: nil
+                    }
+                }))
+        }
         r.register(Command(
             id: "forest.root", title: "Go to the root of the branch's stack", scope: .forest, verb: .root, label: "root", pair: "forest.tip",
             available: onBranch,
