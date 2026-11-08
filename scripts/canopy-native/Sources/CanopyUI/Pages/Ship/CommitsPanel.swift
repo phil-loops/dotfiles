@@ -10,16 +10,60 @@ struct StretchWords: View {
     let branchID: String
 
     var body: some View {
+        // while the keyboard reads the diff the words are one line; moving into them opens them
+        let open = app.pane?.id == ShipSeam.wordsPane
         Group {
             if let sha = ShipState.wordsCommit(app) {
-                CommitHead(branchID: branchID, sha: sha)
+                if open {
+                    CommitHead(branchID: branchID, sha: sha)
+                } else {
+                    let c = ShipState.of(app).historyRows(branchID)?.first { $0.sha == sha }
+                    WordsSummary(subject: c?.subject ?? "", why: c?.body ?? "", notes: 0)
+                }
             } else if ShipState.of(app).host.wholeBranch {
-                WordsEditor(branchID: branchID, landing: true, landingOnly: true)
+                if open {
+                    WordsEditor(branchID: branchID, landing: true, landingOnly: true)
+                } else {
+                    let w = WordsState.of(app)
+                    let v = w.prValue(branchID)
+                    WordsSummary(subject: v.subject, why: v.body, notes: w.prHints(branchID).count)
+                }
             }
         }
         .font(Theme.text(12))
         .fixedSize(horizontal: false, vertical: true)
         .task(id: app.store.view(Branch.self, branchID)?.tip) { WordsState.of(app).load(app, branchID) }
+    }
+}
+
+/// The words in one line while the keyboard is elsewhere: what the stretch lands as, the start of
+/// its why, how many notes the words carry, and the key that opens them.
+struct WordsSummary: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.theme) private var theme
+    let subject: String
+    let why: String
+    let notes: Int
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(subject.isEmpty ? "no title yet" : subject).foregroundStyle(subject.isEmpty ? theme.inkFaint : theme.ink)
+            let line = Self.firstLine(why)
+            if !line.isEmpty { Text("· \(line)").foregroundStyle(theme.inkDim) }
+            if notes > 0 { Text("\(notes) note\(notes == 1 ? "" : "s")").foregroundStyle(theme.goldLeaf) }
+            Spacer(minLength: 8)
+            Text("\(app.registry.verbKey(.paneUp)) words").foregroundStyle(theme.inkFaint)
+        }
+        .lineLimit(1)
+        .truncationMode(.tail)
+    }
+
+    /// A why as one line: its first paragraph, runs of space folded, the PR's `Addresses:` lines left out.
+    static func firstLine(_ why: String) -> String {
+        let kept = why.replacingOccurrences(of: "(?m)^Addresses:.*$", with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let para = kept.components(separatedBy: "\n\n").first ?? ""
+        return para.split(whereSeparator: \.isWhitespace).joined(separator: " ")
     }
 }
 
