@@ -133,7 +133,8 @@ private struct Completions: View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(cs, id: \.element.id) { i, c in
                 HStack(spacing: 12) {
-                    Text(c.id).foregroundStyle(i == app.cmdIndex ? theme.goldLeaf : theme.ink)
+                    (Text(c.id).foregroundStyle(i == app.cmdIndex ? theme.goldLeaf : theme.ink)
+                        + Text(c.takes.map { " \($0)" } ?? "").foregroundStyle(theme.inkFaint))
                     Text(c.title).foregroundStyle(theme.inkDim).lineLimit(1)
                     Spacer()
                     Text(c.keys.first.map { k in glyph(k) + (c.verbs.first.map { " · \($0.name)" } ?? " · page") } ?? "")

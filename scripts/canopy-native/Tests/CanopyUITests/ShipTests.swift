@@ -396,6 +396,82 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
         #expect(w.prHints(Self.branch).contains { $0.id == "dropped" }, "a four-line why owned by the commit won't reach the PR, and says so")
     }
 
+    // ── the words by name: :title, :why, :desc, :reword ──
+
+    func run(_ a: AppModel, _ line: String) {
+        a.cmdline = line
+        a.cmdIndex = 0
+        a.runCmdline()
+    }
+
+    func ownedOutline() -> WordsOutline {
+        var o = outline()
+        o.commits[0].locked = ""
+        return o
+    }
+
+    @Test func colonTitleWithWordsRewordsTheOwnerAndSaves() async throws {
+        let (a, port) = try app()
+        ShipStub.answer(port, "POST", "/loops/outline", #"{"ok":true,"newTip":"f00","changed":1}"#)
+        WordsState.of(a).setShown(Self.branch, ownedOutline())
+        a.cmdline = "title chore: x"
+        #expect(a.completions.map(\.id) == ["title"] && a.completions.first?.takes == "<text>", "the name typed exactly, its words after it")
+        run(a, "title chore: add a label")
+        await until("the save") { !ShipStub.posts(port).isEmpty }
+        #expect(ShipStub.posts(port)[0].body["edits"] == [["sha": "c1", "subject": "chore: add a label", "body": ""]])
+    }
+
+    @Test func colonTitleAloneOpensItToWrite() throws {
+        let (a, _) = try app()
+        WordsState.of(a).setShown(Self.branch, ownedOutline())
+        ShipState.of(a).showCommit("c2")
+        run(a, "title")
+        #expect(ShipState.wordsCommit(a) == nil, "the whole branch, whose words the title is")
+        #expect(a.pane?.id == ShipSeam.wordsPane && a.cursor(in: ShipSeam.wordsPane) == "w|title")
+        #expect(a.insertField == "words.title|\(Self.branch)")
+    }
+
+    @Test func colonWhyKeepsTheTemplate() async throws {
+        let (a, port) = try app()
+        ShipStub.answer(port, "POST", "/loops/outline", #"{"ok":true,"newTip":"f00","changed":0}"#)
+        WordsState.of(a).setShown(Self.branch, outline())
+        run(a, "why because the label lies")
+        await until("the save") { !ShipStub.posts(port).isEmpty }
+        #expect(ShipStub.posts(port)[0].body["prBody"] == "because the label lies\n\n---\n👮 Traffic Cop", "c1 is pushed: the why is PR text")
+    }
+
+    @Test func colonRewordNamesTheCommitBySha() async throws {
+        let (a, port) = try app()
+        ShipStub.answer(port, "POST", "/loops/outline", #"{"ok":true,"newTip":"f00","changed":1}"#)
+        WordsState.of(a).setShown(Self.branch, outline())
+        run(a, "reword c1 chore: something")
+        #expect(a.runner.note?.contains("can't be reworded") == true, "a pushed commit says so")
+        run(a, "reword c3")
+        #expect(a.insertField == "words.s|\(Self.branch)|c3" && ShipState.wordsCommit(a) == "c3")
+        a.keys.setMode(.normal)
+        run(a, "reword c3 rename the label")
+        await until("the save") { !ShipStub.posts(port).isEmpty }
+        #expect(ShipStub.posts(port)[0].body["edits"] == [["sha": "c3", "subject": "rename the label", "body": ""]])
+    }
+
+    @Test func colonDescSavesTheDescription() async throws {
+        let (a, port) = try app()
+        ShipStub.answer(port, "POST", "/loops/outline", #"{"ok":true,"newTip":"f00","changed":0}"#)
+        run(a, "desc label hankles-limited PRs")
+        await until("the save") { !ShipStub.posts(port).isEmpty }
+        #expect(ShipStub.posts(port)[0].body["description"] == "label hankles-limited PRs")
+    }
+
+    @Test func aNamedWordWaitsForTheWordsToBeRead() async throws {
+        let (a, port) = try app()
+        ShipStub.answer(port, "POST", "/loops/outline", #"{"ok":true,"newTip":"f00","changed":1}"#)
+        ShipStub.answer(port, "GET", "/loops/outline", #"{"ok":true,"branch":"add-hankles-limited-label","head":"e1b98e2a","description":"","commits":[{"sha":"c1","subject":"chore: add a one-shot label","locked":""}],"pr":{"exists":false},"draft":{"title":"chore: add a one-shot label","body":""}}"#)
+        #expect(WordsState.of(a).shown[Self.branch] == nil)
+        run(a, "title chore: add a label")
+        await until("the save") { !ShipStub.posts(port).isEmpty }
+        #expect(ShipStub.posts(port)[0].body["edits"] == [["sha": "c1", "subject": "chore: add a label", "body": ""]])
+    }
+
     /// The one commit the diff covers is whose words show; a run of commits has none.
     @Test func theCommitInViewIsWhoseWordsShow() throws {
         let (a, _) = try app()
