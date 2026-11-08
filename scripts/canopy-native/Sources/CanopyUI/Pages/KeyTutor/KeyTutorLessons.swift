@@ -425,7 +425,11 @@ enum KeyLessons {
             KeyStep("{words-description}: the branch's one line.", [.wordsDescription],
                     check: { $0.insertField?.hasPrefix("words.desc|") == true }),
             KeyStep("{cancel} stops.", [.cancel], check: { $0.keys.mode == .normal }),
-        ], recap: "{words-title} {words-why} {words-description} open the words wherever you are. On the {command} line, :title <text>, :why <text>, :desc <text> and :reword <sha> <subject> write and save in one go."),
+            KeyStep("{words-commit}: pick one of the branch's commits to reword — no stretch to light first.", [.wordsCommit],
+                    check: { $0.nav.picker != nil }),
+            KeyStep("{send} picks it: its subject opens, writing.", [.send], check: { $0.insertField?.hasPrefix("words.s|") == true }),
+            KeyStep("{cancel} stops.", [.cancel], check: { $0.keys.mode == .normal }),
+        ], recap: "{words-title} {words-why} {words-description} {words-commit} open the words wherever you are. On the {command} line, :title <text>, :why <text>, :desc <text> and :reword <sha> <subject> write and save in one go."),
 
         KeyLesson(id: "leader", title: "The page's own keys", steps: [
             KeyStep("What no verb names is the page's own, under the leader: {leader}. Which-key lists this page's keys.",

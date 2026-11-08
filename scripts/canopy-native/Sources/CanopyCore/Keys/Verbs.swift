@@ -57,7 +57,7 @@ public enum Verb: String, CaseIterable, Sendable, Comparable {
     case mark, unmark
     case putAway = "put-away"
     case apply, copy, push, sync, words, editor, comment, reply, extend, undo, rename
-    case wordsTitle = "words-title", wordsWhy = "words-why", wordsDescription = "words-description"
+    case wordsTitle = "words-title", wordsWhy = "words-why", wordsDescription = "words-description", wordsCommit = "words-commit"
     case copyPlace = "copy-place"
     case moveUp = "move-up", moveDown = "move-down"
     case nth1 = "nth-1", nth2 = "nth-2", nth3 = "nth-3", nth4 = "nth-4", nth5 = "nth-5"
@@ -111,7 +111,7 @@ public enum KeySection: String, CaseIterable, Sendable {
             return .review
         case .parent, .child, .root, .tip, .nextSibling, .previousSibling, .out:
             return .stack
-        case .wordsTitle, .wordsWhy, .wordsDescription:
+        case .wordsTitle, .wordsWhy, .wordsDescription, .wordsCommit:
             return .words
         case .next, .previous, .first, .last, .windowTop, .windowCenter, .windowBottom,
              .lineStart, .lineEnd, .firstNonBlank, .labels:
@@ -299,6 +299,7 @@ public enum Verbs {
         v(.wordsTitle, .nav, ["D t"], "the branch's title — what lands on main — open to write (:title <text> writes it)"),
         v(.wordsWhy, .nav, ["D w"], "the branch's why, above the PR template, open to write (:why <text>)"),
         v(.wordsDescription, .nav, ["D d"], "the branch's one line, its description, open to write (:desc <text>)"),
+        v(.wordsCommit, .nav, ["D c"], "pick one of the branch's commits and reword it (:reword <sha> <subject>)"),
         v(.editor, .shared, ["o"], "open it in Helix"),
         v(.rename, .shared, ["space r"], "rename the name under the cursor across the program: a commit you see first"),
         v(.comment, .shared, ["c"], "comment on it"),
