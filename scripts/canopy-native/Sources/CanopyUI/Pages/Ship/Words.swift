@@ -63,6 +63,29 @@ public final class WordsState {
         setDraft(id, c.sha, w.subject == c.subject && w.body == c.body ? nil : w)
     }
 
+    /// Who owns the landing title and why. While the opening commit can be reworded it does — the PR
+    /// title defaults to its subject and the drafted body to its why — so editing them rewords it
+    /// and nothing else holds a second copy. Once it's pushed, the PR text on file does. Nil once
+    /// GitHub holds the PR's words.
+    public enum LandingOwner: Equatable {
+        case commit(String)
+        case prText
+    }
+
+    public static func landingOwner(_ o: WordsOutline?) -> LandingOwner? {
+        guard let o, o.draft != nil, !githubOwns(o.pr) else { return nil }
+        if let c = o.commits.first(where: { !$0.carried }), c.locked.isEmpty { return .commit(c.sha) }
+        return .prText
+    }
+
+    public func landingOwner(_ id: String) -> LandingOwner? { Self.landingOwner(shown[id]) }
+
+    /// The opening commit, when it owns the landing words.
+    func owningCommit(_ id: String) -> OutlineCommit? {
+        guard case .commit(let sha) = landingOwner(id) else { return nil }
+        return shown[id]?.commits.first { $0.sha == sha }
+    }
+
     /// The landing title and body on file: the last save's, else /outline's.
     public func prOnFile(_ id: String) -> MessageWords {
         if let s = savedPr[id] { return s }
@@ -71,13 +94,34 @@ public final class WordsState {
     }
 
     /// The landing title and body as they stand: the draft edit if there is one, else what's on file.
-    public func prValue(_ id: String) -> MessageWords { drafts[id]?[Self.pr] ?? prOnFile(id) }
+    public func prValue(_ id: String) -> MessageWords {
+        if let c = owningCommit(id) {
+            let v = valueOf(id, c)
+            return MessageWords(subject: v.subject, body: OutlineHints.joinTemplate(v.body, OutlineHints.splitTemplate(prOnFile(id).body).template))
+        }
+        return drafts[id]?[Self.pr] ?? prOnFile(id)
+    }
+
+    /// PR text saved in config that the owning commit would silently lose to: what it says, when it
+    /// differs from the commit's words.
+    public func prTextOverride(_ id: String) -> MessageWords? {
+        guard let c = owningCommit(id), let d = shown[id]?.draft, d.titleSaved || d.bodySaved else { return nil }
+        let v = valueOf(id, c)
+        let title = d.titleSaved ? trim(d.title) : trim(v.subject)
+        let own = d.bodySaved ? trim(OutlineHints.splitTemplate(d.body).own) : trim(v.body)
+        return title == trim(v.subject) && own == trim(v.body) ? nil : MessageWords(subject: title, body: own)
+    }
 
     /// An open or merged PR's words live on GitHub; a closed one's don't — the next push opens a new PR.
     public static func githubOwns(_ pr: WordsOutline.PR?) -> Bool { pr?.exists == true && pr?.state != "CLOSED" }
 
     /// The landing-text fields a save would send (prTitle / prBody), or nil when nothing changed.
     public func prChange(_ id: String) -> (prTitle: String?, prBody: String?)? {
+        if let c = owningCommit(id) {
+            // rewording the owner retires any PR text on file, so the commit is the one copy
+            guard let d = shown[id]?.draft, d.titleSaved || d.bodySaved, changed(id).contains(where: { $0.sha == c.sha }) else { return nil }
+            return (d.titleSaved ? "" : nil, d.bodySaved ? "" : nil)
+        }
         guard let o = shown[id], o.draft != nil, let w = drafts[id]?[Self.pr], !Self.githubOwns(o.pr) else { return nil }
         let was = prOnFile(id)
         let t = trim(w.subject) != trim(was.subject) ? trim(w.subject) : nil
@@ -88,17 +132,38 @@ public final class WordsState {
     public func prHints(_ id: String) -> [WordsHint] {
         guard let o = shown[id], o.draft != nil, !Self.githubOwns(o.pr) else { return [] }
         let w = prValue(id)
+        let split = OutlineHints.splitTemplate(w.body)
         return OutlineHints.hintsFor(MessageWords(subject: w.subject, body: ""), opening: true, ticket: o.ticket.flatMap { $0.isEmpty ? nil : $0 }, kind: .title)
-            + OutlineHints.bodyHints(w.body)
+            + OutlineHints.bodyHints(split.own) + overrideHints(id) + droppedWhyHints(id, split.own)
+    }
+
+    /// A commit-owned why the server won't carry into the PR body (packet.casual_why: over 280
+    /// chars or 3 lines), so the PR would open with the template alone.
+    private func droppedWhyHints(_ id: String, _ why: String) -> [WordsHint] {
+        guard owningCommit(id) != nil else { return [] }
+        let lines = why.split(separator: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }.count
+        guard OutlineHints.len(trim(why)) > 280 || lines > 3 else { return [] }
+        return [WordsHint(id: "dropped", tone: .warn, text: "too long to open the PR — it starts with the template alone (3 lines, 280 chars)")]
+    }
+
+    /// PR text on file that disagrees with the owning commit: say what it says, and offer to take it in.
+    private func overrideHints(_ id: String) -> [WordsHint] {
+        guard let x = prTextOverride(id) else { return [] }
+        let said = x.body.isEmpty ? "“\(x.subject)”" : "“\(x.subject)” · “\(x.body.split(separator: "\n").first ?? "")”"
+        return [WordsHint(id: "override", tone: .warn, text: "the PR text on file says \(said) — saving retires it",
+                          fix: WordsHint.Fix(label: "take it") { _ in MessageWords(subject: x.subject, body: x.body) })]
     }
 
     public func editPr(_ id: String, _ w: MessageWords) {
+        if let c = owningCommit(id) {
+            return editTo(id, c, MessageWords(subject: w.subject, body: OutlineHints.splitTemplate(w.body).own))
+        }
         let was = prOnFile(id)
         setDraft(id, Self.pr, w.subject == was.subject && w.body == was.body ? nil : w)
     }
 
     /// Edits waiting for one save: changed commits, plus the PR text.
-    public func pending(_ id: String) -> Int { changed(id).count + (prChange(id) == nil ? 0 : 1) }
+    public func pending(_ id: String) -> Int { changed(id).count + (owningCommit(id) == nil && prChange(id) != nil ? 1 : 0) }
 
     /// Edits for commits the branch no longer has (it moved under them).
     public func orphans(_ id: String) -> Int {

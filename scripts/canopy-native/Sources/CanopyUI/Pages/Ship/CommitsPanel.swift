@@ -118,7 +118,7 @@ public struct WordsEditor: View {
         }
     }
 
-    static let bodyHints: Set<String> = ["plan", "prose"]
+    static let bodyHints: Set<String> = ["plan", "prose", "dropped"]
 
     /// Who can see the words from this row on, said once where it changes.
     static func reachHeader(_ key: String, _ rows: [String], _ o: WordsOutline?) -> Reach? {
@@ -160,12 +160,11 @@ public struct WordsEditor: View {
                         let v = w.prValue(branchID)
                         if let pr = o?.pr, WordsState.githubOwns(pr) {
                             Text(pr.title ?? "—").foregroundStyle(theme.inkDim)
-                        } else if !writing, Self.echoesCommit(o, v.subject) {
-                            Text("same as its one commit").foregroundStyle(theme.inkFaint)
                         } else if writing {
                             ModalTextField(field, text: Binding(get: { w.prValue(branchID).subject },
                                                                 set: { w.editPr(branchID, MessageWords(subject: $0.replacingOccurrences(of: "\n", with: " "), body: w.prValue(branchID).body)) }))
                         } else { Text(v.subject.isEmpty ? "—" : v.subject).foregroundStyle(theme.ink) }
+                        if let note = Self.ownerNote(o) { Text(note).font(Theme.text(10.5)).foregroundStyle(theme.inkFaint) }
                     case .body:
                         let github = o?.pr.flatMap { WordsState.githubOwns($0) ? $0 : nil }
                         let parts = OutlineHints.splitTemplate(github?.body ?? w.prValue(branchID).body)
@@ -228,20 +227,30 @@ public struct WordsEditor: View {
         }
     }
 
-    /// Whether the landing title is just the branch's one commit's subject, never saved as its own.
-    static func echoesCommit(_ o: WordsOutline?, _ title: String) -> Bool {
-        guard let o, o.draft?.titleSaved != true else { return false }
-        let own = o.commits.filter { !$0.carried }
-        return own.count == 1 && own[0].subject.trimmingCharacters(in: .whitespaces) == title.trimmingCharacters(in: .whitespaces)
+    /// Where the landing words are kept, said under the title: the opening commit while it can be
+    /// reworded, the PR text once it's shared.
+    static func ownerNote(_ o: WordsOutline?) -> String? {
+        switch WordsState.landingOwner(o) {
+        case .commit(let sha):
+            let short = String((o?.commits.first { $0.sha == sha }?.short ?? sha).prefix(7))
+            return "\(short)'s own words — i rewords it"
+        case .prText:
+            guard let c = o?.commits.first(where: { !$0.carried }) else { return nil }
+            return "kept for the PR — \(String(c.short.prefix(7))) is \(c.locked)"
+        case nil: return nil
+        }
     }
 
     /// Who can see a row's words yet, and so whether they can still change. Nil for a commit's body row.
     static func reach(_ r: WordsRow, _ o: WordsOutline?) -> Reach? {
         switch r {
-        case .desc: .onlyHere
-        case .title, .body: o?.pr.flatMap { WordsState.githubOwns($0) ? Reach.onPR($0.number ?? 0) : nil } ?? .draft
-        case .subject(let sha): (o?.commits.first { $0.sha == sha }).map { $0.locked.isEmpty ? .local : .locked($0.locked) }
-        case .commitBody: nil
+        case .desc: return .onlyHere
+        case .title, .body:
+            if let pr = o?.pr, WordsState.githubOwns(pr) { return .onPR(pr.number ?? 0) }
+            if case .commit = WordsState.landingOwner(o) { return .local }
+            return .draft
+        case .subject(let sha): return (o?.commits.first { $0.sha == sha }).map { $0.locked.isEmpty ? .local : .locked($0.locked) }
+        case .commitBody: return nil
         }
     }
 

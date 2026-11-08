@@ -346,16 +346,54 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
         #expect(WordsEditor.isPageTitle(.desc, o))
     }
 
-    @Test func landsAsDoesntEchoALoneCommit() {
+    /// The landing words have one owner: the opening commit while it can be reworded, the PR text once it's shared.
+    @Test func theOpeningCommitOwnsTheLandingWordsUntilItsPushed() {
         var o = WordsOutline(branch: "b", head: "h", commits: [OutlineCommit(sha: "aaa", subject: "feat: add x")])
         o.draft = .init(title: "feat: add x", body: "")
-        #expect(WordsEditor.echoesCommit(o, "feat: add x"))
-        #expect(!WordsEditor.echoesCommit(o, "feat: add y"))
-        o.draft = .init(title: "feat: add x", body: "", titleSaved: true)
-        #expect(!WordsEditor.echoesCommit(o, "feat: add x"))
-        o.draft = nil
-        o.commits.append(OutlineCommit(sha: "bbb", subject: "more"))
-        #expect(!WordsEditor.echoesCommit(o, "feat: add x"))
+        #expect(WordsState.landingOwner(o) == .commit("aaa"))
+        #expect(WordsEditor.ownerNote(o)?.contains("i rewords it") == true)
+        o.commits[0].locked = "on origin"
+        #expect(WordsState.landingOwner(o) == .prText)
+        #expect(WordsEditor.ownerNote(o) == "kept for the PR — aaa is on origin")
+        o.pr = .init(exists: true, number: 4, state: "OPEN")
+        #expect(WordsState.landingOwner(o) == nil)
+    }
+
+    /// Editing the title or why of a commit-owned branch rewords the commit and retires PR text on file.
+    @Test func editingCommitOwnedLandingWordsRewordsTheCommit() async throws {
+        let (a, port) = try app()
+        ShipStub.answer(port, "POST", "/loops/outline", #"{"ok":true,"newTip":"f00","changed":1}"#)
+        let w = WordsState.of(a)
+        var o = outline()
+        o.commits[0].locked = ""
+        o.draft = .init(title: "chore: add a one-shot label", body: "an older why\n\n---\n👮 Traffic Cop", bodySaved: true)
+        w.setShown(Self.branch, o)
+        #expect(w.prValue(Self.branch).subject == "chore: add a one-shot label")
+        #expect(w.prHints(Self.branch).contains { $0.id == "override" }, "PR text on file that disagrees is said, not hidden")
+        w.editPr(Self.branch, MessageWords(subject: "chore: add a label", body: OutlineHints.joinTemplate("the why", "---\n👮 Traffic Cop")))
+        #expect(w.valueOf(Self.branch, o.commits[0]) == MessageWords(subject: "chore: add a label", body: "the why"))
+        #expect(OutlineHints.splitTemplate(w.prValue(Self.branch).body) == (own: "the why", template: "---\n👮 Traffic Cop"))
+        #expect(w.pending(Self.branch) == 1, "one edit, counted once")
+        a.runner.dispatch("words.save", via: .key, target: Self.branch)
+        await until("the save") { !ShipStub.posts(port).isEmpty }
+        let p = ShipStub.posts(port)[0].body
+        #expect(p["edits"] == [["sha": "c1", "subject": "chore: add a label", "body": "the why"]])
+        #expect(p["prBody"] == "" && p["prTitle"] == nil, "the saved PR body is retired so the commit is the one copy")
+        #expect(w.savedPr[Self.branch] == nil)
+    }
+
+    /// The why's length counts the lines above the template, not the template.
+    @Test func theWhysLengthLeavesTheTemplateOut() throws {
+        let (a, _) = try app()
+        let w = WordsState.of(a)
+        var o = outline()
+        o.draft = .init(title: "chore: add a one-shot hankles tag", body: "a short why\n\n---\n" + String(repeating: "👮 Traffic Cop checklist line\n", count: 12))
+        w.setShown(Self.branch, o)
+        #expect(!w.prHints(Self.branch).contains { $0.id == "prose" })
+        o.commits[0].locked = ""
+        o.commits[0].body = "one\ntwo\nthree\nfour"
+        w.setShown(Self.branch, o)
+        #expect(w.prHints(Self.branch).contains { $0.id == "dropped" }, "a four-line why owned by the commit won't reach the PR, and says so")
     }
 
     /// The one commit the diff covers is whose words show; a run of commits has none.
