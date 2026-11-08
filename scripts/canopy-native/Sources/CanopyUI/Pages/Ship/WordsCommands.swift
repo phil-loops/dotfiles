@@ -79,8 +79,10 @@ enum WordsCommands {
                 if edits.contains(where: { $0.subject.isEmpty }) { throw Refusal("a commit needs a subject") }
                 let was = words.drafts
                 var mine = was[id] ?? [:]
+                // a commit-owned save only retires the PR text on file; there's no landing text of its own to remember
+                let prText = words.owningCommit(id) == nil
                 let prBefore = words.prOnFile(id)
-                let prAfter = pr == nil ? nil : words.prValue(id)
+                let prAfter = pr == nil || !prText ? nil : words.prValue(id)
                 for e in edits { mine[e.sha] = nil }
                 if pr != nil { mine[WordsState.pr] = nil }
                 words.drafts[id] = mine
@@ -90,12 +92,12 @@ enum WordsCommands {
                                                      body: a.body.trimmingCharacters(in: .whitespacesAndNewlines))
                 }
                 let n = edits.count
-                let what = [n > 0 ? "reworded \(n) commit\(n == 1 ? "" : "s")" : "", pr != nil ? "saved the PR text" : ""].filter { !$0.isEmpty }.joined(separator: ", ")
+                let what = [n > 0 ? "reworded \(n) commit\(n == 1 ? "" : "s")" : "", pr != nil && prText ? "saved the PR text" : ""].filter { !$0.isEmpty }.joined(separator: ", ")
                 var body: JSONObject = ["branch": .string(b.name), "head": .string(o.head),
                                         "edits": .array(edits.map { .object(["sha": .string($0.sha), "subject": .string($0.subject), "body": .string($0.body)]) })]
                 if let t = pr?.prTitle { body["prTitle"] = .string(t) }
                 if let x = pr?.prBody { body["prBody"] = .string(x) }
-                let undo = WordsUndo(moves: n > 0, pr: pr == nil ? nil : prBefore)
+                let undo = WordsUndo(moves: n > 0, pr: pr == nil || !prText ? nil : prBefore)
                 return Write(
                     path: tr.atRepo(b.repo, "/outline"), body: .object(body),
                     // rewording moves the tip; a PR-text-only save lands in config, done when the server answers
