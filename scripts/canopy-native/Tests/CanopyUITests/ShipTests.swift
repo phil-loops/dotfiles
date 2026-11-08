@@ -484,6 +484,21 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
         #expect(a.registry.command("title")?.keys == ["D t"] && a.registry.keyProblems.isEmpty, "\(a.registry.keyProblems)")
     }
 
+    /// D c (or :reword alone) picks a commit by its subject; picking opens it to write, a pushed one says why not.
+    @Test func dcPicksACommitToReword() throws {
+        let (a, _) = try app()
+        WordsState.of(a).setShown(Self.branch, outline())
+        a.keys.handle("D"); a.keys.handle("c")
+        #expect(a.nav.picker?.items.map(\.label) == ["c3", "c2", "c1"], "newest first")
+        #expect(a.nav.picker?.items.last?.text == "chore: add a one-shot label · on origin")
+        a.nav.choose(2)
+        #expect(a.runner.note?.contains("can't be reworded") == true && a.insertField == nil)
+        run(a, "reword")
+        a.nav.typed("fail")
+        a.nav.choose()
+        #expect(a.insertField == "words.s|\(Self.branch)|c2" && ShipState.wordsCommit(a) == "c2")
+    }
+
     /// The one commit the diff covers is whose words show; a run of commits has none.
     @Test func theCommitInViewIsWhoseWordsShow() throws {
         let (a, _) = try app()

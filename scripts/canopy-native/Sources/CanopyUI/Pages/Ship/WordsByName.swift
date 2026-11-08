@@ -52,11 +52,11 @@ enum WordsByName {
             }))
 
         r.register(Command(
-            id: "reword", title: "A commit's subject — :reword <sha> <subject> saves it; :reword <sha> opens it to write",
-            scope: .global, budget: .gitWrite, takes: "<sha> <subject>", label: "reword", available: onABranch,
+            id: "reword", title: "A commit's subject — :reword <sha> <subject> saves it; :reword <sha> opens it to write; alone, pick the commit",
+            scope: .global, budget: .gitWrite, verb: .wordsCommit, takes: "<sha> <subject>", label: "reword", available: onABranch,
             local: { _, arg in
                 guard let app = weakApp, let id = branch(app) else { return }
-                guard let t = typed(arg) else { throw Refusal("name the commit: :reword <sha> <subject>") }
+                guard let t = typed(arg) else { return try withWords(app, id) { try pickCommit(app, id) } }
                 let parts = t.split(separator: " ", maxSplits: 1).map(String.init)
                 let sha = parts[0], subject = parts.count > 1 ? oneLine(parts[1]) : nil
                 try withWords(app, id) {
@@ -67,6 +67,23 @@ enum WordsByName {
                     }
                 }
             }))
+    }
+
+    /// The branch's own commits, newest first, by their subjects; picking one opens its subject to write.
+    static func pickCommit(_ app: AppModel, _ id: String) throws {
+        let own = (WordsState.of(app).shown[id]?.commits ?? []).filter { !$0.carried }.reversed().map { $0 }
+        guard !own.isEmpty else { throw Refusal("this branch has no commits of its own") }
+        let items = own.map { c in
+            PickItem(label: String(c.short.prefix(7)), text: c.locked.isEmpty ? c.subject : "\(c.subject) · \(c.locked)")
+        }
+        app.nav.pick("reword a commit", items) { [weak app] i in
+            guard let app else { return }
+            let c = own[i]
+            do {
+                try refuseIfShared(app, id, .subject(c.sha))
+                try open(app, id, .subject(c.sha))
+            } catch { app.runner.say("\(error)") }
+        }
     }
 
     /// What was typed after the command's name, or nil when nothing was.
