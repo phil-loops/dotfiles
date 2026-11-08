@@ -32,6 +32,8 @@ public struct NodePayload: Codable, Equatable, Sendable {
     public var baseSha: String?
     public var worktree: String?
     public var files: [NodeFile]
+    /// the forest deps it carries beyond its parent (fan-in), as branch names
+    public var requires: [String]?
 }
 
 /// A ledger item GitHub doesn't show yet (drafts, waiting, sending, lost): the page draws these; a

@@ -238,12 +238,12 @@ enum KeyLessons {
         KeyLesson(id: "stack", title: "Walking the stack", steps: [
             KeyStep("Reviewing add-greeting. {next-sibling} goes to the next branch in merge order, staying on review.",
                     [.nextSibling], setup: P.review(), check: { P.onBranch($0, S.header) }),
-            KeyStep("{child}: this branch's child.", [.child], check: { P.onBranch($0, S.banner) }),
-            KeyStep("{parent}: back to its parent.", [.parent], check: { P.onBranch($0, S.header) }),
+            KeyStep("Again — ] b is the same next. There is one next: merge order, the forest's numbered list.",
+                    [.nextSibling], check: { P.onBranch($0, S.footer) }),
+            KeyStep("{previous-sibling} (or [ b) steps back.", [.previousSibling], check: { P.onBranch($0, S.header) }),
             KeyStep("{tip}: the tip of the stack.", [.tip], check: { P.onBranch($0, S.banner) }),
-            KeyStep("{previous-sibling}: the branch before it in merge order.", [.previousSibling], check: { P.onBranch($0, S.footer) }),
             KeyStep("{root}: the root of the stack.", [.root], check: { P.onBranch($0, S.root) }),
-        ], recap: "{next-sibling} / {previous-sibling} walk merge order; {parent}, {child}, {root}, {tip} walk the tree (at a fork, {child} labels the children). All are jumps."),
+        ], recap: "{next-sibling} / {previous-sibling}, and ] b / [ b, walk merge order — the only next. Ancestry is named, not stepped: {command} parent, child or requires; {root} and {tip} jump to the stack's ends. All are jumps."),
 
         KeyLesson(id: "jumps", title: "Pickers and the jumplist", steps: [
             KeyStep("{branches} finds any branch, the ones you visit most first.", [.branches],

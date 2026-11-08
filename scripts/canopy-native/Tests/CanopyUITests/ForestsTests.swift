@@ -157,7 +157,7 @@ private let NOW = iso("2026-10-22T18:00:00Z") // Thu 11:00 PT
 /// A small world: two focus forests (the first a fork: a → b, a → c, c → d), one on the workbench,
 /// one archived, one whose every PR landed.
 @MainActor
-func world(_ route: Route = .forests, todo: [String: Any] = [:]) -> AppModel {
+func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = false) -> AppModel {
     var c = AppConfig()
     c.route = route
     let a = AppModel(config: c, port: 1, telemetry: false)
@@ -174,8 +174,13 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:]) -> AppModel {
     let projects = Dictionary(uniqueKeysWithValues: [
         project("tree", "focus", rank: 1), project("solo", "focus", rank: 2), project("bench", "workbench"),
         project("old", "archive"), project("done", "workbench"),
-    ])
-    let branches = Dictionary(uniqueKeysWithValues: [
+    ] + (fanIn ? [project("fan", "focus", rank: 3)] : []))
+    // the enforcement-log shape: 1, 2, 3 off main; 4 on 1; 5 on 4 (requiring 2 and 3); 6 on 5
+    let fan: [(String, [String: Any])] = !fanIn ? [] : [
+        branch("f1", "fan", order: 1), branch("f2", "fan", order: 2), branch("f3", "fan", order: 3),
+        branch("f4", "fan", order: 4, parent: "f1"), branch("f5", "fan", order: 5, parent: "f4"), branch("f6", "fan", order: 6, parent: "f5"),
+    ]
+    let branches = Dictionary(uniqueKeysWithValues: fan + [
         branch("a", "tree", order: 1, ["gates": "green", "pushed": "synced"]),
         branch("b", "tree", order: 2, parent: "a", ["gates": "green"]),
         branch("c", "tree", order: 3, parent: "a"),
@@ -431,33 +436,52 @@ private func showRows(_ a: AppModel) {
         #expect(a.selected == "b:r:d", "the last stays put")
         a.keys.handle("K")
         #expect(a.selected == "b:r:c")
-        for id in ["forest.branch.next", "forest.branch.prev", "forest.parent", "forest.child", "forest.root", "forest.tip", "forest.next.ready"] {
+        for id in ["forest.branch.next", "forest.branch.prev", "forest.root", "forest.tip", "forest.next.ready"] {
             #expect(a.registry.command(id)?.recordsJump == true, "\(id)")
         }
         #expect(a.jumps.back.count >= 4, "each J/K left a jumplist entry")
     }
 
-    @Test func gkAndGjWalkTheDAGWithLabelsAtAFork() {
+    /// One next: ] b / [ b step merge order, as J / K do. Ancestry is named — :parent, :child — not stepped.
+    @Test func bracketBStepsMergeOrderAndAncestryIsNamed() {
         let a = page()
         a.setCursor("b:r:d")
         a.keys.handle("["); a.keys.handle("b")
         #expect(a.selected == "b:r:c")
         a.keys.handle("["); a.keys.handle("b")
-        #expect(a.selected == "b:r:a")
-        a.runner.dispatch("forest.parent", via: .palette)
+        #expect(a.selected == "b:r:b", "merge order, not c's parent")
+        a.runner.dispatch("parent", via: .palette)
+        #expect(a.selected == "b:r:a", ":parent walks ancestry")
+        a.runner.dispatch("parent", via: .palette)
         #expect(a.selected == "b:r:a" && a.runner.note?.contains("sits on main") == true, "\(a.runner.note ?? "")")
-        // a forks into b and c: g j asks which, through the label layer over just the children
+        // a forks into b and c: :child asks which, through the label layer over just the children
         showRows(a)
-        a.keys.handle("]"); a.keys.handle("b")
+        a.runner.dispatch("child", via: .palette)
         #expect(a.keys.layer == .labels)
         #expect(a.labeling?.items.map(\.key) == ["b:r:b", "b:r:c"])
         #expect(a.forestModel.childChoice == nil, "the restriction lasts one layer")
         let c = a.labeling!.label("main", "b:r:c")!
         for k in c { a.keys.handle(String(k)) }
         #expect(a.keys.layer == nil && a.selected == "b:r:c" && a.router.route == .forest(repo: "r", project: "tree"), "a pick only moves the cursor")
-        a.setCursor("b:r:c")
-        a.keys.handle("]"); a.keys.handle("b")
+        a.runner.dispatch("child", via: .palette)
         #expect(a.selected == "b:r:d", "one child: no question")
+        for id in ["forest.parent", "forest.child", "forest.requires"] { #expect(a.registry.command(id)?.recordsJump == true, "\(id)") }
+    }
+
+    /// The rule, on a fan-in forest: ] b from every branch reaches the next in merge order, and [ b the one before —
+    /// even where ancestry has nowhere to go (2 and 3 sit on main; 5 converges 4, 2 and 3).
+    @Test func bracketBReachesTheNextInMergeOrderFromEveryBranchOfAFanIn() {
+        let a = world(.forest(repo: "r", project: "fan"), fanIn: true)
+        let order = ["f1", "f2", "f3", "f4", "f5", "f6"].map { "b:r:\($0)" }
+        #expect(a.rows.filter { $0.hasPrefix("b:") } == order)
+        for (i, here) in order.enumerated() {
+            a.setCursor(here)
+            a.keys.handle("]"); a.keys.handle("b")
+            #expect(a.selected == order[min(i + 1, order.count - 1)], "] b from \(here)")
+            a.setCursor(here)
+            a.keys.handle("["); a.keys.handle("b")
+            #expect(a.selected == order[max(i - 1, 0)], "[ b from \(here)")
+        }
     }
 
     @Test func gShiftKAndGShiftJGoToRootAndTip() {
