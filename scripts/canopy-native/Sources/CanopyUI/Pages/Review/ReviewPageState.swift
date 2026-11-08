@@ -169,16 +169,20 @@ public final class ReviewPageState: ShipHost {
         let longest = files.map(\.path.count).max() ?? 20
         return min(260, max(180, CGFloat(longest) * 6.6 + 80))
     }
-    /// Characters the old half of a split line gets in this file: none for a new file and all of it
-    /// for a deleted one, which have only one side to show; else half, since both halves carry the
-    /// same context lines and a narrower one would wrap them.
+    /// Characters the old half of a split line gets in this file (see `oldHalfWidth`).
     public func splitWidth(_ path: String?) -> Int {
-        let usable = diffColumns > 0 ? diffColumns - 13 : 120
-        switch files.first(where: { $0.path == path })?.status {
-        case .added: return 0
-        case .deleted: return usable
-        default: return max(24, usable / 2)
-        }
+        Self.oldHalfWidth(files.first { $0.path == path }, usable: diffColumns > 0 ? diffColumns - 13 : 120)
+    }
+
+    /// The old half's width: none when the file has nothing old to show (new, or only additions) and
+    /// all of it when it has nothing new (deleted, or only deletions), since a half with nothing in it
+    /// is wasted width; else half, since both halves carry the same context lines and a narrower one
+    /// would wrap them.
+    nonisolated static func oldHalfWidth(_ f: FileDiff?, usable: Int) -> Int {
+        guard let f else { return max(24, usable / 2) }
+        if f.status == .added || f.del == 0 { return 0 }
+        if f.status == .deleted || f.add == 0 { return usable }
+        return max(24, usable / 2)
     }
     /// The cursor in the code: its row, half and UTF-16 range in that half's text (one character). It
     /// counts only while the cursor is still on that row and half.

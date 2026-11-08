@@ -135,6 +135,18 @@ import Testing
         #expect(expand(f, nil, [:]).gaps.isEmpty)
     }
 
+    @Test func aHalfWithNothingToShowGetsNoWidth() {
+        let both = parsePatch("x.ts", ["@@ -1,3 +1,3 @@", " a", "-b", "+B", " c"].joined(separator: "\n"))
+        let adds = parsePatch("x.ts", ["@@ -1,2 +1,3 @@", " a", "+b", " c"].joined(separator: "\n"))
+        let dels = parsePatch("x.ts", ["@@ -1,3 +1,2 @@", " a", "-b", " c"].joined(separator: "\n"))
+        #expect(ReviewPageState.oldHalfWidth(both, usable: 100) == 50)
+        #expect(ReviewPageState.oldHalfWidth(adds, usable: 100) == 0)
+        #expect(ReviewPageState.oldHalfWidth(dels, usable: 100) == 100)
+        var added = both
+        added.status = .added
+        #expect(ReviewPageState.oldHalfWidth(added, usable: 100) == 0)
+    }
+
     // ── review-viewed.test.ts ──
 
     static func keys(_ patch: String, _ path: String = "x.ts") -> [String] { blocksOf(parsePatch(path, patch)).map(\.key) }
