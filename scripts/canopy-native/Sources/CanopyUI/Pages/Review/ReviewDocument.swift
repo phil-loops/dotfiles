@@ -103,6 +103,7 @@ private func pad(_ n: Int?, _ w: Int) -> String {
 }
 
 private func fit(_ s: String, _ w: Int) -> String {
+    guard w > 0 else { return "" }
     let c = s.count
     if c == w { return s }
     if c < w { return s + String(repeating: " ", count: w - c) }
