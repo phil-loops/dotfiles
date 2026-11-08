@@ -474,6 +474,10 @@ enum DiffCommands {
                                pg.lineAnchor = nil
                                app.focus(pane: reviewLinePane)
                                app.setCursor(l.points[pg.lit?.hi ?? l.tip].key)
+                               let commits = l.points.filter { if case .commit = $0 { return true }; return false }.count
+                               if commits == 1 {
+                                   app.runner.say("one commit: its diff is the branch's — \(app.registry.keyOf("reword")) rewords it, \(app.registry.keyOf("title")) its title")
+                               }
                            }))
         let moveOnLine = { (by: Int) in
             guard let l = pg.line, let at = app.selected.flatMap(l.index(key:)) else { return }

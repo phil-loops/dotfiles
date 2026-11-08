@@ -549,6 +549,31 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
         #expect(WordsEditor.ownerNote(w.shown[Self.branch]) == "c1's own words — i rewords it")
     }
 
+    /// A key that can't act says why and what would: c with no PR, , h on a one-commit line, a long title.
+    @Test func deadEndsSayWhatWouldAct() throws {
+        let (a, _) = try app { s in entity(&s, "branch", Self.branch) { $0["commits"] = 1 } }
+        let w = WordsState.of(a)
+        var o = ownedOutline()
+        o.commits = [o.commits[0]]
+        o.commits[0].subject = "chore: send contact.unsubscribed when a contact opts out from the unsubscribe page"
+        w.setShown(Self.branch, o)
+        #expect(w.prHints(Self.branch).first { $0.id == "long" }?.text.contains(":title") == true)
+    }
+
+    @Test func cWithNoPRSaysWhatWould() async throws {
+        Self.nextPort += 1
+        ShipStub.answer(Self.nextPort, "GET", "/loops/node", ReviewPageTests.payload)
+        let (a, _) = try app(port: Self.nextPort) { s in
+            var ents = s["entities"]!.object!
+            ents["conv"] = .object([:])
+            s["entities"] = .object(ents)
+        }
+        let pg = ReviewPageState.of(a)
+        await until("the diff") { pg.here?.kind == .line }
+        a.keys.handle("c")
+        #expect(a.runner.note?.contains("no PR to comment on yet") == true, "\(a.runner.note ?? "-")")
+    }
+
     /// The one commit the diff covers is whose words show; a run of commits has none.
     @Test func theCommitInViewIsWhoseWordsShow() throws {
         let (a, _) = try app()

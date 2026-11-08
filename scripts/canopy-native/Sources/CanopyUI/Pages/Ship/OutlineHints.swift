@@ -113,7 +113,8 @@ public enum OutlineHints {
             hints.append(WordsHint(id: "wip", tone: .error, text: "a placeholder subject — saving refuses it"))
         }
         if wordsLength(subject) > subjectLimit {
-            hints.append(WordsHint(id: "long", tone: .warn, text: "\(wordsLength(subject)) chars after the prefix — yours run 20–35 (≤ \(subjectLimit))"))
+            hints.append(WordsHint(id: "long", tone: .warn, text: "\(wordsLength(subject)) chars after the prefix — yours run 20–35 (≤ \(subjectLimit))"
+                                   + (kind == .title ? " · :title <shorter> rewrites it" : "")))
         }
         let p = prefixOf(subject)
         if opening, let t = ticket, !t.isEmpty {
