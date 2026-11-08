@@ -57,6 +57,7 @@ public enum Verb: String, CaseIterable, Sendable, Comparable {
     case mark, unmark
     case putAway = "put-away"
     case apply, copy, push, sync, words, editor, comment, reply, extend, undo, rename
+    case wordsTitle = "words-title", wordsWhy = "words-why", wordsDescription = "words-description"
     case copyPlace = "copy-place"
     case moveUp = "move-up", moveDown = "move-down"
     case nth1 = "nth-1", nth2 = "nth-2", nth3 = "nth-3", nth4 = "nth-4", nth5 = "nth-5"
@@ -88,7 +89,7 @@ public enum VerbTier: String, Sendable {
 /// Which-key's sections: what can follow a prefix reads by meaning, as Helix's infobox keeps its
 /// keymap's written order, not by letter. The sections show in this order; letters sort inside one.
 public enum KeySection: String, CaseIterable, Sendable {
-    case places, pickers, code, review, stack
+    case places, pickers, code, review, stack, words
     case screen = "on screen", view, windows, outside, choose, help
 
     /// The section a verb reads in. No default: a new verb has to say where it goes.
@@ -110,6 +111,8 @@ public enum KeySection: String, CaseIterable, Sendable {
             return .review
         case .parent, .child, .root, .tip, .nextSibling, .previousSibling, .out:
             return .stack
+        case .wordsTitle, .wordsWhy, .wordsDescription:
+            return .words
         case .next, .previous, .first, .last, .windowTop, .windowCenter, .windowBottom,
              .lineStart, .lineEnd, .firstNonBlank, .labels:
             return .screen
@@ -293,6 +296,9 @@ public enum Verbs {
         v(.push, .shared, ["p"], "send it out: push to origin, send the draft"),
         v(.sync, .shared, ["s"], "sync it: fold or stash dirt, rebase onto its parent, shape the commits"),
         v(.words, .shared, ["d"], "the words: what's written about it, in full"),
+        v(.wordsTitle, .nav, ["D t"], "the branch's title — what lands on main — open to write (:title <text> writes it)"),
+        v(.wordsWhy, .nav, ["D w"], "the branch's why, above the PR template, open to write (:why <text>)"),
+        v(.wordsDescription, .nav, ["D d"], "the branch's one line, its description, open to write (:desc <text>)"),
         v(.editor, .shared, ["o"], "open it in Helix"),
         v(.rename, .shared, ["space r"], "rename the name under the cursor across the program: a commit you see first"),
         v(.comment, .shared, ["c"], "comment on it"),

@@ -80,10 +80,10 @@ import Testing
     /// keys.toml moves a verb, and every page implementing it follows; the leader moves too.
     @Test func keysTomlOverridesApplyPerVerbAcrossPages() {
         let a = app()
-        a.registry.applyUserKeys(["put-away": ["D"], "leader": [";"]])
+        a.registry.applyUserKeys(["put-away": ["Z"], "leader": [";"]])
         #expect(a.registry.keyProblems.isEmpty, "\(a.registry.keyProblems)")
         for id in ["project.archive", "todo.drop", "machine.kill", "tutor.forget", "review.pending.remove"] {
-            #expect(a.registry.command(id)?.keys == ["D"], "\(id)")
+            #expect(a.registry.command(id)?.keys == ["Z"], "\(id)")
         }
         #expect(a.registry.command("project.focus")?.keys == ["; f"])
         #expect(a.registry.command("forest.integration")?.keys == ["; i"])
@@ -108,13 +108,13 @@ import Testing
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
         let native = dir.appendingPathComponent("keys-native.toml")
-        try "# verbs\nput-away = \"D\"\nleader = [\";\"]\n".write(to: native, atomically: true, encoding: .utf8)
+        try "# verbs\nput-away = \"Z\"\nleader = [\";\"]\n".write(to: native, atomically: true, encoding: .utf8)
         let a = AppModel(config: AppConfig(), port: port, telemetry: false, protocolClasses: [ShipStub.self])
         a.nativeKeysPath = native.path
         #expect(a.nativeKeysPath != KeysToml.nativePath)
         await a.loadBootstrap()
         #expect(a.registry.keyProblems.isEmpty, "\(a.registry.keyProblems)")
-        #expect(a.registry.command("project.archive")?.keys == ["D"], "the verb moved; v2's id line didn't")
+        #expect(a.registry.command("project.archive")?.keys == ["Z"], "the verb moved; v2's id line didn't")
         #expect(a.registry.command("project.focus")?.keys == ["; f"])
         #expect(a.registry.keyWarnings.count == 1 && a.registry.keyWarnings[0].contains("`put-away = …` in keys-native.toml"))
         // a bad native line is a problem of the native file's, named as such

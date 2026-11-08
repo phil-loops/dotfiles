@@ -415,6 +415,18 @@ enum KeyLessons {
             KeyStep("{undo} puts it back.", [.undo]),
         ], recap: "A shared verb means one thing on every page that has it: {apply} {undo} {reply} {words} {copy} {sync} {push} {editor} {move-up} {move-down} {mark} {put-away}; digits pick the Nth."),
 
+        KeyLesson(id: "byname", title: "Words by name", steps: [
+            KeyStep("Name the words and you're there, from anywhere on the page. {words-title}: the branch's title, what lands on main, open to write.",
+                    [.wordsTitle], setup: P.review(at: "l|greet.ts|R:2"), check: { $0.insertField?.hasPrefix("words.title|") == true }),
+            KeyStep("{cancel} stops writing.", [.cancel], check: { $0.keys.mode == .normal }),
+            KeyStep("{words-why}: the why above the PR template, the same way.", [.wordsWhy],
+                    check: { $0.insertField?.hasPrefix("words.body|") == true }),
+            KeyStep("{cancel} stops.", [.cancel], check: { $0.keys.mode == .normal }),
+            KeyStep("{words-description}: the branch's one line.", [.wordsDescription],
+                    check: { $0.insertField?.hasPrefix("words.desc|") == true }),
+            KeyStep("{cancel} stops.", [.cancel], check: { $0.keys.mode == .normal }),
+        ], recap: "{words-title} {words-why} {words-description} open the words wherever you are. On the {command} line, :title <text>, :why <text>, :desc <text> and :reword <sha> <subject> write and save in one go."),
+
         KeyLesson(id: "leader", title: "The page's own keys", steps: [
             KeyStep("What no verb names is the page's own, under the leader: {leader}. Which-key lists this page's keys.",
                     [.leader], setup: P.review(), check: { $0.keys.pendingIsLeader }),

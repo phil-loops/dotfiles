@@ -20,7 +20,7 @@ enum WordsByName {
 
         r.register(Command(
             id: "title", title: "The PR's title — :title <text> writes and saves it; alone, opens it to write",
-            scope: .global, budget: .gitWrite, takes: "<text>", label: "title", available: onABranch,
+            scope: .global, budget: .gitWrite, verb: .wordsTitle, takes: "<text>", label: "title", available: onABranch,
             local: { _, arg in
                 guard let app = weakApp, let id = branch(app) else { return }
                 try landing(app, id, row: .title, typed: typed(arg).map(oneLine)) { words, text in
@@ -32,7 +32,7 @@ enum WordsByName {
 
         r.register(Command(
             id: "why", title: "The PR's why — :why <text> writes and saves it; alone, opens it to write",
-            scope: .global, budget: .gitWrite, takes: "<text>", label: "why", available: onABranch,
+            scope: .global, budget: .gitWrite, verb: .wordsWhy, takes: "<text>", label: "why", available: onABranch,
             local: { _, arg in
                 guard let app = weakApp, let id = branch(app) else { return }
                 try landing(app, id, row: .body, typed: typed(arg)) { words, text in
@@ -44,7 +44,7 @@ enum WordsByName {
 
         r.register(Command(
             id: "desc", title: "The branch's description — :desc <text> saves it; alone, opens it to write",
-            scope: .global, budget: .configWrite, takes: "<text>", label: "describe", available: onABranch,
+            scope: .global, budget: .configWrite, verb: .wordsDescription, takes: "<text>", label: "describe", available: onABranch,
             local: { _, arg in
                 guard let app = weakApp, let id = branch(app) else { return }
                 guard let text = typed(arg) else { return try open(app, id, .desc) }

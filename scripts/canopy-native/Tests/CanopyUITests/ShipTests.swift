@@ -472,6 +472,18 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
         #expect(ShipStub.posts(port)[0].body["edits"] == [["sha": "c1", "subject": "chore: add a label", "body": ""]])
     }
 
+    /// D t / D w / D d are the same commands as :title / :why / :desc, by key.
+    @Test func theDLayerNamesTheWords() throws {
+        let (a, _) = try app()
+        WordsState.of(a).setShown(Self.branch, ownedOutline())
+        for (k, field) in [("t", "words.title|"), ("w", "words.body|"), ("d", "words.desc|")] {
+            a.keys.handle("D"); a.keys.handle(k)
+            #expect(a.insertField?.hasPrefix(field) == true, "D \(k) opens \(field)")
+            a.keys.handle("esc")
+        }
+        #expect(a.registry.command("title")?.keys == ["D t"] && a.registry.keyProblems.isEmpty, "\(a.registry.keyProblems)")
+    }
+
     /// The one commit the diff covers is whose words show; a run of commits has none.
     @Test func theCommitInViewIsWhoseWordsShow() throws {
         let (a, _) = try app()
