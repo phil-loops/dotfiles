@@ -716,3 +716,12 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
         #expect(a.runner.note == "add-hankles-limited-label: conflict — with Claude")
     }
 }
+
+@Suite struct WordsSummaryTests {
+    @Test func aWhyFoldsToItsFirstParagraphOnOneLine() {
+        #expect(WordsSummary.firstLine("the create api and\nonboarding   wrote it\n\nsecond para") == "the create api and onboarding wrote it")
+        #expect(WordsSummary.firstLine("Addresses: #12\n\nwhy it matters") == "why it matters")
+        #expect(WordsSummary.firstLine("") == "")
+    }
+}
+
