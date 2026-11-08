@@ -23,6 +23,8 @@ public final class WordsState {
     /// /outline reads in flight or done, by "<repo>|<name>|<tip>"
     @ObservationIgnored private var reading: [String: String] = [:]
     @ObservationIgnored private var pendingPoll: Set<String> = []
+    /// what's waiting for a branch's words to be read (`whenShown`)
+    @ObservationIgnored private var waiting: [String: [@MainActor () -> Void]] = [:]
 
     public init() {}
 
@@ -173,6 +175,13 @@ public final class WordsState {
 
     // ── reading /outline (Commits.tsx useOutline) ──
 
+    /// Run `f` once the branch's words are read: now if they are, else after the read lands.
+    public func whenShown(_ app: AppModel, _ id: String, _ f: @escaping @MainActor () -> Void) {
+        if shown[id] != nil { return f() }
+        waiting[id, default: []].append(f)
+        load(app, id, force: true)
+    }
+
     /// Read the branch's /outline once per tip (and every 1.5s while the server drafts the PR body).
     public func load(_ app: AppModel, _ id: String, force: Bool = false) {
         guard let b = app.store.view(Branch.self, id) else { return }
@@ -182,9 +191,15 @@ public final class WordsState {
         let path = app.transport.atRepo(b.repo, "/outline?branch=\(b.name.uriComponent)")
         let t = app.transport
         Task { @MainActor [weak self, weak app] in
-            guard let got = try? await t.getJSON(path, as: WordsOutline.self) else { return }
+            guard let got = try? await t.getJSON(path, as: WordsOutline.self) else {
+                guard let self, self.reading[id] == key else { return }
+                self.reading[id] = nil
+                if self.waiting.removeValue(forKey: id) != nil { app?.runner.say("couldn't read the branch's words") }
+                return
+            }
             guard let self, self.reading[id] == key else { return }
             self.shown[id] = got
+            self.waiting.removeValue(forKey: id)?.forEach { $0() }
             if got.draft?.bodyPending == true, !self.pendingPoll.contains(id) {
                 self.pendingPoll.insert(id)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self, weak app] in

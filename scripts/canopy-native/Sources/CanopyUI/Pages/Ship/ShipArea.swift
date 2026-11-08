@@ -15,6 +15,7 @@ enum ShipArea: PageArea {
         app.registry.addScopes([.words], to: "review")
         SyncCommands.install(app)
         WordsCommands.install(app)
+        WordsByName.install(app)
         ReviewCommands.install(app)
         InsertCommands.install(app)
         // esc in normal backs out of what Ship has open (B's review.back calls ShipSeam.backOut first)

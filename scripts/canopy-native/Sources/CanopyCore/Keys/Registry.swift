@@ -183,6 +183,10 @@ public struct Command {
     /// only ever run with an argument another view supplies (a found branch, a row index): exempt
     /// from the rule that every command is bound or runnable from `:`
     public var needsArg: Bool
+    /// what it takes typed after its name on the `:` line (`:title <text>`), shown in the completions;
+    /// it arrives as the String `arg`, and nil when nothing was typed — then the command opens what
+    /// it would have written, rather than refusing
+    public var takes: String?
     /// one word for the hint line ("line", "reply"); the title's first clause when absent
     public var label: String?
     /// its opposite (next ↔ previous): the hint line shows the two as one
@@ -212,7 +216,7 @@ public struct Command {
 
     public init(id: String, title: String, scope: Scope, budget: Budget = .local,
                 verb: Verb? = nil, verbs: [Verb] = [], leader: LocalKey? = nil,
-                modes: [KeyMode] = [.normal], needsArg: Bool = false, label: String? = nil,
+                modes: [KeyMode] = [.normal], needsArg: Bool = false, takes: String? = nil, label: String? = nil,
                 pair: String? = nil, group: KeyGroup? = nil, hint: [String] = [], v1: [String] = [], quiet: Bool = false,
                 recordsJump: Bool = false,
                 available: ((String?) -> Bool)? = nil, route: ((String?) -> RouteTo?)? = nil,
@@ -220,7 +224,7 @@ public struct Command {
                 write: ((_ target: String, _ arg: Any?) throws -> Write?)? = nil) {
         self.id = id; self.title = title; self.scope = scope; self.budget = budget; self.label = label
         self.verbs = (verb.map { [$0] } ?? []) + verbs; self.leader = leader
-        self.modes = modes; self.needsArg = needsArg
+        self.modes = modes; self.needsArg = needsArg; self.takes = takes
         self.pair = pair; self.group = group; self.hint = hint; self.v1 = v1; self.quiet = quiet; self.recordsJump = recordsJump; self.available = available
         self.route = route; self.local = local; self.write = write
     }
