@@ -161,7 +161,13 @@ enum ReviewCommands {
             weakApp?.beginInsert(composeField, lines: .multi)
         }
         r.register(Command(id: "review.comment", title: "Comment on the line (or the range x selected)", scope: .line, verb: .comment, label: "comment",
-                           available: { _ in canNote() }, local: { _, _ in try compose(lineComposer()) }))
+                           local: { _, _ in
+                               guard canNote() else {
+                                   let line = weakApp?.registry.keyOf("review.line") ?? ", h"
+                                   throw Refusal("no PR to comment on yet — push it, or light one commit (\(line) ↵ ↵) to note it for Claude")
+                               }
+                               try compose(lineComposer())
+                           }))
         r.register(Command(id: "review.gutter", title: "Comment on this line", scope: .review, needsArg: true, hint: ["click +"], quiet: true,
                            available: { _ in canNote() },
                            local: { _, arg in
