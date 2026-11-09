@@ -3,16 +3,15 @@ import Foundation
 import Testing
 @testable import CanopyUI
 
-// , m reads a declaration: symbol lists shaped as tsgo answers /lsp/symbols for loops' own files
-// (test callbacks named `describe("…") callback`, locals and properties nested under them).
+// , m reads a declaration: declarations shaped as POST /syntax/units reads loops' own files from
+// their syntax tree (each it(…) its own, describe(…) stepped into, a component by its parts).
 
-private func sym(_ name: String, _ kind: String, _ line: Int, _ end: Int, _ depth: Int) -> LSPSymbols.Symbol {
-    let json: [String: Any] = ["name": name, "kind": kind, "line": line, "endLine": end, "depth": depth]
-    return try! JSONDecoder().decode(LSPSymbols.Symbol.self, from: JSONSerialization.data(withJSONObject: json))
+private func d(_ name: String, _ line: Int, _ end: Int, scope: Int = 1) -> SyntaxUnit {
+    SyntaxUnit(line: line, endLine: end, name: name, scope: scope)
 }
 
 /// The units of a patch, keyed by block, as the page would hold them.
-private func units(_ patch: String, status: FileStatus = .modified, _ syms: [LSPSymbols.Symbol]?) -> [Int: ReviewUnit] {
+private func units(_ patch: String, status: FileStatus = .modified, _ decls: [SyntaxUnit]?) -> [Int: ReviewUnit] {
     // a blank context line is one space in a real patch; the fixtures leave it empty
     var f = parsePatch("x.test.ts", "@@ " + patch.dropFirst(3).replacingOccurrences(of: "\n\n", with: "\n \n"))
     f.status = status
@@ -23,21 +22,13 @@ private func units(_ patch: String, status: FileStatus = .modified, _ syms: [LSP
         guard let l = [r.left, r.right].compactMap({ $0 }).first(where: { $0.kind != .ctx }), let b = anchors[anchorOf(l)] else { continue }
         rowBlock[r.key] = b
     }
-    return ReviewUnitRule.units(rows: rows, rowBlock: rowBlock, status: f.status, symbols: syms)
+    return ReviewUnitRule.units(rows: rows, rowBlock: rowBlock, status: f.status, decls: decls)
 }
 
 private let testFile = [
-    sym("describe", "variable", 2, 2, 0),
-    sym(#"describe("campaign-group") callback"#, "function", 4, 30, 0),
-    sym(#"describe("create") callback"#, "function", 5, 16, 1),
-    sym(#"it("appends order") callback"#, "function", 6, 15, 2),
-    sym("team", "variable", 7, 7, 3),
-    sym("created", "variable", 9, 12, 3),
-    sym("teamId", "property", 10, 10, 4),
-    sym(#"describe("findManyByTeam") callback"#, "function", 18, 29, 1),
-    sym(#"it("returns only the team's groups") callback"#, "function", 19, 28, 2),
-    sym("groups", "variable", 21, 21, 3),
-    sym("groups.map() callback", "function", 24, 24, 3),
+    d("import", 2, 2),
+    d(#"it("appends order")"#, 6, 15, scope: 3),
+    d(#"it("returns only the team's groups")"#, 19, 28, scope: 4),
 ]
 
 @MainActor @Suite struct ReviewUnitsTests {
@@ -67,10 +58,7 @@ private let testFile = [
     }
 
     @Test func aFunctionEditedInTwoPlacesIsOneUnitAndItsNeighbourIsNot() {
-        let syms = [
-            sym("findCards", "function", 3, 12, 0),
-            sym("findManyWithCards", "function", 14, 25, 0),
-        ]
+        let syms = [d("function findCards", 3, 12), d("function findManyWithCards", 14, 25)]
         let u = units("""
         @@ -3,10 +3,10 @@
          export async function findCards(
@@ -96,11 +84,7 @@ private let testFile = [
     }
 
     @Test func neighbouringOneLineConstantsReadAsOneButAMultiLineOneStandsAlone() {
-        let syms = [
-            sym("A", "constant", 1, 1, 0),
-            sym("B", "constant", 3, 3, 0),
-            sym("SELECT", "constant", 5, 9, 0),
-        ]
+        let syms = [d("A", 1, 1), d("B", 3, 3), d("SELECT", 5, 9)]
         let u = units("""
         @@ -1,9 +1,9 @@
         -export const A = 1;
@@ -119,7 +103,7 @@ private let testFile = [
         #expect(u[2] == ReviewUnit(blocks: [2], name: "SELECT"))
     }
 
-    @Test func aNewFileIsOneUnitEvenWithoutSymbols() {
+    @Test func aNewFileIsOneUnitEvenWithoutDeclarations() {
         let u = units("""
         @@ -0,0 +1,3 @@
         +export const a = 1;
@@ -129,8 +113,8 @@ private let testFile = [
         #expect(u[0] == ReviewUnit(blocks: [0], name: "the new file"))
     }
 
-    @Test func aChangeOutsideEveryDeclarationIsItsOwnAndARemovalJoinsItsFunction() {
-        let syms = [sym("f", "function", 3, 8, 0)]
+    @Test func anImportIsItsOwnAndARemovalJoinsItsFunction() {
+        let syms = [d("import", 1, 1), d("function f", 3, 8)]
         let u = units("""
         @@ -1,9 +1,8 @@
         -import { x } from "./x";
@@ -142,11 +126,11 @@ private let testFile = [
            return a;
          }
         """, syms)
-        #expect(u[0] == ReviewUnit(blocks: [0], name: "a change"))
+        #expect(u[0] == ReviewUnit(blocks: [0], name: "import"))
         #expect(u[1] == ReviewUnit(blocks: [1], name: "function f"))
     }
 
-    @Test func noSymbolsLeavesEachChangeItsOwnUnit() {
+    @Test func noDeclarationsLeavesEachChangeItsOwnUnit() {
         let u = units("""
         @@ -1,3 +1,3 @@
         -a
@@ -156,5 +140,27 @@ private let testFile = [
         +e
         """, nil)
         #expect(u[0]?.blocks == [0] && u[1]?.blocks == [1])
+    }
+
+    @Test func oneLinersMergeOnlyWithinTheirScopeAndAGapLineIsItsOwn() {
+        let decls = [d("router", 2, 2, scope: 2), d("A", 4, 4), d("function g", 7, 9)]
+        let u = units("""
+        @@ -1,9 +1,9 @@
+         function C() {
+        -  const router = useRouter();
+        +  const router = useRouter({});
+         }
+        -export const A = 1;
+        +export const A = 2;
+
+        -// note
+        +// a note
+         function g() {
+           return 1;
+         }
+        """, decls)
+        #expect(u[0] == ReviewUnit(blocks: [0], name: "router"), "a hook line and a top-level const sit in different scopes")
+        #expect(u[1] == ReviewUnit(blocks: [1], name: "A"))
+        #expect(u[2] == ReviewUnit(blocks: [2], name: "a change"), "a line between declarations is its own")
     }
 }
