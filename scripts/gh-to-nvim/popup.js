@@ -4,7 +4,7 @@ const HOST = "com.loops.gh_to_nvim";
 // Nothing shows when all's well; otherwise one row names the problem and its click is the fix.
 const FIX = {
   offline: { label: "Viewer offline", act: "Start", run: startViewer },
-  unbound: { label: "Shortcut unbound", act: "Bind ⌘⇧U", run: bindShortcut },
+  unbound: { label: "Shortcut unbound", act: "Bind ⌘⇧O", run: bindShortcut },
   stale: { label: "Source changed", act: "Reload", run: () => chrome.runtime.reload() },
 };
 
