@@ -264,7 +264,7 @@ request.
 | `POST /lsp/hover` | position | `{ok, contents(markdown), range}` | `review/types.ts` |
 | `POST /lsp/definition`, `/lsp/type-definition`, `/lsp/implementation`, `/lsp/references` | position | `{ok, sha, side, locations:[{path, line, character, endLine, span?}]}` | `review/types.ts goto` (route `/lsp/${kind}`) |
 | `POST /lsp/symbols` | `{branch\|sha, path, side}` | `{ok, sha, side, symbols:[{name, kind, line, endLine, depth}]}` | `review/types.ts` |
-| `POST /syntax/units` | `{branch\|sha, path}` | `{ok, sha, units:[{line, endLine, name, scope}] \| null, functions:[line]}` — a file's declarations from its syntax tree (Helix's grammars + textobject queries; `units` null for a file with no grammar here) | `ReviewUnits.swift` |
+| `POST /syntax/units` | `{branch\|sha, path}` | `{ok, sha, units:[{line, endLine, name, scope}] \| null, functions:[{line, endLine, name}] \| null, classes:[same] \| null}` — a file's declarations from its syntax tree (Helix's grammars + textobject queries; `units` null for a file with no grammar here) | `ReviewUnits.swift` |
 | `GET /review-flags?branch=` | — | `{flags:[{path, line, text}] \| null}` — push-ready's findings on the tree the branch has now; null when none are recorded for it | `]d` / `[d` (native only) |
 | `POST /lsp/prepare` | `{branch, base?}` | `{"ok":true}` (moves the trees in the background) | `review/page.ts` (on branch page load) |
 | `GET /lsp/src` | `?path=&sha=` | `{path, sha, text}` · `{err}`. v2 fetches it with `getText` and runs `JSON.parse` itself. | `nav.ts` (picker previews) |

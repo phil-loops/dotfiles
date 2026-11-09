@@ -198,11 +198,12 @@ enum KeyLessons {
         ], recap: "{line-start} / {line-end} / {first-non-blank} the line's ends; {find-char} / {till-char} a character on, {find-char-back} / {till-char-back} one back, {repeat-motion} again; {next-long-word} / {previous-long-word} / {long-word-end} by runs of non-blanks — as in Helix."),
 
         KeyLesson(id: "shape", title: "Code by its shape", steps: [
-            KeyStep("{next-function}: the next function in this file's diff — the status line names it.", [.nextFunction],
+            KeyStep("{next-function}: the next function this change touches, on its first line — the status line names it.", [.nextFunction],
                     setup: P.review(at: "l|greet.ts|R:2"), check: { P.here($0) == "l|greet.ts|R:4" }),
-            KeyStep("{next-function} again.", [.nextFunction], check: { P.here($0) == "l|greet.ts|R:7" }),
+            KeyStep("{next-function} again: farewell didn't change, so it's passed; wave's first line was folded away, so it opens.",
+                    [.nextFunction], check: { P.here($0) == "l|greet.ts|R:21" }),
             KeyStep("{previous-function}: back one.", [.previousFunction], check: { P.here($0) == "l|greet.ts|R:4" }),
-            KeyStep("{next-type}: the next class, interface or enum — where the diff first shows it.", [.nextType], check: { P.here($0) == "l|greet.ts|R:22" }),
+            KeyStep("{next-type}: the next class or type this change touches — unfolded the same way.", [.nextType], check: { P.here($0) == "l|greet.ts|R:20" }),
             KeyStep("{previous-type}: there's none before it, and it says so.", [.previousType]),
             KeyStep("{next-finding}: the next thing push-ready's review flagged on this branch; the status line reads it out.", [.nextFinding],
                     check: { P.here($0) == "l|header.ts|R:2" }),

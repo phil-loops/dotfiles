@@ -12,8 +12,8 @@ HAVE = os.path.exists(syntax.RUNTIME) and os.path.exists(os.path.join(syntax.HEL
 
 
 def read(src, ext=".ts"):
-    us, fns = syntax.units_of(textwrap.dedent(src).lstrip("\n").encode(), ext)
-    return [(u["line"], u["endLine"], u["name"], u["scope"]) for u in us], fns
+    us, (fns, classes) = syntax.units_of(textwrap.dedent(src).lstrip("\n").encode(), ext)
+    return [(u["line"], u["endLine"], u["name"], u["scope"]) for u in us], [(f["line"], f["endLine"], f["name"]) for f in fns + classes]
 
 
 @unittest.skipUnless(HAVE, "needs Homebrew's libtree-sitter and Helix's grammars")
@@ -39,7 +39,8 @@ class Units(unittest.TestCase):
                               (5, 8, 'it("appends order")', 3),
                               (10, 12, "function group", 2),
                               (13, 13, 'it.skip("is pending")', 2)])
-        self.assertIn(5, fns, "Helix's ]f stops at the it callback")
+        self.assertIn((5, 8, 'it("appends order")'), fns, "Helix's ]f stops at the it callback, named by its test")
+        self.assertIn((10, 12, "function group"), fns, "an arrow function is named by the const it's bound to")
 
     def test_functions_types_and_constants_are_each_a_unit(self):
         us, _ = read('''
@@ -70,6 +71,14 @@ class Units(unittest.TestCase):
             }
             ''')
         self.assertEqual(us, [(2, 2, "size", 2), (4, 6, "method push", 2)])
+        _, objs = read('''
+            export class Queue {
+              push(x: number) {
+                return [1].map((y) => y + x);
+              }
+            }
+            ''')
+        self.assertEqual(objs, [(2, 4, "method push"), (3, 3, "[1].map() callback"), (1, 5, "class Queue")])
 
     def test_a_react_component_is_read_by_its_hooks_handlers_and_jsx(self):
         us, _ = read('''
