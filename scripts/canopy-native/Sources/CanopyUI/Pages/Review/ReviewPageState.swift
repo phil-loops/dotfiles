@@ -57,8 +57,14 @@ public struct FileView: Equatable {
     public var flagged: Int = 0
     /// each changed row's block (an index into `blocks`), by row key
     public var rowBlock: [String: Int] = [:]
-    /// each block's mark, in `blocks` order
+    /// each block's mark, in `blocks` order: read once every line of it is
     public var marks: [Mark] = []
+    /// each block's line keys, in order (`lineKey`)
+    public var lineKeys: [[String]] = []
+    /// the line keys a changed row shows (two in split view, where a removal and its replacement pair up)
+    public var rowLines: [String: [String]] = [:]
+    /// each changed line's mark, by line key
+    public var lineMarks: [String: Mark] = [:]
     /// unchanged lines the diff still hides (each a cursor stop; ↵ shows more)
     public var gaps: [Gap]
 
@@ -108,8 +114,42 @@ public func changed(_ r: DiffRow) -> Bool { r.left?.kind != .ctx || r.right?.kin
 public enum Mark: String, Equatable, Sendable { case unread = "none", viewed, flagged }
 
 extension FileView {
-    /// The mark on a changed row's block; nil for an unchanged row.
-    public func mark(of r: DiffRow) -> Mark? { rowBlock[r.key].map { marks[$0] } }
+    /// The mark on a changed row: its line's (both lines', in split view); nil for an unchanged row.
+    public func mark(of r: DiffRow) -> Mark? {
+        guard let b = rowBlock[r.key] else { return nil }
+        guard let ks = rowLines[r.key], !ks.isEmpty else { return marks[b] }
+        return combined(ks.map { lineMarks[$0] ?? .unread })
+    }
+}
+
+/// Several lines' marks as one: flagged if any is, read only if all are.
+public func combined(_ ms: [Mark]) -> Mark {
+    ms.contains(.flagged) ? .flagged : !ms.isEmpty && ms.allSatisfy { $0 == .viewed } ? .viewed : .unread
+}
+
+/// A changed line's mark key: its block's key and its place in the block — exactly as stable as the
+/// block's own key, and a block-level mark still covers every line of it.
+public func lineKey(_ b: Block, _ i: Int) -> String { "\(b.key).\(i)" }
+
+/// Each changed line in file order: its anchor, its block (an index into `blocksOf(f)`), its place in the
+/// block, and the new-side line it stands at (a removal: the line now standing where it was).
+public func lineAnchors(_ f: FileDiff) -> [(anchor: String, block: Int, index: Int, at: Int)] {
+    var out: [(anchor: String, block: Int, index: Int, at: Int)] = []
+    var b = -1, i = 0
+    for h in f.hunks {
+        var inRun = false
+        var next = [Int?](repeating: nil, count: h.lines.count + 1)
+        let lastNew = h.lines.compactMap(\.new).last
+        next[h.lines.count] = lastNew.map { $0 + 1 }
+        for k in stride(from: h.lines.count - 1, through: 0, by: -1) { next[k] = h.lines[k].new ?? next[k + 1] }
+        for (k, l) in h.lines.enumerated() {
+            if l.kind == .ctx { inRun = false; continue }
+            if !inRun { b += 1; i = 0; inRun = true }
+            out.append((anchorOf(l), b, i, l.new ?? next[k] ?? 1))
+            i += 1
+        }
+    }
+    return out
 }
 
 /// Each changed line's block as an anchor ("L:<old>" / "R:<new>") → index into `blocksOf(f)`, walking the
@@ -609,6 +649,15 @@ public final class ReviewPageState: ShipHost {
 
     public func mark(_ b: Block) -> Mark { mark(b, serverMarks) }
 
+    /// A line's mark: its own optimistic mark, else its block's, else the server's on the block (or the
+    /// line, when only part of the block was read).
+    func lineMark(_ b: Block, _ k: String, _ s: (viewed: Set<String>, flagged: Set<String>)) -> Mark {
+        if let o = viewedOverride[k] { return o }
+        if let o = viewedOverride[b.key] { return o }
+        if s.flagged.contains(b.key) { return .flagged }
+        return s.viewed.contains(b.key) || s.viewed.contains(b.legacy) || s.viewed.contains(k) ? .viewed : .unread
+    }
+
     func mark(_ b: Block, _ s: (viewed: Set<String>, flagged: Set<String>)) -> Mark {
         if let o = viewedOverride[b.key] { return o }
         if s.flagged.contains(b.key) { return .flagged }
@@ -736,17 +785,31 @@ public final class ReviewPageState: ShipHost {
             for c in pend[file.path] ?? [] { pendingAt["\(c.side == .left ? "L" : "R"):\(c.line ?? 0)", default: []].append(c) }
             let open = (byPath[file.path] ?? []).filter { !$0.resolved && !$0.outdated }.count
             let blocks = blocksOfCached(raw, salt)
-            let marks = blocks.map { mark($0, server) }
+            var lineKeys = blocks.map { _ in [String]() }
+            var keyAt: [String: String] = [:]
+            for a in lineAnchors(raw) where blocks.indices.contains(a.block) {
+                let k = lineKey(blocks[a.block], a.index)
+                lineKeys[a.block].append(k)
+                keyAt[a.anchor] = k
+            }
+            var lineMarks: [String: Mark] = [:]
+            for (b, ks) in lineKeys.enumerated() { for k in ks { lineMarks[k] = lineMark(blocks[b], k, server) } }
+            let marks = blocks.indices.map { b in lineKeys[b].isEmpty ? mark(blocks[b], server) : combined(lineKeys[b].map { lineMarks[$0]! }) }
             let lineBlock = blockAnchors(raw)
             var rowBlock: [String: Int] = [:]
             for r in rows {
                 guard let l = [r.left, r.right].compactMap({ $0 }).first(where: { $0.kind != .ctx }), let b = lineBlock[anchorOf(l)] else { continue }
                 rowBlock[r.key] = b
             }
+            var rowLines: [String: [String]] = [:]
+            for r in rows where rowBlock[r.key] != nil {
+                rowLines[r.key] = [r.left, r.right].compactMap { $0 }.filter { $0.kind != .ctx }.compactMap { keyAt[anchorOf($0)] }
+            }
             let seen = marks.filter { $0 == .viewed }.count
             return FileView(file: file, rows: rows, threadsAt: threadsAt, pendingAt: pendingAt, aside: aside, open: open,
                             viewed: !blocks.isEmpty && seen == blocks.count, blocks: blocks, seen: seen,
-                            flagged: marks.filter { $0 == .flagged }.count, rowBlock: rowBlock, marks: marks, gaps: gaps)
+                            flagged: marks.filter { $0 == .flagged }.count, rowBlock: rowBlock, marks: marks,
+                            lineKeys: lineKeys, rowLines: rowLines, lineMarks: lineMarks, gaps: gaps)
         }
     }
 
@@ -917,6 +980,31 @@ public final class ReviewPageState: ShipHost {
     /// Where each change starts, as stop indexes: a changed line whose line before (conversations
     /// under it don't count) is unchanged, in another hunk or file, or across hidden lines. A change
     /// is finer than git's hunk, which can hold two edits — `]` and the statusline both count these.
+    /// Where each stretch of changed lines in a mark begins, as stop indexes: a change's start, or a line
+    /// whose line before it in the change has another mark — so part of a change read leaves its rest
+    /// one key away.
+    public func markStarts(_ keep: (Mark) -> Bool, reading: (Stop) -> Bool = { _ in false }) -> [Int] {
+        var out: [Int] = []
+        var prev: (stop: Stop, kept: Bool)?
+        for (k, st) in stops.enumerated() {
+            switch st.kind {
+            case .line:
+                if let row = st.row, changed(row) {
+                    // a line being marked right now reads as already marked
+                    let kept = !reading(st) && (markAt(k).map(keep) ?? false)
+                    let joins = prev.flatMap { p in p.stop.row.map { changed($0) && p.stop.path == st.path && $0.hunk == row.hunk && p.kept } } ?? false
+                    if kept && !joins { out.append(k) }
+                    prev = (st, kept)
+                } else {
+                    prev = nil
+                }
+            case .thread, .pending: continue
+            case .file, .gap: prev = nil
+            }
+        }
+        return out
+    }
+
     public var changeStarts: [Int] {
         var out: [Int] = []
         var prev: Stop?

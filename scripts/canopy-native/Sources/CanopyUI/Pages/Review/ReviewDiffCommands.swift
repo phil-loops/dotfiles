@@ -253,7 +253,7 @@ enum DiffCommands {
         /// so what's left to read is one key away without marking anything.
         func unviewed(_ dir: Int) throws {
             let i = idx()
-            let open = pg.changeStarts.filter { pg.markAt($0).map { $0 != .viewed } ?? false }
+            let open = pg.markStarts { $0 != .viewed }
             guard !open.isEmpty else { throw Refusal("every change on this branch is read, none flagged · , M takes a mark back") }
             let ahead = dir > 0 ? open.first { $0 > i } : open.last { $0 < i }
             let target = ahead ?? (dir > 0 ? open.first! : open.last!)
@@ -1100,7 +1100,7 @@ enum DiffCommands {
                            write: { _, arg in
                                guard let path = arg as? String, let fv = pg.fileOf(path) else { return nil }
                                let want: Mark = fv.viewed ? .unread : .viewed
-                               if want == .viewed { advance(pg, from: path, after: nil) }
+                               if want == .viewed { advance(pg, past: [(path, Array(fv.blocks.indices), [:])]) }
                                return markSet(app, pg, blockMarks(pg, fv, Array(fv.blocks.indices), want))
                            }))
         r.register(Command(id: "review.viewed.set", title: "Put marks back", scope: .review, budget: .configWrite, needsArg: true, quiet: true,
@@ -1154,10 +1154,16 @@ enum DiffCommands {
     /// read under its pre-2026-11-05 key has that key cleared too when it stops being read.
     static func blockMarks(_ pg: ReviewPageState, _ fv: FileView, _ blocks: [Int], _ want: Mark) -> (marks: [String: Mark], before: [String: Mark]) {
         var marks: [String: Mark] = [:], before: [String: Mark] = [:]
-        for b in blocks where fv.marks[b] != want {
+        for b in blocks {
             let block = fv.blocks[b]
+            let lines = fv.lineKeys.indices.contains(b) ? fv.lineKeys[b] : []
+            // a line read on its own keeps its own key: taking the block's mark off takes those too
+            let readAlone = want == .viewed ? [] : lines.filter { pg.serverMark($0) == .viewed || pg.viewedOverride[$0] == .viewed }
+            guard fv.marks[b] != want || !readAlone.isEmpty else { continue }
             marks[block.key] = want
             before[block.key] = fv.marks[b]
+            for k in readAlone { marks[k] = .unread; before[k] = .viewed }
+            if want == .viewed { for k in lines where pg.viewedOverride[k] != nil { marks[k] = .viewed; before[k] = fv.lineMarks[k] ?? .unread } }
             if block.legacy != block.key, want != .viewed, pg.serverMark(block.legacy) == .viewed {
                 marks[block.legacy] = .unread
                 before[block.legacy] = .viewed
@@ -1166,11 +1172,33 @@ enum DiffCommands {
         return (marks, before)
     }
 
+    /// The keys to send for reading (or un-reading) some lines of block `b` — a unit that covers part of
+    /// it. Un-reading part of a block read whole moves the mark onto the lines that stay read.
+    static func lineWrites(_ pg: ReviewPageState, _ fv: FileView, _ b: Int, _ idx: Set<Int>, _ want: Mark) -> (marks: [String: Mark], before: [String: Mark]) {
+        var marks: [String: Mark] = [:], before: [String: Mark] = [:]
+        guard fv.lineKeys.indices.contains(b) else { return (marks, before) }
+        let block = fv.blocks[b], keys = fv.lineKeys[b]
+        let now = { (k: String) in fv.lineMarks[k] ?? .unread }
+        if want == .viewed {
+            for i in idx.sorted() where keys.indices.contains(i) && now(keys[i]) == .unread { marks[keys[i]] = .viewed; before[keys[i]] = .unread }
+            return (marks, before)
+        }
+        for i in idx.sorted() where keys.indices.contains(i) && now(keys[i]) == .viewed { marks[keys[i]] = .unread; before[keys[i]] = .viewed }
+        let wholeRead = pg.viewedOverride[block.key] == .viewed || pg.serverMark(block.key) == .viewed || pg.serverMark(block.legacy) == .viewed
+        if wholeRead, !marks.isEmpty {
+            marks[block.key] = .unread
+            before[block.key] = .viewed
+            if block.legacy != block.key, pg.serverMark(block.legacy) == .viewed { marks[block.legacy] = .unread; before[block.legacy] = .viewed }
+            for (i, k) in keys.enumerated() where !idx.contains(i) && now(k) == .viewed { marks[k] = .viewed; before[k] = .unread }
+        }
+        return (marks, before)
+    }
+
     /// What , m / , ! / , M act on, per file: the select range's changes, else the change under the
     /// cursor; an unchanged line or a gap takes its hunk's changes; a file header (a conversation, the
     /// lines past the last hunk) the whole file.
-    static func markTargets(_ app: AppModel, _ pg: ReviewPageState) -> [(path: String, blocks: [Int])] {
-        func of(_ s: Stop, whole: Bool) -> (path: String, blocks: [Int])? {
+    static func markTargets(_ app: AppModel, _ pg: ReviewPageState) -> [(path: String, blocks: [Int], part: [Int: Set<Int>])] {
+        func of(_ s: Stop, whole: Bool) -> (path: String, blocks: [Int], part: [Int: Set<Int>])? {
             guard let fv = pg.fileOf(s.path) else { return nil }
             let all = Array(fv.blocks.indices)
             func hunk(_ h: Int) -> [Int]? {
@@ -1178,14 +1206,17 @@ enum DiffCommands {
                 return bs.isEmpty ? nil : bs.sorted()
             }
             if let row = s.row {
-                let unit = { (b: Int) in whole ? ReviewUnits.of(app).unit(pg, path: s.path, block: b)?.blocks ?? [b] : [b] }
-                return (s.path, fv.rowBlock[row.key].map(unit) ?? hunk(row.hunk) ?? all)
+                if whole, let b = fv.rowBlock[row.key], let u = ReviewUnits.of(app).unit(pg, path: s.path, row: row, block: b) {
+                    let full = u.parts.filter { $0.value.count >= (fv.lineKeys.indices.contains($0.key) ? fv.lineKeys[$0.key].count : 0) }.keys
+                    return (s.path, full.sorted(), u.parts.filter { !full.contains($0.key) })
+                }
+                return (s.path, fv.rowBlock[row.key].map { [$0] } ?? hunk(row.hunk) ?? all, [:])
             }
-            if s.kind == .gap, let at = s.at, let bs = hunk(at) { return (s.path, bs) }
-            return (s.path, all)
+            if s.kind == .gap, let at = s.at, let bs = hunk(at) { return (s.path, bs, [:]) }
+            return (s.path, all, [:])
         }
         if app.keys.mode == .select, app.pane?.id == reviewDiffPane {
-            var out: [(path: String, blocks: [Int])] = []
+            var out: [(path: String, blocks: [Int], part: [Int: Set<Int>])] = []
             for k in app.selection {
                 guard let i = pg.stopIndex[k], let t = of(pg.stops[i], whole: false) else { continue }
                 if let j = out.firstIndex(where: { $0.path == t.path }) {
@@ -1203,25 +1234,36 @@ enum DiffCommands {
     /// Reading or flagging moves on to the next unread change.
     static func marked(_ app: AppModel, _ pg: ReviewPageState, _ state: Mark) -> Write? {
         let targets = markTargets(app, pg)
-        let all = targets.flatMap { t in (pg.fileOf(t.path).map { fv in t.blocks.map { (fv, $0) } } ?? []) }
+        let all = targets.flatMap { t in (pg.fileOf(t.path).map { fv in (t.blocks + t.part.keys).map { (fv, $0) } } ?? []) }
         guard !all.isEmpty else { return nil }
         let want: Mark = state == .flagged && all.allSatisfy({ $0.0.marks[$0.1] == .flagged }) ? .unread : state
-        if want != .unread, let last = targets.last { advance(pg, from: last.path, after: last.blocks.max()) }
+        let unit = app.keys.mode == .select ? nil : pg.here.flatMap { h in
+            h.row.flatMap { r in pg.fileOf(h.path)?.rowBlock[r.key].flatMap { ReviewUnits.of(app).unit(pg, path: h.path, row: r, block: $0)?.name } }
+        }
+        if want != .unread { advance(pg, past: targets) }
         var change: (marks: [String: Mark], before: [String: Mark]) = ([:], [:])
         var count = 0
         for t in targets {
             guard let fv = pg.fileOf(t.path) else { continue }
-            let c = blockMarks(pg, fv, t.blocks, want)
+            // a flag is a change's, never part of one
+            let whole = want == .flagged ? t.blocks + t.part.keys : t.blocks
+            let c = blockMarks(pg, fv, whole, want)
             change.marks.merge(c.marks) { $1 }
             change.before.merge(c.before) { $1 }
-            count += t.blocks.filter { fv.marks[$0] != want }.count
+            var touched = Set(whole.filter { b in c.marks[fv.blocks[b].key] != nil })
+            if want != .flagged {
+                for (b, idx) in t.part {
+                    let l = lineWrites(pg, fv, b, idx, want)
+                    change.marks.merge(l.marks) { $1 }
+                    change.before.merge(l.before) { $1 }
+                    if !l.marks.isEmpty { touched.insert(b) }
+                }
+            }
+            count += touched.count
         }
         guard count > 0 else {
             if want == .unread { app.runner.say("no mark on it yet") }
             return nil
-        }
-        let unit = app.keys.mode == .select ? nil : pg.here.flatMap { h in
-            h.row.flatMap { pg.fileOf(h.path)?.rowBlock[$0.key] }.flatMap { ReviewUnits.of(app).unit(pg, path: h.path, block: $0)?.name }
         }
         let what = unit.map { "\($0) in \(shortPath(targets[0].path))" } ?? (count == 1 ? "a change in \(shortPath(targets[0].path))" : "\(count) changes")
         let said: String
@@ -1233,15 +1275,22 @@ enum DiffCommands {
         return markSet(app, pg, change, said: said)
     }
 
-    /// On to the next unread change after `block` of `path` (the file's last when nil), else the first
-    /// unread one above; flagged changes were read, so they wait for ] u.
-    static func advance(_ pg: ReviewPageState, from path: String, after block: Int?) {
-        guard let fv = pg.fileOf(path) else { return }
-        let last = block ?? (fv.blocks.count - 1)
+    /// On to the next unread stretch after what was just marked, else the first one above it; flagged
+    /// changes were read, so they wait for ] u.
+    static func advance(_ pg: ReviewPageState, past targets: [(path: String, blocks: [Int], part: [Int: Set<Int>])]) {
+        func marking(_ st: Stop) -> Bool {
+            guard let row = st.row, let fv = pg.fileOf(st.path), let b = fv.rowBlock[row.key] else { return false }
+            return targets.contains { t in
+                guard t.path == st.path else { return false }
+                if t.blocks.contains(b) { return true }
+                guard let idx = t.part[b], fv.lineKeys.indices.contains(b) else { return false }
+                return (fv.rowLines[row.key] ?? []).contains { k in fv.lineKeys[b].firstIndex(of: k).map(idx.contains) ?? false }
+            }
+        }
         let s = pg.stops
-        let here = s.lastIndex { $0.path == path && ($0.row.flatMap { fv.rowBlock[$0.key] }.map { $0 <= last } ?? false) }
-            ?? s.firstIndex { $0.path == path } ?? 0
-        let unread = pg.changeStarts.filter { pg.markAt($0) == .unread }
+        guard let here = s.lastIndex(where: marking) ?? targets.last.flatMap({ t in s.firstIndex { $0.path == t.path } }) else { return }
+        let unread = pg.markStarts({ $0 == .unread }, reading: marking)
         if let next = unread.first(where: { $0 > here }) ?? unread.first { pg.setCursor(s[next].key) }
     }
+
 }
