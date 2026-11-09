@@ -7,13 +7,27 @@ public struct ReviewUnit: Equatable {
     public var name: String
 }
 
+/// One declaration of a file as POST /syntax/units reads it from the syntax tree (Helix's grammars):
+/// a statement in its scope — the top level, a class body, a describe(…) callback, a React component.
+struct SyntaxUnit: Decodable, Equatable {
+    var line: Int
+    var endLine: Int
+    var name: String
+    var scope: Int
+}
+
+struct SyntaxUnits: Decodable {
+    var ok: Bool
+    var units: [SyntaxUnit]?
+    var message: String?
+}
+
 enum ReviewUnitRule {
-    /// Each change block's unit, from the file's symbols. Steps into containers — a class, a namespace,
-    /// a `describe(…)` callback — and stops at the first declaration inside: a function, a method, an
-    /// `it(…)`, a multi-line const. Neighbouring one-line declarations the change touches read as one
-    /// (a run of new constants or imports). Blocks that share a declaration share its unit; a change
-    /// outside every declaration is its own. A new file is one unit, symbols or not.
-    static func units(rows: [DiffRow], rowBlock: [String: Int], status: FileStatus, symbols: [LSPSymbols.Symbol]?) -> [Int: ReviewUnit] {
+    /// Each change block's unit. Blocks that touch one declaration share its unit; neighbouring one-line
+    /// declarations of one scope the change touches read as one (a run of new constants, imports or
+    /// hook lines); a change outside every declaration is its own. A new file is one unit, declarations
+    /// or not. Without declarations (no grammar for the file) every change is its own.
+    static func units(rows: [DiffRow], rowBlock: [String: Int], status: FileStatus, decls: [SyntaxUnit]?) -> [Int: ReviewUnit] {
         let blocks = Set(rowBlock.values).sorted()
         if blocks.isEmpty { return [:] }
         if status == .added {
@@ -34,14 +48,12 @@ enum ReviewUnitRule {
             }
         }
 
-        let roots = tree(symbols ?? [])
-        var leafBlocks: [Int: [Int]] = [:]
-        var leafAt: [Int: (siblings: [Node], at: Int)] = [:]
+        let ds = decls ?? []
+        var touched: [Int: [Int]] = [:]   // declaration index → its blocks
         for b in blocks {
             for x in Set(lines[b] ?? []) {
-                guard let hit = leaf(x, roots) else { continue }
-                if !(leafBlocks[hit.node.i]?.contains(b) ?? false) { leafBlocks[hit.node.i, default: []].append(b) }
-                leafAt[hit.node.i] = (hit.siblings, hit.at)
+                guard let d = ds.firstIndex(where: { $0.line <= x && x <= $0.endLine }) else { continue }
+                if !(touched[d]?.contains(b) ?? false) { touched[d, default: []].append(b) }
             }
         }
 
@@ -52,84 +64,36 @@ enum ReviewUnitRule {
             return b
         }
         func union(_ a: Int, _ b: Int) { let (ra, rb) = (find(a), find(b)); if ra != rb { parent[max(ra, rb)] = min(ra, rb) } }
-        for bs in leafBlocks.values { for b in bs.dropFirst() { union(bs[0], b) } }
-        for (i, place) in leafAt {
-            let s = place.siblings[place.at].s
-            guard s.line == s.endLine, place.at + 1 < place.siblings.count else { continue }
-            let next = place.siblings[place.at + 1]
-            guard next.s.line == next.s.endLine, let other = leafBlocks[next.i]?.first, let mine = leafBlocks[i]?.first else { continue }
-            union(mine, other)
+        for bs in touched.values { for b in bs.dropFirst() { union(bs[0], b) } }
+        for d in touched.keys.sorted() where d + 1 < ds.count {
+            let (a, n) = (ds[d], ds[d + 1])
+            guard a.line == a.endLine, n.line == n.endLine, a.scope == n.scope, let next = touched[d + 1]?.first else { continue }
+            union(touched[d]![0], next)
         }
 
         var groups: [Int: [Int]] = [:]
         for b in blocks { groups[find(b), default: []].append(b) }
         var out: [Int: ReviewUnit] = [:]
         for members in groups.values {
-            let leaves = leafBlocks.filter { !Set($0.value).isDisjoint(with: members) }.keys.sorted()
-            let syms = leaves.compactMap { i in leafAt[i].map { $0.siblings[$0.at].s } }
-            let u = ReviewUnit(blocks: members.sorted(), name: name(syms))
+            let names = touched.filter { !Set($0.value).isDisjoint(with: members) }.keys.sorted().map { ds[$0] }
+            let u = ReviewUnit(blocks: members.sorted(), name: name(names))
             for b in members { out[b] = u }
         }
         return out
     }
 
-    final class Node {
-        let s: LSPSymbols.Symbol
-        let i: Int
-        var kids: [Node] = []
-        init(_ s: LSPSymbols.Symbol, _ i: Int) { self.s = s; self.i = i }
-    }
-
-    /// The flat, depth-tagged symbol list back as a tree.
-    static func tree(_ syms: [LSPSymbols.Symbol]) -> [Node] {
-        var roots: [Node] = [], stack: [Node] = []
-        for (i, s) in syms.enumerated() {
-            let n = Node(s, i)
-            while let top = stack.last, top.s.depth >= s.depth { stack.removeLast() }
-            if let p = stack.last { p.kids.append(n) } else { roots.append(n) }
-            stack.append(n)
+    static func name(_ ds: [SyntaxUnit]) -> String {
+        guard let first = ds.first else { return "a change" }
+        if ds.count == 1 { return first.name }
+        if ds.allSatisfy({ $0.line == $0.endLine }) {
+            return ds.allSatisfy({ $0.name == first.name }) ? "\(ds.count) \(first.name)s" : "\(ds.count) declarations"
         }
-        return roots
-    }
-
-    private static let suite = try! NSRegularExpression(pattern: #"^(describe|suite|context)(\.\w+)*\(.*\) callback$"#)
-
-    /// A symbol a unit sits inside of rather than one that is a unit.
-    static func container(_ s: LSPSymbols.Symbol) -> Bool {
-        if ["class", "namespace", "module"].contains(s.kind) { return true }
-        return suite.firstMatch(in: s.name, range: NSRange(s.name.startIndex..., in: s.name)) != nil
-    }
-
-    /// The declaration line `x` reads as part of, and where it sits among its siblings; nil outside every one.
-    static func leaf(_ x: Int, _ roots: [Node]) -> (node: Node, siblings: [Node], at: Int)? {
-        var level = roots
-        while let at = level.firstIndex(where: { $0.s.line <= x && x <= $0.s.endLine }) {
-            let n = level[at]
-            guard container(n.s), !n.kids.isEmpty else { return (n, level, at) }
-            level = n.kids
-        }
-        return nil
-    }
-
-    static func name(_ syms: [LSPSymbols.Symbol]) -> String {
-        if syms.isEmpty { return "a change" }
-        if syms.count > 1 {
-            return syms.allSatisfy { $0.line == $0.endLine } ? "\(syms.count) declarations" : syms.map(label).joined(separator: ", ")
-        }
-        return label(syms[0])
-    }
-
-    static func label(_ s: LSPSymbols.Symbol) -> String {
-        if s.name.hasSuffix(" callback") { return String(s.name.dropLast(9)) }
-        switch s.kind {
-        case "function", "method", "class", "interface", "enum": return "\(s.kind) \(s.name)"
-        default: return s.name
-        }
+        return ds.map(\.name).joined(separator: ", ")
     }
 }
 
-/// Each reviewed file's units, read in the background as the cursor enters the file. `, m` asks here;
-/// until a file's symbols are in, a change is its own unit, as before.
+/// Each reviewed file's units, read as the cursor enters the file. `, m` asks here; until a file's
+/// declarations are in, a change is its own unit, as before.
 @MainActor
 final class ReviewUnits {
     static func of(_ app: AppModel) -> ReviewUnits { app.state { ReviewUnits(app) } }
@@ -144,26 +108,21 @@ final class ReviewUnits {
 
     func unit(_ pg: ReviewPageState, path: String, block: Int) -> ReviewUnit? { byKey[key(pg, path)]?[block] }
 
-    private struct Ask: Encodable { var branch: String; var path: String; var side = "new" }
+    private struct Ask: Encodable { var branch: String; var path: String }
 
     func load(_ pg: ReviewPageState, path: String) async {
         let k = key(pg, path)
         guard byKey[k] == nil, !asking.contains(k), let app, let t = pg.target, let fv = pg.fileOf(path), !fv.blocks.isEmpty else { return }
-        var syms: [LSPSymbols.Symbol]?
-        var answered = fv.file.status == .added
-        if !answered {
+        var decls: [SyntaxUnit]?
+        if fv.file.status != .added {
             asking.insert(k)
             defer { asking.remove(k) }
-            // quiet on purpose: CodeLookup's own asks pop notes and cancel each other; this one is background
-            for _ in 0..<20 {
-                let r = await app.transport.ask(app.transport.atRepo(t.repo, "/lsp/symbols"), Ask(branch: t.name, path: path), as: LSPSymbols.self)
-                if r?.ok == true { syms = r?.symbols ?? []; answered = true; break }
-                guard r?.state == "loading" else { answered = r != nil; break }
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
-            }
+            let r = await app.transport.ask(app.transport.atRepo(t.repo, "/syntax/units"), Ask(branch: t.name, path: path), as: SyntaxUnits.self)
+            // a server that never answered is asked again next time; one that read no declarations is believed
+            guard let r else { return }
+            decls = r.ok ? r.units : nil
         }
-        // a server that never answered is asked again next time; one that said "no symbols" is believed
-        guard answered, let fv = pg.fileOf(path), key(pg, path) == k else { return }
-        byKey[k] = ReviewUnitRule.units(rows: fv.rows, rowBlock: fv.rowBlock, status: fv.file.status, symbols: syms)
+        guard let fv = pg.fileOf(path), key(pg, path) == k else { return }
+        byKey[k] = ReviewUnitRule.units(rows: fv.rows, rowBlock: fv.rowBlock, status: fv.file.status, decls: decls)
     }
 }

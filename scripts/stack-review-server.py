@@ -35,6 +35,7 @@ from srv import tutor   # own line: same reason
 from srv import outbox   # own line: same reason
 from srv import outline   # own line: same reason
 from srv import lsp   # own line: same reason
+from srv import syntax   # own line: same reason
 from srv import packet   # own line: same reason
 from srv import state   # own line: same reason
 from srv import telemetry   # own line: same reason
@@ -565,6 +566,8 @@ class H(BaseHTTPRequestHandler):
             return lsp.references(self, raw)
         if self.path == "/lsp/symbols":
             return lsp.symbols(self, raw)
+        if self.path == "/syntax/units":     # a file's declarations from its syntax tree (Helix's grammars + queries)
+            return syntax.units(self, raw)
         if self.path == "/lsp/rename":       # rename a name across the program at the branch tip: preview, then one commit
             return lsp.rename(self, raw)
         if self.path == "/lsp/prepare":      # move the type trees to a branch page's tip + base (no tsgo)
