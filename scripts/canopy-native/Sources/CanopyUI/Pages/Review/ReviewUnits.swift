@@ -16,10 +16,33 @@ struct SyntaxUnit: Decodable, Equatable {
     var scope: Int
 }
 
+/// A function or class as Helix's textobject queries find it — what Helix's ]f and ]t walk.
+struct SyntaxSpan: Decodable, Equatable {
+    var line: Int
+    var endLine: Int
+    var name: String
+}
+
 struct SyntaxUnits: Decodable {
     var ok: Bool
     var units: [SyntaxUnit]?
+    var functions: [SyntaxSpan]?
+    var classes: [SyntaxSpan]?
     var message: String?
+}
+
+/// What the review page knows of one file's syntax at this tip.
+struct FileSyntax {
+    var units: [Int: ReviewUnit]
+    var functions: [SyntaxSpan]
+    var classes: [SyntaxSpan]
+    /// new-side lines the change touches (a removal counts as the line now standing where it was)
+    var changed: Set<Int>
+
+    /// The functions (or classes) the change touches, in file order — ]f's (]t's) stops.
+    func touched(_ spans: [SyntaxSpan]) -> [SyntaxSpan] {
+        spans.filter { s in changed.contains { s.line <= $0 && $0 <= s.endLine } }.sorted { $0.line < $1.line }
+    }
 }
 
 enum ReviewUnitRule {
@@ -35,19 +58,7 @@ enum ReviewUnitRule {
             return Dictionary(uniqueKeysWithValues: blocks.map { ($0, u) })
         }
 
-        var lines: [Int: [Int]] = [:]
-        for (i, r) in rows.enumerated() {
-            guard let b = rowBlock[r.key] else { continue }
-            if let l = r.right, l.kind == .add, let n = l.new {
-                lines[b, default: []].append(n)
-            } else if r.right == nil || r.right?.kind == .ctx {
-                // a removal answers to the line that now stands where it was
-                let after = rows[(i + 1)...].first { $0.right?.new != nil }?.right?.new
-                let before = rows[..<i].last { $0.right?.new != nil }?.right?.new
-                lines[b, default: []].append(after ?? before.map { $0 + 1 } ?? 1)
-            }
-        }
-
+        let lines = blockLines(rows: rows, rowBlock: rowBlock)
         let ds = decls ?? []
         var touched: [Int: [Int]] = [:]   // declaration index → its blocks
         for b in blocks {
@@ -82,6 +93,22 @@ enum ReviewUnitRule {
         return out
     }
 
+    /// Each block's new-side lines; a removal answers to the line that now stands where it was.
+    static func blockLines(rows: [DiffRow], rowBlock: [String: Int]) -> [Int: [Int]] {
+        var lines: [Int: [Int]] = [:]
+        for (i, r) in rows.enumerated() {
+            guard let b = rowBlock[r.key] else { continue }
+            if let l = r.right, l.kind == .add, let n = l.new {
+                lines[b, default: []].append(n)
+            } else if r.right == nil || r.right?.kind == .ctx {
+                let after = rows[(i + 1)...].first { $0.right?.new != nil }?.right?.new
+                let before = rows[..<i].last { $0.right?.new != nil }?.right?.new
+                lines[b, default: []].append(after ?? before.map { $0 + 1 } ?? 1)
+            }
+        }
+        return lines
+    }
+
     static func name(_ ds: [SyntaxUnit]) -> String {
         guard let first = ds.first else { return "a change" }
         if ds.count == 1 { return first.name }
@@ -99,30 +126,36 @@ final class ReviewUnits {
     static func of(_ app: AppModel) -> ReviewUnits { app.state { ReviewUnits(app) } }
 
     private weak var app: AppModel?
-    private var byKey: [String: [Int: ReviewUnit]] = [:]
+    private var byKey: [String: FileSyntax] = [:]
     private var asking: Set<String> = []
 
     init(_ app: AppModel) { self.app = app }
 
     private func key(_ pg: ReviewPageState, _ path: String) -> String { "\(pg.id)@\(pg.tip)|\(pg.baseSha)|\(path)" }
 
-    func unit(_ pg: ReviewPageState, path: String, block: Int) -> ReviewUnit? { byKey[key(pg, path)]?[block] }
+    func unit(_ pg: ReviewPageState, path: String, block: Int) -> ReviewUnit? { byKey[key(pg, path)]?.units[block] }
+
+    /// The file's syntax, read first if it isn't yet; nil when the server can't be reached.
+    func syntax(_ pg: ReviewPageState, path: String) async -> FileSyntax? {
+        await load(pg, path: path)
+        return byKey[key(pg, path)]
+    }
 
     private struct Ask: Encodable { var branch: String; var path: String }
 
     func load(_ pg: ReviewPageState, path: String) async {
         let k = key(pg, path)
         guard byKey[k] == nil, !asking.contains(k), let app, let t = pg.target, let fv = pg.fileOf(path), !fv.blocks.isEmpty else { return }
-        var decls: [SyntaxUnit]?
-        if fv.file.status != .added {
-            asking.insert(k)
-            defer { asking.remove(k) }
-            let r = await app.transport.ask(app.transport.atRepo(t.repo, "/syntax/units"), Ask(branch: t.name, path: path), as: SyntaxUnits.self)
-            // a server that never answered is asked again next time; one that read no declarations is believed
-            guard let r else { return }
-            decls = r.ok ? r.units : nil
-        }
+        asking.insert(k)
+        defer { asking.remove(k) }
+        let r = await app.transport.ask(app.transport.atRepo(t.repo, "/syntax/units"), Ask(branch: t.name, path: path), as: SyntaxUnits.self)
+        // a server that never answered is asked again next time; one that read no declarations is believed
+        guard let r else { return }
+        let got = r.ok ? r : nil
         guard let fv = pg.fileOf(path), key(pg, path) == k else { return }
-        byKey[k] = ReviewUnitRule.units(rows: fv.rows, rowBlock: fv.rowBlock, status: fv.file.status, decls: decls)
+        byKey[k] = FileSyntax(
+            units: ReviewUnitRule.units(rows: fv.rows, rowBlock: fv.rowBlock, status: fv.file.status, decls: got?.units),
+            functions: got?.functions ?? [], classes: got?.classes ?? [],
+            changed: Set(ReviewUnitRule.blockLines(rows: fv.rows, rowBlock: fv.rowBlock).values.joined()))
     }
 }

@@ -210,6 +210,9 @@ enum KeyTutorSandbox {
             return (200, #"{"ok":true,"sha":"\#(tip(root))","locations":[{"path":"greet.ts","line":2,"character":13},{"path":"header.ts","line":2,"character":9}]}"#)
         case ("POST", "/lsp/symbols"):
             return (200, #"{"ok":true,"sha":"\#(tip(root))","symbols":[{"name":"name","kind":"const","line":1,"endLine":1,"depth":0},{"name":"greeting","kind":"const","line":2,"endLine":2,"depth":0},{"name":"hello","kind":"function","line":4,"endLine":6,"depth":0},{"name":"farewell","kind":"function","line":7,"endLine":9,"depth":0},{"name":"Waver","kind":"class","line":21,"endLine":26,"depth":0}]}"#)
+        case ("POST", "/syntax/units") where query["path"] == "greet.ts":
+            return (200, #"{"ok":true,"sha":"\#(tip(root))","units":[{"line":1,"endLine":1,"name":"name","scope":1},{"line":2,"endLine":2,"name":"greeting","scope":1},{"line":4,"endLine":6,"name":"function hello","scope":1},{"line":8,"endLine":10,"name":"function farewell","scope":1},{"line":21,"endLine":25,"name":"method wave","scope":2}],"functions":[{"line":4,"endLine":6,"name":"function hello"},{"line":8,"endLine":10,"name":"function farewell"},{"line":21,"endLine":25,"name":"method wave"}],"classes":[{"line":20,"endLine":26,"name":"class Waver"}]}"#)
+        case ("POST", "/syntax/units"): return (200, #"{"ok":true,"units":null,"functions":null,"classes":null}"#)
         case ("POST", "/review-apply"): return (200, #"{"ok":true,"sha":"ab12cd"}"#)
         case ("POST", "/sync"): return (200, #"{"ok":true,"rebased":true,"summary":"replayed 1 commit (practice)"}"#)
         case ("POST", _): return (200, #"{"ok":true}"#)
@@ -250,6 +253,18 @@ extension Scope {
 /// `KeyTutorSandbox.answer` and keeps a log of what was asked (and what would have opened or been
 /// copied), per practice app. Nothing it sees goes anywhere.
 final class KeyTutorStub: URLProtocol, @unchecked Sendable {
+    static func drain(_ stream: InputStream) -> Data {
+        var out = Data(), buf = [UInt8](repeating: 0, count: 4096)
+        stream.open()
+        defer { stream.close() }
+        while stream.hasBytesAvailable {
+            let n = stream.read(&buf, maxLength: buf.count)
+            if n <= 0 { break }
+            out.append(buf, count: n)
+        }
+        return out
+    }
+
     struct Seen: Equatable, Sendable {
         var method: String
         var host: String
@@ -277,6 +292,11 @@ final class KeyTutorStub: URLProtocol, @unchecked Sendable {
         Self.lock.withLock { Self.seen[port, default: []].append(Seen(method: method, host: url.host ?? "", port: port, path: url.path)) }
         var query: [String: String] = [:]
         for q in URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? [] { query[q.name] = q.value ?? "" }
+        // a POST's JSON fields answer like query items (which file /syntax/units asks about)
+        if let data = request.httpBody ?? request.httpBodyStream.map(Self.drain),
+           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            for (k, v) in obj { if let v = v as? String, query[k] == nil { query[k] = v } }
+        }
         let (status, body) = KeyTutorSandbox.answer(method: method, path: url.path, query: query)
         let resp = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/json"])!
         client?.urlProtocol(self, didReceive: resp, cacheStoragePolicy: .notAllowed)

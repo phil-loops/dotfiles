@@ -129,7 +129,7 @@ import Testing
                                      "/practice/review-unapply", "/practice/sync", "/practice/prep-push", "/practice/gates",
                                      "/practice/delta-tests", "/practice/review-helix", "/practice/todo-item", "/todo-item",
                                      "/practice/lsp/hover", "/practice/lsp/definition", "/practice/lsp/type-definition",
-                                     "/practice/lsp/implementation", "/practice/lsp/references", "/practice/lsp/symbols",
+                                     "/practice/lsp/implementation", "/practice/lsp/references", "/practice/lsp/symbols", "/practice/syntax/units",
                                      "/practice/push-origin", "/practice/integrate", "/practice/lsp/prepare", "/practice/revert-commit", "/practice/review-address"]
         #expect(writes.isSubset(of: expected), "unexpected writes: \(writes.subtracting(expected).sorted())")
         let notes = KeyTutorStub.notes(port)

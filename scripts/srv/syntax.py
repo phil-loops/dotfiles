@@ -1,6 +1,7 @@
 # srv/syntax.py — a changed file's declarations, read from its syntax tree for canopy's review page.
 #
-#   POST /syntax/units {branch | sha, path} → {ok, sha, units: [{line, endLine, name, scope}], functions: [line]}
+#   POST /syntax/units {branch | sha, path}
+#     → {ok, sha, units: [{line, endLine, name, scope}], functions: [{line, endLine, name}], classes: [same]}
 #
 # Parses with Helix's own compiled grammars and runs Helix's own textobject queries, so "a function"
 # means here exactly what it means to Helix's ]f. The tree-sitter C runtime is loaded through ctypes
@@ -70,6 +71,7 @@ class _TS:
         self.end = f("ts_node_end_point", Point, Node)
         self.start_byte = f("ts_node_start_byte", u32, Node)
         self.end_byte = f("ts_node_end_byte", u32, Node)
+        self.parent = f("ts_node_parent", Node, Node)
         self.query_new = f("ts_query_new", vp, vp, ctypes.c_char_p, u32, ctypes.POINTER(u32), ctypes.POINTER(ctypes.c_int))
         self.capture_count = f("ts_query_capture_count", u32, vp)
         self.capture_name = f("ts_query_capture_name_for_id", ctypes.c_char_p, vp, u32, ctypes.POINTER(u32))
@@ -133,19 +135,20 @@ def _query(qdir, lang):
             raise RuntimeError(f"Helix's {qdir} textobjects don't compile (error {err.value} at byte {off.value})")
         n = ctypes.c_uint32(0)
         names = [ts.capture_name(q, i, ctypes.byref(n))[:n.value].decode() for i in range(ts.capture_count(q))]
-        _queries[qdir] = (q, names.index("function.around") if "function.around" in names else None)
+        _queries[qdir] = (q, {i: n for i, n in enumerate(names) if n in ("function.around", "class.around")})
     return _queries[qdir]
 
 
 def units_of(src, ext):
-    """`src` (bytes)'s units and its functions' first lines; None for a language this doesn't read."""
+    """`src` (bytes)'s units, and its functions and classes as Helix's textobjects find them (what ]f and ]t
+    walk); None for a language this doesn't read."""
     if ext not in LANGS:
         return None
     grammar, qdir = LANGS[ext]
     with _lock:
         ts = _runtime()
         lang = _language(grammar)
-        q, fid = _query(qdir, lang)
+        q, ids = _query(qdir, lang)
         parser = ts.parser_new()
         try:
             if not ts.set_language(parser, lang):
@@ -153,27 +156,33 @@ def units_of(src, ext):
             tree = ts.parse(parser, None, src, len(src))
             try:
                 root = ts.root(tree)
-                return _Reader(ts, src, jsx=grammar in ("tsx", "javascript")).read(root), _functions(ts, q, fid, root)
+                reader = _Reader(ts, src, jsx=grammar in ("tsx", "javascript"))
+                return reader.read(root), _textobjects(ts, q, ids, root, reader)
             finally:
                 ts.tree_delete(tree)
         finally:
             ts.parser_delete(parser)
 
 
-def _functions(ts, q, fid, root):
-    if fid is None:
-        return []
+def _textobjects(ts, q, ids, root, reader):
+    """Helix's function.around and class.around matches, each once, in file order, with a name."""
+    out = {"function.around": {}, "class.around": {}}
     cur = ts.cursor_new()
     try:
         ts.cursor_exec(cur, q, root)
-        m, at, out = Match(), ctypes.c_uint32(0), set()
+        m, at = Match(), ctypes.c_uint32(0)
         while ts.next_capture(cur, ctypes.byref(m), ctypes.byref(at)):
             c = m.captures[at.value]
-            if c.index == fid:
-                out.add(ts.start(c.node).row + 1)
-        return sorted(out)
+            kind = ids.get(c.index)
+            if kind is None:
+                continue
+            span = (ts.start(c.node).row + 1, ts.end(c.node).row + 1)
+            if span not in out[kind]:
+                out[kind][span] = reader.called(c.node)
     finally:
         ts.cursor_delete(cur)
+    return tuple([{"line": a, "endLine": b, "name": n} for (a, b), n in sorted(out[k].items())]
+                 for k in ("function.around", "class.around"))
 
 
 class _Reader:
@@ -249,6 +258,38 @@ class _Reader:
         body = self.field(fn, "body")
         return self.kids(body) if body is not None and self.kind(body) == "statement_block" else None
 
+    def called(self, n):
+        """What a function or class is called: its own name, else the binding or call it sits in."""
+        k = self.kind(n)
+        own = self.field(n, "name")
+        if k == "method_definition" and own is not None:
+            return f"method {self.text(own)}"
+        if k in ("class_declaration", "abstract_class_declaration", "class", "interface_declaration", "type_alias_declaration"):
+            word = {"interface_declaration": "interface", "type_alias_declaration": "type"}.get(k, "class")
+            return f"{word} {self.text(own)}" if own is not None else word
+        if own is not None:
+            return f"function {self.text(own)}"
+        p = self.ts.parent(n)
+        if self.ts.is_null(p):
+            return "function"
+        pk = self.kind(p)
+        if pk == "variable_declarator" and self.field(p, "name") is not None:
+            return f"function {self.text(self.field(p, 'name'))}"
+        if pk == "pair" and self.field(p, "key") is not None:
+            return f"function {self.text(self.field(p, 'key'))}"
+        if pk == "jsx_expression":
+            attr = self.ts.parent(p)
+            if not self.ts.is_null(attr) and self.kind(attr) == "jsx_attribute" and self.ts.named_count(attr):
+                return f"{self.text(self.kids(attr)[0])} handler"
+        if pk == "arguments":
+            call = self.ts.parent(p)
+            if not self.ts.is_null(call) and self.kind(call) == "call_expression":
+                head = self.callee(call)
+                first = next(iter(self.kids(p)), None)
+                title = self.text(first) if first is not None and self.kind(first) in ("string", "template_string") else ""
+                return f"{head}({title})" if title else f"{head}() callback"
+        return "function"
+
     def callee(self, call):
         f = self.field(call, "function")
         if f is None:
@@ -310,7 +351,7 @@ def units(req, raw):
         return req._send(400, json.dumps({"ok": False, "message": f"bad path {rel}"}))
     ext = os.path.splitext(rel)[1]
     if ext not in LANGS:
-        return req._send(200, json.dumps({"ok": True, "units": None, "functions": [], "message": f"no grammar for {ext or 'this file'}"}))
+        return req._send(200, json.dumps({"ok": True, "units": None, "functions": None, "classes": None, "message": f"no grammar for {ext or 'this file'}"}))
     repo = ctx.repo_cwd()
     ref = commit or f"refs/heads/{branch}"
     sha = subprocess.run(["git", "-C", repo, "rev-parse", "--verify", "-q", f"{ref}^{{commit}}"],
@@ -320,16 +361,16 @@ def units(req, raw):
     blob = subprocess.run(["git", "-C", repo, "rev-parse", "--verify", "-q", f"{sha}:{rel}"],
                           capture_output=True, text=True).stdout.strip()
     if not blob:
-        return req._send(200, json.dumps({"ok": True, "sha": sha, "units": [], "functions": [], "message": "not in this commit"}))
+        return req._send(200, json.dumps({"ok": True, "sha": sha, "units": [], "functions": [], "classes": [], "message": "not in this commit"}))
     key = f"{blob}|{ext}"
     hit = _cache.get(key)
     if hit is None:
         src = subprocess.run(["git", "-C", repo, "cat-file", "blob", blob], capture_output=True).stdout
         try:
-            us, fns = units_of(src, ext)
+            us, (fns, classes) = units_of(src, ext)
         except (OSError, RuntimeError, AttributeError) as e:
             return req._send(200, json.dumps({"ok": False, "message": f"can't read its syntax: {e}"}))
-        hit = {"units": us, "functions": fns}
+        hit = {"units": us, "functions": fns, "classes": classes}
         if len(_cache) > 512:
             _cache.clear()
         _cache[key] = hit
