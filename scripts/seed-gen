@@ -44,6 +44,10 @@ realpath_of(){ (cd "$1" 2>/dev/null && pwd -P); }
 wait_lock(){ # $1 = lock dir; returns once we hold it, 1 after 600s of someone else holding it
   local lock="$1" waited=0 age
   until mkdir "$lock" 2>/dev/null; do
+    # The lock's home vanished (a scratch worktree pruned mid-run): mkdir can never succeed, and
+    # the failed stat reads as an ancient lock, so this used to spin without sleeping — two such
+    # runs held both heavy-turn slots for 3h (2026-11-08).
+    [[ -d "$(dirname "$lock")" ]] || return 1
     age=$(( $(date +%s) - $(stat -f %m "$lock" 2>/dev/null || echo 0) ))
     (( age > 600 )) && { rm -rf "$lock"; continue; }
     (( waited >= 600 )) && return 1
