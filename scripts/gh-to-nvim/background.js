@@ -164,13 +164,13 @@ async function openActiveTab(target) {
 }
 
 chrome.commands.onCommand.addListener((cmd) => {
-  if (cmd === "open-in-viewer") {
+  if (cmd === "open-in-nvim") {
     openActiveTab("viewer");
   }
 });
 
 // ── prewarm ──
-// The PR page you're LOOKING at is the best predictor of the next ⌘⇧U, so pay the cold cost
+// The PR page you're LOOKING at is the best predictor of the next ⌘⇧O, so pay the cold cost
 // (import the head, build the worktree — together ~1.4s, plus a fetch for someone else's PR)
 // while you're still reading the diff, instead of at the instant you press the key.
 //
@@ -210,7 +210,7 @@ async function prewarm(url) {
   }
   // The viewer self-reaps after 15min idle, so the first PR of a session finds it gone and the
   // prewarm quietly does nothing — leaving the entire cold cost (boot, import, worktree: ~8s)
-  // on the first ⌘⇧U. That is the press that "only launches the forest": it is working, it just
+  // on the first ⌘⇧O. That is the press that "only launches the forest": it is working, it just
   // hasn't finished by the time a second press lands warm and takes the credit. Boot it here
   // instead, while the diff is still being read. No extra launches — once up it stays up, so
   // this is the same one-per-session boot, moved off the keypress.
@@ -258,7 +258,7 @@ const STATE = {
   fresh: { badge: "", color: "#3FB950", title: "GitHub → Show — up to date" },
   stale: { badge: "●", color: "#D29922", title: "GitHub → Show — source changed (click for menu)" },
   offline: { badge: "×", color: "#6E7681", title: `GitHub → Show — viewer offline (${VIEWER_URL})` },
-  unbound: { badge: "!", color: "#D29922", title: "GitHub → Show — ⌘⇧U isn't bound (click to fix)" },
+  unbound: { badge: "!", color: "#D29922", title: "GitHub → Show — ⌘⇧O isn't bound (click to fix)" },
 };
 
 // A key rotation changes the extension id, and Chrome's shortcut registry keys on the OLD id
@@ -266,7 +266,7 @@ const STATE = {
 // failure surface we built stays silent. getAll() is the only honest read (the on-disk
 // Preferences entry can name the live id and still be dead), and only a human re-typing them at
 // chrome://extensions/shortcuts can rebind.
-const CHORDS = ["open-in-viewer"];
+const CHORDS = ["open-in-nvim"];   // the name Chrome keyed ⌘⇧O to; renaming it drops the binding
 
 async function chordsUnbound() {
   const cmds = await chrome.commands.getAll();

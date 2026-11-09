@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "GitHub → Show",
-  "version": "0.3.33",
+  "version": "0.3.35",
   "description": "Open the GitHub PR you're on in Show, at the line you selected. URL-only: no page access.",
   "permissions": [
     "management",
@@ -33,10 +33,10 @@
     }
   },
   "commands": {
-    "open-in-viewer": {
+    "open-in-nvim": {
       "suggested_key": {
-        "default": "Ctrl+Shift+U",
-        "mac": "Command+Shift+U"
+        "default": "Ctrl+Shift+O",
+        "mac": "Command+Shift+O"
       },
       "description": "Open this PR in Show, at the selected line"
     }

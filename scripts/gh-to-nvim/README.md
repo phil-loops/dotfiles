@@ -13,7 +13,7 @@ selected-line hash against the branch's changed files.
 
 ## Use it
 
-- **⌘⇧U — open in Show** (imports the PR if needed, opens its node at the
+- **⌘⇧O — open in Show** (imports the PR if needed, opens its node at the
   selected line — click a line number first, GitHub writes it into the hash).
 - **Toolbar popup** — one card naming what will open: the PR's forest, branch,
   review decision, selected line and children (orphans flagged). Off a PR it
