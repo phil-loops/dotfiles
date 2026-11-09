@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "GitHub → canopy",
-  "version": "0.3.28",
-  "description": "Open the GitHub PR you're on in canopy at the line you selected, or the page's file in Helix. URL-only: no page access.",
+  "name": "GitHub → Show",
+  "version": "0.3.33",
+  "description": "Open the GitHub PR you're on in Show, at the line you selected. URL-only: no page access.",
   "permissions": [
     "management",
     "storage",
@@ -23,7 +23,7 @@
     "128": "icons/fresh-128.png"
   },
   "action": {
-    "default_title": "GitHub → canopy",
+    "default_title": "GitHub → Show",
     "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/fresh-16.png",
@@ -33,19 +33,12 @@
     }
   },
   "commands": {
-    "open-in-nvim": {
-      "suggested_key": {
-        "default": "Ctrl+Shift+O",
-        "mac": "Command+Shift+O"
-      },
-      "description": "Open this GitHub page's file in Helix (the selected line, else the whole PR)"
-    },
     "open-in-viewer": {
       "suggested_key": {
         "default": "Ctrl+Shift+U",
         "mac": "Command+Shift+U"
       },
-      "description": "Open this PR in canopy, at the selected line"
+      "description": "Open this PR in Show, at the selected line"
     }
   },
   "background": {

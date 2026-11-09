@@ -85,7 +85,7 @@ function notify(text) {
   chrome.notifications.create({
     type: "basic",
     iconUrl: "icons/fresh-128.png",
-    title: "GitHub → nvim",
+    title: "GitHub → Show",
     message: text,
   });
 }
@@ -96,7 +96,7 @@ function notify(text) {
 async function fail(text) {
   await chrome.storage.session.set({ lastError: { text, at: Date.now() } });
   await badge("✗", "#F85149", 10000);
-  await chrome.action.setTitle({ title: `GitHub → nvim — failed: ${text}` });
+  await chrome.action.setTitle({ title: `GitHub → Show — failed: ${text}` });
   notify(text.slice(0, 200));
   try {
     await chrome.action.openPopup();
@@ -108,7 +108,7 @@ async function fail(text) {
 const reason = (res) => res?.body?.err || res?.error || `status ${res?.status}`;
 
 // Self-healing open: dead viewer → native-host launch + wait + one retry; cold first open
-// (504 — the worktree/nvim still warming) → brief wait + retry.
+// (504 — the worktree still warming) → brief wait + retry.
 async function openWithRecovery(payload) {
   await badge("…", "#58A6FF", 30000);
   let res = await post(payload);
@@ -164,15 +164,13 @@ async function openActiveTab(target) {
 }
 
 chrome.commands.onCommand.addListener((cmd) => {
-  if (cmd === "open-in-nvim") {
-    openActiveTab("nvim");
-  } else if (cmd === "open-in-viewer") {
+  if (cmd === "open-in-viewer") {
     openActiveTab("viewer");
   }
 });
 
 // ── prewarm ──
-// The PR page you're LOOKING at is the best predictor of the next ⌘⇧O, so pay the cold cost
+// The PR page you're LOOKING at is the best predictor of the next ⌘⇧U, so pay the cold cost
 // (import the head, build the worktree — together ~1.4s, plus a fetch for someone else's PR)
 // while you're still reading the diff, instead of at the instant you press the key.
 //
@@ -212,7 +210,7 @@ async function prewarm(url) {
   }
   // The viewer self-reaps after 15min idle, so the first PR of a session finds it gone and the
   // prewarm quietly does nothing — leaving the entire cold cost (boot, import, worktree: ~8s)
-  // on the first ⌘⇧O. That is the press that "only launches the forest": it is working, it just
+  // on the first ⌘⇧U. That is the press that "only launches the forest": it is working, it just
   // hasn't finished by the time a second press lands warm and takes the credit. Boot it here
   // instead, while the diff is still being read. No extra launches — once up it stays up, so
   // this is the same one-per-session boot, moved off the keypress.
@@ -236,7 +234,7 @@ chrome.tabs.onUpdated.addListener((_id, info, tab) => {
   }
 });
 
-// The popup's "→ nvim this page" button routes here — opening the popup is itself the
+// The popup's open button routes here — opening the popup is itself the
 // activeTab gesture, so the tab URL is readable for the click that follows.
 chrome.runtime.onMessage.addListener((msg, _s, respond) => {
   if (msg?.type === "open-canopy") {
@@ -246,7 +244,7 @@ chrome.runtime.onMessage.addListener((msg, _s, respond) => {
   if (msg?.type !== "open-url") {
     return;
   }
-  openActiveTab(msg.target || "nvim").then(() => respond({ ok: true }));
+  openActiveTab(msg.target || "viewer").then(() => respond({ ok: true }));
   return true;
 });
 
@@ -257,10 +255,10 @@ const ICONS = {
   unbound: iconSet("stale"),
 };
 const STATE = {
-  fresh: { badge: "", color: "#3FB950", title: "GitHub → nvim — up to date" },
-  stale: { badge: "●", color: "#D29922", title: "GitHub → nvim — source changed (click for menu)" },
-  offline: { badge: "×", color: "#6E7681", title: `GitHub → nvim — viewer offline (${VIEWER_URL})` },
-  unbound: { badge: "!", color: "#D29922", title: "GitHub → nvim — ⌘⇧O isn't bound (click to fix)" },
+  fresh: { badge: "", color: "#3FB950", title: "GitHub → Show — up to date" },
+  stale: { badge: "●", color: "#D29922", title: "GitHub → Show — source changed (click for menu)" },
+  offline: { badge: "×", color: "#6E7681", title: `GitHub → Show — viewer offline (${VIEWER_URL})` },
+  unbound: { badge: "!", color: "#D29922", title: "GitHub → Show — ⌘⇧U isn't bound (click to fix)" },
 };
 
 // A key rotation changes the extension id, and Chrome's shortcut registry keys on the OLD id
@@ -268,7 +266,7 @@ const STATE = {
 // failure surface we built stays silent. getAll() is the only honest read (the on-disk
 // Preferences entry can name the live id and still be dead), and only a human re-typing them at
 // chrome://extensions/shortcuts can rebind.
-const CHORDS = ["open-in-nvim", "open-in-viewer"];
+const CHORDS = ["open-in-viewer"];
 
 async function chordsUnbound() {
   const cmds = await chrome.commands.getAll();
