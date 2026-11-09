@@ -243,6 +243,21 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = f
         #expect(ForestNav.primary(for: "p:r:done", a)?.id == "forest.page")
     }
 
+    @Test func prsAwaitingReviewSitBetweenFocusAndTheWorkbenchAndRetOpensThem() {
+        let a = world()
+        a.forestModel.syncClosings()
+        a.forestModel.setReviewRequests([
+            ReviewRequest(number: 7, title: "compile footer lmx", author: "someone", url: "https://github.com/o/r/pull/7", imported: true),
+            ReviewRequest(number: 9, title: "fix a thing", author: "someone", url: "https://github.com/o/r/pull/9", imported: false),
+        ])
+        #expect(a.rows == ["p:r:tree", "p:r:solo", "r:7", "r:9", "p:r:bench"])
+        #expect(ForestNav.primary(for: "r:9", a)?.id == "forests.review.open")
+        #expect(ForestNav.primary(for: "r:9", a)?.target == "9")
+        #expect(a.provider?.title(for: "r:7", a) == "#7 compile footer lmx")
+        a.keys.handle(","); a.keys.handle("r")
+        #expect(!a.rows.contains("r:7"), "ready-only leaves the review queue out")
+    }
+
     @Test func retOpensTheForestsPageAndMinusFoldsAnOpenSpine() {
         let a = world()
         a.keys.handle("ret")

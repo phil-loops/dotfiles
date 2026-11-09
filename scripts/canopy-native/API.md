@@ -312,6 +312,7 @@ The todo items themselves arrive through the `todo` store domain (`/state`, `/v2
   foreign repo holding the port.
 - `GET /packet?branch=`: the review packet (PR body as a checkable contract). *(live: `{ok, branch, tree, title, label, labelName, sections, hand, body, packetBody, …}`)*
 - `GET /ext-mtime`: the Chrome extension's self-update poll.
+- `GET /review-requests`: open PRs awaiting my review (`gh search`, cached; a stale answer re-searches behind it), each flagged `imported` once its head is local as `review/pr-<N>`. The forests home's review section.
 - `GET /preview-wait` is used. The page it serves calls `POST /preview {branch}` and
   `POST /preview-integration {project}` (both MUTATING, spawn `next dev`).
 - `GET /lsp/status` is documented in `srv/lsp.py`'s header but **not dispatched** (it returns 404).

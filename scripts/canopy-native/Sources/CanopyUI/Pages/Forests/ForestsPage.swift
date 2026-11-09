@@ -44,6 +44,7 @@ struct ForestsPage: View {
                                 .padding(.leading, 44).padding(.bottom, 20)
                             }
                             section(.focus, p.focus, fs, nameWidth: nameWidth, cursor: cursor, selection: selection)
+                            if !m.readyOnly { ReviewQueue(nameWidth: nameWidth, cursor: cursor, selection: selection) }
                             section(.workbench, p.workbench, fs, nameWidth: nameWidth, cursor: cursor, selection: selection)
                             if !m.readyOnly {
                                 if m.showArchive {
@@ -72,6 +73,7 @@ struct ForestsPage: View {
         .padding(.horizontal, 16).padding(.bottom, 8)
         .onChange(of: m.closedIDs(), initial: true) { _, _ in m.syncClosings() }
         .task { await tick(m) }
+        .task { await pollReviews(m) }
         // the cursor landing on a branch warms its review page's diff (Forests.tsx warmSelected)
         .onChange(of: cursor, initial: true) { _, k in
             if let b = RowKey.id(k, "b").flatMap({ app.store.view(Branch.self, $0) }) { ReviewPageState.of(app).warm(repo: b.repo, name: b.name, at: b.tip) }
@@ -110,10 +112,58 @@ struct ForestsPage: View {
         }
     }
 
+    private func pollReviews(_ m: ForestModel) async {
+        while !Task.isCancelled {
+            await m.loadReviewRequests()
+            try? await Task.sleep(nanoseconds: 60_000_000_000)
+        }
+    }
+
     private func tick(_ m: ForestModel) async {
         while !Task.isCancelled {
             m.now = Date()
             try? await Task.sleep(nanoseconds: 30_000_000_000)
+        }
+    }
+}
+
+/// Open PRs GitHub says await my review — reachable here, not only from the PR page's ⌘⇧U. ↵ opens
+/// one in canopy, importing its head as review/pr-<N> first if it isn't local yet.
+private struct ReviewQueue: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.theme) private var theme
+    let nameWidth: CGFloat
+    let cursor: String?
+    let selection: Set<String>
+
+    var body: some View {
+        let queue = app.forestModel.reviewRequests
+        if !queue.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("review").font(Theme.text(11)).foregroundStyle(theme.inkFaint)
+                    .explains("lane|review", RowName(word: "review", meaning: "open PRs awaiting your review on GitHub"))
+                    .padding(.leading, 44).padding(.bottom, 4)
+                ForEach(queue, id: \.number) { r in
+                    let key = RowKey.reviewRequest(r.number)
+                    let here = cursor == key
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        Text("").frame(width: 12)
+                        Text("#\(r.number)").font(Theme.display(17)).foregroundStyle(here ? theme.goldLeaf : theme.ink)
+                            .lineLimit(1).frame(width: nameWidth, alignment: .leading)
+                        Text(r.title).foregroundStyle(theme.inkDim).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+                        Text(r.author).font(Theme.text(11)).foregroundStyle(theme.inkFaint).fixedSize()
+                        Text(r.imported ? "loaded" : "on GitHub").font(Theme.text(11))
+                            .foregroundStyle(r.imported ? theme.inkDim : theme.inkFaint).fixedSize()
+                            .explains("review|loaded|\(r.number)", RowName(word: r.imported ? "loaded" : "on GitHub",
+                                meaning: r.imported ? "its head is local as review/pr-\(r.number): it opens at once"
+                                    : "↵ fetches its head first, a second or two"))
+                    }
+                    .frame(height: 30)
+                    .padding(.horizontal, 16)
+                    .rowChrome(key, cursor: here, selected: selection.contains(key))
+                }
+            }
+            .padding(.bottom, 28)
         }
     }
 }

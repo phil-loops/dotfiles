@@ -12,6 +12,7 @@ enum ForestNav {
         if let id = RowKey.id(row, "b") {
             return m.branchView(id) == nil ? nil : RouteTo("branch.open", target: id)
         }
+        if let r = m.reviewRequest(row) { return RouteTo("forests.review.open", target: String(r.number)) }
         if let d = RowKey.id(row, "d"), app.store.view(Landed.self, d) != nil {
             return RouteTo("story.why", arg: RowKey.landed(d))
         }
@@ -152,6 +153,25 @@ enum ForestNav {
             }))
 
 
+        // ↵ on a PR awaiting review: the same import + route the Chrome extension's ⌘⇧U asks for
+        struct Opened: Decodable { var ok: Bool; var path: String?; var err: String? }
+        r.register(Command(
+            id: "forests.review.open", title: "Open a PR awaiting your review", scope: .forests, needsArg: true, label: "open",
+            available: { m.reviewRequest(RowKey.reviewRequest(Int($0 ?? "") ?? -1)) != nil },
+            local: { n, _ in
+                guard let pr = m.reviewRequest(RowKey.reviewRequest(Int(n ?? "") ?? -1)) else { return }
+                if !pr.imported { app.runner.say("fetching #\(pr.number)…") }
+                let t = app.transport
+                Task { @MainActor in
+                    let got = await t.ask("/open-url", ["url": pr.url, "open": "viewer"], as: Opened.self)
+                    guard let path = got?.path, got?.ok == true else {
+                        return app.runner.say("couldn't open #\(pr.number): \(got?.err ?? "the server didn't answer")")
+                    }
+                    app.open(address: path)
+                    await m.loadReviewRequests()
+                }
+            }))
+
         // space f: find on this page — forests (and open spines) on Forests, branches on a forest; picking moves the cursor
         func find(_ title: String) throws {
             let rows = app.rows
@@ -159,6 +179,7 @@ enum ForestNav {
             let items = rows.map { row -> PickItem in
                 if let id = RowKey.id(row, "b"), let v = m.branchView(id) { return PickItem(label: v.b.name, text: v.b.description) }
                 if let id = RowKey.id(row, "p"), let p = app.store.view(Project.self, id) { return PickItem(label: p.name, text: p.summary) }
+                if let r = m.reviewRequest(row) { return PickItem(label: "#\(r.number)", text: r.title) }
                 return PickItem(label: app.provider?.title(for: row, app) ?? row)
             }
             app.nav.pick(title, items) { i in app.jump { app.setCursor(rows[i]) } }
