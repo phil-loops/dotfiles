@@ -416,6 +416,7 @@ class H(BaseHTTPRequestHandler):
         elif u.path == "/v2/events":      return state.events(self, u, keepalive=lambda: last.__setitem__(0, time.time()))   # SSE: entity patches per domain
         elif u.path == "/telemetry/summary": return telemetry.summary(self, u)   # command/surface latency vs budgets, from daily rollups
         elif u.path == "/ext-mtime":       return reviews.ext_mtime(self)
+        elif u.path == "/review-requests": return reviews.requests(self)   # Home's review section
         # Hyphenated, not /wiki/… — /wiki/<slug> is a client route served index.html above.
         elif u.path == "/wiki-pages":     return wiki.pages(self, u)   # every page for this repo, nav-ordered
         elif u.path == "/wiki-src":       return wiki.src(self, u)     # resolve one citation to its source lines

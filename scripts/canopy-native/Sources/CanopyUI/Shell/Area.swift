@@ -98,6 +98,8 @@ public struct Crumb: Hashable {
 public enum RowKey {
     public static func project(_ id: String) -> String { "p:\(id)" }
     public static func branch(_ id: String) -> String { "b:\(id)" }
+    /// an open PR awaiting my review, by number
+    public static func reviewRequest(_ number: Int) -> String { "r:\(number)" }
     public static func todo(_ id: String) -> String { "t:\(id)" }
     public static func landed(_ id: String) -> String { "d:\(id)" }
     public static func server(_ id: String) -> String { "m:\(id)" }

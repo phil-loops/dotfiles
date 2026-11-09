@@ -76,6 +76,26 @@ def _refresh_requests(repo_path):
         ctx.clear_repo()
 
 
+_TTL = 300   # Home's review section re-searches GitHub past this; the warm loop refreshes it too
+
+
+def requests(req):   # GET /review-requests — Home's review section: open PRs awaiting my review
+    # Serve the cached queue at once; a stale one re-searches in the background. Cold blocks once.
+    repo_path = ctx.repo_cwd()
+    with _cache_lock:
+        ent = _cache.get(repo_path)
+        if ent:
+            if time.time() - ent["at"] >= _TTL and repo_path not in _refreshing:
+                _refreshing.add(repo_path)
+                threading.Thread(target=_refresh_requests, args=(repo_path,), daemon=True).start()
+            req._send(200, ent["json"])
+            return
+    payload = _compute_requests()
+    with _cache_lock:
+        _cache[repo_path] = {"at": time.time(), "json": payload}
+    req._send(200, payload)
+
+
 _WARM_EVERY = 300   # the review queue moves on human timescales; gh search is a ~1s network call
 _WARM_MAX = 5       # bound the git work — the queue is normally 1-2 PRs
 _warming = {}       # branch -> its prepare; a cold one outlives _WARM_EVERY, and re-firing stacked 3 per PR
@@ -86,7 +106,10 @@ def _warm_review_requests():
     # are the ones you're about to jump into. Import the head and build its worktree while the PR is
     # still just sitting in the queue, so the first jump is warm (~0.5s) instead of paying a fetch
     # plus a cold worktree build (~1.4s) at the moment you press the key.
-    prs = json.loads(_compute_requests())
+    payload = _compute_requests()
+    with _cache_lock:
+        _cache[ctx.repo_cwd()] = {"at": time.time(), "json": payload}
+    prs = json.loads(payload)
     for p in prs[:_WARM_MAX]:
         num = str(p["number"])
         if not p.get("imported") and \

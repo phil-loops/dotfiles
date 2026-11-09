@@ -23,6 +23,16 @@ public struct ForestView: Equatable {
     public var closed: Bool
 }
 
+/// An open PR GitHub says awaits my review (GET /review-requests); `imported` once its head is a
+/// local review/pr-<N> branch, so ↵ opens it without a fetch.
+public struct ReviewRequest: Decodable, Equatable {
+    public var number: Int
+    public var title: String
+    public var author: String
+    public var url: String
+    public var imported: Bool
+}
+
 /// Whether the whole forest merges onto main (integrate.ts).
 public struct IntegrationVerdict: Equatable {
     public enum State: String { case checking, clean, conflicts, failed }
@@ -68,6 +78,8 @@ public final class ForestModel {
     public var childChoice: [String]?
 
     public private(set) var verdicts: [String: IntegrationVerdict] = [:]
+    /// open PRs awaiting my review, newest search first; empty until the first answer
+    public private(set) var reviewRequests: [ReviewRequest] = []
     @ObservationIgnored var wasClosed: Set<String>?
 
     public enum Face: String { case branches, story }
@@ -178,11 +190,28 @@ public final class ForestModel {
             }
             return out
         }
-        for x in p.focus + p.workbench + (showArchive ? p.archive : []) {
-            out.append(RowKey.project(x.id))
-            if expanded.contains(x.id) { out += (f[x.id]?.branches ?? []).map { RowKey.branch($0.b.id) } }
+        func add(_ xs: [Project]) {
+            for x in xs {
+                out.append(RowKey.project(x.id))
+                if expanded.contains(x.id) { out += (f[x.id]?.branches ?? []).map { RowKey.branch($0.b.id) } }
+            }
         }
+        add(p.focus)
+        out += reviewRequests.map { RowKey.reviewRequest($0.number) }
+        add(p.workbench + (showArchive ? p.archive : []))
         return out
+    }
+
+    public func reviewRequest(_ row: String?) -> ReviewRequest? {
+        guard let n = RowKey.id(row, "r").flatMap(Int.init) else { return nil }
+        return reviewRequests.first { $0.number == n }
+    }
+
+    /// Re-read the review queue. The server answers from its cache and re-searches GitHub behind it,
+    /// so asking often is cheap; a failed read keeps the last queue rather than blanking the section.
+    public func loadReviewRequests() async {
+        guard let got = try? await transport.getJSON("/review-requests", as: [ReviewRequest].self) else { return }
+        if got != reviewRequests { reviewRequests = got }
     }
 
     // ── watchClosings: a forest whose last PR lands gets its moment, then folds into the archive ──
@@ -246,6 +275,9 @@ public final class ForestModel {
             state: r == nil || r?.ok == false ? .failed : r?.clean == true ? .clean : .conflicts,
             detail: r == nil ? "the check couldn't run" : (r?.detail ?? ""), stamp: stamp)
     }
+
+    /// Tests set the review queue directly.
+    func setReviewRequests(_ rs: [ReviewRequest]) { reviewRequests = rs }
 
     /// Tests and the stub path set a verdict directly.
     func setVerdict(_ pid: String, _ v: IntegrationVerdict) { verdicts[pid] = v }
