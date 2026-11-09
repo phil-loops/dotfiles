@@ -5,23 +5,20 @@
     <link rel="stylesheet" href="popup.css" />
   </head>
   <body>
-    <div class="status" id="status" hidden>
-      <span class="dot" id="dot"></span>
-      <div class="lines">
-        <span class="label" id="label"></span>
-        <span class="detail" id="detail"></span>
-      </div>
-    </div>
-    <button class="btn launch" id="launch" hidden>Start the viewer</button>
-    <button class="btn bind" id="bind" hidden>Bind ⌘⇧U / ⌘⇧O</button>
-    <button class="btn" id="reload" hidden>Reload the extension</button>
-    <div class="last-error" id="last-error" hidden></div>
-    <button class="open" id="canopy">
-      <span class="open-title"><span id="canopy-title">Open canopy</span><span class="key">⌘⇧U</span></span>
-      <span class="open-what" id="canopy-what"></span>
-      <span class="open-detail" id="canopy-detail"></span>
+    <button class="open" id="open">
+      <span class="open-head">
+        <span class="open-title" id="open-title">Open Show</span>
+        <kbd>⌘⇧U</kbd>
+      </span>
+      <span class="open-what" id="open-what"></span>
+      <span class="open-detail" id="open-detail"></span>
     </button>
-    <button class="btn" id="helix" hidden>Open in Helix<span class="key">⌘⇧O</span></button>
+    <div class="last-error" id="last-error" hidden></div>
+    <button class="fix" id="fix" hidden>
+      <span class="dot" id="dot"></span>
+      <span class="fix-label" id="fix-label"></span>
+      <span class="fix-act" id="fix-act"></span>
+    </button>
     <script src="config.js"></script>
     <script src="popup.js"></script>
   </body>
