@@ -552,6 +552,41 @@ import Testing
         #expect(!pg.fileOf("a.ts")!.viewed)
     }
 
+    @Test func mReadsOneDeclarationOfABlockByItsLinesAndMovesOnToTheRest() async throws {
+        let (a, p) = try await app()
+        let pg = ReviewPageState.of(a)
+        ShipStub.answer(p, "POST", "/loops/viewed", #"{"ok":true}"#)
+        // a.ts's first block is three lines: "-old one" (the old line 2), "+new one" (2), "+new two" (3) — two declarations
+        ShipStub.answer(p, "POST", "/loops/syntax/units",
+                        #"{"ok":true,"units":[{"line":1,"endLine":2,"name":"function one","scope":1},{"line":3,"endLine":4,"name":"function two","scope":1}],"functions":[],"classes":[]}"#)
+        await ReviewUnits.of(a).load(pg, path: "a.ts")
+        let fv = { pg.fileOf("a.ts")! }
+        let block = fv().blocks[0], keys0 = fv().lineKeys[0]
+        #expect(keys0 == ["\(block.key).0", "\(block.key).1", "\(block.key).2"])
+        pg.setCursor("l|a.ts|R:2")
+        keys(a, ",", "m")
+        await until("the post") { ShipStub.posts(p).contains { $0.path == "/loops/viewed" } }
+        #expect(ShipStub.posts(p).last { $0.path == "/loops/viewed" }!.body["marks"]
+                == .object([keys0[0]: .string("viewed"), keys0[1]: .string("viewed")]), "only function one's lines, by line")
+        #expect(fv().marks[0] == .unread, "the block still has a line to read")
+        #expect(pg.here?.key == "l|a.ts|R:3", "on to the rest of the same block")
+        #expect((a.runner.note ?? "").contains("function one"), "\(a.runner.note ?? "")")
+        keys(a, ",", "m")
+        #expect(fv().marks[0] == .viewed, "every line read: the block is")
+
+        // read whole by its block key, then , M on function two moves the mark onto function one's lines
+        for k in keys0 { pg.viewedOverride[k] = nil }
+        pg.viewedOverride[block.key] = .viewed
+        pg.setCursor("l|a.ts|R:3")
+        let before = ShipStub.posts(p).count
+        keys(a, ",", "M")
+        await until("the unmark") { ShipStub.posts(p).count > before }
+        #expect(ShipStub.posts(p).last { $0.path == "/loops/viewed" }!.body["marks"]
+                == .object([block.key: .string("none"), keys0[0]: .string("viewed"), keys0[1]: .string("viewed"), keys0[2]: .string("none")]))
+        let rows = fv().rows
+        #expect(fv().mark(of: rows.first { $0.key == "R:2" }!) == .viewed && fv().mark(of: rows.first { $0.key == "R:3" }!) == .unread)
+    }
+
     @Test func bangFlagsAChangeUStopsOnItAndBangAgainTakesItOff() async throws {
         let (a, p) = try await app()
         let pg = ReviewPageState.of(a)

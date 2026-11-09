@@ -238,7 +238,7 @@ public func expand(_ f: FileDiff, _ lines: [String]?, _ reveal: [Int: Int]) -> (
 
 // ── viewed: a change stays reviewed until its own text changes ──
 
-/// A run of consecutive changed lines — the unit "viewed" is kept on (wiki canopy-v2-viewed).
+/// A run of consecutive changed lines — the key a read mark is kept on, whole or (`lineKey`) line by line (wiki canopy-v2-viewed).
 public struct Block: Equatable, Sendable {
     /// the path and the block's changed text with whitespace dropped (a reformat keeps it); an exact
     /// duplicate in the same file adds the unchanged lines around it, so a new copy never inherits a mark

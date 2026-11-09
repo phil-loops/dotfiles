@@ -10,19 +10,24 @@ private func d(_ name: String, _ line: Int, _ end: Int, scope: Int = 1) -> Synta
     SyntaxUnit(line: line, endLine: end, name: name, scope: scope)
 }
 
-/// The units of a patch, keyed by block, as the page would hold them.
-private func units(_ patch: String, status: FileStatus = .modified, _ decls: [SyntaxUnit]?) -> [Int: ReviewUnit] {
+/// The units of a patch, by block, as the page would hold them: each block's unit, when one unit
+/// covers all of it (the line-by-line answer is `lineUnits`).
+private func lineUnits(_ patch: String, status: FileStatus = .modified, _ decls: [SyntaxUnit]?) -> [LineID: ReviewUnit] {
     // a blank context line is one space in a real patch; the fixtures leave it empty
     var f = parsePatch("x.test.ts", "@@ " + patch.dropFirst(3).replacingOccurrences(of: "\n\n", with: "\n \n"))
     f.status = status
-    let rows = unifiedRows(f)
-    let anchors = blockAnchors(f)
-    var rowBlock: [String: Int] = [:]
-    for r in rows {
-        guard let l = [r.left, r.right].compactMap({ $0 }).first(where: { $0.kind != .ctx }), let b = anchors[anchorOf(l)] else { continue }
-        rowBlock[r.key] = b
-    }
-    return ReviewUnitRule.units(rows: rows, rowBlock: rowBlock, status: f.status, decls: decls)
+    return ReviewUnitRule.units(lines: lineAnchors(f).map { ($0.block, $0.index, $0.at) }, status: f.status, decls: decls)
+}
+
+private func units(_ patch: String, status: FileStatus = .modified, _ decls: [SyntaxUnit]?) -> [Int: ReviewUnit] {
+    var out: [Int: ReviewUnit] = [:]
+    for (id, u) in lineUnits(patch, status: status, decls) where id.index == 0 { out[id.block] = u }
+    return out
+}
+
+/// A unit made of whole blocks of two lines each (a removal and its replacement), as most fixtures are.
+private func whole(_ blocks: [Int: Int], _ name: String) -> ReviewUnit {
+    ReviewUnit(parts: blocks.mapValues { Set(0..<$0) }, name: name)
 }
 
 private let testFile = [
@@ -52,9 +57,9 @@ private let testFile = [
              assert.deepEqual(
                groups.map((group) => group.id),
         """, testFile)
-        #expect(u[0] == ReviewUnit(blocks: [0, 1], name: #"it("appends order")"#), "both edits sit in one it: one , m reads the test")
+        #expect(u[0] == whole([0: 2, 1: 2], #"it("appends order")"#), "both edits sit in one it: one , m reads the test")
         #expect(u[1] == u[0])
-        #expect(u[2] == ReviewUnit(blocks: [2], name: #"it("returns only the team's groups")"#), "a describe is stepped into, not read whole")
+        #expect(u[2] == whole([2: 2], #"it("returns only the team's groups")"#), "a describe is stepped into, not read whole")
     }
 
     @Test func aFunctionEditedInTwoPlacesIsOneUnitAndItsNeighbourIsNot() {
@@ -79,8 +84,8 @@ private let testFile = [
         +    deps.findGroups({ teamId }),
              deps.findCards({ teamId, order: "manual" }),
         """, syms)
-        #expect(u[0] == ReviewUnit(blocks: [0, 1], name: "function findCards"))
-        #expect(u[2] == ReviewUnit(blocks: [2], name: "function findManyWithCards"), "each function is its own unit")
+        #expect(u[0] == whole([0: 2, 1: 4], "function findCards"))
+        #expect(u[2] == whole([2: 2], "function findManyWithCards"), "each function is its own unit")
     }
 
     @Test func neighbouringOneLineConstantsReadAsOneButAMultiLineOneStandsAlone() {
@@ -99,8 +104,8 @@ private let testFile = [
            name: true,
          };
         """, syms)
-        #expect(u[0] == ReviewUnit(blocks: [0, 1], name: "2 declarations"))
-        #expect(u[2] == ReviewUnit(blocks: [2], name: "SELECT"))
+        #expect(u[0] == whole([0: 2, 1: 2], "2 declarations"))
+        #expect(u[2] == whole([2: 2], "SELECT"))
     }
 
     @Test func aNewFileIsOneUnitEvenWithoutDeclarations() {
@@ -110,7 +115,7 @@ private let testFile = [
         +
         +export function f() {}
         """, status: .added, nil)
-        #expect(u[0] == ReviewUnit(blocks: [0], name: "the new file"))
+        #expect(u[0] == whole([0: 3], "the new file"))
     }
 
     @Test func anImportIsItsOwnAndARemovalJoinsItsFunction() {
@@ -126,8 +131,8 @@ private let testFile = [
            return a;
          }
         """, syms)
-        #expect(u[0] == ReviewUnit(blocks: [0], name: "import"))
-        #expect(u[1] == ReviewUnit(blocks: [1], name: "function f"))
+        #expect(u[0] == whole([0: 2], "import"))
+        #expect(u[1] == whole([1: 1], "function f"))
     }
 
     @Test func noDeclarationsLeavesEachChangeItsOwnUnit() {
@@ -159,8 +164,31 @@ private let testFile = [
            return 1;
          }
         """, decls)
-        #expect(u[0] == ReviewUnit(blocks: [0], name: "router"), "a hook line and a top-level const sit in different scopes")
-        #expect(u[1] == ReviewUnit(blocks: [1], name: "A"))
-        #expect(u[2] == ReviewUnit(blocks: [2], name: "a change"), "a line between declarations is its own")
+        #expect(u[0] == whole([0: 2], "router"), "a hook line and a top-level const sit in different scopes")
+        #expect(u[1] == whole([1: 2], "A"))
+        #expect(u[2] == whole([2: 2], "a change"), "a line between declarations is its own")
+    }
+
+    @Test func twoNewFunctionsInOneRunOfAddedLinesAreTwoUnitsAndTheBlankLinesGoWithTheNext() {
+        let decls = [d("a", 1, 1), d("function f", 3, 5), d("function g", 7, 9), d("z", 10, 10)]
+        let u = lineUnits("""
+        @@ -1,2 +1,10 @@
+         const a = 1;
+        +
+        +function f() {
+        +  return 1;
+        +}
+        +
+        +function g() {
+        +  return 2;
+        +}
+         const z = 2;
+        """, decls)
+        let f = ReviewUnit(parts: [0: [0, 1, 2, 3]], name: "function f")
+        let g = ReviewUnit(parts: [0: [4, 5, 6, 7]], name: "function g")
+        #expect(u[LineID(block: 0, index: 0)] == f, "the blank line before f reads with f")
+        #expect(u[LineID(block: 0, index: 3)] == f)
+        #expect(u[LineID(block: 0, index: 4)] == g)
+        #expect(u[LineID(block: 0, index: 7)] == g, "one block, two units: each function its own")
     }
 }

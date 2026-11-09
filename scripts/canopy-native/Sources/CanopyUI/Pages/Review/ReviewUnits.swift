@@ -1,10 +1,18 @@
 import CanopyCore
 import Foundation
 
-/// What one `, m` reads: the declaration a change sits in, as the change blocks it spans.
+/// What one `, m` reads: the declaration a change sits in, as the lines of each change block it spans.
 public struct ReviewUnit: Equatable {
-    public var blocks: [Int]
+    /// block → the indexes of its lines in this unit
+    public var parts: [Int: Set<Int>]
     public var name: String
+    public var blocks: [Int] { parts.keys.sorted() }
+}
+
+/// A changed line: its block and its place in the block.
+public struct LineID: Hashable {
+    public var block: Int
+    public var index: Int
 }
 
 /// One declaration of a file as POST /syntax/units reads it from the syntax tree (Helix's grammars):
@@ -33,7 +41,7 @@ struct SyntaxUnits: Decodable {
 
 /// What the review page knows of one file's syntax at this tip.
 struct FileSyntax {
-    var units: [Int: ReviewUnit]
+    var units: [LineID: ReviewUnit]
     var functions: [SyntaxSpan]
     var classes: [SyntaxSpan]
     /// new-side lines the change touches (a removal counts as the line now standing where it was)
@@ -46,67 +54,61 @@ struct FileSyntax {
 }
 
 enum ReviewUnitRule {
-    /// Each change block's unit. Blocks that touch one declaration share its unit; neighbouring one-line
-    /// declarations of one scope the change touches read as one (a run of new constants, imports or
-    /// hook lines); a change outside every declaration is its own. A new file is one unit, declarations
-    /// or not. Without declarations (no grammar for the file) every change is its own.
-    static func units(rows: [DiffRow], rowBlock: [String: Int], status: FileStatus, decls: [SyntaxUnit]?) -> [Int: ReviewUnit] {
-        let blocks = Set(rowBlock.values).sorted()
-        if blocks.isEmpty { return [:] }
+    /// Each changed line's unit. Lines in one declaration share its unit; neighbouring one-line
+    /// declarations of one scope the change touches read as one (a run of new constants, imports or hook
+    /// lines). A line outside every declaration (a blank line, a comment) goes with the next declaration
+    /// in its block, else the one before; a block touching none is one unit. A new file is one unit.
+    static func units(lines: [(block: Int, index: Int, at: Int)], status: FileStatus, decls: [SyntaxUnit]?) -> [LineID: ReviewUnit] {
+        if lines.isEmpty { return [:] }
+        let ids = lines.map { LineID(block: $0.block, index: $0.index) }
+        func unit(_ members: [Int], _ name: String) -> ReviewUnit {
+            var parts: [Int: Set<Int>] = [:]
+            for m in members { parts[ids[m].block, default: []].insert(ids[m].index) }
+            return ReviewUnit(parts: parts, name: name)
+        }
         if status == .added {
-            let u = ReviewUnit(blocks: blocks, name: "the new file")
-            return Dictionary(uniqueKeysWithValues: blocks.map { ($0, u) })
+            let u = unit(Array(ids.indices), "the new file")
+            return Dictionary(uniqueKeysWithValues: ids.map { ($0, u) })
         }
 
-        let lines = blockLines(rows: rows, rowBlock: rowBlock)
         let ds = decls ?? []
-        var touched: [Int: [Int]] = [:]   // declaration index → its blocks
-        for b in blocks {
-            for x in Set(lines[b] ?? []) {
-                guard let d = ds.firstIndex(where: { $0.line <= x && x <= $0.endLine }) else { continue }
-                if !(touched[d]?.contains(b) ?? false) { touched[d, default: []].append(b) }
-            }
-        }
-
-        var parent = Dictionary(uniqueKeysWithValues: blocks.map { ($0, $0) })
-        func find(_ b: Int) -> Int {
-            var b = b
-            while parent[b]! != b { b = parent[b]! }
-            return b
+        let declOf = lines.map { l in ds.firstIndex { $0.line <= l.at && l.at <= $0.endLine } }
+        var parent = Array(ids.indices)
+        func find(_ i: Int) -> Int {
+            var i = i
+            while parent[i] != i { i = parent[i] }
+            return i
         }
         func union(_ a: Int, _ b: Int) { let (ra, rb) = (find(a), find(b)); if ra != rb { parent[max(ra, rb)] = min(ra, rb) } }
-        for bs in touched.values { for b in bs.dropFirst() { union(bs[0], b) } }
-        for d in touched.keys.sorted() where d + 1 < ds.count {
+
+        var firstIn: [Int: Int] = [:]   // declaration → its first line
+        for (i, d) in declOf.enumerated() { if let d { if let f = firstIn[d] { union(f, i) } else { firstIn[d] = i } } }
+        for d in firstIn.keys where d + 1 < ds.count {
             let (a, n) = (ds[d], ds[d + 1])
-            guard a.line == a.endLine, n.line == n.endLine, a.scope == n.scope, let next = touched[d + 1]?.first else { continue }
-            union(touched[d]![0], next)
+            guard a.line == a.endLine, n.line == n.endLine, a.scope == n.scope, let other = firstIn[d + 1] else { continue }
+            union(firstIn[d]!, other)
+        }
+        var looseOf: [Int: Int] = [:]   // block → its first line outside every declaration, when it touches none
+        for i in ids.indices where declOf[i] == nil {
+            let same = { (k: Int) in ids[k].block == ids[i].block && declOf[k] != nil }
+            if let k = ids.indices.first(where: { $0 > i && same($0) }) ?? ids.indices.last(where: { $0 < i && same($0) }) {
+                union(i, k)
+            } else if let f = looseOf[ids[i].block] {
+                union(f, i)
+            } else {
+                looseOf[ids[i].block] = i
+            }
         }
 
         var groups: [Int: [Int]] = [:]
-        for b in blocks { groups[find(b), default: []].append(b) }
-        var out: [Int: ReviewUnit] = [:]
+        for i in ids.indices { groups[find(i), default: []].append(i) }
+        var out: [LineID: ReviewUnit] = [:]
         for members in groups.values {
-            let names = touched.filter { !Set($0.value).isDisjoint(with: members) }.keys.sorted().map { ds[$0] }
-            let u = ReviewUnit(blocks: members.sorted(), name: name(names))
-            for b in members { out[b] = u }
+            let names = Set(members.compactMap { declOf[$0] }).sorted().map { ds[$0] }
+            let u = unit(members, name(names))
+            for m in members { out[ids[m]] = u }
         }
         return out
-    }
-
-    /// Each block's new-side lines; a removal answers to the line that now stands where it was.
-    static func blockLines(rows: [DiffRow], rowBlock: [String: Int]) -> [Int: [Int]] {
-        var lines: [Int: [Int]] = [:]
-        for (i, r) in rows.enumerated() {
-            guard let b = rowBlock[r.key] else { continue }
-            if let l = r.right, l.kind == .add, let n = l.new {
-                lines[b, default: []].append(n)
-            } else if r.right == nil || r.right?.kind == .ctx {
-                let after = rows[(i + 1)...].first { $0.right?.new != nil }?.right?.new
-                let before = rows[..<i].last { $0.right?.new != nil }?.right?.new
-                lines[b, default: []].append(after ?? before.map { $0 + 1 } ?? 1)
-            }
-        }
-        return lines
     }
 
     static func name(_ ds: [SyntaxUnit]) -> String {
@@ -133,7 +135,14 @@ final class ReviewUnits {
 
     private func key(_ pg: ReviewPageState, _ path: String) -> String { "\(pg.id)@\(pg.tip)|\(pg.baseSha)|\(path)" }
 
-    func unit(_ pg: ReviewPageState, path: String, block: Int) -> ReviewUnit? { byKey[key(pg, path)]?.units[block] }
+    /// The unit a changed row's line sits in, once the file's syntax is in.
+    func unit(_ pg: ReviewPageState, path: String, row: DiffRow, block: Int) -> ReviewUnit? {
+        guard let fs = byKey[key(pg, path)], let fv = pg.fileOf(path), fv.lineKeys.indices.contains(block) else { return nil }
+        for k in fv.rowLines[row.key] ?? [] {
+            if let i = fv.lineKeys[block].firstIndex(of: k), let u = fs.units[LineID(block: block, index: i)] { return u }
+        }
+        return nil
+    }
 
     /// The file's syntax, read first if it isn't yet; nil when the server can't be reached.
     func syntax(_ pg: ReviewPageState, path: String) async -> FileSyntax? {
@@ -153,9 +162,8 @@ final class ReviewUnits {
         guard let r else { return }
         let got = r.ok ? r : nil
         guard let fv = pg.fileOf(path), key(pg, path) == k else { return }
-        byKey[k] = FileSyntax(
-            units: ReviewUnitRule.units(rows: fv.rows, rowBlock: fv.rowBlock, status: fv.file.status, decls: got?.units),
-            functions: got?.functions ?? [], classes: got?.classes ?? [],
-            changed: Set(ReviewUnitRule.blockLines(rows: fv.rows, rowBlock: fv.rowBlock).values.joined()))
+        let lines = lineAnchors(fv.file).map { ($0.block, $0.index, $0.at) }
+        byKey[k] = FileSyntax(units: ReviewUnitRule.units(lines: lines, status: fv.file.status, decls: got?.units),
+                              functions: got?.functions ?? [], classes: got?.classes ?? [], changed: Set(lines.map(\.2)))
     }
 }
