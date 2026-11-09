@@ -68,6 +68,8 @@ struct ReviewPage: View {
         .overlay { if let h = pg.helix, h.whole, let dir = h.dir { HelixCover(open: h, dir: dir) } }
         .onAppear { pg.sync() }
         .task(id: "\(pg.id)@\(pg.tip)") { pg.warmHelix(app) }
+        // the file under the cursor learns its declarations, so , m can read one whole
+        .task(id: "\(pg.id)@\(pg.tip)|\(pg.here?.path ?? "")") { if let p = pg.here?.path { await ReviewUnits.of(app).load(pg, path: p) } }
     }
 }
 

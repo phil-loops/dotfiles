@@ -1070,7 +1070,7 @@ enum DiffCommands {
 
         // ── marks: , m reads a change and moves on, , ! flags it to come back to, , M takes either off ──
 
-        r.register(Command(id: "review.viewed", title: "Mark read and go on to the next unread change — the change, its hunk on an unchanged line, the file on its header, the range in select",
+        r.register(Command(id: "review.viewed", title: "Mark read and go on to the next unread change — the declaration it sits in (a function, a test, a run of constants; a new file whole), its hunk on an unchanged line, the file on its header, the range in select",
                            scope: .review, budget: .configWrite, verb: .mark, leader: LocalKey(",m"), modes: motion, label: "viewed", pair: "review.unviewed",
                            available: { _ in onDiff(nil) && pg.here != nil && !pg.scoped },
                            write: { _, _ in
@@ -1168,21 +1168,24 @@ enum DiffCommands {
     /// cursor; an unchanged line or a gap takes its hunk's changes; a file header (a conversation, the
     /// lines past the last hunk) the whole file.
     static func markTargets(_ app: AppModel, _ pg: ReviewPageState) -> [(path: String, blocks: [Int])] {
-        func of(_ s: Stop) -> (path: String, blocks: [Int])? {
+        func of(_ s: Stop, whole: Bool) -> (path: String, blocks: [Int])? {
             guard let fv = pg.fileOf(s.path) else { return nil }
             let all = Array(fv.blocks.indices)
             func hunk(_ h: Int) -> [Int]? {
                 let bs = Set(fv.rows.filter { $0.hunk == h }.compactMap { fv.rowBlock[$0.key] })
                 return bs.isEmpty ? nil : bs.sorted()
             }
-            if let row = s.row { return (s.path, fv.rowBlock[row.key].map { [$0] } ?? hunk(row.hunk) ?? all) }
+            if let row = s.row {
+                let unit = { (b: Int) in whole ? ReviewUnits.of(app).unit(pg, path: s.path, block: b)?.blocks ?? [b] : [b] }
+                return (s.path, fv.rowBlock[row.key].map(unit) ?? hunk(row.hunk) ?? all)
+            }
             if s.kind == .gap, let at = s.at, let bs = hunk(at) { return (s.path, bs) }
             return (s.path, all)
         }
         if app.keys.mode == .select, app.pane?.id == reviewDiffPane {
             var out: [(path: String, blocks: [Int])] = []
             for k in app.selection {
-                guard let i = pg.stopIndex[k], let t = of(pg.stops[i]) else { continue }
+                guard let i = pg.stopIndex[k], let t = of(pg.stops[i], whole: false) else { continue }
                 if let j = out.firstIndex(where: { $0.path == t.path }) {
                     out[j].blocks = Array(Set(out[j].blocks + t.blocks)).sorted()
                 } else {
@@ -1191,7 +1194,7 @@ enum DiffCommands {
             }
             return out
         }
-        return pg.here.flatMap(of).map { [$0] } ?? []
+        return pg.here.flatMap { of($0, whole: true) }.map { [$0] } ?? []
     }
 
     /// , m / , ! / , M: give the targets a mark. , ! on changes already all flagged takes the flag off.
@@ -1215,7 +1218,10 @@ enum DiffCommands {
             if want == .unread { app.runner.say("no mark on it yet") }
             return nil
         }
-        let what = count == 1 ? "a change in \(shortPath(targets[0].path))" : "\(count) changes"
+        let unit = app.keys.mode == .select ? nil : pg.here.flatMap { h in
+            h.row.flatMap { pg.fileOf(h.path)?.rowBlock[$0.key] }.flatMap { ReviewUnits.of(app).unit(pg, path: h.path, block: $0)?.name }
+        }
+        let what = unit.map { "\($0) in \(shortPath(targets[0].path))" } ?? (count == 1 ? "a change in \(shortPath(targets[0].path))" : "\(count) changes")
         let said: String
         switch want {
         case .viewed: said = "viewed \(what) — u puts it back"
