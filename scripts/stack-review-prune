@@ -1,0 +1,52 @@
+#!/bin/zsh
+# stack-review-prune [--dry-run] — retire imported review PRs once they're done.
+#
+# stack-review-import (and the Chrome extension's prewarm, on every PR page visited) fetches a PR's
+# head into review/pr-<N> and pins it to the stack.standalone watch-list. Nothing took them away, so
+# they piled up (355 branches and 810 list entries by 2026-11-09). This deletes each review/pr-<N>
+# whose PR is no longer open — merged or closed — unless a worktree has it checked out, and drops
+# watch-list entries whose branch is gone. Branch config (description, parent) goes with the branch.
+#
+# Run in the repo. The review server runs it once a day (srv/reviews.py); --dry-run says what it would do.
+set -euo pipefail
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
+
+dry=0
+[[ "${1:-}" == "--dry-run" ]] && dry=1
+
+repo=$(gh repo view --json nameWithOwner -q .nameWithOwner)
+# never prune on a failed or empty answer: every branch would look closed
+open=$(gh pr list --repo "$repo" --state open --limit 2000 --json number --jq '.[].number')
+if [[ -z "$open" ]]; then
+  print -u2 "stack-review-prune: GitHub listed no open PRs for $repo — refusing to prune on that"
+  exit 1
+fi
+typeset -A is_open
+for n in ${(f)open}; do is_open[$n]=1; done
+
+typeset -A checked_out
+for ref in ${(f)"$(git worktree list --porcelain | awk '/^branch /{print $2}')"}; do
+  checked_out[${ref#refs/heads/}]=1
+done
+
+deleted=0 kept=0 busy=0
+for b in ${(f)"$(git for-each-ref --format='%(refname:short)' refs/heads/review/)"}; do
+  n=${b#review/pr-}
+  [[ "$n" == <-> ]] || continue
+  if (( ${+is_open[$n]} )); then kept=$((kept + 1)); continue; fi
+  if (( ${+checked_out[$b]} )); then busy=$((busy + 1)); print "keeps $b: checked out in a worktree"; continue; fi
+  (( dry )) || git branch -q -D "$b"
+  deleted=$((deleted + 1))
+done
+
+dangling=0
+for b in ${(f)"$(git config --get-all stack.standalone 2>/dev/null || true)"}; do
+  [[ -n "$b" ]] || continue
+  (( dry )) && [[ "$b" == review/pr-<-> ]] && ! (( ${+is_open[${b#review/pr-}]} )) && ! (( ${+checked_out[$b]} )) && { dangling=$((dangling + 1)); continue; }
+  git show-ref --verify --quiet "refs/heads/$b" && continue
+  (( dry )) || git config --unset-all stack.standalone "^${(b)b}\$"
+  dangling=$((dangling + 1))
+done
+
+verb=$( (( dry )) && print "would delete" || print "deleted" )
+print "stack-review-prune: $verb $deleted closed review branches, kept $kept open$( (( busy )) && print ", $busy checked out"); $( (( dry )) && print "would drop" || print "dropped") $dangling watch-list entries for missing branches"

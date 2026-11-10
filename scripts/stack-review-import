@@ -9,7 +9,8 @@
 #   • pins it to the standalone watch-list so it surfaces on the landing page
 #
 # Prints the local branch name on success. Idempotent: re-running refreshes the
-# fetched head and leaves the single watch-list entry intact.
+# fetched head and leaves the single watch-list entry intact. stack-review-prune retires the
+# branch and its entry once the PR closes (the review server runs it daily).
 set -euo pipefail
 # dual-write both stack-config namespaces (see the library header)
 source "${0:A:h}/stack-config-lib.zsh"
