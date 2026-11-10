@@ -16,6 +16,8 @@ struct Deck: Decodable {
     let staleAfter: Double?
     let repoPath: String?
     let plan: Plan?
+    /// Labels a section can be given with one key each; a deck that has them shows them in the sign-off bar.
+    let choices: [Choice]?
     let sections: [Section]
 
     /// A live deck is watched, not judged: no sign-off bar, no sign-off file, no sign-off marks.
@@ -24,6 +26,15 @@ struct Deck: Decodable {
     /// The Inbox: messages, not a review, so no sign-off checkbox, Send or Submit, only a reply field.
     var isInbox: Bool { mode == "inbox" }
     var isPlan: Bool { plan != nil }
+    /// A labelling deck: its sections get a choice each, so it keeps the sign-off bar that reading decks drop.
+    var isLabelling: Bool { !isLive && !isInbox && !(choices ?? []).isEmpty }
+
+    func choice(_ key: String) -> Choice? { choices?.first { $0.key == key } }
+}
+
+struct Choice: Decodable {
+    let key: String
+    let label: String
 }
 
 struct Section: Decodable {
@@ -44,6 +55,8 @@ struct Section: Decodable {
     let sha: String?
     /// The session this section came from, overriding the deck's `replyTo` (the Inbox holds notes from many sessions).
     let replyTo: String?
+    /// The choice key suggested for this section in a labelling deck.
+    let proposed: String?
 
     var key: String { id ?? title }
     static let views: Set<String> = ["plan"]
@@ -53,6 +66,8 @@ struct SignOff: Codable {
     var signed: Bool
     var note: String
     var at: String
+    /// The key of the deck choice picked for this section; absent outside labelling decks.
+    var choice: String?
 }
 
 

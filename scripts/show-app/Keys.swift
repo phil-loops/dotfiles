@@ -95,6 +95,9 @@ enum KeyTable {
         return menuOrder.filter(named.contains) + named.subtracting(menuOrder).sorted()
     }
 
+    /// Where a deck can carry `choices`: the deck workspaces outside the Inbox and Runs.
+    static let labelling: [Workspace] = [.forest, .review, .plans]
+
     static let core: [KeyBinding] = [
         KeyBinding(id: "library.find", menu: "Library", title: "Find…", key: "o", modifiers: .command, also: "/", overOverlay: true) { $0.showFinder(nil) },
         KeyBinding(id: "library.find-slash", menu: "Library", title: "Find…", key: "/", when: .notTyping, listed: false) { $0.showFinder(nil) },
@@ -125,6 +128,14 @@ enum KeyTable {
                    isEnabled: { $0.signableDeck?.selectedReplyTo != nil }) { $0.signableDeck?.jumpToSession() },
         KeyBinding(id: "section.submit", menu: "Section", title: "Send Reply", key: "\r", modifiers: .command, workspaces: [.inbox],
                    isEnabled: { $0.signableDeck != nil }) { $0.sendOrSubmit() },
+        KeyBinding(id: "section.choose-1", menu: "Section", title: "Pick Choice", key: "1", workspaces: KeyTable.labelling, when: .notTyping, also: "2–9",
+                   isEnabled: { $0.labellingDeck?.deck.choice("1") != nil }) { $0.labellingDeck?.pick("1") },
+    ] + (2...9).map { digit in
+        KeyBinding(id: "section.choose-\(digit)", menu: "Section", title: "Pick Choice", key: "\(digit)", workspaces: KeyTable.labelling, when: .notTyping, listed: false,
+                   isEnabled: { $0.labellingDeck?.deck.choice("\(digit)") != nil }) { $0.labellingDeck?.pick("\(digit)") }
+    } + [
+        KeyBinding(id: "section.accept-proposed", menu: "Section", title: "Pick the Proposed Choice", key: "a", workspaces: KeyTable.labelling, when: .notTyping,
+                   isEnabled: { $0.labellingDeck?.selectedSection?.proposed != nil }) { $0.labellingDeck?.acceptProposed() },
         KeyBinding(id: "section.canopy", menu: "Section", title: "Open Branch in Canopy", key: "O", modifiers: [.command, .shift], workspaces: [.forest]) { $0.openInCanopy(nil) },
 
         KeyBinding(id: "workspace.canopy", menu: "Workspace", title: "Canopy", key: Workspace.canopy.key, modifiers: .command, overOverlay: true) { $0.switchTo(.canopy) },
@@ -242,6 +253,11 @@ extension AppDelegate {
     var signableDeck: DeckController? {
         guard [.forest, .review, .plans].contains(active), let deck = workspaces[active]?.currentDeck, !deck.deck.isLive else { return nil }
         return deck
+    }
+
+    /// The open deck when it has `choices`, the one the digit keys and A label.
+    var labellingDeck: DeckController? {
+        signableDeck.flatMap { $0.deck.isLabelling ? $0 : nil }
     }
 
     func isEnabled(_ binding: KeyBinding) -> Bool {

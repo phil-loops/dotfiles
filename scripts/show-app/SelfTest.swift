@@ -311,6 +311,7 @@ final class SelfTestDriver {
 
         arrivals()
         fold()
+        labelling()
 
         switchKey(.learn)
         app.focus(front.shelf)
@@ -412,6 +413,65 @@ final class SelfTestDriver {
         check("the log replays to the state the app holds", ShowState.fold(showEvents.events) == showEvents.state)
         command("[", code: 33)
         command("[", code: 33)
+    }
+
+    /// A deck with `choices`: a digit records its choice and signs off, A takes the proposed one, both move to the next unsigned
+    /// section; an old sign-off file without choices still loads, and a deck without choices keeps no bar and ignores the digits.
+    /// Leaves Review back on Alpha.
+    func labelling() {
+        let alpha = at("alpha-plan.json"), labels = at("label-pages.json")
+        write(["title": "Label pages", "choices": [["key": "1", "label": "impersonation"], ["key": "2", "label": "fine"], ["key": "3", "label": "unsure"]],
+               "sections": [
+                   ["id": "p1", "group": "Pages", "title": "Page one", "body": "One.", "proposed": "2"],
+                   ["id": "p2", "group": "Pages", "title": "Page two", "body": "Two.", "proposed": "1"],
+                   ["id": "p3", "group": "Pages", "title": "Page three", "body": "Three."],
+                   ["id": "p4", "group": "Pages", "title": "Page four", "body": "Four.", "proposed": "3"],
+               ]], labels)
+        write(["p3": ["signed": true, "note": "old note", "at": "2026-11-01T00:00:00Z"]], (labels as NSString).deletingPathExtension + ".signoff.json")
+        check("choices and proposed are keys this build knows", unknownParts(ofDeckAt: labels).isEmpty, unknownParts(ofDeckAt: labels).joined(separator: ", "))
+        switchKey(.review)
+        app.openPath(labels)
+        settle()
+        guard let deck = front.currentDeck, deck.path == labels else { return check("the labelling deck opens", false, front.current ?? "-") }
+        let plainStore = SignOffStore(deckPath: (scratch as NSString).appendingPathComponent("plain.json"))
+        plainStore.update("s1") { $0.signed = true }
+        check("a sign-off written without a choice has no choice key", (try? String(contentsOf: plainStore.url, encoding: .utf8))?.contains("choice") == false)
+        check("an old sign-off file without choices loads", deck.store.entries["p3"]?.note == "old note" && deck.store.entries["p3"]?.choice == nil)
+        check("a labelling deck shows its choices and the sign-off bar", !deck.choiceBar.isHidden && !deck.actionBar.isHidden
+              && deck.choiceBar.arrangedSubviews.compactMap { ($0 as? NSButton)?.identifier?.rawValue } == ["1", "2", "3"])
+        deck.select(section: "p1")
+        app.focus(deck.text)
+        press("1", code: 18)
+        check("a choice key records the choice and signs off", signoff(labels)["p1"]?.choice == "1" && signoff(labels)["p1"]?.signed == true,
+              "\(String(describing: signoff(labels)["p1"]))")
+        check("…and moves to the next section not signed off", deck.selectedSection?.key == "p2", deck.selectedSection?.key ?? "-")
+        press("a", code: 0)
+        check("A records the proposed choice", signoff(labels)["p2"]?.choice == "1" && signoff(labels)["p2"]?.signed == true,
+              "\(String(describing: signoff(labels)["p2"]))")
+        check("…and skips the section already signed off", deck.selectedSection?.key == "p4", deck.selectedSection?.key ?? "-")
+        check("…keeping the old section's note", signoff(labels)["p3"]?.note == "old note")
+        press("9", code: 25)
+        check("a key with no choice records nothing", signoff(labels)["p4"] == nil && deck.selectedSection?.key == "p4")
+        app.focusComposer()
+        type("2")
+        check("a digit typed into the note stays text", deck.composer.string == "2" && signoff(labels)["p4"] == nil, deck.composer.string)
+        escape()
+        deck.composer.string = ""
+        deck.composer.didChangeText()
+        deck.select(section: "p1")
+        let buttons = deck.choiceBar.arrangedSubviews.compactMap { $0 as? NSButton }
+        check("the recorded choice shows pressed and the proposed one is marked", buttons.map(\.state) == [.on, .off, .off]
+              && buttons[1].attributedTitle.string.hasSuffix("proposed") && !buttons[0].attributedTitle.string.hasSuffix("proposed"),
+              buttons.map(\.attributedTitle.string).joined(separator: " | "))
+
+        command("[", code: 33)
+        guard let plain = front.currentDeck, plain.path == alpha else { return check("⌘[ goes back to Alpha", false, front.current ?? "-") }
+        check("a deck without choices keeps no bar", plain.actionBar.isHidden && plain.choiceBar.isHidden)
+        app.focus(plain.text)
+        let before = signoff(alpha)
+        press("1", code: 18)
+        press("a", code: 0)
+        check("…and the choice keys do nothing there", signoff(alpha).keys.sorted() == before.keys.sorted() && signoff(alpha)["a1"]?.choice == nil)
     }
 
     /// A launcher's request, written to the inbox the way `show` writes it.
