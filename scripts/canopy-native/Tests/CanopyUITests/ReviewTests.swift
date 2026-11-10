@@ -535,9 +535,14 @@ import Testing
         let pg = ReviewPageState.of(a)
         ShipStub.answer(p, "POST", "/loops/viewed", #"{"ok":true,"count":1,"on":true}"#)
         let hunk0 = pg.fileOf("a.ts")!.blocks.filter { $0.hunk == 0 }
+        let start = pg.here?.key
         keys(a, ",", "m")
         #expect(hunk0.allSatisfy(pg.isSeen))
         #expect(pg.here?.key == "l|a.ts|R:22", "on to the next unviewed hunk")
+        keys(a, "C-o")
+        #expect(pg.here?.key == start, "C-o goes back to what was just marked")
+        keys(a, "C-i")
+        #expect(pg.here?.key == "l|a.ts|R:22")
         await until("the post") { ShipStub.posts(p).contains { $0.path == "/loops/viewed" } }
         let post = ShipStub.posts(p).last { $0.path == "/loops/viewed" }!
         #expect(post.body["marks"] == .object(Dictionary(uniqueKeysWithValues: hunk0.map { ($0.key, JSONValue.string("viewed")) })))
