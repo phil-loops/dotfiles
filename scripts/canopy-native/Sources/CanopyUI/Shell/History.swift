@@ -6,6 +6,10 @@ extension AppModel {
     /// A command flagged `recordsJump` is about to run.
     public func willJump(_ id: String) { recordJump() }
 
+    public func placeNow() -> Place? { here() }
+
+    public func returnTo(_ p: Place) { restore(p) }
+
     /// Put a remembered place back — page, pane, cursor, code place, then the surface's tab and
     /// viewport row — without recording anything.
     public func restore(_ p: Place) {
