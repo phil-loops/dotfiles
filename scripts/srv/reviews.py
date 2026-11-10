@@ -128,10 +128,24 @@ def _preparing(branch):
                           capture_output=True).returncode == 0
 
 
+_PRUNE_EVERY = 86400
+_pruned = [0.0]
+
+
+def _prune_daily():
+    # every PR page visited imports a review/pr-N (the prewarm), so once a day the ones whose PR has
+    # closed go, with their watch-list entries — stack-review-prune; a server start prunes too
+    if time.time() - _pruned[0] < _PRUNE_EVERY:
+        return
+    _pruned[0] = time.time()
+    ctx.run([os.path.join(ctx.SCRIPTS, "stack-review-prune")], timeout=600)
+
+
 def warm_requests_forever():
     while True:
         try:
             ctx.set_repo(ctx.CWD)
+            _prune_daily()
             _warm_review_requests()
         except Exception:
             pass   # a warm is a nicety — never let it kill the thread (or the next cycle)
