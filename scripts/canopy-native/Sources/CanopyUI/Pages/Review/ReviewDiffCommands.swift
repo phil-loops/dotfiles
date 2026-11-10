@@ -1072,7 +1072,7 @@ enum DiffCommands {
 
         // ── marks: , m reads a change and moves on, , ! flags it to come back to, , M takes either off ──
 
-        r.register(Command(id: "review.viewed", title: "Mark read and go on to the next unread change — the declaration it sits in (a function, a test, a run of constants; a new file whole), its hunk on an unchanged line, the file on its header, the range in select",
+        r.register(Command(id: "review.viewed", title: "Mark read and go on to the next unread change — new code by declaration (a function, a test, a run of constants; a new file whole), an edit by its change, its hunk on an unchanged line, the file on its header, the range in select",
                            scope: .review, budget: .configWrite, verb: .mark, leader: LocalKey(",m"), modes: motion, label: "viewed", pair: "review.unviewed",
                            available: { _ in onDiff(nil) && pg.here != nil && !pg.scoped },
                            write: { _, _ in
