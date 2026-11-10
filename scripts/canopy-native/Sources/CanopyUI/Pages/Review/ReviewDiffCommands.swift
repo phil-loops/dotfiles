@@ -1100,7 +1100,7 @@ enum DiffCommands {
                            write: { _, arg in
                                guard let path = arg as? String, let fv = pg.fileOf(path) else { return nil }
                                let want: Mark = fv.viewed ? .unread : .viewed
-                               if want == .viewed { advance(pg, past: [(path, Array(fv.blocks.indices), [:])]) }
+                               if want == .viewed { app.recordJump(); advance(pg, past: [(path, Array(fv.blocks.indices), [:])]) }
                                return markSet(app, pg, blockMarks(pg, fv, Array(fv.blocks.indices), want))
                            }))
         r.register(Command(id: "review.viewed.set", title: "Put marks back", scope: .review, budget: .configWrite, needsArg: true, quiet: true,
@@ -1240,7 +1240,10 @@ enum DiffCommands {
         let unit = app.keys.mode == .select ? nil : pg.here.flatMap { h in
             h.row.flatMap { r in pg.fileOf(h.path)?.rowBlock[r.key].flatMap { ReviewUnits.of(app).unit(pg, path: h.path, row: r, block: $0)?.name } }
         }
-        if want != .unread { advance(pg, past: targets) }
+        if want != .unread {
+            app.recordJump()   // moving on is a jump: C-o comes back to what was just marked
+            advance(pg, past: targets)
+        }
         var change: (marks: [String: Mark], before: [String: Mark]) = ([:], [:])
         var count = 0
         for t in targets {
