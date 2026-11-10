@@ -344,18 +344,41 @@ def run_checks(repo, shas, only):
         git(repo, "config", "--remove-section", "stack-branch.wt-1.2")
         git(repo, "config", "--remove-section", "branch.base")
         git(repo, "config", "--unset-all", "stack-branch.base.requires")
+        from srv import stackcfg
+        git(repo, "branch", "recreated", shas["b"])
+        stackcfg.set_key("recreated", "review-run", "run-1")
+        check("namespace: a server write leaves no legacy copy",
+              git(repo, "config", "--get", "stack-branch.recreated.review-run", check_rc=False) == "")
+        git(repo, "branch", "-D", "recreated")
+        git(repo, "branch", "recreated", shas["b"])
+        repostate.invalidate()
+        check("namespace: a recreated branch inherits nothing from its deleted namesake",
+              repostate.snapshot().branch_key("recreated", "review-run") == "",
+              repostate.snapshot().branch_key("recreated", "review-run"))
+        git(repo, "config", "stack-branch.recreated.parent", "stale")
+        stackcfg.set_key("recreated", "parent", "base")
+        check("namespace: a set clears that key's pre-existing legacy copy",
+              git(repo, "config", "--get", "stack-branch.recreated.parent", check_rc=False) == "")
+        git(repo, "config", "--add", "stack-branch.recreated.requires", "dep-one")
+        stackcfg.add_key("recreated", "requires", "dep-two")
+        repostate.invalidate()
+        check("namespace: an append keeps the legacy-only values readers were seeing",
+              repostate.snapshot().branch_key_all("recreated", "requires") == ["dep-one", "dep-two"]
+              and git(repo, "config", "--get-all", "stack-branch.recreated.requires", check_rc=False) == "",
+              str(repostate.snapshot().branch_key_all("recreated", "requires")))
+        git(repo, "branch", "-D", "recreated")
         git(repo, "config", "branch.base.description", "base: one line of purpose")
         repostate.invalidate()
 
     if want("dualwrite"):
-        print("dual-write (namespace migration)")
+        print("target-only writes (namespace migration)")
         from srv import stackcfg, ctx
         cfg = lambda k: git(repo, "config", "--get", k, check_rc=False)
         stackcfg.set_key("base", "role", "proof")
         check("dualwrite: set writes the target spelling",
               cfg("branch.base.stack-role") == "proof", cfg("branch.base.stack-role"))
-        check("dualwrite: set writes the legacy spelling too",
-              cfg("stack-branch.base.role") == "proof", cfg("stack-branch.base.role"))
+        check("dualwrite: set writes no legacy spelling",
+              cfg("stack-branch.base.role") == "", cfg("stack-branch.base.role"))
         stackcfg.unset_key("base", "role")
         check("dualwrite: unset clears both",
               cfg("branch.base.stack-role") == "" and cfg("stack-branch.base.role") == "")
@@ -363,11 +386,11 @@ def run_checks(repo, shas, only):
         stackcfg.add_key("base", "requires", "dep-b")
         both = (git(repo, "config", "--get-all", "branch.base.stack-requires", check_rc=False).split(),
                 git(repo, "config", "--get-all", "stack-branch.base.requires", check_rc=False).split())
-        check("dualwrite: add keeps every value in both", both == (["dep-a", "dep-b"], ["dep-a", "dep-b"]), str(both))
+        check("dualwrite: add keeps every value in the target only", both == (["dep-a", "dep-b"], []), str(both))
         stackcfg.unset_key("base", "requires", "dep-a")
         both = (git(repo, "config", "--get-all", "branch.base.stack-requires", check_rc=False).split(),
                 git(repo, "config", "--get-all", "stack-branch.base.requires", check_rc=False).split())
-        check("dualwrite: a valued unset removes that value from both", both == (["dep-b"], ["dep-b"]), str(both))
+        check("dualwrite: a valued unset removes that value", both == (["dep-b"], []), str(both))
 
         # the trap: the target side must NEVER be `--remove-section branch.<b>`
         desc_before = cfg("branch.base.description")
