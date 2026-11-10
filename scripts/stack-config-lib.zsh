@@ -12,6 +12,9 @@
 # spelling is SILENTLY SHADOWED, because readers take the target. A re-parent would report success
 # and do nothing. Route writes through here and dropping the legacy spelling later is one edit.
 #
+# That edit is made (2026-11-09): writes emit the target only and clear the key's legacy copy, which
+# otherwise outlived `branch -D` and leaked a dead branch's verdicts into a recreated namesake.
+#
 #   stack_cfg_set   <branch> <key> <value>
 #   stack_cfg_add   <branch> <key> <value>          # multivar
 #   stack_cfg_unset <branch> <key> [value-pattern]
@@ -19,12 +22,20 @@
 
 stack_cfg_set() {
   git config "branch.$1.stack-$2" "$3"
-  git config "stack-branch.$1.$2" "$3"
+  git config --unset-all "stack-branch.$1.$2" 2>/dev/null || true
 }
 
 stack_cfg_add() {
+  # A legacy-only list is folded into the target first, so the append can't hide what readers
+  # were getting from the fallback.
+  local v
+  if [[ -z "$(git config --get-all "branch.$1.stack-$2" 2>/dev/null)" ]]; then
+    git config --get-all "stack-branch.$1.$2" 2>/dev/null | while IFS= read -r v; do
+      git config --add "branch.$1.stack-$2" "$v"
+    done
+  fi
+  git config --unset-all "stack-branch.$1.$2" 2>/dev/null || true
   git config --add "branch.$1.stack-$2" "$3"
-  git config --add "stack-branch.$1.$2" "$3"
 }
 
 stack_cfg_unset() {

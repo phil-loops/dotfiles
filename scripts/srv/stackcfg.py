@@ -12,6 +12,10 @@
 #
 # So: route writes through here, and dropping the legacy spelling later is one edit in one file
 # rather than a hundred.
+#
+# That edit is made (2026-11-09): writes emit the target only and clear the key's legacy copy.
+# A dual-written legacy copy outlived `branch -D`, so a branch recreated under the same name read
+# the dead branch's review run back through the fallback and refused to record a fresh verdict.
 from . import ctx, repostate
 
 
@@ -21,15 +25,26 @@ def _pair(branch, key):
 
 
 def set_key(branch, key, value):
-    for k in _pair(branch, key):
-        ctx.run(["git", "config", k, str(value)])
+    target, legacy = _pair(branch, key)
+    ctx.run(["git", "config", target, str(value)])
+    ctx.run(["git", "config", "--unset-all", legacy])
     repostate.invalidate()
 
 
 def add_key(branch, key, value):
-    for k in _pair(branch, key):
-        ctx.run(["git", "config", "--add", k, str(value)])
+    target, legacy = _pair(branch, key)
+    _absorb_legacy(target, legacy)
+    ctx.run(["git", "config", "--add", target, str(value)])
     repostate.invalidate()
+
+
+def _absorb_legacy(target, legacy):
+    """Before a multivar append, fold a legacy-only list into the target so the append doesn't
+    hide the values readers were getting from the fallback, then drop the legacy copy."""
+    if not ctx.run(["git", "config", "--get-all", target]).stdout.strip():
+        for v in ctx.run(["git", "config", "--get-all", legacy]).stdout.splitlines():
+            ctx.run(["git", "config", "--add", target, v])
+    ctx.run(["git", "config", "--unset-all", legacy])
 
 
 def unset_key(branch, key, value_regex=None):
