@@ -63,11 +63,17 @@ def main():
         return
     for b, s, vs in moves:
         new = f"branch.{b}.stack-{s}"
+        # readers take the target whole when it has any value, so a legacy copy beside one is
+        # dead weight — never copy it over the live value (2026-11-09: three stale .base copies)
+        if git("config", "--get-all", new).stdout.strip():
+            print(f"{'drop' if mode == '--apply' else 'would drop'}: stack-branch.{b}.{s} (target already set)")
+            if mode == "--apply":
+                git("config", "--unset-all", f"stack-branch.{b}.{s}", check=True)
+            continue
         print(f"{'move' if mode == '--apply' else 'would move'}: stack-branch.{b}.{s} -> {new}"
               + (f" ({len(vs)} values)" if len(vs) > 1 else ""))
         if mode != "--apply":
             continue
-        git("config", "--unset-all", new)
         for v in vs:
             git("config", "--add", new, v, check=True)
         git("config", "--unset-all", f"stack-branch.{b}.{s}", check=True)
