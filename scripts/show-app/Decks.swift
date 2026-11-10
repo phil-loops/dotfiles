@@ -54,6 +54,9 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
     let submit = NSButton(title: "Submit", target: nil, action: nil)
     let goToSession = NSButton(title: "Go to session", target: nil, action: nil)
     let inboxHint = NSTextField(labelWithString: "⌘↩ reply · ⌘S done · ⌘J go to session")
+    /// A labelling deck's choices, one button each, above the sign-off bar.
+    let choiceBar = NSStackView()
+    let choiceHint = NSTextField(labelWithString: "")
     let live = LivePanel()
     let planScroll = PlanScroll()
     var actionBar: NSView!
@@ -273,6 +276,7 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
             }
         }
         table.reloadData()
+        applyChoices()
         let kept = rows.firstIndex { if case .item(let i) = $0 { return deck.sections[i].key == key } else { return false } }
         let first = rows.firstIndex { if case .item = $0 { return true } else { return false } }
         if let row = kept ?? first {
@@ -431,6 +435,13 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
         actionBar = bar
         actionDivider = divider
 
+        choiceBar.orientation = .horizontal
+        choiceBar.alignment = .centerY
+        choiceBar.spacing = 8
+        choiceBar.edgeInsets = NSEdgeInsets(top: 12, left: 48, bottom: 0, right: 24)
+        choiceHint.font = .systemFont(ofSize: 11)
+        choiceHint.textColor = .tertiaryLabelColor
+
         movedLine.font = .systemFont(ofSize: 12, weight: .medium)
         movedLine.textColor = .systemOrange
         movedLine.lineBreakMode = .byTruncatingTail
@@ -438,10 +449,10 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
         moved.edgeInsets = NSEdgeInsets(top: 14, left: 53, bottom: 0, right: 24)
         moved.isHidden = true
 
-        let stack = NSStackView(views: [live.header, moved, page, divider, bar, live.bar])
+        let stack = NSStackView(views: [live.header, moved, page, divider, choiceBar, bar, live.bar])
         stack.orientation = .vertical
         stack.spacing = 0
-        for view in [live.header, moved, page, divider, bar, live.bar] {
+        for view in [live.header, moved, page, divider, choiceBar, bar, live.bar] {
             view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
         let vc = NSViewController()
@@ -453,6 +464,72 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
         guard !deck.isLive, let section = selectedSection else { return }
         store.update(section.key) { $0.signed = signed.state == .on }
         reloadSelectedRow()
+    }
+
+    /// Rebuilds the choice buttons from the deck: "1 impersonation", …, then the key hint.
+    private func applyChoices() {
+        choiceBar.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        for choice in deck.choices ?? [] {
+            let button = NSButton(title: "\(choice.key) \(choice.label)", target: self, action: #selector(choiceClicked))
+            button.setButtonType(.pushOnPushOff)
+            button.bezelStyle = .rounded
+            button.identifier = NSUserInterfaceItemIdentifier(choice.key)
+            choiceBar.addArrangedSubview(button)
+        }
+        let keys = (deck.choices ?? []).map(\.key)
+        choiceHint.stringValue = [keys.first, keys.count > 1 ? keys.last : nil].compactMap { $0 }.joined(separator: "–") + " picks · A takes the proposed"
+        choiceBar.addArrangedSubview(choiceHint)
+        updateChoiceButtons()
+    }
+
+    /// The recorded choice shows pressed and ticked; the proposed one carries an accent "proposed".
+    private func updateChoiceButtons() {
+        let section = selectedSection
+        let recorded = section.flatMap { store.entries[$0.key]?.choice }
+        for case let button as NSButton in choiceBar.arrangedSubviews {
+            let key = button.identifier?.rawValue ?? ""
+            guard let choice = deck.choice(key) else { continue }
+            button.state = key == recorded ? .on : .off
+            button.bezelColor = key == recorded ? .controlAccentColor : nil
+            let title = NSMutableAttributedString(string: (key == recorded ? "✓ " : "") + "\(choice.key)  \(choice.label)",
+                                                  attributes: [.font: NSFont.systemFont(ofSize: 13, weight: key == recorded ? .bold : .medium)])
+            if key == section?.proposed {
+                title.append(NSAttributedString(string: "  proposed", attributes: [.font: NSFont.systemFont(ofSize: 11, weight: .semibold), .foregroundColor: NSColor.controlAccentColor]))
+            }
+            button.attributedTitle = title
+        }
+    }
+
+    @objc private func choiceClicked(_ sender: NSButton) {
+        pick(sender.identifier?.rawValue ?? "")
+    }
+
+    /// Records `key` as the selected section's choice, signs the section off, and moves on to the next section not yet signed off.
+    func pick(_ key: String) {
+        guard deck.isLabelling, deck.choice(key) != nil, let section = selectedSection else { return }
+        store.update(section.key) {
+            $0.choice = key
+            $0.signed = true
+        }
+        signed.state = .on
+        reloadSelectedRow()
+        updateChoiceButtons()
+        advanceToUnsigned()
+    }
+
+    func acceptProposed() {
+        guard let proposed = selectedSection?.proposed else { return NSSound.beep() }
+        pick(proposed)
+    }
+
+    /// Selects the first section after this one, wrapping, that isn't signed off; stays put when every section is.
+    private func advanceToUnsigned() {
+        let current = max(table.selectedRow, 0)
+        let order = Array(rows.indices[(current + 1)...]) + Array(rows.indices[...current])
+        guard let next = order.first(where: { if case .item(let i) = rows[$0] { return store.entries[deck.sections[i].key]?.signed != true } else { return false } }),
+              next != table.selectedRow else { return }
+        table.selectRowIndexes(IndexSet(integer: next), byExtendingSelection: false)
+        table.scrollRowToVisible(next)
     }
 
     /// Keeps the reply being typed as the section's draft, so a reload, a section switch or a relaunch never loses it.
@@ -608,8 +685,9 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
     }
 
     private func updateProgress() {
-        actionBar.isHidden = !deck.isInbox
-        actionDivider.isHidden = !deck.isInbox
+        actionBar.isHidden = !(deck.isInbox || deck.isLabelling)
+        actionDivider.isHidden = actionBar.isHidden
+        choiceBar.isHidden = !deck.isLabelling
         progress.isHidden = true
         updateStatusLine()
         if deck.isLive {
@@ -718,10 +796,18 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
         }
     }
 
-    /// The list's mark for a section: ◆ a forest branch that moved since its page was written; in the Inbox ● handled, ◐ open, ○ not yet. Live decks carry their own.
+    /// The list's mark for a section: ◆ a forest branch that moved since its page was written; in the Inbox ● handled, ◐ open, ○ not yet;
+    /// in a labelling deck the recorded choice key, else the proposed one dimmed. Live decks carry their own.
     private func sectionMark(_ section: Section, selected: Bool) -> NSAttributedString {
         guard !deck.isLive else { return liveMark(section, current: deck.status?.current) }
         let entry = store.entries[section.key]
+        if deck.isLabelling {
+            let (mark, color): (String, NSColor) = entry?.choice.map { ($0, .labelColor) }
+                ?? section.proposed.map { ($0, .tertiaryLabelColor) }
+                ?? (entry?.signed == true ? "●" : "○", .tertiaryLabelColor)
+            return NSAttributedString(string: mark + "  ", attributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: entry?.choice == nil ? .regular : .bold),
+                                                                         .foregroundColor: color])
+        }
         let (mark, color): (String, NSColor)
         if freshness.moved(section) != nil {
             (mark, color) = ("◆", .systemOrange)
@@ -769,6 +855,7 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
         }
         let entry = store.entries[section.key]
         signed.state = entry?.signed == true ? .on : .off
+        updateChoiceButtons()
         if composerKey != section.key {
             saveNote()
             composerKey = section.key
