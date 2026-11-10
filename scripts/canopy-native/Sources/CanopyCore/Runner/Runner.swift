@@ -13,10 +13,16 @@ public protocol CommandContext: AnyObject {
     func closeMenu()
     /// A command that records a jump (`Command.recordsJump`) is about to run: remember where we are.
     func willJump(_ id: String)
+    /// Where the cursor is, for putting it back when a write is undone or refused; nil when unknown.
+    func placeNow() -> Place?
+    /// Put the cursor back where a write was made, without recording a jump.
+    func returnTo(_ p: Place)
 }
 
 public extension CommandContext {
     func willJump(_ id: String) {}
+    func placeNow() -> Place? { nil }
+    func returnTo(_ p: Place) {}
 }
 
 /// A write's live state, for a button that becomes its own status (runner.ts Run).
@@ -56,7 +62,9 @@ public final class Runner {
 
     @ObservationIgnored private var seq = 0
     @ObservationIgnored private var tail: Task<Sent, Never>?
-    @ObservationIgnored private var undo: [Inverse] = []
+    /// each landed write's way back, and where it was made: undoing puts both back, as Helix's undo
+    /// returns to the change
+    @ObservationIgnored private var undo: [(inverse: Inverse, at: Place?)] = []
     @ObservationIgnored private var awaiting: [Int: (settled: () -> Bool, done: () -> Void)] = [:]
     @ObservationIgnored private var noteGen = 0
     @ObservationIgnored private var firedGen = 0
@@ -167,6 +175,8 @@ public final class Runner {
         }
 
         var w: Write?
+        // a write may move the cursor as part of it (, m moves on): its undo and its refusal move it back
+        let before = undoing ? nil : context?.placeNow()
         do {
             if let target, let write = cmd.write { w = try write(target, arg) }
         } catch {
@@ -177,6 +187,7 @@ public final class Runner {
         }
         echo(named, via, w != nil)
         guard let w else { return }
+        let after = context?.placeNow()
         let runKey = "\(id)|\(target ?? "")"
         let started = Date()
         runs[runKey] = Run(state: .sending, t0: started)
@@ -196,13 +207,15 @@ public final class Runner {
             let settledMs = (Date().timeIntervalSince(t0) * 10000).rounded() / 10
             w.answered?(r.ok, r.body ?? ["err": .string(r.err ?? "")])
             if r.ok {
-                if let inv = w.inverse?(r.body ?? [:]), !undoing { self.undo.append(inv) }
+                if let inv = w.inverse?(r.body ?? [:]), !undoing { self.undo.append((inv, before)) }
                 if let said = w.said, !w.silent { self.say(said) }
                 self.runs[runKey] = Run(state: .landing, t0: started)
                 self.reconcile(s, w, wrote: r.body?["wrote"]?.int) { self.runs[runKey] = Run(state: .done, t0: started, t1: Date()) }
             } else {
                 self.store.dropOps(seq: s)
                 w.rollback?()
+                // the cursor goes back too — unless it has moved on since, which would yank it away
+                if let before, before != after, self.context?.placeNow() == after { self.context?.returnTo(before) }
                 // the server's own sentence says what to do next; the short class is the fallback
                 let bodyErr = r.body?["err"]?.string ?? r.body?["error"]?.string
                 let why: String = {
@@ -264,8 +277,9 @@ public final class Runner {
     /// Put back the last write (one level per press).
     @discardableResult
     public func undoLast() -> Bool {
-        guard let inv = undo.popLast() else { return false }
+        guard let (inv, at) = undo.popLast() else { return false }
         dispatch(inv.id, via: .key, target: inv.target, arg: inv.arg, undoing: true)
+        if let at { context?.returnTo(at) }
         return true
     }
 

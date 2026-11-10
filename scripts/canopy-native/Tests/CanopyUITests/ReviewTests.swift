@@ -592,6 +592,20 @@ import Testing
         #expect(fv().mark(of: rows.first { $0.key == "R:2" }!) == .viewed && fv().mark(of: rows.first { $0.key == "R:3" }!) == .unread)
     }
 
+    @Test func uAfterMPutsTheMarkAndTheCursorBack() async throws {
+        let (a, p) = try await app()
+        let pg = ReviewPageState.of(a)
+        ShipStub.answer(p, "POST", "/loops/viewed", #"{"ok":true}"#)
+        let start = pg.here?.key
+        let first = pg.fileOf("a.ts")!.blocks[0]
+        keys(a, ",", "m")
+        #expect(pg.here?.key != start)
+        await until("the mark lands") { a.runner.runOf("review.viewed", pg.id)?.state != .sending }
+        keys(a, "u")
+        #expect(pg.here?.key == start, "back on the change that was marked")
+        await until("the unmark") { pg.mark(first) == .unread }
+    }
+
     @Test func bangFlagsAChangeUStopsOnItAndBangAgainTakesItOff() async throws {
         let (a, p) = try await app()
         let pg = ReviewPageState.of(a)

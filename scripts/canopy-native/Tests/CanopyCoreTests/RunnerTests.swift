@@ -29,6 +29,9 @@ final class Ctx: CommandContext {
     func target(for scope: Scope) -> String? { targets[scope] }
     func liveScopes() -> [Scope] { scopes }
     func closeMenu() {}
+    var at = Place(route: .forests, pane: "main", cursorKey: "a")
+    func placeNow() -> Place? { at }
+    func returnTo(_ p: Place) { at = p }
 }
 
 @MainActor @Suite(.serialized) struct RunnerTests {
@@ -170,6 +173,35 @@ final class Ctx: CommandContext {
         #expect(runner.undoLast())
         #expect(undone)
         #expect(!runner.undoLast())
+    }
+
+    @Test func undoAndARefusalPutTheCursorBackWhereTheWriteMovedItFrom() async throws {
+        let (runner, _, ctx) = try setup()
+        Stub.answers["/moves-ok"] = .init(status: 200, body: #"{"ok":true}"#)
+        Stub.answers["/moves-no"] = .init(status: 200, body: #"{"ok":false,"err":"no"}"#)
+        let id = "loops:add-hankles-limited-label"
+        for path in ["/moves-ok", "/moves-no"] {
+            runner.registry.register(Command(id: "t\(path)", title: "W", scope: .branch, write: { target, _ in
+                ctx.at.cursorKey = "next"   // , m moves on as part of marking
+                return Write(path: path, body: [:], settled: { true }, failed: "no", inverse: { _ in Inverse(id: "t.back", target: target) })
+            }))
+        }
+        runner.registry.register(Command(id: "t.back", title: "U", scope: .branch, local: { _, _ in }))
+
+        runner.dispatch("t/moves-ok", via: .key, target: id)
+        for _ in 0..<50 where runner.runOf("t/moves-ok", id)?.state == .sending { try await Task.sleep(nanoseconds: 20_000_000) }
+        #expect(ctx.at.cursorKey == "next")
+        #expect(runner.undoLast())
+        #expect(ctx.at.cursorKey == "a", "u puts the mark back and the cursor where it was made")
+
+        runner.dispatch("t/moves-no", via: .key, target: id)
+        for _ in 0..<50 where runner.runOf("t/moves-no", id)?.state == .sending { try await Task.sleep(nanoseconds: 20_000_000) }
+        #expect(ctx.at.cursorKey == "a", "a refused write takes its move back")
+
+        runner.dispatch("t/moves-no", via: .key, target: id)
+        ctx.at.cursorKey = "elsewhere"   // moved on before the refusal came back
+        for _ in 0..<50 where runner.runOf("t/moves-no", id)?.state == .sending { try await Task.sleep(nanoseconds: 20_000_000) }
+        #expect(ctx.at.cursorKey == "elsewhere", "a late refusal never yanks the cursor away from where it went")
     }
 
     /// The focus-lane burst (2026-11-05): press 4 put a forest at rank 1, press 5 moved it down, press 6
