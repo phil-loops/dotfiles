@@ -16,7 +16,7 @@ private func lineUnits(_ patch: String, status: FileStatus = .modified, _ decls:
     // a blank context line is one space in a real patch; the fixtures leave it empty
     var f = parsePatch("x.test.ts", "@@ " + patch.dropFirst(3).replacingOccurrences(of: "\n\n", with: "\n \n"))
     f.status = status
-    return ReviewUnitRule.units(lines: lineAnchors(f).map { ($0.block, $0.index, $0.at) }, status: f.status, decls: decls)
+    return ReviewUnitRule.units(lines: lineAnchors(f).map { ($0.block, $0.index, $0.at, $0.anchor.hasPrefix("R:")) }, status: f.status, decls: decls)
 }
 
 private func units(_ patch: String, status: FileStatus = .modified, _ decls: [SyntaxUnit]?) -> [Int: ReviewUnit] {
@@ -37,7 +37,7 @@ private let testFile = [
 ]
 
 @MainActor @Suite struct ReviewUnitsTests {
-    @Test func twoEditsInOneTestAreOneUnitAndAnotherTestIsItsOwn() {
+    @Test func editsInAnExistingTestAreEachTheChangeUnderTheCursor() {
         let u = units("""
         @@ -7,9 +7,9 @@
         -    const team = await createTeam();
@@ -57,12 +57,12 @@ private let testFile = [
              assert.deepEqual(
                groups.map((group) => group.id),
         """, testFile)
-        #expect(u[0] == whole([0: 2, 1: 2], #"it("appends order")"#), "both edits sit in one it: one , m reads the test")
-        #expect(u[1] == u[0])
-        #expect(u[2] == whole([2: 2], #"it("returns only the team's groups")"#), "a describe is stepped into, not read whole")
+        #expect(u[0] == whole([0: 2], #"a change in it("appends order")"#), "the test was already there: one change at a time")
+        #expect(u[1] == whole([1: 2], #"a change in it("appends order")"#))
+        #expect(u[2] == whole([2: 2], #"a change in it("returns only the team's groups")"#), "a describe is stepped into, not read whole")
     }
 
-    @Test func aFunctionEditedInTwoPlacesIsOneUnitAndItsNeighbourIsNot() {
+    @Test func anExistingFunctionEditedInTwoPlacesReadsOneChangeAtATime() {
         let syms = [d("function findCards", 3, 12), d("function findManyWithCards", 14, 25)]
         let u = units("""
         @@ -3,10 +3,10 @@
@@ -84,18 +84,17 @@ private let testFile = [
         +    deps.findGroups({ teamId }),
              deps.findCards({ teamId, order: "manual" }),
         """, syms)
-        #expect(u[0] == whole([0: 2, 1: 4], "function findCards"))
-        #expect(u[2] == whole([2: 2], "function findManyWithCards"), "each function is its own unit")
+        #expect(u[0] == whole([0: 2], "a change in function findCards"))
+        #expect(u[1] == whole([1: 4], "a change in function findCards"))
+        #expect(u[2] == whole([2: 2], "a change in function findManyWithCards"))
     }
 
-    @Test func neighbouringOneLineConstantsReadAsOneButAMultiLineOneStandsAlone() {
-        let syms = [d("A", 1, 1), d("B", 3, 3), d("SELECT", 5, 9)]
+    @Test func newOneLineConstantsReadAsOneAndAnEditedObjectIsItsChange() {
+        let syms = [d("A", 1, 1), d("B", 3, 3), d("SELECT", 5, 8)]
         let u = units("""
-        @@ -1,9 +1,9 @@
-        -export const A = 1;
+        @@ -1,6 +1,8 @@
         +export const A = 2;
 
-        -export const B = 1;
         +export const B = 2;
 
          export const SELECT = {
@@ -104,8 +103,9 @@ private let testFile = [
            name: true,
          };
         """, syms)
-        #expect(u[0] == whole([0: 2, 1: 2], "2 declarations"))
-        #expect(u[2] == whole([2: 2], "SELECT"))
+        #expect(u[0] == ReviewUnit(parts: [0: [0], 1: [0]], name: "2 declarations"), "two new constants, one press")
+        #expect(u[1] == u[0])
+        #expect(u[2] == whole([2: 2], "a change in SELECT"))
     }
 
     @Test func aNewFileIsOneUnitEvenWithoutDeclarations() {
@@ -132,7 +132,7 @@ private let testFile = [
          }
         """, syms)
         #expect(u[0] == whole([0: 2], "import"))
-        #expect(u[1] == whole([1: 1], "function f"))
+        #expect(u[1] == whole([1: 1], "a change in function f"))
     }
 
     @Test func noDeclarationsLeavesEachChangeItsOwnUnit() {

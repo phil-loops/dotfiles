@@ -54,11 +54,13 @@ struct FileSyntax {
 }
 
 enum ReviewUnitRule {
-    /// Each changed line's unit. Lines in one declaration share its unit; neighbouring one-line
-    /// declarations of one scope the change touches read as one (a run of new constants, imports or hook
-    /// lines). A line outside every declaration (a blank line, a comment) goes with the next declaration
-    /// in its block, else the one before; a block touching none is one unit. A new file is one unit.
-    static func units(lines: [(block: Int, index: Int, at: Int)], status: FileStatus, decls: [SyntaxUnit]?) -> [LineID: ReviewUnit] {
+    /// Each changed line's unit. New code reads by declaration: the lines of a declaration that is all new
+    /// share its unit, and neighbouring new one-line declarations of one scope read as one (a run of new
+    /// constants, imports or hook lines). An edit to code that was already there reads as the change under
+    /// the cursor, kept to its declaration. A line outside every declaration (a blank line, a comment)
+    /// goes with the next declaration in its block, else the one before; a block touching none is one
+    /// unit. A new file is one unit.
+    static func units(lines: [(block: Int, index: Int, at: Int, added: Bool)], status: FileStatus, decls: [SyntaxUnit]?) -> [LineID: ReviewUnit] {
         if lines.isEmpty { return [:] }
         let ids = lines.map { LineID(block: $0.block, index: $0.index) }
         func unit(_ members: [Int], _ name: String) -> ReviewUnit {
@@ -73,6 +75,8 @@ enum ReviewUnitRule {
 
         let ds = decls ?? []
         let declOf = lines.map { l in ds.firstIndex { $0.line <= l.at && l.at <= $0.endLine } }
+        let addedAt = Set(lines.filter(\.added).map(\.at))
+        let fresh = ds.map { d in (d.line...max(d.line, d.endLine)).allSatisfy(addedAt.contains) }
         var parent = Array(ids.indices)
         func find(_ i: Int) -> Int {
             var i = i
@@ -81,12 +85,19 @@ enum ReviewUnitRule {
         }
         func union(_ a: Int, _ b: Int) { let (ra, rb) = (find(a), find(b)); if ra != rb { parent[max(ra, rb)] = min(ra, rb) } }
 
-        var firstIn: [Int: Int] = [:]   // declaration → its first line
-        for (i, d) in declOf.enumerated() { if let d { if let f = firstIn[d] { union(f, i) } else { firstIn[d] = i } } }
-        for d in firstIn.keys where d + 1 < ds.count {
+        // a new declaration is one unit; an edited one, one per change (block) inside it
+        struct Key: Hashable { var decl: Int; var block: Int? }
+        var firstIn: [Key: Int] = [:]
+        for (i, d) in declOf.enumerated() {
+            guard let d else { continue }
+            let k = Key(decl: d, block: fresh[d] ? nil : ids[i].block)
+            if let f = firstIn[k] { union(f, i) } else { firstIn[k] = i }
+        }
+        for d in ds.indices where d + 1 < ds.count && fresh[d] && fresh[d + 1] {
             let (a, n) = (ds[d], ds[d + 1])
-            guard a.line == a.endLine, n.line == n.endLine, a.scope == n.scope, let other = firstIn[d + 1] else { continue }
-            union(firstIn[d]!, other)
+            guard a.line == a.endLine, n.line == n.endLine, a.scope == n.scope,
+                  let mine = firstIn[Key(decl: d, block: nil)], let other = firstIn[Key(decl: d + 1, block: nil)] else { continue }
+            union(mine, other)
         }
         var looseOf: [Int: Int] = [:]   // block → its first line outside every declaration, when it touches none
         for i in ids.indices where declOf[i] == nil {
@@ -104,8 +115,11 @@ enum ReviewUnitRule {
         for i in ids.indices { groups[find(i), default: []].append(i) }
         var out: [LineID: ReviewUnit] = [:]
         for members in groups.values {
-            let names = Set(members.compactMap { declOf[$0] }).sorted().map { ds[$0] }
-            let u = unit(members, name(names))
+            let touched = Set(members.compactMap { declOf[$0] }).sorted()
+            let names = touched.map { ds[$0] }
+            // an edit inside a declaration that was already there says where it is
+            let edit = touched.count == 1 && !fresh[touched[0]] && ds[touched[0]].line != ds[touched[0]].endLine
+            let u = unit(members, edit ? "a change in \(ds[touched[0]].name)" : name(names))
             for m in members { out[ids[m]] = u }
         }
         return out
@@ -162,7 +176,7 @@ final class ReviewUnits {
         guard let r else { return }
         let got = r.ok ? r : nil
         guard let fv = pg.fileOf(path), key(pg, path) == k else { return }
-        let lines = lineAnchors(fv.file).map { ($0.block, $0.index, $0.at) }
+        let lines = lineAnchors(fv.file).map { ($0.block, $0.index, $0.at, $0.anchor.hasPrefix("R:")) }
         byKey[k] = FileSyntax(units: ReviewUnitRule.units(lines: lines, status: fv.file.status, decls: got?.units),
                               functions: got?.functions ?? [], classes: got?.classes ?? [], changed: Set(lines.map(\.2)))
     }
