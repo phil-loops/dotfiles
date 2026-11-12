@@ -66,6 +66,23 @@ public struct LSPSymbols: Decodable, Sendable {
     public var message: String?
 }
 
+/// POST /lsp/workspace-symbols → symbols matching a query across the file's project, the branch's own code.
+public struct LSPWorkspaceSymbols: Decodable, Sendable {
+    public struct Symbol: Decodable, Sendable, Equatable {
+        public var name: String
+        public var kind: String
+        public var container: String?
+        public var path: String
+        public var line: Int
+        public var endLine: Int
+    }
+    public var ok: Bool
+    public var sha: String?
+    public var symbols: [Symbol]?
+    public var state: String?
+    public var message: String?
+}
+
 /// GET /lsp/src?path=&sha= → {text}.
 public struct LSPSource: Decodable, Sendable {
     public var text: String?
