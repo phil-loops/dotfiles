@@ -76,6 +76,7 @@ Usage: stack restack <project>
        stack restack <project> --plan
        stack restack <project> --no-claude
        stack restack <project> --no-classify  # skip the already-merged contraction pre-pass
+       stack restack <project> --hold=<b>[,<b>]  # leave these branches and everything stacked on them where they are
 EOF
   exit 2
 }
@@ -110,6 +111,8 @@ RESOLVE_BAR="${RESOLVE_BAR:-conservative}"
 # stall, runaway tool loop, stdin block — is killed and the conflict escalates to a
 # human, instead of wedging the driver in an unbounded wait forever.
 RESOLVE_TIMEOUT="${STACK_RESTACK_RESOLVE_TIMEOUT:-600}"
+typeset -a HOLD
+HOLD=()
 for arg in "$@"; do
   case "$arg" in
     --continue) MODE="continue" ;;
@@ -120,6 +123,7 @@ for arg in "$@"; do
     --plan) MODE="plan" ;;
     --no-claude|--manual) USE_CLAUDE=0 ;;
     --no-classify) USE_CLASSIFY=0 ;;
+    --hold=*) HOLD+=("${(s:,:)arg#--hold=}") ;;   # a published root (open PR) must not move: hold its subtree
     --*) echo "unknown flag: $arg" >&2; usage ;;
     *) [[ -z "$PROJECT" ]] && PROJECT="$arg" ;;
   esac
@@ -762,6 +766,18 @@ if [[ "$MODE" == "abort" ]]; then
   exit 0
 fi
 
+# A branch is held when it, or any ancestor on its parent chain, was named in --hold: a
+# published root's whole subtree stays where it is while the rest of the forest moves.
+held() {
+  local b="$1" h
+  (( ${#HOLD[@]} )) || return 1
+  while [[ -n "$b" && "$b" != "$MAIN_BRANCH" ]]; do
+    for h in "${HOLD[@]}"; do [[ "$b" == "$h" ]] && return 0; done
+    b=$(git config "branch.${b}.stack-parent" 2>/dev/null || git config "stack-branch.${b}.parent" 2>/dev/null || echo "$MAIN_BRANCH")
+  done
+  return 1
+}
+
 if [[ "$MODE" == "plan" ]]; then
   echo "Plan for $PROJECT:"
   echo "  Main: $MAIN_BRANCH ($(git rev-parse --short $MAIN_BRANCH))"
@@ -769,7 +785,8 @@ if [[ "$MODE" == "plan" ]]; then
     p=$(git config "branch.${b}.stack-parent" 2>/dev/null || git config "stack-branch.${b}.parent" 2>/dev/null || echo "?")
     sha=$(git rev-parse --short "$b" 2>/dev/null || echo "MISSING")
     wt=$(worktree_of "$b")
-    printf "  %-45s parent=%-40s sha=%s  wt=%s\n" "$b" "$p" "$sha" "${wt:-<unchecked-out>}"
+    mark=""; held "$b" && mark="  HELD"
+    printf "  %-45s parent=%-40s sha=%s  wt=%s%s\n" "$b" "$p" "$sha" "${wt:-<unchecked-out>}" "$mark"
   done < <(topo_order "$PROJECT")
   exit 0
 fi
@@ -956,10 +973,12 @@ elif [[ "$MODE" == "start" ]]; then
     SNAPSHOT[$b]=$(git rev-parse "$b")
   done < <(topo_order "$PROJECT")
 
-  # Build PENDING from topo order, filtering out missing branches.
+  # Build PENDING from topo order, filtering out missing branches and held subtrees.
   PENDING=()
   while IFS= read -r b; do
-    [[ -n "${SNAPSHOT[$b]:-}" ]] && PENDING+=("$b")
+    [[ -n "${SNAPSHOT[$b]:-}" ]] || continue
+    if held "$b"; then echo "  ○ $b held — stays where it is"; continue; fi
+    PENDING+=("$b")
   done < <(topo_order "$PROJECT")
 
   COMPLETED=()
