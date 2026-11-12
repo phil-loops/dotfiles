@@ -25,6 +25,10 @@ struct TelemetryRow: Decodable, Equatable {
     var settled: Stats?
     var paint: Stats?
     var over: Double?
+    /// the first keys after a page open, the rest, and each surface's own wait
+    var cold: Stats?
+    var warm: Stats?
+    var surfaces: [String: Stats]?
     /// a v1 side that never ran gives just the ids it counted
     var ids: [String]?
 }
@@ -208,6 +212,13 @@ struct DashboardPage: View {
     private func cmdDetail(_ c: TelemetryRow) -> String {
         var bits = ["budget: feedback \(DashText.ms(c.budgetMs?.feedbackMs)) · settled \(DashText.ms(c.budgetMs?.settledMs))"]
         if (c.settled?.n ?? 0) > 0 { bits.append("settled p95 \(DashText.ms(c.settled?.p95))") }
+        if let cold = c.cold, cold.n > 0, let warm = c.warm, warm.n > 0 {
+            bits.append("cold p95 \(DashText.ms(cold.p95)) (\(cold.n)) · warm p95 \(DashText.ms(warm.p95)) (\(warm.n))")
+        }
+        if let s = c.surfaces, s.count > 1 {
+            bits.append(s.sorted { ($0.value.p95 ?? 0) > ($1.value.p95 ?? 0) }.prefix(3)
+                .map { "\($0.key) \(DashText.ms($0.value.p95))" }.joined(separator: ", "))
+        }
         if let r = c.refusedRate, r > 0 { bits.append("refused \(DashText.pct(r))") }
         if let f = c.failedRate, f > 0 { bits.append("failed \(DashText.pct(f))") }
         if let via = c.via, !via.isEmpty { bits.append("via " + via.sorted { $0.key < $1.key }.map { "\($0.key) \($0.value)" }.joined(separator: ", ")) }

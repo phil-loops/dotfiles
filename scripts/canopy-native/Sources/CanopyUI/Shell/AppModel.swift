@@ -93,7 +93,13 @@ public final class AppModel: CommandContext {
             self?.keys.reset()
             self?.runner.disarm()
             if let b = to.branchID { self?.frecency.visit(b) }
-            self?.telemetry.emit(["type": "nav", "from": .string(from.surfaceID), "to": .string(to.surfaceID), "path": .string(to.path), "paintMs": nil])
+            let t0 = Date()
+            self?.telemetry.arrived(to.surfaceID, at: t0)
+            DispatchQueue.main.async { [weak self] in
+                // the first frame of the new page: the main queue's next turn, after SwiftUI's commit
+                let paint = (Date().timeIntervalSince(t0) * 10000).rounded() / 10
+                self?.telemetry.emit(["type": "nav", "from": .string(from.surfaceID), "to": .string(to.surfaceID), "path": .string(to.path), "paintMs": .number(paint)])
+            }
             Log.line("nav \(from.path) → \(to.path)")
         }
         keys.onChange = { [weak self] from, to in self?.modeChanged(from, to) }
