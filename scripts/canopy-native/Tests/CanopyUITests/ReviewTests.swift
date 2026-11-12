@@ -1068,16 +1068,24 @@ import Testing
         #expect(ReviewPageState.of(a).keyOf.hasSuffix("|main"))
     }
 
-    @Test func retOnAGapShowsTwentyMoreLines() async throws {
+    /// ↵ on a gap shows all of it in one press — reading the function around a change is the point
+    /// (Phil, 2026-11-02: a 52-line gap took three presses at 20 lines each).
+    @Test func retOnAGapShowsAllOfIt() async throws {
         let (a, p) = try await app()
         let pg = ReviewPageState.of(a)
-        ShipStub.answer(p, "GET", "/loops/file", (1...40).map { "n\($0)" }.joined(separator: "\n"))
+        ShipStub.answer(p, "GET", "/loops/file", (1...200).map { "n\($0)" }.joined(separator: "\n"))
         pg.setCursor("g|a.ts|1")
         #expect(a.liveScopes().first == .gap)
         keys(a, "ret")
         await until("the gap to close") { pg.fileOf("a.ts")!.gaps.first { $0.at == 1 } == nil }
         #expect(pg.stops.contains { $0.key == "l|a.ts|R:12" }, "the 15 hidden lines show")
         #expect(pg.here?.key == "l|a.ts|R:6", "the cursor lands on the line the gap ended on")
+        let tail = try #require(pg.fileOf("a.ts")!.gaps.last)
+        #expect(tail.last == 200 && tail.last! - tail.first + 1 > 20, "a gap longer than the old 20-line step")
+        pg.setCursor("g|a.ts|\(tail.at)")
+        keys(a, "ret")
+        await until("the long gap to close in one press") { pg.fileOf("a.ts")!.gaps.first { $0.at == tail.at } == nil }
+        #expect(pg.stops.contains { $0.key == "l|a.ts|R:200" })
     }
 
     /// g d replaces what the window shows (Helix's Action::Replace); C-o puts the diff back, C-i the file.
