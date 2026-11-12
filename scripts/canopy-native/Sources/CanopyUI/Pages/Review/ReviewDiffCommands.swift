@@ -399,15 +399,23 @@ enum DiffCommands {
         // a teammate's PR (review/pr-N): J / K walk its stack as GitHub chains it, importing the neighbour first
         let foreignPR: () -> Int? = { pg.branch == nil ? ForeignStacks.prNumber(pg.target?.name) : nil }
         struct Opened: Decodable { var ok: Bool; var path: String?; var err: String? }
-        func foreignHop(_ n: Int, _ d: Int) {
+        /// A step through a teammate's stack answers the key honestly: with the stack in hand it steps or
+        /// refuses at once; without it the key is held while the stack is read, then runs (or says why not).
+        func foreignHop(_ n: Int, _ d: Int) throws {
             guard let t = pg.target else { return }
             let stacks = ForeignStacks.of(app)
-            Task { @MainActor in
-                let (nodes, err) = await stacks.load(app, repo: t.repo, n)
-                guard let nodes else { return app.runner.say("no stack for #\(n): \(err ?? "")") }
-                guard let next = ForeignStacks.step(nodes, from: n, d) else {
-                    return app.runner.say(d > 0 ? "#\(n) is the last PR in this stack" : "#\(n) is the first PR in this stack")
+            let id = d > 0 ? "review.branch.next" : "review.branch.prev"
+            guard let nodes = stacks.cached(n) else {
+                Task { @MainActor in
+                    let (nodes, err) = await stacks.load(app, repo: t.repo, n)
+                    if nodes != nil { app.runner.releaseHeld() } else { app.runner.dropHeld(id, because: "no stack for #\(n): \(err ?? "")") }
                 }
+                throw Hold("reading #\(n)'s stack…")
+            }
+            guard let next = ForeignStacks.step(nodes, from: n, d) else {
+                throw Refusal(d > 0 ? "#\(n) is the last PR in this stack" : "#\(n) is the first PR in this stack")
+            }
+            Task { @MainActor in
                 app.runner.say("opening #\(next.number)…")
                 let got = await app.transport.ask(app.transport.atRepo(t.repo, "/open-url"), ["url": next.url, "open": "viewer"], as: Opened.self)
                 guard let path = got?.path, got?.ok == true else { return app.runner.say("couldn't open #\(next.number): \(got?.err ?? "the server didn't answer")") }
@@ -418,10 +426,10 @@ enum DiffCommands {
         }
         r.register(Command(id: "review.branch.next", title: "Review the next branch in merge order (a teammate's PR: the next in its stack)", scope: .review, verb: .nextSibling,
                            label: "branch", pair: "review.branch.prev", available: { isBranch($0) || foreignPR() != nil },
-                           local: { _, _ in if let n = foreignPR() { return foreignHop(n, 1) }; try hop(pg.neighbour(1)) }))
+                           local: { _, _ in if let n = foreignPR() { return try foreignHop(n, 1) }; try hop(pg.neighbour(1)) }))
         r.register(Command(id: "review.branch.prev", title: "Review the previous branch in merge order (a teammate's PR: the one before in its stack)", scope: .review, verb: .previousSibling,
                            label: "branch", available: { isBranch($0) || foreignPR() != nil },
-                           local: { _, _ in if let n = foreignPR() { return foreignHop(n, -1) }; try hop(pg.neighbour(-1)) }))
+                           local: { _, _ in if let n = foreignPR() { return try foreignHop(n, -1) }; try hop(pg.neighbour(-1)) }))
         func children(_ id: String) -> [Branch] {
             app.store.list(Branch.self).filter { $0.parentId == id }.sorted { ($0.order, $0.name) < ($1.order, $1.name) }
         }
