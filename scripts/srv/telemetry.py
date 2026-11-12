@@ -19,10 +19,11 @@ import re
 import threading
 import time
 
-ROLLUP_V = 2
+ROLLUP_V = 3   # 3: per-command surface and cold (first keys after a page open) splits
 # Only Phil's own browser counts: Claude's curls, the extension and headless checks would skew
 # the timings this dashboard exists to steer by.
 HUMAN_ACTORS = {"browser", None}
+COLD_MS = 1500   # a key this soon after a page open is a cold one: its wait is the page's first paint
 LIVE_MAX = 8 * 1024 * 1024
 DEFAULT_BUDGETS = {
     "local": {"feedbackMs": 16.7, "settledMs": None},
@@ -113,7 +114,8 @@ def fold(days, reg, e):
     d = days.setdefault(_day(e.get("ts", 0)), {"cmd": {}, "nav": {}, "page": {}})
     if t == "cmd" or (t == "timing" and e.get("kind") == "input"):
         k = f"{app}|{e.get('id') or '?'}"
-        c = d["cmd"].setdefault(k, {"budget": e.get("budget") or "local", "n": 0, "via": {}, "out": {}, "err": {}, "fb": [], "st": []})
+        c = d["cmd"].setdefault(k, {"budget": e.get("budget") or "local", "n": 0, "via": {}, "out": {}, "err": {}, "fb": [], "st": [],
+                                    "surf": {}, "cold": [], "warm": []})
         c["n"] += 1
         c["budget"] = e.get("budget") or c["budget"]
         for field, key in (("via", e.get("via")), ("out", e.get("outcome") or "ok"), ("err", e.get("err"))):
@@ -121,6 +123,14 @@ def fold(days, reg, e):
                 c[field][key] = c[field].get(key, 0) + 1
         if _num(e.get("feedbackMs")) is not None:
             c["fb"].append(_num(e["feedbackMs"]))
+            # where the key was pressed, and whether the page had just opened: a stall only on
+            # the first keys after a nav is the page's first paint, not the key's own work
+            if e.get("surface"):
+                sf = c["surf"].setdefault(str(e["surface"]), {"n": 0, "fb": []})
+                sf["n"] += 1
+                sf["fb"].append(_num(e["feedbackMs"]))
+            if _num(e.get("sinceNavMs")) is not None:
+                c["cold" if _num(e["sinceNavMs"]) < COLD_MS else "warm"].append(_num(e["feedbackMs"]))
         if _num(e.get("settledMs")) is not None:
             c["st"].append(_num(e["settledMs"]))
     elif t == "nav" or (t == "timing" and e.get("kind") == "nav"):
@@ -225,8 +235,14 @@ def summarize(cache, days=30, now=None):
     cmds, navs, pages = {}, {}, {}
     for r in window.values():
         for k, c in r["cmd"].items():
-            m = cmds.setdefault(k, {"budget": c["budget"], "n": 0, "via": {}, "out": {}, "err": {}, "fb": [], "st": []})
+            m = cmds.setdefault(k, {"budget": c["budget"], "n": 0, "via": {}, "out": {}, "err": {}, "fb": [], "st": [], "surf": {}, "cold": [], "warm": []})
             m["n"] += c["n"]
+            for sid, sf in c.get("surf", {}).items():
+                t = m["surf"].setdefault(sid, {"n": 0, "fb": []})
+                t["n"] += sf["n"]
+                t["fb"] += sf["fb"]
+            m["cold"] += c.get("cold", [])
+            m["warm"] += c.get("warm", [])
             m["budget"] = c["budget"]
             for f in ("via", "out", "err"):
                 for kk, v in c[f].items():
@@ -260,6 +276,9 @@ def summarize(cache, days=30, now=None):
             "topErr": max(m["err"], key=m["err"].get) if m["err"] else None,
             "feedback": fb, "settled": st, "over": ratio,
             "score": round(m["n"] * max(0.0, (ratio or 0) - 1), 2),
+            "cold": _stats(m["cold"]),
+            "warm": _stats(m["warm"]),
+            "surfaces": {sid: _stats(sf["fb"]) for sid, sf in sorted(m["surf"].items(), key=lambda kv: -kv[1]["n"])},
         })
     commands.sort(key=lambda c: (-c["score"], -(c["over"] or 0), -c["n"]))
 
