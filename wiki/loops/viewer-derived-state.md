@@ -30,6 +30,6 @@ Measured baseline: [[viewer-derived-state-measurements]]. Invariants and target 
 
 **"Which branches are in project P" has three implementations that disagree under churn.**
 `/forest-branches` reads the registry only; `/model`, `/projects` and `stack-forest` accept
-registry ∪ per-branch tag ∪ descent by parent edge. Same class as the `stack-branch.*` /
+registry ∪ per-branch tag ∪ descent by parent edge. Same class as the `branch.*.stack-*` /
 `branch.*.stack-*` split that `repostate.branch_key` centralised — and it is why the palette
 could miss a project the API already served.

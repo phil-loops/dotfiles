@@ -42,7 +42,7 @@ def _config():
     global _CONFIG
     if _CONFIG is None:
         raw = subprocess.run(
-            ["git", "config", "-z", "--get-regexp", r"^(branch|stack-branch|stack-project)\."],
+            ["git", "config", "-z", "--get-regexp", r"^(branch|stack-project)\."],
             capture_output=True, text=True).stdout
         _CONFIG = {}
         for entry in raw.split("\0"):
@@ -62,18 +62,15 @@ def cfg_all(key):
 
 
 def parent_of(branch):
-    return (cfg(f"branch.{branch}.stack-parent")
-            or cfg(f"stack-branch.{branch}.parent") or "main")
+    return (cfg(f"branch.{branch}.stack-parent") or "main")
 
 
 def requires_of(branch):
-    return (cfg_all(f"branch.{branch}.stack-requires")
-            or cfg_all(f"stack-branch.{branch}.requires"))
+    return (cfg_all(f"branch.{branch}.stack-requires"))
 
 
 def after_of(branch):
-    return (cfg_all(f"branch.{branch}.stack-after")
-            or cfg_all(f"stack-branch.{branch}.after"))
+    return (cfg_all(f"branch.{branch}.stack-after"))
 
 
 def _waits_on(branch, members):
@@ -92,8 +89,7 @@ def _waits_on(branch, members):
 def role_of(branch):
     """A branch's forest role. `proof` = a never-merge branch riding alongside its forest
     to prove it works (e2e/smoke artifacts). Set with `stack-proof`."""
-    return (cfg(f"branch.{branch}.stack-role")
-            or cfg(f"stack-branch.{branch}.role"))
+    return (cfg(f"branch.{branch}.stack-role"))
 
 
 def plan_omitted(branch):
@@ -102,8 +98,7 @@ def plan_omitted(branch):
     implies it."""
     if role_of(branch) == "proof":
         return True
-    return (cfg(f"branch.{branch}.stack-plan-omit")
-            or cfg(f"stack-branch.{branch}.plan-omit")) == "true"
+    return (cfg(f"branch.{branch}.stack-plan-omit")) == "true"
 
 
 def _subject_of(branch):
@@ -118,8 +113,7 @@ def sources_of(branch):
     can show which one won and what it is shadowing, instead of a silent override."""
     return {
         "description": cfg(f"branch.{branch}.description"),
-        "story": (cfg(f"branch.{branch}.stack-story")
-                  or cfg(f"stack-branch.{branch}.story")),
+        "story": (cfg(f"branch.{branch}.stack-story")),
         "subject": _subject_of(branch),
     }
 
@@ -133,8 +127,7 @@ def job_of(branch):
     description = cfg(f"branch.{branch}.description")
     if description:
         return description
-    story = (cfg(f"branch.{branch}.stack-story")
-             or cfg(f"stack-branch.{branch}.story"))
+    story = (cfg(f"branch.{branch}.stack-story"))
     if story:
         return story
     return _subject_of(branch) or branch
@@ -207,8 +200,7 @@ def _order(branch):
 
 
 def project_of(branch):
-    return (cfg(f"branch.{branch}.stack-project")
-            or cfg(f"stack-branch.{branch}.project"))
+    return (cfg(f"branch.{branch}.stack-project"))
 
 
 def _plan(branch, project, prs):
@@ -222,8 +214,7 @@ def _plan(branch, project, prs):
         p = prs.get(b, {})
         plan.append({
             "job": job_of(b),
-            "story": (cfg(f"branch.{b}.stack-story")
-                      or cfg(f"stack-branch.{b}.story")),
+            "story": (cfg(f"branch.{b}.stack-story")),
             "pr": p.get("pr"),
             "state": p.get("state"),
             "landed": False,
@@ -272,10 +263,6 @@ def facts(branch):
 
     # UNBLOCKS — everything that builds on this: children (parent == this) ∪ consumers (require this)
     edges = {}
-    for key, val in (l.split(" ", 1) for l in git_lines("config", "--get-regexp",
-                                                        r"^stack-branch\..*\.(parent|requires)$")):
-        name, kind = key[len("stack-branch."):].rsplit(".", 1)
-        edges.setdefault((name, kind), []).append(val)
     new_edges = {}
     for key, val in (l.split(" ", 1) for l in git_lines("config", "--get-regexp",
                                                         r"^branch\..*\.stack-(parent|requires)$")):
@@ -297,8 +284,7 @@ def facts(branch):
         "project": project,
         "role": role_of(branch),
         "purpose": cfg(f"branch.{branch}.description"),
-        "summary": (cfg(f"branch.{branch}.stack-summary")
-                    or cfg(f"stack-branch.{branch}.summary")),
+        "summary": (cfg(f"branch.{branch}.stack-summary")),
         "summaryStatus": summary_status,
         "job": job_of(branch),
         "parent": parent,

@@ -48,7 +48,6 @@ if [[ -f "$state" ]]; then
     if [[ -n "${br:-}" && -z "$(git -C "$main_top" rev-list "$mainbranch..$br" 2>/dev/null)" ]]; then
       git -C "$main_top" worktree remove --force "$old" 2>/dev/null || true
       git -C "$main_top" branch -D "$br" 2>/dev/null || true
-      git -C "$main_top" config --remove-section "stack-branch.$br" 2>/dev/null || true
       git -C "$main_top" config --name-only --get-regexp "^branch\.$(sed -e 's/[.[\\*^$()+?{|]/\\&/g' <<<"$br")\.stack-" 2>/dev/null \
         | while IFS= read -r k; do git -C "$main_top" config --unset-all "$k"; done
     fi

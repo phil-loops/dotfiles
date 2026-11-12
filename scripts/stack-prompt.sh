@@ -7,8 +7,6 @@ BRANCH=$(git branch --show-current 2>/dev/null)
 ALL_PARENTS=$(
   { git config --get-regexp "^branch\..*\.stack-parent$" 2>/dev/null \
       | sed -E 's/^branch\.(.*)\.stack-parent /\1 /'
-    git config --get-regexp "^stack-branch\..*\.parent$" 2>/dev/null \
-      | sed -E 's/^stack-branch\.(.*)\.parent /\1 /'
   } | awk 'NF && !seen[$1]++'
 )
 MAIN_BRANCH=$(git config stack.main-branch 2>/dev/null || echo "main")
