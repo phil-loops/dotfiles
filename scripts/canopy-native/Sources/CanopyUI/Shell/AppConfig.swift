@@ -15,6 +15,7 @@ import Foundation
 ///   --page <route>        a page for --bench; repeatable
 ///   --budget <ms>         --bench's limit per key, redraw included (default 33)
 ///   --quick               --bench presses the keys, then again under a patch storm: no typing, no writes
+///   --synthetic <n>       --bench on a generated store (n branches) and a generated review diff; no server
 ///   /v2/... | canopy://…  the first route
 public struct AppConfig: Sendable {
     public var port: Int?
@@ -33,6 +34,7 @@ public struct AppConfig: Sendable {
     public var pages: [String] = []
     public var budget: Double = 33
     public var quick = false
+    public var synthetic = 0
     public var shootWidth: Double = 1280
     public var shootHeight: Double = 800
 
@@ -56,6 +58,7 @@ public struct AppConfig: Sendable {
             case "--page": if let p = next() { c.pages.append(p) }
             case "--budget": c.budget = next().flatMap(Double.init) ?? c.budget
             case "--quick": c.quick = true
+            case "--synthetic": c.synthetic = next().flatMap(Int.init) ?? 300
             case "--size":
                 let wh = (next() ?? "").split(separator: "x").compactMap { Double($0) }
                 if wh.count == 2 { c.shootWidth = wh[0]; c.shootHeight = wh[1] }
