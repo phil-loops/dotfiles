@@ -685,6 +685,20 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
         #expect(ship.motionOf(Self.branch) == nil)
     }
 
+    @Test func gatesAnsweredCachedSettleAtOnce() async throws {
+        // a press that races a run finishing on the same tree: the server answers cached and the
+        // branch was green all along — the optimistic running must go on that answer, not wait
+        // for a change in the server's copy that never comes (the chip froze on it, 2026-11-05)
+        let (a, port) = try app { s in entity(&s, "branch", Self.branch) { $0["gates"] = "green" } }
+        ShipStub.answer(port, "POST", "/loops/gates", #"{"ok":true,"cached":true,"gates":[]}"#)
+        a.runner.dispatch("branch.gates.run", via: .key, target: Self.branch)
+        #expect(a.store.view(Branch.self, Self.branch)?.gates == .running)
+        await until("the cached answer to settle the overlay") { a.runner.runOf("branch.gates.run", Self.branch)?.state == .done }
+        // settled on the answer: the runner never reached its "not confirmed yet · resyncing" give-up
+        #expect(a.runner.note == "running the gates — p pushes once they're green")
+        #expect(a.store.view(Branch.self, Self.branch)?.gates == .green)
+    }
+
     @Test func dirtWaitsForADecisionAndAStashComesBack() async throws {
         let (a, port) = try app()
         ShipStub.answer(port, "GET", "/loops/sync", #"{"behind":0,"syncable":false,"restack":false,"published":true,"dirty":["a.ts"],"dirtyRows":[{"path":"a.ts","code":" M","patch":"@@ -1 +1 @@\n-a\n+b"}],"dirtyWorktree":"/wt","why":""}"#)

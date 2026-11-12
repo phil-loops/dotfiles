@@ -145,7 +145,9 @@ public enum GatesRun {
     public static func waiting(_ p: GateProgress?, rows: [GateRow], inFlight: Bool, now: Double) -> (text: String, secs: Double?, stuck: Bool)? {
         let step = setup(p)
         guard let text = between(rows, inFlight: inFlight, setup: step) else { return nil }
-        guard let since = step?.ts else { return (text, p?.elapsed, false) }
+        // a time belongs to a live run only: a finished run's elapsed stood still on the chip
+        // while an optimistic "running" outlived it ("gates starting · 20m 39s", 2026-11-05)
+        guard let since = step?.ts else { return (text, p?.running == true ? p?.elapsed : nil, false) }
         let secs = max(0, now - since)
         return (secs > stuckAfter ? "stuck \(text)" : text, secs, secs > stuckAfter)
     }
