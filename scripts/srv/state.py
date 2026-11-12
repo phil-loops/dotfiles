@@ -77,7 +77,6 @@ _COND = threading.Condition()
 _WAKE = threading.Event()
 _SUBS = [0]
 _GRAPHS = {}   # repo path -> (tips key, Graph)
-_TREES = {}    # repo path -> (refs key, {branch: tree})
 _BEHIND = {}   # repo path -> (refs key, {branch: commits on trunk it lacks})
 _ANC = {}      # (ancestor sha, tip sha) -> bool, for parents already on trunk (outside the graph)
 
@@ -120,18 +119,6 @@ def _graph(snap, trunk, tips):
     g = outbox.Graph(r.stdout if r.returncode == 0 else "")
     _GRAPHS[repo] = (key, g)
     return g
-
-
-def _trees(snap):
-    repo = ctx.repo_cwd()
-    key = _refs_key(snap)
-    hit = _TREES.get(repo)
-    if hit and hit[0] == key:
-        return hit[1]
-    out = ctx.run(["git", "for-each-ref", "--format=%(refname:short) %(tree)", "refs/heads"]).stdout
-    trees = dict(ln.rsplit(" ", 1) for ln in out.splitlines() if " " in ln)
-    _TREES[repo] = (key, trees)
-    return trees
 
 
 def _behind_trunk(snap, trunk, branches):
@@ -224,7 +211,7 @@ def _git_entities(name, snap, jobs):
         p = snap.parent(b)
         tips.update(t for t in (snap.local(b), snap.remote(b), snap.local(p)) if t)
     graph = _graph(snap, trunk, tips)
-    trees = _trees(snap)
+    trees = snap.head_trees()
     ents = {"repo": {name: {"id": name, "name": name, "main": main, "trunk": snap.sha.get(f"refs/remotes/{trunk}", snap.local(main))}},
             "project": {}, "branch": {}}
     behind = _behind_trunk(snap, trunk, member)
