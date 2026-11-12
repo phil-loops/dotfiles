@@ -8,6 +8,10 @@
 # a rebase there would leave the push door refusing a diverged branch). A conflict is
 # aborted, never left parked — the forest carries the reason on /projects (`sync`), and is not
 # retried until its branches or origin/main move.
+#
+# Every forest the viewer shows, focus or not, also sheds what landed: a member with a merged PR
+# goes with stack-restack --contract-only, which drops it once nothing live sits on it and moves
+# no branch. A member whose worktree is busy is held until it frees.
 import json
 import os
 import subprocess
@@ -46,6 +50,13 @@ def _git(*args):
 
 def _tip(ref):
     return _git("rev-parse", "-q", "--verify", ref).stdout.strip()
+
+
+def _projects():
+    """Every registered forest outside the archive."""
+    out = _git("config", "--name-only", "--get-regexp", r"^stack-project\..*\.branch$").stdout
+    names = sorted({line[len("stack-project."):-len(".branch")] for line in out.splitlines() if line})
+    return [p for p in names if _git("config", "--bool", f"stack-project.{p}.archived").stdout.strip() != "true"]
 
 
 def _focus_projects():
@@ -115,14 +126,20 @@ def _ff_main(tip):
         ctx.log(f"focus-sync: local main fast-forwarded in {wt} {cur[:9]} → {tip[:9]}")
 
 
-def _restack(project, hold=()):
+def _restack(project, hold=(), merged=None):
+    """merged ({branch: the head GitHub merged}) runs --contract-only instead of the walk."""
     wt = restack.worktree()
     _git("-C", wt, "checkout", "--detach")
+    env = None
     with open(os.path.join(ctx.ROOT, "restack.log"), "ab") as lf:
         cmd = [os.path.join(ctx.SCRIPTS, "stack-restack"), project, "--no-claude"]
         if hold:
             cmd.append("--hold=" + ",".join(hold))
-        rc = subprocess.run(cmd, cwd=wt, stdout=lf, stderr=lf).returncode
+        if merged is not None:
+            cmd.append("--contract-only")
+            env = {**os.environ, "STACK_RESTACK_MERGED_HEADS": "\n".join(f"{b} {h or '-'}" for b, h in sorted(merged.items())),
+                   "STACK_RESTACK_OPEN_PR_HEADS": f" {' '.join(sorted(sync._open_pr_heads()))} "}
+        rc = subprocess.run(cmd, cwd=wt, stdout=lf, stderr=lf, env=env).returncode
     parked, current = restack._parked()
     if parked:
         restack._clear_park()
@@ -186,6 +203,32 @@ def _sync_project(project, st, cwds):
     return True
 
 
+def _contract_project(project, merged, st, cwds):
+    """Drop the members that landed. What a pass leaves (live children sit on it) isn't retried until
+    the forest's shape changes or another member lands; a held member is retried every tick."""
+    def sig(members):
+        return " ".join(f"{b}={_tip('refs/heads/' + b)}<{_parent(b)}" for b in members if b in merged) \
+            + " | " + " ".join(f"{b}<{_parent(b)}" for b in members)
+
+    members = _members(project)
+    landed = [b for b in members if b in merged]
+    if not landed or st["contracted"].get(project) == sig(members):
+        return False
+    held = [b for b in landed if _busy([b], cwds)]
+    tips = {b: _tip(f"refs/heads/{b}") for b in landed}
+    ctx.log(f"focus-sync: contracting {project} ({', '.join(landed)}{'; holding ' + ', '.join(held) if held else ''})")
+    _restack(project, hold=held, merged=merged)
+    members = _members(project)
+    gone = [b for b in landed if b not in members]
+    if held:
+        st["contracted"].pop(project, None)
+    else:
+        st["contracted"][project] = sig(members)   # what's left waits on live children
+    if gone:
+        ctx.log(f"focus-sync: {project} shed {', '.join(f'{b} ({tips[b][:12]})' for b in gone)}")
+    return bool(gone)
+
+
 def tick():
     ctx.set_repo(ctx.CWD)
     _git("fetch", "-q", "origin", "main")
@@ -201,9 +244,18 @@ def tick():
                      cwd=ctx.MAIN_WT)
             st["tip"] = tip
             changed = True
+        shown = _projects()
+        st["contracted"] = {p: v for p, v in st.get("contracted", {}).items() if p in shown}
+        merged = {b: pr.get("head") for b, pr in sync._pr_state_map().items() if pr.get("state") == "MERGED"}
+        cwds = None
+        for p in shown:
+            if restack.blocked():
+                break
+            if any(b in merged for b in _members(p)):
+                cwds = _live_cwds() if cwds is None else cwds
+                changed |= _contract_project(p, merged, st, cwds)
         focus = _focus_projects()
         st["projects"] = {p: v for p, v in st.get("projects", {}).items() if p in focus}
-        cwds = None
         for p in focus:
             if restack.blocked():
                 break
