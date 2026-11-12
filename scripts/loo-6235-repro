@@ -58,8 +58,36 @@ function saveRuns(runs) {
   writeFileSync(RUNS_FILE, JSON.stringify(runs.slice(-8), null, 2));
 }
 
+class Stopped extends Error {}
+
+// The run in flight, if any. In "step" mode every request waits here until the page says
+// send, skip, rest (send this and all that follow) or stop.
+let active = null;
+
+function gate(planned) {
+  if (active.mode === "auto") {
+    return Promise.resolve("send");
+  }
+  return new Promise((resolve) => {
+    active.pending = { ...planned, resolve };
+  });
+}
+
 // Every request a run fires goes through here and lands in its audit trail, key redacted.
-async function call(key, trail, method, path, body) {
+async function call(key, method, path, body) {
+  const planned = { method, url: BASE + path, requestBody: body ?? null, readOnly: method === "GET" };
+  const answer = await gate(planned);
+  active.pending = null;
+  if (answer === "stop") {
+    throw new Stopped();
+  }
+  if (answer === "rest") {
+    active.mode = "auto";
+  }
+  if (answer === "skip") {
+    active.run.trail.push({ at: new Date().toISOString(), method, url: BASE + path, requestBody: body ?? null, skipped: true, status: null, ms: 0 });
+    return { status: null, json: null, message: "skipped: you skipped it", ms: 0 };
+  }
   const started = Date.now();
   const entry = {
     at: new Date(started).toISOString(),
@@ -71,7 +99,7 @@ async function call(key, trail, method, path, body) {
     },
     requestBody: body ?? null,
   };
-  trail.push(entry);
+  active.run.trail.push(entry);
   try {
     const res = await fetch(BASE + path, {
       method,
@@ -106,66 +134,76 @@ async function call(key, trail, method, path, body) {
   }
 }
 
-const shown = (request, r) => ({ request, status: r.status, message: r.message, ms: r.ms });
+const shown = (request, r) =>
+  r.status === null ? { request, status: null, message: r.message, ms: 0 } : { request, status: r.status, message: r.message, ms: r.ms };
 const skipped = (request, why) => ({ request, status: null, message: `skipped: ${why}`, ms: 0 });
 
 async function run(key) {
-  const stamp = new Date().toISOString();
-  const name = `LOO-6235 repro ${stamp.slice(0, 16).replace("T", " ")}`;
-  const results = {};
-  const trail = [];
+  const { results } = active.run;
+  const name = `LOO-6235 repro ${active.run.at.slice(0, 16).replace("T", " ")}`;
 
-  const who = await call(key, trail, "GET", "/api-key");
-  const team = who.json?.teamName ?? `unknown (${who.status} ${who.message})`;
+  const who = await call(key, "GET", "/api-key");
+  active.run.team = who.json?.teamName ?? (who.status === null ? "team not checked" : `unknown (${who.status} ${who.message})`);
 
-  const campaign = await call(key, trail, "POST", "/campaigns", { name });
-  results.campaign = shown("POST /campaigns", campaign);
+  results.campaign = shown("POST /campaigns", await call(key, "POST", "/campaigns", { name }));
 
-  const created = await call(key, trail, "POST", "/transactional-emails", { name });
+  const created = await call(key, "POST", "/transactional-emails", { name });
   results.transactional = shown("POST /transactional-emails", created);
 
-  const list = await call(key, trail, "GET", "/transactional-emails?perPage=20");
-  const existing = (list.json?.data ?? []).find((t) => t.draftEmailMessageId || t.publishedEmailMessageId);
-  const target = created.status === 201 ? created.json : existing;
-  const needsOne = "the team has no transactional email yet; make one in the staging app";
+  const list = await call(key, "GET", "/transactional-emails?perPage=20");
+  const own = (list.json?.data ?? []).filter((t) => !t.systemEmailType);
+  const fresh = created.status === 201 ? created.json : null;
+  const target = fresh ?? own[0] ?? (list.json?.data ?? [])[0];
 
   if (!target) {
-    for (const id of ["draft", "read", "update", "publish", "send"]) {
-      results[id] = skipped("", needsOne);
+    for (const id of ["draft", "read", "update"]) {
+      results[id] = skipped("", "the team has no transactional email yet; make one in the staging app");
     }
-    return { at: stamp, team, results, trail };
-  }
-
-  const draft = await call(key, trail, "POST", `/transactional-emails/${target.id}/draft`);
-  results.draft = shown("POST /transactional-emails/{id}/draft", draft);
-
-  const messageId =
-    draft.json?.draftEmailMessageId ?? target.draftEmailMessageId ?? target.publishedEmailMessageId;
-  if (!messageId) {
-    results.read = skipped("GET /email-messages/{id}", "no email message id on the transactional");
-    results.update = skipped("POST /email-messages/{id}", "no email message id on the transactional");
   } else {
-    const read = await call(key, trail, "GET", `/email-messages/${messageId}`);
-    results.read = shown("GET /email-messages/{id}", read);
-    const update = await call(key, trail, "POST", `/email-messages/${messageId}`, {
-      ...(read.json?.contentRevisionId ? { expectedRevisionId: read.json.contentRevisionId } : {}),
-      subject: name,
-    });
-    results.update = shown("POST /email-messages/{id}", update);
+    const draft = await call(key, "POST", `/transactional-emails/${target.id}/draft`);
+    results.draft = shown("POST /transactional-emails/{id}/draft", draft);
+
+    const messageId = draft.json?.draftEmailMessageId ?? target.draftEmailMessageId ?? target.publishedEmailMessageId;
+    if (!messageId) {
+      results.read = skipped("GET /email-messages/{id}", "the transactional has no email message");
+      results.update = skipped("POST /email-messages/{id}", "the transactional has no email message");
+    } else {
+      const read = await call(key, "GET", `/email-messages/${messageId}`);
+      results.read = shown("GET /email-messages/{id}", read);
+      const update = await call(key, "POST", `/email-messages/${messageId}`, {
+        ...(read.json?.contentRevisionId ? { expectedRevisionId: read.json.contentRevisionId } : {}),
+        subject: name,
+      });
+      results.update = shown("POST /email-messages/{id}", update);
+    }
   }
 
-  const publish = await call(key, trail, "POST", `/transactional-emails/${target.id}/publish`);
-  results.publish = shown("POST /transactional-emails/{id}/publish", publish);
+  const drafted = fresh ?? own.find((t) => t.draftEmailMessageId);
+  results.publish = drafted
+    ? shown("POST /transactional-emails/{id}/publish", await call(key, "POST", `/transactional-emails/${drafted.id}/publish`))
+    : skipped("POST /transactional-emails/{id}/publish", "needs a non-system transactional email with an unpublished draft on this team");
 
-  const published = (list.json?.data ?? []).find((t) => t.publishedEmailMessageId);
-  if (!published) {
-    results.send = skipped("POST /transactional", "the team has no published transactional email");
-  } else {
-    const send = await call(key, trail, "POST", "/transactional", { transactionalId: published.id, email: SEND_TO });
-    results.send = shown("POST /transactional", send);
+  const published = own.find((t) => t.publishedEmailMessageId);
+  results.send = published
+    ? shown("POST /transactional", await call(key, "POST", "/transactional", { transactionalId: published.id, email: SEND_TO }))
+    : skipped("POST /transactional", "needs a published, non-system transactional email on this team");
+}
+
+async function startRun(key, mode) {
+  active = { mode, pending: null, run: { at: new Date().toISOString(), team: "", mode, results: {}, trail: [], inProgress: true } };
+  try {
+    await run(key);
+  } catch (error) {
+    if (!(error instanceof Stopped)) {
+      active.run.error = error.message;
+    }
+    active.run.stopped = true;
   }
-
-  return { at: stamp, team, results, trail };
+  delete active.run.inProgress;
+  const runs = loadRuns();
+  runs.push(active.run);
+  saveRuns(runs);
+  active = null;
 }
 
 const PAGE = `<!doctype html>
@@ -209,6 +247,17 @@ const PAGE = `<!doctype html>
   button.run:active:not(:disabled) { transform: translateY(3px); box-shadow: none; }
   button.run:disabled { opacity: .4; cursor: default; }
   #note { color: var(--soft); font-size: 13px; }
+  button.quiet { font: 500 14px var(--sans); color: var(--ink); background: none; border: 1px solid var(--rule); border-radius: 4px; padding: 11px 16px; cursor: pointer; }
+  button.quiet:hover:not(:disabled) { border-color: var(--ink); }
+  button.quiet:disabled { opacity: .4; cursor: default; }
+  .press[hidden], #next[hidden] { display: none; }
+  #next { background: var(--sheet); border: 1px solid var(--ink); max-width: 860px; }
+  #next .ask { padding: 16px 20px 4px; }
+  #next .ask p { margin: 0 0 8px; font-weight: 600; }
+  #next .ask p small { font-weight: 400; color: var(--soft); margin-left: 8px; font-size: 13px; }
+  #next pre { margin: 0 0 12px; font: 12.5px/1.5 var(--wire); white-space: pre-wrap; word-break: break-word; max-height: 220px; overflow: auto; }
+  #next .acts { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; padding: 14px 20px 18px; border-top: 1px solid var(--rule); }
+  #next .acts .gap { flex: 1; }
   #setup { margin-top: 22px; padding: 16px 18px; background: var(--sheet); border-left: 3px solid var(--still); max-width: 78ch; }
   #setup[hidden] { display: none; }
   #setup pre { margin: 10px 0 0; font: 12.5px var(--wire); white-space: pre-wrap; word-break: break-all; }
@@ -247,6 +296,7 @@ const PAGE = `<!doctype html>
   ol.trail summary::before { content: counter(req); color: var(--soft); }
   ol.trail summary .st { font-weight: 500; }
   ol.trail li.ok .st { color: var(--fixed); } ol.trail li.no .st { color: var(--still); }
+  ol.trail li.skip { color: var(--soft); } ol.trail li.skip summary { cursor: default; }
   ol.trail summary .u { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   ol.trail summary .t { color: var(--soft); font-family: var(--sans); font-size: 12.5px; }
   ol.trail details[open] summary { background: color-mix(in srgb, var(--ink) 5%, transparent); }
@@ -266,7 +316,8 @@ const PAGE = `<!doctype html>
   </div>
   <h1 id="verdict">Nothing run yet.</h1>
   <p class="lede" id="lede">Seven API requests that a team with a disabled sending domain gets wrong answers to. Run them now, deploy, then run them again and compare.</p>
-  <div class="press"><button class="run" id="run">Run the requests</button><span id="note" role="status"></span></div>
+  <div class="press" id="starters"><button class="run" id="step">Run one at a time</button><button class="quiet" id="run">Run all without stopping</button><span id="note" role="status"></span></div>
+  <div id="next" hidden></div>
   <div id="setup" hidden>This page has no API key yet. Store the key of a staging team whose sending domain is disabled, then come back:<pre>security add-generic-password -s __SERVICE__ -a loops -w</pre></div>
   <div id="groups"></div>
   <section>
@@ -284,6 +335,7 @@ const kindOf = (step, r) => !r || r.status === null ? "skipped" : matches(r, ste
 let busy = false, last = "", shownRun = null, openReqs = new Set();
 
 function verdict(run) {
+  if (run?.inProgress) return ["", "Run in progress.", (run.trail ?? []).filter((t) => !t.skipped).length + " requests sent so far. Nothing else is sent until you say so."];
   if (!run) return ["", "Nothing run yet.", "Seven API requests that a team with a disabled sending domain gets wrong answers to. Run them now, deploy, then run them again and compare."];
   const kinds = STEPS.map((s) => ({ pr: s.pr, kind: kindOf(s, run.results[s.id]) }));
   const ran = kinds.filter((k) => k.kind !== "skipped");
@@ -308,7 +360,10 @@ function cell(step, r, latest) {
 function render(state) {
   const runs = state.runs, latest = runs[runs.length - 1];
   $("setup").hidden = state.hasKey;
-  $("run").disabled = busy || !state.hasKey;
+  const live = Boolean(latest?.inProgress);
+  $("starters").hidden = live;
+  $("run").disabled = $("step").disabled = busy || !state.hasKey;
+  renderNext(state);
   $("team").textContent = latest ? "Key belongs to " + latest.team : "";
   const [tone, head, lede] = verdict(latest);
   $("verdict").className = tone; $("verdict").textContent = head; $("lede").textContent = lede;
@@ -331,12 +386,30 @@ function render(state) {
   renderTrail(runs);
 }
 
+function renderNext(state) {
+  const n = state.pending, box = $("next");
+  box.hidden = !state.runs[state.runs.length - 1]?.inProgress;
+  if (box.hidden) return;
+  if (!n) { box.innerHTML = '<div class="ask"><p>Waiting for the answer…</p></div>'; return; }
+  box.innerHTML = '<div class="ask"><p>Next request<small>' + (n.readOnly ? "reads only, changes nothing on staging" : "writes to staging if it succeeds") + "</small></p><pre>" +
+    esc(n.method) + " " + esc(n.url) + (n.requestBody ? "\\n\\n" + pretty(n.requestBody) : "") + "</pre></div>" +
+    '<div class="acts"><button class="run" data-do="send">Send this request</button><button class="quiet" data-do="skip">Skip it</button>' +
+    '<span class="gap"></span><button class="quiet" data-do="rest">Send this and the rest</button><button class="quiet" data-do="stop">Stop the run</button></div>';
+  box.querySelector("button")?.focus();
+}
+$("next").onclick = async (e) => {
+  const act = e.target.dataset?.do; if (!act || busy) return;
+  busy = true; $("next").querySelectorAll("button").forEach((b) => (b.disabled = true));
+  try { const text = await (await fetch("/next?do=" + act, { method: "POST" })).text(); last = text; busy = false; render(JSON.parse(text)); }
+  catch (err) { busy = false; $("note").textContent = "That failed: " + err.message; }
+};
 const pretty = (v) => esc(v == null ? "(none)" : typeof v === "string" ? v : JSON.stringify(v, null, 2));
 function renderTrail(runs) {
-  $("tabs").innerHTML = runs.map((r, i) => '<button data-at="' + esc(r.at) + '" aria-pressed="' + (r.at === shownRun) + '">Run ' + (i + 1) + ", " + esc(clock(r.at)) + "</button>").join("");
+  $("tabs").innerHTML = runs.map((r, i) => '<button data-at="' + esc(r.at) + '" aria-pressed="' + (r.at === shownRun) + '">Run ' + (i + 1) + ", " + esc(clock(r.at)) + (r.inProgress ? ", in progress" : r.stopped ? ", stopped early" : "") + "</button>").join("");
   const run = runs.find((r) => r.at === shownRun);
   if (!run) { $("trail").innerHTML = '<p class="hint">After a run, each request it sent is listed here with its full response.</p>'; return; }
   $("trail").innerHTML = '<ol class="trail">' + (run.trail ?? []).map((t, j) => {
+    if (t.skipped) return '<li class="skip"><details><summary><span class="st">skip</span><span class="u">' + esc(t.method) + " " + esc(t.url) + '</span><span class="t">you skipped it</span></summary></details></li>';
     const k = run.at + ":" + j, ok = t.status >= 200 && t.status < 300;
     return '<li class="' + (ok ? "ok" : "no") + '"><details data-k="' + k + '"' + (openReqs.has(k) ? " open" : "") + ">" +
       '<summary><span class="st">' + (t.status || "failed") + '</span><span class="u">' + esc(t.method) + " " + esc(t.url) + '</span><span class="t">' + t.ms + " ms</span></summary>" +
@@ -355,19 +428,21 @@ async function load() {
   const text = await (await fetch("/state")).text();
   if (text !== last) { last = text; render(JSON.parse(text)); }
 }
-$("run").onclick = async () => {
-  busy = true; $("run").disabled = true; $("note").textContent = "Running the requests…";
+async function start(mode) {
+  busy = true; $("run").disabled = $("step").disabled = true; $("note").textContent = mode === "auto" ? "Running the requests…" : "";
   const started = Date.now();
   try {
-    const text = await (await fetch("/run", { method: "POST" })).text();
+    const text = await (await fetch("/run?mode=" + mode, { method: "POST" })).text();
     const state = JSON.parse(text);
     busy = false; last = text; shownRun = null;
-    $("note").textContent = state.error ?? "Ran " + (state.runs[state.runs.length - 1]?.trail?.length ?? 0) + " requests in " + ((Date.now() - started) / 1000).toFixed(1) + " s";
+    $("note").textContent = state.error ?? (mode === "auto" ? "Ran " + (state.runs[state.runs.length - 1]?.trail?.length ?? 0) + " requests in " + ((Date.now() - started) / 1000).toFixed(1) + " s" : "");
     render(state);
-  } catch (e) { busy = false; $("note").textContent = "The run failed: " + e.message; $("run").disabled = false; }
-};
+  } catch (e) { busy = false; $("note").textContent = "The run failed: " + e.message; $("run").disabled = $("step").disabled = false; }
+}
+$("run").onclick = () => start("auto");
+$("step").onclick = () => start("step");
 load();
-setInterval(load, 3000);
+setInterval(load, 1500);
 document.addEventListener("visibilitychange", load);
 </script>
 </html>`;
@@ -391,42 +466,57 @@ function branchTip(name) {
 
 const state = () => ({
   hasKey: Boolean(readKey()),
-  runs: loadRuns(),
+  runs: active ? [...loadRuns(), active.run] : loadRuns(),
+  pending: active?.pending ? { ...active.pending, resolve: undefined } : null,
+  mode: active?.mode ?? null,
   branches: BRANCHES.map((b) => ({ ...b, tip: branchTip(b.name), href: `canopy://v2/b/loops/${b.name}` })),
 });
-let running = false;
-
 createServer(async (req, res) => {
   const json = (code, body) => {
     res.writeHead(code, { "Content-Type": "application/json" });
     res.end(JSON.stringify(body));
   };
-  if (req.method === "GET" && req.url === "/") {
+  const url = new URL(req.url, "http://x");
+  if (req.method === "GET" && url.pathname === "/") {
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
     return res.end(
       PAGE.replaceAll("__BASE__", BASE).replaceAll("__SERVICE__", KEY_SERVICE).replace("__STEPS__", JSON.stringify(STEPS))
     );
   }
-  if (req.method === "GET" && req.url === "/state") {
+  if (req.method === "GET" && url.pathname === "/state") {
     return json(200, state());
   }
-  if (req.method === "POST" && req.url === "/run") {
+  if (req.method === "POST" && url.pathname === "/run") {
     const key = readKey();
     if (!key) {
       return json(200, { ...state(), error: "no key in the Keychain" });
     }
-    if (running) {
+    if (active) {
       return json(200, { ...state(), error: "a run is already in progress" });
     }
-    running = true;
-    try {
-      const runs = loadRuns();
-      runs.push(await run(key));
-      saveRuns(runs);
-      return json(200, state());
-    } finally {
-      running = false;
+    const mode = url.searchParams.get("mode") === "step" ? "step" : "auto";
+    const done = startRun(key, mode);
+    if (mode === "auto") {
+      await done;
+    } else {
+      await new Promise((r) => setTimeout(r, 30));
     }
+    return json(200, state());
+  }
+  if (req.method === "POST" && url.pathname === "/next") {
+    const answer = url.searchParams.get("do");
+    if (!active?.pending || !["send", "skip", "rest", "stop"].includes(answer)) {
+      return json(200, { ...state(), error: "nothing is waiting" });
+    }
+    const hadRun = active.run;
+    const { resolve } = active.pending;
+    active.pending = null;
+    resolve(answer);
+    // wait until the request has answered and the run is either waiting again or finished
+    for (let i = 0; i < 400 && active && active.run === hadRun && !active.pending; i++) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    return json(200, state());
   }
   json(404, { error: "not found" });
 }).listen(PORT, "127.0.0.1", () => {
