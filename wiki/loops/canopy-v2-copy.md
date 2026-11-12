@@ -6,6 +6,8 @@ project: canopy-v2
 lede: The terse pass over every on-screen string in v2 (2026-10-25, 13f2d80) — before and after, for review. Command titles in the ? sheet and the menu keep their full wording.
 ---
 
+> **The client is native since 2026-10-29.** This page was written for the web client (`viewer-solid`, retired 2026-10-31); canopy is now the macOS app in `scripts/canopy-native/` (Show's ⌘1). The goals and invariants here stand; the keys live in `scripts/canopy-native/NAV.md`, and anything naming a `.tsx`/`.ts` file is history.
+
 **The hint line is gone** (see [Keys like Helix](canopy-v2-keys)); the copy rules below still hold.
 
 **Rules.** Pair opposites into one hint (`j/k line`). One word, no next/previous when the pair implies it. Cut what the page already shows. A glyph or a count over a phrase. Terse and lowercase; notes end in `· u undoes`.
