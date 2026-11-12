@@ -129,7 +129,9 @@ struct ReviewSurface: SurfaceProvider {
     func searchStamp(_ app: AppModel) -> String {
         let pg = ReviewPageState.of(app)
         let p = PageSearch.of(app).pane
-        return "\(pg.searchStamp)|\(pg.window(pane: p)?.text?.utf16.count ?? -1)"
+        // a file's text is fixed by its commit and path, so those name it exactly (its length didn't)
+        let w = pg.window(pane: p)
+        return "\(pg.searchStamp)|\(w?.doc.map { "\($0.repo)@\($0.sha):\($0.path)" } ?? "")|\(w?.text != nil)"
     }
 
     func searchFields(for row: String, _ app: AppModel) -> [String] {
