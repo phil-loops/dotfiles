@@ -198,7 +198,7 @@ def _pr_rank(pr):
 
 def fetch_pr_state():
     """Authoritative per-branch PR state, read LIVE from GitHub — never cached.
-    One batched `gh pr list` → {headRefName: {number,state,draft,url,review}}.
+    One batched `gh pr list` → {headRefName: {number,state,draft,url,review,head}}.
     GitHub is the source of truth for "merged?" (a squash-merge is invisible to
     local git by sha, which is why `landed()` is only a fragile fallback). Returns
     None on any gh failure, so a GitHub 504 never reads as "no PRs". Checks rollup is omitted on
@@ -208,7 +208,7 @@ def fetch_pr_state():
     try:
         r = subprocess.run(
             ["gh", "pr", "list", "--state", "all", "--limit", str(limit), "--json",
-             "headRefName,number,state,isDraft,url,reviewDecision"],
+             "headRefName,headRefOid,number,state,isDraft,url,reviewDecision"],
             capture_output=True, text=True, timeout=30,
         )
         if r.returncode != 0:
@@ -233,6 +233,7 @@ def fetch_pr_state():
             "draft": bool(p.get("isDraft")),
             "url": p.get("url"),
             "review": p.get("reviewDecision") or None,  # APPROVED | CHANGES_REQUESTED | REVIEW_REQUIRED
+            "head": p.get("headRefOid"),                # the tip GitHub merged, for a MERGED PR
         }
         if ref not in out or _pr_rank(cur) > _pr_rank(out[ref]):
             out[ref] = cur
@@ -240,7 +241,7 @@ def fetch_pr_state():
 
 
 # ---- live PR state overlay -----------------------------------------------
-# {headRefName: {number,state,draft,url,review}} straight from GitHub, no git, no
+# {headRefName: {number,state,draft,url,review,head}} straight from GitHub, no git, no
 # cache. Kept OUT of the WAVE-1 tree so the graph paints instantly (git-only); the
 # browser fetches this separately and overlays authoritative merged/draft/review
 # badges when it resolves (~3s). GitHub is the source of truth for "merged?".
