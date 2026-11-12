@@ -45,7 +45,7 @@ if [[ -n "$desc" ]]; then
   jq -n --arg t "$desc" '{thesis:$t, enables:"", source:"description"}'; exit 0
 fi
 
-parent=$(git config "branch.${branch}.stack-parent" 2>/dev/null || git config "stack-branch.${branch}.parent" 2>/dev/null || true)
+parent=$(git config "branch.${branch}.stack-parent" 2>/dev/null || true)
 [[ -n "$parent" ]] || parent=$(git config stack.main-branch 2>/dev/null || echo main)
 # trunk base is the REMOTE trunk — a stale local main balloons the diff (and the cache sig).
 # Mirrors stack-forest trunk_base.
@@ -72,8 +72,6 @@ fi
 diff="$(git diff "${parent}...${branch}")"; diff="${diff[1,12000]}"
 children=$({ git config --get-regexp '^branch\..*\.stack-parent$' 2>/dev/null \
     | sed -E 's/^branch\.(.*)\.stack-parent /\1 /' || :
-  git config --get-regexp '^stack-branch\..*\.parent$' 2>/dev/null \
-    | sed -E 's/^stack-branch\.(.*)\.parent /\1 /' || :
   } | awk -v p="$branch" 'NF && !seen[$1]++ && $2==p{print $1}' | paste -sd', ' -)
 
 read -r -d '' prompt <<EOF || true
