@@ -75,6 +75,7 @@ root = "/t/tree"
 ws = lsp._workspace_symbols(root, [
     {"name": "greet", "kind": 12, "containerName": "", "location": {"uri": "file:///t/tree/lib/greet.ts", "range": {"start": {"line": 4, "character": 0}, "end": {"line": 9, "character": 1}}}},
     {"name": "greet", "kind": 12, "location": {"uri": "file:///t/tree/node_modules/x/index.d.ts", "range": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 9}}}},
+    {"name": "greet", "kind": 13, "location": {"uri": "file:///t/tree/.gen/trpc-types/greet.d.ts", "range": {"start": {"line": 1, "character": 0}, "end": {"line": 1, "character": 5}}}},
     {"name": "Array", "kind": 11, "location": {"uri": "file:///lib/lib.es5.d.ts", "range": {"start": {"line": 1, "character": 0}, "end": {"line": 2, "character": 0}}}},
 ])
 check("workspace symbols keep the branch's own code, repo-relative", ws,
