@@ -159,15 +159,16 @@ private struct BranchLine: View {
                 let rows = Dictionary((ship.historyRows(pg.id) ?? []).map { ($0.sha, $0) }, uniquingKeysWith: { a, _ in a })
                 let named = Set([lit?.lo, lit?.hi, cursor, pg.lineAnchor, l.parentIndex, 0, l.tip].compactMap { $0 })
                 ForEach(Array(l.points.enumerated()), id: \.offset) { i, p in
-                    if i > 0 {
-                        let on = lit.map { i > $0.lo && i <= $0.hi } ?? false
-                        Rectangle().fill(on ? theme.goldLeaf : theme.rule).frame(width: l.points.count > 12 ? 10 : 18, height: on ? 2 : 1)
-                    }
                     let on = lit.map { i > $0.lo && i <= $0.hi } ?? false
+                    let lands = l.lands(i)
+                    if i > 0 {
+                        Rectangle().fill(on ? (lands ? theme.goldLeaf : theme.inkDim) : lands ? theme.goldLeaf.opacity(0.5) : theme.rule)
+                            .frame(width: l.points.count > 12 ? 10 : 18, height: on ? 2 : 1)
+                    }
                     let isStart = lit?.lo == i
                     VStack(spacing: 1) {
                         Circle()
-                            .fill(on ? theme.goldLeaf : isStart ? theme.ink : theme.inkFaint)
+                            .fill(on ? (lands ? theme.goldLeaf : theme.inkDim) : isStart ? theme.ink : lands ? theme.goldLeaf.opacity(0.5) : theme.inkFaint)
                             .frame(width: 7, height: 7)
                             .overlay { if cursor == i { Circle().stroke(theme.ink, lineWidth: 1.2).frame(width: 13, height: 13) } }
                             .overlay { if pg.lineAnchor == i { Circle().stroke(theme.goldLeaf, lineWidth: 1.2).frame(width: 13, height: 13) } }
@@ -201,20 +202,13 @@ private struct BranchLine: View {
         return rows[s]?.subject ?? s
     }
 
-    /// The lit stretch in words, or the commit under the line's cursor while it's there.
+    /// Where the lit stretch sits against what lands, or the commit under the line's cursor while it's there.
     private func words(_ pg: ReviewPageState, _ l: ReviewLine, _ rows: [String: HistoryCommit], _ cursor: Int?) -> String {
         if let c = cursor, case .commit(let s) = l.points[c] { return rows[s]?.subject ?? "" }
-        if let scope = pg.commitScope {
-            let e = ReviewLine.ends(scope)
-            if e.from == nil { return rows.first { $0.key.hasPrefix(e.to) }?.value.subject ?? "one commit" }
-            guard let lit = pg.lit else { return "a run of commits" }
-            return "\(lit.hi - lit.lo) commits"
-        }
-        switch pg.base {
-        case .parent: return pg.branch.map { $0.commits > 1 ? "all \($0.commits) commits" : "the branch" } ?? ""
-        case .main: return "the whole stack, from main"
-        case .outgoing: return "what the next push sends"
-        }
+        if let lit = pg.lit { return l.words(lit) }
+        // off the line: a commit this history doesn't hold, or origin's copy after a rewrite
+        if let scope = pg.commitScope { return ReviewLine.ends(scope).from == nil ? "one commit" : "a run of commits" }
+        return pg.base == .outgoing ? "what the next push sends" : ""
     }
 }
 

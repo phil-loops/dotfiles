@@ -36,6 +36,27 @@ public struct ReviewLine: Equatable {
     public var tip: Int { points.count - 1 }
     public var parentIndex: Int { points.firstIndex(of: .parent) ?? 0 }
 
+    /// How a stretch sits against what lands when the branch merges, the parent to the tip.
+    public enum Cover: Equatable, Sendable { case landing, part, beyond }
+
+    /// Whether the point's commit lands with this branch: a fact of the line, whatever is lit.
+    public func lands(_ i: Int) -> Bool { i > parentIndex && i <= tip }
+
+    public func cover(_ lit: (lo: Int, hi: Int)) -> Cover {
+        if lit.lo < parentIndex { return .beyond }
+        return lit.lo == parentIndex && lit.hi == tip ? .landing : .part
+    }
+
+    /// The stretch in words, read from where it sits and never from how it was reached.
+    public func words(_ lit: (lo: Int, hi: Int)) -> String {
+        let n = lit.hi - lit.lo, all = tip - parentIndex
+        switch cover(lit) {
+        case .landing: return n > 1 ? "what lands · all \(n) commits" : "what lands"
+        case .beyond: return "the whole stack, from main"
+        case .part: return "\(n) of \(all) commits" + (lit.lo == origin && lit.hi == tip ? " · the next push" : "")
+        }
+    }
+
     /// `commits` as the history reads them, newest first. A branch on main has no separate main point.
     public init(parentIsMain: Bool, commits: [HistoryCommit]) {
         let own = Array(commits.reversed())

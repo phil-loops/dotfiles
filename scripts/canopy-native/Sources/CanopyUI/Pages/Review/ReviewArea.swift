@@ -248,6 +248,10 @@ struct ReviewSurface: SurfaceProvider {
     func restore(_ place: Place, _ app: AppModel) {
         let pg = ReviewPageState.of(app)
         if let id = place.window, let w = pg.windows.first(where: { $0.id == id }), place.loc == nil { app.focus(pane: w.pane) }
+        if place.commit == nil, pg.scoped, pg.payload?.key.hasPrefix("\(pg.id)@") == true {
+            ShipState.of(app).showCommit(nil)
+            if let k = place.cursorKey { app.setCursor(k) }
+        }
         let scoping = place.commit != nil && place.commit != pg.commitScope
         if scoping, let k = place.cursorKey { pg.pendingCursor = (pg.id, k) }
         if scoping, let l = place.loc { pg.pendingLoc = (pg.id, l) }

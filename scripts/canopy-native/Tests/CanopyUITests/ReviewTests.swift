@@ -881,6 +881,40 @@ import Testing
         #expect(pg.commitScope == "c1")
     }
 
+    /// A step replaces what the diff shows, so it's a jump: C-o walks back to what lands, on the line it left.
+    @Test func cOBringsBackTheWholeBranchAfterAStep() async throws {
+        let (a, _) = try await app()
+        let pg = ReviewPageState.of(a)
+        let b = try #require(pg.branch)
+        ShipState.of(a).putHistory(b, [HistoryCommit(sha: "c2", subject: "second"), HistoryCommit(sha: "c1", subject: "first")])
+        keys(a, "j", "j")
+        let was = try #require(pg.here?.key)
+        keys(a, "]", "h", "]", "h")
+        #expect(pg.commitScope == "c2")
+        keys(a, "C-o")
+        #expect(pg.commitScope == "c1", "back one step")
+        keys(a, "C-o")
+        #expect(!pg.scoped && pg.lit.map { [$0.lo, $0.hi] } == [0, 2], "then the whole branch: what lands")
+        #expect(pg.here?.key == was, "on the line the first step left")
+        keys(a, "C-i")
+        #expect(pg.commitScope == "c1", "and C-i steps in again")
+    }
+
+    /// What the diff covers has one writer: a preset from a stepped commit lights its own stretch, never the commit still.
+    @Test func aPresetFromAStepLightsItsOwnStretch() async throws {
+        let (a, _) = try await app()
+        let pg = ReviewPageState.of(a)
+        let b = try #require(pg.branch)
+        ShipState.of(a).putHistory(b, [HistoryCommit(sha: "c2", subject: "second"), HistoryCommit(sha: "c1", subject: "first")])
+        keys(a, "]", "h")
+        #expect(pg.commitScope == "c1")
+        keys(a, ",", "b", "p")
+        #expect(!pg.scoped && pg.base == .parent && pg.wholeBranch, ", b p from a step is the whole branch again")
+        keys(a, "]", "h")
+        keys(a, ",", "b", "m")
+        #expect(!pg.scoped && pg.base == .main, "and , b m is the stack from main")
+    }
+
     /// w / b put a one-character cursor on each name's first character, crossing lines; g d / space k ask about that name.
     @Test func wAndBStepNameToNameAcrossLines() async throws {
         let (a, _) = try await app()
@@ -1435,6 +1469,20 @@ import Testing
             #expect(lit.map { [$0.lo, $0.hi] } == [a == b ? a - 1 : min(a, b), max(a, b)], "\(a)…\(b) → \(c)")
         }
         #expect(l.lit(base: .outgoing, scope: nil).map { [$0.lo, $0.hi] } == [3, 4], "origin to the tip: what the next push sends")
+    }
+
+    /// What lands is the parent to the tip whatever is lit, and a stretch reads the same however it was reached.
+    @Test func aStretchReadsAgainstWhatLands() {
+        let l = stacked
+        #expect((0...4).map(l.lands) == [false, false, true, true, true], "main and the parent are someone else's")
+        #expect(l.cover((1, 4)) == .landing && l.cover((2, 4)) == .part && l.cover((1, 3)) == .part && l.cover((0, 4)) == .beyond)
+        #expect(l.words((1, 4)) == "what lands · all 3 commits")
+        #expect(l.words((0, 4)) == "the whole stack, from main")
+        #expect(l.words((1, 2)) == "1 of 3 commits")
+        let stepped = l.lit(base: .parent, scope: "c3"), preset = l.lit(base: .outgoing, scope: nil)
+        #expect(stepped.map(l.words) == "1 of 3 commits · the next push" && preset.map(l.words) == stepped.map(l.words), "one stretch, one reading")
+        let one = ReviewLine(parentIsMain: true, commits: [HistoryCommit(sha: "c1", subject: "", pushed: false)])
+        #expect(one.words((0, 1)) == "what lands" && one.cover(one.lit(base: .parent, scope: "c1")!) == .landing, "a one-commit branch's commit is what lands")
     }
 
     @Test func stepsWalkOneCommitAndSayWhereTheyStop() {
