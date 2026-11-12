@@ -565,7 +565,9 @@ import Testing
         ShipStub.answer(p, "GET", "/loops/review-flags",
                         #"{"flags":[{"path":"a.ts","line":3,"text":"two is never read"},{"path":"elsewhere.ts","line":9,"text":"not in this diff"}]}"#)
         keys(a, "space", "d")
+        #expect(a.runner.held?.id == "review.findings", "unread findings hold the key instead of claiming it ran")
         await until("the findings picker") { a.nav.picker != nil }
+        #expect(a.runner.held == nil)
         #expect(a.nav.picker?.items.map(\.label) == ["a.ts:3", "elsewhere.ts:9"])
         a.nav.choose(0)
         #expect(pg.here?.key == "l|a.ts|R:3" && a.runner.note == "two is never read")

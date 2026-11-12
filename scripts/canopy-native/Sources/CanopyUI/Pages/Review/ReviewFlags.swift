@@ -17,6 +17,11 @@ final class ReviewFlags {
 
     static func of(_ app: AppModel) -> ReviewFlags { app.state { ReviewFlags() } }
 
+    /// The findings for the branch's tip when a read already has them — a key's synchronous answer.
+    func cached(_ app: AppModel, _ t: ReviewPageState.Target) -> [ReviewFlag]? {
+        cache["\(t.id)@\(app.store.view(Branch.self, t.id)?.tip ?? "")"]
+    }
+
     /// nil when no review is recorded for the tree the branch has now.
     func load(_ app: AppModel, _ t: ReviewPageState.Target) async -> [ReviewFlag]? {
         let tip = app.store.view(Branch.self, t.id)?.tip ?? ""

@@ -986,28 +986,30 @@ enum DiffCommands {
                            local: { _, _ in
                                guard let t = pg.target else { throw Refusal("no branch here") }
                                let flags = ReviewFlags.of(app)
-                               Task { @MainActor in
-                                   guard let fs = await flags.load(app, t) else {
-                                       app.runner.say("no findings on this tree — push-ready's review hasn't run since the last edit")
+                               guard let fs = flags.cached(app, t) else {
+                                   Task { @MainActor in
+                                       if await flags.load(app, t) != nil { app.runner.releaseHeld() } else {
+                                           app.runner.dropHeld("review.findings", because: "no findings on this tree — push-ready's review hasn't run since the last edit")
+                                       }
+                                   }
+                                   throw Hold("reading the findings…")
+                               }
+                               if fs.isEmpty { throw Refusal("push-ready's review found nothing here") }
+                               let shown = findingStops(fs)
+                               let items = fs.map { f in
+                                   PickItem(label: [f.path.map { String($0.split(separator: "/").last ?? Substring($0)) }, f.line.map(String.init)]
+                                                .compactMap { $0 }.joined(separator: ":"),
+                                            text: f.text)
+                               }
+                               app.nav.pick("review findings", items) { n in
+                                   guard let s = shown.first(where: { $0.n == n }) else {
+                                       app.runner.say("that finding is on code this diff doesn't show")
                                        return
                                    }
-                                   if fs.isEmpty { app.runner.say("push-ready's review found nothing here"); return }
-                                   let shown = findingStops(fs)
-                                   let items = fs.map { f in
-                                       PickItem(label: [f.path.map { String($0.split(separator: "/").last ?? Substring($0)) }, f.line.map(String.init)]
-                                                    .compactMap { $0 }.joined(separator: ":"),
-                                                text: f.text)
-                                   }
-                                   app.nav.pick("review findings", items) { n in
-                                       guard let s = shown.first(where: { $0.n == n }) else {
-                                           app.runner.say("that finding is on code this diff doesn't show")
-                                           return
-                                       }
-                                       if app.keys.mode != .select { pg.mark = nil }
-                                       goTo(s.i)
-                                       shownFinding = (pg.here?.key ?? "", n)
-                                       app.runner.say(fs[n].text)
-                                   }
+                                   if app.keys.mode != .select { pg.mark = nil }
+                                   goTo(s.i)
+                                   shownFinding = (pg.here?.key ?? "", n)
+                                   app.runner.say(fs[n].text)
                                }
                            }))
 
