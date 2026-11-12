@@ -169,136 +169,231 @@ async function run(key) {
 }
 
 const PAGE = `<!doctype html>
+<html lang="en">
 <meta charset="utf-8">
-<title>LOO-6235 repro</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-6235 staging replay</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   :root {
     color-scheme: light dark;
-    --ink: light-dark(#1b1b1f, #ececf1); --dim: light-dark(#6b6b76, #9a9aa6);
-    --line: light-dark(#e4e4ea, #2e2e36); --card: light-dark(#f6f6f9, #222228);
-    --accent: light-dark(#4f46e5, #8b85ff); --good: light-dark(#15803d, #4ade80); --bad: light-dark(#c2410c, #fb923c);
+    --paper: light-dark(#eef1f6, #131929);
+    --sheet: light-dark(#f9fafc, #1a2135);
+    --ink: light-dark(#1a2238, #e4e8f4);
+    --soft: light-dark(#5a6482, #98a2c0);
+    --rule: light-dark(#c9d0e0, #2c3552);
+    --press: light-dark(#2b3fd6, #8e9bff);
+    --press-ink: light-dark(#ffffff, #10162a);
+    --still: light-dark(#a85b00, #f2b25c);
+    --fixed: light-dark(#0b7d62, #58d6b4);
+    --sans: "Archivo", "Helvetica Neue", Arial, sans-serif;
+    --wire: "IBM Plex Mono", ui-monospace, Menlo, monospace;
   }
   * { box-sizing: border-box; }
-  body { font: 13px/1.4 -apple-system, system-ui, sans-serif; color: var(--ink); margin: 0; padding: 28px 32px; }
-  header { display: flex; align-items: center; gap: 16px; margin-bottom: 22px; }
-  h1 { font-size: 17px; font-weight: 600; margin: 0; flex: 1; }
-  h1 small { display: block; font-size: 12px; font-weight: 400; color: var(--dim); margin-top: 3px; }
-  button { font: inherit; font-weight: 600; color: #fff; background: var(--accent); border: 0; border-radius: 8px; padding: 9px 18px; cursor: pointer; }
-  button:disabled { opacity: .45; cursor: default; }
-  #note { color: var(--dim); font-size: 12px; }
-  #setup { background: var(--card); border-radius: 10px; padding: 14px 16px; margin-bottom: 20px; }
-  #setup:empty { display: none; }
-  #setup pre { margin: 8px 0 0; font: 12px ui-monospace, Menlo, monospace; white-space: pre-wrap; }
-  .scroll { overflow-x: auto; }
-  table { border-collapse: collapse; width: 100%; }
-  th, td { text-align: left; vertical-align: middle; padding: 9px 14px 9px 0; border-bottom: 1px solid var(--line); white-space: nowrap; }
-  th { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--dim); }
-  th span { display: block; text-transform: none; letter-spacing: 0; font-weight: 400; }
-  tr.group td { font-size: 12px; font-weight: 600; color: var(--dim); padding-top: 22px; border-bottom-color: var(--ink); }
-  .path { display: block; font: 11px ui-monospace, Menlo, monospace; color: var(--dim); margin-top: 2px; }
-  .code { font: 600 11px ui-monospace, Menlo, monospace; padding: 2px 6px; border-radius: 5px; background: var(--card); margin-right: 6px; }
-  .expect { color: var(--dim); }
-  .fixed .code { background: color-mix(in srgb, var(--good) 18%, transparent); color: var(--good); }
-  .broken .code { background: color-mix(in srgb, var(--bad) 18%, transparent); color: var(--bad); }
-  .verdict { font-size: 11px; font-weight: 600; margin-left: 8px; }
-  .fixed .verdict { color: var(--good); } .broken .verdict { color: var(--bad); } .other .verdict { color: var(--dim); }
-  .msg { display: block; color: var(--dim); font-size: 11px; margin-top: 3px; max-width: 280px; white-space: normal; }
-  .empty { color: var(--dim); padding: 18px 0; }
-  h2 { font-size: 13px; font-weight: 600; margin: 34px 0 10px; }
-  #trail > details { border: 1px solid var(--line); border-radius: 10px; margin-bottom: 10px; padding: 0 14px; }
-  #trail > details > summary { padding: 10px 0; font-weight: 600; cursor: pointer; }
-  #trail summary span { color: var(--dim); font-weight: 400; margin-left: 8px; }
-  .req { border-top: 1px solid var(--line); }
-  .req > summary { padding: 8px 0; cursor: pointer; font: 12px ui-monospace, Menlo, monospace; }
-  .req .code { margin-right: 8px; }
-  .req h3 { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--dim); margin: 10px 0 4px; }
-  .req pre { margin: 0 0 10px; padding: 10px 12px; background: var(--card); border-radius: 8px; font: 11px/1.45 ui-monospace, Menlo, monospace; overflow-x: auto; max-height: 340px; }
+  html { background: var(--paper); }
+  body { margin: 0; padding: 40px clamp(20px, 5vw, 64px) 96px; color: var(--ink); font: 15px/1.5 var(--sans); font-stretch: 100%; }
+  main { max-width: 1120px; margin: 0 auto; }
+  a { color: inherit; text-decoration-color: var(--rule); text-underline-offset: 3px; }
+  a:hover { text-decoration-color: currentColor; }
+  :focus-visible { outline: 2px solid var(--press); outline-offset: 3px; border-radius: 3px; }
+
+  .top { display: flex; align-items: baseline; justify-content: space-between; gap: 24px; flex-wrap: wrap; color: var(--soft); font-size: 13px; }
+  .top b { color: var(--ink); font-weight: 600; }
+  h1 { font: 650 clamp(30px, 4.6vw, 52px)/1.06 var(--sans); font-stretch: 112%; letter-spacing: -0.015em; margin: 28px 0 14px; max-width: 20ch; text-wrap: balance; }
+  h1.still { color: var(--still); } h1.fixed { color: var(--fixed); }
+  .lede { max-width: 62ch; color: var(--soft); margin: 0 0 26px; }
+  .press { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  button.run { font: 600 15px var(--sans); font-stretch: 108%; color: var(--press-ink); background: var(--press); border: 0; border-radius: 4px; padding: 13px 24px; cursor: pointer; box-shadow: 0 3px 0 color-mix(in srgb, var(--press) 55%, var(--ink)); transition: transform .08s, box-shadow .08s; }
+  button.run:active:not(:disabled) { transform: translateY(3px); box-shadow: none; }
+  button.run:disabled { opacity: .4; cursor: default; }
+  #note { color: var(--soft); font-size: 13px; }
+  #setup { margin-top: 22px; padding: 16px 18px; background: var(--sheet); border-left: 3px solid var(--still); max-width: 78ch; }
+  #setup[hidden] { display: none; }
+  #setup pre { margin: 10px 0 0; font: 12.5px var(--wire); white-space: pre-wrap; word-break: break-all; }
+
+  section { margin-top: 56px; }
+  h2 { font: 600 21px/1.2 var(--sans); font-stretch: 108%; margin: 0; }
+  .branch { margin: 6px 0 16px; font-size: 13px; color: var(--soft); }
+  .branch a { font-family: var(--wire); font-size: 12.5px; color: var(--ink); }
+  .scroll { overflow-x: auto; background: var(--sheet); border: 1px solid var(--rule); }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 12px 18px; border-bottom: 1px solid var(--rule); white-space: nowrap; vertical-align: top; }
+  tr:last-child td { border-bottom: 0; }
+  th { font-size: 12.5px; font-weight: 500; color: var(--soft); }
+  th small { display: block; font-size: 11.5px; font-weight: 400; }
+  th:nth-child(1) { width: 32%; } th:nth-child(2) { width: 24%; } th:nth-child(3) { width: 21%; }
+  td.what { font-weight: 550; }
+  .line { display: block; font: 12px var(--wire); font-weight: 400; color: var(--soft); margin-top: 3px; }
+  td.expect { color: var(--soft); font-size: 13.5px; }
+  td.expect b, td.got b { font: 500 13.5px var(--wire); margin-right: 8px; color: var(--ink); }
+  td.got { border-left: 1px solid var(--rule); font-size: 13.5px; }
+  td.got.still, td.got.still b { color: var(--still); }
+  td.got.fixed, td.got.fixed b { color: var(--fixed); }
+  td.got.latest { background: color-mix(in srgb, currentColor 7%, transparent); font-weight: 600; }
+  td.got .why { display: block; max-width: 30ch; white-space: normal; font-size: 12px; font-weight: 400; color: var(--soft); margin-top: 3px; }
+  td.none { border-left: 1px solid var(--rule); color: var(--soft); font-size: 13px; }
+
+  .trailhead { display: flex; align-items: baseline; justify-content: space-between; gap: 20px; flex-wrap: wrap; margin-bottom: 14px; }
+  .tabs { display: flex; gap: 4px; flex-wrap: wrap; }
+  .tabs button { font: 500 13px var(--sans); color: var(--soft); background: none; border: 1px solid var(--rule); border-radius: 4px; padding: 6px 12px; cursor: pointer; }
+  .tabs button[aria-pressed="true"] { color: var(--press-ink); background: var(--ink); border-color: var(--ink); }
+  ol.trail { list-style: none; margin: 0; padding: 0; counter-reset: req; background: var(--sheet); border: 1px solid var(--rule); }
+  ol.trail > li { counter-increment: req; border-bottom: 1px solid var(--rule); }
+  ol.trail > li:last-child { border-bottom: 0; }
+  ol.trail summary { display: grid; grid-template-columns: 2.2em 3.2em 1fr auto; gap: 12px; align-items: baseline; padding: 11px 18px; cursor: pointer; list-style: none; font: 12.5px var(--wire); }
+  ol.trail summary::-webkit-details-marker { display: none; }
+  ol.trail summary::before { content: counter(req); color: var(--soft); }
+  ol.trail summary .st { font-weight: 500; }
+  ol.trail li.ok .st { color: var(--fixed); } ol.trail li.no .st { color: var(--still); }
+  ol.trail summary .u { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  ol.trail summary .t { color: var(--soft); font-family: var(--sans); font-size: 12.5px; }
+  ol.trail details[open] summary { background: color-mix(in srgb, var(--ink) 5%, transparent); }
+  .exchange { display: grid; grid-template-columns: 1fr 1fr; gap: 0; border-top: 1px solid var(--rule); }
+  .exchange > div { padding: 14px 18px 18px; min-width: 0; }
+  .exchange > div + div { border-left: 1px solid var(--rule); }
+  .exchange h3 { font: 600 12.5px var(--sans); margin: 0 0 8px; color: var(--soft); }
+  .exchange pre { margin: 0 0 12px; font: 12px/1.5 var(--wire); white-space: pre-wrap; word-break: break-word; max-height: 420px; overflow: auto; }
+  .hint { color: var(--soft); padding: 18px; background: var(--sheet); border: 1px solid var(--rule); }
+  @media (max-width: 720px) { .exchange { grid-template-columns: 1fr; } .exchange > div + div { border-left: 0; border-top: 1px solid var(--rule); } }
+  @media (prefers-reduced-motion: reduce) { button.run { transition: none; } }
 </style>
-<header>
-  <h1>API requests on a disabled sending domain<small>LOO-6235 · staging · <span id="team">run once before the deploy and once after</span></small></h1>
-  <span id="note"></span>
-  <button id="run">Run the requests</button>
-</header>
-<div id="setup"></div>
-<div class="scroll"><table id="grid"></table></div>
-<h2>Audit trail</h2>
-<div id="trail"></div>
+<main>
+  <div class="top">
+    <span><b>LOO-6235</b> replayed against staging, <span id="host">__BASE__</span></span>
+    <span id="team"></span>
+  </div>
+  <h1 id="verdict">Nothing run yet.</h1>
+  <p class="lede" id="lede">Seven API requests that a team with a disabled sending domain gets wrong answers to. Run them now, deploy, then run them again and compare.</p>
+  <div class="press"><button class="run" id="run">Run the requests</button><span id="note" role="status"></span></div>
+  <div id="setup" hidden>This page has no API key yet. Store the key of a staging team whose sending domain is disabled, then come back:<pre>security add-generic-password -s __SERVICE__ -a loops -w</pre></div>
+  <div id="groups"></div>
+  <section>
+    <div class="trailhead"><h2>Every request, in the order it was sent</h2><div class="tabs" id="tabs"></div></div>
+    <div id="trail"></div>
+  </section>
+</main>
 <script>
 const STEPS = __STEPS__;
+const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
-const expect = (e) => '<td class="expect"><span class="code">' + e.status + "</span>" + esc(e.text) + "</td>";
+const clock = (at) => new Date(at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 const matches = (r, e) => r.status === e.status && (!e.match || (r.message ?? "").includes(e.match));
-function cell(step, r) {
-  if (!r) return "<td></td>";
-  if (r.status === null) return '<td class="other"><span class="msg">' + esc(r.message) + "</span></td>";
-  const kind = matches(r, step.after) ? "fixed" : matches(r, step.before) ? "broken" : "other";
-  const word = { fixed: "fixed", broken: "not yet", other: "unexpected" }[kind];
-  return '<td class="' + kind + '"><span class="code">' + (r.status || "ERR") + '</span><span class="verdict">' + word + "</span>" +
-    (kind === "other" ? '<span class="msg">' + esc(r.message) + "</span>" : "") + "</td>";
+const kindOf = (step, r) => !r || r.status === null ? "skipped" : matches(r, step.after) ? "fixed" : matches(r, step.before) ? "still" : "odd";
+let busy = false, last = "", shownRun = null, openReqs = new Set();
+
+function verdict(run) {
+  if (!run) return ["", "Nothing run yet.", "Seven API requests that a team with a disabled sending domain gets wrong answers to. Run them now, deploy, then run them again and compare."];
+  const kinds = STEPS.map((s) => ({ pr: s.pr, kind: kindOf(s, run.results[s.id]) }));
+  const ran = kinds.filter((k) => k.kind !== "skipped");
+  const count = (pr, kind) => kinds.filter((k) => (!pr || k.pr === pr) && k.kind === kind).length;
+  const fixed = count(0, "fixed"), odd = count(0, "odd"), skipped = count(0, "skipped");
+  const tail = (skipped ? skipped + " could not run; the table says why. " : "") + (odd ? odd + " answered something neither expected; read the trail below." : "");
+  if (ran.length && fixed === ran.length) return ["fixed", "All " + fixed + " requests are fixed.", tail || "Staging now answers every request the way the two branches intend."];
+  if (!fixed) return ["still", "Nothing has changed yet.", tail || "Staging still answers the way the ticket describes. Deploy, then run the requests again."];
+  if (count(1, "fixed") && !count(1, "still") && !count(2, "fixed")) return ["", "Drafting works again. Send and publish still say “not verified”.", tail || "That is the first branch deployed without the second."];
+  return ["", fixed + " of " + ran.length + " requests are fixed.", tail || "The table shows which ones still answer the old way."];
 }
-let busy = false;
+
+function cell(step, r, latest) {
+  const kind = kindOf(step, r);
+  if (!r) return '<td class="none"></td>';
+  if (kind === "skipped") return '<td class="none">' + esc(r.message.replace(/^skipped: /, "Not run: ")) + "</td>";
+  const word = { fixed: "fixed", still: "same as today", odd: "unexpected" }[kind];
+  return '<td class="got ' + kind + (latest ? " latest" : "") + '"><b>' + (r.status || "failed") + "</b>" + word +
+    (kind === "odd" ? '<span class="why">' + esc(r.message) + "</span>" : "") + "</td>";
+}
+
 function render(state) {
-  document.getElementById("setup").innerHTML = state.hasKey ? "" :
-    "No API key yet. Store the key of a staging team whose sending domain is disabled:<pre>security add-generic-password -s __SERVICE__ -a loops -w</pre>";
-  document.getElementById("run").disabled = busy || !state.hasKey;
-  const runs = state.runs;
-  if (runs.length) document.getElementById("team").textContent = runs[runs.length - 1].team;
-  let html = "<tr><th>Request</th><th>Today</th><th>Fixed</th>" +
-    runs.map((r, i) => "<th>Run " + (i + 1) + "<span>" + esc(new Date(r.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })) + "</span></th>").join("") +
-    (runs.length ? "" : "<th>Runs</th>") + "</tr>";
-  for (const pr of [1, 2]) {
-    html += '<tr class="group"><td colspan="' + (3 + Math.max(runs.length, 1)) + '">' +
-      (pr === 1 ? "PR 1 · allow content api drafts on a disabled domain" : "PR 2 · say when the sending domain is disabled") + "</td></tr>";
-    STEPS.filter((x) => x.pr === pr).forEach((s, i) => {
-      const req = runs.map((r) => r.results[s.id]?.request).find(Boolean) ?? "";
-      html += "<tr><td>" + esc(s.label) + '<span class="path">' + esc(req) + "</span></td>" + expect(s.before) + expect(s.after) +
-        runs.map((r) => cell(s, r.results[s.id])).join("") +
-        (runs.length || i || pr === 2 ? (runs.length ? "" : "<td></td>") : '<td class="empty" rowspan="1">no runs yet</td>') + "</tr>";
-    });
-  }
-  document.getElementById("grid").innerHTML = html;
+  const runs = state.runs, latest = runs[runs.length - 1];
+  $("setup").hidden = state.hasKey;
+  $("run").disabled = busy || !state.hasKey;
+  $("team").textContent = latest ? "Key belongs to " + latest.team : "";
+  const [tone, head, lede] = verdict(latest);
+  $("verdict").className = tone; $("verdict").textContent = head; $("lede").textContent = lede;
+
+  $("groups").innerHTML = state.branches.map((b) => {
+    const rows = STEPS.filter((s) => s.pr === b.pr).map((s) => {
+      const line = runs.map((r) => r.results[s.id]?.request).find(Boolean) ?? "";
+      return '<tr><td class="what">' + esc(s.label) + '<span class="line">' + esc(line) + "</span></td>" +
+        '<td class="expect"><b>' + s.before.status + "</b>" + esc(s.before.text) + "</td>" +
+        '<td class="expect"><b>' + s.after.status + "</b>" + esc(s.after.text) + "</td>" +
+        (runs.length ? runs.map((r, i) => cell(s, r.results[s.id], i === runs.length - 1)).join("") : '<td class="none">not run yet</td>') + "</tr>";
+    }).join("");
+    return "<section><h2>" + esc(b.title) + '</h2><p class="branch">Fixed by <a href="' + esc(b.href) + '">' + esc(b.name) + "</a>" +
+      (b.tip ? ", now at " + esc(b.tip) : ", which is no longer a local branch") + '</p><div class="scroll"><table><tr><th>Request</th><th>Answers today</th><th>Should answer</th>' +
+      (runs.length ? runs.map((r, i) => "<th>Run " + (i + 1) + "<small>" + esc(clock(r.at)) + "</small></th>").join("") : "<th>Runs</th>") +
+      "</tr>" + rows + "</table></div></section>";
+  }).join("");
+
+  if (!runs.some((r) => r.at === shownRun)) shownRun = latest?.at ?? null;
   renderTrail(runs);
 }
-const pretty = (v) => esc(typeof v === "string" ? v : JSON.stringify(v, null, 2));
+
+const pretty = (v) => esc(v == null ? "(none)" : typeof v === "string" ? v : JSON.stringify(v, null, 2));
 function renderTrail(runs) {
-  const el = document.getElementById("trail");
-  const open = new Set([...el.querySelectorAll("details[open]")].map((d) => d.dataset.k));
-  if (!runs.length) { el.innerHTML = '<div class="empty">Every request and response of each run is listed here.</div>'; return; }
-  el.innerHTML = runs.map((r, i) => {
-    const k = "run" + r.at;
-    const reqs = (r.trail ?? []).map((t, j) => {
-      const kk = k + ":" + j, ok = t.status >= 200 && t.status < 300;
-      return '<details class="req ' + (ok ? "fixed" : "broken") + '" data-k="' + kk + '"' + (open.has(kk) ? " open" : "") + ">" +
-        '<summary><span class="code">' + (t.status || "ERR") + "</span>" + esc(t.method) + " " + esc(t.url) + "<span>" + t.ms + " ms · " + esc(new Date(t.at).toLocaleTimeString()) + "</span></summary>" +
-        "<h3>Request headers</h3><pre>" + pretty(t.requestHeaders) + "</pre>" +
-        "<h3>Request body</h3><pre>" + (t.requestBody ? pretty(t.requestBody) : "(none)") + "</pre>" +
-        "<h3>Response " + (t.status || "error") + "</h3><pre>" + pretty({ headers: t.responseHeaders ?? {}, body: t.responseBody ?? null }) + "</pre></details>";
-    }).join("");
-    const latest = i === runs.length - 1;
-    return '<details data-k="' + k + '"' + (open.has(k) || (latest && !el.querySelector('[data-k="' + k + '"]')) ? " open" : "") + "><summary>Run " + (i + 1) +
-      "<span>" + esc(new Date(r.at).toLocaleString()) + " · " + esc(r.team) + " · " + (r.trail ?? []).length + " requests</span></summary>" + reqs + "</details>";
-  }).reverse().join("");
+  $("tabs").innerHTML = runs.map((r, i) => '<button data-at="' + esc(r.at) + '" aria-pressed="' + (r.at === shownRun) + '">Run ' + (i + 1) + ", " + esc(clock(r.at)) + "</button>").join("");
+  const run = runs.find((r) => r.at === shownRun);
+  if (!run) { $("trail").innerHTML = '<p class="hint">After a run, each request it sent is listed here with its full response.</p>'; return; }
+  $("trail").innerHTML = '<ol class="trail">' + (run.trail ?? []).map((t, j) => {
+    const k = run.at + ":" + j, ok = t.status >= 200 && t.status < 300;
+    return '<li class="' + (ok ? "ok" : "no") + '"><details data-k="' + k + '"' + (openReqs.has(k) ? " open" : "") + ">" +
+      '<summary><span class="st">' + (t.status || "failed") + '</span><span class="u">' + esc(t.method) + " " + esc(t.url) + '</span><span class="t">' + t.ms + " ms</span></summary>" +
+      '<div class="exchange"><div><h3>Sent at ' + esc(new Date(t.at).toLocaleTimeString()) + "</h3><pre>" + esc(t.method) + " " + esc(t.url) + "\\n" +
+      Object.entries(t.requestHeaders ?? {}).map(([h, v]) => esc(h) + ": " + esc(v)).join("\\n") + "</pre><h3>Body</h3><pre>" + pretty(t.requestBody) + "</pre></div>" +
+      "<div><h3>Answered " + (t.status || "nothing") + " in " + t.ms + " ms</h3><pre>" +
+      Object.entries(t.responseHeaders ?? {}).map(([h, v]) => esc(h) + ": " + esc(v)).join("\\n") + "</pre><h3>Body</h3><pre>" + pretty(t.responseBody) + "</pre></div></div></details></li>";
+  }).join("") + "</ol>";
 }
-let last = "";
+
+$("tabs").onclick = (e) => { const at = e.target.dataset?.at; if (at) { shownRun = at; renderTrail(JSON.parse(last).runs); } };
+$("trail").addEventListener("toggle", (e) => { const k = e.target.dataset?.k; if (k) e.target.open ? openReqs.add(k) : openReqs.delete(k); }, true);
+
 async function load() {
   if (busy) return;
   const text = await (await fetch("/state")).text();
   if (text !== last) { last = text; render(JSON.parse(text)); }
 }
-document.getElementById("run").onclick = async () => {
-  const btn = document.getElementById("run"), note = document.getElementById("note");
-  busy = true; btn.disabled = true; note.textContent = "running…";
+$("run").onclick = async () => {
+  busy = true; $("run").disabled = true; $("note").textContent = "Running the requests…";
+  const started = Date.now();
   try {
-    const state = await (await fetch("/run", { method: "POST" })).json();
-    busy = false; note.textContent = state.error ?? ""; render(state);
-  } catch (e) { busy = false; note.textContent = String(e); btn.disabled = false; }
+    const text = await (await fetch("/run", { method: "POST" })).text();
+    const state = JSON.parse(text);
+    busy = false; last = text; shownRun = null;
+    $("note").textContent = state.error ?? "Ran " + (state.runs[state.runs.length - 1]?.trail?.length ?? 0) + " requests in " + ((Date.now() - started) / 1000).toFixed(1) + " s";
+    render(state);
+  } catch (e) { busy = false; $("note").textContent = "The run failed: " + e.message; $("run").disabled = false; }
 };
 load();
 setInterval(load, 3000);
 document.addEventListener("visibilitychange", load);
-</script>`;
+</script>
+</html>`;
 
-const state = () => ({ hasKey: Boolean(readKey()), runs: loadRuns() });
+const REPO = process.env.REPRO_REPO ?? join(homedir(), "coding", "loops");
+const BRANCHES = [
+  { pr: 1, name: "allow-content-api-drafts-on-a-disabled-domain", title: "Drafting on a disabled domain" },
+  { pr: 2, name: "say-when-the-sending-domain-is-disabled", title: "Saying the domain is disabled" },
+];
+
+function branchTip(name) {
+  try {
+    return execFileSync("git", ["-C", REPO, "rev-parse", "--short=10", `refs/heads/${name}`], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch {
+    return null;
+  }
+}
+
+const state = () => ({
+  hasKey: Boolean(readKey()),
+  runs: loadRuns(),
+  branches: BRANCHES.map((b) => ({ ...b, tip: branchTip(b.name), href: `canopy://v2/b/loops/${b.name}` })),
+});
 let running = false;
 
 createServer(async (req, res) => {
