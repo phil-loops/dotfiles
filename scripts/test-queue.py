@@ -62,5 +62,9 @@ check("a run on a gate says the gate", queue.gate_step([{"event": "setup", "step
 check("between gates it says the setup word", queue.gate_step([{"event": "start", "gate": "env"}, {"event": "done", "gate": "env"}]) == "starting")
 check("elapsed parses", queue._etime("01:34:20") == 5660 and queue._etime("16-15:35:33") == 16 * 86400 + 15 * 3600 + 35 * 60 + 33 and queue._etime("05:07") == 307)
 
+check("a holder's pid is killable, named by its gate", queue.killable(q, 200) == {"kind": "ticket", "name": "feat"})
+check("un-queued heavy work is killable by name", queue.killable(q, 400) == {"kind": "outside", "name": "seed-gen"})
+check("any other pid is not", queue.killable(q, 500) is None and queue.killable(q, 190) is None)
+
 print(f"\n{'OK' if not failures else 'FAIL'} — {failures} failure(s)")
 sys.exit(1 if failures else 0)

@@ -183,3 +183,36 @@ def compose(ht, procs, gates, now=None, idle_after=IDLE_AFTER_S):
 def get(req, u):
     answer = compose(heavy_turn(), processes(), gate_runs_now())
     req._send(200, json.dumps({"ok": True, **answer}))
+
+
+def killable(answer, pid):
+    """The row a pid is, if the queue page may kill it: a ticket's own process (held or waiting)
+    or heavy work outside the queue — never an arbitrary pid. Pure."""
+    for t in answer.get("holders", []) + answer.get("waiters", []):
+        if t.get("pid") == pid:
+            return {"kind": "ticket", "name": (t.get("gate") or {}).get("branch") or t.get("cmd") or t.get("cls")}
+    for o in answer.get("outside", []):
+        if o.get("pid") == pid:
+            return {"kind": "outside", "name": o.get("name")}
+    return None
+
+
+def kill(req, raw):
+    """POST /queue-kill {pid} — Phil's x on a queue row: SIGTERM to a slot holder, a waiter or
+    un-queued heavy work; refused for any pid the queue doesn't show."""
+    import signal
+    d = json.loads(raw or "{}")
+    try:
+        pid = int(d.get("pid") or 0)
+    except (TypeError, ValueError):
+        pid = 0
+    if pid <= 1:
+        return req._send(400, json.dumps({"ok": False, "err": "no pid"}))
+    row = killable(compose(heavy_turn(), processes(), gate_runs_now()), pid)
+    if not row:
+        return req._send(200, json.dumps({"ok": False, "err": f"pid {pid} isn't a slot holder, a waiter or un-queued heavy work — nothing killed"}))
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except OSError as e:
+        return req._send(200, json.dumps({"ok": False, "err": f"couldn't signal {pid}: {e.strerror or e}"}))
+    req._send(200, json.dumps({"ok": True, "pid": pid, **row}))
