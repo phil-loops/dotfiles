@@ -526,7 +526,7 @@ def gather(branch):
     files = diff_files(floor, branch)
     subjects = [s for s in _git("log", "--reverse", "--format=%s", f"{floor}..{branch}").splitlines() if s]
     tree = _git("rev-parse", f"{branch}^{{tree}}").strip()
-    green = sf.cfg(f"branch.{branch}.stack-gates-green-tree") or sf.cfg(f"stack-branch.{branch}.gates-green-tree")
+    green = sf.cfg(f"branch.{branch}.stack-gates-green-tree")
     return {
         "branch": branch, "description": sf.cfg(f"branch.{branch}.description"), "subjects": subjects,
         "hand": load_hand(sf.cfg(f"branch.{branch}.{PACKET_KEY}")), "plan": plan if len(plan) > 1 else [],

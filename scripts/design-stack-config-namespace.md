@@ -1,5 +1,12 @@
 # stack-branch.* → branch.<b>.stack-* namespace migration
 
+> **Done 2026-11-12.** Writers went target-only on 2026-11-09 (db0c8236), every repo was swept
+> (`stack-config-move --check` clean in loops, dotfiles and monotoad), and on 2026-11-12 every
+> reader — `srv/`, the stack-* scripts, `stack-config-lib.zsh`, the fixtures — dropped the
+> fallback arm. One spelling remains: `branch.<b>.stack-<key>`. `stack-doctor --prune` still
+> sweeps any `stack-branch.*` residue it finds; `stack-config-move` stays as the tool that
+> would move a stray key. What follows is the plan as it was written.
+
 ## Why
 
 `stack-branch.<b>.*` lives outside the one config namespace git manages. `git branch -D`
