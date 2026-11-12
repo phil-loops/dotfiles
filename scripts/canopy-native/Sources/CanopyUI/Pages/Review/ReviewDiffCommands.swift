@@ -592,13 +592,17 @@ enum DiffCommands {
 
         // ── hidden lines ──
 
-        r.register(Command(id: "review.expand", title: "Show 20 more hidden lines", scope: .gap, verb: .main, label: "more",
+        // ↵ on a gap shows all of it: reading the function around a change is the point, and 20 lines at a
+        // time made a 52-line gap three presses (Phil, 2026-11-02, models/team-membership.ts)
+        r.register(Command(id: "review.expand", title: "Show the hidden lines", scope: .gap, verb: .main, label: "show",
                            available: { $0?.hasPrefix("g|") ?? false },
                            local: { key, _ in
                                guard let key, let cut = key.lastIndex(of: "|"), let at = Int(key[key.index(after: cut)...]) else { return }
                                let path = String(key[key.index(key.startIndex, offsetBy: 2)..<cut])
+                               let gap = pg.fileOf(path)?.gaps.first { $0.at == at }
+                               let n = gap.map { g in g.last.map { $0 - g.first + 1 } ?? ReviewPageState.wholeRest } ?? 20
                                Task { @MainActor in
-                                   await pg.reveal(path, at: at)
+                                   await pg.reveal(path, at: at, n: n)
                                    // a gap that just closed takes the cursor to the line it ended on, not back to the top
                                    guard let fv = pg.fileOf(path), !fv.gaps.contains(where: { $0.at == at }), !fv.file.hunks.isEmpty else { return }
                                    let end = at < fv.file.hunks.count ? fv.file.hunks[at].lines.first : fv.file.hunks[fv.file.hunks.count - 1].lines.last

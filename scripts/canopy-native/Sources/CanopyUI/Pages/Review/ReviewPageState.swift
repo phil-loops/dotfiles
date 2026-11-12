@@ -609,6 +609,9 @@ public final class ReviewPageState: ShipHost {
         context = (key, files)
     }
 
+    /// A gap that runs to the end of a file not read yet has no size: revealing this many shows all of it.
+    static let wholeRest = 1_000_000
+
     /// Show `n` more hidden lines at a gap; returns once the file's text is here.
     public func reveal(_ path: String, at: Int, n: Int = 20) async {
         let key = contextKey
