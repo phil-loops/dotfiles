@@ -280,9 +280,11 @@ def _signs():
     return _out("config", "--get", "commit.gpgsign") == "true"
 
 
-def _rebuild(old, parents, message, sign):
-    """commit-tree on old's tree + author, onto parents, with message (None = keep old's)."""
-    tree = _out("rev-parse", f"{old}^{{tree}}")
+def _rebuild(old, parents, message, sign, tree_of=None):
+    """commit-tree on old's tree + author, onto parents, with message (None = keep old's);
+    `tree_of` names another commit whose tree to take (a fold keeps the lower commit's author
+    and the upper commit's tree)."""
+    tree = _out("rev-parse", f"{tree_of or old}^{{tree}}")
     an, ae, ad = _git("log", "-1", "--format=%an%x00%ae%x00%aD", old).stdout.rstrip("\n").split("\x00")
     msg = message if message is not None else _git("log", "-1", "--format=%B", old).stdout
     cmd = ["git", "commit-tree", tree, *[a for p in parents for a in ("-p", p)], *(["-S"] if sign else [])]
@@ -490,7 +492,28 @@ def save(req, raw):
             return _refuse(req, 409, f"{row['short']} is {row['locked']}")
         changes[row["sha"]] = msg
 
-    if changes and d.get("head") and d["head"] != tip:
+    # fold: each listed commit is absorbed into the one below it — one commit with the upper's tree,
+    # the lower's author, and both messages. Trees above are untouched, so no replay can conflict
+    # and the tip's tree (the gates verdict's key) stays. Undo is the same journal entry.
+    order = [r["sha"] for r in rows]
+    fold = []
+    for f in d.get("fold") or []:
+        f = (f or "").strip()
+        row = by_sha.get(f) or next((r for r in rows if f and r["sha"].startswith(f)), None)
+        if not row:
+            return _refuse(req, 409, f"{f[:10]} is no longer one of {branch}'s commits — the branch moved; reload", moved=True)
+        i = order.index(row["sha"])
+        if i == 0:
+            return _refuse(req, 400, f"{row['short']} is the branch's first commit — there is nothing below it to fold into")
+        below = rows[i - 1]
+        for r in (row, below):
+            if r["locked"]:
+                return _refuse(req, 409, f"{r['short']} is {r['locked']}")
+            if r["merge"]:
+                return _refuse(req, 409, f"{r['short']} is a merge commit — fold by hand")
+        fold.append(row["sha"])
+
+    if (changes or fold) and d.get("head") and d["head"] != tip:
         return _refuse(req, 409, f"{branch} moved since the editor loaded it — reload to see the new commits",
                        moved=True, head=tip)
     for sha, exp in (d.get("expect") or {}).items():
@@ -499,32 +522,50 @@ def save(req, raw):
 
     entry = {"id": uuid.uuid4().hex[:12], "kind": "edit", "branch": branch, "oldTip": tip, "newTip": tip}
     warnings, new_tip, rewritten = [], tip, {}
-    if changes:
-        order = [r["sha"] for r in rows]
-        first = min(order.index(s) for s in changes)
+    if changes or fold:
+        first = min([order.index(s) for s in changes] + [order.index(s) - 1 for s in fold])
         sign = _signs()
+        messages = {}   # what each commit's message becomes, for the journal
         try:
             parents = _out("log", "-1", "--format=%P", order[first]).split()
-            for sha in order[first:]:
+            i = first
+            while i < len(order):
+                sha = order[i]
                 if sha != order[first] and len(_out("rev-list", "--parents", "-1", sha).split()) > 2:
                     raise RuntimeError(f"{sha[:10]} above the edit is a merge commit — reword by hand")
-                new = _rebuild(sha, parents if sha == order[first] else [new_tip], changes.get(sha), sign)
-                rewritten[sha] = new
+                msg = changes.get(sha)
+                absorbed = []
+                while i + 1 < len(order) and order[i + 1] in fold:
+                    i += 1
+                    absorbed.append(order[i])
+                if absorbed:
+                    parts = [msg if msg is not None else _git("log", "-1", "--format=%B", sha).stdout]
+                    parts += [changes.get(a) if changes.get(a) is not None else _git("log", "-1", "--format=%B", a).stdout for a in absorbed]
+                    msg = "\n\n".join(p.strip() for p in parts if p.strip()) + "\n"
+                new = _rebuild(sha, parents if sha == order[first] else [new_tip], msg, sign, tree_of=absorbed[-1] if absorbed else None)
+                for s in [sha] + absorbed:
+                    rewritten[s] = new
+                    messages[s] = msg
                 new_tip = new
+                i += 1
         except RuntimeError as e:
             return _refuse(req, 500, str(e))
-        r = _git("update-ref", "-m", f"stack-outline: reword {len(changes)}", f"refs/heads/{branch}", new_tip, tip)
+        what = f"reword {len(changes)}" if not fold else f"fold {len(fold)}" + (f", reword {len(changes)}" if changes else "")
+        r = _git("update-ref", "-m", f"stack-outline: {what}", f"refs/heads/{branch}", new_tip, tip)
         if r.returncode != 0:
             return _refuse(req, 409, f"{branch} moved while saving — nothing was written; reload", moved=True)
         entry["newTip"] = new_tip
+        touched = [s for s in order if s in changes or s in fold]
         entry["commits"] = [{"old": s, "new": rewritten[s], "before": _git("log", "-1", "--format=%B", s).stdout,
-                             "after": changes[s]} for s in changes]
+                             "after": messages.get(s) or changes.get(s, "")} for s in touched]
+        if fold:
+            entry["fold"] = fold
     _apply_fields(branch, d, entry)
     if entry.get("commits") or any(k in entry for k in ("description", *_PR_KEYS)):
         _journal(entry)
     repostate.invalidate()
-    job = _start_reseat(branch, tip, new_tip, rewritten) if changes else None
-    _send(req, 200, {"ok": True, "newTip": new_tip, "oldTip": tip, "changed": len(changes),
+    job = _start_reseat(branch, tip, new_tip, rewritten) if (changes or fold) else None
+    _send(req, 200, {"ok": True, "newTip": new_tip, "oldTip": tip, "changed": len(changes), "folded": len(fold),
                      "fields": [k for k in ("description", *_PR_KEYS) if k in entry],
                      "warnings": warnings, "reseat": job, "journal": entry["id"]})
 
