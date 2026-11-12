@@ -116,12 +116,14 @@ def _ff_main(tip):
         ctx.log(f"focus-sync: local main fast-forwarded in {wt} {cur[:9]} → {tip[:9]}")
 
 
-def _restack(project):
+def _restack(project, hold=()):
     wt = restack.worktree()
     _git("-C", wt, "checkout", "--detach")
     with open(os.path.join(ctx.ROOT, "restack.log"), "ab") as lf:
-        rc = subprocess.run([os.path.join(ctx.SCRIPTS, "stack-restack"), project, "--no-claude"],
-                            cwd=wt, stdout=lf, stderr=lf).returncode
+        cmd = [os.path.join(ctx.SCRIPTS, "stack-restack"), project, "--no-claude"]
+        if hold:
+            cmd.append("--hold=" + ",".join(hold))
+        rc = subprocess.run(cmd, cwd=wt, stdout=lf, stderr=lf).returncode
     parked, current = restack._parked()
     if parked:
         restack._clear_park()
@@ -143,11 +145,21 @@ def _sync_project(project, st, cwds):
         return False
     roots = [b for b in branches if _parent(b) == "main"]
     open_prs = sync._open_pr_heads()
-    if any(r in open_prs for r in roots):
-        st["projects"][project] = {"state": "skipped", "why": "its base has an open PR"}
+    # A published root (an open PR, or pushed to origin and not merged) must not move — but only
+    # its own subtree is held; the other roots still contract and restack (2026-10-27: #11228
+    # merged and its forest sat skipped wholesale because a sibling root had an open PR).
+    held = [r for r in roots if r in open_prs or (_tip(f"refs/remotes/origin/{r}") and not sync._already_merged(r))]
+
+    def under_hold(b):
+        while b and b != "main":
+            if b in held:
+                return True
+            b = _parent(b)
         return False
-    if any(_tip(f"refs/remotes/origin/{r}") and not sync._already_merged(r) for r in roots):
-        st["projects"][project] = {"state": "skipped", "why": "its base is pushed to origin"}
+
+    if held and all(under_hold(b) for b in behind):
+        why = "its base has an open PR" if any(r in open_prs for r in held) else "its base is pushed to origin"
+        st["projects"][project] = {"state": "skipped", "why": why}
         return False
     for r in roots:
         if r in behind and sync._already_merged(r) and not _gh_merged(r):
@@ -158,10 +170,10 @@ def _sync_project(project, st, cwds):
     if why:
         st["projects"][project] = {"state": "waiting", "why": why}
         return False
-    ctx.log(f"focus-sync: restacking {project} ({len(behind)} behind)")
-    rc, current = _restack(project)
+    ctx.log(f"focus-sync: restacking {project} ({len(behind)} behind{', holding ' + ', '.join(held) if held else ''})")
+    rc, current = _restack(project, hold=held)
     branches = _members(project)
-    still = _behind(branches)
+    still = [b for b in _behind(branches) if not under_hold(b)]   # a held subtree is behind on purpose
     now = int(time.time())
     if current:
         st["projects"][project] = {"state": "conflict", "sig": _sig(branches), "at": now, "branch": current,
