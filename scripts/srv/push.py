@@ -161,7 +161,7 @@ def gates(req, raw):
     # re-running proves nothing new — unless that green skipped a gate this run asks for:
     # a quick green never answers a full run. force:true opts out (a suspected-flaky green).
     tree = _tree(branch) if branch else ""
-    if not d.get("force") and tree and _green_tree(branch) == tree and _green_skipped(branch) <= asked:
+    if not d.get("force") and tree and verdict_stands(branch) and _green_skipped(branch) <= asked:
         return req._send(200, json.dumps({"ok": True, "cached": True, "gates": []}))
     # --fix is OPT-IN (fix:true): a red gate with a remediation (fresh → rebase, format →
     # oxfmt) gets one auto-fix attempt before the verdict. Default false since 2026-08-19 —
@@ -316,8 +316,48 @@ def gates_progress(req, u):
 # never client-claimed. Keyed by TREE sha, not commit: the gates read file contents only, so
 # a message reword must not relock push — the tip-sha key stranded green on rewords
 # (2026-07-12). Config, not process memory, so a server bounce doesn't relock push either.
+# Beside it, gates-green-delta seals the branch's own hunks, so a forward rebase or catch-up
+# merge that leaves them byte-identical carries the verdict (verdict_stands → "delta").
 def _green_tree(branch):
     return repostate.snapshot().branch_key(branch, "gates-green-tree")
+
+
+_HUNK_HEADER = re.compile(r"^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@", re.MULTILINE)
+
+
+def _delta_id(branch, snap=None):
+    """sha256 of the branch's own diff against its base (the parent, a trunk parent as origin's
+    copy) with index lines and hunk offsets stripped — git patch-id's idea. Context lines stay
+    in on purpose: main landing INSIDE a hunk's context changes the id, which is exactly when a
+    carried verdict should lapse."""
+    snap = snap or repostate.snapshot()
+    base = snap.parent(branch)
+    if base == snap.main() and snap.remote(base):
+        base = f"origin/{base}"
+
+    def compute():
+        diff = ctx.run(["git", "diff", "--no-color", f"{base}...{branch}"]).stdout
+        kept = [ln for ln in diff.splitlines() if not ln.startswith("index ")]
+        return hashlib.sha256(_HUNK_HEADER.sub("@@", "\n".join(kept)).encode("utf-8", "replace")).hexdigest()
+
+    return snap.once(("delta-id", branch, snap.local(branch), base), compute)
+
+
+def verdict_stands(branch, snap=None):
+    """How the gates verdict for <branch> holds — the ONE reader every door, strip and picker
+    asks: "tree" when the recorded tree is the tip's, "delta" when the tip moved but the
+    branch's own hunks did not (a forward rebase, a catch-up merge), "" when it lapsed."""
+    snap = snap or repostate.snapshot()
+    tip = snap.local(branch)
+    if not tip:
+        return ""
+    green = snap.branch_key(branch, "gates-green-tree")
+    if green and green == snap.tree(tip):
+        return "tree"
+    delta = snap.branch_key(branch, "gates-green-delta")
+    if delta and delta == _delta_id(branch, snap):
+        return "delta"
+    return ""
 
 
 def _green_skipped(branch):
@@ -333,6 +373,14 @@ def _skipped(gates):
 
 def _record_green(branch, tree, gates=()):
     stackcfg.set_key(branch, "gates-green-tree", tree)
+    # the verdict also seals the DELTA: a forward rebase or catch-up merge moves the tree while
+    # the branch's own hunks stay byte-identical, and that must not relock push or re-pay a
+    # typecheck (Phil, 2026-09-14: "the bytes of the delta should be sealed, not the commit").
+    # Only a verdict for the current tip gets one — a harvested older tree's delta is unknown.
+    if tree == _tree(branch):
+        stackcfg.set_key(branch, "gates-green-delta", _delta_id(branch))
+    else:
+        stackcfg.unset_all(branch, "gates-green-delta")
     stackcfg.unset_all(branch, "gates-skipped")
     for g in sorted(_skipped(gates)):
         stackcfg.add_key(branch, "gates-skipped", g)
@@ -664,7 +712,8 @@ def _origin_verdict(branch):
     has_outgoing = n_out >= 1
     wip = [c for c in outgoing if not c["voiced"]]
     tip = snap.local(branch)
-    gates_green = _green_tree(branch) == snap.tree(tip)
+    gates_how = verdict_stands(branch, snap)
+    gates_green = bool(gates_how)
     # Phil's waiver for this exact tree ships it without gates — said at the door, never as green
     waived_by = None if gates_green else verdicts.waived(branch, snap.tree(tip))
     # Waivers recorded alongside the green (a gate that was unsatisfiable, not unmet). Shown
@@ -708,7 +757,8 @@ def _origin_verdict(branch):
         # "rebase forward" without rewriting shared history.
         ward("watch", "deploy watch clear", not deploy_critical or (has_remote and ff and bool(outgoing)),
              f"main changed {len(deploy_critical)} deploy-watched file{'s' if len(deploy_critical) != 1 else ''} this branch lacks — rebase forward"),
-        ward("gates", f"gates waived · {waived_by}" if waived_by else _gates_label(gates_waived),
+        ward("gates", f"gates waived · {waived_by}" if waived_by else
+             _gates_label(gates_waived) + (" · carried through the rebase" if gates_how == "delta" else ""),
              gates_green or waived_by,
              "not green for this exact commit — ⟲ sync runs the gates"),
         # The pre-push TODO ratchet, moved to the door: a TODO clears by naming a ticket the

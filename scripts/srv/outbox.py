@@ -222,7 +222,7 @@ def _gates(snap, branch, tree):
     push door: green only for THIS tree; a finished detached run for this tree is the red memo;
     a green for an older tree is stale (the edit since then hasn't been gated)."""
     green = snap.branch_key(branch, "gates-green-tree")
-    if green and green == tree:
+    if push.verdict_stands(branch, snap):
         return "green", []
     run = push.gate_run(branch)
     if run and run.meta.get("tree") == tree:
