@@ -84,6 +84,7 @@ struct MachinePage: View {
                     VStack(alignment: .leading, spacing: 32) {
                         Servers()
                         StackSection()
+                        QueueSection()
                         FootprintSection()
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -305,6 +306,52 @@ private struct StackSection: View {
         }
         .font(Theme.text(12))
         .padding(.leading, 28).padding(.trailing, 16)
+    }
+}
+
+/// The heavy-turn queue: who holds the slots and who waits, each with its process tree's cpu and
+/// memory and, for a gates run, the step it is on; heavy work outside the queue; and the two
+/// warnings that explained the hour-long gates of 2026-11-04 — an idle holder and un-queued work.
+private struct QueueSection: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.theme) private var theme
+
+    var body: some View {
+        let m = app.state { Workstation(app: app) }
+        VStack(alignment: .leading, spacing: 6) {
+            if let q = m.queue {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    SectionHead(text: "queue")
+                    Dot(color: q.warnings.isEmpty ? (q.holders.isEmpty ? theme.inkFaint : theme.add) : theme.ember, breathe: !q.warnings.isEmpty)
+                    Text(QueueText.headline(q)).foregroundStyle(theme.inkDim)
+                    Spacer()
+                }
+                ForEach(q.holders + q.waiters, id: \.id) { t in ticket(t) }
+                ForEach(q.outside, id: \.pid) { o in
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text("outside").foregroundStyle(theme.ember).frame(width: 64, alignment: .trailing)
+                        Text(o.name).foregroundStyle(theme.ink)
+                        Text("\(MachineText.ago(Double(o.age))) · \(Int(o.cpu.rounded()))% · \(Int(o.rssMb)) MB").foregroundStyle(theme.inkFaint)
+                        Spacer(minLength: 4)
+                    }
+                }
+                ForEach(q.warnings, id: \.self) { w in Text("⚠ \(w)").foregroundStyle(theme.ember) }
+            } else {
+                SectionHead(text: "queue · …")
+            }
+        }
+        .font(Theme.text(12))
+        .padding(.leading, 28).padding(.trailing, 16)
+    }
+
+    @ViewBuilder private func ticket(_ t: Queue.Ticket) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(t.state == "held" ? "holds" : "waits").foregroundStyle(t.idle ? theme.ember : t.state == "held" ? theme.goldLeaf : theme.inkFaint).frame(width: 64, alignment: .trailing)
+            Text(QueueText.who(t)).foregroundStyle(theme.ink)
+            Text(QueueText.doing(t)).foregroundStyle(theme.inkDim)
+            Text("\(MachineText.ago(Double(t.age)))\(t.batch ? " · batch" : "") · \(Int(t.cpu.rounded()))% · \(Int(t.rssMb)) MB").foregroundStyle(theme.inkFaint)
+            Spacer(minLength: 4)
+        }
     }
 }
 
