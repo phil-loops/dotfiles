@@ -46,7 +46,7 @@ struct ForestPage: View {
                         ForEach(f.branches, id: \.b.id) { v in
                             ForestBranchView(v: v, cursor: cursor == RowKey.branch(v.b.id), selected: selection.contains(RowKey.branch(v.b.id)))
                         }
-                        ForestTodoList(items: Self.todoItems(app))
+                        ForestTodoList(items: Self.todoItems(app), forest: f, landed: app.store.list(Landed.self).filter { $0.project == p.id })
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -94,6 +94,34 @@ struct ForestPage: View {
     static func todoItems(_ app: AppModel) -> [TodoItem] {
         guard app.forestModel.face == .branches, let pid = app.forestModel.pageProject else { return [] }
         return Tracker.queue(app.store.trackerItems(on: pid)).flatMap(\.items)
+    }
+
+    /// What solves a forest todo item: the branch its `solved_by` names, with that branch's PR, or
+    /// the PR it landed as once the branch is gone; on a ticket's forest, an item no branch claims
+    /// is uncovered.
+    enum Cover: Equatable {
+        case none, uncovered
+        case branch(String, pr: Int?, state: String?)
+        case landed(String, pr: Int)
+        case gone(String)
+
+        var label: String {
+            switch self {
+            case .none: ""
+            case .uncovered: "not covered"
+            case let .branch(n, pr?, state?): "\(leaf(n)) · #\(pr) \(state.lowercased())"
+            case let .branch(n, _, _): "\(leaf(n)) · no PR yet"
+            case let .landed(n, pr): "\(leaf(n)) · #\(pr) merged"
+            case let .gone(n): "\(leaf(n)) · not in this forest"
+            }
+        }
+    }
+
+    static func cover(_ t: TodoItem, _ f: ForestView, landed: [Landed]) -> Cover {
+        guard let want = t.solved_by, !want.isEmpty else { return f.p.ticket == nil ? .none : .uncovered }
+        if let v = f.branches.first(where: { $0.b.name == want }) { return .branch(want, pr: v.pr?.number, state: v.pr?.state) }
+        if let l = landed.first(where: { $0.branch == want }) { return .landed(want, pr: l.pr) }
+        return .gone(want)
     }
 
     static let mergeMeaning: [IntegrationVerdict.State: String] = [
@@ -156,22 +184,33 @@ private struct ForestBranchView: View {
     }
 }
 
-/// The forest's todo list under its branches: a title per row, kind and size to the right; `ret`
-/// opens the item on the tracker.
+/// The forest's todo list under its branches — headed by the ticket when the forest has one: a title
+/// per row, and to the right the branch solving it (with its PR), "not covered", or kind and size;
+/// `ret` opens the item on the tracker.
 private struct ForestTodoList: View {
     @Environment(\.theme) private var theme
     let items: [TodoItem]
+    let forest: ForestView
+    let landed: [Landed]
 
     var body: some View {
         if !items.isEmpty {
             VStack(alignment: .leading, spacing: 0) {
-                SectionHead(text: "todo · \(items.count)").padding(.leading, 52).padding(.bottom, 4)
+                SectionHead(text: "\(forest.p.ticket ?? "todo") · \(items.count)").padding(.leading, 52).padding(.bottom, 4)
                 ForEach(items, id: \.id) { t in
+                    let cover = ForestPage.cover(t, forest, landed: landed)
                     CursorRow(pane: "todo", key: RowKey.todo(t.id)) { on in
                         HStack(alignment: .firstTextBaseline, spacing: 12) {
                             Text(t.title).foregroundStyle(on ? theme.goldLeaf : t.kind == "decide" ? theme.ink : theme.inkDim).lineLimit(1)
                             Spacer(minLength: 8)
-                            Text("\(t.state == "waiting" ? "waiting" : t.kind) · \(t.size)").font(Theme.text(11)).foregroundStyle(theme.inkFaint)
+                            if cover == .none {
+                                Text("\(t.state == "waiting" ? "waiting" : t.kind) · \(t.size)").font(Theme.text(11)).foregroundStyle(theme.inkFaint)
+                            } else {
+                                Text(cover.label).font(Theme.text(11))
+                                    .foregroundStyle(cover == .uncovered ? theme.del : theme.inkFaint)
+                                    .lineLimit(1).truncationMode(.middle).frame(maxWidth: 340, alignment: .trailing)
+                                    .help(t.solved_by.map { "solved by \($0)" } ?? "no branch in this forest solves this yet")
+                            }
                         }
                         .frame(minHeight: 28)
                         .padding(.leading, 52).padding(.trailing, 20)

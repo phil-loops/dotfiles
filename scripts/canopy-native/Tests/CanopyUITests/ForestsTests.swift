@@ -447,6 +447,22 @@ private func showRows(_ a: AppModel) {
         #expect(world(.forest(repo: "r", project: "solo")).panes.map(\.id) == ["main"], "a forest with no items has no pane")
     }
 
+    @Test func aTodoItemShowsTheBranchThatSolvesIt() throws {
+        let a = page()
+        var f = try #require(a.forestModel.forest("r:tree"))
+        let landed = a.store.list(Landed.self).filter { $0.project == "r:tree" }
+        func cover(_ solvedBy: String?) -> ForestPage.Cover { ForestPage.cover(TodoItem(id: "t", project: "r:tree", solved_by: solvedBy), f, landed: landed) }
+        #expect(cover("a") == .branch("a", pr: 11, state: "OPEN"))
+        #expect(cover("a").label == "a · #11 open")
+        #expect(cover("b").label == "b · no PR yet")
+        #expect(cover("z") == .landed("z", pr: 9), "a contracted branch reads as the PR it landed as")
+        #expect(cover("nope") == .gone("nope"))
+        #expect(cover(nil) == .none, "a forest without a ticket has nothing to cover")
+        f.p.ticket = "LOO-1"
+        #expect(cover(nil) == .uncovered)
+        #expect(cover(nil).label == "not covered")
+    }
+
     @Test func jAndKWalkMergeOrderAndRecordJumps() {
         let a = page()
         #expect(a.rows == ["b:r:a", "b:r:b", "b:r:c", "b:r:d"])

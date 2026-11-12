@@ -340,6 +340,8 @@ public struct TodoItem: Entity {
     public var blocked_by: [String]?
     public var links: [String]?
     public var rank: Int?
+    /// on a forest's list, the branch that solves the item
+    public var solved_by: String?
     public var created: String?
     public var updated: String?
     public var body: String
@@ -347,13 +349,13 @@ public struct TodoItem: Entity {
 
     public init(id: String, title: String? = nil, kind: String = "build", state: TodoState = .open, area: String = "x", project: String? = nil,
                 size: String = "S", why: String = "", waiting: String? = nil, blocked_by: [String]? = nil, links: [String]? = nil, rank: Int? = nil,
-                created: String? = nil, updated: String? = nil, body: String = "", problems: [String]? = nil) {
+                solved_by: String? = nil, created: String? = nil, updated: String? = nil, body: String = "", problems: [String]? = nil) {
         self.id = id; self.title = title ?? id; self.kind = kind; self.state = state; self.area = area; self.project = project; self.size = size
-        self.why = why; self.waiting = waiting; self.blocked_by = blocked_by; self.links = links; self.rank = rank
+        self.why = why; self.waiting = waiting; self.blocked_by = blocked_by; self.links = links; self.rank = rank; self.solved_by = solved_by
         self.created = created; self.updated = updated; self.body = body; self.problems = problems
     }
 
-    enum K: String, CodingKey { case id, title, kind, state, area, project, size, why, waiting, blocked_by, links, rank, created, updated, body, problems }
+    enum K: String, CodingKey { case id, title, kind, state, area, project, size, why, waiting, blocked_by, links, rank, solved_by, created, updated, body, problems }
 
     /// A file srv/todo.py can't parse arrives as `{id, title, state: "broken", problems, body}`
     /// with no kind/area/size/why; it still decodes, so the tracker's "Can't read" section shows it.
@@ -371,6 +373,7 @@ public struct TodoItem: Entity {
         blocked_by = try? c.decode([String].self, forKey: .blocked_by)
         links = try? c.decode([String].self, forKey: .links)
         rank = (try? c.decode(Double.self, forKey: .rank)).map { Int($0) }
+        solved_by = try? c.decode(String.self, forKey: .solved_by)
         created = try? c.decode(String.self, forKey: .created)
         updated = try? c.decode(String.self, forKey: .updated)
         body = (try? c.decode(String.self, forKey: .body)) ?? ""
