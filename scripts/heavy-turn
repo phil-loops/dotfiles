@@ -98,12 +98,31 @@ def cap_of(cls):
     return CLASS_CAPS.get(cls, SLOTS)
 
 
+_lock_depth = 0
+
+
 @contextmanager
 def locked():
+    """The queue lock, reentrant within a process. A SIGTERM/SIGHUP lands while the main thread may
+    be inside, and the handler's drop() locks again: a second open+flock is a different holder to
+    the kernel, so it waits on itself and every heavy-turn on the machine waits behind it
+    (2026-11-12: a seed-gen waiter signalled mid-claim held the queue for 40 minutes)."""
+    global _lock_depth
+    if _lock_depth:
+        _lock_depth += 1
+        try:
+            yield
+        finally:
+            _lock_depth -= 1
+        return
     ROOT.mkdir(parents=True, exist_ok=True)
     with (ROOT / "lock").open("a") as f:
         fcntl.flock(f, fcntl.LOCK_EX)
-        yield
+        _lock_depth = 1
+        try:
+            yield
+        finally:
+            _lock_depth = 0
 
 
 def alive(pid):
