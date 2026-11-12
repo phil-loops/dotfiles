@@ -269,6 +269,15 @@ def run_checks(repo, shas, only):
             state.refresh()
             return state._D["git"].ents["project"].get(f"{os.path.basename(repo)}:{name}")
 
+        git(repo, "config", "branch.base.stack-role", "proof")
+        state.refresh()
+        check("state: a proof branch carries its role",
+              state._D["git"].ents["branch"][f"{os.path.basename(repo)}:base"].get("role") == "proof")
+        git(repo, "config", "--unset", "branch.base.stack-role")
+        repostate.invalidate()
+        state.refresh()
+        check("state: a branch with no role carries none",
+              state._D["git"].ents["branch"][f"{os.path.basename(repo)}:base"].get("role") is None)
         check("forestwords: without its own line, a forest borrows a branch's, marked so",
               proj("fixture")["summaryBy"] == "branch" and proj("fixture")["summary"].endswith("one line of purpose"))
         post(review.project_describe, {"project": "fixture", "description": "  the  fixture's own   words "})

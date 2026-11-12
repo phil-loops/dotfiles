@@ -252,6 +252,8 @@ def _git_entities(name, snap, jobs):
             "pushed": "synced" if remote and not ahead else "ahead" if remote else "local", "ahead": ahead,
             "gates": gates, "redGates": red,
             "order": order.get(b, 999), "holdUntil": snap.branch_key(b, "hold-until") or None,
+            # stack-proof's mark: an e2e/smoke branch that rides the forest and never merges
+            "role": snap.branch_key(b, "role") or None,
             "behind": behind.get(b, 0),
             "drifted": bool(tip) and not rooted and not _is_ancestor(graph, snap.local(parent), tip),
             "upstream": up, "upstreamBad": up_bad, "diverged": diverged,
