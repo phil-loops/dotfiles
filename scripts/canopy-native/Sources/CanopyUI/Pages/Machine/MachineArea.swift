@@ -8,11 +8,14 @@ enum MachineArea: PageArea {
 
     static func install(_ app: AppModel) {
         app.addSurface(MachineSurface())
+        app.registry.addScopes([.queue], to: "machine")
         app.addSurface(DashboardSurface())
         MachineCommands.install(app)
         DashboardCommands.install(app)
     }
 }
+
+extension Scope { static let queue: Scope = "queue" }
 
 struct MachineSurface: SurfaceProvider {
     let surfaceID = "machine"
@@ -25,21 +28,30 @@ struct MachineSurface: SurfaceProvider {
         let m = app.state { Workstation(app: app) }
         var out = [Pane(id: "servers", title: "serving", rows: m.servers.map { RowKey.server($0.sid) })]
         if m.logFor != nil { out.append(Pane(id: "log", title: "log", rows: m.logLines.indices.map { "log:\($0)" }, row: 1, pageSize: 20)) }
+        let qrows = Workstation.queueRows(m.queue)
+        if !qrows.isEmpty { out.append(Pane(id: "queue", title: "queue", rows: qrows, row: 1)) }
         return out
     }
 
+    /// ↵ on a server opens it; on a queue row with a gates run, its branch page.
     func primary(for row: String, _ app: AppModel) -> RouteTo? {
-        RowKey.id(row, "m").map { RouteTo("machine.open", target: $0) }
+        if let id = RowKey.id(row, "m") { return RouteTo("machine.open", target: id) }
+        if let id = RowKey.id(row, "q") { return RouteTo("machine.queue.open", target: id) }
+        return nil
     }
 
     func scopes(_ app: AppModel) -> [Scope] {
-        target(for: .server, app) != nil ? [.server] : []
+        (target(for: .server, app) != nil ? [.server] : []) + (target(for: .queue, app) != nil ? [.queue] : [])
     }
 
-    /// The server under the cursor; in the log pane, the server whose log it is.
+    /// The server under the cursor (in the log pane, the server whose log it is); the queue row under it.
     func target(for scope: Scope, _ app: AppModel) -> String? {
-        guard scope == .server else { return nil }
         let m = app.state { Workstation(app: app) }
+        if scope == .queue {
+            guard let id = RowKey.id(app.selected, "q"), m.queueRow(id) != nil else { return nil }
+            return id
+        }
+        guard scope == .server else { return nil }
         if app.pane?.id == "log" { return m.logFor }
         guard let id = RowKey.id(app.selected, "m"), m.server(id) != nil else { return nil }
         return id
@@ -326,15 +338,22 @@ private struct QueueSection: View {
                     Text(QueueText.headline(q)).foregroundStyle(theme.inkDim)
                     Spacer()
                 }
-                ForEach(q.holders + q.waiters, id: \.id) { t in ticket(t) }
-                ForEach(q.outside, id: \.pid) { o in
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text("outside").foregroundStyle(theme.ember).frame(width: 64, alignment: .trailing)
-                        Text(o.name).foregroundStyle(theme.ink)
-                        Text("\(MachineText.ago(Double(o.age))) · \(Int(o.cpu.rounded()))% · \(Int(o.rssMb)) MB").foregroundStyle(theme.inkFaint)
-                        Spacer(minLength: 4)
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(q.holders + q.waiters, id: \.id) { t in
+                        row(Workstation.queueID(t)) { ticket(t) }
+                    }
+                    ForEach(q.outside, id: \.pid) { o in
+                        row("o:\(o.pid)") {
+                            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                Text("outside").foregroundStyle(theme.ember).frame(width: 64, alignment: .trailing)
+                                Text(o.name).foregroundStyle(theme.ink)
+                                Text("\(MachineText.ago(Double(o.age))) · \(Int(o.cpu.rounded()))% · \(Int(o.rssMb)) MB").foregroundStyle(theme.inkFaint)
+                                Spacer(minLength: 4)
+                            }
+                        }
                     }
                 }
+                .paneRing("queue")
                 ForEach(q.warnings, id: \.self) { w in Text("⚠ \(w)").foregroundStyle(theme.ember) }
             } else {
                 SectionHead(text: "queue · …")
@@ -342,6 +361,19 @@ private struct QueueSection: View {
         }
         .font(Theme.text(12))
         .padding(.leading, 28).padding(.trailing, 16)
+    }
+
+    /// A queue row the cursor can rest on: ↵ opens its gate's branch page, X arms a kill (again sends it).
+    @ViewBuilder private func row(_ id: String, @ViewBuilder _ content: @escaping () -> some View) -> some View {
+        let armed = app.runner.armed == "kill queue \(id)"
+        CursorRow(pane: "queue", key: RowKey.queue(id)) { on in
+            VStack(alignment: .leading, spacing: 2) {
+                content().foregroundStyle(on ? theme.goldLeaf : theme.ink)
+                if on, armed { Lever(id: "machine.queue.kill", target: id, word: "again kills it · esc", danger: true).padding(.leading, 72) }
+            }
+            .padding(.vertical, 2)
+        }
+        .overlay { if armed { Rectangle().stroke(theme.del.opacity(0.6), lineWidth: 1) } }
     }
 
     @ViewBuilder private func ticket(_ t: Queue.Ticket) -> some View {

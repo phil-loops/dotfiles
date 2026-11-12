@@ -75,6 +75,32 @@ enum MachineCommands {
                                             said: "killed \(s.label)", failed: "\(s.label) is still running")
                            }))
 
+        // ── the queue's rows: ↵ opens a gate's branch page, X arms a kill of the holder, waiter or un-queued work ──
+        let queueKillArm = { (id: String) in "kill queue \(id)" }
+        r.register(Command(id: "machine.queue.open", title: "Open the gates run's branch page", scope: .queue, verb: .main, label: "open",
+                           available: { [weak m] id in m?.queueRow(id)?.branch != nil },
+                           local: { [weak m] id, _ in
+                               guard let m, let id, let row = m.queueRow(id), let b = row.branch, let app = wapp else { throw Refusal("this row runs no gates — nothing to open") }
+                               app.router.navigate(Route.review(repo: app.transport.repos.first ?? "loops", branch: b))
+                           }))
+        r.register(Command(id: "machine.queue.kill", title: "Kill the slot holder, waiter or un-queued work on this row", scope: .queue, verb: .putAway, label: "kill",
+                           available: { [weak m] id in m?.queueRow(id)?.pid != nil },
+                           route: { [weak m] id in
+                               guard let m, let id, m.queueRow(id)?.pid != nil else { return nil }
+                               return RouteTo(wapp?.runner.armed == queueKillArm(id) ? "machine.queue.stop" : "machine.queue.kill.arm", target: id)
+                           }))
+        r.register(Command(id: "machine.queue.kill.arm", title: "Ready a kill of this queue row (the next press sends it)", scope: .queue, needsArg: true, quiet: true,
+                           available: { [weak m] id in m?.queueRow(id)?.pid != nil },
+                           local: { id, _ in if let id { try wapp?.runner.arm(queueKillArm(id)) } }))
+        r.register(Command(id: "machine.queue.stop", title: "Kill a queue row's process", scope: .queue, budget: .gitWrite, needsArg: true, quiet: true,
+                           write: { [weak m] id, _ in
+                               guard let m, let row = m.queueRow(id), let pid = row.pid else { return nil }
+                               return Write(path: "/queue-kill", body: ["pid": .number(Double(pid))],
+                                            settled: { [weak m] in m?.queueRow(id) == nil },
+                                            said: "killed \(row.name) (pid \(pid))", failed: "\(row.name) is still running",
+                                            answered: { [weak m] ok, _ in if ok { m?.measure() } })
+                           }))
+
         r.register(Command(id: "machine.killall", title: "Kill every server", scope: .machine, leader: LocalKey(",x"), label: "kill all",
                            available: { [weak m] _ in !(m?.servers.isEmpty ?? true) },
                            route: { [weak m] _ in

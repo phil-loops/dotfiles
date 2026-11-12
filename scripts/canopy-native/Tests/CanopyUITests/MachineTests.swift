@@ -88,6 +88,30 @@ import Testing
         #expect(!a.registry.command("machine.log")!.available!("3009"), "an unmanaged server has no log here")
     }
 
+    @Test func theQueueRowsAreAPaneWithOpenAndKill() throws {
+        let (a, m) = try app()
+        m.take(try JSONDecoder().decode(Queue.self, from: Data(MachineFixtures.queue.utf8)))
+        #expect(a.panes.map(\.id) == ["servers", "queue"])
+        a.focus(pane: "queue")
+        #expect(a.selected == RowKey.queue("t1") && a.target(for: .queue) == "t1")
+        #expect(!a.registry.command("machine.queue.open")!.available!("t1"), "an eval ticket runs no gates")
+        a.keys.handle("j")
+        #expect(a.selected == RowKey.queue("t3") && a.registry.command("machine.queue.open")!.available!("t3"))
+        a.keys.handle("ret")
+        #expect(a.router.route == .review(repo: "loops", branch: "other"), "ret opens the gate's branch page")
+        a.router.navigate(Route.machine); a.focus(pane: "queue"); a.keys.handle("j"); a.keys.handle("j")
+        #expect(a.selected == RowKey.queue("o:400"))
+        let kill = a.registry.command("machine.queue.kill")!
+        #expect(kill.route!("o:400")?.id == "machine.queue.kill.arm")
+        a.keys.handle("X")
+        #expect(a.runner.armed == "kill queue o:400")
+        #expect(kill.route!("o:400")?.id == "machine.queue.stop", "the second press sends")
+        let w = try a.registry.command("machine.queue.stop")!.write!("o:400", nil)!
+        #expect(w.path == "/queue-kill" && w.body == .object(["pid": .number(400)]))
+        a.keys.handle("esc")
+        #expect(a.runner.armed == nil)
+    }
+
     @Test func killTakesASecondPressAndEscDisarms() throws {
         let (a, _) = try app()
         let kill = a.registry.command("machine.kill")!
