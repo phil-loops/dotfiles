@@ -473,7 +473,7 @@ enum DiffCommands {
                               (.outgoing, "o", "Diff against origin — what the next push sends")] {
             r.register(Command(id: "review.base.\(b.word)", title: title, scope: .review, leader: LocalKey(",b \(k)"), label: b.word,
                                available: { _ in baseOK(b) },
-                               local: { _, _ in pg.tab = "files"; pg.setBase(b) }))
+                               local: { _, _ in try pg.apply(.base(b)) }))
         }
         // ── the branch's line: what the diff covers (ReviewLine) ──
 
@@ -536,7 +536,7 @@ enum DiffCommands {
                            local: { _, _ in
                                let ok = ReviewBase.allCases.filter(baseOK)
                                let at = ok.firstIndex(of: pg.base) ?? -1
-                               pg.setBase(ok[(at + 1) % ok.count])
+                               try pg.apply(.base(ok[(at + 1) % ok.count]))
                            }))
         r.register(Command(id: "review.filter", title: "Find a file (filter the tree)", scope: .review, verb: .find, label: "find",
                            local: { _, _ in
