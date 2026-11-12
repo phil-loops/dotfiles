@@ -245,11 +245,8 @@ public final class ShipState {
     /// For tests and the forest page: a history read put in place.
     public func putHistory(_ b: Branch, _ rows: [HistoryCommit]) { history = (Self.historyKey(b), rows.filter(\.own)) }
 
-    /// The one commit the diff covers, when it covers just one: its words sit above the diff.
-    public static func wordsCommit(_ app: AppModel) -> String? {
-        guard let s = of(app).commitScope, !s.contains("..") else { return nil }
-        return s
-    }
+    /// The one commit the diff covers, when it covers just one and that isn't all that lands: its words sit above the diff.
+    public static func wordsCommit(_ app: AppModel) -> String? { of(app).host.loneCommit }
 
     /// Show one commit's diff, or a run's ("from..to"; nil: the whole branch). The diff itself is area B's to load.
     public func showCommit(_ sha: String?) {

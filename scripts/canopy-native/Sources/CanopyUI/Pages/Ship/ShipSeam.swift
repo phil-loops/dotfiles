@@ -34,6 +34,8 @@ public protocol ShipHost: AnyObject {
     func commitScopeChanged(_ sha: String?)
     /// Whether the diff covers the whole branch, its parent to its tip: what lands on main.
     var wholeBranch: Bool { get }
+    /// The one commit the diff shows, when that's all it shows and the commit isn't all that lands.
+    var loneCommit: String? { get }
     /// The cursor's line was commented or written to: drop `x`'s mark.
     func clearMark()
     /// `i` with no comment open: open Helix on the new-half line under the cursor; false: nothing to edit here.
@@ -42,6 +44,8 @@ public protocol ShipHost: AnyObject {
 
 public extension ShipHost {
     func beginEdit(_ app: AppModel) -> Bool { false }
+    /// A host with no line to read: the scope, when it names one commit.
+    var loneCommit: String? { commitScope.flatMap { $0.contains("..") ? nil : $0 } }
 }
 
 public struct ShipLineRange: Equatable, Sendable {

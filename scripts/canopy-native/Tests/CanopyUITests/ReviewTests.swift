@@ -915,6 +915,23 @@ import Testing
         #expect(!pg.scoped && pg.base == .main, "and , b m is the stack from main")
     }
 
+    /// A one-commit branch's commit is what lands: one stretch, so one spelling, one set of words.
+    @Test func aOneCommitBranchsCommitIsWhatLands() async throws {
+        let (a, _) = try await app()
+        let pg = ReviewPageState.of(a)
+        let b = try #require(pg.branch)
+        ShipState.of(a).putHistory(b, [HistoryCommit(sha: "c1", subject: "first")])
+        WordsState.of(a).setShown(pg.id, WordsOutline(branch: "add-hankles-limited-label", head: "h", commits: [OutlineCommit(sha: "c1", subject: "first")],
+                                                      draft: .init(title: "feat: add a label", body: "")))
+        keys(a, "]", "h")
+        #expect(!pg.scoped && a.runner.note == "its one commit is what lands")
+        pg.setBase(.main)
+        ShipState.of(a).showCommit("c1")
+        #expect(!pg.scoped && pg.base == .parent && pg.wholeBranch, "showing its one commit is showing what lands")
+        #expect(ShipRows.words(a, pg.id) == ["w|desc", "w|title", "w|body"], "so the words are what it lands as")
+        #expect(ShipState.wordsCommit(a) == nil)
+    }
+
     /// w / b put a one-character cursor on each name's first character, crossing lines; g d / space k ask about that name.
     @Test func wAndBStepNameToNameAcrossLines() async throws {
         let (a, _) = try await app()
@@ -1483,6 +1500,8 @@ import Testing
         #expect(stepped.map(l.words) == "1 of 3 commits · the next push" && preset.map(l.words) == stepped.map(l.words), "one stretch, one reading")
         let one = ReviewLine(parentIsMain: true, commits: [HistoryCommit(sha: "c1", subject: "", pushed: false)])
         #expect(one.words((0, 1)) == "what lands" && one.cover(one.lit(base: .parent, scope: "c1")!) == .landing, "a one-commit branch's commit is what lands")
+        #expect(one.choose(1, 1) == .base(.parent) && one.lone((0, 1)) == nil, "so picking it is the parent preset, never a commit scope")
+        #expect(l.lone((1, 2)) == "c1" && l.lone((2, 4)) == nil && l.lone((3, 4)) == "c3")
     }
 
     @Test func stepsWalkOneCommitAndSayWhereTheyStop() {

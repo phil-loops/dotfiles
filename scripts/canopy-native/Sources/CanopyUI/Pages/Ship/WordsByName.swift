@@ -184,6 +184,7 @@ enum WordsByName {
 
     /// Open the branch's page on the stretch whose words `row` is, the words pane on it, writing.
     static func open(_ app: AppModel, _ id: String, _ row: WordsRow) throws {
+        var row = row
         guard let b = app.store.view(Branch.self, id) else { throw Refusal("no such branch") }
         if ShipSeam.branchID(app) != id { app.go(.review(repo: b.repo, branch: b.name)) }
         let pg = ReviewPageState.of(app)
@@ -192,9 +193,12 @@ enum WordsByName {
         switch row {
         case .subject(let sha), .commitBody(let sha):
             ship.showCommit(sha)
+            // a commit that is all that lands, and owns its words, is written as what lands
+            if ship.host.wholeBranch, case .commit(let owner) = WordsState.of(app).landingOwner(id), owner.hasPrefix(sha) || sha.hasPrefix(owner) {
+                row = row == .subject(sha) ? .title : .body
+            }
         case .title, .body:
-            if pg.base != .parent { pg.setBase(.parent) }
-            if pg.scoped { ship.showCommit(nil) }
+            try pg.apply(.base(.parent))
         case .desc:
             break
         }
