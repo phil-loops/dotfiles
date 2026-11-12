@@ -96,6 +96,17 @@ class RepoState:
     def main(self):
         return self.get("stack.main-branch") or "main"
 
+    def trunk(self):
+        """The trunk every range starts from: origin's copy when there is one, since a stale
+        local main would count merged work as a branch's own."""
+        main = self.main()
+        return f"origin/{main}" if self.remote(main) else main
+
+    def diff_base(self, branch):
+        """Where a branch's own diff starts: its parent, with a trunk parent read as trunk()."""
+        parent = self.parent(branch)
+        return self.trunk() if parent == self.main() else parent
+
     # ── refs ──────────────────────────────────────────────────────────────
     def local(self, branch):
         return self.sha.get(f"refs/heads/{branch}", "")

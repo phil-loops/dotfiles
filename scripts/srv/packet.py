@@ -129,8 +129,7 @@ def _forest_of(branch):
 def _floor(snap, branch):
     parent = snap.parent(branch)
     if parent in ("main", "master") or not snap.exists(parent):
-        origin = f"origin/{snap.main()}"
-        mb = ctx.run(["git", "merge-base", origin if snap.remote(snap.main()) else snap.main(), branch]).stdout.strip()
+        mb = ctx.run(["git", "merge-base", snap.trunk(), branch]).stdout.strip()
         return mb or parent
     return parent
 

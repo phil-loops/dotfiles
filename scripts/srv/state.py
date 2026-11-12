@@ -204,7 +204,7 @@ def _git_fp(name):
 
 def _git_entities(name, snap, jobs):
     main = snap.main()
-    trunk = f"origin/{main}" if snap.remote(main) else main
+    trunk = snap.trunk()
     member, names = _membership(snap)
     tips = set()
     for b in member:
