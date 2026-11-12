@@ -105,6 +105,21 @@ private func pad(_ n: Int?, _ w: Int) -> String {
     return s.count >= w ? s : String(repeating: " ", count: w - s.count) + s
 }
 
+/// A removed line cut into its half's width: each chunk at most `w` characters, broken after the last
+/// space in a chunk's back half when there is one (a word isn't split mid-name), else hard at `w`.
+func oldChunks(_ s: String, _ w: Int) -> [String] {
+    guard w > 1, s.count > w else { return [s] }
+    var out: [String] = [], rest = Substring(s)
+    while rest.count > w {
+        let head = rest.prefix(w)
+        let cut = head.lastIndex(of: " ").flatMap { i in head.distance(from: head.startIndex, to: i) >= w / 2 ? head.index(after: i) : nil } ?? head.endIndex
+        out.append(String(rest[rest.startIndex..<cut]))
+        rest = rest[cut...]
+    }
+    if !rest.isEmpty { out.append(String(rest)) }
+    return out
+}
+
 private func fit(_ s: String, _ w: Int) -> String {
     guard w > 0 else { return "" }
     let c = s.count
@@ -198,16 +213,28 @@ enum ReviewDocument {
             if split {
                 b.put(pad(r.left?.old, 5) + " ", [.foregroundColor: c.inkFaint, .font: DocFont.small])
                 let lstart = b.length
-                let ltext = r.left.map { fit($0.text, W) } ?? String(repeating: " ", count: W)
+                // a removed line is the text under review: it wraps under its own column instead of being
+                // cut off (a context line's old half repeats the new half, which shows it whole)
+                let chunks = r.left?.kind == .del && W > 0 ? oldChunks(r.left!.text, W) : []
+                let ltext = chunks.first.map { fit($0, W) } ?? r.left.map { fit($0.text, W) } ?? String(repeating: " ", count: W)
                 b.put(ltext)
                 if r.left != nil { b.tokens(ltext, lang, at: lstart, c.code) }
                 b.put(" " + pad(r.right?.new, 5) + " ", [.foregroundColor: c.inkFaint, .font: DocFont.small])
                 let rstart = b.length
                 if let rt = r.right { b.put(rt.text); b.tokens(rt.text, lang, at: rstart, c.code) }
+                let more = Array(chunks.dropFirst())
+                if !more.isEmpty {
+                    // room for the rest: the new half's own wrapped lines count, line separators make up the difference
+                    let newCols = max(1, (pg.diffColumns > 0 ? pg.diffColumns : 240) - (W + 13))
+                    let newLines = max(1, Int((Double(r.right?.text.count ?? 0) / Double(newCols)).rounded(.up)))
+                    let extra = max(0, 1 + more.count - newLines)
+                    if extra > 0 { b.put(String(repeating: "\u{2028}", count: extra)) }
+                }
                 let (lh, rh) = r.left?.kind == .del && r.right?.kind == .add ? changedWords(r.left!.text, r.right!.text) : ([], [])
                 b.endRow(RowInfo(kind: .line, stop: key, path: path, hunk: r.hunk, left: r.left?.kind, right: r.right?.kind,
                                  oldLine: r.left?.old, newLine: r.right?.new, threaded: threaded, splitCol: W + 7,
-                                 codeStart: 6, rightCodeStart: W + 13, leftHot: lh.filter { NSMaxRange($0) < W }, rightHot: rh), splitPara)
+                                 codeStart: 6, rightCodeStart: W + 13, leftHot: lh.filter { NSMaxRange($0) < W }, rightHot: rh,
+                                 oldMore: more), splitPara)
             } else {
                 let line = (r.right ?? r.left)!
                 let kind: LineKind = r.left != nil && r.right != nil ? .ctx : r.right != nil ? .add : .del

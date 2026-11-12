@@ -43,14 +43,17 @@ final class RowInfo: NSObject {
     /// split: the words that changed between a paired old and new line, UTF-16 ranges from each half's code start
     let leftHot: [NSRange]
     let rightHot: [NSRange]
+    /// split: a removed line longer than its half — the rest of it, one chunk per continuation line, drawn
+    /// under the old column (the row carries line separators after its new half to make the room)
+    let oldMore: [String]
 
     init(kind: Kind, stop: String?, stops: [String] = [], path: String = "", hunk: Int = -1, left: LineKind? = nil, right: LineKind? = nil,
          oldLine: Int? = nil, newLine: Int? = nil, threaded: Bool = false, splitCol: Int = 0, codeStart: Int = 0, rightCodeStart: Int = 0,
-         extra: ExtraSpec? = nil, leftHot: [NSRange] = [], rightHot: [NSRange] = []) {
+         extra: ExtraSpec? = nil, leftHot: [NSRange] = [], rightHot: [NSRange] = [], oldMore: [String] = []) {
         self.kind = kind; self.stop = stop; self.stops = stops.isEmpty ? (stop.map { [$0] } ?? []) : stops; self.path = path; self.hunk = hunk
         self.left = left; self.right = right; self.oldLine = oldLine; self.newLine = newLine; self.threaded = threaded; self.splitCol = splitCol
         self.codeStart = codeStart; self.rightCodeStart = rightCodeStart; self.extra = extra
-        self.leftHot = leftHot; self.rightHot = rightHot
+        self.leftHot = leftHot; self.rightHot = rightHot; self.oldMore = oldMore
     }
 }
 
@@ -309,6 +312,7 @@ final class CanvasTextView: NSTextView {
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
+        drawOldMore(dirtyRect)
         // read changes dim, so what's left stands out (v2: opacity .5 unless under the cursor); flagged ones
         // carry an ember bar down their left edge
         guard let colors, !marks.seen.isEmpty || !marks.flagged.isEmpty, let lm = layoutManager, let tc = textContainer, let ts = textStorage, ts.length > 0 else { return }
@@ -324,6 +328,41 @@ final class CanvasTextView: NSTextView {
             } else if let stop = inf.stop, stop != self.marks.cursor, self.marks.seen.contains(stop) {
                 colors.bg.withAlphaComponent(0.5).setFill(); band.fill(using: .sourceOver)
             }
+        }
+    }
+}
+
+extension CanvasTextView {
+    /// A removed line longer than its half reads in full: its rest is drawn under the old column on the
+    /// row's continuation lines (the new half's wrapped lines, or the line separators the row carries),
+    /// in the old text's own font and colour. A row that still runs out of lines ends its last chunk "…".
+    func drawOldMore(_ dirtyRect: NSRect) {
+        guard let lm = layoutManager, let tc = textContainer, let ts = textStorage, ts.length > 0 else { return }
+        let origin = textContainerOrigin
+        let glyphs = lm.glyphRange(forBoundingRect: NSRect(x: dirtyRect.minX - origin.x, y: dirtyRect.minY - origin.y, width: dirtyRect.width, height: dirtyRect.height), in: tc)
+        let ns = ts.string as NSString
+        lm.enumerateLineFragments(forGlyphRange: glyphs) { frag, _, _, gr, _ in
+            let ci = lm.characterIndexForGlyph(at: gr.location)
+            guard let inf = ts.attribute(.rvRow, at: ci, effectiveRange: nil) as? RowInfo, inf.kind == .line, !inf.oldMore.isEmpty else { return }
+            let para = ns.paragraphRange(for: NSRange(location: ci, length: 0))
+            let firstGlyph = lm.glyphIndexForCharacter(at: para.location)
+            guard gr.location > firstGlyph else { return }   // the first line shows the first chunk as text
+            let first = lm.lineFragmentRect(forGlyphAt: firstGlyph, effectiveRange: nil)
+            let line = Int(((frag.minY - first.minY) / max(1, frag.height)).rounded())
+            guard line >= 1, line <= inf.oldMore.count else { return }
+            let lastGlyph = lm.glyphIndexForCharacter(at: max(para.location, NSMaxRange(para) - 1))
+            let lines = Int(((lm.lineFragmentRect(forGlyphAt: lastGlyph, effectiveRange: nil).minY - first.minY) / max(1, frag.height)).rounded()) + 1
+            var text = inf.oldMore[line - 1]
+            if line == lines - 1, inf.oldMore.count > lines - 1 { text = String(text.dropLast()) + "…" }
+            let at = para.location + inf.codeStart
+            var attrs = ts.attributes(at: min(at, ts.length - 1), effectiveRange: nil)
+            attrs[.rvRow] = nil
+            attrs[.paragraphStyle] = nil
+            let g = lm.glyphIndexForCharacter(at: min(at, ts.length - 1))
+            let x = lm.boundingRect(forGlyphRange: NSRange(location: g, length: 1), in: tc).minX + origin.x
+            let base = lm.location(forGlyphAt: firstGlyph).y
+            let font = (attrs[.font] as? NSFont) ?? NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+            NSAttributedString(string: text, attributes: attrs).draw(at: NSPoint(x: x, y: frag.minY + origin.y + base - font.ascender))
         }
     }
 }
