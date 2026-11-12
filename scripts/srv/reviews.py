@@ -443,10 +443,6 @@ def ext_mtime(req):   # GET /ext-mtime — newest source mtime (ms) so the ext c
 
 def _children_of(branch):
     parents = {}
-    r = ctx.run(["git", "config", "--get-regexp", r"^stack-branch\..*\.parent$"])
-    for line in r.stdout.splitlines():
-        key, _, val = line.partition(" ")
-        parents[key[len("stack-branch."):-len(".parent")]] = val.strip()
     r = ctx.run(["git", "config", "--get-regexp", r"^branch\..*\.stack-parent$"])
     for line in r.stdout.splitlines():
         key, _, val = line.partition(" ")
@@ -468,8 +464,7 @@ def _cut_point(parent, child):
     r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-base"), child])
     if r.returncode == 0 and r.stdout.strip():
         return r.stdout.strip()
-    base = (ctx.run(["git", "config", f"branch.{child}.stack-base"]).stdout.strip()
-            or ctx.run(["git", "config", f"stack-branch.{child}.base"]).stdout.strip())
+    base = ctx.run(["git", "config", f"branch.{child}.stack-base"]).stdout.strip()
     if base and ctx.run(["git", "cat-file", "-e", f"{base}^{{commit}}"]).returncode == 0:
         return base
     r = ctx.run(["git", "merge-base", "--fork-point", parent, child])
@@ -592,8 +587,7 @@ def pr_forest(req, raw):   # POST /pr-forest — Chrome ext: forest membership +
     if not branch:
         req._send(200, json.dumps({"ok": True, "branch": None}))   # not my local branch → no forest to show
         return
-    project = (ctx.run(["git", "config", f"branch.{branch}.stack-project"]).stdout.strip()
-               or ctx.run(["git", "config", f"stack-branch.{branch}.project"]).stdout.strip())
+    project = ctx.run(["git", "config", f"branch.{branch}.stack-project"]).stdout.strip()
     children = [{"branch": c, "seated": _seated(branch, c)} for c in _children_of(branch)]
     route = _viewer_route(branch)
     req._send(200, json.dumps({"ok": True, "branch": branch, "project": project or None,

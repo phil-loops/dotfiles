@@ -130,7 +130,7 @@ def _ticket(branch):
 
 
 def _story(branch):
-    return _cfg(f"branch.{branch}.stack-story") or _cfg(f"stack-branch.{branch}.story")
+    return _cfg(f"branch.{branch}.stack-story")
 
 
 # ── PR text + drafted body: stale-while-revalidate, never a gh call on the request thread ──
@@ -302,13 +302,12 @@ def _normalize(msg):
 
 
 def _children():
-    """{parent: [children]} from both stack-parent spellings, the target winning."""
+    """{parent: [children]} from every branch's stack-parent."""
     parents = {}
-    for pat, pre, suf in ((r"^stack-branch\..*\.parent$", "stack-branch.", ".parent"),
-                          (r"^branch\..*\.stack-parent$", "branch.", ".stack-parent")):
-        for ln in _git("config", "--get-regexp", pat).stdout.splitlines():
-            key, _, val = ln.partition(" ")
-            parents[key[len(pre):-len(suf)]] = val.strip()
+    pre, suf = "branch.", ".stack-parent"
+    for ln in _git("config", "--get-regexp", r"^branch\..*\.stack-parent$").stdout.splitlines():
+        key, _, val = ln.partition(" ")
+        parents[key[len(pre):-len(suf)]] = val.strip()
     out = {}
     for child, parent in parents.items():
         out.setdefault(parent, []).append(child)
@@ -316,10 +315,10 @@ def _children():
 
 
 def _repoint_base(branch, rewritten):
-    for key in (f"branch.{branch}.stack-base", f"stack-branch.{branch}.base"):
-        recorded = _cfg(key)
-        if recorded in rewritten:
-            _git("config", key, rewritten[recorded])
+    key = f"branch.{branch}.stack-base"
+    recorded = _cfg(key)
+    if recorded in rewritten:
+        _git("config", key, rewritten[recorded])
 
 
 # ── the reseat job ─────────────────────────────────────────────────────────
@@ -352,7 +351,7 @@ def _reseat(job, root, old_tip, new_tip, rewritten):
         if child in seen:
             continue
         seen.add(child)
-        parent = (_cfg(f"branch.{child}.stack-parent") or _cfg(f"stack-branch.{child}.parent"))
+        parent = _cfg(f"branch.{child}.stack-parent")
         if parent not in moved:
             continue
         o, n = moved[parent]
