@@ -51,6 +51,7 @@ skip whose warn says "quick gates", so the door tells a quick green from a full 
 """
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -320,10 +321,50 @@ def default_fixes(cwd, branch, borrowed=False):
     return fixes
 
 
+ERROR_LINE = re.compile(r"\b(error|fatal|failed|refused|ECONNREFUSED|EADDRINUSE|ENOTFOUND|ETIMEDOUT|Prisma\w*Error|"
+                        r"P\d{4}|Can't reach database server|Connection refused)\b", re.I)
+
+
 def last_lines(text, n=12):
+    """A failing gate's summary: the last lines of its output — led by the first line that names
+    an error, so a stack of bare frames (Prisma's empty-message failure, 2026-11-02) still opens
+    with the cause instead of a frame."""
     lines = [ln for ln in text.splitlines() if ln.strip()]
     tail = lines[-n:]
+    lead = next((ln for ln in lines if ERROR_LINE.search(ln) and not ln.lstrip().startswith("at ")), None)
+    if lead and lead not in tail:
+        tail = [lead, "…"] + tail[-(n - 2):]
     return "\n".join(tail)
+
+
+def db_reachable(cwd, timeout=2.0):
+    """The tree's database, as its .env names it: (note, ok). A gate that runs tests against a
+    Postgres that isn't there reds with ten bare Prisma frames and no message (OrbStack stopped,
+    2026-11-02) — say the cause before the tests run. No .env or no URL: nothing to say."""
+    import socket
+    from urllib.parse import urlsplit
+    url = ""
+    try:
+        with open(os.path.join(cwd, ".env")) as f:
+            for ln in f:
+                ln = ln.strip()
+                if ln.startswith("DATABASE_URL=") or ln.startswith("export DATABASE_URL="):
+                    url = ln.split("=", 1)[1].strip().strip("'\"")
+                    break
+    except OSError:
+        return "", True
+    if not url:
+        return "", True
+    try:
+        u = urlsplit(url)
+        host, port = u.hostname or "localhost", u.port or 5432
+    except ValueError:
+        return "", True
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return "", True
+    except OSError as e:
+        return f"local Postgres is down at {host}:{port} ({e.strerror or e}) — start OrbStack / the database", False
 
 
 def env_repair(cwd):
@@ -355,6 +396,11 @@ def env_repair(cwd):
             except subprocess.TimeoutExpired:
                 notes.append(f"{label}types rebuild timed out after 600s")
                 ok = False
+    # the database the tests will hit: name a down Postgres here, not as test stack frames
+    note, up = db_reachable(cwd)
+    if not up:
+        notes.append(note)
+        ok = False
     return notes, ok
 
 QUICK_SKIPS = ("typecheck", "lint")
