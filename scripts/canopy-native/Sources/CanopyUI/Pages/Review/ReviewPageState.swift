@@ -563,9 +563,13 @@ public final class ReviewPageState: ShipHost {
 
     /// ShipHost.commitScopeChanged: show one commit's diff or a run's ("from..to"), or what lands (nil).
     public func commitScopeChanged(_ sha: String?) {
-        // one stretch, one spelling: commits that are all of what lands are what lands
-        if let sha, let l = line, let lit = l.lit(base: .parent, scope: sha), l.cover(lit) == .landing { return setStretch("") }
-        setStretch(sha ?? "")
+        // one stretch, one spelling: the line spells it (what lands, the stack from main, or commits)
+        guard let sha, let l = line, let lit = l.lit(base: .parent, scope: sha) else { return setStretch(sha ?? "") }
+        switch l.spell(lit) {
+        case .base(let b): setStretch(b.rawValue)
+        case .commits(let f, let t): setStretch(f.map { "\($0)..\(t)" } ?? t)
+        case .refuse: setStretch(sha)
+        }
     }
 
     /// The stretch moved, by any road (a key, a link, `C-o`): drop what belonged to the last one, read

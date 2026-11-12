@@ -4,7 +4,7 @@
 #   GET  /node?branch=X     a node's file list (stack-forest --node; whitespace hidden, ?ws=1 shows it)
 #   GET  /file?branch&path  a file's contents on a ref (git show)
 #   GET  /commits?branch=X  branch history: own commits (own:true) + ancestors (own:false)
-#   GET  /commit-diff?sha=X one commit's changed files + patches (git show)
+#   GET  /commit-diff?sha=X one commit's changed files + patches (git show); &from=<sha> a run, &from=main main...X
 #   POST /squash {branch}        collapse parent..branch into unstaged working-tree changes
 #   POST /prep {branch}          prep-for-push: squash unpushed → one, then oxfmt
 import os
@@ -431,13 +431,21 @@ def commit_diff(req, u):
     # node view renders — so the history list can expand a commit inline. Read-only: these are
     # historical commits. Diffed against the commit's first parent.
     # ?from=<older sha> widens it to a contiguous slice: the combined diff from..sha inclusive.
+    # ?from=main starts at main instead: main...sha, everything sha adds since it left main.
     sha = parse_qs(u.query).get("sha", [""])[0]
     frm = parse_qs(u.query).get("from", [""])[0]
-    if frm and not re.fullmatch(r"[0-9a-f]{7,40}", frm):
-        return req._send(400, json.dumps({"err": "from must be a commit sha"}))
+    if frm and frm != "main" and not re.fullmatch(r"[0-9a-f]{7,40}", frm):
+        return req._send(400, json.dumps({"err": "from must be a commit sha or main"}))
+    if frm == "main":
+        mb = ctx.run(["git", "merge-base", "main", sha])
+        if mb.returncode != 0:
+            return req._send(404, json.dumps({"err": f"{sha} shares no history with main"}))
+        start = mb.stdout.strip()
+    else:
+        start = f"{frm}^" if frm else ""
     hide_ws = _hide_ws(u)
-    key = (ctx.repo_cwd(), sha, frm, hide_ws)
-    show = (lambda *flags: ["git", "diff", *flags, f"{frm}^", sha]) if frm else (lambda *flags: ["git", "show", *flags, "--format=", sha])
+    key = (ctx.repo_cwd(), sha, start, hide_ws)
+    show = (lambda *flags: ["git", "diff", *flags, start, sha]) if start else (lambda *flags: ["git", "show", *flags, "--format=", sha])
     pinned = re.fullmatch(r"[0-9a-f]{7,40}", sha) is not None   # a branch name moves; only a sha may be cached
     hit = _CDIFF_CACHE.get(key) if pinned else None
     if hit is not None:
