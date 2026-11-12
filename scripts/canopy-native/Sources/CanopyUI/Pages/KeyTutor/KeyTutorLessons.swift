@@ -430,7 +430,10 @@ enum KeyLessons {
                     check: { $0.nav.picker != nil }),
             KeyStep("{send} picks it: its subject opens, writing.", [.send], check: { $0.insertField?.hasPrefix("words.s|") == true }),
             KeyStep("{cancel} stops.", [.cancel], check: { $0.keys.mode == .normal }),
-        ], recap: "{words-title} {words-why} {words-description} {words-commit} open the words wherever you are. On the {command} line, :title <text>, :why <text>, :desc <text> and :reword <sha> <subject> write and save in one go."),
+            KeyStep("{words-fold}: pick an unpushed commit to fold into the one below it — one commit, both messages, {undo} puts it back; a one-commit branch says so.", [.wordsFold],
+                    check: { $0.nav.picker != nil || ($0.runner.note ?? "").contains("nothing to fold") }),
+            KeyStep("{cancel} stops.", [.cancel], check: { $0.keys.mode == .normal }),
+        ], recap: "{words-title} {words-why} {words-description} {words-commit} {words-fold} open the words wherever you are. On the {command} line, :title <text>, :why <text>, :desc <text>, :reword <sha> <subject> and :fold <sha> write and save in one go."),
 
         KeyLesson(id: "leader", title: "The page's own keys", steps: [
             KeyStep("What no verb names is the page's own, under the leader: {leader}. Which-key lists this page's keys.",

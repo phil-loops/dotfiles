@@ -67,6 +67,49 @@ enum WordsByName {
                     }
                 }
             }))
+
+        // fold: one commit absorbed into the one below it — the server's one commit-tree pass (POST
+        // /outline {fold}), tree-preserving and undone by u. Typed, it folds that sha; alone, it picks.
+        r.register(Command(
+            id: "fold", title: "Fold a commit into the one below it — :fold <sha>; alone, pick the commit",
+            scope: .global, verb: .wordsFold, takes: "<sha>", label: "fold", available: onABranch,
+            local: { _, arg in
+                guard let app = weakApp, let id = branch(app) else { return }
+                guard let t = typed(arg) else { return try withWords(app, id) { try pickFold(app, id) } }
+                try withWords(app, id) { app.runner.dispatch("words.fold", via: .key, target: id, arg: String(t.split(separator: " ")[0])) }
+            }))
+        r.register(Command(
+            id: "words.fold", title: "Fold the named commit into the one below it", scope: .global, budget: .gitWrite, needsArg: true, quiet: true,
+            write: { [weak app] t, arg in
+                guard let app, let id = t ?? branch(app), let b = app.store.view(Branch.self, id), let sha = arg as? String else { return nil }
+                let words = WordsState.of(app)
+                guard let o = words.shown[id] else { throw Refusal("the words aren't read yet") }
+                let own = o.commits.filter { !$0.carried }
+                guard let c = commit(words, id, sha), let i = own.firstIndex(where: { $0.sha == c.sha }) else { throw Refusal("\(sha) isn't one of this branch's commits") }
+                guard i > 0 else { throw Refusal("\(c.short.prefix(7)) is the branch's first commit — nothing below it to fold into") }
+                let below = own[i - 1]
+                for x in [c, below] where !x.locked.isEmpty { throw Refusal("\(x.short.prefix(7)) is \(x.locked)") }
+                let tip = b.tip
+                return Write(
+                    path: app.transport.atRepo(b.repo, "/outline"),
+                    body: ["branch": .string(b.name), "head": .string(o.head), "fold": .array([.string(c.sha)])],
+                    settled: { app.store.table(Branch.self)[id]?.tip != tip },
+                    said: "folded \(c.short.prefix(7)) into \(below.short.prefix(7)) — \(app.registry.keyOf("undo")) puts it back",
+                    failed: "couldn't fold \(c.short.prefix(7))",
+                    inverse: { _ in Inverse(id: "words.undo", target: id, arg: WordsUndo(moves: true, pr: nil)) })
+            }))
+    }
+
+    /// The branch's unpushed commits that have one below them, newest first; picking one folds it.
+    static func pickFold(_ app: AppModel, _ id: String) throws {
+        let own = (WordsState.of(app).shown[id]?.commits ?? []).filter { !$0.carried }
+        let candidates = Array(own.dropFirst().reversed())
+        guard !candidates.isEmpty else { throw Refusal("this branch has one commit — nothing to fold") }
+        let items = candidates.map { c in PickItem(label: String(c.short.prefix(7)), text: c.locked.isEmpty ? c.subject : "\(c.subject) · \(c.locked)") }
+        app.nav.pick("fold a commit into the one below it", items) { [weak app] i in
+            guard let app else { return }
+            app.runner.dispatch("words.fold", via: .key, target: id, arg: candidates[i].sha)
+        }
     }
 
     /// The branch's own commits, newest first, by their subjects; picking one opens its subject to write.

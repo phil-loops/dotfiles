@@ -499,6 +499,22 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
         #expect(a.insertField == "words.s|\(Self.branch)|c2" && ShipState.wordsCommit(a) == "c2")
     }
 
+    /// D j (or :fold alone) picks an unpushed commit to fold into the one below; the first commit and a
+    /// pushed pair are refused in words; a pick posts the fold and u puts it back.
+    @Test func djFoldsACommitIntoTheOneBelow() async throws {
+        let (a, port) = try app()
+        WordsState.of(a).setShown(Self.branch, outline())
+        ShipStub.answer(port, "POST", "/loops/outline", #"{"ok":true,"newTip":"abc","oldTip":"def","changed":0,"folded":1}"#)
+        a.keys.handle("D"); a.keys.handle("j")
+        #expect(a.nav.picker?.items.map(\.label) == ["c3", "c2"], "the first commit has nothing below it")
+        a.nav.choose(1)   // c2 into c1 — c1 is on origin
+        #expect(a.runner.note?.contains("on origin") == true)
+        run(a, "fold c3")
+        await until("the fold to post") { ShipStub.posts(port).contains { $0.path == "/loops/outline" } }
+        let body = ShipStub.posts(port).last { $0.path == "/loops/outline" }!.body
+        #expect(body["fold"] == .array([.string("c3")]) && body["branch"] == .string("add-hankles-limited-label"), "\(body)")
+    }
+
     /// The rule (NAV.md 2026-11-08, name the target, don't walk to it): every named words target is
     /// reached from every kind of starting place in two keys or one `:` command — the cursor is a
     /// default, never a precondition. A new target or a new starting place gets the rule for free.
