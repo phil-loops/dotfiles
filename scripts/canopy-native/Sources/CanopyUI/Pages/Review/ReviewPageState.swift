@@ -759,6 +759,20 @@ public final class ReviewPageState: ShipHost {
         var showOutdated: Bool
     }
 
+    /// What the diff's search fields are read from (ReviewSurface.searchStamp).
+    var searchStamp: String {
+        "\(payloadGen)|\(payload?.key ?? "")|\(commitScope ?? "")|\(split)|\(diffColumns)|\(app?.store.versions[Domain.review] ?? 0)|\(app?.store.ops.count ?? 0)|\(contextGen)"
+    }
+
+    @ObservationIgnored private var linesMemo: (text: String, lines: [String])?
+    /// A window's text as lines, split once per text.
+    func lines(of text: String) -> [String] {
+        if let m = linesMemo, m.text == text { return m.lines }
+        let l = text.components(separatedBy: "\n")
+        linesMemo = (text, l)
+        return l
+    }
+
     private var viewsSig: ViewsSig {
         ViewsSig(payload: "\(payloadGen)|\(payload?.key ?? "")", scope: commitScope, scopeLoaded: commitFiles?.sha == commitScope, split: split,
                  review: app?.store.versions[Domain.review] ?? 0, ops: app?.store.ops.map(\.seq) ?? [], context: contextGen,

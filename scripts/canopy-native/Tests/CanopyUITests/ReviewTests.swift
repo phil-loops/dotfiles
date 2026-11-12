@@ -1340,6 +1340,24 @@ import Testing
         #expect(ShipStub.posts(p).last { $0.path == "/loops/lsp/workspace-symbols" }!.body["query"] == .string("greetAll"))
     }
 
+    /// A live search reads the page once per query and content, not on every redraw: keys that change
+    /// neither reuse the matches (a 6000-line review spent ~130 ms per key re-reading every row).
+    @Test func aLiveSearchReadsThePageOncePerQueryAndContent() async throws {
+        let (a, _) = try await app()
+        let search = PageSearch.of(a)
+        keys(a, "w"); keys(a, "*")
+        let first = search.hits(a)
+        let scans = search.scans
+        #expect(!first.isEmpty && scans >= 1)
+        _ = search.hits(a); _ = search.matches(a); _ = search.hitsByRow(a, pane: reviewDiffPane)
+        keys(a, "j"); keys(a, "x"); keys(a, "esc")
+        _ = search.hits(a)
+        #expect(search.scans == scans, "moving, selecting and redrawing reuse the matches")
+        keys(a, "/"); keys(a, "t"); keys(a, "w"); keys(a, "o"); keys(a, "ret")
+        _ = search.hits(a)
+        #expect(search.scans > scans, "a new query reads the page again")
+    }
+
     /// The code beside the diff searches its text, not its line numbers, and lights its matches.
     @Test func slashSearchesTheCodeBesideTheDiff() async throws {
         let (a, p) = try await app()

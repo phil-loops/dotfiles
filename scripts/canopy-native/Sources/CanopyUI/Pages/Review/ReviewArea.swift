@@ -124,6 +124,14 @@ struct ReviewSurface: SurfaceProvider {
     /// In the diff `/` reads code only — a line's new half (field 0), and its old half (field 1) where
     /// that's a removed line, as far as it's drawn; headers, conversations and gaps aren't searched.
     /// The open file: each line's text. Elsewhere (the file tree): titles.
+    /// The diff's search reads the payload, its scope and split (the old half is cut to its width), the
+    /// review patches (threads are rows) and the code beside it.
+    func searchStamp(_ app: AppModel) -> String {
+        let pg = ReviewPageState.of(app)
+        let p = PageSearch.of(app).pane
+        return "\(pg.searchStamp)|\(pg.window(pane: p)?.text?.utf16.count ?? -1)"
+    }
+
     func searchFields(for row: String, _ app: AppModel) -> [String] {
         let pg = ReviewPageState.of(app)
         switch PageSearch.of(app).pane {
@@ -134,7 +142,7 @@ struct ReviewSurface: SurfaceProvider {
             return [r.right?.text ?? "", old ?? ""]
         case let p where pg.window(pane: p)?.doc != nil:
             guard let n = RowKey.id(row, "s").flatMap(Int.init), let t = pg.window(pane: p)?.text else { return [] }
-            let lines = t.components(separatedBy: "\n")
+            let lines = pg.lines(of: t)   // split once per text, not once per row (a scan was quadratic)
             return n >= 1 && n <= lines.count ? [lines[n - 1]] : []
         default:
             return [searchText(for: row, app) ?? app.guessTitle(row)]

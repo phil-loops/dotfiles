@@ -49,6 +49,9 @@ public protocol SurfaceProvider {
     func searchFields(for row: String, _ app: AppModel) -> [String]
     /// The cursor just landed on a match: select it, if the page has a selection for it.
     func searchLanded(_ hit: PageSearch.Hit, _ app: AppModel)
+    /// What the search fields are read from, as a stamp: while it and the query stay the same, a search's
+    /// matches are reused instead of every row re-read on every redraw. Default: the store's versions.
+    func searchStamp(_ app: AppModel) -> String
     /// Where the cursor is, in the reader's words, for the status line; nil says "<pane> i/n".
     func position(_ app: AppModel) -> String?
     /// Fill in what the jumplist keeps beyond route, pane and cursor (which the shell fills):
@@ -79,6 +82,9 @@ public extension SurfaceProvider {
     func searchText(for row: String, _ app: AppModel) -> String? { title(for: row, app) }
     func searchFields(for row: String, _ app: AppModel) -> [String] { [searchText(for: row, app) ?? app.guessTitle(row)] }
     func searchLanded(_ hit: PageSearch.Hit, _ app: AppModel) {}
+    func searchStamp(_ app: AppModel) -> String {
+        app.store.versions.sorted { $0.key < $1.key }.map { "\($0.value)" }.joined(separator: ",") + "|\(app.store.ops.count)"
+    }
     func position(_ app: AppModel) -> String? { nil }
     func remember(_ place: inout Place, _ app: AppModel) {}
     func rememberLayout(_ place: inout Place, _ app: AppModel) {}

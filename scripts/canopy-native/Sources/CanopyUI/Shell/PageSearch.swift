@@ -59,16 +59,29 @@ public final class PageSearch {
         fields(row, app).enumerated().flatMap { f, text in Self.ranges(of: query, in: text).map { Hit(row: row, field: f, at: $0) } }
     }
 
-    /// Every match in the searched pane, in reading order (row, then field, then position).
+    private struct MemoKey: Equatable { var query: String; var pane: String; var rows: [String]; var stamp: String }
+    /// The last scan: every redraw while a search is live asks for the matches, and on a 6000-line
+    /// review re-reading every row cost ~130 ms per key (bench --synthetic 1000, 2026-11-12).
+    @ObservationIgnored private var memo: (key: MemoKey, hits: [Hit])?
+    /// How many full scans have run (tests hold the memo to its word).
+    @ObservationIgnored private(set) var scans = 0
+
+    /// Every match in the searched pane, in reading order (row, then field, then position) — read once
+    /// per query, pane rows and page content (`searchStamp`).
     public func hits(_ app: AppModel) -> [Hit] {
         guard active, let p = app.panes.first(where: { $0.id == pane }) else { return [] }
-        return p.rows.flatMap { hits(in: $0, app) }
+        let key = MemoKey(query: query, pane: pane, rows: p.rows, stamp: app.provider?.searchStamp(app) ?? "")
+        if let m = memo, m.key == key { return m.hits }
+        let out = p.rows.flatMap { hits(in: $0, app) }
+        scans += 1
+        memo = (key, out)
+        return out
     }
 
     /// The searched pane's rows that match, in order.
     public func matches(_ app: AppModel) -> [String] {
-        guard active, let p = app.panes.first(where: { $0.id == pane }) else { return [] }
-        return p.rows.filter { !hits(in: $0, app).isEmpty }
+        var seen = Set<String>()
+        return hits(app).compactMap { seen.insert($0.row).inserted ? $0.row : nil }
     }
 
     /// The searched pane's matches by row, for the views that light them.
