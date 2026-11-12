@@ -82,6 +82,7 @@
 | labels | `g w` `f` | label everything on screen; type a label to go there |
 | find | `space f` | find something on this page by name |
 | changed-files | `space g` | the files this branch changes, to pick one (Helix's changed-file picker) |
+| findings | `space d` | push-ready's review findings on this branch, to pick one (Helix's diagnostics picker); `]d` / `[d` step through them |
 | search | `/` | search this page's text — the cursor lands on each match, selected like a name; `n`/`N` step match by match (on Review: code only, not paths or comments) |
 | search name | `*` | search for the name under the cursor |
 | map | `space m` | the map around what you're on |

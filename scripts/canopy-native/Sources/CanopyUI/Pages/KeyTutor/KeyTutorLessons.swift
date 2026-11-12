@@ -210,6 +210,8 @@ enum KeyLessons {
             KeyStep("{previous-finding}: the one before.", [.previousFinding], check: { P.here($0) == "l|greet.ts|R:5" }),
             KeyStep("{last-finding}: the last one.", [.lastFinding]),
             KeyStep("{first-finding}: the first.", [.firstFinding]),
+            KeyStep("{findings} lists every finding at once, as Helix's diagnostics picker does.", [.findings], check: { $0.nav.picker != nil }),
+            KeyStep("{send} goes to the one under the cursor.", [.send], check: { $0.nav.picker == nil }),
             KeyStep("{last-change}: the branch's last change.", [.lastChange], check: { P.here($0) == P.pg($0).stops.last { $0.row.map(changed) ?? false }?.key }),
             KeyStep("{first-change}: its first.", [.firstChange], check: { P.here($0) == P.pg($0).stopFiles.first.flatMap(P.pg($0).landing(file:)) }),
             KeyStep("{view-top} scrolls so this line is at the top of the screen.", [.viewTop]),

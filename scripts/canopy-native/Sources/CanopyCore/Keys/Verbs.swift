@@ -45,7 +45,7 @@ public enum Verb: String, CaseIterable, Sendable, Comparable {
     case slot1 = "slot-1", slot2 = "slot-2", slot3 = "slot-3", slot4 = "slot-4", slot5 = "slot-5"
     case slot6 = "slot-6", slot7 = "slot-7", slot8 = "slot-8", slot9 = "slot-9"
     case jumpBack = "jump-back", jumpForward = "jump-forward", saveJump = "save-jump"
-    case branches, jumps, flags, grep, lastPicker = "last-picker"
+    case branches, jumps, flags, findings, grep, lastPicker = "last-picker"
     case paneLeft = "pane-left", paneDown = "pane-down", paneUp = "pane-up", paneRight = "pane-right", paneNext = "pane-next"
     case splitRight = "split-right", splitBelow = "split-below", closeWindow = "close-window", onlyWindow = "only-window"
     case pickRight = "pick-right", pickBelow = "pick-below"
@@ -100,7 +100,7 @@ public enum KeySection: String, CaseIterable, Sendable {
              .goForests, .goDashboard, .goTodo, .goMachine, .goWiki, .goTutor,
              .slot1, .slot2, .slot3, .slot4, .slot5, .slot6, .slot7, .slot8, .slot9:
             return .places
-        case .find, .branches, .jumps, .flags, .grep, .lastPicker:
+        case .find, .branches, .jumps, .flags, .findings, .grep, .lastPicker:
             return .pickers
         case .type, .definition, .typeDefinition, .implementations, .references, .symbols, .rename, .match,
              .nextFunction, .previousFunction, .nextType, .previousType, .nextTest, .previousTest:
@@ -266,6 +266,7 @@ public enum Verbs {
         v(.branches, .nav, ["space B"], "find a branch in any forest"),
         v(.jumps, .nav, ["space j"], "pick from the jumplist"),
         v(.flags, .nav, ["space !"], "pick a change you flagged (, !), on any branch"),
+        v(.findings, .nav, ["space d"], "pick one of push-ready's review findings on this branch (Helix's diagnostics picker)"),
         v(.lastPicker, .nav, ["space '"], "reopen the last picker"),
         v(.paneLeft, .nav, ["C-h", "C-w h", "space w h", "A-h"], "focus the pane to the left"),
         v(.paneDown, .nav, ["C-w j", "space w j", "A-j"], "focus the pane below"),
