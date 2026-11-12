@@ -10,6 +10,7 @@ import SwiftUI
 public struct ShipStripView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme
+    @Environment(\.accessibilityReduceMotion) private var reduced
     let branchID: String
 
     public init(branchID: String) { self.branchID = branchID }
@@ -100,8 +101,12 @@ public struct ShipStripView: View {
                 }
             }
             if acts || live != nil {
-                KeyButton(title: pushLabel(b, route: route, live: live, forced: push?.forced ?? false), id: "review.push", target: branchID,
+                // the routine wins settle in (joy page): gates going green turn the label to push,
+                // a clean push turns it to ✓ pushed — a 200 ms settle, not a toast; still under reduced motion
+                let label = pushLabel(b, route: route, live: live, forced: push?.forced ?? false)
+                KeyButton(title: label, id: "review.push", target: branchID,
                           gold: true, busy: live == .sending || live == .landing, failed: live == .failed)
+                    .settles(label, reduced: reduced)
                     .explains("ship|push", "p: this branch's next step — run the gates, then push to origin")
             }
             if route == "branch.gates.run" && live == nil && app.store.view(Pr.self, branchID) != nil {
