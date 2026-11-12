@@ -13,7 +13,7 @@ import time
 from urllib.parse import parse_qs
 from . import ctx
 
-FIELDS = "number,title,headRefName,baseRefName,author,isDraft,url"
+FIELDS = "number,title,headRefName,baseRefName,author,isDraft,url,isCrossRepository"
 TTL = 60.0
 _cache = {}            # slug -> (monotonic, prs)
 _lock = threading.Lock()
@@ -22,8 +22,10 @@ _lock = threading.Lock()
 def stack_of(prs, number):
     """The stack that holds PR `number`, from open PRs as `gh pr list --json` gives them. Up: follow
     each base to the open PR whose head it is, until a base no open PR heads (main, or a branch that
-    merged). Down: every open PR based on a node's head, depth first, children by number. Pure."""
-    by_head = {p["headRefName"]: p for p in prs}
+    merged). Down: every open PR based on a node's head, depth first, children by number. A fork's
+    PR heads a branch in the fork, not here — a fork PR named `main` must not root every stack —
+    so it can sit in a stack but nothing chains on it. Pure."""
+    by_head = {p["headRefName"]: p for p in prs if not p.get("isCrossRepository")}
     by_num = {p["number"]: p for p in prs}
     me = by_num.get(number)
     if not me:
@@ -45,6 +47,8 @@ def stack_of(prs, number):
                       "base": p["baseRefName"], "parent": parent, "depth": depth,
                       "author": ((p.get("author") or {}).get("login") or ""), "draft": bool(p.get("isDraft")),
                       "url": p.get("url") or ""})
+        if p.get("isCrossRepository"):
+            return
         for c in sorted(children.get(p["headRefName"], []), key=lambda c: c["number"]):
             walk(c, p["number"], depth + 1)
 

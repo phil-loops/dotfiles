@@ -37,5 +37,13 @@ check("an unknown PR is None", foreign.stack_of(prs, 999) is None)
 loop = [pr(1, "a", "b"), pr(2, "b", "a")]
 check("a base cycle can't spin", foreign.stack_of(loop, 1) is not None)
 
+# a fork's PR whose head is named main: it doesn't root the main-based stack, and nothing chains on it
+fork = dict(pr(600, "main", "footers-8", author="outsider"), isCrossRepository=True)
+s2 = foreign.stack_of(prs + [fork], 406)
+check("a fork PR named main doesn't become every stack's root", s2["root"] == 406, s2["root"])
+check("…it sits in the stack it's based on, as a leaf", [n["number"] for n in s2["nodes"] if n["parent"] == 408] == [409, 410, 600], s2["nodes"])
+s3 = foreign.stack_of(prs + [fork, pr(700, "other", "main")], 600)
+check("…and asking from it walks up its own bases, not every main-based PR", s3["root"] == 406 and 700 not in {n["number"] for n in s3["nodes"]}, s3)
+
 print(f"\n{'OK' if not failures else 'FAIL'} — {failures} failure(s)")
 sys.exit(1 if failures else 0)
