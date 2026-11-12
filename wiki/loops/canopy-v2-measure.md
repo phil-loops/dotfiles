@@ -6,6 +6,8 @@ project: canopy-v2
 lede: Built before any surface: every command and navigation is named and timed on the client, so a dashboard always shows what's slow, what's used, and what fails.
 ---
 
+> **The client is native since 2026-10-29.** This page was written for the web client (`viewer-solid`, retired 2026-10-31); canopy is now the macOS app in `scripts/canopy-native/` (Show's ⌘1). The goals and invariants here stand; the keys live in `scripts/canopy-native/NAV.md`, and anything naming a `.tsx`/`.ts` file is history.
+
 **Event tracking, keyed by command id.** Every command run records:
 
 - id, scope, target and how it was invoked (key, click, palette, menu);

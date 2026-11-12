@@ -6,6 +6,8 @@ project: canopy-v2
 lede: The v2 store hydrates once from a snapshot, then applies entity patches the server pushes per domain. One config write is one small patch, never a refetch.
 ---
 
+> **The client is native since 2026-10-29.** This page was written for the web client (`viewer-solid`, retired 2026-10-31); canopy is now the macOS app in `scripts/canopy-native/` (Show's ⌘1). The goals and invariants here stand; the keys live in `scripts/canopy-native/NAV.md`, and anything naming a `.tsx`/`.ts` file is history.
+
 Design: [[canopy-v2-architecture]]. Code: `srv/state.py`.
 
 **`GET /state`** returns `{epoch, versions, entities}`. Entities are keyed by type, then id:

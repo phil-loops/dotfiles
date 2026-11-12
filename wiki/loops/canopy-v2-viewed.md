@@ -6,6 +6,8 @@ project: canopy-v2
 lede: A change stays reviewed until its own text changes — not when another hunk in the file moves, and not when a rebase shifts it or edits the lines around it. Built 2026-10-25.
 ---
 
+> **The client is native since 2026-10-29.** This page was written for the web client (`viewer-solid`, retired 2026-10-31); canopy is now the macOS app in `scripts/canopy-native/` (Show's ⌘1). The goals and invariants here stand; the keys live in `scripts/canopy-native/NAV.md`, and anything naming a `.tsx`/`.ts` file is history.
+
 **Today.** "Viewed" is per file: `stack-bless` writes `$GIT_DIR/stack-blessed.json` as `{branch: {path: blob}}` (a leftover of the nvim `stack-blessed.lua`), and v2's `v` posts `/bless`. The key is the file's blob, so any change anywhere in the file un-views the whole file: a fix in another hunk, or a rebase that brings in main's edits to the same file. The ledger holds 391 entries across 116 branches.
 
 **The unit is a change block, not a hunk.** A block is a run of consecutive `-`/`+` lines. Git's hunks are blocks grouped by context width (3 lines by default): two changes 5 lines apart are one hunk, and if the code between them changes they become two. Keying on blocks makes the split/merge question disappear: a hunk is viewed when every block in it is.

@@ -6,6 +6,8 @@ project: canopy-v2
 lede: seed-gen stores every tRPC types emit under the exact inputs the compiler read, so any tree whose inputs were built before restores them instead of compiling.
 ---
 
+> **The client is native since 2026-10-29.** This page was written for the web client (`viewer-solid`, retired 2026-10-31); canopy is now the macOS app in `scripts/canopy-native/` (Show's ⌘1). The goals and invariants here stand; the keys live in `scripts/canopy-native/NAV.md`, and anything naming a `.tsx`/`.ts` file is history.
+
 **Keyed by what the compiler read.** A stored emit carries its compiler graph and every path module resolution probed. A tree hits only when those files hash the same and every probe answers the same. The key also covers package.jsons read or missing, node_modules links, configs, the compiler's files and seed-gen's. Each part has a counterexample in `test-seed-gen-cache`.
 
 **Restore is a clone.** `clonefile` copies the entry, which is checked against its sha256 manifest. Only changed files are swapped in, so the type service hears real changes only. The tsbuildinfo is re-spelled for the tree, so a no-op `tsc` re-emits nothing.

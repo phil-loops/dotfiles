@@ -6,6 +6,8 @@ project: canopy-v2
 lede: A ground-up rewrite of the viewer's frontend. Same server, same data; a new client built to be instant, ergonomic and a joy to use — and to measure itself, so we always know where the next improvement is.
 ---
 
+> **The client is native since 2026-10-29.** This page was written for the web client (`viewer-solid`, retired 2026-10-31); canopy is now the macOS app in `scripts/canopy-native/` (Show's ⌘1). The goals and invariants here stand; the keys live in `scripts/canopy-native/NAV.md`, and anything naming a `.tsx`/`.ts` file is history.
+
 **Why rewrite.** The frontend grew by accretion to 15,400 lines in 87 files. The server is fast — warm reads take 0.1–0.2 s — but the client makes it feel slow and clunky:
 
 - every action waits on the server, then refetches;

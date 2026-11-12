@@ -6,6 +6,8 @@ project: canopy-v2
 lede: Measured 2026-10-22 on the live viewer. The server is not the problem; the client's shape is.
 ---
 
+> **The client is native since 2026-10-29.** This page was written for the web client (`viewer-solid`, retired 2026-10-31); canopy is now the macOS app in `scripts/canopy-native/` (Show's ⌘1). The goals and invariants here stand; the keys live in `scripts/canopy-native/NAV.md`, and anything naming a `.tsx`/`.ts` file is history.
+
 **The server is fast.** Warm reads: `/projects` 0.1 s, `/node` 0.2 s, `/outline` 0.1 s, `/outbox` 0.1 s. Only the first `/model` and `/push-preview` per branch are slow (2.5 s cold).
 
 **The client's shape is the problem:**

@@ -6,6 +6,8 @@ project: canopy-v2
 lede: One long-lived tsgo reads viewer-owned trees that move between commits instead of starting cold per branch, and every answer is byte-identical to a fresh tsgo on a fresh tree.
 ---
 
+> **The client is native since 2026-10-29.** This page was written for the web client (`viewer-solid`, retired 2026-10-31); canopy is now the macOS app in `scripts/canopy-native/` (Show's ⌘1). The goals and invariants here stand; the keys live in `scripts/canopy-native/NAV.md`, and anything naming a `.tsx`/`.ts` file is history.
+
 **Trees that move, not start over.** The viewer owns a pool of four detached worktrees (~240 MB each). A commit goes to the tree already holding its lockfile and `packages/`. `git checkout` then rewrites only the differing files, so hopping forests doesn't re-derive node_modules or the prisma client.
 
 **tsgo hears every change.** The client declares dynamic watch registration, so tsgo runs no watcher of its own. Each changed path goes over as a `didChangeWatchedFiles` event before the next request. A changed dependency view, or more than 1,000 changes, restarts tsgo instead.

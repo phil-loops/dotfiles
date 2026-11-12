@@ -6,6 +6,8 @@ project: canopy-v2
 lede: Every action is a named command with one key, reachable from the palette. Three surfaces, each one job. Reading and writing are separate modes.
 ---
 
+> **The client is native since 2026-10-29.** This page was written for the web client (`viewer-solid`, retired 2026-10-31); canopy is now the macOS app in `scripts/canopy-native/` (Show's ⌘1). The goals and invariants here stand; the keys live in `scripts/canopy-native/NAV.md`, and anything naming a `.tsx`/`.ts` file is history.
+
 **One command model.** Every action is a command with an id, a title, a key, a scope (global, forest, branch, line) and a run function. Buttons, keys, right-click menus and the palette all dispatch commands. The `?` sheet is generated from them, so it can't drift, and telemetry is keyed by command id, so renaming a label never splits the data.
 
 **Keys follow Helix where they overlap:**

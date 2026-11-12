@@ -6,6 +6,8 @@ project: canopy-v2
 lede: The branch page is GitHub's pull-request review, rebuilt local — same nouns, same moves, so nothing new to learn — plus what GitHub can't do: types, your unpushed commits, and a second reader.
 ---
 
+> **The client is native since 2026-10-29.** This page was written for the web client (`viewer-solid`, retired 2026-10-31); canopy is now the macOS app in `scripts/canopy-native/` (Show's ⌘1). The goals and invariants here stand; the keys live in `scripts/canopy-native/NAV.md`, and anything naming a `.tsx`/`.ts` file is history.
+
 **GitHub's model, kept whole.** Files changed with inline threads; a file tree with *viewed* checkboxes; a conversation view for the PR. On any line (or an `x`-range): *start a review* / *add review comment*. On a thread: reply, *show outdated*. Suggestion blocks with **apply suggestion**. Same for your PRs and teammates' (`review/pr-N`). Keys follow GitHub's where it has them.
 
 **You submit on GitHub.** What you write goes into your **pending review** on GitHub — private to you until you press Submit there. The viewer never submits, approves, requests changes, resolves, or posts a standalone comment: **S** opens the PR's files on GitHub with the pending count, and **R** opens a thread there to resolve it. It can send exactly three things — create your pending review, add a thread to it, add a reply to it — and a structure test holds it to those. Sending to the real GitHub stays off until `git config stack.viewer-github-pending true`; until then everything is kept as a draft.

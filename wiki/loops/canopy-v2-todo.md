@@ -6,6 +6,8 @@ project: canopy-v2
 lede: One list of what's left to build on the viewer — files in the dotfiles, a page in canopy, and a skill that ranks it, checks the design, and writes the next steps.
 ---
 
+> **The client is native since 2026-10-29.** This page was written for the web client (`viewer-solid`, retired 2026-10-31); canopy is now the macOS app in `scripts/canopy-native/` (Show's ⌘1). The goals and invariants here stand; the keys live in `scripts/canopy-native/NAV.md`, and anything naming a `.tsx`/`.ts` file is history.
+
 **One item, one file.** `~/.dotfiles/canopy/todo/<id>.md`: TOML frontmatter between `+++` lines (title, kind, state, area, size, why, waiting, blocked_by, links, rank), then notes in markdown. One file per item so concurrent sessions never write the same file; git is the history. Kinds: *build*, *fix*, *decide* (only Phil can make the call), *look* (a question to answer). States: open → doing → done, or waiting (on something named), or dropped.
 
 **Only the viewer's work.** Loops product work lives in forests and Linear; this list doesn't copy it.

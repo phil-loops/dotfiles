@@ -6,6 +6,8 @@ project: canopy-v2
 lede: Joy is mostly the absence of friction — then a few moments that are crafted on purpose.
 ---
 
+> **The client is native since 2026-10-29.** This page was written for the web client (`viewer-solid`, retired 2026-10-31); canopy is now the macOS app in `scripts/canopy-native/` (Show's ⌘1). The goals and invariants here stand; the keys live in `scripts/canopy-native/NAV.md`, and anything naming a `.tsx`/`.ts` file is history.
+
 **Calm by default.** The page at rest shows titles and one action each. Metadata comes on hover, focus or selection. One accent color (gold) means "you can act here"; ember means "the clock matters"; red only means something broke.
 
 **Motion that explains.** Short, springy transitions (150–200 ms) that show where things went:
