@@ -32,7 +32,7 @@ def heavy_turn():
 
 def processes():
     """Every process as {pid, ppid, cpu, rssMb, age, command}; same user only (ps -x)."""
-    out = subprocess.run(["ps", "-axo", "pid=,ppid=,pcpu=,rss=,etime=,command="], capture_output=True, text=True).stdout
+    out = subprocess.run(["ps", "-xo", "pid=,ppid=,pcpu=,rss=,etime=,command="], capture_output=True, text=True).stdout
     rows = []
     for ln in out.splitlines():
         parts = ln.split(None, 5)
@@ -201,7 +201,9 @@ def kill(req, raw):
     """POST /queue-kill {pid} — Phil's x on a queue row: SIGTERM to a slot holder, a waiter or
     un-queued heavy work; refused for any pid the queue doesn't show."""
     import signal
-    from . import actor
+    from . import actor, preview
+    if preview.sandboxed():   # the pids are the machine's real ones
+        return req._send(403, json.dumps({"ok": False, "err": "the sandbox has no queue — this would signal the machine's real processes"}))
     if not actor.is_phil(req):
         return req._send(403, json.dumps({"ok": False, "err": "only Phil's click kills a process"}))
     d = json.loads(raw or "{}")
