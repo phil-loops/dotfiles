@@ -526,6 +526,9 @@ def _direct_rebase(branch):
     n = ctx.run(["git", "-C", target, "rev-list", "--count", "origin/main..HEAD"]).stdout.strip()
     if own:
         ctx.run(["git", "-C", target, "checkout", "--detach"])  # release the branch
+    # The record is part of the move: the branch now forks from origin/main's tip, and a base
+    # left at the old fork point is what let a seal swallow main's advance (2026-10-28).
+    stackcfg.set_key(branch, "base", ctx.run(["git", "rev-parse", "origin/main"]).stdout.strip())
     return "clean", f"replayed {n} commit{'' if n == '1' else 's'} onto origin/main"
 
 

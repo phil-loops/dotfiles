@@ -961,6 +961,8 @@ def prep_push(req, raw):
                 if held is None:
                     r = ctx.run(["git", "-C", scratch, "rebase", "--onto", "origin/main", cut, branch])
                     if r.returncode == 0:
+                        # the move records its own base — stale records swallow main on the seal below
+                        stackcfg.set_key(branch, "base", ctx.run(["git", "rev-parse", "origin/main"]).stdout.strip())
                         routed.append(f"restacked onto origin/main ({state['behind']} behind)")
                     else:
                         ctx.run(["git", "-C", scratch, "rebase", "--abort"])

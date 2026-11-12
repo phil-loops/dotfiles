@@ -461,7 +461,13 @@ def _seated(parent, child):
 def _cut_point(parent, child):
     # the recorded parent tip the child was last rebased onto — NOT merge-base(parent, child):
     # after the parent is rewritten that merge-base collapses to main and the rebase would
-    # replay the parent's old commits into the child.
+    # replay the parent's old commits into the child. The rule for when the record still
+    # stands (an ancestor the child hasn't been rebased past) lives in one place, stack-base,
+    # which also heals a stale record; trusting any record that merely exists replayed main's
+    # commits into a child after a forward rebase (2026-10-28).
+    r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-base"), child])
+    if r.returncode == 0 and r.stdout.strip():
+        return r.stdout.strip()
     base = (ctx.run(["git", "config", f"branch.{child}.stack-base"]).stdout.strip()
             or ctx.run(["git", "config", f"stack-branch.{child}.base"]).stdout.strip())
     if base and ctx.run(["git", "cat-file", "-e", f"{base}^{{commit}}"]).returncode == 0:
