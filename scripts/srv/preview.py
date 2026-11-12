@@ -33,7 +33,7 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import parse_qs, urlparse
 
-from . import ctx, checkout
+from . import ctx, checkout, actor
 
 _ANSI = re.compile(r"\x1b\[[0-9;?]*[a-zA-Z]")
 # next-dev log markers, most-significant first — scanned bottom-up so the LATEST state wins.
@@ -51,6 +51,18 @@ def sandboxed():
 
 
 SANDBOX_REFUSAL = "the sandbox has no previews — this would act on the machine's real dev servers"
+
+
+def phil_only(fn):
+    """A process kill only Phil's click may send: the processes it ends may belong to another
+    session (a preview it is reading, a typecheck it is waiting on). Enforced, not just asked."""
+    def guarded(req, raw):
+        if not actor.is_phil(req):
+            return req._send(403, json.dumps({"ok": False, "err": "only Phil's click kills a server"}))
+        return fn(req, raw)
+    guarded.__name__ = fn.__name__
+    guarded.__doc__ = fn.__doc__
+    return guarded
 
 
 def machine_only(fn):
@@ -625,6 +637,7 @@ def restart(req, raw):
 
 
 @machine_only
+@phil_only
 def swap(req, raw):
     # before/after in ONE tab: kill the server on this port and relaunch it serving a DIFFERENT
     # branch's worktree — the URL survives, and the X-Dev-Worktree stamp proves each flip. Never
@@ -657,6 +670,7 @@ def swap(req, raw):
 
 
 @machine_only
+@phil_only
 def kill(req, raw):
     d = json.loads(raw or "{}")
     dirp = d.get("dir", "")
@@ -674,6 +688,7 @@ def kill(req, raw):
 
 
 @machine_only
+@phil_only
 def reap(req, raw):
     p = subprocess.run([_script(), "--reap"], capture_output=True, text=True)
     _list_invalidate()

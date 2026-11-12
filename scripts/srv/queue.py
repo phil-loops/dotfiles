@@ -201,6 +201,9 @@ def kill(req, raw):
     """POST /queue-kill {pid} — Phil's x on a queue row: SIGTERM to a slot holder, a waiter or
     un-queued heavy work; refused for any pid the queue doesn't show."""
     import signal
+    from . import actor
+    if not actor.is_phil(req):
+        return req._send(403, json.dumps({"ok": False, "err": "only Phil's click kills a process"}))
     d = json.loads(raw or "{}")
     try:
         pid = int(d.get("pid") or 0)
