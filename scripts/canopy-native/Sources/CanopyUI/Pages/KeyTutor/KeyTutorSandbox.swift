@@ -208,6 +208,8 @@ enum KeyTutorSandbox {
             return (200, #"{"ok":true,"sha":"\#(tip(root))","locations":[{"path":"greet.ts","line":2,"character":13}]}"#)
         case ("POST", "/lsp/references"):
             return (200, #"{"ok":true,"sha":"\#(tip(root))","locations":[{"path":"greet.ts","line":2,"character":13},{"path":"header.ts","line":2,"character":9}]}"#)
+        case ("POST", "/lsp/workspace-symbols"):
+            return (200, #"{"ok":true,"sha":"\#(tip(root))","symbols":[{"name":"greeting","kind":"constant","container":"","path":"greet.ts","line":2,"endLine":2},{"name":"greeting","kind":"variable","container":"","path":"header.ts","line":1,"endLine":1}]}"#)
         case ("POST", "/lsp/symbols"):
             return (200, #"{"ok":true,"sha":"\#(tip(root))","symbols":[{"name":"name","kind":"const","line":1,"endLine":1,"depth":0},{"name":"greeting","kind":"const","line":2,"endLine":2,"depth":0},{"name":"hello","kind":"function","line":4,"endLine":6,"depth":0},{"name":"farewell","kind":"function","line":7,"endLine":9,"depth":0},{"name":"Waver","kind":"class","line":21,"endLine":26,"depth":0}]}"#)
         case ("POST", "/syntax/units") where query["path"] == "greet.ts":

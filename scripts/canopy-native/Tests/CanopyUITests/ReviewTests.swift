@@ -1314,6 +1314,24 @@ import Testing
         #expect(PageSearch.of(a).query == "one" && !PageSearch.of(a).typing && pg.hereWord == 4..<5, "stays on the name it searched")
     }
 
+    /// space S asks for the name under the cursor across the project (Helix's workspace symbols); :symbol
+    /// <name> names any other; a picked symbol is a place the picker opens.
+    @Test func spaceSFindsTheNameAcrossTheProject() async throws {
+        let (a, p) = try await app()
+        ShipStub.answer(p, "POST", "/loops/lsp/workspace-symbols",
+                        #"{"ok":true,"sha":"abc","symbols":[{"name":"one","kind":"function","container":"","path":"lib/one.ts","line":3,"endLine":9}]}"#)
+        keys(a, "w")
+        keys(a, "space", "S")
+        await until("the workspace symbols") { a.nav.picker != nil }
+        #expect(a.nav.picker?.items.map(\.label) == ["one"] && a.nav.picker?.items.first?.loc.path == "lib/one.ts")
+        let asked = ShipStub.posts(p).last { $0.path == "/loops/lsp/workspace-symbols" }!.body
+        #expect(asked["query"] == .string("one") && asked["path"] == .string("a.ts"), "\(asked)")
+        a.nav.close()
+        a.cmdline = "symbol greetAll"; a.cmdIndex = 0; a.runCmdline()
+        await until("the second ask") { ShipStub.posts(p).filter { $0.path == "/loops/lsp/workspace-symbols" }.count == 2 }
+        #expect(ShipStub.posts(p).last { $0.path == "/loops/lsp/workspace-symbols" }!.body["query"] == .string("greetAll"))
+    }
+
     /// The code beside the diff searches its text, not its line numbers, and lights its matches.
     @Test func slashSearchesTheCodeBesideTheDiff() async throws {
         let (a, p) = try await app()

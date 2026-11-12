@@ -692,23 +692,26 @@ enum DiffCommands {
             throw Refusal(d > 0 ? "no more names below" : "no more names above")
         }
         /// `*`: the name under the cursor (w's, else the line's first), as a kept search from there.
-        func searchWord() throws {
-            let search = PageSearch.of(app)
+        /// The name under the cursor — in the code beside the diff, or on a diff line — and where it sits.
+        /// One reading for every key that asks "what name is this" (*, space S).
+        func nameUnderCursor() -> (q: String, hit: PageSearch.Hit)? {
             if pg.code != nil {
-                guard let n = RowKey.id(app.selected, "s").flatMap(Int.init) else { throw Refusal("no name here") }
+                guard let n = RowKey.id(app.selected, "s").flatMap(Int.init) else { return nil }
                 let lines = (pg.sideText ?? "").components(separatedBy: "\n")
                 let text = n >= 1 && n <= lines.count ? lines[n - 1] : ""
                 let ns = CodeLookup.names(text)
-                guard let w = pg.sideHereWord.flatMap({ c in ns.first { $0.contains(c.lowerBound) } }) ?? ns.first else { throw Refusal("no name on this line") }
-                let q = (text as NSString).substring(with: NSRange(location: w.lowerBound, length: w.count))
-                if !search.seek(app, q, at: PageSearch.Hit(row: "s:\(n)", field: 0, at: w)) { throw Refusal("no matches") }
-                return
+                guard let w = pg.sideHereWord.flatMap({ c in ns.first { $0.contains(c.lowerBound) } }) ?? ns.first else { return nil }
+                return ((text as NSString).substring(with: NSRange(location: w.lowerBound, length: w.count)), PageSearch.Hit(row: "s:\(n)", field: 0, at: w))
             }
             guard app.pane?.id == reviewDiffPane, let h = pg.here, let (side, ns) = names(h),
                   let w = pg.hereWord.flatMap({ c in ns.first { $0.contains(c.lowerBound) } }) ?? ns.first,
-                  let text = (side == .left ? h.row?.left : h.row?.right)?.text else { throw Refusal("no name here") }
-            let q = (text as NSString).substring(with: NSRange(location: w.lowerBound, length: w.count))
-            if !search.seek(app, q, at: PageSearch.Hit(row: h.key, field: side == .right ? 0 : 1, at: w)) { throw Refusal("no matches") }
+                  let text = (side == .left ? h.row?.left : h.row?.right)?.text else { return nil }
+            return ((text as NSString).substring(with: NSRange(location: w.lowerBound, length: w.count)),
+                    PageSearch.Hit(row: h.key, field: side == .right ? 0 : 1, at: w))
+        }
+        func searchWord() throws {
+            guard let (q, hit) = nameUnderCursor() else { throw Refusal("no name here") }
+            if !PageSearch.of(app).seek(app, q, at: hit) { throw Refusal("no matches") }
         }
         r.register(Command(id: "review.search.word", title: "Search for the name under the cursor", scope: .review, verb: .searchWord, label: "search name",
                            local: { _, _ in try searchWord() }))
@@ -1042,6 +1045,23 @@ enum DiffCommands {
                                let (p, w) = position()
                                let path = p?.path ?? (pg.code != nil ? pg.code?.doc?.path : pg.here?.path)
                                CodeLookup.of(app).symbols(path: path, side: p?.side ?? "new", w)
+                           }))
+        // space S: the name under the cursor across the branch's project (Helix's workspace symbols);
+        // :symbol <name> names any other — the cursor is a default, never a precondition
+        func workspaceSymbols(_ query: String?) throws {
+            guard let q = query ?? nameUnderCursor()?.q, !q.isEmpty else { throw Refusal("no name under the cursor — :symbol <name> asks for any") }
+            let (p, w) = position()
+            let path = p?.path ?? (pg.code != nil ? pg.code?.doc?.path : pg.here?.path)
+            CodeLookup.of(app).workspaceSymbols(query: q, path: path, side: "new", w)
+        }
+        r.register(Command(id: "review.workspace.symbols", title: "Symbols named like the name under the cursor, across the project", scope: .review,
+                           verb: .workspaceSymbols, label: "workspace symbols", available: codeOK,
+                           local: { _, _ in try workspaceSymbols(nil) }))
+        r.register(Command(id: "symbol", title: "Symbols matching a name across the project — :symbol <name>; alone, the name under the cursor",
+                           scope: .review, takes: "<name>", label: "symbol", available: codeOK,
+                           local: { _, arg in
+                               let typed = (arg as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                               try workspaceSymbols(typed.flatMap { $0.isEmpty ? nil : String($0.split(separator: " ")[0]) })
                            }))
         r.register(Command(id: "review.window.right", title: "A copy of this window beside it", scope: .review, verb: .splitRight, group: .move, quiet: true,
                            local: { _, _ in try pg.split(below: false) }))

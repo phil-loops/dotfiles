@@ -251,6 +251,31 @@ public final class CodeLookup {
         }
     }
 
+    /// space S / :symbol: symbols matching `query` across the project the file at `path` belongs to,
+    /// as a picker of places (Helix's workspace symbols).
+    public func workspaceSymbols(query: String, path: String?, side: String = "new", _ w: Where?) {
+        guard let path, let w else { pop = .note("no file to load the project from"); return }
+        pop = .wait("finding \(query) across the project…")
+        struct WBody: Encodable { var base: Body; var query: String
+            func encode(to e: Encoder) throws { try base.encode(to: e); var c = e.container(keyedBy: K.self); try c.encode(query, forKey: .query) }
+            enum K: String, CodingKey { case query }
+        }
+        let b = WBody(base: body(nil, path: path, side: side, w), query: query)
+        Task { @MainActor in
+            guard let r = await asking("/lsp/workspace-symbols", w, b, LSPWorkspaceSymbols.self) else { return }
+            let syms = r.ok ? (r.symbols ?? []) : []
+            if syms.isEmpty {
+                pop = .note(r.ok ? "no symbol matches \(query)" : Self.plainNote(r.message).isEmpty ? "types aren't available" : Self.plainNote(r.message))
+                return
+            }
+            pop = nil
+            app?.nav.pick("symbols · \(query)", syms.map {
+                PickItem(loc: Loc(repo: w.repo, sha: r.sha ?? "", path: $0.path, line: $0.line, end: $0.endLine),
+                         label: $0.name, text: "\($0.kind) · \($0.path):\($0.line)\($0.container.map { $0.isEmpty ? "" : " in \($0)" } ?? "")")
+            })
+        }
+    }
+
     /// ] f / ] t: a file's symbols, quietly (nil when they can't be had: the note says why).
     public func symbolList(path: String, side: String = "new", _ w: Where) async -> [LSPSymbols.Symbol]? {
         let b = body(nil, path: path, side: side, w)
@@ -336,6 +361,7 @@ protocol Settles {
     var message: String? { get }
 }
 extension LSPHover: Settles {}
+extension LSPWorkspaceSymbols: Settles {}
 extension LSPLocations: Settles {}
 extension LSPSymbols: Settles {}
 
