@@ -570,12 +570,12 @@ import Testing
         #expect(keys0 == ["\(block.key).0", "\(block.key).1", "\(block.key).2"])
         pg.setCursor("l|a.ts|R:2")
         keys(a, ",", "m")
-        await until("the post") { ShipStub.posts(p).contains { $0.path == "/loops/viewed" } }
+        // the note is said when the answer lands, after the post goes out: wait for the note itself
+        await until("the mark to be said") { (a.runner.note ?? "").contains("function one") }
         #expect(ShipStub.posts(p).last { $0.path == "/loops/viewed" }!.body["marks"]
                 == .object([keys0[0]: .string("viewed"), keys0[1]: .string("viewed")]), "only function one's lines, by line")
         #expect(fv().marks[0] == .unread, "the block still has a line to read")
         #expect(pg.here?.key == "l|a.ts|R:3", "on to the rest of the same block")
-        #expect((a.runner.note ?? "").contains("function one"), "\(a.runner.note ?? "")")
         keys(a, ",", "m")
         #expect(fv().marks[0] == .viewed, "every line read: the block is")
 
