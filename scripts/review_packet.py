@@ -208,7 +208,11 @@ def verified_lines(gates, files):
     out = []
     if gates and gates.get("green"):
         names = ", ".join(gates.get("names") or [])
-        out.append(f"Pre-push gates green for this exact tree (`{gates['tree'][:10]}`)" + (f": {names}" if names else ""))
+        if gates.get("how") == "delta":
+            out.append(f"Pre-push gates green on `{gates['tree'][:10]}`, carried through a rebase that left this branch's own diff unchanged"
+                       + (f": {names}" if names else ""))
+        else:
+            out.append(f"Pre-push gates green for this exact tree (`{gates['tree'][:10]}`)" + (f": {names}" if names else ""))
     tests = [f for f in files or [] if layer_of(f["path"]) == "tests" and f.get("status") != "D"]
     added = [f["path"] for f in tests if f.get("status") == "A"]
     changed = [f["path"] for f in tests if f.get("status") != "A"]

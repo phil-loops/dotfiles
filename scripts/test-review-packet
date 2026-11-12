@@ -67,6 +67,16 @@ class Where(unittest.TestCase):
         self.assertFalse(rp.staleness(old, ["1. #43", "2. **this PR**"])["stale"])
 
 
+class Verified(unittest.TestCase):
+    def test_exact_tree(self):
+        self.assertIn("green for this exact tree (`aaaaaaaaaa`)", rp.verified_lines({"green": True, "how": "tree", "tree": "a" * 40}, [])[0])
+
+    def test_a_carried_verdict_never_claims_the_tip(self):
+        line = rp.verified_lines({"green": True, "how": "delta", "tree": "b" * 40}, [])[0]
+        self.assertNotIn("exact tree", line)
+        self.assertIn("`bbbbbbbbbb`, carried through a rebase", line)
+
+
 class Findings(unittest.TestCase):
     claims = ["Each widget query is one Prisma call with no business logic.", "Adds the widget card."]
 

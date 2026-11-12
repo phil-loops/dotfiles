@@ -139,7 +139,10 @@ def _gates(snap, branch, tree):
     """green for this tree (or carried through a rebase that left the branch's own hunks
     unchanged) + the gate names (and squawk's verdict) from the run that proved it."""
     from . import push
-    out = {"green": bool(push.verdict_stands(branch, snap)), "tree": tree, "names": []}
+    how = push.verdict_stands(branch, snap)
+    # a carried verdict names the tree the gates actually ran on, never the tip's
+    out = {"green": bool(how), "how": how, "names": [],
+           "tree": snap.branch_key(branch, "gates-green-tree") if how == "delta" else tree}
     if not out["green"]:
         return out
     try:
