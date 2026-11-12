@@ -1037,10 +1037,12 @@ def _workspace_symbols(root, result):
         if not uri or not rng:
             continue
         path = unquote(urlparse(uri).path)
-        if not path.startswith(root + os.sep) or "/node_modules/" in path:
+        rel = os.path.relpath(path, root) if path.startswith(root + os.sep) else ""
+        # outside the tree, a library, or a hidden directory (.gen's generated declarations) — not the branch's code
+        if not rel or "/node_modules/" in path or rel.split("/", 1)[0].startswith("."):
             continue
         out.append({"name": n.get("name", ""), "kind": SYMBOL_KIND.get(n.get("kind"), "symbol"),
-                    "container": n.get("containerName") or "", "path": os.path.relpath(path, root),
+                    "container": n.get("containerName") or "", "path": rel,
                     "line": rng["start"]["line"] + 1, "endLine": rng["end"]["line"] + 1})
         if len(out) >= WORKSPACE_SYMBOLS_MAX:
             break
