@@ -128,3 +128,13 @@ public enum Fonts {
         return nil
     }
 }
+
+/// The one cursor look (one-cursor-look, 2026-11-12): every pane says "the keyboard is here" the
+/// same way — a gold bar and a gold wash — and where a pane's cursor was left when focus moved on,
+/// dimmer: a deep-gold bar and a fainter wash. The diff canvas, list rows, forest rows and the tutor
+/// all draw from these.
+public enum CursorLook {
+    public static let bar: CGFloat = 3
+    public static let hereWash = 0.18
+    public static let leftWash = 0.10
+}

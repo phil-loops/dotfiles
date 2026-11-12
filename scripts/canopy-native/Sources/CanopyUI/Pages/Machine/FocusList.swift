@@ -40,12 +40,11 @@ struct CursorRow<Content: View>: View {
 
     var body: some View {
         let marks = given?.pane == pane ? given! : app.cursorMarks(pane)
-        let on = marks.on == key
-        let inRange = !on && marks.range.contains(key)
-        content(on)
+        let state = marks.state(of: key)
+        // only the focused pane's row is live: a row merely left there shows its mark, not its levers
+        content(state == .here)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(on ? theme.goldWash : inRange ? theme.emberWash : .clear)
-            .overlay(alignment: .leading) { (on ? theme.goldLeaf : .clear).frame(width: 2) }
+            .cursorChrome(state, inRange: state != .here && marks.range.contains(key))
             .contentShape(Rectangle())
             .onTapGesture { app.runner.dispatch("pane.focus", via: .click, target: pane); app.runner.dispatch("cursor.set", via: .click, target: key) }
             .id(key)
@@ -58,13 +57,40 @@ struct CursorMarks {
     var pane: String
     var on: String?
     var range: Set<String>
+    /// whether the keyboard is in this pane: false means `on` is where its cursor was left
+    var focused = true
+
+    func state(of key: String) -> CursorState { on == key ? (focused ? .here : .left) : .none }
 }
+
+/// A row's cursor: where the keyboard is, where a pane's cursor was left, or neither.
+enum CursorState { case here, left, none }
 
 extension AppModel {
     func cursorMarks(_ id: String) -> CursorMarks {
-        guard let p = pane, p.id == id else { return CursorMarks(pane: id, on: nil, range: []) }
+        guard let p = pane, p.id == id else {
+            // another pane holds the keyboard: this one shows where its cursor was left (one dictionary read)
+            return CursorMarks(pane: id, on: cursor(in: id), range: [], focused: false)
+        }
         return CursorMarks(pane: id, on: selected(in: p), range: Set(selection(in: p)))
     }
+}
+
+/// The one cursor look (`CursorLook`) on a row.
+struct CursorChrome: ViewModifier {
+    @Environment(\.theme) private var theme
+    let state: CursorState
+    let inRange: Bool
+    func body(content: Content) -> some View {
+        content
+            .background(state == .here ? theme.goldLeaf.opacity(CursorLook.hereWash)
+                        : state == .left ? theme.goldLeaf.opacity(CursorLook.leftWash) : inRange ? theme.emberWash : .clear)
+            .overlay(alignment: .leading) { (state == .here ? theme.goldLeaf : state == .left ? theme.goldDeep : .clear).frame(width: CursorLook.bar) }
+    }
+}
+
+extension View {
+    func cursorChrome(_ state: CursorState, inRange: Bool = false) -> some View { modifier(CursorChrome(state: state, inRange: inRange)) }
 }
 
 private struct CursorMarksKey: EnvironmentKey { static let defaultValue: CursorMarks? = nil }

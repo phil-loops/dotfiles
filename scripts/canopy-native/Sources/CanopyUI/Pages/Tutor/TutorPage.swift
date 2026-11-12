@@ -97,13 +97,12 @@ struct TutorRow<Content: View>: View {
 
     var body: some View {
         let marks = app.cursorMarks(pane)
-        let on = marks.on == key
+        let state = marks.state(of: key)
         let inRange = marks.range.count > 1 && marks.range.contains(key)
-        content(on)
+        content(state == .here)
             .padding(.vertical, 3).padding(.horizontal, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(on ? theme.goldWash : inRange ? theme.emberWash : .clear)
-            .overlay(alignment: .leading) { if on { theme.goldLeaf.frame(width: 2) } }
+            .cursorChrome(state, inRange: inRange)
             .contentShape(Rectangle())
             .onTapGesture {
                 app.focus(pane: pane)

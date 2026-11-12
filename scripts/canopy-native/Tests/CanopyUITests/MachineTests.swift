@@ -112,6 +112,21 @@ import Testing
         #expect(a.runner.armed == nil)
     }
 
+    /// One cursor look: the focused pane's row is "here"; a pane the keyboard left shows where its
+    /// cursor was left, without making that row live.
+    @Test func aPaneTheKeyboardLeftShowsWhereItsCursorWasLeft() throws {
+        let (a, m) = try app()
+        m.take(try JSONDecoder().decode(Queue.self, from: Data(MachineFixtures.queue.utf8)))
+        a.keys.handle("j")
+        let left = try #require(a.selected)
+        #expect(a.cursorMarks("servers").state(of: left) == .here)
+        a.focus(pane: "queue")
+        let servers = a.cursorMarks("servers")
+        #expect(servers.state(of: left) == .left && !servers.focused, "the servers pane remembers its row, dimmed")
+        #expect(a.cursorMarks("queue").state(of: RowKey.queue("t1")) == .here)
+        #expect(a.cursorMarks("log").on == nil, "a pane the cursor never visited marks nothing")
+    }
+
     @Test func killTakesASecondPressAndEscDisarms() throws {
         let (a, _) = try app()
         let kill = a.registry.command("machine.kill")!

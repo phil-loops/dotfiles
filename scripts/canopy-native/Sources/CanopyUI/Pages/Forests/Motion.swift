@@ -56,8 +56,7 @@ struct RowChrome: ViewModifier {
     func body(content: Content) -> some View {
         content
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(cursor ? theme.goldWash : selected ? theme.emberWash : .clear)
-            .overlay(alignment: .leading) { (cursor ? theme.goldLeaf : .clear).frame(width: 2) }
+            .cursorChrome(cursor ? .here : .none, inRange: selected)
             .contentShape(Rectangle())
             .onTapGesture { app.runner.dispatch("cursor.set", via: .click, target: key) }
             .labelTarget(pane: "main", key: key)
