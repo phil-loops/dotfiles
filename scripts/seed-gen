@@ -21,6 +21,7 @@
 #   default (hooks; async, never blocks):
 #     main checkout        rebuild when generation inputs or emitted artifacts change
 #     scratch review tree  symlink main's .gen — a read surface, nothing there writes it
+#     (and the viewer's restack worktree, which only replays commits)
 #     any other worktree   copy main's .gen — `task dev` there must not write through — then
 #                          start a detached, heavy-turn-queued --sync so the tree describes its HEAD
 #
@@ -658,7 +659,10 @@ if [[ "$(realpath_of "$dir")" != "$(realpath_of "$src")" ]]; then
   fi
 
   scratch=$(realpath_of "${STACK_OPEN_DIR:-$HOME/Library/Caches/stack-study}")
-  if [[ -n "$scratch" && "$(realpath_of "$dir")" == "$scratch"/* ]]; then
+  # The viewer's restack worktree only replays commits — nothing compiles or runs there — and every
+  # branch a restack moves is a checkout in it, so a private seed queued a --sync per branch moved
+  # (291 in a day, 2026-11-12). It reads main's .gen like any scratch tree.
+  if [[ ( -n "$scratch" && "$(realpath_of "$dir")" == "$scratch"/* ) || "$(basename "$dir")" == .loops-restack-wt ]]; then
     # Nothing in a scratch tree rebuilds .gen on the async path, so a private copy is 17M of
     # types frozen at whenever it was seeded — including the 47 the pre-2026-07-22 seeders left
     # behind. Trade each one for the live link on its next open, unless a rebuild is holding it.
