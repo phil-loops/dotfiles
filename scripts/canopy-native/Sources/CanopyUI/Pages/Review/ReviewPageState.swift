@@ -448,6 +448,7 @@ public final class ReviewPageState: ShipHost {
         prepareTypes()
         settleCursor()
         warmNeighbours()
+        app?.runner.releaseHeld()
     }
 
     private func resetForNewBranch(_ newID: String) {

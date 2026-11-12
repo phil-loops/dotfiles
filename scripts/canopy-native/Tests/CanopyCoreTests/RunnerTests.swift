@@ -76,6 +76,30 @@ final class Ctx: CommandContext {
         #expect(built == 0, "ret never sends")
     }
 
+    @Test func aKeyPressedBeforeItsPageCanActIsHeldAndRunsOnRelease() throws {
+        let (runner, _, _) = try setup()
+        var ready = false, ran = 0
+        runner.registry.register(Command(id: "t.next", title: "N", scope: .global, local: { _, _ in
+            guard ready else { throw Hold("reading — runs when it's in") }
+            ran += 1
+        }))
+        runner.registry.register(Command(id: "t.other", title: "O", scope: .global, local: { _, _ in }))
+        runner.dispatch("t.next", via: .key)
+        #expect(runner.held?.id == "t.next" && ran == 0 && runner.note == "reading — runs when it's in")
+        ready = true
+        runner.releaseHeld()
+        #expect(ran == 1 && runner.held == nil, "the held key runs once the page is ready")
+        ready = false
+        runner.dispatch("t.next", via: .key)
+        runner.dispatch("t.other", via: .key)
+        #expect(runner.held == nil, "any other key drops the hold")
+        runner.dispatch("t.next", via: .key)
+        runner.disarm()
+        #expect(runner.held == nil, "a page change drops it too")
+        runner.releaseHeld()
+        #expect(ran == 1)
+    }
+
     @Test func postRefusalSemantics() async {
         Stub.answers = [
             "/ok": .init(status: 200, body: #"{"ok":true,"n":1}"#),

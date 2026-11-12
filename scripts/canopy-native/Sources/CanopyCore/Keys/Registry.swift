@@ -83,6 +83,14 @@ public struct Refusal: Error, CustomStringConvertible {
     public var description: String { message }
 }
 
+/// A command that can't act yet (the diff it moves through is still being read): the runner keeps
+/// it and runs it once the page says it's ready (`releaseHeld`), instead of losing the press.
+public struct Hold: Error, CustomStringConvertible {
+    public var why: String
+    public init(_ why: String) { self.why = why }
+    public var description: String { why }
+}
+
 /// An optimistic server write (registry.ts Write): shown at once, posted in the background, kept
 /// until settled.
 public struct Write {
