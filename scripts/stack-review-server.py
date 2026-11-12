@@ -496,6 +496,8 @@ class H(BaseHTTPRequestHandler):
             return preview.start_integration(self, raw)
         if self.path == "/preview-main":   # run (or attach to) main on :3000
             return preview.start_main(self, raw)
+        if self.path == "/queue-kill":     # x on a Machine queue row: SIGTERM a slot holder, waiter or un-queued heavy work
+            return queue.kill(self, raw)
         if self.path == "/preview-kill":   # stop one side-port preview (by its worktree dir)
             return preview.kill(self, raw)
         if self.path == "/preview-restart":   # kill + fresh next dev on the same port
