@@ -1,0 +1,262 @@
+#!/usr/bin/env node
+// loo-6235-repro — a one-button page that replays the LOO-6235 API requests against
+// staging with a disabled-domain team's key, and keeps each run so before/after a deploy
+// sit side by side. Serves http://127.0.0.1:7235 (shown in Show through a deck `url` section).
+//
+// The key is read from the macOS Keychain on every run and never reaches the page:
+//   security add-generic-password -s loops-staging-disabled-domain-key -a loops -w
+import { execFileSync } from "node:child_process";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
+const PORT = Number(process.env.REPRO_PORT ?? 7235);
+const BASE = process.env.REPRO_BASE ?? "https://app.l3s.email/api/v1";
+const KEY_SERVICE = "loops-staging-disabled-domain-key";
+const SEND_TO = process.env.REPRO_SEND_TO ?? "loo-6235-repro@example.com";
+const STATE_DIR = process.env.REPRO_STATE ?? join(homedir(), ".cache", "loo-6235-repro");
+const RUNS_FILE = join(STATE_DIR, "runs.json");
+
+const NO_DOMAIN = "400 · No sending domain configured for this team.";
+const STEPS = [
+  { id: "campaign", pr: 1, label: "Create a campaign", before: NO_DOMAIN, after: "201" },
+  { id: "transactional", pr: 1, label: "Create a transactional email", before: NO_DOMAIN, after: "201" },
+  { id: "draft", pr: 1, label: "Create a transactional draft", before: NO_DOMAIN, after: "200" },
+  { id: "read", pr: 1, label: "Read an email message", before: NO_DOMAIN, after: "200" },
+  { id: "update", pr: 1, label: "Update an email message", before: NO_DOMAIN, after: "200" },
+  {
+    id: "publish",
+    pr: 2,
+    label: "Publish a transactional",
+    before: "422 · Your sending domain is not verified.",
+    after: "422 · Your sending domain has been disabled. Contact support to re-enable it.",
+  },
+  {
+    id: "send",
+    pr: 2,
+    label: "Send a transactional",
+    before: "400 · Your sending domain is not verified.",
+    after: "400 · Your sending domain has been disabled. Contact support to re-enable it.",
+  },
+];
+
+function readKey() {
+  if (process.env.REPRO_KEY) {
+    return process.env.REPRO_KEY;
+  }
+  try {
+    return execFileSync("security", ["find-generic-password", "-s", KEY_SERVICE, "-w"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch {
+    return null;
+  }
+}
+
+function loadRuns() {
+  try {
+    return JSON.parse(readFileSync(RUNS_FILE, "utf8"));
+  } catch {
+    return [];
+  }
+}
+
+function saveRuns(runs) {
+  mkdirSync(STATE_DIR, { recursive: true });
+  writeFileSync(RUNS_FILE, JSON.stringify(runs.slice(-8), null, 2));
+}
+
+async function call(key, method, path, body) {
+  const started = Date.now();
+  try {
+    const res = await fetch(BASE + path, {
+      method,
+      headers: {
+        Authorization: `Bearer ${key}`,
+        ...(body ? { "Content-Type": "application/json" } : {}),
+      },
+      body: body ? JSON.stringify(body) : undefined,
+      signal: AbortSignal.timeout(20000),
+    });
+    const text = await res.text();
+    let json = null;
+    try {
+      json = JSON.parse(text);
+    } catch {}
+    return { status: res.status, json, message: json?.message ?? (json ? "" : text.slice(0, 200)), ms: Date.now() - started };
+  } catch (error) {
+    return { status: 0, json: null, message: `request failed: ${error.message}`, ms: Date.now() - started };
+  }
+}
+
+const shown = (request, r) => ({ request, status: r.status, message: r.message, ms: r.ms });
+const skipped = (request, why) => ({ request, status: null, message: `skipped: ${why}`, ms: 0 });
+
+async function run(key) {
+  const stamp = new Date().toISOString();
+  const name = `LOO-6235 repro ${stamp.slice(0, 16).replace("T", " ")}`;
+  const results = {};
+
+  const who = await call(key, "GET", "/api-key");
+  const team = who.json?.teamName ?? `unknown (${who.status} ${who.message})`;
+
+  const campaign = await call(key, "POST", "/campaigns", { name });
+  results.campaign = shown("POST /campaigns", campaign);
+
+  const created = await call(key, "POST", "/transactional-emails", { name });
+  results.transactional = shown("POST /transactional-emails", created);
+
+  const list = await call(key, "GET", "/transactional-emails?perPage=20");
+  const existing = (list.json?.data ?? []).find((t) => t.draftEmailMessageId || t.publishedEmailMessageId);
+  const target = created.status === 201 ? created.json : existing;
+  const needsOne = "the team has no transactional email yet; make one in the staging app";
+
+  if (!target) {
+    for (const id of ["draft", "read", "update", "publish", "send"]) {
+      results[id] = skipped("", needsOne);
+    }
+    return { at: stamp, team, results };
+  }
+
+  const draft = await call(key, "POST", `/transactional-emails/${target.id}/draft`);
+  results.draft = shown("POST /transactional-emails/{id}/draft", draft);
+
+  const messageId =
+    draft.json?.draftEmailMessageId ?? target.draftEmailMessageId ?? target.publishedEmailMessageId;
+  if (!messageId) {
+    results.read = skipped("GET /email-messages/{id}", "no email message id on the transactional");
+    results.update = skipped("POST /email-messages/{id}", "no email message id on the transactional");
+  } else {
+    const read = await call(key, "GET", `/email-messages/${messageId}`);
+    results.read = shown("GET /email-messages/{id}", read);
+    const update = await call(key, "POST", `/email-messages/${messageId}`, {
+      ...(read.json?.contentRevisionId ? { expectedRevisionId: read.json.contentRevisionId } : {}),
+      subject: name,
+    });
+    results.update = shown("POST /email-messages/{id}", update);
+  }
+
+  const publish = await call(key, "POST", `/transactional-emails/${target.id}/publish`);
+  results.publish = shown("POST /transactional-emails/{id}/publish", publish);
+
+  const published = (list.json?.data ?? []).find((t) => t.publishedEmailMessageId);
+  if (!published) {
+    results.send = skipped("POST /transactional", "the team has no published transactional email");
+  } else {
+    const send = await call(key, "POST", "/transactional", { transactionalId: published.id, email: SEND_TO });
+    results.send = shown("POST /transactional", send);
+  }
+
+  return { at: stamp, team, results };
+}
+
+const PAGE = `<!doctype html>
+<meta charset="utf-8">
+<title>LOO-6235 repro</title>
+<style>
+  :root { color-scheme: light dark; --line: color-mix(in srgb, currentColor 18%, transparent); --dim: color-mix(in srgb, currentColor 60%, transparent); }
+  body { font: 14px/1.45 -apple-system, system-ui, sans-serif; margin: 24px; max-width: 1100px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  p { margin: 4px 0 14px; color: var(--dim); }
+  button { font: inherit; padding: 7px 16px; border-radius: 7px; border: 1px solid var(--line); cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  #note { margin-left: 10px; color: var(--dim); }
+  .scroll { overflow-x: auto; margin-top: 16px; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; vertical-align: top; padding: 7px 10px; border-bottom: 1px solid var(--line); }
+  th { font-weight: 600; white-space: nowrap; }
+  td.step { white-space: nowrap; }
+  code, .mono { font: 12px ui-monospace, Menlo, monospace; }
+  .dim { color: var(--dim); }
+  .ok { color: #1a8a4a; } .err { color: #c2410c; }
+  tr.group td { font-weight: 600; padding-top: 16px; border-bottom: 1px solid currentColor; }
+  pre { background: color-mix(in srgb, currentColor 7%, transparent); padding: 10px; border-radius: 7px; overflow-x: auto; }
+</style>
+<h1>LOO-6235 — API requests on a disabled sending domain</h1>
+<p>Replays the ticket's requests against <code>__BASE__</code> with the key in the Keychain item <code>__SERVICE__</code>. Each press adds a column, so run once before the deploy and once after.</p>
+<button id="run">Run the requests</button><span id="note"></span>
+<div id="setup"></div>
+<div class="scroll"><table id="grid"></table></div>
+<script>
+const STEPS = __STEPS__;
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+function cell(r) {
+  if (!r) return '<td class="dim">—</td>';
+  if (r.status === null) return '<td class="dim">' + esc(r.message) + "</td>";
+  const cls = r.status >= 200 && r.status < 300 ? "ok" : "err";
+  return '<td><span class="mono ' + cls + '">' + r.status + "</span> " + esc(r.message) + "</td>";
+}
+function render(state) {
+  document.getElementById("setup").innerHTML = state.hasKey ? "" :
+    "<p>No key yet. Add the API key of a staging team whose sending domain is disabled, in a terminal:</p><pre>security add-generic-password -s __SERVICE__ -a loops -w</pre>";
+  document.getElementById("run").disabled = !state.hasKey;
+  const runs = state.runs;
+  let html = "<tr><th>Request</th><th>Before the PR</th><th>After the PR</th>" +
+    runs.map((r) => "<th>" + esc(new Date(r.at).toLocaleString()) + '<br><span class="dim">' + esc(r.team) + "</span></th>").join("") + "</tr>";
+  for (const pr of [1, 2]) {
+    html += '<tr class="group"><td colspan="' + (3 + runs.length) + '">' +
+      (pr === 1 ? "PR 1 — allow content api drafts on a disabled domain" : "PR 2 — say when the sending domain is disabled") + "</td></tr>";
+    for (const s of STEPS.filter((x) => x.pr === pr)) {
+      const req = runs.map((r) => r.results[s.id]?.request).find(Boolean) ?? "";
+      html += '<tr><td class="step">' + esc(s.label) + '<br><span class="mono dim">' + esc(req) + "</span></td>" +
+        '<td class="dim">' + esc(s.before) + '</td><td class="dim">' + esc(s.after) + "</td>" +
+        runs.map((r) => cell(r.results[s.id])).join("") + "</tr>";
+    }
+  }
+  document.getElementById("grid").innerHTML = html;
+}
+async function load() { render(await (await fetch("/state")).json()); }
+document.getElementById("run").onclick = async () => {
+  const btn = document.getElementById("run"), note = document.getElementById("note");
+  btn.disabled = true; note.textContent = "running…";
+  try {
+    const res = await fetch("/run", { method: "POST" });
+    const state = await res.json();
+    note.textContent = state.error ?? "";
+    render(state);
+  } catch (e) { note.textContent = String(e); btn.disabled = false; }
+};
+load();
+</script>`;
+
+const state = () => ({ hasKey: Boolean(readKey()), runs: loadRuns() });
+let running = false;
+
+createServer(async (req, res) => {
+  const json = (code, body) => {
+    res.writeHead(code, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(body));
+  };
+  if (req.method === "GET" && req.url === "/") {
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    return res.end(
+      PAGE.replaceAll("__BASE__", BASE).replaceAll("__SERVICE__", KEY_SERVICE).replace("__STEPS__", JSON.stringify(STEPS))
+    );
+  }
+  if (req.method === "GET" && req.url === "/state") {
+    return json(200, state());
+  }
+  if (req.method === "POST" && req.url === "/run") {
+    const key = readKey();
+    if (!key) {
+      return json(200, { ...state(), error: "no key in the Keychain" });
+    }
+    if (running) {
+      return json(200, { ...state(), error: "a run is already in progress" });
+    }
+    running = true;
+    try {
+      const runs = loadRuns();
+      runs.push(await run(key));
+      saveRuns(runs);
+      return json(200, state());
+    } finally {
+      running = false;
+    }
+  }
+  json(404, { error: "not found" });
+}).listen(PORT, "127.0.0.1", () => {
+  console.log(`loo-6235-repro on http://127.0.0.1:${PORT} → ${BASE}`);
+});
