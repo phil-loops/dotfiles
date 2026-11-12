@@ -102,8 +102,8 @@ public struct ReviewLine: Equatable {
     public func choose(_ a: Int, _ b: Int) -> Choice {
         let lo = min(a, b), hi = max(a, b)
         guard points.indices.contains(lo), points.indices.contains(hi) else { return .refuse("that isn't on the line") }
-        guard let end = sha(hi) else { return .refuse("a stretch ends on a commit") }
-        if lo == hi { return .commits(from: nil, to: end) }
+        guard sha(hi) != nil else { return .refuse("a stretch ends on a commit") }
+        if lo == hi { return run(hi, hi) }
         switch points[lo] {
         case .main:
             return hi == tip ? .base(.main) : .refuse("against main the diff runs to the tip")
@@ -114,9 +114,16 @@ public struct ReviewLine: Equatable {
         }
     }
 
+    /// A run of commits, or the parent preset when the run is what lands: one stretch, one spelling.
     private func run(_ first: Int, _ last: Int) -> Choice {
         guard let s = sha(first), let e = sha(last) else { return .refuse("a stretch ends on a commit") }
+        if first == parentIndex + 1, last == tip { return .base(.parent) }
         return .commits(from: s == e ? nil : s, to: e)
+    }
+
+    /// The one commit a stretch shows, unless that commit is all that lands.
+    public func lone(_ lit: (lo: Int, hi: Int)) -> String? {
+        lit.hi - lit.lo == 1 && cover(lit) == .part ? sha(lit.hi) : nil
     }
 
     /// `] h` / `[ h`: one commit, the next or previous from what's lit. From a wider stretch, `] h`
@@ -124,6 +131,7 @@ public struct ReviewLine: Equatable {
     public func step(from lit: (lo: Int, hi: Int)?, by: Int) -> Choice {
         let first = parentIndex + 1
         guard first <= tip else { return .refuse("no commits of its own") }
+        if first == tip { return .refuse("its one commit is what lands") }
         let at: Int
         if let l = lit, l.hi - l.lo == 1, l.lo >= parentIndex, !(l.lo == parentIndex && l.hi == tip) {
             at = l.hi + by

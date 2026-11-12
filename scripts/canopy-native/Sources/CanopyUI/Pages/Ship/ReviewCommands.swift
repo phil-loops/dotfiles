@@ -48,9 +48,7 @@ enum ReviewCommands {
             local: { id, _ in
                 guard let app = weakApp, let id = id ?? page() else { return }
                 let pg = ReviewPageState.of(app)
-                if pg.base != .parent { pg.setBase(.parent) }
-                if pg.scoped { ship.showCommit(nil) }
-                ship.host.tab = "files"
+                try pg.apply(.base(.parent))
                 words.load(app, id)
                 app.focus(pane: ShipSeam.wordsPane)
                 app.setCursor(words.shown[id].map { WordsState.githubOwns($0.pr) } == false ? "w|title" : "w|desc")

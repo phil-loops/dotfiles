@@ -372,6 +372,8 @@ public final class ReviewPageState: ShipHost {
     }
     /// The stretch the diff covers on the line.
     public var lit: (lo: Int, hi: Int)? { line?.lit(base: base, scope: commitScope) }
+    /// Where what's shown sits against what lands: nil before the history is read, or off the line.
+    public var cover: ReviewLine.Cover? { lit.flatMap { l in line?.cover(l) } }
     /// the point ↵ picked first on the line, waiting for the other end
     public var lineAnchor: Int?
 
@@ -550,6 +552,11 @@ public final class ReviewPageState: ShipHost {
     /// ShipHost.commitScopeChanged: show one commit's diff or a run's ("from..to", GET /commit-diff),
     /// or the branch again.
     public func commitScopeChanged(_ sha: String?) {
+        // one stretch, one spelling: a scope that covers what lands is the parent preset
+        if let sha, let l = line, let lit = l.lit(base: .parent, scope: sha), l.cover(lit) == .landing {
+            if base != .parent { setBase(.parent) }
+            return commitScopeChanged(nil)
+        }
         commitScope = sha
         lineAnchor = nil
         mark = nil
@@ -1158,7 +1165,12 @@ public extension ReviewPageState {
     }
     func newLines(_ app: AppModel, path: String, from: Int, to: Int) -> [String] { newLines(path: path, from: from, to: to) }
     func showThread(_ app: AppModel, id: String) { showThread(id) }
-    var wholeBranch: Bool { integration == nil && commitScope == nil && base == .parent }
+    /// What's shown is what lands, read from the stretch; before the line is read, from the setting.
+    var wholeBranch: Bool { integration == nil && (cover.map { $0 == .landing } ?? (commitScope == nil && base == .parent)) }
+    var loneCommit: String? {
+        if let l = line, let lit { return l.lone(lit) }
+        return commitScope.flatMap { $0.contains("..") ? nil : $0 }
+    }
     func clearMark() { mark = nil }
 
     func beginEdit(_ app: AppModel) -> Bool {
