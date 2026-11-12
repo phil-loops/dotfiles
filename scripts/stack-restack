@@ -1000,11 +1000,12 @@ elif [[ "$MODE" == "start" ]]; then
   # is read-only (scratch worktree); the branch ref never moves until the drop step.
   #
   # --contract-only drops a member only when GitHub has a merged PR for it and its tip is in what
-  # landed — the merged PR's head or behind it, in origin/main (ff), or rebase-classify's already-
-  # merged (a squash whose files main hasn't touched since) — and nothing live sits on it:
+  # landed — the merged PR's head or behind it, or rebase-classify's already-merged (a squash whose
+  # files main hasn't touched since) — and nothing live sits on it:
   # contracting a parent under an unmerged child would leave the child's diff re-showing the landed
   # commits until a rebase this mode never runs. Then the walk is skipped. The merged PR is never
-  # optional: a branch cut a minute ago is in origin/main too.
+  # optional, and neither is its head: a branch cut a minute ago is in origin/main too, and one
+  # reusing an old merged PR's name has that PR to show — only the head ties the two together.
   # STACK_RESTACK_MERGED_HEADS: "<branch> <merged head sha>" lines (the viewer's PR cache); unset, gh.
   if (( CONTRACT_ONLY )); then
     _trunk="origin/${MAIN_BRANCH}"
@@ -1025,7 +1026,9 @@ elif [[ "$MODE" == "start" ]]; then
       for _h in ${(f)_heads}; do
         [[ "$_h" == "$_tip" ]] || git merge-base --is-ancestor "$_tip" "$_h" 2>/dev/null && { _in=1; break; }
       done
-      (( _in )) || is_ancestor "$b" "$_trunk" && _in=1
+      # a tip already in the trunk with no tie to the merged head has no commits of its own: a
+      # branch cut after that PR merged, reusing its name — never landed work this mode may drop
+      (( _in )) || ! is_ancestor "$b" "$_trunk" || continue
       if (( ! _in )); then
         "${SELF_DIR}/rebase-classify" "$b" "$_trunk" >/dev/null 2>&1 && _crc=0 || _crc=$?
         (( _crc == 20 )) && _in=1

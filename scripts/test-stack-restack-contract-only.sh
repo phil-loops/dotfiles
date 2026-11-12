@@ -24,17 +24,21 @@ mk() { git checkout -q -b "$1" "$2"; echo "$1" > "$1.txt"; git add "$1.txt"; git
 # a: landed leaf · b: landed, c (unmerged) on it · d → e: both landed (no head sha: the classify
 # fallback) · f: landed, no merged PR · g: landed, held · h: landed, main edited its file since ·
 # i: landed, then a local commit on top · j: merged PR, no commits of its own · k: cut a minute ago
+# l: cut a minute ago under a name whose old PR merged (that PR's head is unrelated history)
 mk a main; mk b main; mk c b; mk d main; mk e d; mk f main; mk g main; mk h main; mk i main
 I0=$(git rev-parse i); echo more >> i.txt; git commit -qam "i after merge"
+git checkout -q -b old-l main; echo old > old-l.txt; git add old-l.txt; git commit -qm "old l"; L0=$(git rev-parse old-l)
+git checkout -q main; git branch -q -D old-l
 for x in j k; do git checkout -q -b "$x" main; git config "branch.$x.stack-parent" main; git config --add stack-project.proj.branch "$x"; done
 git checkout -q main
 for x in a b d e f g h i; do echo "$x" > "$x.txt"; git add "$x.txt"; git commit -qm "squash $x"; done   # the squash-merges
 echo later >> h.txt; git commit -qam "main moves on over h"
 git push -q origin main
+git checkout -q -b l origin/main; git config branch.l.stack-parent main; git config --add stack-project.proj.branch l; git checkout -q main
 C0=$(git rev-parse c)
-heads() { for x in "$@"; do case $x in d|e) echo "$x -" ;; i) echo "i $I0" ;; *) echo "$x $(git rev-parse "$x")" ;; esac; done; }
+heads() { for x in "$@"; do case $x in d|e) echo "$x -" ;; i) echo "i $I0" ;; l) echo "l $L0" ;; *) echo "$x $(git rev-parse "$x")" ;; esac; done; }
 
-out=$(STACK_RESTACK_MERGED_HEADS="$(heads a b d e g h i j)" STACK_RESTACK_OPEN_PR_HEADS=" " \
+out=$(STACK_RESTACK_MERGED_HEADS="$(heads a b d e g h i j l)" STACK_RESTACK_OPEN_PR_HEADS=" " \
       "$RESTACK" proj --contract-only --no-claude --hold=g 2>&1); rc=$?
 assert_eq "exits clean (rc)" 0 "$rc"
 assert_eq "a (landed leaf) is gone" no "$(exists a)"
@@ -49,11 +53,12 @@ assert_eq "f stays without a merged PR" yes "$(exists f)"
 assert_eq "g stays while held" yes "$(exists g)"
 assert_eq "i stays with a commit past its merged head" yes "$(exists i)"
 assert_eq "k (no PR, no commits) stays" yes "$(exists k)"
-assert_eq "the registry keeps the survivors" "b c f g i k" "$(git config --get-all stack-project.proj.branch | sort | xargs)"
+assert_eq "l (a new branch under a merged PR's old name) stays" yes "$(exists l)"
+assert_eq "the registry keeps the survivors" "b c f g i k l" "$(git config --get-all stack-project.proj.branch | sort | xargs)"
 
 # the rest lands: the forest ships and its keys go with it
 git checkout -q main; for x in c i; do git checkout -q "$x" -- "$x.txt"; git commit -qm "squash $x"; done; git push -q origin main
-out=$(STACK_RESTACK_MERGED_HEADS="$(heads b c f g k; echo "i $(git rev-parse i)")" STACK_RESTACK_OPEN_PR_HEADS=" " \
+out=$(STACK_RESTACK_MERGED_HEADS="$(heads b c f g k; echo "l $(git rev-parse l)"; echo "i $(git rev-parse i)")" STACK_RESTACK_OPEN_PR_HEADS=" " \
       "$RESTACK" proj --contract-only --no-claude 2>&1); rc=$?
 assert_eq "second pass exits clean (rc)" 0 "$rc"
 assert_eq "the shipped forest leaves no project keys" "" "$(git config --get-regexp '^stack-project\.proj\.' || true)"
