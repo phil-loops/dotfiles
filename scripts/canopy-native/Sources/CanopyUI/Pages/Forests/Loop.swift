@@ -5,7 +5,7 @@ import Foundation
 // branch is and what stands in the way, without reading three surfaces. Pure (loop.ts).
 
 public struct LoopStep: Equatable, Sendable {
-    public enum ID: String, Sendable, CaseIterable { case words, gates, push, pr, review, merged }
+    public enum ID: String, Sendable, CaseIterable { case words, gates, push, pr, review, merged, proof }
     public enum State: String, Sendable { case done, now, later }
     public var id: ID
     public var state: State
@@ -29,6 +29,7 @@ public struct LoopStep: Equatable, Sendable {
         case .pr: "next: open its PR"
         case .review: "its PR waits on review"
         case .merged: "approved; waits on what follows to merge"
+        case .proof: "a proof branch: it rides the forest for its e2e or smoke run and never merges"
         }
     }
 }
@@ -49,6 +50,17 @@ public enum Loop {
     /// Each step's state; `words` are the title and body hints, which flag but never block — nil
     /// while they're unread, which leaves the step out rather than claim it's clean.
     public static func steps(_ b: Branch, _ pr: Pr?, _ st: Stand, words: [LoopWord]?) -> [LoopStep] {
+        // a proof branch's loop ends at its gates: it never pushes for a PR, never merges
+        if b.role == "proof" {
+            let green = b.gates == .green
+            var steps = [LoopStep(id: .gates, state: green ? .done : .now, note: green ? nil : note(.gates, b, pr, st)),
+                         LoopStep(id: .proof, state: green ? .now : .later)]
+            if let words {
+                let wrong = words.filter { $0.tone != "note" }
+                steps.insert(LoopStep(id: .words, state: wrong.isEmpty ? .done : .now, note: wrong.isEmpty ? nil : wrong.map(\.id).joined(separator: " · "), flag: !wrong.isEmpty), at: 0)
+            }
+            return steps
+        }
         let merged = st.ship == .landed
         let done: [LoopStep.ID: Bool] = [
             .gates: b.gates == .green || (st.ship != .local && b.pushed != .ahead),
@@ -81,7 +93,7 @@ public enum Loop {
         case .pr: return "open it"
         case .review: return pr?.review == "CHANGES_REQUESTED" ? "changes requested" : pr?.draft == true ? "draft" : "waiting"
         case .merged: return st.waiting.first?.label
-        case .words: return nil
+        case .words, .proof: return nil
         }
     }
 
@@ -92,6 +104,7 @@ public enum Loop {
         case .pr, .merged: "branch.pr"
         case .review: "branch.open"
         case .words: "review.words"
+        case .proof: nil
         }
     }
 }

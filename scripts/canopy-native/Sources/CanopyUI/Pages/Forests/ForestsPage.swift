@@ -317,7 +317,7 @@ private struct BranchRowView: View {
             Text(leaf(v.b.name)).foregroundStyle(cursor ? theme.goldLeaf : theme.ink).lineLimit(1).frame(width: 172, alignment: .leading)
             Text(v.b.description == summary ? "" : v.b.description).foregroundStyle(theme.inkDim).lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            Text("\(v.st.ship.glyph) \(word)")
+            Text("\(v.b.role == "proof" ? "⚗" : v.st.ship.glyph) \(word)")
                 .foregroundStyle(live ? theme.goldLeaf : v.st.ready ? theme.ink : theme.inkFaint)
                 .opacity(v.b.pending != nil || word.hasSuffix("…") ? 0.75 : 1)
                 .fixedSize()
@@ -339,13 +339,16 @@ private struct BranchRowView: View {
         switch word {
         case "pushing…": RowName(word: "pushing…", meaning: "sending it to origin")
         case "waiting for GitHub…": RowName(word: "waiting for GitHub…", meaning: "pushed with its PR opening; GitHub hasn't reported the PR yet")
-        default: v.st.ship.term
+        default: v.b.role == "proof" ? Self.proofTerm : v.st.ship.term
         }
     }
 
+    /// stack-proof's branch: never a ship stage — it rides the forest for its run
+    static let proofTerm = RowName(word: "⚗ proof", meaning: "a proof branch: it rides the forest for its e2e or smoke run and never merges")
+
     private func shipWord(_ m: ForestModel) -> String {
         if v.b.pending == "pushing" { return "pushing…" }
-        return v.st.ship.word
+        return v.b.role == "proof" ? "proof" : v.st.ship.word
     }
 
     private var armHint: String {

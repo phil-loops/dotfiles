@@ -133,6 +133,13 @@ private let NOW = iso("2026-10-22T18:00:00Z") // Thu 11:00 PT
         #expect(words(br(["pushed": "synced"]), pr()).state == .done)
     }
 
+    @Test func aProofBranchsLoopEndsAtItsGates() {
+        let proof = br(["gates": "green", "role": "proof"])
+        #expect(Loop.steps(proof, nil, ShipRules.stand(proof, nil, nil, now: NOW), words: nil).map { "\($0.id.rawValue):\($0.state.rawValue)" } == ["gates:done", "proof:now"])
+        #expect(at(br(["role": "proof"])) == "gates not run")
+        #expect(Loop.command(.proof) == nil)
+    }
+
     @Test func unreadWordsLeaveTheStepOut() {
         let b = br(["gates": "green"])
         #expect(Loop.steps(b, nil, ShipRules.stand(b, nil, nil, now: NOW), words: nil).map(\.id) == [.gates, .push, .pr, .review, .merged])
