@@ -65,14 +65,17 @@ enum Para {
     }
 }
 
+/// Word, space and punctuation tokens — compiled once: compiling it per changed line was a tenth of a
+/// big review's build (bench --synthetic 1000, 2026-11-12). Matching is thread-safe.
+nonisolated(unsafe) private let wordTokens = try! NSRegularExpression(pattern: "[A-Za-z0-9_$]+|\\s+|[^A-Za-z0-9_$\\s]")
+
 /// The words that differ between an old line and the new line that replaced it, as UTF-16 ranges
 /// in each: a longest-common-subsequence over word, space and punctuation tokens. A line that
 /// shares almost nothing gets no highlight (the whole line changed; the band already says so).
 func changedWords(_ old: String, _ new: String) -> ([NSRange], [NSRange]) {
     func tokens(_ s: String) -> [(String, NSRange)] {
         let ns = s as NSString
-        let re = try! NSRegularExpression(pattern: "[A-Za-z0-9_$]+|\\s+|[^A-Za-z0-9_$\\s]")
-        return re.matches(in: s, range: NSRange(location: 0, length: ns.length)).map { (ns.substring(with: $0.range), $0.range) }
+        return wordTokens.matches(in: s, range: NSRange(location: 0, length: ns.length)).map { (ns.substring(with: $0.range), $0.range) }
     }
     let a = tokens(old), b = tokens(new)
     guard a.count * b.count <= 160_000 else { return ([], []) }

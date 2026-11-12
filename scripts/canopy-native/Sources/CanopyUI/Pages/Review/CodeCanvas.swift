@@ -480,6 +480,9 @@ final class Canvas: NSObject {
     var length: Int { text.textStorage?.length ?? 0 }
 
     /// Bring the text up to these segments: only the run between the unchanged head and tail is re-set.
+    /// Characters a splice may insert in place; past this (or a quarter of the text) the storage is rebuilt.
+    static let spliceLimit = 20_000
+
     func apply(_ segs: [Segment]) {
         guard let ts = text.textStorage else { return }
         let keys = segs.map(\.key)
@@ -500,7 +503,21 @@ final class Canvas: NSObject {
             newMid.append((s.key, a.length))
         }
         ts.beginEditing()
-        ts.replaceCharacters(in: NSRange(location: start, length: oldMid), with: mid)
+        if mid.length > Self.spliceLimit || mid.length > ts.length / 4 {
+            // A splice inserts the new text's attribute runs one at a time ahead of everything after it
+            // (NSMutableRLEArray shifts the tail for each), so a big one is quadratic in runs: 1.2 s to
+            // open or resize a 6000-line review (bench --synthetic 1000, 2026-11-12). Rebuilt from
+            // empty, every run lands at the end — linear in the text.
+            let whole = NSMutableAttributedString()
+            if start > 0 { whole.append(ts.attributedSubstring(from: NSRange(location: 0, length: start))) }
+            whole.append(mid)
+            let after = start + oldMid
+            if after < ts.length { whole.append(ts.attributedSubstring(from: NSRange(location: after, length: ts.length - after))) }
+            ts.deleteCharacters(in: NSRange(location: 0, length: ts.length))
+            ts.append(whole)
+        } else {
+            ts.replaceCharacters(in: NSRange(location: start, length: oldMid), with: mid)
+        }
         ts.endEditing()
         segments = Array(segments[..<head]) + newMid + Array(segments[(segments.count - tail)...])
         let live = Set(keys)
