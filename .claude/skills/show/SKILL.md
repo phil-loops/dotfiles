@@ -17,7 +17,7 @@ description: Present a design, plan or walkthrough as a native macOS app (Swift 
 | Forest | — | `"mode": "forest"` | a project's branches in merge order (branch-deck decks) |
 | Review | — | `"mode": "deck"` or no mode | designs and walkthroughs to read |
 | Runs | — | `"mode": "live"` | live runs, read-only |
-| API | — | `show --api` | the loops-postman console (:7070), started when it's down |
+| API | — | `show --api [<bench>]` | the loops-postman console (:7070) and the registered benches (see *Benches*), each started when it's down |
 
 **Who takes the screen — one rule.** Every door (`show`, `canopy`, `stack web`, `show --api`) writes a request `{target, actor, intent}` into `~/.cache/show/inbox/` and hands it to Show with `open -g`. Show comes forward only when Phil is the actor (his terminal, Finder, a `canopy://` link) or a session passes `--focus` / `SHOW_FOCUS=1` because Phil asked to see it now. Anything else a session sends **arrives**: a notification naming it and the session's topic, a rail badge (a deck tops its shelf; a canopy page counts on ⌘1), a ◆ row in History (⌘Y). Nothing switches or opens, and ⌘1 stays on its page. A Claude session is detected by `CLAUDECODE`.
 
@@ -99,6 +99,20 @@ A plan is a deck with a top-level `"plan"` object and `"mode": "plan"`, which op
 - The plan page opens as a **canvas**: the shelf and section list fold away and the grid takes the window, columns sized to their content (every branch chip shown, long names wrapped). `f` (or ⎋) leaves it, and the choice sticks per deck; leaving the plan page brings the columns back. It pans both ways and zooms: pinch, `=` / `−`, `0` toggles fit-to-width and actual size.
 - **Lint** (`Show --check-plan <file>`, exit 1 on errors; also drawn on the grid): one authority per stage, moving only at a `flip`; no row dropping out and coming back; no reader moving and nothing `gone` before the flip; a rollback line on every transition; branch and extra stages that exist; an extra left out past its ▼ cliff warns unless `accepted` says why.
 - The cliff is the stage from which leaving an extra out costs more, usually the first stored event of a shape it changes. An extra whose cliff comes before the stage you ship is in the MVP or explicitly accepted.
+
+## Benches: tool pages in the API workspace
+
+A bench is a local web page for one piece of work (a staging replay, a seed tool) that lives beside the API console and belongs to a forest. Register it as `~/.dotfiles/show/benches/<id>.json`:
+
+```json
+{ "title": "LOO-6235 replay", "url": "http://127.0.0.1:7235/", "start": "exec loo-6235-repro",
+  "repo": "loops", "project": "draft-on-a-disabled-domain", "branches": ["<branch>", "…"] }
+```
+
+- `show --api <id>` opens it (quiet arrival unless `--focus`); the target is `{"bench": "<id>"}` and it shows in History.
+- The API workspace grows a switcher once any bench is registered. Each page keeps its own web view, so switching loses nothing. **⌘⇧B** goes to the next one; **⌘⇧O** opens the bench's forest (`/v2/p/<repo>/<project>`) in Canopy.
+- Show starts a bench's server with its `start` line (zsh) when nothing answers at `url`; the server outlives Show. ⌘R reloads the page, or starts it again.
+- The page is the bench's own; build it as a single-file server under `~/.dotfiles/scripts/` (`loo-6235-repro` is the worked example: a run button, one-at-a-time or all at once, a column per run, a full request trail).
 
 ## Forest workspace
 

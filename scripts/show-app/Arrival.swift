@@ -114,6 +114,8 @@ extension AppDelegate {
             title = canopyTitle(route)
         case .api:
             title = "API console"
+        case .bench(let id):
+            title = Bench.titled(id)
         }
         session = session.flatMap { $0.isEmpty ? nil : $0 }
         showEvents.append(ShowEvent(kind: .arrived, target: target, workspace: workspace, title: title, session: session))
