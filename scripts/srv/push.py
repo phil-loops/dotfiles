@@ -805,14 +805,6 @@ def _origin_verdict(branch):
     }
 
 
-# The read-only verdict is ~18 git spawns and every panel polls it. Everything it reads is a
-# ref (branch, origin copy, origin/main, stack parent) or this branch's git config (gates-green,
-# review flags, description, parent…) plus the cached open-PR set — so two spawns fingerprint
-# it and a hit answers from memory. Belt and braces: a hit also expires after a minute.
-# /push-origin never reads this cache; it recomputes the verdict at push time.
-_PREVIEW_CACHE = {}   # (repo, branch) -> (fingerprint, monotonic, json)
-
-
 def _branch_worktree(branch):
     """Path of the worktree that currently holds <branch> (HEAD = branch), or '' if none.
     Lets a push run in the branch's OWN tree so the pre-push hook checks what went green,

@@ -72,7 +72,6 @@ def _self():
     caches = {
         "commits": len(getattr(review, "_COMMITS_CACHE", {})),
         "commitDiff": len(getattr(review, "_CDIFF_CACHE", {})),
-        "pushPreview": len(getattr(push, "_PREVIEW_CACHE", {})),
         "merged": len(getattr(sync, "_MERGED_CACHE", {})),
         "standalone": len(getattr(picker, "_standalone_cache", {})),
     }
