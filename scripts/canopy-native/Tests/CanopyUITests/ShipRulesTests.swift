@@ -25,6 +25,16 @@ import Testing
         #expect(GatesRun.between([], inFlight: false) == nil)
     }
 
+    @Test func aRunningGateQuietPastTheThresholdReadsAsStuck() {
+        let live = GateProgress(running: true, events: [plan, GateEvent(event: "done", gate: "env", ok: true, ms: 100), GateEvent(event: "start", gate: "typecheck", ts: 0)],
+                                tail: GateProgress.Tail(gate: "typecheck", lines: ["…"], age: 40))
+        #expect(GatesRun.stuck(GatesRun.rows(live, now: 100)) == nil)   // 40 s quiet is a slow typecheck
+        let quiet = GateProgress(running: true, events: live.events, tail: GateProgress.Tail(gate: "typecheck", lines: ["…"], age: 900))
+        #expect(GatesRun.stuck(GatesRun.rows(quiet, now: 1000))?.name == "typecheck")
+        let finished = GateProgress(running: false, events: live.events, tail: GateProgress.Tail(gate: "typecheck", lines: ["…"], age: 900))
+        #expect(GatesRun.stuck(GatesRun.rows(finished, now: 1000)) == nil, "a finished run is never stuck")
+    }
+
     @Test func outputShowsInFullOnlyOnRequestOrOnARedGate() {
         let rows = [GateRow(name: "lint", state: .running, ms: 10000), GateRow(name: "tests", state: .red, ms: 900), GateRow(name: "env", state: .green, ms: 100)]
         #expect(GatesRun.fullOutput("lint", rows: rows, shown: nil) == false)   // running: a count until asked

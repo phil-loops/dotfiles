@@ -77,7 +77,9 @@ public struct ShipStripView: View {
             if (acts || waiting) && live == nil {
                 if let g = running {
                     // the strip beneath names the running step and its time; the line then says only the stage
-                    Text(detailed ? "◌ gates" : "◌ \(g.name) \(GatesRun.secs(g.ms))").foregroundStyle(theme.goldLeaf)
+                    let stuck = GatesRun.stuck(rows) != nil
+                    Text(detailed ? (stuck ? "◌ gates · stuck?" : "◌ gates") : "◌ \(g.name) \(GatesRun.secs(g.ms))\(stuck ? " · stuck?" : "")")
+                        .foregroundStyle(stuck ? theme.ember : theme.goldLeaf)
                         .explains("ship|gates", "the push gates are running on this tree; p pushes once every one is green")
                 } else if let w = GatesRun.waiting(progress, rows: rows, inFlight: b.gates == .running || progress?.running == true, now: now) {
                     Text("◌ \(w.text)\(w.secs.map { " · " + GatesRun.secs($0 * 1000) } ?? "")").foregroundStyle(w.stuck ? theme.ember : theme.goldLeaf)
@@ -326,6 +328,10 @@ struct GatesStrip: View {
                 HStack(spacing: 3) {
                     Text("\(stepIcon[s] ?? "·") \(g.name)").foregroundStyle(stepColor(s, theme))
                     if timings, g.ms != nil { Text(GatesRun.secs(g.ms)).foregroundStyle(theme.inkFaint) }
+                    if let q = g.quiet, q > GatesRun.stuckAfter {
+                        Text("· no output for \(GatesRun.secs(q * 1000)) — stuck?").foregroundStyle(theme.ember)
+                            .explains("ship|gates|stuck", "the gate holds its slot but has written nothing for a while: , g shows its last lines; the machine page kills the run")
+                    }
                 }
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)

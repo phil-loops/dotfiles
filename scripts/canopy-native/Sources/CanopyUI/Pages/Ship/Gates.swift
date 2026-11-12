@@ -70,6 +70,8 @@ public struct GateProgress: Decodable, Equatable, Sendable {
     public struct Tail: Decodable, Equatable, Sendable {
         public var gate: String
         public var lines: [String]
+        /// seconds since the gate last wrote a line (the server stamps it from the log's mtime)
+        public var age: Double?
     }
 
     public var running: Bool
@@ -92,6 +94,8 @@ public struct GateRow: Equatable, Sendable {
     /// how long it ran, or has been running (ms)
     public var ms: Double?
     public var summary: String?
+    /// a running gate: seconds since it last wrote anything — past `stuckAfter` it is stuck, not slow
+    public var quiet: Double?
 }
 
 public enum GatesRun {
@@ -110,10 +114,17 @@ public enum GatesRun {
                 return GateRow(name: name, state: done.ok == true ? .green : .red, ms: done.ms, summary: s)
             }
             if let start = ev.first(where: { $0.event == "start" && $0.gate == name }) {
-                return GateRow(name: name, state: running ? .running : .stopped, ms: start.ts.map { max(0, (now - $0) * 1000) })
+                let quiet = running && p?.tail?.gate == name ? p?.tail?.age : nil
+                return GateRow(name: name, state: running ? .running : .stopped, ms: start.ts.map { max(0, (now - $0) * 1000) }, quiet: quiet)
             }
             return GateRow(name: name, state: running ? .queued : .stopped, ms: nil)
         }
+    }
+
+    /// The running gate that has written nothing for longer than `stuckAfter`: a wedged test
+    /// holding the slot reads as stuck, not slow, without asking Claude.
+    public static func stuck(_ rows: [GateRow]) -> GateRow? {
+        rows.first { $0.state == .running && ($0.quiet ?? 0) > stuckAfter }
     }
 
     /// Whether a gate's output is shown in full: on request (`, g` names it) or when it went red.
