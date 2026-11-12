@@ -12,7 +12,8 @@
 #
 # When a forest merges its design pages become citable — that's the moment to convert
 # them (drop `project:`, add citations) rather than let them rot as a plan nobody
-# reopens. /wiki/lint surfaces exactly that as `convertible`.
+# reopens. (The web lint that flagged these as `convertible` retired with viewer-solid,
+# 2026-10-31; it could not tell "landed" from "never started" anyway.)
 #
 # Resolution, budget and the duplicate-prose detector are mail_map's, imported rather
 # than reimplemented; this module adds page kinds and multi-root loading. mail_map.py
