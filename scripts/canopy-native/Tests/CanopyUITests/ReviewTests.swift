@@ -1373,6 +1373,42 @@ import Testing
         #expect(search.scans > scans, "a new query reads the page again")
     }
 
+    /// A removed line is cut into its half's width, after a space in the chunk's back half when it can be.
+    @Test func aRemovedLineIsCutIntoItsHalfsWidthAtSpaces() {
+        #expect(oldChunks("short", 10) == ["short"])
+        #expect(oldChunks("const value = compute(old, before)", 16) == ["const value = ", "compute(old, ", "before)"])
+        #expect(oldChunks("abcdefghijklmnopqrstuvwxyz", 10) == ["abcdefghij", "klmnopqrst", "uvwxyz"], "no space: hard cuts")
+        #expect(oldChunks("const value = compute(old, before)", 16).joined() == "const value = compute(old, before)")
+    }
+
+    /// In split view a removed line longer than its half reads in full: its first chunk in place (no …),
+    /// the rest on the row's continuation lines, with line separators making the room. A context line
+    /// keeps its cut (the new half shows it whole).
+    @Test func aLongRemovedLineWrapsUnderItsColumn() async throws {
+        let long = "export const somethingRemoved = computeTheValue(firstArgument, secondArgument, thirdArgument)"
+        let kept = long.replacingOccurrences(of: "somethingRemoved", with: "somethingKeptAsIs")
+        let patch = ["@@ -1,3 +1,3 @@", " " + kept, "-" + long, "+short"].joined(separator: "\n")
+        let payload = String(decoding: try JSONEncoder().encode(JSONValue.object(["branch": "add-hankles-limited-label", "baseSha": "base123",
+            "files": .array([["path": "a.ts", "add": 1, "del": 1, "patch": .string(patch)]])])), as: UTF8.self)
+        let (a, _) = try await app(payload)
+        let pg = ReviewPageState.of(a)
+        pg.diffColumns = 100
+        let text = NSMutableAttributedString()
+        for s in ReviewDocument.segments(pg, a, CanvasColors(.dark)) { text.append(s.build()) }
+        var removed: RowInfo?, context: RowInfo?
+        text.enumerateAttribute(.rvRow, in: NSRange(location: 0, length: text.length)) { v, _, _ in
+            guard let inf = v as? RowInfo, inf.kind == .line else { return }
+            if inf.left == .del { removed = inf } else if inf.left == .ctx { context = inf }
+        }
+        let W = pg.splitWidth("a.ts")
+        let r = try #require(removed)
+        #expect(!r.oldMore.isEmpty)
+        #expect(oldChunks(long, W).dropFirst().map { $0 } == r.oldMore, "the rest of the removed line, chunk by chunk")
+        #expect(text.string.contains("\u{2028}"), "line separators make the row tall enough")
+        #expect(!text.string.contains("\(String(long.prefix(W - 1)))…"), "the removed line isn't cut off with …")
+        #expect(context?.oldMore.isEmpty == true, "a context line keeps its cut")
+    }
+
     /// The code beside the diff searches its text, not its line numbers, and lights its matches.
     @Test func slashSearchesTheCodeBesideTheDiff() async throws {
         let (a, p) = try await app()
