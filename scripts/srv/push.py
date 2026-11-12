@@ -558,6 +558,17 @@ def _chain_break(branch):
     return ""
 
 
+def _outgoing_range(branch, has_remote, parent, main, exists):
+    """The rev-list range of what this branch sends: past origin's copy on a re-push, else past
+    every remote — and past its stacked parent either way, so a parent's unpushed commits (a
+    first push of a chain, or a restack onto a parent that gained commits) are the parent's
+    count, not this branch's."""
+    own = [parent] if parent and parent != main and exists(parent) else []
+    if has_remote:
+        return [f"origin/{branch}..{branch}", *(["--not", *own] if own else [])]
+    return [branch, "--not", "--remotes=origin", *own]
+
+
 def _origin_verdict(branch):
     """Every /push-origin guard, recomputed from git — shared by the read-only
     preview (drives the crossing view + wards + arming) and the push itself
@@ -583,7 +594,7 @@ def _origin_verdict(branch):
     # stacked branch's parent commits (already on origin via the parent) out of the count.
     # --first-parent: a catch-up merge's mainline commits arrive via the merge edge — they are
     # not this branch's outgoing work and must not trip the seal (which would flatten the merge).
-    range_args = [f"origin/{branch}..{branch}"] if has_remote else [branch, "--not", "--remotes=origin"]
+    range_args = _outgoing_range(branch, has_remote, snap.parent(branch), snap.main(), snap.exists)
     log = ctx.run(["git", "log", "--first-parent", "--format=%H\x1f%s\x1f%ad\x1f%at", "--date=format:%b %e", *range_args]).stdout
     outgoing = []
     for rec in log.splitlines():
