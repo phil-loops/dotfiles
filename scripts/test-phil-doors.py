@@ -59,4 +59,10 @@ for who in ("claude", "cli", "browser"):
         door(r, RAW)
         check(f"{name} refuses a {who} request", r.status == 403 and r.body.get("ok") is False, (r.status, r.body))
 
+# the sandbox refuses first, in its own words, before asking who clicked
+os.environ["STACK_REVIEW_SANDBOX"] = "1"
+r = Req("browser")
+queue.kill(r, json.dumps({"pid": 2}))
+check("a queue kill refuses in the sandbox", r.status == 403 and "sandbox" in r.body.get("err", ""), r.body)
+
 sys.exit(1 if failures else 0)
