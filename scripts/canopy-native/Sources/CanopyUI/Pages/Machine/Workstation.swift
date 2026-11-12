@@ -48,6 +48,21 @@ final class Workstation {
     func take(_ f: Footprint) { footprint = f }
     func take(_ q: Queue) { queue = q }
 
+    /// A ticket's row id: its ticket id, else its pid.
+    static func queueID(_ t: Queue.Ticket) -> String { t.id ?? "p:\(t.pid ?? 0)" }
+    /// The queue pane's rows: holders, waiters, then un-queued heavy work ("o:<pid>").
+    static func queueRows(_ q: Queue?) -> [String] {
+        guard let q else { return [] }
+        return (q.holders + q.waiters).map { RowKey.queue(queueID($0)) } + q.outside.map { RowKey.queue("o:\($0.pid)") }
+    }
+    /// What a queue row is: (pid, name, the gate's branch if any).
+    func queueRow(_ id: String?) -> (pid: Int?, name: String, branch: String?)? {
+        guard let q = queue, let id else { return nil }
+        if id.hasPrefix("o:"), let o = q.outside.first(where: { "o:\($0.pid)" == id }) { return (o.pid, o.name, nil) }
+        guard let t = (q.holders + q.waiters).first(where: { Self.queueID($0) == id }) else { return nil }
+        return (t.pid, QueueText.who(t), t.gate?.branch)
+    }
+
     func take(log text: String) { log = text }
 
     /// Re-read the servers; a call while one is out queues exactly one more.

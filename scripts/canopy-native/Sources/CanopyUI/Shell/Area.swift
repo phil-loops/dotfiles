@@ -103,6 +103,8 @@ public enum RowKey {
     public static func todo(_ id: String) -> String { "t:\(id)" }
     public static func landed(_ id: String) -> String { "d:\(id)" }
     public static func server(_ id: String) -> String { "m:\(id)" }
+    /// a Machine queue row: a ticket by its id, or un-queued heavy work by its pid ("o:<pid>")
+    public static func queue(_ id: String) -> String { "q:\(id)" }
     public static func wiki(_ slug: String) -> String { "w:\(slug)" }
     public static func concept(_ id: String) -> String { "c:\(id)" }
     public static func lesson(_ id: String) -> String { "s:\(id)" }
