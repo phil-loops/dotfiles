@@ -106,6 +106,13 @@ public final class Runner {
 
     public func disarm() { armed = nil; held = nil }
 
+    /// What a hold waited on failed: drop it if it's still that command's, and say why.
+    public func dropHeld(_ id: String, because why: String) {
+        guard held?.id == id else { return }
+        held = nil
+        say(why)
+    }
+
     /// Run the held key now — the page that held it says the diff has arrived.
     public func releaseHeld() {
         guard let h = held else { return }

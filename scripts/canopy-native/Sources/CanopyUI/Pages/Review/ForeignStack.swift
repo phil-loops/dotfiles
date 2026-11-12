@@ -36,6 +36,12 @@ final class ForeignStacks {
         return Int(b.dropFirst("review/pr-".count))
     }
 
+    /// The stack that holds PR `n` when a read under a minute old has it — the key's synchronous answer.
+    func cached(_ n: Int) -> [ForeignNode]? {
+        guard let hit = byNumber[n], Date().timeIntervalSince(hit.at) < Self.fresh else { return nil }
+        return hit.nodes
+    }
+
     /// The stack that holds PR `n`, read once a minute at most; nil with the server's reason.
     func load(_ app: AppModel, repo: String, _ n: Int) async -> (nodes: [ForeignNode]?, err: String?) {
         if let hit = byNumber[n], Date().timeIntervalSince(hit.at) < Self.fresh { return (hit.nodes, nil) }

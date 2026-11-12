@@ -1435,7 +1435,11 @@ import Testing
         #expect(pg.branch == nil && a.registry.command("review.branch.next")!.available!(nil), "J offers itself on a teammate's PR")
         #expect(a.registry.command("review.preview")!.route!("loops:review/pr-10468")?.id == "review.preview.pr")
         a.runner.dispatch("review.branch.next", via: .key)
+        #expect(a.runner.held?.id == "review.branch.next", "with the stack unread, J waits for it instead of claiming it ran")
         await until("the end of the stack") { (a.runner.note ?? "").contains("last PR in this stack") }
+        #expect(a.runner.held == nil && a.runner.fired?.ok == false, "the end is a refusal, not a success")
+        a.runner.dispatch("review.branch.next", via: .key)
+        #expect(a.runner.held == nil && a.runner.fired?.ok == false, "with the stack in hand the end refuses at once")
         a.runner.dispatch("review.branch.prev", via: .key)
         await until("the PR before") { a.router.route == .review(repo: "loops", branch: "review/pr-10466") }
         #expect(ShipStub.posts(p).last { $0.path == "/loops/open-url" }!.body["url"] == .string("https://github.com/loops-so/loops/pull/10466"))
