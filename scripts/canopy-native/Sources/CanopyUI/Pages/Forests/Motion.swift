@@ -24,6 +24,29 @@ extension View {
     }
 }
 
+/// A value that settles in once typing pauses (joy page): the opening commit's edited subject is the
+/// "lands as" title, and it settles into that row when you stop typing — never per keystroke, which
+/// would flicker. Under reduced motion it just changes.
+struct SettlingText: View {
+    @Environment(\.accessibilityReduceMotion) private var reduced
+    let value: String
+    let color: Color
+    @State private var shown: String?
+
+    static let pause: UInt64 = 350_000_000
+
+    var body: some View {
+        Text(shown ?? value)
+            .foregroundStyle(color)
+            .settles(shown ?? value, reduced: reduced)
+            .task(id: value) {
+                guard shown != nil, !reduced else { shown = value; return }
+                try? await Task.sleep(nanoseconds: Self.pause)
+                if !Task.isCancelled { shown = value }
+            }
+    }
+}
+
 /// Key.tsx: a command's key as a faint label that lights for a moment when the key runs it, and
 /// glows while a half-typed prefix waits for the key that would finish it. Reads keys.toml.
 struct KeyHint: View {

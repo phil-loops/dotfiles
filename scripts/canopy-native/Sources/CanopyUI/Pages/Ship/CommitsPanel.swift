@@ -207,7 +207,7 @@ public struct WordsEditor: View {
                         } else if writing {
                             ModalTextField(field, text: Binding(get: { w.prValue(branchID).subject },
                                                                 set: { w.editPr(branchID, MessageWords(subject: $0.replacingOccurrences(of: "\n", with: " "), body: w.prValue(branchID).body)) }))
-                        } else { Text(v.subject.isEmpty ? "—" : v.subject).foregroundStyle(theme.ink) }
+                        } else { SettlingText(value: v.subject.isEmpty ? "—" : v.subject, color: theme.ink) }
                         if let note = Self.ownerNote(o) { Text(note).font(Theme.text(10.5)).foregroundStyle(theme.inkFaint) }
                     case .body:
                         let github = o?.pr.flatMap { WordsState.githubOwns($0) ? $0 : nil }
