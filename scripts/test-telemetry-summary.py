@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """srv/telemetry.py's summary over folded events: the never-used list and the v1 pairs read the
 app that posted the registry, so a native command with uses is not reported as never used."""
+import json
 import os
 import sys
 import time
@@ -46,7 +47,7 @@ events += [
     {"schema": 2, "app": "native", "type": "cmd", "id": "history.prev", "ts": now - 6, "actor": actor, "pl": "p2", "budget": "local", "via": "key", "outcome": "refused", "err": "already at the top", "feedbackMs": 5},
 ]
 for e in events:
-    cache["registry"] = telemetry.fold(cache["days"], cache["registry"], e)
+    telemetry.fold(cache, e)
 s = telemetry.summarize(cache, days=30, now=now)
 
 check("a native command with uses is not never-used", "cursor.halfdown" not in s["neverUsed"], s["neverUsed"])
@@ -60,6 +61,18 @@ check("…the rest the warm split", down["warm"]["n"] == 2 and down["warm"]["p95
 check("…and each surface has its own stats, busiest first", list(down["surfaces"]) == ["review", "forest"] and down["surfaces"]["review"]["n"] == 2, down["surfaces"])
 
 sess = s["sessions"]["native"]
+# a server restart between two keys of one launch: the cache is saved, the module starts fresh
+import importlib  # noqa: E402
+cut = next(i for i, e in enumerate(events) if e.get("id") == "undo")
+again = {"days": {}, "registry": None}
+for e in events[:cut]:
+    telemetry.fold(again, e)
+again = json.loads(json.dumps(again))
+importlib.reload(telemetry)
+for e in events[cut:]:
+    telemetry.fold(again, e)
+resumed = telemetry.summarize(again, days=30, now=now)["sessions"]
+check("a restart mid-launch still pairs the undo with the key before it", resumed == s["sessions"], resumed)
 check("sessions count launches, refusals, an undo right after a key, and a reversed motion",
       sess["launches"] == 2 and sess["refused"] == 1 and sess["undoSoon"] == 1 and sess["reversed"] == 1, sess)
 

@@ -19,7 +19,7 @@ import re
 import threading
 import time
 
-ROLLUP_V = 4   # 3: per-command surface and cold splits; 4: per-launch session stats (refusals, undo-soon, reversed motions)
+ROLLUP_V = 5   # 3: per-command surface and cold splits; 4: per-launch session stats (refusals, undo-soon, reversed motions); 5: the previous command per launch lives in the cache
 # Only Phil's own browser counts: Claude's curls, the extension and headless checks would skew
 # the timings this dashboard exists to steer by.
 HUMAN_ACTORS = {"browser", None}
@@ -29,7 +29,6 @@ REVERSE_S = 1      # j then k (or the like) this close is a motion that overshot
 REVERSES = {("cursor.down", "cursor.up"), ("cursor.up", "cursor.down"), ("review.down", "review.up"), ("review.up", "review.down"),
             ("history.next", "history.prev"), ("history.prev", "history.next"), ("review.file.next", "review.file.prev"),
             ("review.file.prev", "review.file.next"), ("review.hunk.next", "review.hunk.prev"), ("review.hunk.prev", "review.hunk.next")}
-_LAST = {}   # pl -> (ts, id): the previous command in that launch, for undo-soon and reversed pairs
 LIVE_MAX = 8 * 1024 * 1024
 DEFAULT_BUDGETS = {
     "local": {"feedbackMs": 16.7, "settledMs": None},
@@ -108,8 +107,14 @@ def _num(v):
     return round(float(v), 1) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
 
 
-def fold(days, reg, e):
-    """Fold one event into the per-day rollup. Events that aren't schema 2 are ignored."""
+def fold(cache, e):
+    """Fold one event into the rollup cache. Events that aren't schema 2 are ignored. Everything
+    a fold reads lives in the cache — the previous command per launch too — so a server restart
+    resumes it and a rebuilt cache counts the same."""
+    cache["registry"] = _fold(cache["days"], cache.get("registry"), cache.setdefault("last", {}), e)
+
+
+def _fold(days, reg, last, e):
     if e.get("schema") != 2:
         return reg
     t, app = e.get("type"), e.get("app") or "?"
@@ -127,14 +132,17 @@ def fold(days, reg, e):
         s["cmds"] += 1
         if e.get("outcome") == "refused":
             s["refused"] += 1
-        prev = _LAST.get(pl)
+        prev = last.get(pl)
         ts, cid = e.get("ts", 0), e.get("id") or "?"
         if prev:
             if cid == "undo" and ts - prev[0] <= UNDO_SOON_S:
                 s["undoSoon"] += 1
             if (prev[1], cid) in REVERSES and ts - prev[0] <= REVERSE_S:
                 s["reversed"] += 1
-        _LAST[pl] = (ts, cid)
+        if len(last) > 256:   # a launch's pairs only reach back seconds: forget the long-quiet ones
+            for k in [k for k, (t0, _) in last.items() if ts - t0 > 600]:
+                del last[k]
+        last[pl] = (ts, cid)
         k = f"{app}|{e.get('id') or '?'}"
         c = d["cmd"].setdefault(k, {"budget": e.get("budget") or "local", "n": 0, "via": {}, "out": {}, "err": {}, "fb": [], "st": [],
                                     "surf": {}, "cold": [], "warm": []})
@@ -178,7 +186,7 @@ def _fold_bytes(cache, data):
         except ValueError:
             continue
         if isinstance(e, dict):
-            cache["registry"] = fold(cache["days"], cache.get("registry"), e)
+            fold(cache, e)
 
 
 def rollups(gd):
@@ -192,7 +200,7 @@ def rollups(gd):
             if cache.get("v") != ROLLUP_V:
                 raise ValueError
         except (OSError, ValueError):
-            cache = {"v": ROLLUP_V, "ino": None, "off": 0, "days": {}, "registry": None}
+            cache = {"v": ROLLUP_V, "ino": None, "off": 0, "days": {}, "registry": None, "last": {}}
         try:
             st = os.stat(path)
         except OSError:
