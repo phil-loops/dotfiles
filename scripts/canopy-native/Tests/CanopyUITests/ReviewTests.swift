@@ -1490,14 +1490,14 @@ import Testing
         #expect(l.choose(4, 1) == .base(.parent), "either order; the parent to the tip is the branch")
         #expect(l.choose(1, 3) == .commits(from: "c1", to: "c2"))
         #expect(l.choose(0, 4) == .base(.main))
-        #expect(l.choose(0, 3) == .refuse("against main the diff runs to the tip"))
+        #expect(l.choose(0, 3) == .commits(from: "main", to: "c2"), "main up to a commit of its own: main...c2")
         #expect(l.choose(0, 1) == .refuse("a stretch ends on a commit"))
         #expect(ReviewLine.Choice.commits(from: "c2", to: "c3").scope == "c2..c3")
     }
 
     @Test func whatsLitReadsBackWhatWasChosen() {
         let l = stacked
-        for (a, b) in [(2, 4), (1, 3), (3, 3), (0, 4), (1, 4)] {
+        for (a, b) in [(2, 4), (1, 3), (3, 3), (0, 4), (1, 4), (0, 3), (0, 2)] {
             let c = l.choose(a, b)
             let base: ReviewBase = { if case .base(let x) = c { return x } else { return .parent } }()
             let lit = l.lit(base: base, scope: c.scope)
@@ -1514,6 +1514,10 @@ import Testing
         #expect(l.words((1, 4)) == "what lands · all 3 commits")
         #expect(l.words((0, 4)) == "the whole stack, from main")
         #expect(l.words((1, 2)) == "1 of 3 commits")
+        #expect(l.words((0, 3)) == "from main, up to 2 of 3 commits" && l.cover((0, 3)) == .beyond && l.lone((0, 2)) == nil)
+        #expect(l.spell((0, 4)) == .base(.main) && l.spell((1, 4)) == .base(.parent) && l.spell((3, 4)) == .commits(from: nil, to: "c3"), "a stretch has one spelling")
+        let flat = ReviewLine(parentIsMain: true, commits: [HistoryCommit(sha: "c2", subject: ""), HistoryCommit(sha: "c1", subject: "")])
+        #expect(flat.lit(base: .parent, scope: "main..c1") == nil, "a branch on main has no main of its own to start at")
         let stepped = l.lit(base: .parent, scope: "c3"), preset = l.lit(base: .outgoing, scope: nil)
         #expect(stepped.map(l.words) == "1 of 3 commits · the next push" && preset.map(l.words) == stepped.map(l.words), "one stretch, one reading")
         let one = ReviewLine(parentIsMain: true, commits: [HistoryCommit(sha: "c1", subject: "", pushed: false)])

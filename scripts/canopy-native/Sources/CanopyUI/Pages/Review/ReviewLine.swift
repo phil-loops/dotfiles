@@ -19,7 +19,7 @@ public struct ReviewLine: Equatable {
     /// What two picked points make the diff cover.
     public enum Choice: Equatable, Sendable {
         case base(ReviewBase)
-        /// one commit (`from` nil) or a run of them, both ends included
+        /// one commit (`from` nil) or a run of them, both ends included; `from` "main" starts at main
         case commits(from: String?, to: String)
         case refuse(String)
 
@@ -52,7 +52,7 @@ public struct ReviewLine: Equatable {
         let n = lit.hi - lit.lo, all = tip - parentIndex
         switch cover(lit) {
         case .landing: return n > 1 ? "what lands · all \(n) commits" : "what lands"
-        case .beyond: return "the whole stack, from main"
+        case .beyond: return lit.hi == tip ? "the whole stack, from main" : "from main, up to \(lit.hi - parentIndex) of \(all) commits"
         case .part: return "\(n) of \(all) commits" + (lit.lo == origin && lit.hi == tip ? " · the next push" : "")
         }
     }
@@ -83,6 +83,7 @@ public struct ReviewLine: Equatable {
             let ends = Self.ends(scope)
             guard let hi = index(sha: ends.to) else { return nil }
             guard let f = ends.from else { return (hi - 1, hi) }
+            if f == Self.fromMain { return points.first == .main ? (0, hi) : nil }
             return index(sha: f).map { ($0 - 1, hi) }
         }
         switch base {
@@ -92,21 +93,27 @@ public struct ReviewLine: Equatable {
         }
     }
 
+    /// A run's start that is main itself rather than a commit: main...to.
+    public static let fromMain = "main"
+
     /// A scope key's ends: "a..b" or a lone "b".
     public static func ends(_ scope: String) -> (from: String?, to: String) {
         guard let r = scope.range(of: "..") else { return (nil, scope) }
         return (String(scope[..<r.lowerBound]), String(scope[r.upperBound...]))
     }
 
+    /// A lit stretch as the line would choose it: its one spelling.
+    public func spell(_ lit: (lo: Int, hi: Int)) -> Choice { choose(lit.hi - lit.lo == 1 ? lit.hi : lit.lo, lit.hi) }
+
     /// Two picked points as what the diff covers; the same commit twice is that commit alone.
     public func choose(_ a: Int, _ b: Int) -> Choice {
         let lo = min(a, b), hi = max(a, b)
         guard points.indices.contains(lo), points.indices.contains(hi) else { return .refuse("that isn't on the line") }
-        guard sha(hi) != nil else { return .refuse("a stretch ends on a commit") }
+        guard let end = sha(hi) else { return .refuse("a stretch ends on a commit") }
         if lo == hi { return run(hi, hi) }
         switch points[lo] {
         case .main:
-            return hi == tip ? .base(.main) : .refuse("against main the diff runs to the tip")
+            return hi == tip ? .base(.main) : .commits(from: Self.fromMain, to: end)
         case .parent:
             return hi == tip ? .base(.parent) : run(lo + 1, hi)
         case .commit:
