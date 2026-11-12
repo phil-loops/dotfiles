@@ -146,5 +146,31 @@ assert_eq "journal: command" "sh -c sleep 0.2; exit 3" "$cmd"
 n=$(wc -l < "$HEAVY_TURN_JOURNAL" | tr -d ' ')
 (( n >= 25 )) && ok "journal: every earlier ticket was recorded ($n lines)" || bad "journal: every earlier ticket was recorded" "$n lines"
 
+# 12. the lock is reentrant: a signal handler's drop() inside a held lock must not wait on itself
+out=$(python3 - "$HT" <<'PY' 2>&1
+import runpy, signal, sys
+signal.alarm(5)   # a self-deadlock dies here instead of hanging the suite
+g = runpy.run_path(sys.argv[1], run_name="heavy_turn")
+with g["locked"]():
+    with g["locked"]():
+        pass
+    with g["locked"]():
+        pass
+with g["locked"]():
+    print("reentrant")
+PY
+)
+assert_eq "a nested lock returns instead of waiting on itself" reentrant "$out"
+# …and a SIGTERMed waiter leaves the queue usable
+HEAVY_TURN_SLOTS=1 "$HT" -- sleep 2 2>/dev/null &
+sleep 0.3
+HEAVY_TURN_SLOTS=1 "$HT" --batch -- true 2>/dev/null & w=$!
+sleep 0.3
+for _ in 1 2 3 4 5; do kill -TERM $w 2>/dev/null; done
+wait $w 2>/dev/null
+st=$(HEAVY_TURN_SLOTS=1 "$HT" --status 2>&1)
+[[ "$st" == *"slots held"* && "$st" != *"waiting  "* ]] && ok "a killed waiter drops its ticket" || bad "a killed waiter drops its ticket" "$st"
+wait
+
 echo "---- $PASS passed, $FAIL failed"
 (( FAIL == 0 ))
