@@ -21,7 +21,7 @@ import sys
 # 4-reads-per-branch loop made this script the slow step of every plan/model render
 def read_config():
     raw = subprocess.run(["git", "config", "-z", "--get-regexp",
-                          r"^(branch|stack-branch|stack-project)\."],
+                          r"^(branch|stack-project)\."],
                          capture_output=True, text=True).stdout
     conf = {}
     for entry in raw.split("\0"):
@@ -37,7 +37,7 @@ def compute(key, conf):
     one = lambda k: (conf.get(k) or [""])[-1].strip()
     many = lambda k: [v.strip() for v in conf.get(k, []) if v.strip()]
     # accept a branch (resolve its project) or a project name directly
-    project = one(f"branch.{key}.stack-project") or one(f"stack-branch.{key}.project")
+    project = one(f"branch.{key}.stack-project")
     if not project:
         project = key
     branches = many(f"stack-project.{project}.branch")
@@ -47,12 +47,12 @@ def compute(key, conf):
     parent, requires, after = {}, {}, {}
     known = set(branches)
     for b in branches:
-        parent[b] = one(f"branch.{b}.stack-parent") or one(f"stack-branch.{b}.parent") or "main"
-        requires[b] = many(f"branch.{b}.stack-requires") or many(f"stack-branch.{b}.requires")
+        parent[b] = one(f"branch.{b}.stack-parent") or "main"
+        requires[b] = many(f"branch.{b}.stack-requires")
         # `after` = merge-order-only dependence: no carried commits, no rebase coupling —
         # the branch is content-independent but must land later (deploy invariants).
         # Counts fully in rank so the canonical order honors it.
-        after[b] = many(f"branch.{b}.stack-after") or many(f"stack-branch.{b}.after")
+        after[b] = many(f"branch.{b}.stack-after")
 
     memo = {}
 

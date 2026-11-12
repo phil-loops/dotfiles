@@ -237,7 +237,7 @@ def main():
     who_ = attribution()
     for ev in events:
         b = ev.get("branch") or ""
-        ev["project"] = git("config", f"branch.{b}.stack-project") or git("config", f"stack-branch.{b}.project") or None
+        ev["project"] = git("config", f"branch.{b}.stack-project") or None
         ev.update(who_)
         ev["ts"] = ts
     if kind == "push":

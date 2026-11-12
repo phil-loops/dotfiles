@@ -28,8 +28,8 @@ echo one > a.txt; git add -A; git commit -qm "base"
 mk() {  # mk <branch> <parent> <subject> <file>
   git checkout -q "$2" && git checkout -qb "$1"
   echo "$1" > "$4"; git add "$4"; git commit -qm "$3"
-  git config "stack-branch.$1.parent" "$2"
-  git config "stack-branch.$1.project" proj
+  git config "branch.$1.stack-parent" "$2"
+  git config "branch.$1.stack-project" proj
   git config --add stack-project.proj.branch "$1"
 }
 mk one   main "feat(x): the first step"  f1.txt
@@ -83,7 +83,7 @@ cat > "$gd/stack-project-merges.json" <<'EOF'
 {"tip":"x","merges":{"proj":[{"pr":9560,"title":"feat(x): the first step","at":"2026-07-13T00:00:00Z","branch":"one"}]}}
 EOF
 git config --unset stack-project.proj.branch one      # the contraction: drop the merged node
-git config stack-branch.two.parent main               # ... and rewire its child onto main
+git config branch.two.stack-parent main               # ... and rewire its child onto main
 cat > "$stub/stack-merge-rank" <<'EOF'
 #!/bin/sh
 echo '{"order":["two","three"]}'
@@ -102,8 +102,8 @@ has  "the map marks it merged"                  "✓"                           
 print -- "
 SUMMARY — rebase-stable, but not code-stable"
 git checkout -q three
-git config stack-branch.three.summary "the stored summary"
-git config stack-branch.three.summary-patchid \
+git config branch.three.stack-summary "the stored summary"
+git config branch.three.stack-summary-patchid \
   "$(git diff two...three | git patch-id --stable | awk '{print $1}')"
 is "fresh when stored against this code" "fresh" "$("$SCRIPTS/stack-summary" three --status)"
 
@@ -123,8 +123,8 @@ rm -f "$gd/stack-project-merges.json"
 git config --unset-all stack-project.proj.branch 2>/dev/null || true
 git checkout -q main && git checkout -qb quoted
 echo q > q.txt; git add q.txt; git commit -qm "fix(q): don't let a branch's name break it"
-git config stack-branch.quoted.parent main
-git config stack-branch.quoted.project proj
+git config branch.quoted.stack-parent main
+git config branch.quoted.stack-project proj
 # The PROJECT REGISTRY is what makes a branch a plan member — a .project tag on the branch alone
 # renders nothing. This case never added the entry, which is why it could not have passed.
 git config --add stack-project.proj.branch quoted

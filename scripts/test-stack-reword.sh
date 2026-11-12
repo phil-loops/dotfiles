@@ -23,11 +23,11 @@ git remote add origin "$ROOT/origin.git"
 echo base > f; git add f; git commit -qm "base"; git push -q origin main
 git checkout -qb a
 for n in 1 2 3; do echo "a$n" > "a$n"; git add "a$n"; git commit -qm "a$n subject" -m "a$n body"; done
-git config stack-branch.a.parent main
+git config branch.a.stack-parent main
 git checkout -qb b
 echo b1 > b1; git add b1; git commit -qm "b1 subject"
-git config stack-branch.b.parent a
-git config stack-branch.b.base "$(git rev-parse a)"
+git config branch.b.stack-parent a
+git config branch.b.stack-base "$(git rev-parse a)"
 git checkout -q a
 
 A2="$(git rev-parse a~1)"; A_TREE="$(git rev-parse 'a^{tree}')"; B_TREE="$(git rev-parse 'b^{tree}')"
@@ -43,7 +43,7 @@ assert_eq "T1 new subject" "a2 new subject" "$(git log -1 --format=%s a~1)"
 assert_eq "T1 new body" "new body" "$(git log -1 --format=%b a~1 | git stripspace)"
 assert_eq "T1 a3 message kept" "a3 subject" "$(git log -1 --format=%s a)"
 assert_eq "T1 b on new a tip" "$(git rev-parse a)" "$(git rev-parse b~1)"
-assert_eq "T1 b base re-pointed" "$(git rev-parse a)" "$(git config stack-branch.b.base)"
+assert_eq "T1 b base re-pointed" "$(git rev-parse a)" "$(git config branch.b.stack-base)"
 assert_eq "T1 worktree clean" "" "$(git status --porcelain)"
 assert_eq "T1 HEAD still a" "a" "$(git symbolic-ref --short HEAD)"
 assert_eq "T1 author date kept" "$(git log -1 --format=%ad "$OLD_A")" "$(git log -1 --format=%ad a)"

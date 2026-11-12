@@ -1,19 +1,9 @@
 # stack-config-lib.zsh — SOURCE this, don't run it. The one place a zsh script writes per-branch
-# stack config, and the mirror of srv/stackcfg.py on the Python side.
+# stack config, `branch.<b>.stack-<key>` (git GCs it when the branch is deleted and carries it on
+# rename), and the mirror of srv/stackcfg.py on the Python side.
 #
-# Why: the namespace migration moves `stack-branch.<b>.<key>` (legacy) → `branch.<b>.stack-<key>`
-# (target, so git GCs it when the branch is deleted and carries it on rename). Phase 2 was
-# written as "sweep every key and flip every writer in one window", which across the tree's write
-# sites — in files several sessions hold — has no good moment. Dual-writing removes the window:
-# writers emit BOTH spellings, readers already prefer the target, and the sweep then becomes
-# idempotent and runnable any time.
-#
-# The failure mode this exists to prevent: after a sweep, a writer still emitting only the legacy
-# spelling is SILENTLY SHADOWED, because readers take the target. A re-parent would report success
-# and do nothing. Route writes through here and dropping the legacy spelling later is one edit.
-#
-# That edit is made (2026-11-09): writes emit the target only and clear the key's legacy copy, which
-# otherwise outlived `branch -D` and leaked a dead branch's verdicts into a recreated namesake.
+# This is where the migration from `stack-branch.<b>.<key>` ended: writers went target-only on
+# 2026-11-09, every repo was swept, and on 2026-11-12 the readers dropped their fallback arm.
 #
 #   stack_cfg_set   <branch> <key> <value>
 #   stack_cfg_add   <branch> <key> <value>          # multivar
@@ -22,31 +12,19 @@
 
 stack_cfg_set() {
   git config "branch.$1.stack-$2" "$3"
-  git config --unset-all "stack-branch.$1.$2" 2>/dev/null || true
 }
 
 stack_cfg_add() {
-  # A legacy-only list is folded into the target first, so the append can't hide what readers
-  # were getting from the fallback.
-  local v
-  if [[ -z "$(git config --get-all "branch.$1.stack-$2" 2>/dev/null)" ]]; then
-    git config --get-all "stack-branch.$1.$2" 2>/dev/null | while IFS= read -r v; do
-      git config --add "branch.$1.stack-$2" "$v"
-    done
-  fi
-  git config --unset-all "stack-branch.$1.$2" 2>/dev/null || true
   git config --add "branch.$1.stack-$2" "$3"
 }
 
 stack_cfg_unset() {
   # git exits 5 for "was not set", which is not a failure here — and under `set -e` it would
-  # abort the caller, so both arms swallow it.
+  # abort the caller, so it is swallowed.
   if [[ -n "${3:-}" ]]; then
     git config --unset "branch.$1.stack-$2" "$3" 2>/dev/null || true
-    git config --unset "stack-branch.$1.$2" "$3" 2>/dev/null || true
   else
     git config --unset "branch.$1.stack-$2" 2>/dev/null || true
-    git config --unset "stack-branch.$1.$2" 2>/dev/null || true
   fi
 }
 
@@ -58,5 +36,4 @@ stack_cfg_drop_section() {
   git config --get-regexp "^branch\.${esc}\.stack-" 2>/dev/null | cut -d' ' -f1 | while read -r k; do
     [[ -n "$k" ]] && { git config --unset-all "$k" 2>/dev/null || true }
   done
-  git config --remove-section "stack-branch.$1" 2>/dev/null || true
 }

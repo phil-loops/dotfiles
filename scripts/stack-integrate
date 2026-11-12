@@ -139,18 +139,18 @@ build_integration() {
   for m in "${members[@]}"; do
     while IFS= read -r r; do
       [[ -n "$r" ]] && is_carried[$r]=1
-    done < <(git config --get-all "branch.${m}.stack-requires" 2>/dev/null || git config --get-all "stack-branch.${m}.requires" 2>/dev/null || true)
+    done < <(git config --get-all "branch.${m}.stack-requires" 2>/dev/null || true)
   done
 
   # Leaves = project members with no project-member child and no carrier.
   local -a leaves
   for m in "${members[@]}"; do
-    local role=$(git config "branch.${m}.stack-role" 2>/dev/null || git config "stack-branch.${m}.role" 2>/dev/null || true)
+    local role=$(git config "branch.${m}.stack-role" 2>/dev/null || true)
     [[ "$role" == "proof" ]] && continue
     local has_child=0
     for other in "${members[@]}"; do
       [[ "$other" == "$m" ]] && continue
-      local op=$(git config "branch.${other}.stack-parent" 2>/dev/null || git config "stack-branch.${other}.parent" 2>/dev/null || true)
+      local op=$(git config "branch.${other}.stack-parent" 2>/dev/null || true)
       if [[ "$op" == "$m" ]]; then has_child=1; break; fi
     done
     (( has_child == 0 )) && [[ -z "${is_carried[$m]:-}" ]] && leaves+=("$m")

@@ -26,7 +26,7 @@ Escape hatches (per guard, one push): `ALLOW_WIP_PUSH=1` / `ALLOW_MERGE_PUSH=1`
 / `ALLOW_PROOF_PUSH=1`.
 For pushes from GUI clients that can't set env vars (GH Desktop), a one-shot
 per-branch flag does the same for the merge guard and is consumed on use:
-`git config stack-branch.<branch>.allow-merge-push true`.
+`git config branch.<branch>.stack-allow-merge-push true`.
 
 Exit 0 = clean (allow push). Exit 1 = blocked.
 """
@@ -80,7 +80,7 @@ def catchup_bases(branch):
     (a stacked child's PR base) when it exists on origin. Never the branch itself —
     that's a pull-merge, the thing this guard exists for."""
     bases = ["origin/main"]
-    for key in (f"branch.{branch}.stack-parent", f"stack-branch.{branch}.parent"):
+    for key in (f"branch.{branch}.stack-parent",):
         sp = subprocess.run(
             ["git", "config", "--get", key], capture_output=True, text=True,
         ).stdout.strip()
@@ -126,7 +126,7 @@ def merge_commits(rev_args, branch):
 
 
 def branch_role(name):
-    for key in (f"branch.{name}.stack-role", f"stack-branch.{name}.role"):
+    for key in (f"branch.{name}.stack-role",):
         val = subprocess.run(
             ["git", "config", "--get", key], capture_output=True, text=True,
         ).stdout.strip()
@@ -138,7 +138,7 @@ def branch_role(name):
 def branch_merge_pass(remote_ref):
     """One-shot per-branch merge-push pass, consumed on use (for GUI pushes)."""
     branch = remote_ref.removeprefix("refs/heads/")
-    key = f"stack-branch.{branch}.allow-merge-push"
+    key = f"branch.{branch}.stack-allow-merge-push"
     val = subprocess.run(
         ["git", "config", "--get", key], capture_output=True, text=True,
     ).stdout.strip().lower()

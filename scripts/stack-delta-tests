@@ -8,7 +8,7 @@ changed `*.test.ts(x)` runs directly. Nothing changed has a sibling test ⇒ exi
 
   stack-delta-tests [--branch <b>]   delta = <base>..HEAD ∪ working tree, where
                                      base = merge-base(parent, HEAD), parent from
-                                     stack-branch.<b>.parent (else main)
+                                     branch.<b>.stack-parent (else main)
 
 Runs `tsx --tsconfig <repo test tsconfig> --test <files>` from the repo toplevel,
 resolving tsx repo-local first. A worktree with no node_modules borrows the main
@@ -37,7 +37,7 @@ def main_worktree(repo):
 
 
 def changed_files(repo, branch):
-    parent = git(["config", f"branch.{branch}.stack-parent"], repo).stdout.strip() or git(["config", f"stack-branch.{branch}.parent"], repo).stdout.strip() or MAIN
+    parent = git(["config", f"branch.{branch}.stack-parent"], repo).stdout.strip() or MAIN
     base = git(["merge-base", parent, "HEAD"], repo).stdout.strip() or parent
     # Clamp a ROOT branch's diff base FORWARD to its real fork with origin/main. Local `main`
     # is often stale (behind origin/main), so merge-base(main, HEAD) sits below origin/main and
