@@ -42,6 +42,28 @@ _READY = re.compile(r"(✓ Compiled|✓ Ready|Ready in)")
 _COMPILING = re.compile(r"○ Compiling")
 
 
+def sandboxed():
+    """The sandbox (viewer-sandbox, STACK_REVIEW_SANDBOX=1) has no previews of its own: the list
+    scans the MACHINE's tmux/lsof and the writes kill, restart, reap and launch real dev servers,
+    so a sandbox that answered them would act on Phil's live previews (2026-10-27). One rule here;
+    every handler asks it."""
+    return os.environ.get("STACK_REVIEW_SANDBOX") == "1"
+
+
+SANDBOX_REFUSAL = "the sandbox has no previews — this would act on the machine's real dev servers"
+
+
+def machine_only(fn):
+    """A preview write refuses in the sandbox, in words, before touching anything."""
+    def guarded(req, raw=None):
+        if sandboxed():
+            return req._send(200, json.dumps({"ok": False, "err": SANDBOX_REFUSAL}))
+        return fn(req, raw) if raw is not None else fn(req)
+    guarded.__name__ = fn.__name__
+    guarded.__doc__ = fn.__doc__
+    return guarded
+
+
 def _script():
     return os.path.join(ctx.SCRIPTS, "loops-preview")
 
@@ -493,6 +515,7 @@ def _serve_dir(req, dirp, extra=None, branch=None):
                                "dir": dirp, **(extra or {})}))
 
 
+@machine_only
 def start(req, raw):
     d = json.loads(raw or "{}")
     branch = d.get("branch", "")
@@ -529,6 +552,7 @@ def _integrate_playground(project):
     return dirp, flags, "", 200
 
 
+@machine_only
 def start_integration(req, raw):
     d = json.loads(raw or "{}")
     project = d.get("project", "")
@@ -542,6 +566,7 @@ def start_integration(req, raw):
     _serve_dir(req, dirp, {"project": project, **flags})
 
 
+@machine_only
 def start_main(req, raw):
     # "run main": a web-only next dev for the LITERAL main branch, preferring :3000. main's worktree
     # is resolved the same way branch previews resolve theirs — its own checkout if the primary tree
@@ -576,6 +601,7 @@ def start_main(req, raw):
     req._send(200, json.dumps({"ok": True, "port": port, "url": "http://localhost:%d" % port, "dir": dirp}))
 
 
+@machine_only
 def restart(req, raw):
     d = json.loads(raw or "{}")
     dirp = d.get("dir", "")
@@ -598,6 +624,7 @@ def restart(req, raw):
     req._send(200, json.dumps({"ok": True, "port": newport, "url": "http://localhost:%d" % newport, "dir": dirp}))
 
 
+@machine_only
 def swap(req, raw):
     # before/after in ONE tab: kill the server on this port and relaunch it serving a DIFFERENT
     # branch's worktree — the URL survives, and the X-Dev-Worktree stamp proves each flip. Never
@@ -629,6 +656,7 @@ def swap(req, raw):
     req._send(200, json.dumps({"ok": True, "port": int(m.group(1)), "url": "http://localhost:%s" % m.group(1), "dir": dirp}))
 
 
+@machine_only
 def kill(req, raw):
     d = json.loads(raw or "{}")
     dirp = d.get("dir", "")
@@ -645,12 +673,14 @@ def kill(req, raw):
     req._send(200, json.dumps({"ok": True}))
 
 
+@machine_only
 def reap(req, raw):
     p = subprocess.run([_script(), "--reap"], capture_output=True, text=True)
     _list_invalidate()
     req._send(200, json.dumps({"ok": True, "out": (p.stdout or "").strip()}))
 
 
+@machine_only
 def stack_up(req, raw):
     # bring the shared Docker stack up. Detached: `compose up -d` can pull images for minutes, and
     # the drawer's service chips already narrate the containers arriving.
@@ -677,6 +707,8 @@ def stack_up(req, raw):
 
 
 def previews(req):
+    if sandboxed():
+        return req._send(200, json.dumps({"ok": True, "previews": [], "substrate": None, "sandbox": True}))
     # the docker-ps substrate scan is independent of the preview list + probes — overlap them
     # so the drawer's cold open pays max(list+probes, docker), not the sum.
     # _active_main_wt reads the request's pinned repo via a thread-local the pools WON'T inherit
