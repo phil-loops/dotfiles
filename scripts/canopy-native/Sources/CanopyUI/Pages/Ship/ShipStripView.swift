@@ -23,9 +23,9 @@ public struct ShipStripView: View {
                 let progress = ship.progressOf(branchID)
                 let rows = GatesRun.rows(progress, now: ctx.date.timeIntervalSince1970)
                 VStack(alignment: .leading, spacing: 4) {
-                    line(b, m, rows, progress, now: ctx.date.timeIntervalSince1970)
+                    line(b, m, rows, progress, now: ctx.date.timeIntervalSince1970, detailed: m == nil && stripShown(rows, progress, shown, ship))
                     if let m { StepsStrip(branchID: branchID, motion: m) }
-                    else if !rows.isEmpty, !ship.gatesHidden.contains(branchID), progress?.running == true || rows.contains(where: { $0.state == .red }) || shown != nil {
+                    else if stripShown(rows, progress, shown, ship) {
                         GatesStrip(branchID: branchID, rows: rows, progress: progress, shown: shown)
                     }
                     if m == nil, b.diverged, case .some(.some(let s)) = ship.forceScopeOf(app, branchID) { GuardStrip(guards: s.guards) }
@@ -41,12 +41,17 @@ public struct ShipStripView: View {
         }
     }
 
+    /// the gates strip shows while a run is live, after a red, or when a gate's output was asked for
+    private func stripShown(_ rows: [GateRow], _ progress: GateProgress?, _ shown: String?, _ ship: ShipState) -> Bool {
+        !rows.isEmpty && !ship.gatesHidden.contains(branchID) && (progress?.running == true || rows.contains(where: { $0.state == .red }) || shown != nil)
+    }
+
     /// dirt and the prep route are read per branch, re-read when the branch moves or a sync ends
     private func readKey(_ b: Branch, _ m: SyncMotion?) -> String {
         "\(b.repo)|\(b.name)|\(b.tip)|\(b.pushed.rawValue)|\(b.ahead)|\(b.behind)|\(b.drifted)|\(m?.phase.rawValue ?? "")"
     }
 
-    @ViewBuilder private func line(_ b: Branch, _ m: SyncMotion?, _ rows: [GateRow], _ progress: GateProgress?, now: Double) -> some View {
+    @ViewBuilder private func line(_ b: Branch, _ m: SyncMotion?, _ rows: [GateRow], _ progress: GateProgress?, now: Double, detailed: Bool = false) -> some View {
         let ship = ShipState.of(app)
         let route = ReviewCommands.pushRoute(app, branchID)
         let push = latestPush()
@@ -71,7 +76,8 @@ public struct ShipStripView: View {
             }
             if (acts || waiting) && live == nil {
                 if let g = running {
-                    Text("◌ \(g.name) \(GatesRun.secs(g.ms))").foregroundStyle(theme.goldLeaf)
+                    // the strip beneath names the running step and its time; the line then says only the stage
+                    Text(detailed ? "◌ gates" : "◌ \(g.name) \(GatesRun.secs(g.ms))").foregroundStyle(theme.goldLeaf)
                         .explains("ship|gates", "the push gates are running on this tree; p pushes once every one is green")
                 } else if let w = GatesRun.waiting(progress, rows: rows, inFlight: b.gates == .running || progress?.running == true, now: now) {
                     Text("◌ \(w.text)\(w.secs.map { " · " + GatesRun.secs($0 * 1000) } ?? "")").foregroundStyle(w.stuck ? theme.ember : theme.goldLeaf)
@@ -268,41 +274,64 @@ struct GatesStrip: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
+            // a label never breaks mid-word: the timings give way first, then the elapsed total
             HStack(spacing: 12) {
                 Text("gates").foregroundStyle(theme.inkFaint)
-                ForEach(rows, id: \.name) { g in
-                    let s = Self.step[g.state] ?? .idle
-                    HStack(spacing: 3) {
-                        Text("\(stepIcon[s] ?? "·") \(g.name)").foregroundStyle(stepColor(s, theme))
-                        if g.ms != nil { Text(GatesRun.secs(g.ms)).foregroundStyle(theme.inkFaint) }
-                    }
-                    .underline(progress?.tail?.gate == g.name)
+                ViewThatFits(in: .horizontal) {
+                    gateRow(timings: true)
+                    gateRow(timings: false)
                 }
                 Spacer(minLength: 0)
-                if progress?.running == true, let e = progress?.elapsed { Text("\(GatesRun.secs(e * 1000)) in").foregroundStyle(theme.inkFaint) }
-                KeyButton(title: "output", id: "review.gates.show", target: branchID)
+                HStack(spacing: 12) {
+                    if progress?.running == true, let e = progress?.elapsed { Text("\(GatesRun.secs(e * 1000)) in").foregroundStyle(theme.inkFaint) }
+                    KeyButton(title: "output", id: "review.gates.show", target: branchID)
+                }
+                .fixedSize()
+                .layoutPriority(1)
             }
             ForEach(rows.filter { $0.state == .red && $0.summary != nil && $0.name != progress?.tail?.gate }, id: \.name) { g in
                 (Text(g.name).bold() + Text(" \(g.summary ?? "")")).foregroundStyle(theme.ember)
             }
             if let t = progress?.tail {
-                Text("\(t.gate) · \(rows.first { $0.name == t.gate }?.state == .running ? "output so far" : "output")")
-                    .font(Theme.text(11)).foregroundStyle(theme.inkFaint)
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        Text(t.lines.isEmpty ? "(no output yet)" : t.lines.joined(separator: "\n"))
-                            .font(Theme.text(11)).foregroundStyle(theme.diffInk).textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        Color.clear.frame(height: 1).id("end")
+                let red = rows.first { $0.name == t.gate }?.state == .red
+                if GatesRun.fullOutput(t.gate, rows: rows, shown: shown) {
+                    // the strip already names the gate (underlined): the caption says only what this is
+                    Text(red ? "output" : "output so far").font(Theme.text(11)).foregroundStyle(theme.inkFaint)
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            // colour means outcome: a failing gate's lines in ember, everything else plain ink
+                            Text(t.lines.isEmpty ? "(no output yet)" : t.lines.joined(separator: "\n"))
+                                .font(Theme.text(11)).foregroundStyle(red ? theme.ember : theme.inkDim).textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            Color.clear.frame(height: 1).id("end")
+                        }
+                        .frame(maxHeight: 200)
+                        .background(theme.diffBg)
+                        .onChange(of: t.lines.count, initial: true) { _, _ in proxy.scrollTo("end") }
                     }
-                    .frame(maxHeight: 200)
-                    .background(theme.diffBg)
-                    .onChange(of: t.lines.count, initial: true) { _, _ in proxy.scrollTo("end") }
+                } else {
+                    // a passing or running gate's output is a count until asked for
+                    Text("\(t.lines.count) line\(t.lines.count == 1 ? "" : "s") so far").font(Theme.text(11)).foregroundStyle(theme.inkFaint)
                 }
             }
         }
         .padding(6)
         .overlay(Rectangle().stroke(theme.rule, lineWidth: 1))
+    }
+
+    @ViewBuilder private func gateRow(timings: Bool) -> some View {
+        HStack(spacing: 12) {
+            ForEach(rows, id: \.name) { g in
+                let s = Self.step[g.state] ?? .idle
+                HStack(spacing: 3) {
+                    Text("\(stepIcon[s] ?? "·") \(g.name)").foregroundStyle(stepColor(s, theme))
+                    if timings, g.ms != nil { Text(GatesRun.secs(g.ms)).foregroundStyle(theme.inkFaint) }
+                }
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .underline(progress?.tail?.gate == g.name)
+            }
+        }
     }
 }
 

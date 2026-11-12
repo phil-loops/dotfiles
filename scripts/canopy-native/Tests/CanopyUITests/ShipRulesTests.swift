@@ -25,6 +25,14 @@ import Testing
         #expect(GatesRun.between([], inFlight: false) == nil)
     }
 
+    @Test func outputShowsInFullOnlyOnRequestOrOnARedGate() {
+        let rows = [GateRow(name: "lint", state: .running, ms: 10000), GateRow(name: "tests", state: .red, ms: 900), GateRow(name: "env", state: .green, ms: 100)]
+        #expect(GatesRun.fullOutput("lint", rows: rows, shown: nil) == false)   // running: a count until asked
+        #expect(GatesRun.fullOutput("lint", rows: rows, shown: "lint") == true)
+        #expect(GatesRun.fullOutput("tests", rows: rows, shown: nil) == true)   // red: always
+        #expect(GatesRun.fullOutput("env", rows: rows, shown: nil) == false)
+    }
+
     @Test func aFinishedRunLendsNoTimeToAnOptimisticRunning() {
         // Phil's p raced a run that finished the same second: the overlay says running, the
         // server's last answer is the finished run — its elapsed must not stand on the chip

@@ -116,6 +116,12 @@ public enum GatesRun {
         }
     }
 
+    /// Whether a gate's output is shown in full: on request (`, g` names it) or when it went red.
+    /// A running or passing gate's output is one line — a count — until asked (focus decides detail).
+    public static func fullOutput(_ gate: String, rows: [GateRow], shown: String?) -> Bool {
+        shown == gate || rows.first { $0.name == gate }?.state == .red
+    }
+
     /// The gates a quick run left to CI (stack-gates --quick says "quick gates" in each one's warn).
     public static func quick(_ rows: [GateRow]) -> [String] {
         rows.filter { $0.state == .waived && $0.summary?.contains("quick gates") == true }.map(\.name)
