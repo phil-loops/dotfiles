@@ -40,7 +40,9 @@ public enum Bench {
         }
         let app = AppModel(config: config, port: port, telemetry: false, protocolClasses: [Blackhole.self])
         var hello = false
-        app.stream.onFrame = { f in if f.event == "hello" { hello = true } }
+        let launched = Date()
+        var helloAt: Date?
+        app.stream.onFrame = { f in if f.event == "hello" { hello = true; helloAt = helloAt ?? Date() } }
         app.start()
         let size = NSSize(width: config.shootWidth, height: config.shootHeight)
         let window = NSWindow(contentRect: NSRect(origin: NSPoint(x: -20000, y: -20000), size: size),
@@ -137,9 +139,33 @@ public enum Bench {
             app.keys.setMode(.normal)
         }
 
+        /// A window resize on this page: narrow, then back — each a layout + paint, timed like a key.
+        func resize() -> Double {
+            var worst = 0.0
+            for w in [800.0, size.width] {
+                step = "resize \(Int(w))"
+                let r0 = Date()
+                host.frame = NSRect(origin: .zero, size: NSSize(width: w, height: size.height))
+                host.layoutSubtreeIfNeeded()
+                paint()
+                let ms = Date().timeIntervalSince(r0) * 1000
+                if ms > config.budget { hits.append(Hit(page: page, pass: "resize", step: step, ms: ms, what: "layout + paint at \(Int(w)) wide")) }
+                worst = max(worst, ms)
+                last = Date()
+            }
+            return worst
+        }
+
         Task { @MainActor in
             let t0 = Date()
             while !hello, Date().timeIntervalSince(t0) < 15 { try? await Task.sleep(nanoseconds: 100_000_000) }
+            // cold: launch → the server's hello, and the first page's first layout + paint (the paint budget, 100 ms)
+            let helloMs = (helloAt ?? Date()).timeIntervalSince(launched) * 1000
+            let c0 = Date()
+            draw()
+            let firstPaint = Date().timeIntervalSince(c0) * 1000
+            print(String(format: "cold: hello %.0fms after launch · first paint %.0fms (%@)", helloMs, firstPaint, app.router.route.path as NSString))
+            if firstPaint > max(config.budget, 100) { hits.append(Hit(page: app.router.route.path, pass: "cold", step: "first paint", ms: firstPaint, what: "launch → first layout + paint")) }
             try? await Task.sleep(nanoseconds: 1_500_000_000)
             let pages = config.pages.isEmpty ? defaultPages(app) : config.pages
             for route in pages {
@@ -157,6 +183,7 @@ public enum Bench {
                 await open()
                 pass = "keys"; worst[pass] = await press(script)
                 settle()
+                pass = "resize"; worst[pass] = resize()
                 if !config.quick {
                     pass = "typing"; worst[pass] = await press(typing)
                     settle()
@@ -193,8 +220,8 @@ public enum Bench {
                 worst[pass] = w
                 watching = false
                 settle()
-                print(String(format: "%-44@ keys %4.0f  typing %4.0f  pressure %4.0f  writes %4.0f (%d)", route as NSString,
-                             worst["keys"] ?? 0, worst["typing"] ?? 0, worst["pressure"] ?? 0, w, n))
+                print(String(format: "%-44@ keys %4.0f  resize %4.0f  typing %4.0f  pressure %4.0f  writes %4.0f (%d)", route as NSString,
+                             worst["keys"] ?? 0, worst["resize"] ?? 0, worst["typing"] ?? 0, worst["pressure"] ?? 0, w, n))
             }
             print("bench: \(Blackhole.answered) writes answered here, none sent")
             let over = hits.sorted { $0.ms > $1.ms }
