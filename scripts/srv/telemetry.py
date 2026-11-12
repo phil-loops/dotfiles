@@ -272,8 +272,11 @@ def summarize(cache, days=30, now=None):
                          "score": round(m["n"] * max(0.0, (ratio or 0) - 1), 2)})
     surfaces.sort(key=lambda s: (-s["score"], -(s["over"] or 0), -s["n"]))
 
+    # the registry names the app that posted it (native since 2026-10-29); never-used and the
+    # v1 pairs read that app's uses — reading v2's left every native command "never used"
     registered = [c["id"] for c in reg.get("commands") or []]
-    used = {c["id"] for c in commands if c["app"] == "v2"}
+    reg_app = reg.get("app") or "v2"
+    used = {c["id"] for c in commands if c["app"] == reg_app}
     by = {(c["app"], c["id"]): c for c in commands}
     sby = {(s["app"], s["id"]): s for s in surfaces}
 
@@ -288,11 +291,11 @@ def summarize(cache, days=30, now=None):
     pairs = []
     for c in reg.get("commands") or []:
         if c.get("v1"):
-            pairs.append({"kind": "cmd", "id": c["id"], "v1ids": c["v1"], "v2": by.get(("v2", c["id"])),
+            pairs.append({"kind": "cmd", "id": c["id"], "v1ids": c["v1"], "v2": by.get((reg_app, c["id"])),
                           "v1": merged([by.get(("v1", v)) for v in c["v1"]])})
     for s in reg.get("surfaces") or []:
         if s.get("v1"):
-            pairs.append({"kind": "nav", "id": s["id"], "v1ids": s["v1"], "v2": sby.get(("v2", s["id"])),
+            pairs.append({"kind": "nav", "id": s["id"], "v1ids": s["v1"], "v2": sby.get((reg_app, s["id"])),
                           "v1": merged([sby.get(("v1", v)) for v in s["v1"]])})
 
     weekly = {}
