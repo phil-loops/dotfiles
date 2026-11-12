@@ -72,6 +72,13 @@ def edit(l0, c0, l1, c1, new):
 check("edits apply back to front", lsp._apply_edits(text, [edit(0, 6, 0, 7, "count"), edit(1, 10, 1, 11, "count"), edit(1, 14, 1, 15, "count")]),
       "const count = 1;\nlet 😀b = count + count;\n")
 root = "/t/tree"
+ws = lsp._workspace_symbols(root, [
+    {"name": "greet", "kind": 12, "containerName": "", "location": {"uri": "file:///t/tree/lib/greet.ts", "range": {"start": {"line": 4, "character": 0}, "end": {"line": 9, "character": 1}}}},
+    {"name": "greet", "kind": 12, "location": {"uri": "file:///t/tree/node_modules/x/index.d.ts", "range": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 9}}}},
+    {"name": "Array", "kind": 11, "location": {"uri": "file:///lib/lib.es5.d.ts", "range": {"start": {"line": 1, "character": 0}, "end": {"line": 2, "character": 0}}}},
+])
+check("workspace symbols keep the branch's own code, repo-relative", ws,
+      [{"name": "greet", "kind": "function", "container": "", "path": "lib/greet.ts", "line": 5, "endLine": 10}])
 check("workspace edits by repo path", sorted(lsp._workspace_edits({"changes": {"file:///t/tree/a.ts": [1], "file:///t/tree/lib/b.ts": [2]}}, root)),
       ["a.ts", "lib/b.ts"])
 check("documentChanges read too", list(lsp._workspace_edits({"documentChanges": [{"textDocument": {"uri": "file:///t/tree/a.ts"}, "edits": [1]}]}, root)), ["a.ts"])

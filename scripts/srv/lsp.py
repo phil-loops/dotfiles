@@ -660,6 +660,9 @@ class Server:
                 del self.opened[other]
         if method == "textDocument/hover" and FRESH_CHECKER:
             self._touch(full)
+        if method == "workspace/symbol":
+            # the file only loads its project; the question is the query, over every file it holds
+            return self.request(method, {"query": str((extra or {}).get("query") or "")})
         params = {"textDocument": {"uri": "file://" + full}}
         if method != "textDocument/documentSymbol":
             params["position"] = {"line": line0, "character": character}
@@ -942,9 +945,10 @@ def _loading(e):
     return {"ok": False, "state": "loading", "message": msg, "progress": prog}
 
 
-def _ask(req, raw, method):
+def _ask(req, raw, method, extra_of=None):
     try:
         d = json.loads(raw or "{}")
+        extra = extra_of(d) if extra_of else None
         branch, commit, rel = str(d.get("branch") or ""), str(d.get("sha") or ""), str(d["path"])
         line, character = int(d.get("line", 1)), int(d.get("character", 0))
         side = str(d.get("side") or "new")
@@ -971,8 +975,8 @@ def _ask(req, raw, method):
         e.last_old = time.time()
     branch = branch or commit[:10]
     e.branch[side] = branch if side == "new" else f"{branch}'s base"
-    job = e.submit("ask", ("ask", repo, side, sha, method, rel, line, character),
-                   lambda: e.answer(repo, side, sha, method, rel, line, character))
+    job = e.submit("ask", ("ask", repo, side, sha, method, rel, line, character, json.dumps(extra, sort_keys=True)),
+                   lambda: e.answer(repo, side, sha, method, rel, line, character, extra))
     if not job.event.wait(WAIT_S):
         return req._send(200, json.dumps(_loading(e)))
     if job.error:
@@ -1020,9 +1024,34 @@ def _symbols(nodes, depth=0):
     return out
 
 
+WORKSPACE_SYMBOLS_MAX = 200
+
+
+def _workspace_symbols(root, result):
+    """workspace/symbol's answer as repo-relative rows, the branch's own code only — a library's
+    declarations (node_modules, the lib .d.ts files) are noise in a review."""
+    out = []
+    for n in result or []:
+        loc = n.get("location") or {}
+        uri, rng = loc.get("uri"), loc.get("range")
+        if not uri or not rng:
+            continue
+        path = unquote(urlparse(uri).path)
+        if not path.startswith(root + os.sep) or "/node_modules/" in path:
+            continue
+        out.append({"name": n.get("name", ""), "kind": SYMBOL_KIND.get(n.get("kind"), "symbol"),
+                    "container": n.get("containerName") or "", "path": os.path.relpath(path, root),
+                    "line": rng["start"]["line"] + 1, "endLine": rng["end"]["line"] + 1})
+        if len(out) >= WORKSPACE_SYMBOLS_MAX:
+            break
+    return out
+
+
 def _shape(root, sha, side, method, result):
     if method == "textDocument/documentSymbol":
         return {"ok": True, "sha": sha, "side": side, "symbols": _symbols(result)}
+    if method == "workspace/symbol":
+        return {"ok": True, "sha": sha, "side": side, "symbols": _workspace_symbols(root, result)}
     if method == "textDocument/hover":
         md = _markdown((result or {}).get("contents")).strip()
         rng = (result or {}).get("range")
@@ -1070,6 +1099,11 @@ def references(req, raw):
 def symbols(req, raw):
     """The file's symbols — a path, no position."""
     return _ask(req, raw, "textDocument/documentSymbol")
+
+
+def workspace_symbols(req, raw):
+    """Symbols matching {query} across the project the file at {path} belongs to (space S)."""
+    return _ask(req, raw, "workspace/symbol", lambda d: {"query": str(d.get("query") or "").strip()[:120]})
 
 
 _NAME = re.compile(r"^[A-Za-z_$][A-Za-z0-9_$]*$")
