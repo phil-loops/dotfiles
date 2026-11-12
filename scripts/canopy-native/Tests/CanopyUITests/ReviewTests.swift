@@ -557,6 +557,24 @@ import Testing
         #expect(!pg.fileOf("a.ts")!.viewed)
     }
 
+    /// space d: push-ready's findings as a picker (Helix's diagnostics picker); ↵ lands on the change,
+    /// a finding on code the diff doesn't show says so.
+    @Test func spaceDPicksAFinding() async throws {
+        let (a, p) = try await app()
+        let pg = ReviewPageState.of(a)
+        ShipStub.answer(p, "GET", "/loops/review-flags",
+                        #"{"flags":[{"path":"a.ts","line":3,"text":"two is never read"},{"path":"elsewhere.ts","line":9,"text":"not in this diff"}]}"#)
+        keys(a, "space", "d")
+        await until("the findings picker") { a.nav.picker != nil }
+        #expect(a.nav.picker?.items.map(\.label) == ["a.ts:3", "elsewhere.ts:9"])
+        a.nav.choose(0)
+        #expect(pg.here?.key == "l|a.ts|R:3" && a.runner.note == "two is never read")
+        keys(a, "space", "d")
+        await until("the picker again") { a.nav.picker != nil }
+        a.nav.choose(1)
+        #expect(a.runner.note == "that finding is on code this diff doesn't show")
+    }
+
     @Test func mReadsOneDeclarationOfABlockByItsLinesAndMovesOnToTheRest() async throws {
         let (a, p) = try await app()
         let pg = ReviewPageState.of(a)

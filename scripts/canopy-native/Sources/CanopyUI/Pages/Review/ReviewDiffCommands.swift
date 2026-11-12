@@ -942,6 +942,37 @@ enum DiffCommands {
                            available: onDiff, local: { _, _ in try findingStep(1, edge: true) }))
         r.register(Command(id: "review.finding.first", title: "The first review finding", scope: .review, verb: .firstFinding, modes: motion, quiet: true,
                            available: onDiff, local: { _, _ in try findingStep(-1, edge: true) }))
+        // space d: every finding as a list (Helix's diagnostics picker) — ↵ goes to its change; one on code
+        // the diff doesn't show says so instead of landing nowhere
+        r.register(Command(id: "review.findings", title: "Pick one of push-ready's review findings on this branch", scope: .review,
+                           verb: .findings, label: "findings", available: onDiff,
+                           local: { _, _ in
+                               guard let t = pg.target else { throw Refusal("no branch here") }
+                               let flags = ReviewFlags.of(app)
+                               Task { @MainActor in
+                                   guard let fs = await flags.load(app, t) else {
+                                       app.runner.say("no findings on this tree — push-ready's review hasn't run since the last edit")
+                                       return
+                                   }
+                                   if fs.isEmpty { app.runner.say("push-ready's review found nothing here"); return }
+                                   let shown = findingStops(fs)
+                                   let items = fs.map { f in
+                                       PickItem(label: [f.path.map { String($0.split(separator: "/").last ?? Substring($0)) }, f.line.map(String.init)]
+                                                    .compactMap { $0 }.joined(separator: ":"),
+                                                text: f.text)
+                                   }
+                                   app.nav.pick("review findings", items) { n in
+                                       guard let s = shown.first(where: { $0.n == n }) else {
+                                           app.runner.say("that finding is on code this diff doesn't show")
+                                           return
+                                       }
+                                       if app.keys.mode != .select { pg.mark = nil }
+                                       goTo(s.i)
+                                       shownFinding = (pg.here?.key ?? "", n)
+                                       app.runner.say(fs[n].text)
+                                   }
+                               }
+                           }))
 
         r.register(Command(id: "review.conversation", title: "The conversation, in place of the diff (esc brings the diff back)", scope: .review,
                            verb: .conversation, label: "conversation", available: { _ in pg.integration == nil },
