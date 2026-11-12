@@ -19,11 +19,17 @@ import re
 import threading
 import time
 
-ROLLUP_V = 3   # 3: per-command surface and cold (first keys after a page open) splits
+ROLLUP_V = 4   # 3: per-command surface and cold splits; 4: per-launch session stats (refusals, undo-soon, reversed motions)
 # Only Phil's own browser counts: Claude's curls, the extension and headless checks would skew
 # the timings this dashboard exists to steer by.
 HUMAN_ACTORS = {"browser", None}
 COLD_MS = 1500   # a key this soon after a page open is a cold one: its wait is the page's first paint
+UNDO_SOON_S = 3    # an undo this soon after a key is a key that did the wrong thing
+REVERSE_S = 1      # j then k (or the like) this close is a motion that overshot or was refused in effect
+REVERSES = {("cursor.down", "cursor.up"), ("cursor.up", "cursor.down"), ("review.down", "review.up"), ("review.up", "review.down"),
+            ("history.next", "history.prev"), ("history.prev", "history.next"), ("review.file.next", "review.file.prev"),
+            ("review.file.prev", "review.file.next"), ("review.hunk.next", "review.hunk.prev"), ("review.hunk.prev", "review.hunk.next")}
+_LAST = {}   # pl -> (ts, id): the previous command in that launch, for undo-soon and reversed pairs
 LIVE_MAX = 8 * 1024 * 1024
 DEFAULT_BUDGETS = {
     "local": {"feedbackMs": 16.7, "settledMs": None},
@@ -113,6 +119,22 @@ def fold(days, reg, e):
         return reg
     d = days.setdefault(_day(e.get("ts", 0)), {"cmd": {}, "nav": {}, "page": {}})
     if t == "cmd" or (t == "timing" and e.get("kind") == "input"):
+        # per-launch session facts: how often a key is refused, undone at once, or reversed at once
+        s = d.setdefault("sess", {}).setdefault(app, {"launches": [], "cmds": 0, "refused": 0, "undoSoon": 0, "reversed": 0})
+        pl = e.get("pl") or ""
+        if pl and pl not in s["launches"]:   # an event with no page-load id belongs to no launch
+            s["launches"].append(pl)
+        s["cmds"] += 1
+        if e.get("outcome") == "refused":
+            s["refused"] += 1
+        prev = _LAST.get(pl)
+        ts, cid = e.get("ts", 0), e.get("id") or "?"
+        if prev:
+            if cid == "undo" and ts - prev[0] <= UNDO_SOON_S:
+                s["undoSoon"] += 1
+            if (prev[1], cid) in REVERSES and ts - prev[0] <= REVERSE_S:
+                s["reversed"] += 1
+        _LAST[pl] = (ts, cid)
         k = f"{app}|{e.get('id') or '?'}"
         c = d["cmd"].setdefault(k, {"budget": e.get("budget") or "local", "n": 0, "via": {}, "out": {}, "err": {}, "fb": [], "st": [],
                                     "surf": {}, "cold": [], "warm": []})
@@ -232,8 +254,13 @@ def summarize(cache, days=30, now=None):
     paint_budget = reg.get("paintMs") or DEFAULT_PAINT_MS
     window = {d: r for d, r in cache.get("days", {}).items() if d > cutoff}
 
-    cmds, navs, pages = {}, {}, {}
+    cmds, navs, pages, sess = {}, {}, {}, {}
     for r in window.values():
+        for app, s in r.get("sess", {}).items():
+            m = sess.setdefault(app, {"launches": set(), "cmds": 0, "refused": 0, "undoSoon": 0, "reversed": 0})
+            m["launches"] |= set(s["launches"])
+            for f in ("cmds", "refused", "undoSoon", "reversed"):
+                m[f] += s[f]
         for k, c in r["cmd"].items():
             m = cmds.setdefault(k, {"budget": c["budget"], "n": 0, "via": {}, "out": {}, "err": {}, "fb": [], "st": [], "surf": {}, "cold": [], "warm": []})
             m["n"] += c["n"]
@@ -338,6 +365,11 @@ def summarize(cache, days=30, now=None):
         "mostUsed": sorted(({"app": c["app"], "id": c["id"], "n": c["n"]} for c in commands), key=lambda c: -c["n"])[:15],
         "neverUsed": [i for i in registered if i not in used], "registeredAt": reg.get("ts"),
         "pairs": pairs, "weekly": trend,
+        "sessions": {app: {"launches": len(m["launches"]), "cmds": m["cmds"], "refused": m["refused"],
+                           "refusedRate": round(m["refused"] / m["cmds"], 3) if m["cmds"] else 0,
+                           "undoSoon": m["undoSoon"], "reversed": m["reversed"],
+                           "perLaunch": {f: round(m[f] / len(m["launches"]), 1) for f in ("cmds", "refused", "undoSoon", "reversed")} if m["launches"] else {}}
+                     for app, m in sess.items()},
         "pages": {app: {"loads": p["loads"], "longtasks": p["longtasks"], "longtaskMsP95": _pct(p["longtaskMs"], 0.95),
                         "clsP95": _pct(p["cls"], 0.95)} for app, p in pages.items()},
     }

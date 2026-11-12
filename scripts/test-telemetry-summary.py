@@ -38,6 +38,13 @@ events += [
     {"schema": 2, "app": "native", "type": "cmd", "id": "review.down", "ts": now - 18, "actor": actor, "budget": "local",
      "via": "key", "outcome": "ok", "feedbackMs": 12, "surface": "forest", "sinceNavMs": 9000},
 ]
+events += [
+    {"schema": 2, "app": "native", "type": "cmd", "id": "history.next", "ts": now - 10, "actor": actor, "pl": "p1", "budget": "local", "via": "key", "outcome": "ok", "feedbackMs": 5},
+    {"schema": 2, "app": "native", "type": "cmd", "id": "history.prev", "ts": now - 9.5, "actor": actor, "pl": "p1", "budget": "local", "via": "key", "outcome": "ok", "feedbackMs": 5},
+    {"schema": 2, "app": "native", "type": "cmd", "id": "words.save", "ts": now - 8, "actor": actor, "pl": "p1", "budget": "git-write", "via": "key", "outcome": "ok", "feedbackMs": 5},
+    {"schema": 2, "app": "native", "type": "cmd", "id": "undo", "ts": now - 7, "actor": actor, "pl": "p1", "budget": "local", "via": "key", "outcome": "ok", "feedbackMs": 5},
+    {"schema": 2, "app": "native", "type": "cmd", "id": "history.prev", "ts": now - 6, "actor": actor, "pl": "p2", "budget": "local", "via": "key", "outcome": "refused", "err": "already at the top", "feedbackMs": 5},
+]
 for e in events:
     cache["registry"] = telemetry.fold(cache["days"], cache["registry"], e)
 s = telemetry.summarize(cache, days=30, now=now)
@@ -51,6 +58,10 @@ down = next(c for c in s["commands"] if c["app"] == "native" and c["id"] == "rev
 check("keys within 1.5 s of a page open are the cold split", down["cold"] == {"n": 1, "p50": 800, "p95": 800}, down["cold"])
 check("…the rest the warm split", down["warm"]["n"] == 2 and down["warm"]["p95"] == 12, down["warm"])
 check("…and each surface has its own stats, busiest first", list(down["surfaces"]) == ["review", "forest"] and down["surfaces"]["review"]["n"] == 2, down["surfaces"])
+
+sess = s["sessions"]["native"]
+check("sessions count launches, refusals, an undo right after a key, and a reversed motion",
+      sess["launches"] == 2 and sess["refused"] == 1 and sess["undoSoon"] == 1 and sess["reversed"] == 1, sess)
 
 print(f"\n{'OK' if not failures else 'FAIL'} — {failures} failure(s)")
 sys.exit(1 if failures else 0)
