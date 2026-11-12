@@ -6,6 +6,7 @@
 #        stack restack <project> --abort    # discard saved state
 #        stack restack <project> --plan     # dry-run: topo order + parent map
 #        stack restack <project> --no-claude# disable auto-resolve (manual only)
+#        stack restack <project> --contract-only # drop branches that landed, rebase nothing
 #
 # What it does:
 #   1. Fetch origin; fast-forward local main
@@ -77,6 +78,7 @@ Usage: stack restack <project>
        stack restack <project> --no-claude
        stack restack <project> --no-classify  # skip the already-merged contraction pre-pass
        stack restack <project> --hold=<b>[,<b>]  # leave these branches and everything stacked on them where they are
+       stack restack <project> --contract-only  # drop branches that landed (merged PR, nothing live on them); rebase nothing
 EOF
   exit 2
 }
@@ -113,6 +115,9 @@ RESOLVE_BAR="${RESOLVE_BAR:-conservative}"
 RESOLVE_TIMEOUT="${STACK_RESTACK_RESOLVE_TIMEOUT:-600}"
 typeset -a HOLD
 HOLD=()
+# --contract-only: drop members that landed and rebase nothing — the viewer's tick runs it on every
+# forest so a merged branch leaves canopy without anyone restacking. See the pre-pass.
+CONTRACT_ONLY=0
 for arg in "$@"; do
   case "$arg" in
     --continue) MODE="continue" ;;
@@ -124,6 +129,7 @@ for arg in "$@"; do
     --no-claude|--manual) USE_CLAUDE=0 ;;
     --no-classify) USE_CLASSIFY=0 ;;
     --hold=*) HOLD+=("${(s:,:)arg#--hold=}") ;;   # a published root (open PR) must not move: hold its subtree
+    --contract-only) CONTRACT_ONLY=1 ;;
     --*) echo "unknown flag: $arg" >&2; usage ;;
     *) [[ -z "$PROJECT" ]] && PROJECT="$arg" ;;
   esac
@@ -992,7 +998,53 @@ elif [[ "$MODE" == "start" ]]; then
   # rewire its inbound children onto its parent (so the walk rebases them onto a live
   # base) and queue it for the same drop machinery the empty-branch pass uses. The probe
   # is read-only (scratch worktree); the branch ref never moves until the drop step.
-  if (( USE_CLASSIFY )) && [[ -x "${SELF_DIR}/rebase-classify" ]]; then
+  #
+  # --contract-only drops a member only when GitHub has a merged PR for it and its tip is in what
+  # landed — the merged PR's head or behind it, in origin/main (ff), or rebase-classify's already-
+  # merged (a squash whose files main hasn't touched since) — and nothing live sits on it:
+  # contracting a parent under an unmerged child would leave the child's diff re-showing the landed
+  # commits until a rebase this mode never runs. Then the walk is skipped. The merged PR is never
+  # optional: a branch cut a minute ago is in origin/main too.
+  # STACK_RESTACK_MERGED_HEADS: "<branch> <merged head sha>" lines (the viewer's PR cache); unset, gh.
+  if (( CONTRACT_ONLY )); then
+    _trunk="origin/${MAIN_BRANCH}"
+    git rev-parse -q --verify "$_trunk" >/dev/null || _trunk="$MAIN_BRANCH"
+    typeset -A _landed _mhead
+    if [[ -n "${STACK_RESTACK_MERGED_HEADS+set}" ]]; then
+      while read -r _n _h; do [[ -n "$_n" ]] && _mhead[$_n]="${_h:--}"; done <<< "$STACK_RESTACK_MERGED_HEADS"
+    fi
+    for b in "${PENDING[@]}"; do
+      if [[ -n "${STACK_RESTACK_MERGED_HEADS+set}" ]]; then
+        _heads="${_mhead[$b]:-}"
+      else
+        _heads=$(gh pr list --state merged --head "$b" --json headRefOid --jq '.[].headRefOid' 2>/dev/null) || continue
+      fi
+      [[ -n "$_heads" ]] || continue
+      _tip=$(git rev-parse "$b")
+      _in=0
+      for _h in ${(f)_heads}; do
+        [[ "$_h" == "$_tip" ]] || git merge-base --is-ancestor "$_tip" "$_h" 2>/dev/null && { _in=1; break; }
+      done
+      (( _in )) || is_ancestor "$b" "$_trunk" && _in=1
+      if (( ! _in )); then
+        "${SELF_DIR}/rebase-classify" "$b" "$_trunk" >/dev/null 2>&1 && _crc=0 || _crc=$?
+        (( _crc == 20 )) && _in=1
+      fi
+      (( _in )) && _landed[$b]=1
+    done
+    # Every member that stays (unmerged, held) keeps its whole ancestry.
+    for b in "${(@k)SNAPSHOT}"; do
+      [[ "$b" == "$MAIN_BRANCH" || -n "${_landed[$b]:-}" ]] && continue
+      a=$(git config "branch.${b}.stack-parent" 2>/dev/null || echo "$MAIN_BRANCH")
+      while [[ -n "$a" && "$a" != "$MAIN_BRANCH" ]]; do
+        unset "_landed[$a]"
+        a=$(git config "branch.${a}.stack-parent" 2>/dev/null || echo "$MAIN_BRANCH")
+      done
+    done
+    CONTRACTED=("${(@k)_landed}")
+    for b in "${CONTRACTED[@]}"; do echo "  ● $b landed — contracting"; done
+    PENDING=()
+  elif (( USE_CLASSIFY )) && [[ -x "${SELF_DIR}/rebase-classify" ]]; then
     typeset -a _survivors
     _survivors=()
     for b in "${PENDING[@]}"; do
