@@ -25,6 +25,7 @@ from srv import wiki    # own line: same reason
 from srv import focus   # own line: same reason
 from srv import footprint   # own line: same reason
 from srv import queue       # own line: same reason
+from srv import foreign     # own line: same reason
 from srv import repostate   # own line: same reason
 from srv import procsig   # own line: same reason
 from srv import actor, reqlog   # own line: same reason
@@ -436,6 +437,7 @@ class H(BaseHTTPRequestHandler):
         elif u.path == "/commit-diff":    return review.commit_diff(self, u)
         elif u.path == "/footprint":      return footprint.get(self, u)      # machine / repo sprawl / this server's own footprint
         elif u.path == "/queue":          return queue.get(self, u)          # heavy-turn slots, waiters, gate steps, heavy work outside the queue
+        elif u.path == "/foreign-stack":  return foreign.get(self, u)        # a teammate's PR stack, derived from GitHub base → head chains (read-only)
         elif u.path == "/previews":       return preview.previews(self)   # health-probed dev servers + shared stack
         elif u.path == "/preview-log":    return preview.log(self)   # tail one preview's next-dev log
         elif u.path == "/preview-wait":   return preview.wait(self)   # warming page: boots + hands off to the preview
