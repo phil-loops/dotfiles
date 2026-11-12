@@ -6,6 +6,8 @@ project: canopy-v2
 lede: The client holds the world locally and changes it first; the server confirms behind it. Views are projections of the store, never fetch waterfalls.
 ---
 
+> **The client is native since 2026-10-29.** This page was written for the web client (`viewer-solid`, retired 2026-10-31); canopy is now the macOS app in `scripts/canopy-native/` (Show's ⌘1). The goals and invariants here stand; the keys live in `scripts/canopy-native/NAV.md`, and anything naming a `.tsx`/`.ts` file is history.
+
 **1. One local store of the world.** Forests, branches, commits, PRs, gates, the words — hydrated once from a `/state` snapshot into normalized entities every view shares.
 
 **2. The server pushes what changed, by domain.** The server already computes separate fingerprints per change domain: refs, config, PR state, gates, worktrees ([[viewer-derived-state-domains]]). The event stream sends *which entities changed* in each domain. The client patches only those, replacing today's "something changed, refetch 13 queries". Diff text and file sources stay lazy, cached by tree SHA.

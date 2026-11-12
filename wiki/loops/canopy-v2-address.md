@@ -6,6 +6,8 @@ project: canopy-v2
 lede: A review thread asks for a change; you say which commit makes it, the commit carries that link in its own message, both ends show it, and the reply naming it is drafted to go out with the push. Built 2026-10-25.
 ---
 
+> **The client is native since 2026-10-29.** This page was written for the web client (`viewer-solid`, retired 2026-10-31); canopy is now the macOS app in `scripts/canopy-native/` (Show's ⌘1). The goals and invariants here stand; the keys live in `scripts/canopy-native/NAV.md`, and anything naming a `.tsx`/`.ts` file is history.
+
 **Today.** `a` only applies a GitHub suggestion block. For a plain question, say nalanj on #11132 at `queries/sending-domain.test.ts:599`, asking "should this test ensure the sending domain is enabled after the function is called?", the path is: `o` into Helix, commit there, come back, `r`, and type the sha by hand. Nothing ties the commit to the thread.
 
 **The link is declared, and it lives in the commit.** A commit that addresses a thread carries a trailer naming it by the URL of the thread's first comment:
