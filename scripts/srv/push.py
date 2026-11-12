@@ -327,6 +327,7 @@ def _green_tree(branch):
     return repostate.snapshot().branch_key(branch, "gates-green-tree")
 
 
+_DELTA_IDS = {}   # (repo, base sha, tip sha) -> delta id: a pure function of two commits, never stale
 _HUNK_HEADER = re.compile(r"^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@", re.MULTILINE)
 
 
@@ -337,15 +338,25 @@ def _delta_id(branch, snap=None):
     carried verdict should lapse."""
     snap = snap or repostate.snapshot()
     base = snap.parent(branch)
-    if base == snap.main() and snap.remote(base):
-        base = f"origin/{base}"
+    trunk = base == snap.main() and snap.remote(base)
+    base_sha = snap.remote(base) if trunk else snap.local(base)
+    tip = snap.local(branch)
+    if not (base_sha and tip):
+        return ""
 
     def compute():
-        diff = ctx.run(["git", "diff", "--no-color", f"{base}...{branch}"]).stdout
+        diff = ctx.run(["git", "diff", "--no-color", f"{base_sha}...{tip}"]).stdout
         kept = [ln for ln in diff.splitlines() if not ln.startswith("index ")]
         return hashlib.sha256(_HUNK_HEADER.sub("@@", "\n".join(kept)).encode("utf-8", "replace")).hexdigest()
 
-    return snap.once(("delta-id", branch, snap.local(branch), base), compute)
+    # keyed by the two commits, not the snapshot: every config write starts a new snapshot, and
+    # after a restack each rebased branch would re-spawn its diff on every one of them
+    key = (ctx.repo_cwd(), base_sha, tip)
+    if key not in _DELTA_IDS:
+        if len(_DELTA_IDS) > 1024:
+            _DELTA_IDS.clear()
+        _DELTA_IDS[key] = compute()
+    return _DELTA_IDS[key]
 
 
 def verdict_stands(branch, snap=None):
@@ -382,8 +393,9 @@ def _record_green(branch, tree, gates=()):
     # the branch's own hunks stay byte-identical, and that must not relock push or re-pay a
     # typecheck (Phil, 2026-09-14: "the bytes of the delta should be sealed, not the commit").
     # Only a verdict for the current tip gets one — a harvested older tree's delta is unknown.
-    if tree == _tree(branch):
-        stackcfg.set_key(branch, "gates-green-delta", _delta_id(branch))
+    delta = _delta_id(branch) if tree == _tree(branch) else ""
+    if delta:
+        stackcfg.set_key(branch, "gates-green-delta", delta)
     else:
         stackcfg.unset_all(branch, "gates-green-delta")
     stackcfg.unset_all(branch, "gates-skipped")

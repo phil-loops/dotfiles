@@ -78,6 +78,15 @@ write("b.txt", "alpha\nbeta\ngamma\n"); git("commit", "-q", "-am", "main: gamma"
 git("rebase", "-q", "main", "feat")
 check("a forward rebase keeps the verdict as delta", stands("feat") == "delta", stands("feat"))
 
+# a carried verdict is asked on every snapshot (any config write starts one): it reads no new diff
+spawned, _run = [], ctx.run
+ctx.run = lambda argv, **kw: (spawned.append(argv) if argv[:2] == ["git", "diff"] else None, _run(argv, **kw))[1]
+for _ in range(3):
+    git("config", "branch.feat.stack-touched", "x")
+    stands("feat")
+ctx.run = _run
+check("a carried verdict reads its diff once, not once per snapshot", spawned == [], spawned)
+
 # the door and the state read the one answer
 git("checkout", "-q", "main")
 v = push._origin_verdict("feat")
