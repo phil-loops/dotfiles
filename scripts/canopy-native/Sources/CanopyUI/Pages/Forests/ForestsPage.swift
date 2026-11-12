@@ -285,14 +285,6 @@ private struct ForestRowView: View {
         .rowChrome(RowKey.project(p.id), cursor: cursor, selected: selected)
     }
 
-    private var hint: String {
-        let go = app.registry.keyOf("row.primary")
-        if f.p.state == .archive { return "\(go) restore" }
-        if f.closed { return "\(go) archive" }
-        if f.branches.isEmpty || app.forestModel.readyOnly { return "" }
-        return "\(go) page" + (f.unopened.count > 1 ? " · \(app.registry.keyOf("forest.launch")) launch all" : "")
-    }
-
     private func meta(_ verdict: IntegrationVerdict?) -> String {
         if f.p.state == .archive || f.branches.isEmpty { return "" }
         var parts = ["\(f.branches.count) branch\(f.branches.count == 1 ? "" : "es")"]
