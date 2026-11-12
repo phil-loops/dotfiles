@@ -6,6 +6,7 @@
 // The key is read from the macOS Keychain on every run and never reaches the page:
 //   security add-generic-password -s loops-staging-disabled-domain-key -a loops -w
 import { execFileSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { homedir } from "node:os";
@@ -17,6 +18,10 @@ const KEY_SERVICE = "loops-staging-disabled-domain-key";
 const SEND_TO = process.env.REPRO_SEND_TO ?? "loo-6235-repro@example.com";
 const STATE_DIR = process.env.REPRO_STATE ?? join(homedir(), ".cache", "loo-6235-repro");
 const RUNS_FILE = join(STATE_DIR, "runs.json");
+// A run sends real requests to staging, so only this server's own page may start or step one:
+// the page carries a per-launch token in a custom header, which a curl lacks and another web
+// page can't send (the header forces a CORS preflight this server never answers).
+const TOKEN = randomBytes(16).toString("hex");
 
 const NO_DOMAIN = { status: 400, text: "no sending domain configured", match: "No sending domain" };
 const NOT_VERIFIED = { text: "domain is not verified", match: "not verified" };
@@ -400,7 +405,7 @@ function renderNext(state) {
 $("next").onclick = async (e) => {
   const act = e.target.dataset?.do; if (!act || busy) return;
   busy = true; $("next").querySelectorAll("button").forEach((b) => (b.disabled = true));
-  try { const text = await (await fetch("/next?do=" + act, { method: "POST" })).text(); last = text; busy = false; render(JSON.parse(text)); }
+  try { const text = await (await fetch("/next?do=" + act, { method: "POST", headers: { "X-Repro-Token": "__TOKEN__" } })).text(); last = text; busy = false; render(JSON.parse(text)); }
   catch (err) { busy = false; $("note").textContent = "That failed: " + err.message; }
 };
 const pretty = (v) => esc(v == null ? "(none)" : typeof v === "string" ? v : JSON.stringify(v, null, 2));
@@ -432,7 +437,7 @@ async function start(mode) {
   busy = true; $("run").disabled = $("step").disabled = true; $("note").textContent = mode === "auto" ? "Running the requests…" : "";
   const started = Date.now();
   try {
-    const text = await (await fetch("/run?mode=" + mode, { method: "POST" })).text();
+    const text = await (await fetch("/run?mode=" + mode, { method: "POST", headers: { "X-Repro-Token": "__TOKEN__" } })).text();
     const state = JSON.parse(text);
     busy = false; last = text; shownRun = null;
     $("note").textContent = state.error ?? (mode === "auto" ? "Ran " + (state.runs[state.runs.length - 1]?.trail?.length ?? 0) + " requests in " + ((Date.now() - started) / 1000).toFixed(1) + " s" : "");
@@ -480,11 +485,14 @@ createServer(async (req, res) => {
   if (req.method === "GET" && url.pathname === "/") {
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
     return res.end(
-      PAGE.replaceAll("__BASE__", BASE).replaceAll("__SERVICE__", KEY_SERVICE).replace("__STEPS__", JSON.stringify(STEPS))
+      PAGE.replaceAll("__BASE__", BASE).replaceAll("__SERVICE__", KEY_SERVICE).replace("__STEPS__", JSON.stringify(STEPS)).replaceAll("__TOKEN__", TOKEN)
     );
   }
   if (req.method === "GET" && url.pathname === "/state") {
     return json(200, state());
+  }
+  if (req.method === "POST" && req.headers["x-repro-token"] !== TOKEN) {
+    return json(403, { error: "only this page's buttons start a run" });
   }
   if (req.method === "POST" && url.pathname === "/run") {
     const key = readKey();
