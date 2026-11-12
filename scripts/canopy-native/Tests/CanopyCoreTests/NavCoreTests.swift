@@ -103,7 +103,7 @@ import Testing
     }
 
     @Test func placeFields() {
-        let p = Place(route: .review(repo: "loops", branch: "a/b", base: "main"), tab: "files")
+        let p = Place(route: .review(repo: "loops", branch: "a/b", stretch: "main"), tab: "files")
         #expect(p.surface == "review" && p.arg == "loops/a/b" && p.base == "main")
     }
 
@@ -121,7 +121,7 @@ import Testing
     }
 
     @Test func anAddressIsAPlaceWrittenOut() {
-        let review = Route.review(repo: "loops", branch: "a/b", base: "main")
+        let review = Route.review(repo: "loops", branch: "a/b", stretch: "main")
         let line = Place(route: review, pane: "review.diff", tab: "files",
                          loc: Loc(repo: "loops", sha: "abc", path: "src/x y+z.ts", line: 12, diffKey: "l|src/x y+z.ts|r12"))
         #expect(line.address == "/v2/b/loops/a/b?base=main&file=src/x%20y%2Bz.ts&line=12")

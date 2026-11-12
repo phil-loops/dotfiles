@@ -36,9 +36,10 @@ public enum Route: Hashable, Sendable {
     case machine
     /// /v2/p/<repo>/<project>
     case forest(repo: String, project: String)
-    /// /v2/b/<repo>/<branch> — the branch keeps its slashes; `base` is the review page's ?base=
-    /// ("" parent, "main", "outgoing"), the one query param a v2 address carries.
-    case review(repo: String, branch: String, base: String = "")
+    /// /v2/b/<repo>/<branch> — the branch keeps its slashes. `stretch` is what the diff covers, the
+    /// one setting a v2 address carries: "" what lands, `main` or `outgoing` (?base=), or one commit
+    /// `<sha>` / a run `<from>..<to>` (?commit=).
+    case review(repo: String, branch: String, stretch: String = "")
     /// /v2/wiki[/<slug>]
     case wiki(slug: String?)
     /// /v2/tutor[/<session>]
@@ -83,9 +84,10 @@ public enum Route: Hashable, Sendable {
         case .todo: return "\(b)/todo"
         case .machine: return "\(b)/machine"
         case .forest(let r, let p): return "\(b)/p/\(r.uriComponent)/\(p.uriComponent)"
-        case .review(let r, let br, let base):
+        case .review(let r, let br, let stretch):
             let tail = br.split(separator: "/", omittingEmptySubsequences: false).map { String($0).uriComponent }.joined(separator: "/")
-            return "\(b)/b/\(r.uriComponent)/\(tail)" + (base.isEmpty ? "" : "?base=\(base.uriComponent)")
+            let q = stretch.isEmpty ? "" : Self.presets.contains(stretch) ? "?base=\(stretch.uriComponent)" : "?commit=\(stretch.uriComponent)"
+            return "\(b)/b/\(r.uriComponent)/\(tail)" + q
         case .wiki(let s): return s.map { "\(b)/wiki/\($0.uriComponent)" } ?? "\(b)/wiki"
         case .tutor(let s): return s.map { "\(b)/tutor/\($0.uriComponent)" } ?? "\(b)/tutor"
         case .keytutor(let l): return l.map { "\(b)/keytutor/\($0.uriComponent)" } ?? "\(b)/keytutor"
@@ -147,13 +149,19 @@ public enum Route: Hashable, Sendable {
             guard let cut = arg.firstIndex(of: "/"), cut != arg.startIndex else { return hit.id == "forest" ? .forest(repo: "", project: "") : .review(repo: "", branch: "") }
             let repo = String(arg[..<cut]), rest = String(arg[arg.index(after: cut)...])
             if hit.id == "forest" { return .forest(repo: repo, project: rest) }
-            let base = URLComponents(string: "?\(query)")?.queryItems?.first { $0.name == "base" }?.value ?? ""
-            return .review(repo: repo, branch: rest, base: base == "main" || base == "outgoing" ? base : "")
+            let items = URLComponents(string: "?\(query)")?.queryItems ?? []
+            let base = items.first { $0.name == "base" }?.value ?? ""
+            let commit = items.first { $0.name == "commit" }?.value ?? ""
+            let stretch = presets.contains(base) ? base : commit.allSatisfy { $0.isLetter || $0.isNumber || $0 == "." } ? commit : ""
+            return .review(repo: repo, branch: rest, stretch: stretch)
         default: return .forests
         }
     }
 
     // ── review-page helpers (router.ts) ──
+
+    /// The stretches a review address names by word; any other is commits.
+    public static let presets: Set<String> = ["main", "outgoing"]
 
     /// A forest's whole diff against main reads like a branch on the review page.
     public static func integrationRef(_ project: String) -> String { "refs/stack/\(project)-integration" }

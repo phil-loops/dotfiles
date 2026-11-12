@@ -18,8 +18,12 @@ import Testing
         ("/v2/b/loops/goal-metrics/metrics-job", .review(repo: "loops", branch: "goal-metrics/metrics-job")),
         ("/v2/b/loops/refs/stack/feat-integration", .review(repo: "loops", branch: "refs/stack/feat-integration")),
         ("/v2/b/loops/review/pr-11285", .review(repo: "loops", branch: "review/pr-11285")),
-        ("/v2/b/loops/add-x?base=main", .review(repo: "loops", branch: "add-x", base: "main")),
+        ("/v2/b/loops/add-x?base=main", .review(repo: "loops", branch: "add-x", stretch: "main")),
         ("/v2/b/loops/add-x?base=bogus", .review(repo: "loops", branch: "add-x")),
+        ("/v2/b/loops/add-x?commit=abc123", .review(repo: "loops", branch: "add-x", stretch: "abc123")),
+        ("/v2/b/loops/add-x?commit=abc..def", .review(repo: "loops", branch: "add-x", stretch: "abc..def")),
+        ("/v2/b/loops/add-x?commit=a%20b", .review(repo: "loops", branch: "add-x")),
+        ("/v2/b/loops/add-x?base=main&commit=abc", .review(repo: "loops", branch: "add-x", stretch: "main")),
         ("/v2/nonsense", .forests),
         ("/v2/b", .forests),
         ("/elsewhere", .forests),
@@ -35,8 +39,9 @@ import Testing
     @Test func pathsRoundTripWithEncoding() {
         let routes: [Route] = [
             .forests, .dashboard, .todo, .machine, .wiki(slug: nil), .wiki(slug: "a b"), .tutor(session: "s 1"),
-            .forest(repo: "loops", project: "url-safety"), .review(repo: "loops", branch: "a/b c", base: "outgoing"),
+            .forest(repo: "loops", project: "url-safety"), .review(repo: "loops", branch: "a/b c", stretch: "outgoing"),
             .review(repo: "loops", branch: Route.integrationRef("p")),
+            .review(repo: "loops", branch: "x", stretch: "abc..def"), .review(repo: "loops", branch: "x", stretch: "main"),
         ]
         for r in routes { #expect(Route(r.path) == r, "\(r.path)") }
         #expect(Route.review(repo: "loops", branch: "a/b c").path == "/v2/b/loops/a/b%20c")

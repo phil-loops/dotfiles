@@ -35,7 +35,7 @@ extension AppModel {
     func describe(_ p: Place) -> String {
         var s: String
         switch p.route {
-        case .review(_, let b, let base): s = "review \(b)\(base.isEmpty ? "" : " vs \(base)")"
+        case .review(_, let b, let st): s = "review \(b)\(st.isEmpty ? "" : Route.presets.contains(st) ? " vs \(st)" : " at \(st)")"
         case .forest(_, let pr): s = "forest \(pr)"
         default: s = p.route.surface.title.lowercased() + (p.arg.isEmpty ? "" : " \(p.arg)")
         }
