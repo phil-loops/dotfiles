@@ -215,6 +215,8 @@ def _contract_project(project, merged, st, cwds):
     if not landed or st["contracted"].get(project) == sig(members):
         return False
     held = [b for b in landed if _busy([b], cwds)]
+    if len(held) == len(landed):
+        return False   # nothing to drop until a worktree frees
     tips = {b: _tip(f"refs/heads/{b}") for b in landed}
     ctx.log(f"focus-sync: contracting {project} ({', '.join(landed)}{'; holding ' + ', '.join(held) if held else ''})")
     _restack(project, hold=held, merged=merged)

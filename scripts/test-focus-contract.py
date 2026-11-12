@@ -93,6 +93,14 @@ check("the busy landed branch is held", exists("busy"))
 check("the archived forest's landed branch is untouched", exists("arch"))
 check("the registry keeps the survivors", sorted(git("config", "--get-all", "stack-project.proj.branch").split()) == ["busy", "kid", "par"])
 
+# with only the busy branch landed, nothing runs at all
+runs = []
+real = focus._restack
+focus._restack = lambda *a, **k: runs.append(a) or (0, "")
+focus._contract_project("proj", {"busy": merged["busy"]}, {"contracted": {}}, set())
+check("a forest whose landed branches are all held runs nothing", runs == [], runs)
+focus._restack = real
+
 # the worktree frees: busy goes; par still waits on kid
 focus._busy = lambda branches, cwds: ""
 focus._contract_project("proj", merged, st, set())
