@@ -84,12 +84,12 @@
 | search name | `*` | search for the name under the cursor |
 | map | `space m` | the map around what you're on |
 | type | `space k` | the type under the cursor (hover) |
-| definition / type-definition / implementations / references | `g d` / `g y` / `g I` / `g r` | code navigation: the place replaces what the window shows (the diff, or a file at its commit in the diff's place), centred; `C-o` brings back what it replaced |
-| symbols | `space S` | list the file's symbols |
-| github | `g h` | open it on GitHub |
+| definition / type-definition / implementations / references | `g d` / `g y` / `g i` / `g r` | code navigation: the place replaces what the window shows (the diff, or a file at its commit in the diff's place), centred; `C-o` brings back what it replaced |
+| symbols | `space s` | list the file's symbols |
+| github | `space o g` | open it on GitHub |
 | lines on GitHub | `space o m` / `space o b` | the lines under the cursor or selection on GitHub, on main / at the branch (the open file: at its commit) — Helix's gh-open keys |
-| preview | `g P` | preview it on a side port |
-| go-forests / go-dashboard / go-todo / go-machine / go-wiki / go-tutor | `g f` / `g s` / `g o` / `g m` / `g i` / `g t` | go to that page |
+| preview | `space o p` | preview it on a side port |
+| go-forests / go-dashboard / go-todo / go-machine / go-wiki / go-tutor | `g F` / `g S` / `g O` / `g M` / `g W` / `g T` | go to that page (g + a capital: lowercase g is Helix's) |
 | alternate | `g a` | the alternate place (where the last jump left from) |
 | slot-1 … slot-9 | `g 1` … `g 9` | the Nth focus forest |
 | jump-back / jump-forward / save-jump | `C-o` / `C-i` / `C-s` | the jumplist |
