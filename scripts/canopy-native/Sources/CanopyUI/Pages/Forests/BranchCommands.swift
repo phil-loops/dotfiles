@@ -66,13 +66,18 @@ enum BranchCommands {
             var body: JSONObject = ["branch": .string(v.b.name), "detach": true]
             if !skip.isEmpty { body["skip"] = .array(skip.map(JSONValue.string)) }
             if quick { body["mode"] = "quick" }
+            // the server's answer settles the overlay when nothing new will run: a tree that already
+            // passed answers cached (a run that finished the same second as the press, 2026-11-05)
+            // and the server's copy was green all along, so "gates changed" would never come
+            var answeredCached = false
             return Write(
                 ops: [Op(type: .branch, id: id, fields: ["gates": "running"])],
                 path: t.atRepo(v.b.repo, "/gates"), body: .object(body),
-                settled: { s.table(Branch.self)[id]?.gates != was },
+                settled: { answeredCached || s.table(Branch.self)[id]?.gates != was },
                 said: !skip.isEmpty ? "skipping \(skip.joined(separator: ", ")) for this code — the rest re-run"
                     : quick ? "running the quick gates — typecheck and lint left to CI" : "running the gates — p pushes once they're green",
-                failed: "the gates didn't start")
+                failed: "the gates didn't start",
+                answered: { ok, body in if ok, body["cached"] == true { answeredCached = true } })
         }
         r.register(Command(
             id: "branch.gates.run", title: "Run the push gates", scope: .branch, label: "gates", quiet: true,

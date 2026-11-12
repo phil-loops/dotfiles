@@ -25,6 +25,17 @@ import Testing
         #expect(GatesRun.between([], inFlight: false) == nil)
     }
 
+    @Test func aFinishedRunLendsNoTimeToAnOptimisticRunning() {
+        // Phil's p raced a run that finished the same second: the overlay says running, the
+        // server's last answer is the finished run — its elapsed must not stand on the chip
+        let finished = GateProgress(running: false, elapsed: 1239, events: [plan, GateEvent(event: "done", gate: "env", ok: true, ms: 900),
+                                                                           GateEvent(event: "done", gate: "typecheck", ok: true, ms: 900), GateEvent(event: "done", gate: "tests", ok: true, ms: 900)])
+        let w = GatesRun.waiting(finished, rows: GatesRun.rows(finished, now: 1239), inFlight: true, now: 1239)
+        #expect(w?.text == "gates starting" && w?.secs == nil)
+        let live = GateProgress(running: true, elapsed: 3, events: [])
+        #expect(GatesRun.waiting(live, rows: [], inFlight: true, now: 3)?.secs == 3)
+    }
+
     @Test func aRunInSetupNamesTheStepAndTurnsStuckAfterFiveMinutes() {
         let queued = GateProgress(running: true, elapsed: 4452, events: [
             GateEvent(event: "queued", ts: 0),
