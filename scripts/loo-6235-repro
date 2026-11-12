@@ -18,27 +18,17 @@ const SEND_TO = process.env.REPRO_SEND_TO ?? "loo-6235-repro@example.com";
 const STATE_DIR = process.env.REPRO_STATE ?? join(homedir(), ".cache", "loo-6235-repro");
 const RUNS_FILE = join(STATE_DIR, "runs.json");
 
-const NO_DOMAIN = "400 · No sending domain configured for this team.";
+const NO_DOMAIN = { status: 400, text: "no sending domain configured", match: "No sending domain" };
+const NOT_VERIFIED = { text: "domain is not verified", match: "not verified" };
+const DISABLED = { text: "domain has been disabled", match: "has been disabled" };
 const STEPS = [
-  { id: "campaign", pr: 1, label: "Create a campaign", before: NO_DOMAIN, after: "201" },
-  { id: "transactional", pr: 1, label: "Create a transactional email", before: NO_DOMAIN, after: "201" },
-  { id: "draft", pr: 1, label: "Create a transactional draft", before: NO_DOMAIN, after: "200" },
-  { id: "read", pr: 1, label: "Read an email message", before: NO_DOMAIN, after: "200" },
-  { id: "update", pr: 1, label: "Update an email message", before: NO_DOMAIN, after: "200" },
-  {
-    id: "publish",
-    pr: 2,
-    label: "Publish a transactional",
-    before: "422 · Your sending domain is not verified.",
-    after: "422 · Your sending domain has been disabled. Contact support to re-enable it.",
-  },
-  {
-    id: "send",
-    pr: 2,
-    label: "Send a transactional",
-    before: "400 · Your sending domain is not verified.",
-    after: "400 · Your sending domain has been disabled. Contact support to re-enable it.",
-  },
+  { id: "campaign", pr: 1, label: "Create a campaign", before: NO_DOMAIN, after: { status: 201, text: "created" } },
+  { id: "transactional", pr: 1, label: "Create a transactional email", before: NO_DOMAIN, after: { status: 201, text: "created" } },
+  { id: "draft", pr: 1, label: "Create a transactional draft", before: NO_DOMAIN, after: { status: 200, text: "ok" } },
+  { id: "read", pr: 1, label: "Read an email message", before: NO_DOMAIN, after: { status: 200, text: "ok" } },
+  { id: "update", pr: 1, label: "Update an email message", before: NO_DOMAIN, after: { status: 200, text: "ok" } },
+  { id: "publish", pr: 2, label: "Publish a transactional", before: { status: 422, ...NOT_VERIFIED }, after: { status: 422, ...DISABLED } },
+  { id: "send", pr: 2, label: "Send a transactional", before: { status: 400, ...NOT_VERIFIED }, after: { status: 400, ...DISABLED } },
 ];
 
 function readKey() {
@@ -68,8 +58,20 @@ function saveRuns(runs) {
   writeFileSync(RUNS_FILE, JSON.stringify(runs.slice(-8), null, 2));
 }
 
-async function call(key, method, path, body) {
+// Every request a run fires goes through here and lands in its audit trail, key redacted.
+async function call(key, trail, method, path, body) {
   const started = Date.now();
+  const entry = {
+    at: new Date(started).toISOString(),
+    method,
+    url: BASE + path,
+    requestHeaders: {
+      Authorization: "Bearer ••••" + key.slice(-4),
+      ...(body ? { "Content-Type": "application/json" } : {}),
+    },
+    requestBody: body ?? null,
+  };
+  trail.push(entry);
   try {
     const res = await fetch(BASE + path, {
       method,
@@ -85,9 +87,22 @@ async function call(key, method, path, body) {
     try {
       json = JSON.parse(text);
     } catch {}
-    return { status: res.status, json, message: json?.message ?? (json ? "" : text.slice(0, 200)), ms: Date.now() - started };
+    const ms = Date.now() - started;
+    Object.assign(entry, {
+      status: res.status,
+      ms,
+      responseHeaders: Object.fromEntries(
+        ["content-type", "x-request-id", "x-ratelimit-remaining"].flatMap((h) =>
+          res.headers.get(h) ? [[h, res.headers.get(h)]] : []
+        )
+      ),
+      responseBody: json ?? text.slice(0, 20000),
+    });
+    return { status: res.status, json, message: json?.message ?? (json ? "" : text.slice(0, 200)), ms };
   } catch (error) {
-    return { status: 0, json: null, message: `request failed: ${error.message}`, ms: Date.now() - started };
+    const ms = Date.now() - started;
+    Object.assign(entry, { status: 0, ms, responseBody: `request failed: ${error.message}` });
+    return { status: 0, json: null, message: `request failed: ${error.message}`, ms };
   }
 }
 
@@ -98,17 +113,18 @@ async function run(key) {
   const stamp = new Date().toISOString();
   const name = `LOO-6235 repro ${stamp.slice(0, 16).replace("T", " ")}`;
   const results = {};
+  const trail = [];
 
-  const who = await call(key, "GET", "/api-key");
+  const who = await call(key, trail, "GET", "/api-key");
   const team = who.json?.teamName ?? `unknown (${who.status} ${who.message})`;
 
-  const campaign = await call(key, "POST", "/campaigns", { name });
+  const campaign = await call(key, trail, "POST", "/campaigns", { name });
   results.campaign = shown("POST /campaigns", campaign);
 
-  const created = await call(key, "POST", "/transactional-emails", { name });
+  const created = await call(key, trail, "POST", "/transactional-emails", { name });
   results.transactional = shown("POST /transactional-emails", created);
 
-  const list = await call(key, "GET", "/transactional-emails?perPage=20");
+  const list = await call(key, trail, "GET", "/transactional-emails?perPage=20");
   const existing = (list.json?.data ?? []).find((t) => t.draftEmailMessageId || t.publishedEmailMessageId);
   const target = created.status === 201 ? created.json : existing;
   const needsOne = "the team has no transactional email yet; make one in the staging app";
@@ -117,10 +133,10 @@ async function run(key) {
     for (const id of ["draft", "read", "update", "publish", "send"]) {
       results[id] = skipped("", needsOne);
     }
-    return { at: stamp, team, results };
+    return { at: stamp, team, results, trail };
   }
 
-  const draft = await call(key, "POST", `/transactional-emails/${target.id}/draft`);
+  const draft = await call(key, trail, "POST", `/transactional-emails/${target.id}/draft`);
   results.draft = shown("POST /transactional-emails/{id}/draft", draft);
 
   const messageId =
@@ -129,96 +145,157 @@ async function run(key) {
     results.read = skipped("GET /email-messages/{id}", "no email message id on the transactional");
     results.update = skipped("POST /email-messages/{id}", "no email message id on the transactional");
   } else {
-    const read = await call(key, "GET", `/email-messages/${messageId}`);
+    const read = await call(key, trail, "GET", `/email-messages/${messageId}`);
     results.read = shown("GET /email-messages/{id}", read);
-    const update = await call(key, "POST", `/email-messages/${messageId}`, {
+    const update = await call(key, trail, "POST", `/email-messages/${messageId}`, {
       ...(read.json?.contentRevisionId ? { expectedRevisionId: read.json.contentRevisionId } : {}),
       subject: name,
     });
     results.update = shown("POST /email-messages/{id}", update);
   }
 
-  const publish = await call(key, "POST", `/transactional-emails/${target.id}/publish`);
+  const publish = await call(key, trail, "POST", `/transactional-emails/${target.id}/publish`);
   results.publish = shown("POST /transactional-emails/{id}/publish", publish);
 
   const published = (list.json?.data ?? []).find((t) => t.publishedEmailMessageId);
   if (!published) {
     results.send = skipped("POST /transactional", "the team has no published transactional email");
   } else {
-    const send = await call(key, "POST", "/transactional", { transactionalId: published.id, email: SEND_TO });
+    const send = await call(key, trail, "POST", "/transactional", { transactionalId: published.id, email: SEND_TO });
     results.send = shown("POST /transactional", send);
   }
 
-  return { at: stamp, team, results };
+  return { at: stamp, team, results, trail };
 }
 
 const PAGE = `<!doctype html>
 <meta charset="utf-8">
 <title>LOO-6235 repro</title>
 <style>
-  :root { color-scheme: light dark; --line: color-mix(in srgb, currentColor 18%, transparent); --dim: color-mix(in srgb, currentColor 60%, transparent); }
-  body { font: 14px/1.45 -apple-system, system-ui, sans-serif; margin: 24px; max-width: 1100px; }
-  h1 { font-size: 18px; margin: 0 0 4px; }
-  p { margin: 4px 0 14px; color: var(--dim); }
-  button { font: inherit; padding: 7px 16px; border-radius: 7px; border: 1px solid var(--line); cursor: pointer; }
-  button:disabled { opacity: .5; cursor: default; }
-  #note { margin-left: 10px; color: var(--dim); }
-  .scroll { overflow-x: auto; margin-top: 16px; }
+  :root {
+    color-scheme: light dark;
+    --ink: light-dark(#1b1b1f, #ececf1); --dim: light-dark(#6b6b76, #9a9aa6);
+    --line: light-dark(#e4e4ea, #2e2e36); --card: light-dark(#f6f6f9, #222228);
+    --accent: light-dark(#4f46e5, #8b85ff); --good: light-dark(#15803d, #4ade80); --bad: light-dark(#c2410c, #fb923c);
+  }
+  * { box-sizing: border-box; }
+  body { font: 13px/1.4 -apple-system, system-ui, sans-serif; color: var(--ink); margin: 0; padding: 28px 32px; }
+  header { display: flex; align-items: center; gap: 16px; margin-bottom: 22px; }
+  h1 { font-size: 17px; font-weight: 600; margin: 0; flex: 1; }
+  h1 small { display: block; font-size: 12px; font-weight: 400; color: var(--dim); margin-top: 3px; }
+  button { font: inherit; font-weight: 600; color: #fff; background: var(--accent); border: 0; border-radius: 8px; padding: 9px 18px; cursor: pointer; }
+  button:disabled { opacity: .45; cursor: default; }
+  #note { color: var(--dim); font-size: 12px; }
+  #setup { background: var(--card); border-radius: 10px; padding: 14px 16px; margin-bottom: 20px; }
+  #setup:empty { display: none; }
+  #setup pre { margin: 8px 0 0; font: 12px ui-monospace, Menlo, monospace; white-space: pre-wrap; }
+  .scroll { overflow-x: auto; }
   table { border-collapse: collapse; width: 100%; }
-  th, td { text-align: left; vertical-align: top; padding: 7px 10px; border-bottom: 1px solid var(--line); }
-  th { font-weight: 600; white-space: nowrap; }
-  td.step { white-space: nowrap; }
-  code, .mono { font: 12px ui-monospace, Menlo, monospace; }
-  .dim { color: var(--dim); }
-  .ok { color: #1a8a4a; } .err { color: #c2410c; }
-  tr.group td { font-weight: 600; padding-top: 16px; border-bottom: 1px solid currentColor; }
-  pre { background: color-mix(in srgb, currentColor 7%, transparent); padding: 10px; border-radius: 7px; overflow-x: auto; }
+  th, td { text-align: left; vertical-align: middle; padding: 9px 14px 9px 0; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--dim); }
+  th span { display: block; text-transform: none; letter-spacing: 0; font-weight: 400; }
+  tr.group td { font-size: 12px; font-weight: 600; color: var(--dim); padding-top: 22px; border-bottom-color: var(--ink); }
+  .path { display: block; font: 11px ui-monospace, Menlo, monospace; color: var(--dim); margin-top: 2px; }
+  .code { font: 600 11px ui-monospace, Menlo, monospace; padding: 2px 6px; border-radius: 5px; background: var(--card); margin-right: 6px; }
+  .expect { color: var(--dim); }
+  .fixed .code { background: color-mix(in srgb, var(--good) 18%, transparent); color: var(--good); }
+  .broken .code { background: color-mix(in srgb, var(--bad) 18%, transparent); color: var(--bad); }
+  .verdict { font-size: 11px; font-weight: 600; margin-left: 8px; }
+  .fixed .verdict { color: var(--good); } .broken .verdict { color: var(--bad); } .other .verdict { color: var(--dim); }
+  .msg { display: block; color: var(--dim); font-size: 11px; margin-top: 3px; max-width: 280px; white-space: normal; }
+  .empty { color: var(--dim); padding: 18px 0; }
+  h2 { font-size: 13px; font-weight: 600; margin: 34px 0 10px; }
+  #trail > details { border: 1px solid var(--line); border-radius: 10px; margin-bottom: 10px; padding: 0 14px; }
+  #trail > details > summary { padding: 10px 0; font-weight: 600; cursor: pointer; }
+  #trail summary span { color: var(--dim); font-weight: 400; margin-left: 8px; }
+  .req { border-top: 1px solid var(--line); }
+  .req > summary { padding: 8px 0; cursor: pointer; font: 12px ui-monospace, Menlo, monospace; }
+  .req .code { margin-right: 8px; }
+  .req h3 { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--dim); margin: 10px 0 4px; }
+  .req pre { margin: 0 0 10px; padding: 10px 12px; background: var(--card); border-radius: 8px; font: 11px/1.45 ui-monospace, Menlo, monospace; overflow-x: auto; max-height: 340px; }
 </style>
-<h1>LOO-6235 — API requests on a disabled sending domain</h1>
-<p>Replays the ticket's requests against <code>__BASE__</code> with the key in the Keychain item <code>__SERVICE__</code>. Each press adds a column, so run once before the deploy and once after.</p>
-<button id="run">Run the requests</button><span id="note"></span>
+<header>
+  <h1>API requests on a disabled sending domain<small>LOO-6235 · staging · <span id="team">run once before the deploy and once after</span></small></h1>
+  <span id="note"></span>
+  <button id="run">Run the requests</button>
+</header>
 <div id="setup"></div>
 <div class="scroll"><table id="grid"></table></div>
+<h2>Audit trail</h2>
+<div id="trail"></div>
 <script>
 const STEPS = __STEPS__;
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
-function cell(r) {
-  if (!r) return '<td class="dim">—</td>';
-  if (r.status === null) return '<td class="dim">' + esc(r.message) + "</td>";
-  const cls = r.status >= 200 && r.status < 300 ? "ok" : "err";
-  return '<td><span class="mono ' + cls + '">' + r.status + "</span> " + esc(r.message) + "</td>";
+const expect = (e) => '<td class="expect"><span class="code">' + e.status + "</span>" + esc(e.text) + "</td>";
+const matches = (r, e) => r.status === e.status && (!e.match || (r.message ?? "").includes(e.match));
+function cell(step, r) {
+  if (!r) return "<td></td>";
+  if (r.status === null) return '<td class="other"><span class="msg">' + esc(r.message) + "</span></td>";
+  const kind = matches(r, step.after) ? "fixed" : matches(r, step.before) ? "broken" : "other";
+  const word = { fixed: "fixed", broken: "not yet", other: "unexpected" }[kind];
+  return '<td class="' + kind + '"><span class="code">' + (r.status || "ERR") + '</span><span class="verdict">' + word + "</span>" +
+    (kind === "other" ? '<span class="msg">' + esc(r.message) + "</span>" : "") + "</td>";
 }
+let busy = false;
 function render(state) {
   document.getElementById("setup").innerHTML = state.hasKey ? "" :
-    "<p>No key yet. Add the API key of a staging team whose sending domain is disabled, in a terminal:</p><pre>security add-generic-password -s __SERVICE__ -a loops -w</pre>";
-  document.getElementById("run").disabled = !state.hasKey;
+    "No API key yet. Store the key of a staging team whose sending domain is disabled:<pre>security add-generic-password -s __SERVICE__ -a loops -w</pre>";
+  document.getElementById("run").disabled = busy || !state.hasKey;
   const runs = state.runs;
-  let html = "<tr><th>Request</th><th>Before the PR</th><th>After the PR</th>" +
-    runs.map((r) => "<th>" + esc(new Date(r.at).toLocaleString()) + '<br><span class="dim">' + esc(r.team) + "</span></th>").join("") + "</tr>";
+  if (runs.length) document.getElementById("team").textContent = runs[runs.length - 1].team;
+  let html = "<tr><th>Request</th><th>Today</th><th>Fixed</th>" +
+    runs.map((r, i) => "<th>Run " + (i + 1) + "<span>" + esc(new Date(r.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })) + "</span></th>").join("") +
+    (runs.length ? "" : "<th>Runs</th>") + "</tr>";
   for (const pr of [1, 2]) {
-    html += '<tr class="group"><td colspan="' + (3 + runs.length) + '">' +
-      (pr === 1 ? "PR 1 — allow content api drafts on a disabled domain" : "PR 2 — say when the sending domain is disabled") + "</td></tr>";
-    for (const s of STEPS.filter((x) => x.pr === pr)) {
+    html += '<tr class="group"><td colspan="' + (3 + Math.max(runs.length, 1)) + '">' +
+      (pr === 1 ? "PR 1 · allow content api drafts on a disabled domain" : "PR 2 · say when the sending domain is disabled") + "</td></tr>";
+    STEPS.filter((x) => x.pr === pr).forEach((s, i) => {
       const req = runs.map((r) => r.results[s.id]?.request).find(Boolean) ?? "";
-      html += '<tr><td class="step">' + esc(s.label) + '<br><span class="mono dim">' + esc(req) + "</span></td>" +
-        '<td class="dim">' + esc(s.before) + '</td><td class="dim">' + esc(s.after) + "</td>" +
-        runs.map((r) => cell(r.results[s.id])).join("") + "</tr>";
-    }
+      html += "<tr><td>" + esc(s.label) + '<span class="path">' + esc(req) + "</span></td>" + expect(s.before) + expect(s.after) +
+        runs.map((r) => cell(s, r.results[s.id])).join("") +
+        (runs.length || i || pr === 2 ? (runs.length ? "" : "<td></td>") : '<td class="empty" rowspan="1">no runs yet</td>') + "</tr>";
+    });
   }
   document.getElementById("grid").innerHTML = html;
+  renderTrail(runs);
 }
-async function load() { render(await (await fetch("/state")).json()); }
+const pretty = (v) => esc(typeof v === "string" ? v : JSON.stringify(v, null, 2));
+function renderTrail(runs) {
+  const el = document.getElementById("trail");
+  const open = new Set([...el.querySelectorAll("details[open]")].map((d) => d.dataset.k));
+  if (!runs.length) { el.innerHTML = '<div class="empty">Every request and response of each run is listed here.</div>'; return; }
+  el.innerHTML = runs.map((r, i) => {
+    const k = "run" + r.at;
+    const reqs = (r.trail ?? []).map((t, j) => {
+      const kk = k + ":" + j, ok = t.status >= 200 && t.status < 300;
+      return '<details class="req ' + (ok ? "fixed" : "broken") + '" data-k="' + kk + '"' + (open.has(kk) ? " open" : "") + ">" +
+        '<summary><span class="code">' + (t.status || "ERR") + "</span>" + esc(t.method) + " " + esc(t.url) + "<span>" + t.ms + " ms · " + esc(new Date(t.at).toLocaleTimeString()) + "</span></summary>" +
+        "<h3>Request headers</h3><pre>" + pretty(t.requestHeaders) + "</pre>" +
+        "<h3>Request body</h3><pre>" + (t.requestBody ? pretty(t.requestBody) : "(none)") + "</pre>" +
+        "<h3>Response " + (t.status || "error") + "</h3><pre>" + pretty({ headers: t.responseHeaders ?? {}, body: t.responseBody ?? null }) + "</pre></details>";
+    }).join("");
+    const latest = i === runs.length - 1;
+    return '<details data-k="' + k + '"' + (open.has(k) || (latest && !el.querySelector('[data-k="' + k + '"]')) ? " open" : "") + "><summary>Run " + (i + 1) +
+      "<span>" + esc(new Date(r.at).toLocaleString()) + " · " + esc(r.team) + " · " + (r.trail ?? []).length + " requests</span></summary>" + reqs + "</details>";
+  }).reverse().join("");
+}
+let last = "";
+async function load() {
+  if (busy) return;
+  const text = await (await fetch("/state")).text();
+  if (text !== last) { last = text; render(JSON.parse(text)); }
+}
 document.getElementById("run").onclick = async () => {
   const btn = document.getElementById("run"), note = document.getElementById("note");
-  btn.disabled = true; note.textContent = "running…";
+  busy = true; btn.disabled = true; note.textContent = "running…";
   try {
-    const res = await fetch("/run", { method: "POST" });
-    const state = await res.json();
-    note.textContent = state.error ?? "";
-    render(state);
-  } catch (e) { note.textContent = String(e); btn.disabled = false; }
+    const state = await (await fetch("/run", { method: "POST" })).json();
+    busy = false; note.textContent = state.error ?? ""; render(state);
+  } catch (e) { busy = false; note.textContent = String(e); btn.disabled = false; }
 };
 load();
+setInterval(load, 3000);
+document.addEventListener("visibilitychange", load);
 </script>`;
 
 const state = () => ({ hasKey: Boolean(readKey()), runs: loadRuns() });
