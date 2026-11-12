@@ -100,7 +100,7 @@
 | split-right / split-below / close-window / only-window | `C-w v` / `C-w s` / `C-w q` / `C-w o` | Helix's windows: a copy of this one beside / under it, close it, close the others |
 | pick-right / pick-below | `C-v` / `C-s` in a picker | the pick in a new window beside / under this one |
 | command / menu / keys / select | `:` / `space ?` / `g ?` / `v` | the command line, the menu, the key sheet, select mode |
-| words by name | `D t` / `D w` / `D d` / `D c` (`:title` / `:why` / `:desc` / `:reword`, each with its words to write and save at once) | the branch's title, why or description, open to write from anywhere; `D c` picks one of its commits (newest first, by subject) to reword — `:reword <sha> [<subject>]` names it |
+| words by name | `D t` / `D w` / `D d` / `D c` / `D j` (`:title` / `:why` / `:desc` / `:reword` / `:fold`, each with its words to write and save at once) | the branch's title, why or description, open to write from anywhere; `D c` picks one of its commits (newest first, by subject) to reword — `:reword <sha> [<subject>]` names it; `D j` picks an unpushed commit to fold into the one below it (one commit, both messages, `u` puts it back) — `:fold <sha>` names it |
 | search back | `?` | search the page backwards; `n` / `N` then run the other way (Helix) |
 | word end | `e` | the end of the name (Helix `e`) |
 | leader | `,` | this page's own keys follow |
