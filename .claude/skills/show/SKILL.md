@@ -5,7 +5,7 @@ description: Present a design, plan or walkthrough as a native macOS app (Swift 
 
 # show — a native walkthrough Phil reads
 
-`show <file.json>` opens a file in the one Show window (section list and rendered markdown, set as a reading page: serif prose held to about 75 characters). The window never multiplies: a rail on its left edge switches between **workspaces** (five on the rail with ⌘1–⌘5; Forest, Review, Runs and API have no tile or number and come forward when a document routes to them or from History), and each keeps its own open document, typed text and scroll while another is in front.
+`show <file.json>` opens a file in the one Show window (section list and rendered markdown, set as a reading page: serif prose held to about 75 characters). The window never multiplies: a rail on its left edge switches between **workspaces** (six on the rail with ⌘1–⌘6; Forest, Review and Runs have no tile or number and come forward when a document routes to them or from History), and each keeps its own open document, typed text and scroll while another is in front.
 
 | Workspace | Key | Opens files with | Holds |
 |---|---|---|---|
@@ -17,7 +17,7 @@ description: Present a design, plan or walkthrough as a native macOS app (Swift 
 | Forest | — | `"mode": "forest"` | a project's branches in merge order (branch-deck decks) |
 | Review | — | `"mode": "deck"` or no mode | designs and walkthroughs to read |
 | Runs | — | `"mode": "live"` | live runs, read-only |
-| API | — | `show --api [<bench>]` | the loops-postman console (:7070) and the registered benches (see *Benches*), each started when it's down |
+| API | ⌘6 | `show --api [<bench>]` | the loops-postman console (:7070) and the registered benches (see *Benches*), each started when it's down |
 
 **Who takes the screen — one rule.** Every door (`show`, `canopy`, `stack web`, `show --api`) writes a request `{target, actor, intent}` into `~/.cache/show/inbox/` and hands it to Show with `open -g`. Show comes forward only when Phil is the actor (his terminal, Finder, a `canopy://` link) or a session passes `--focus` / `SHOW_FOCUS=1` because Phil asked to see it now. Anything else a session sends **arrives**: a notification naming it and the session's topic, a rail badge (a deck tops its shelf; a canopy page counts on ⌘1), a ◆ row in History (⌘Y). Nothing switches or opens, and ⌘1 stays on its page. A Claude session is detected by `CLAUDECODE`.
 
