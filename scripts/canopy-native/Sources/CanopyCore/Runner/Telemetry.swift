@@ -16,6 +16,26 @@ public final class Telemetry {
     private var timer: DispatchWorkItem?
     private var counters: [String: Int] = [:]
     private var timings: [String: [Double]] = [:]
+    /// The surface the keyboard is on and when it opened (the Router hook's `arrived`), so a
+    /// command's wait can be read by page, and a cold one (the first keys after a page open,
+    /// whose wait is the page's first paint) apart from a steady-state stall.
+    public private(set) var surface: String?
+    public private(set) var navAt: Date?
+
+    public func arrived(_ surface: String, at: Date = Date()) {
+        self.surface = surface
+        self.navAt = at
+    }
+
+    /// A command event with where and when it happened: `surface`, and `sinceNavMs` since
+    /// that surface opened. Other events pass through unchanged.
+    public func stamped(_ ev: JSONObject, now: Date = Date()) -> JSONObject {
+        guard ev["type"] == .string("cmd"), let surface else { return ev }
+        var e = ev
+        e["surface"] = .string(surface)
+        if let navAt { e["sinceNavMs"] = .number((now.timeIntervalSince(navAt) * 1000).rounded()) }
+        return e
+    }
 
     public init(transport: Transport, enabled: Bool = true) {
         self.transport = transport
@@ -25,7 +45,7 @@ public final class Telemetry {
     public func emit(_ ev: JSONObject) {
         guard enabled else { return }
         var e: JSONObject = ["schema": .number(Double(Self.schema)), "app": .string(Self.app), "pl": .string(transport.pageLoad)]
-        e.merge(ev) { $1 }
+        e.merge(stamped(ev)) { $1 }
         queue.append(e)
         if timer == nil {
             let w = DispatchWorkItem { [weak self] in self?.flush() }
