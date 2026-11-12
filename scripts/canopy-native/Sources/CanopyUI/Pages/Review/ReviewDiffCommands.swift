@@ -42,6 +42,11 @@ enum DiffCommands {
 
         /// The diff cursor's index, and a move to one.
         func idx() -> Int { pg.here.flatMap { pg.stopIndex[$0.key] } ?? 0 }
+        /// While the diff is still being read a motion can't land: the runner keeps the key and
+        /// runs it when the diff arrives (ReviewPageState.land releases it).
+        func reading() throws {
+            if pg.payload == nil && pg.loadErr == nil { throw Hold("reading the diff — this key runs when it's in") }
+        }
         func goTo(_ i: Int) {
             let s = pg.stops
             guard !s.isEmpty else { return }
@@ -49,6 +54,7 @@ enum DiffCommands {
             CodeLookup.of(app).dismiss()
         }
         func seek(_ dir: Int, _ ok: (Stop) -> Bool) throws {
+            try reading()
             let s = pg.stops
             var i = idx() + dir
             while i >= 0 && i < s.count {
@@ -150,6 +156,7 @@ enum DiffCommands {
 
         /// gg / G: the first changed line of the diff, the last changed line of it.
         func ends(first: Bool) throws {
+            try reading()
             if app.pane?.id != reviewDiffPane {
                 let was = app.selected
                 app.cursorTo(first ? 0 : Int.max)
@@ -168,6 +175,7 @@ enum DiffCommands {
         }
         /// ]/[: the next (previous) file by the diff's order, landing on its first change.
         func file(_ dir: Int) throws {
+            try reading()
             let fs = pg.stopFiles
             guard let here = pg.here?.path, let i = fs.firstIndex(of: here) else { throw Refusal("no file here · space g picks one") }
             guard fs.count > 1 else { throw Refusal("the only file in this diff · ] g [ g move by change") }
@@ -179,6 +187,7 @@ enum DiffCommands {
         }
         /// ]T / [T: the next (previous) test file, landing on its first change.
         func testFile(_ dir: Int) throws {
+            try reading()
             let fs = pg.stopFiles
             guard let here = pg.here?.path, let i = fs.firstIndex(of: here) else { throw Refusal("no file here · space g picks one") }
             let tests = fs.enumerated().filter { isTestPath($0.element) }
@@ -193,6 +202,7 @@ enum DiffCommands {
         }
         /// ]p / [p: the first line of the next (previous) git hunk — a hunk can hold several of ] g's changes.
         func gitHunk(_ dir: Int) throws {
+            try reading()
             let s = pg.stops
             var starts: [Int] = []
             var last: (path: String, hunk: Int)?
@@ -252,6 +262,7 @@ enum DiffCommands {
         /// ]u / [u: the start of the next (previous) change not read yet or flagged, wrapping round the branch,
         /// so what's left to read is one key away without marking anything.
         func unviewed(_ dir: Int) throws {
+            try reading()
             let i = idx()
             let open = pg.markStarts { $0 != .viewed }
             guard !open.isEmpty else { throw Refusal("every change on this branch is read, none flagged · , M takes a mark back") }
@@ -264,6 +275,7 @@ enum DiffCommands {
         /// ]/[: the start of the next (previous) change — a run of changed lines with nothing unchanged
         /// between them, finer than git's hunk (which can hold two edits) — crossing into the next file.
         func change(_ dir: Int) throws {
+            try reading()
             let s = pg.stops
             let starts = pg.changeStarts
             let i = idx()
@@ -294,6 +306,7 @@ enum DiffCommands {
                            label: "test", available: onDiff, local: { _, _ in try testFile(-1) }))
         /// ]c / [c: the first line of the next (previous) comment in the diff's code.
         func comment(_ dir: Int) throws {
+            try reading()
             let s = pg.stops
             func isComment(_ st: Stop) -> Bool {
                 guard st.kind == .line, let row = st.row else { return false }
@@ -324,6 +337,7 @@ enum DiffCommands {
                            label: "hunk", available: onDiff, local: { _, _ in try gitHunk(-1) }))
         /// ]r / [r: open conversations first, then any.
         func thread(_ dir: Int) throws {
+            try reading()
             func openOne(_ s: Stop) -> Bool {
                 guard s.kind == .thread, let t = s.id.flatMap({ app.store.view(CanopyCore.Thread.self, $0) }) else { return false }
                 return !t.resolved && !t.outdated

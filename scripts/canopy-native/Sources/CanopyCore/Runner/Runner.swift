@@ -49,6 +49,9 @@ public final class Runner {
     /// The one act waiting on its confirming press ("push r:b", "kill 3001"). A confirm lasts one
     /// command: whatever runs next clears it, unless that command armed it again.
     public private(set) var armed: String?
+    /// A key pressed before its page could act (the diff still being read): kept, and run by
+    /// `releaseHeld` when the page is ready. The next key, or a page change, drops it.
+    public private(set) var held: (id: String, target: String?, arg: Any?)?
 
     @ObservationIgnored public let registry: CommandRegistry
     @ObservationIgnored public let store: Store
@@ -101,7 +104,14 @@ public final class Runner {
         armings += 1
     }
 
-    public func disarm() { armed = nil }
+    public func disarm() { armed = nil; held = nil }
+
+    /// Run the held key now — the page that held it says the diff has arrived.
+    public func releaseHeld() {
+        guard let h = held else { return }
+        held = nil
+        dispatch(h.id, via: .key, target: h.target, arg: h.arg)
+    }
 
     /// `explained`: a refusal already said why, so the key's "nothing here" doesn't cover it.
     private func echo(_ id: String, _ via: Via, _ ok: Bool, explained: Bool = false) {
@@ -162,9 +172,15 @@ public final class Runner {
             opening = opens
             defer { opening = was }
             do {
+                held = nil
                 try local(target, arg)
                 echo(named, via, true)
                 feedback(["outcome": "ok", "settledMs": nil])
+            } catch let h as Hold {
+                held = (id, target, arg)
+                say(h.why)
+                echo(named, via, false, explained: true)
+                feedback(["outcome": "held", "settledMs": nil])
             } catch {
                 let err = String(describing: error)
                 say(err)
