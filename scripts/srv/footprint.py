@@ -68,7 +68,7 @@ def _top(n=8):
 def _self():
     ru = resource.getrusage(resource.RUSAGE_SELF)
     children = subprocess.run(["pgrep", "-P", str(os.getpid())], capture_output=True, text=True).stdout.split()
-    from . import review, push, sync, picker
+    from . import review, sync, picker
     caches = {
         "commits": len(getattr(review, "_COMMITS_CACHE", {})),
         "commitDiff": len(getattr(review, "_CDIFF_CACHE", {})),
