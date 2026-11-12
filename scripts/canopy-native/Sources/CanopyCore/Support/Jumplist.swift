@@ -26,8 +26,6 @@ public struct Place: Equatable, Sendable {
     }
     /// a code place (CodeNav), when the page shows code
     public var loc: Loc?
-    /// the one commit the review page is showing instead of the whole branch
-    public var commit: String?
     /// the page's window the spot is in (the review page's splits), whose own jumps C-o walks
     public var window: Int?
     /// The page's whole window set, only in a saved place (what Show brings back on relaunch): jumps
@@ -58,7 +56,7 @@ public struct Place: Equatable, Sendable {
 
     /// The same spot, ignoring the viewport row: two consecutive entries that are the same spot collapse.
     public func sameSpot(_ o: Place) -> Bool {
-        route == o.route && pane == o.pane && cursorKey == o.cursorKey && tab == o.tab && loc == o.loc && commit == o.commit && window == o.window
+        route == o.route && pane == o.pane && cursorKey == o.cursorKey && tab == o.tab && loc == o.loc && window == o.window
     }
 }
 

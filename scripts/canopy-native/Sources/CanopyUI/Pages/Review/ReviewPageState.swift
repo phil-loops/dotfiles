@@ -262,10 +262,17 @@ public final class ReviewPageState: ShipHost {
     public var search = ""
     /// the forest map overlay is up (space m) — its layer's cursor
     public var mapIndex = 0
-    /// what the diff covers when it isn't a base's whole stretch: one commit ("sha") or a run of
-    /// them ("from..to", both ends included) — the branch line's lit stretch (ReviewLine). Its files beside it.
-    public private(set) var commitScope: String?
+    /// What the diff covers, the one setting, as the address carries it: "" what lands, a preset's
+    /// word, or commits. Everything else about what's shown is read from it.
+    public var stretchKey: String {
+        guard let app, case .review(_, _, let s) = app.router.route else { return "" }
+        return s
+    }
+    /// the stretch as commits, when it's commits: one ("sha") or a run ("from..to", both ends included)
+    public var commitScope: String? { stretchKey.isEmpty || Route.presets.contains(stretchKey) ? nil : stretchKey }
     public private(set) var commitFiles: (sha: String, files: [NodeFile])?
+    /// the stretch the page last brought its diff and cursor up to
+    @ObservationIgnored private var shownStretch = ""
 
     // ── the diff ──
 
@@ -339,15 +346,17 @@ public final class ReviewPageState: ShipHost {
         return tip
     }
 
-    public var base: ReviewBase {
-        guard let app, case .review(_, _, let b) = app.router.route else { return .parent }
-        return ReviewBase(rawValue: b) ?? .parent
-    }
+    /// The diff the commits are read against: a preset's, else the parent's.
+    public var base: ReviewBase { ReviewBase(rawValue: Route.presets.contains(stretchKey) ? stretchKey : "") ?? .parent }
 
-    /// The address carries the base, so a link reproduces the view (history.replaceState).
-    public func setBase(_ b: ReviewBase) {
-        guard let app, case .review(let r, let n, _) = app.router.route else { return }
-        app.router.replace(.review(repo: r, branch: n, base: b.rawValue))
+    public func setBase(_ b: ReviewBase) { setStretch(b.rawValue) }
+
+    /// The one writer of what the diff covers. The address carries it, so a link, `C-o` and a
+    /// relaunch bring back exactly this stretch (history.replaceState).
+    func setStretch(_ s: String) {
+        guard let app, case .review(let r, let n, let now) = app.router.route, now != s else { return }
+        app.router.replace(.review(repo: r, branch: n, stretch: s))
+        sync()
     }
 
     /// The base as sent: outgoing is origin's copy, which a branch never pushed doesn't have.
@@ -382,10 +391,9 @@ public final class ReviewPageState: ShipHost {
         switch c {
         case .refuse(let why): throw Refusal(why)
         case .base(let b):
-            if commitScope != nil { commitScopeChanged(nil) }
-            if b != base { setBase(b) }
+            setStretch(b.rawValue)
         case .commits:
-            if commitScope != c.scope { commitScopeChanged(c.scope) }
+            commitScopeChanged(c.scope)
         }
         tab = "files"
     }
@@ -399,6 +407,10 @@ public final class ReviewPageState: ShipHost {
     public func sync() {
         guard let t = target else { return }
         arrive()
+        if stretchKey != shownStretch {
+            shownStretch = stretchKey
+            stretchMoved()
+        }
         // the header's line is the page's: its commits load with the diff (a no-op once read at this tip)
         if integration == nil, let app { ShipState.of(app).loadHistory(app, id) }
         let key = keyOf
@@ -458,7 +470,7 @@ public final class ReviewPageState: ShipHost {
         loadErr = nil
         mark = nil
         viewedOverride = [:]
-        commitScope = nil
+        shownStretch = ""
         commitFiles = nil
         windows = [ReviewWindow(id: 1, column: 0)]
         if let c = carry, c.id == newID { tab = c.tab } else { carry = nil; tab = "files" }
@@ -549,20 +561,22 @@ public final class ReviewPageState: ShipHost {
 
     // ── a stretch of commits ──
 
-    /// ShipHost.commitScopeChanged: show one commit's diff or a run's ("from..to", GET /commit-diff),
-    /// or the branch again.
+    /// ShipHost.commitScopeChanged: show one commit's diff or a run's ("from..to"), or what lands (nil).
     public func commitScopeChanged(_ sha: String?) {
-        // one stretch, one spelling: a scope that covers what lands is the parent preset
-        if let sha, let l = line, let lit = l.lit(base: .parent, scope: sha), l.cover(lit) == .landing {
-            if base != .parent { setBase(.parent) }
-            return commitScopeChanged(nil)
-        }
-        commitScope = sha
+        // one stretch, one spelling: commits that are all of what lands are what lands
+        if let sha, let l = line, let lit = l.lit(base: .parent, scope: sha), l.cover(lit) == .landing { return setStretch("") }
+        setStretch(sha ?? "")
+    }
+
+    /// The stretch moved, by any road (a key, a link, `C-o`): drop what belonged to the last one, read
+    /// the commits' diff (GET /commit-diff), and land on the first file unless a restore puts the cursor.
+    private func stretchMoved() {
         lineAnchor = nil
         mark = nil
-        let waiting = pendingCursor?.id == id || pendingLoc?.id == id
-        if !waiting, let k = stopFiles.first.flatMap(landing(file:)) { setCursor(k, focus: false) }
-        guard let sha, commitFiles?.sha != sha, let app else { return }
+        let waiting = pendingCursor?.id == id || pendingLoc?.id == id || (app?.jumpDepth ?? 0) > 0
+        let here = commitScope.map { commitFiles?.sha == $0 } ?? (payload?.key == keyOf)
+        if !waiting, here, let k = stopFiles.first.flatMap(landing(file:)) { setCursor(k, focus: false) }
+        guard let sha = commitScope, commitFiles?.sha != sha, let app else { return }
         let ends = ReviewLine.ends(sha)
         let path = repoPath("/commit-diff?sha=\(ends.to.uriComponent)" + (ends.from.map { "&from=\($0.uriComponent)" } ?? ""))
         Task { @MainActor [weak self] in
@@ -572,12 +586,6 @@ public final class ReviewPageState: ShipHost {
             if self.pendingCursor?.id == self.id || self.pendingLoc?.id == self.id { return self.settleCursor() }
             if let k = self.stopFiles.first.flatMap(self.landing(file:)) { self.setCursor(k, focus: false) }
         }
-    }
-
-    /// Tests and the inline view hand a commit's files in directly.
-    public func landCommit(_ sha: String, _ files: [NodeFile]) {
-        commitScope = sha
-        commitFiles = (sha, files)
     }
 
     private func tabMoved(_ from: String) {

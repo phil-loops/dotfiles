@@ -393,7 +393,7 @@ enum DiffCommands {
         func hop(_ b: Branch?) throws {
             guard let b else { throw Refusal("no branch that way") }
             pg.carry = (b.id, pg.tab, pg.here?.path)
-            app.go(.review(repo: b.repo, branch: b.name, base: pg.base == .outgoing ? "" : pg.base.rawValue))
+            app.go(.review(repo: b.repo, branch: b.name, stretch: pg.base == .main ? "main" : ""))
         }
         let isBranch: (String?) -> Bool = { _ in pg.integration == nil && pg.branch != nil }
         r.register(Command(id: "review.branch.next", title: "Review the next branch in merge order", scope: .review, verb: .nextSibling,

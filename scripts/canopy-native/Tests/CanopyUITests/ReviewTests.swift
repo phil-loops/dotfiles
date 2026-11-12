@@ -507,8 +507,8 @@ import Testing
         a.focus(pane: reviewDiffPane)
         keys(a, "j")
         let at = a.here()
-        #expect(at.commit == "c1" && at.address.contains("commit=c1"), "\(at.address)")
-        #expect(Place(address: at.address).commit == "c1")
+        #expect(at.route == .review(repo: "loops", branch: "add-hankles-limited-label", stretch: "c1") && at.address.contains("commit=c1"), "\(at.address)")
+        #expect(Place(address: at.address).route == at.route, "the route carries the stretch")
 
         let (b, q) = try await app()
         ShipStub.answer(q, "GET", "/loops/commit-diff", #"{"sha":"c1","files":[{"path":"c.ts","add":2,"del":0,"patch":"@@ -1,0 +1,2 @@\n+hi\n+there"}]}"#)
@@ -1046,7 +1046,7 @@ import Testing
     @Test func theBaseRidesTheAddress() async throws {
         let (a, _) = try await app()
         keys(a, ",", "b", "m")
-        #expect(a.router.route == .review(repo: "loops", branch: "add-hankles-limited-label", base: "main"))
+        #expect(a.router.route == .review(repo: "loops", branch: "add-hankles-limited-label", stretch: "main"))
         #expect(ReviewPageState.of(a).keyOf.hasSuffix("|main"))
     }
 
