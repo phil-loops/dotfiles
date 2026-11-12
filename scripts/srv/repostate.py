@@ -9,6 +9,7 @@
 # upstream tracking, published. Anything that needs a *walk* (rev-list counts, merge-base)
 # still spawns — but memoised per snapshot, so the same walk isn't repeated within one epoch.
 import hashlib
+import re
 import threading
 import time
 
@@ -19,6 +20,9 @@ _SNAP = {}   # repo cwd -> RepoState
 # A snapshot serves as long as the stat watcher's generation hasn't moved; the spawned
 # fingerprint re-check is only the safety net for a change the stat walk can't see.
 _SAFETY_AGE = 30.0
+# A commit's tree never changes, so this outlives every snapshot: (repo, commit sha) -> tree sha.
+_TREE_OF = {}
+_HEX40 = re.compile(r"^[0-9a-f]{40}$")
 
 
 class RepoState:
@@ -163,10 +167,47 @@ class RepoState:
         return self._memo[key]
 
     def tree(self, rev):
+        """The tree of a local branch's tip or a commit sha. Branch tips are filled for every
+        head in one spawn on the first miss and kept by commit, so a new snapshot (any config
+        write) re-reads nothing."""
+        sha = self.local(rev) or rev
+        repo = ctx.repo_cwd()
+        if (repo, sha) not in _TREE_OF and sha in self._head_shas():
+            self._fill_head_trees(repo)
+        if (repo, sha) in _TREE_OF:
+            return _TREE_OF[(repo, sha)]
         key = ("tree", rev)
         if key not in self._memo:
-            self._memo[key] = ctx.run(["git", "rev-parse", f"{rev}^{{tree}}"]).stdout.strip()
+            t = ctx.run(["git", "rev-parse", f"{rev}^{{tree}}"]).stdout.strip()
+            if t and _HEX40.match(sha):
+                _TREE_OF[(repo, sha)] = t
+            self._memo[key] = t
         return self._memo[key]
+
+    def head_trees(self):
+        """{branch: tree sha} for every local head — one spawn at most, none once the tips are known."""
+        repo = ctx.repo_cwd()
+        heads = {r[11:]: s for r, s in self.sha.items() if r.startswith("refs/heads/")}
+        if any((repo, s) not in _TREE_OF for s in heads.values()):
+            self._fill_head_trees(repo)
+        return {b: _TREE_OF[(repo, s)] for b, s in heads.items() if (repo, s) in _TREE_OF}
+
+    def _head_shas(self):
+        if "head-shas" not in self._memo:
+            self._memo["head-shas"] = {s for r, s in self.sha.items() if r.startswith("refs/heads/")}
+        return self._memo["head-shas"]
+
+    def _fill_head_trees(self, repo):
+        if self._memo.get("heads-filled"):
+            return
+        self._memo["heads-filled"] = True
+        if len(_TREE_OF) > 50_000:
+            _TREE_OF.clear()
+        out = ctx.run(["git", "for-each-ref", "--format=%(objectname) %(tree)", "refs/heads"]).stdout
+        for ln in out.splitlines():
+            c, _, t = ln.partition(" ")
+            if t:
+                _TREE_OF[(repo, c)] = t
 
     def once(self, key, fn):
         """Memoise any per-snapshot computation (a diff, a script's JSON) under `key`."""

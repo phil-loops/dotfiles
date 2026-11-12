@@ -25,7 +25,6 @@ FIXTURE_ENV = "STACK_OUTBOX_PR_FIXTURE"
 TRUNKS = ("main", "master", "origin/main")
 
 
-
 def _fixture():
     path = os.environ.get(FIXTURE_ENV)
     if not path:
@@ -138,7 +137,6 @@ def _rank(project, snap):
 
 # ── walks: ONE `git log` over every unlanded commit per snapshot, walked in Python ──
 _GRAPHS = {}   # repo -> (snapshot fingerprint, Graph)
-_TREES = {}   # repo -> (refs fingerprint, {branch: tree})
 _TEMPLATE = lru.ByteLRU(1 << 20)   # (repo, trunk sha) -> the PR template GitHub would otherwise supply
 
 
@@ -192,19 +190,6 @@ def _graph(snap, trunk):
     g = Graph(r.stdout if r.returncode == 0 else "")
     _GRAPHS[repo] = (snap.fingerprint, g)
     return g
-
-
-def _trees(snap):
-    """{branch: tree sha} for every local head in ONE spawn — gates verdicts are tree-keyed."""
-    repo = ctx.repo_cwd()
-    hit = _TREES.get(repo)
-    fp = snap.fingerprint
-    if hit and hit[0] == fp:
-        return hit[1]
-    out = ctx.run(["git", "for-each-ref", "--format=%(refname:short) %(tree)", "refs/heads"]).stdout
-    trees = dict(ln.rsplit(" ", 1) for ln in out.splitlines() if " " in ln)
-    _TREES[repo] = (fp, trees)
-    return trees
 
 
 def _template(snap):
@@ -279,7 +264,7 @@ def _forest(snap, project, prs, slug, graph):
     order = [b for b in rank.get("order", []) if snap.exists(b)]
     if not order:
         return None
-    trees = _trees(snap)
+    trees = snap.head_trees()
     ticket = snap.get(f"stack-project.{project}.ticket")
     nodes = []
     for pos, b in enumerate(order, 1):
