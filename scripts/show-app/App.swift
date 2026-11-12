@@ -289,6 +289,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             workspaces[.canopy]?.canopy?.start(route: route.isEmpty ? nil : route)
         case .api:
             switchTo(.api)
+        case .bench(let id):
+            switchTo(.api)
+            workspaces[.api]?.console?.show(id)
         }
     }
 
