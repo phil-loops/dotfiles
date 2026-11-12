@@ -93,6 +93,13 @@ final class Ctx: CommandContext {
         runner.dispatch("t.next", via: .key)
         runner.dispatch("t.other", via: .key)
         #expect(runner.held == nil, "any other key drops the hold")
+        runner.registry.register(Command(id: "t.nowhere", title: "W", scope: .global, route: { _ in nil }))
+        runner.registry.register(Command(id: "t.off", title: "F", scope: .global, available: { _ in false }, local: { _, _ in }))
+        for other in ["t.nowhere", "t.off"] {
+            runner.dispatch("t.next", via: .key)
+            runner.dispatch(other, via: .key)
+            #expect(runner.held == nil, "a key that does nothing still drops the hold: \(other)")
+        }
         runner.dispatch("t.next", via: .key)
         runner.disarm()
         #expect(runner.held == nil, "a page change drops it too")

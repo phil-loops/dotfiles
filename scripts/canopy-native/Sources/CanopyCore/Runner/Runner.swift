@@ -129,6 +129,7 @@ public final class Runner {
     /// Run a registered command. Never awaited by callers — the UI has already moved.
     public func dispatch(_ id: String, via: Via, target explicit: String? = nil, arg: Any? = nil, undoing: Bool = false, from: String? = nil) {
         guard let cmd = registry.command(id) else { return }
+        held = nil   // the next key drops a hold, whatever kind of command it is; a Hold below re-takes it
         if via == .menu || via == .palette { context?.closeMenu() }
         let named = from ?? id
         let opens = opening || cmd.verbs.contains(.main)
@@ -172,7 +173,6 @@ public final class Runner {
             opening = opens
             defer { opening = was }
             do {
-                held = nil
                 try local(target, arg)
                 echo(named, via, true)
                 feedback(["outcome": "ok", "settledMs": nil])
