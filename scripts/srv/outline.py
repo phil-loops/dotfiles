@@ -70,10 +70,7 @@ def _base(branch):
     """The commit range's floor, the same one /commits and /node use: the parent, except a
     trunk parent resolves to origin's copy so a stale local main can't count merged work."""
     snap = repostate.snapshot()
-    parent = snap.parent(branch)
-    if parent == snap.main() and _git("rev-parse", "--verify", "-q", f"origin/{parent}").returncode == 0:
-        return parent, f"origin/{parent}"
-    return parent, parent
+    return snap.parent(branch), snap.diff_base(branch)
 
 
 def _carried(branch, base):

@@ -337,9 +337,8 @@ def _delta_id(branch, snap=None):
     in on purpose: main landing INSIDE a hunk's context changes the id, which is exactly when a
     carried verdict should lapse."""
     snap = snap or repostate.snapshot()
-    base = snap.parent(branch)
-    trunk = base == snap.main() and snap.remote(base)
-    base_sha = snap.remote(base) if trunk else snap.local(base)
+    base = snap.diff_base(branch)
+    base_sha = snap.sha.get(f"refs/remotes/{base}") or snap.local(base)
     tip = snap.local(branch)
     if not (base_sha and tip):
         return ""

@@ -363,9 +363,7 @@ def commits(req, u):
     # main would count merged work as the branch's own.
     branch = parse_qs(u.query).get("branch", [""])[0]
     snap = repostate.snapshot()
-    parent = snap.parent(branch)
-    if parent == snap.main() and ctx.run(["git", "rev-parse", "--verify", "-q", f"origin/{parent}"]).returncode == 0:
-        parent = f"origin/{parent}"
+    parent = snap.diff_base(branch)
     key = (ctx.repo_cwd(), branch, snap.branch_fingerprint(branch))
     hit = _COMMITS_CACHE.get(key)
     if hit is not None:
@@ -437,7 +435,8 @@ def commit_diff(req, u):
     if frm and frm != "main" and not re.fullmatch(r"[0-9a-f]{7,40}", frm):
         return req._send(400, json.dumps({"err": "from must be a commit sha or main"}))
     if frm == "main":
-        mb = ctx.run(["git", "merge-base", "main", sha])
+        # main means the trunk every other lit stretch starts from, origin's copy
+        mb = ctx.run(["git", "merge-base", repostate.snapshot().trunk(), sha])
         if mb.returncode != 0:
             return req._send(404, json.dumps({"err": f"{sha} shares no history with main"}))
         start = mb.stdout.strip()
