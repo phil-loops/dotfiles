@@ -246,13 +246,13 @@ struct SyncMotionDriver {
                 }
                 let queued = Syncing.truthy(q.body["queued"])
                 let behind = q.body["behind"].flatMap { Syncing.truthy($0) ? ($0.string ?? $0.number.map { String(Int($0)) }) : nil } ?? "the running restack"
-                ship.setStep(id, .rebase, .ok, queued ? "queued behind \(behind) — sync again once it lands" : "restacking \(project) in the background — sync again once it lands")
+                ship.setStep(id, .rebase, .ok, queued ? "queued behind \(behind)" : "restacking \(project)")
                 return await finish(id, via: via, .restacking)
             case .contract:
                 ship.setStep(id, .rebase, .fail, "already merged into origin/main — the restack walk drops it")
                 return await finish(id, via: via, .stopped)
             case .conflict:
-                ship.setStep(id, .rebase, .fail, "conflict — Claude is rebasing it in the branch's worktree (it never pushes); sync again once it lands")
+                ship.setStep(id, .rebase, .fail, "conflict — Claude is rebasing it in its worktree")
                 return await finish(id, via: via, .conflict)
             case .rebased(let note):
                 ship.setStep(id, .rebase, .ok, note)
@@ -284,10 +284,10 @@ struct SyncMotionDriver {
         }
 
         // the gates run detached on the shaped tip; the ship strip follows them from there
-        if branch(id)?.gates == .running { ship.setStep(id, .gates, .ok, "already running") }
+        if branch(id)?.gates == .running { ship.setStep(id, .gates, .ok) }
         else if app.registry.command("branch.gates.run") != nil {
             app.runner.dispatch("branch.gates.run", via: via, target: id)
-            ship.setStep(id, .gates, .ok, "started — \(app.registry.keyOf("review.push")) pushes once they're green")
+            ship.setStep(id, .gates, .ok)
         } else {
             ship.setStep(id, .gates, .skip, "no gates command installed (area A's branch.gates.run)")
         }

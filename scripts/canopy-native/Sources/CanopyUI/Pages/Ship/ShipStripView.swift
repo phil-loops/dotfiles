@@ -58,11 +58,10 @@ public struct ShipStripView: View {
         let red = rows.filter { $0.state == .red }
         let waived = rows.filter { $0.state == .waived }
         HStack(alignment: .firstTextBaseline, spacing: 10) {
+            // a motion has one face, the steps strip beneath: the line names only the step in progress
             if let doing = m.flatMap({ $0.phase == .running ? $0.steps.first { $0.state == .run } : nil }) {
                 Text("⟲ \(doing.label)…").foregroundStyle(theme.goldLeaf)
-            } else if let said = said(b, m) {
-                Text(said).foregroundStyle(m?.phase == .restacking ? theme.goldLeaf : theme.ember)
-            } else {
+            } else if m == nil {
                 let needs = Syncing.needs(b, facts: ship.factsOf(branchID), prep: ship.prepOf(branchID))
                 if !needs.isEmpty {
                     KeyButton(title: "⟲ sync", id: "review.sync", target: branchID)
@@ -81,7 +80,7 @@ public struct ShipStripView: View {
                     Text("gates ✗").foregroundStyle(theme.ember)
                         .explains("ship|gates", "a gate failed on this tree: , g shows its output, skip waives it for this code")
                     ForEach(red, id: \.name) { g in Text(g.name).foregroundStyle(theme.ember) }
-                    KeyButton(title: "skip", id: "review.gates.skip", target: branchID, quiet: true)
+                    KeyButton(title: "skip", id: "review.gates.skip", target: branchID)
                 } else if b.gates == .green && !waived.isEmpty {
                     let quick = GatesRun.quick(rows)
                     let others = waived.count - quick.count
@@ -116,12 +115,6 @@ public struct ShipStripView: View {
     }
 
     /// what the last sync left to say: a hand-off to Claude only until the tip moves
-    private func said(_ b: Branch, _ m: SyncMotion?) -> String? {
-        guard let m, m.phase != .running, m.phase != .done else { return nil }
-        if (m.phase == .conflict || m.phase == .claude) && b.tip != m.tip { return nil }
-        return m.phase.word
-    }
-
     /// the latest push or force this launch
     private func latestPush() -> (run: Run, forced: Bool)? {
         let p = app.runner.runOf("branch.push.confirm", branchID)
@@ -164,8 +157,6 @@ struct KeyButton: View {
     var gold = false
     var busy = false
     var failed = false
-    /// show the command's `:` name instead of a key when it has none
-    var quiet = false
 
     var body: some View {
         let keys = app.registry.command(id)?.keys ?? []
@@ -173,7 +164,8 @@ struct KeyButton: View {
             HStack(spacing: 5) {
                 Text(title)
                 if !busy {
-                    Text(keys.first.map(glyph) ?? (quiet ? ":\(id)" : ""))
+                    // a command with no key shows no hint: the title is the verb, and : reaches it by name
+                    Text(keys.first.map(glyph) ?? "")
                         .font(Theme.text(10.5)).foregroundStyle(theme.inkFaint)
                 }
             }
@@ -213,7 +205,7 @@ struct StepsStrip: View {
                     Text("\(stepIcon[s.state] ?? "·") \(s.label)").foregroundStyle(stepColor(s.state, theme))
                 }
                 Spacer(minLength: 0)
-                if motion.phase != .running && motion.phase != .dirt { KeyButton(title: "put away", id: "review.sync.dismiss", target: branchID, quiet: true) }
+                if motion.phase != .running && motion.phase != .dirt { KeyButton(title: "put away", id: "review.sync.dismiss", target: branchID) }
             }
             ForEach(motion.steps.filter { $0.note != nil }, id: \.id) { s in
                 (Text(s.label).bold() + Text(" \(s.note ?? "")")).foregroundStyle(s.state == .fail ? theme.ember : theme.inkDim)
@@ -227,10 +219,10 @@ struct StepsStrip: View {
                     }
                     if let row = dirt.rows.first(where: { $0.path == open }) { DirtDiff(row: row) }
                     HStack(spacing: 8) {
-                        KeyButton(title: "fold into the commit", id: "review.sync.fold", target: branchID, gold: true, quiet: true)
-                        KeyButton(title: "stash & continue", id: "review.sync.stash", target: branchID, quiet: true)
-                        KeyButton(title: "stop", id: "review.sync.stop", target: branchID, quiet: true)
-                        KeyButton(title: "show the next file's change", id: "review.sync.dirt.show", target: branchID, quiet: true)
+                        KeyButton(title: "fold into the commit", id: "review.sync.fold", target: branchID, gold: true)
+                        KeyButton(title: "stash & continue", id: "review.sync.stash", target: branchID)
+                        KeyButton(title: "stop", id: "review.sync.stop", target: branchID)
+                        KeyButton(title: "show the next file's change", id: "review.sync.dirt.show", target: branchID)
                     }
                 }
                 .padding(.leading, 8)
