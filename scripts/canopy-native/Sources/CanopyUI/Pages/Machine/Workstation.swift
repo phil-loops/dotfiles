@@ -15,6 +15,7 @@ final class Workstation {
     private(set) var servers: [Server] = []
     private(set) var substrate: Substrate?
     private(set) var footprint: Footprint?
+    private(set) var queue: Queue?
     private(set) var logFor: String?
     private(set) var logSrc: LogSource = .web
     private(set) var log: String?
@@ -45,6 +46,7 @@ final class Workstation {
     }
 
     func take(_ f: Footprint) { footprint = f }
+    func take(_ q: Queue) { queue = q }
 
     func take(log text: String) { log = text }
 
@@ -65,6 +67,7 @@ final class Workstation {
         guard let t = app?.transport else { return }
         Task { @MainActor [weak self] in
             if let f = try? await t.getJSON("/footprint", as: Footprint.self) { self?.footprint = f }
+            if let q = try? await t.getJSON("/queue", as: Queue.self) { self?.queue = q }
         }
     }
 

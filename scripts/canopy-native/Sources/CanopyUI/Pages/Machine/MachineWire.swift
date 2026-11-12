@@ -166,6 +166,53 @@ struct Footprint: Decodable, Equatable {
 
 struct PreviewLog: Decodable { var log: String? }
 
+/// GET /queue (srv/queue.py): the heavy-turn slots — who holds them, who waits, what each gate run
+/// is on, and heavy work running outside the queue.
+struct Queue: Decodable, Equatable {
+    struct Gate: Decodable, Equatable { var branch: String; var step: String }
+    struct Ticket: Decodable, Equatable {
+        var id: String?; var pid: Int?; var cls: String; var batch: Bool; var cmd: String; var cwd: String
+        var age: Int; var state: String; var cpu: Double; var rssMb: Double; var gate: Gate?; var idle: Bool
+    }
+    struct GateRun: Decodable, Equatable { var branch: String; var step: String; var age: Int }
+    struct Outside: Decodable, Equatable { var pid: Int; var name: String; var cpu: Double; var rssMb: Double; var age: Int; var command: String }
+    var slots: Int
+    var configured: Int
+    var mem: Int?
+    var floor: String?
+    var holders: [Ticket]
+    var waiters: [Ticket]
+    var gates: [GateRun]
+    var outside: [Outside]
+    var warnings: [String]
+}
+
+enum QueueText {
+    /// The one line atop the section: `queue · 1 of 2 slots (memory 24% < floor) · held by eval 19h · 14 waiting`.
+    static func headline(_ q: Queue) -> String {
+        var bits = ["\(q.holders.count) of \(q.slots) slot\(q.slots == 1 ? "" : "s")" + (q.floor != nil ? " (memory \(q.mem ?? 0)% headroom cut it from \(q.configured))" : "")]
+        if let h = q.holders.first { bits.append("held by \(who(h)) \(MachineText.ago(Double(h.age)))" + (q.holders.count > 1 ? " +\(q.holders.count - 1)" : "")) }
+        if !q.waiters.isEmpty { bits.append("\(q.waiters.count) waiting") }
+        if !q.outside.isEmpty { bits.append("\(q.outside.count) outside the queue") }
+        return bits.joined(separator: " · ")
+    }
+
+    /// A ticket's short name: its gate's branch, else its command's first word, else its class.
+    static func who(_ t: Queue.Ticket) -> String {
+        if let g = t.gate { return g.branch }
+        // the tool, not its interpreter: `python3 eval.py` is eval.py, `node /x/tsc` is tsc
+        let words = t.cmd.split(separator: " ").map { String($0.split(separator: "/").last ?? $0) }
+        let tool = words.first { !["python3", "python", "node", "npx", "zsh", "bash", "sh", "env"].contains($0) } ?? words.first
+        return tool.flatMap { $0.isEmpty ? nil : $0 } ?? t.cls
+    }
+
+    /// What a ticket's row says after its name: the gate's step, else class · cwd.
+    static func doing(_ t: Queue.Ticket) -> String {
+        if let g = t.gate { return g.step }
+        return t.cls + (t.cwd.isEmpty ? "" : " · " + MachineText.shortDir(t.cwd))
+    }
+}
+
 enum MachineText {
     private static func shortMig(_ m: String) -> String {
         var s = m

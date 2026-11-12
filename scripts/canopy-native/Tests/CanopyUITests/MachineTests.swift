@@ -27,6 +27,14 @@ import Testing
         #expect(empty.pg == nil, "the live server sends schema {} when the stack is down")
     }
 
+    @Test func theQueueDecodesAndItsHeadlineSaysWhatHoldsTheSlots() throws {
+        let q = try JSONDecoder().decode(Queue.self, from: Data(MachineFixtures.queue.utf8))
+        #expect(q.holders.first?.idle == true && q.waiters.first?.gate?.step == "1st in line" && q.outside.first?.name == "seed-gen")
+        #expect(QueueText.headline(q) == "1 of 1 slot (memory 24% headroom cut it from 2) · held by eval.py 19h 0m · 1 waiting · 1 outside the queue")
+        #expect(QueueText.who(q.waiters[0]) == "other" && QueueText.doing(q.waiters[0]) == "1st in line")
+        #expect(QueueText.doing(q.holders[0]) == "eval · eval")
+    }
+
     @Test func driftInWords() {
         let sc = SchemaDrift(pg: .init(head: "x", behind: 2, ahead: 1, latestBehind: "20261028120000_add_col.sql", latestAhead: "9_mine.sql"),
                              ch: .init(head: "y", behind: 1, latestBehind: "z"))
