@@ -224,7 +224,8 @@ final class SelfTestDriver {
             switchKey(workspace)
             check("⌘\(key) switches to \(workspace.name)", app.active == workspace, "front is \(app.active.name)")
         }
-        check("Forest, Review, Runs and API have no ⌘ number", [Workspace.forest, .review, .runs, .api].allSatisfy { $0.key.isEmpty })
+        check("Forest, Review and Runs have no ⌘ number", [Workspace.forest, .review, .runs].allSatisfy { $0.key.isEmpty })
+        check("API is ⌘6", Workspace.api.key == "6")
         let benchFile = (Bench.directory as NSString).appendingPathComponent("replay.json")
         try? FileManager.default.createDirectory(atPath: Bench.directory, withIntermediateDirectories: true)
         try? #"{"title": "Replay", "url": "http://127.0.0.1:9/", "start": "true", "repo": "loops", "project": "some-forest"}"#

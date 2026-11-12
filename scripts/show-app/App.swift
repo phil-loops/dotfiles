@@ -36,7 +36,7 @@ enum Workspace: String, CaseIterable {
     }
 
     /// The workspaces with a rail tile and a ⌘ number; the rest open only when a document routes to them.
-    static let onRail: [Workspace] = [.canopy, .learn, .machine, .inbox, .plans]
+    static let onRail: [Workspace] = [.canopy, .learn, .machine, .inbox, .plans, .api]
 
     var key: String { Workspace.onRail.firstIndex(of: self).map { "\($0 + 1)" } ?? "" }
 
