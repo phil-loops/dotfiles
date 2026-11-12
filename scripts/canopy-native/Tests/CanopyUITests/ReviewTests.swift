@@ -610,6 +610,21 @@ import Testing
         #expect(fv().mark(of: rows.first { $0.key == "R:2" }!) == .viewed && fv().mark(of: rows.first { $0.key == "R:3" }!) == .unread)
     }
 
+    /// Two callers asking for a file's declarations at once both get them: the second waits for the read
+    /// in flight instead of returning empty (which read as "the server can't be reached").
+    @Test func aSecondAskForAFilesUnitsWaitsForTheFirst() async throws {
+        let (a, p) = try await app()
+        let pg = ReviewPageState.of(a)
+        ShipStub.answer(p, "POST", "/loops/syntax/units",
+                        #"{"ok":true,"units":[{"line":1,"endLine":2,"name":"function one","scope":1}],"functions":[],"classes":[]}"#)
+        let units = ReviewUnits.of(a)
+        async let first = units.syntax(pg, path: "a.ts")
+        async let second = units.syntax(pg, path: "a.ts")
+        let (x, y) = await (first, second)
+        #expect(x != nil && y != nil)
+        #expect(ShipStub.posts(p).filter { $0.path == "/loops/syntax/units" }.count <= 1, "one read, shared")
+    }
+
     @Test func uAfterMPutsTheMarkAndTheCursorBack() async throws {
         let (a, p) = try await app()
         let pg = ReviewPageState.of(a)

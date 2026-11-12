@@ -143,7 +143,10 @@ final class ReviewUnits {
 
     private weak var app: AppModel?
     private var byKey: [String: FileSyntax] = [:]
-    private var asking: Set<String> = []
+    /// The read in flight per file: a second caller waits for it instead of getting nothing — before,
+    /// it returned at once and syntax() answered nil, as if the server couldn't be reached (and a test
+    /// raced the page's own read under load, 2026-11-12).
+    private var reading: [String: Task<Void, Never>] = [:]
 
     init(_ app: AppModel) { self.app = app }
 
@@ -168,9 +171,16 @@ final class ReviewUnits {
 
     func load(_ pg: ReviewPageState, path: String) async {
         let k = key(pg, path)
-        guard byKey[k] == nil, !asking.contains(k), let app, let t = pg.target, let fv = pg.fileOf(path), !fv.blocks.isEmpty else { return }
-        asking.insert(k)
-        defer { asking.remove(k) }
+        if byKey[k] != nil { return }
+        if let inFlight = reading[k] { return await inFlight.value }
+        guard let app, let t = pg.target, let fv = pg.fileOf(path), !fv.blocks.isEmpty else { return }
+        let task = Task { @MainActor [weak self] in _ = await self?.read(pg, path: path, k: k, app: app, t: t) }
+        reading[k] = task
+        await task.value
+        reading[k] = nil
+    }
+
+    private func read(_ pg: ReviewPageState, path: String, k: String, app: AppModel, t: ReviewPageState.Target) async {
         let r = await app.transport.ask(app.transport.atRepo(t.repo, "/syntax/units"), Ask(branch: t.name, path: path), as: SyntaxUnits.self)
         // a server that never answered is asked again next time; one that read no declarations is believed
         guard let r else { return }
