@@ -532,11 +532,20 @@ def _origin_web(branch):
     return compare_url(branch)
 
 
-def _open_pr_url(branch):
-    """URL of an OPEN PR whose head is this branch — checked origin then the fork
-    (Phil's PRs live on origin; the fork is the automation surface). Empty if none.
-    Called ONLY at push time (never in the preview poll), so its gh calls stay rare:
-    once a PR exists, a re-push jumps to it instead of the compare-and-create form."""
+def _open_pr_url(branch, first=False):
+    """URL of an OPEN PR whose head is this branch, empty if none. The server's PR map (sync's
+    open-PR read, the one source every page shows) answers first; a FIRST push can have no PR,
+    so it asks nothing. Only a re-push the map doesn't know asks gh — origin, then the fork.
+    Push confirm sat at 6 s p50 with up to two gh round trips after every push (2026-11-12)."""
+    if first:
+        return ""
+    try:
+        from . import outbox
+        pr = (outbox._pr_map()[0] or {}).get(branch)
+        if pr and pr.get("url") and (pr.get("state") or "OPEN") == "OPEN":
+            return pr["url"]
+    except Exception:
+        pass
     for remote in ("origin", "phil-loops"):
         try:
             url = ctx.run(["git", "remote", "get-url", remote]).stdout.strip()
@@ -890,7 +899,7 @@ def push_origin(req, raw):
         from . import reviewdesk
         reviewdesk.pushed()   # replies waiting on these commits go out on the next tick
     # An open PR already exists → jump to it; otherwise the compare-and-create form.
-    target = (_open_pr_url(branch) or v["web"]) if ok else v["web"]
+    target = (_open_pr_url(branch, first=not has_remote) or v["web"]) if ok else v["web"]
     # stay: the outbox's push, whose next step is its own open-PR link — no tab pops mid-sheet
     opened = _open_web(target) if ok and not d.get("stay") else False
     req._send(200, json.dumps({
