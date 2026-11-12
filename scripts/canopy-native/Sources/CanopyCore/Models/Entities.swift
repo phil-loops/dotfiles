@@ -94,6 +94,8 @@ public struct Branch: Entity {
     public var upstream: String
     public var upstreamBad: Bool
     public var diverged: Bool
+    /// stack-proof's mark ("proof"): an e2e/smoke branch that rides the forest and never merges
+    public var role: String?
     /// client-only: an optimistic write in flight ("pushing")
     public var pending: String?
 }

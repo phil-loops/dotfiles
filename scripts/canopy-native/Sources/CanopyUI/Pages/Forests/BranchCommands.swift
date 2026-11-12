@@ -18,6 +18,7 @@ enum BranchCommands {
     static func pushRoute(_ id: String?, _ app: AppModel) -> String? {
         let m = app.forestModel
         guard let id, let v = m.branchView(id) else { return nil }
+        if v.b.role == "proof" { return v.b.gates == .running ? "branch.gates.next" : v.b.gates == .green ? "branch.proof" : "branch.gates.run" }
         if v.b.diverged {
             guard let s = forceScope(id, app), v.b.pending == nil else { return nil }
             if s.eligible { return app.runner.armed == forceArm(id) ? "branch.force.confirm" : "branch.force.arm" }
@@ -60,6 +61,9 @@ enum BranchCommands {
         r.register(Command(
             id: "branch.push", title: "Push to origin", scope: .branch, verb: .push, label: "push",
             route: { id in pushRoute(id, app).map { RouteTo($0, target: id) } }))
+
+        r.register(Command(id: "branch.proof", title: "A proof branch never pushes — it rides the forest for its run", scope: .branch, quiet: true,
+                           local: { _, _ in throw Refusal("a proof branch never pushes or merges — it rides the forest for its e2e run; its gates are green") }))
 
         func gatesWrite(_ v: BranchView, skip: [String], quick: Bool = false) -> Write {
             let id = v.b.id, was = v.b.gates
