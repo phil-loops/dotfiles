@@ -195,7 +195,7 @@ def _jobs_sig(jobs):
 
 def _gates(snap, b, tree, jobs):
     green = snap.branch_key(b, "gates-green-tree")
-    if green and green == tree:
+    if push.verdict_stands(b, snap):
         return "green", []
     run = jobs.get(b)
     if run and run.meta.get("tree") == tree:

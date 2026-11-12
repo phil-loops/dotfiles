@@ -136,15 +136,16 @@ def _floor(snap, branch):
 
 
 def _gates(snap, branch, tree):
-    """green for THIS tree + the gate names (and squawk's verdict) from the run that proved it."""
-    green = snap.branch_key(branch, "gates-green-tree")
-    out = {"green": bool(green) and green == tree, "tree": tree, "names": []}
+    """green for this tree (or carried through a rebase that left the branch's own hunks
+    unchanged) + the gate names (and squawk's verdict) from the run that proved it."""
+    from . import push
+    out = {"green": bool(push.verdict_stands(branch, snap)), "tree": tree, "names": []}
     if not out["green"]:
         return out
     try:
-        from . import push
         run = push.gate_run(branch)
-        if run and run.meta.get("tree") == tree:
+        # the run that proved it ran on the recorded tree — the tip's own, or the one carried from
+        if run and run.meta.get("tree") == snap.branch_key(branch, "gates-green-tree"):
             res = push.gate_result(run)
             gates = (res or {}).get("gates") or []
             out["names"] = [g.get("name", "") for g in gates if g.get("name") and g.get("name") != "env"]

@@ -819,9 +819,8 @@ def force_scope(branch, upstream):
     inspection time; the push passes it to --force-with-lease so git itself refuses if
     origin moves after Phil read this sheet."""
     lease = ctx.run(["git", "rev-parse", f"refs/remotes/{upstream}"]).stdout.strip()
-    tip_tree = ctx.run(["git", "rev-parse", f"{branch}^{{tree}}"]).stdout.strip()
-    from . import repostate
-    gates_green = bool(tip_tree) and tip_tree == repostate.snapshot().branch_key(branch, "gates-green-tree")
+    from . import push
+    gates_green = bool(push.verdict_stands(branch))
     pr = None
     try:
         url = ctx.run(["git", "remote", "get-url", "origin"]).stdout.strip()

@@ -13,7 +13,7 @@ import re
 import shlex
 import sys
 
-KEYS = re.compile(r"(^|\.)(stack-)?(gates-green-tree|gates-skipped|gates-waived|gates-waived-tree|gates-waived-by|"
+KEYS = re.compile(r"(^|\.)(stack-)?(gates-green-tree|gates-green-delta|gates-skipped|gates-waived|gates-waived-tree|gates-waived-by|"
                   r"review-flag|review-flags-tree|review-depth|review-run)$", re.I)
 WRITE_FLAGS = {"--add", "--unset", "--unset-all", "--replace-all", "--remove-section", "--rename-section", "--edit", "-e"}
 READ_FLAGS = {"--get", "--get-all", "--get-regexp", "--get-urlmatch", "--list", "-l"}

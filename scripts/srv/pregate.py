@@ -53,7 +53,7 @@ def _candidate():
         if b not in current or not snap.exists(b) or _archived(snap, b):
             continue
         tree = snap.tree(b)
-        if not tree or push._green_tree(b) == tree:
+        if not tree or push.verdict_stands(b, snap):
             continue
         run = push.gate_run(b)
         if run and run.meta.get("tree") == tree:
