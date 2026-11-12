@@ -730,7 +730,7 @@ def previews(req):
                         # dual-read by hand: this reads ANOTHER worktree, so the server's
                         # snapshot (pinned to the request's repo) is the wrong source
                         pv["swapTo"] = "main"
-                        for key in ("branch.%s.stack-parent" % br, "stack-branch.%s.parent" % br):
+                        for key in ("branch.%s.stack-parent" % br,):
                             pr = subprocess.run(["git", "-C", main_wt, "config", key],
                                                 capture_output=True, text=True, timeout=4)
                             if pr.stdout.strip():

@@ -963,8 +963,7 @@ def prep_push(req, raw):
             # The tree is unchanged, so a green gates verdict rides along.
             tip = _tip(branch)
             origin_tip = ctx.run(["git", "rev-parse", f"origin/{branch}"]).stdout.strip()
-            sp = (ctx.run(["git", "config", f"branch.{branch}.stack-parent"]).stdout.strip()
-                  or ctx.run(["git", "config", f"stack-branch.{branch}.parent"]).stdout.strip())
+            sp = ctx.run(["git", "config", f"branch.{branch}.stack-parent"]).stdout.strip()
             base_ref = (f"origin/{sp}" if sp and sp not in ("main", "master") and ctx.run(
                 ["git", "rev-parse", "--verify", "-q", f"refs/remotes/origin/{sp}"]).returncode == 0
                 else "origin/main")

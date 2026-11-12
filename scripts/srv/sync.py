@@ -565,10 +565,6 @@ def _eject(branch):
 
 def _children_of(branch):
     parents = {}
-    out = ctx.run(["git", "config", "--get-regexp", r"^stack-branch\..*\.parent$"]).stdout
-    for line in out.splitlines():
-        key, _, val = line.partition(" ")
-        parents[key[len("stack-branch."):-len(".parent")]] = val.strip()
     out = ctx.run(["git", "config", "--get-regexp", r"^branch\..*\.stack-parent$"]).stdout
     for line in out.splitlines():
         key, _, val = line.partition(" ")

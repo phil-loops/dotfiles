@@ -1,75 +1,46 @@
-# srv/stackcfg.py — the ONE place the server writes per-branch stack config, and the reason it
-# exists is the namespace migration: `stack-branch.<b>.<key>` (legacy) → `branch.<b>.stack-<key>`
-# (target, so git GCs it when the branch is deleted and carries it on rename).
+# srv/stackcfg.py — the ONE place the server writes per-branch stack config:
+# `branch.<b>.stack-<key>`, so git GCs it when the branch is deleted and carries it on rename.
 #
-# Phase 2 of that migration was written as "sweep every key and flip every writer in one
-# window", which across ~100 write sites in files several sessions hold is a coordination
-# problem with no good moment. Dual-writing removes the window: every writer emits BOTH
-# spellings, readers already prefer the target, and the sweep then becomes idempotent and
-# runnable at any time. What made the ordering matter is the failure mode of getting it wrong —
-# after a sweep, a writer still emitting only the legacy spelling is SILENTLY SHADOWED, because
-# readers take the target. A re-parent would report success and do nothing.
-#
-# So: route writes through here, and dropping the legacy spelling later is one edit in one file
-# rather than a hundred.
-#
-# That edit is made (2026-11-09): writes emit the target only and clear the key's legacy copy.
-# A dual-written legacy copy outlived `branch -D`, so a branch recreated under the same name read
-# the dead branch's review run back through the fallback and refused to record a fresh verdict.
+# This is where the namespace migration from `stack-branch.<b>.<key>` ended (design-stack-config-
+# namespace.md): writers went target-only on 2026-11-09, every repo was swept, and on 2026-11-12
+# the readers dropped their fallback arm. One spelling, read and written here and in
+# RepoState.branch_key.
 from . import ctx, repostate
 
 
-def _pair(branch, key):
-    """(target, legacy) — target first, matching the read precedence in RepoState.branch_key."""
-    return f"branch.{branch}.stack-{key}", f"stack-branch.{branch}.{key}"
+def _key(branch, key):
+    return f"branch.{branch}.stack-{key}"
 
 
 def set_key(branch, key, value):
-    target, legacy = _pair(branch, key)
-    ctx.run(["git", "config", target, str(value)])
-    ctx.run(["git", "config", "--unset-all", legacy])
+    ctx.run(["git", "config", _key(branch, key), str(value)])
     repostate.invalidate()
 
 
 def add_key(branch, key, value):
-    target, legacy = _pair(branch, key)
-    _absorb_legacy(target, legacy)
-    ctx.run(["git", "config", "--add", target, str(value)])
+    ctx.run(["git", "config", "--add", _key(branch, key), str(value)])
     repostate.invalidate()
 
 
-def _absorb_legacy(target, legacy):
-    """Before a multivar append, fold a legacy-only list into the target so the append doesn't
-    hide the values readers were getting from the fallback, then drop the legacy copy."""
-    if not ctx.run(["git", "config", "--get-all", target]).stdout.strip():
-        for v in ctx.run(["git", "config", "--get-all", legacy]).stdout.splitlines():
-            ctx.run(["git", "config", "--add", target, v])
-    ctx.run(["git", "config", "--unset-all", legacy])
-
-
 def unset_key(branch, key, value_regex=None):
-    for k in _pair(branch, key):
-        ctx.run(["git", "config", "--unset", k] + ([value_regex] if value_regex else []))
+    ctx.run(["git", "config", "--unset", _key(branch, key)] + ([value_regex] if value_regex else []))
     repostate.invalidate()
 
 
 def unset_all(branch, key):
-    """Drop every value of a multivar, both spellings — `--unset` refuses when more than one
-    value is set, so a rewritten list needs this before it is re-added."""
-    for k in _pair(branch, key):
-        ctx.run(["git", "config", "--unset-all", k])
+    """Drop every value of a multivar — `--unset` refuses when more than one value is set, so a
+    rewritten list needs this before it is re-added."""
+    ctx.run(["git", "config", "--unset-all", _key(branch, key)])
     repostate.invalidate()
 
 
 def remove_stack_section(branch):
-    """Every stack key for a branch, both spellings. The target side is unset KEY BY KEY on
-    purpose: `--remove-section branch.<b>` would take git's own branch.<b>.remote / .merge /
-    .description with it. (After a `branch -D` git has already GC'd the target keys — which is
-    the whole point of the migration — so this is usually the legacy section alone.)"""
+    """Every stack key for a branch, unset KEY BY KEY on purpose: `--remove-section branch.<b>`
+    would take git's own branch.<b>.remote / .merge / .description with it. (After a `branch -D`
+    git has already GC'd these — the whole point of the namespace.)"""
     out = ctx.run(["git", "config", "--get-regexp", rf"^branch\.{branch}\.stack-"]).stdout
     for ln in out.splitlines():
         k = ln.split(" ", 1)[0]
         if k:
             ctx.run(["git", "config", "--unset-all", k])
-    ctx.run(["git", "config", "--remove-section", f"stack-branch.{branch}"])
     repostate.invalidate()

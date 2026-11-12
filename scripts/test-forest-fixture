@@ -126,13 +126,12 @@ def build():
     git(repo, "checkout", "-q", "main")
     for br, parent in (("base", "main"), ("child", "base"), ("pub", "main"), ("two", "main"),
                        ("pubtwo", "main"), ("wip", "main")):
-        git(repo, "config", f"stack-branch.{br}.parent", parent)
-        git(repo, "config", f"stack-branch.{br}.project", "fixture")
+        git(repo, "config", f"branch.{br}.stack-parent", parent)
+        git(repo, "config", f"branch.{br}.stack-project", "fixture")
         git(repo, "config", f"branch.{br}.description", f"{br}: one line of purpose")
         git(repo, "config", "--add", "stack-project.fixture.branch", br)
-    # a branch carrying ONLY the legacy namespace — the migration's canary
-    git(repo, "checkout", "-q", "-b", "legacy", b)
-    commit(repo, "legacy-namespace branch")
+    git(repo, "checkout", "-q", "-b", "legacy", b)   # a member of no forest
+    commit(repo, "forest-less branch")
     git(repo, "checkout", "-q", "main")
     git(repo, "config", "branch.legacy.stack-parent", "base")
     return root, repo, {"a": a, "b": b, "c": c, "d": d, "e": e, "f": f, "g": g, "h": h, "i": i, "w": w}
@@ -174,21 +173,19 @@ def run_checks(repo, shas, only):
     if want("repostate"):
         print("repostate")
         snap = repostate.snapshot()
-        check("repostate: parent from stack-branch", snap.parent("child") == "base", snap.parent("child"))
+        check("repostate: parent from branch.<b>.stack-parent", snap.parent("child") == "base", snap.parent("child"))
         check("repostate: parent falls back to main", snap.parent("base") == "main", snap.parent("base"))
         check("repostate: unknown branch → main", snap.parent("nope") == "main", snap.parent("nope"))
-        check("repostate: pre-migration stack-branch.<b>.parent still resolves",
-              snap.parent("legacy") == "base", snap.parent("legacy"))
-        # mid-sweep a key exists in BOTH namespaces; the target must win or a reader answers
-        # with the value the sweep superseded
-        git(repo, "config", "branch.child.stack-parent", "main")
+        check("repostate: a branch outside the project list still resolves its parent", snap.parent("legacy") == "base", snap.parent("legacy"))
+        # the old stack-branch.<b>.<key> spelling is not read any more (every repo swept 2026-11-12)
+        git(repo, "config", "stack-branch.child.parent", "elsewhere")
         repostate.invalidate()
-        check("repostate: target namespace wins over the old spelling",
-              repostate.snapshot().parent("child") == "main", repostate.snapshot().parent("child"))
-        git(repo, "config", "--unset", "branch.child.stack-parent")
+        check("repostate: the pre-migration spelling is not read",
+              repostate.snapshot().parent("child") == "base", repostate.snapshot().parent("child"))
+        git(repo, "config", "--unset", "stack-branch.child.parent")
         git(repo, "config", "branch.base.stack-gates-green-tree", "deadbeef")
         repostate.invalidate()
-        check("repostate: gates verdict reads the target namespace first",
+        check("repostate: gates verdict reads branch.<b>.stack-gates-green-tree",
               push._green_tree("base") == "deadbeef", push._green_tree("base"))
         git(repo, "config", "--unset", "branch.base.stack-gates-green-tree")
         repostate.invalidate()
@@ -204,11 +201,11 @@ def run_checks(repo, shas, only):
         repostate.invalidate()
         check("repostate: fingerprint moves on a ref change", repostate.snapshot().fingerprint != fp)
         fp2 = repostate.snapshot().fingerprint
-        git(repo, "config", "stack-branch.base.role", "proof")
+        git(repo, "config", "branch.base.stack-role", "proof")
         repostate.invalidate()
         check("repostate: fingerprint moves on a config write", repostate.snapshot().fingerprint != fp2)
         git(repo, "branch", "-D", "fp-probe")
-        git(repo, "config", "--unset", "stack-branch.base.role")
+        git(repo, "config", "--unset", "branch.base.stack-role")
         repostate.invalidate()
 
     if want("asof"):
@@ -297,8 +294,6 @@ def run_checks(repo, shas, only):
         check("forestwords: …and the forest's own keys, focus included",
               snap.get("stack-project.renamed.focus") == "3" and len(snap.get_all("stack-project.renamed.branch")) == 6
               and not snap.get_all("stack-project.fixture.branch"))
-        check("forestwords: the legacy spelling follows too",
-              git(repo, "config", "stack-branch.base.project") == "renamed")
         check("forestwords: the stream shows the forest under its new name only",
               proj("renamed") is not None and proj("fixture") is None)
         post(review.project_rename, {"project": "renamed", "to": "fixture"})
@@ -306,66 +301,43 @@ def run_checks(repo, shas, only):
         repostate.invalidate()
 
     if want("namespace"):
-        print("namespace dual-read")
+        print("namespace — one spelling, branch.<b>.stack-<key>")
         snap = repostate.snapshot()
         roots = snap.branch_keys("parent")
-        check("namespace: the enumerator sees every branch in the old spelling",
-              {"base", "pub", "two", "wip", "child"} <= set(roots), str(sorted(roots)))
-        git(repo, "config", "branch.moved.stack-parent", "main")
-        git(repo, "branch", "moved", shas["b"])
-        repostate.invalidate()
-        roots = repostate.snapshot().branch_keys("parent")
-        check("namespace: the enumerator sees a swept branch too", roots.get("moved") == "main", str(roots.get("moved")))
+        check("namespace: the enumerator sees every branch", {"base", "pub", "two", "wip", "child"} <= set(roots), str(sorted(roots)))
         # a branch name with a dot must survive affix-stripping, never a split on "."
         git(repo, "branch", "wt-1.2", shas["b"])
-        git(repo, "config", "stack-branch.wt-1.2.parent", "base")
+        git(repo, "config", "branch.wt-1.2.stack-parent", "base")
         repostate.invalidate()
         check("namespace: a dotted branch name survives the enumerator",
               repostate.snapshot().branch_keys("parent").get("wt-1.2") == "base",
               str(repostate.snapshot().branch_keys("parent").get("wt-1.2")))
-        git(repo, "config", "--add", "stack-branch.base.requires", "dep-one")
-        git(repo, "config", "--add", "stack-branch.base.requires", "dep-two")
+        git(repo, "config", "--add", "branch.base.stack-requires", "dep-one")
+        git(repo, "config", "--add", "branch.base.stack-requires", "dep-two")
         repostate.invalidate()
-        check("namespace: multivar reads every value from the old spelling",
+        check("namespace: multivar reads every value",
               repostate.snapshot().branch_key_all("base", "requires") == ["dep-one", "dep-two"],
               str(repostate.snapshot().branch_key_all("base", "requires")))
-        git(repo, "config", "--add", "branch.base.stack-requires", "dep-swept")
+        git(repo, "config", "--add", "stack-branch.base.requires", "dep-legacy")
         repostate.invalidate()
-        check("namespace: multivar takes the target namespace WHOLE, never concatenated",
-              repostate.snapshot().branch_key_all("base", "requires") == ["dep-swept"],
+        check("namespace: a stray legacy value is not read",
+              repostate.snapshot().branch_key_all("base", "requires") == ["dep-one", "dep-two"],
               str(repostate.snapshot().branch_key_all("base", "requires")))
-        # the whole reason for the migration: git GCs branch.<b>.* on delete, and leaves
-        # stack-branch.<b>.* behind as rot for stack-doctor to sweep
-        git(repo, "branch", "-D", "moved", "wt-1.2")
-        check("namespace: deleting a branch GCs its target-namespace keys",
-              git(repo, "config", "--get", "branch.moved.stack-parent", check_rc=False) == "")
-        check("namespace: the old spelling outlives the branch",
-              git(repo, "config", "--get", "stack-branch.wt-1.2.parent", check_rc=False) == "base")
-        git(repo, "config", "--remove-section", "stack-branch.wt-1.2")
-        git(repo, "config", "--remove-section", "branch.base")
         git(repo, "config", "--unset-all", "stack-branch.base.requires")
+        # the whole reason for the namespace: git GCs branch.<b>.* on delete
+        git(repo, "branch", "-D", "wt-1.2")
+        check("namespace: deleting a branch GCs its keys",
+              git(repo, "config", "--get", "branch.wt-1.2.stack-parent", check_rc=False) == "")
+        git(repo, "config", "--remove-section", "branch.base")
         from srv import stackcfg
         git(repo, "branch", "recreated", shas["b"])
         stackcfg.set_key("recreated", "review-run", "run-1")
-        check("namespace: a server write leaves no legacy copy",
-              git(repo, "config", "--get", "stack-branch.recreated.review-run", check_rc=False) == "")
         git(repo, "branch", "-D", "recreated")
         git(repo, "branch", "recreated", shas["b"])
         repostate.invalidate()
         check("namespace: a recreated branch inherits nothing from its deleted namesake",
               repostate.snapshot().branch_key("recreated", "review-run") == "",
               repostate.snapshot().branch_key("recreated", "review-run"))
-        git(repo, "config", "stack-branch.recreated.parent", "stale")
-        stackcfg.set_key("recreated", "parent", "base")
-        check("namespace: a set clears that key's pre-existing legacy copy",
-              git(repo, "config", "--get", "stack-branch.recreated.parent", check_rc=False) == "")
-        git(repo, "config", "--add", "stack-branch.recreated.requires", "dep-one")
-        stackcfg.add_key("recreated", "requires", "dep-two")
-        repostate.invalidate()
-        check("namespace: an append keeps the legacy-only values readers were seeing",
-              repostate.snapshot().branch_key_all("recreated", "requires") == ["dep-one", "dep-two"]
-              and git(repo, "config", "--get-all", "stack-branch.recreated.requires", check_rc=False) == "",
-              str(repostate.snapshot().branch_key_all("recreated", "requires")))
         git(repo, "branch", "-D", "recreated")
         git(repo, "config", "branch.base.description", "base: one line of purpose")
         repostate.invalidate()
@@ -380,8 +352,7 @@ def run_checks(repo, shas, only):
         check("dualwrite: set writes no legacy spelling",
               cfg("stack-branch.base.role") == "", cfg("stack-branch.base.role"))
         stackcfg.unset_key("base", "role")
-        check("dualwrite: unset clears both",
-              cfg("branch.base.stack-role") == "" and cfg("stack-branch.base.role") == "")
+        check("dualwrite: unset clears it", cfg("branch.base.stack-role") == "")
         stackcfg.add_key("base", "requires", "dep-a")
         stackcfg.add_key("base", "requires", "dep-b")
         both = (git(repo, "config", "--get-all", "branch.base.stack-requires", check_rc=False).split(),
@@ -396,30 +367,10 @@ def run_checks(repo, shas, only):
         desc_before = cfg("branch.base.description")
         git(repo, "config", "branch.base.remote", "origin")
         stackcfg.remove_stack_section("base")
-        check("dualwrite: removing the stack section clears both namespaces' stack keys",
-              cfg("branch.base.stack-requires") == "" and cfg("stack-branch.base.requires") == "")
+        check("dualwrite: removing the stack section clears the stack keys", cfg("branch.base.stack-requires") == "")
         check("dualwrite: and leaves git's OWN branch keys intact",
               cfg("branch.base.description") == desc_before and cfg("branch.base.remote") == "origin",
               f'{cfg("branch.base.description")!r} / {cfg("branch.base.remote")!r}')
-
-        # the shadow backstop: disagreeing namespaces read the target and say so
-        git(repo, "config", "branch.base.stack-parent", "main")
-        git(repo, "config", "stack-branch.base.parent", "stale-parent")
-        repostate.invalidate()
-        logged = []
-        real_log = ctx.log
-        ctx.log = lambda line: logged.append(line)
-        try:
-            answer = repostate.snapshot().parent("base")
-        finally:
-            ctx.log = real_log
-        check("dualwrite: a shadowed legacy key still reads the target", answer == "main", answer)
-        check("dualwrite: and the shadowing is logged, naming the branch and key",
-              any("base" in l and "parent" in l and "stale-parent" in l for l in logged), str(logged))
-        git(repo, "config", "--unset", "stack-branch.base.parent")
-        git(repo, "config", "--unset", "branch.base.stack-parent")
-        git(repo, "config", "branch.base.description", "base: one line of purpose")
-        repostate.invalidate()
 
         # the ratchet: a file already converted must never grow a legacy-only write again
         import re as _re
@@ -475,20 +426,15 @@ def run_checks(repo, shas, only):
         # read vs write, textually: a read closes the key and the arg list — f"stack-branch.…"])
         # — while a write follows the key with a comma and a value. --unset / --add /
         # --remove-section are writes whatever follows.
-        KEY_THEN_VALUE = _re.compile(r'stack-branch\.[^"\']*["\']\s*,')
-        MUTATOR = _re.compile(r'--unset|--add|--remove-section')
+        # the server neither writes nor READS the old spelling any more (2026-11-12): a mention
+        # outside a comment is a fallback arm growing back
         offenders = []
         for f in sorted(pathlib.Path(HERE).glob("srv/*.py")):
-            if f.name == "stackcfg.py":
-                continue
             for i, ln in enumerate(f.read_text().splitlines(), 1):
-                if "stack-branch." not in ln or "config" not in ln:
-                    continue
-                if _re.search(r'--get\b|get-regexp', ln):
-                    continue
-                if MUTATOR.search(ln) or KEY_THEN_VALUE.search(ln):
+                code = ln.split("#", 1)[0]
+                if "stack-branch." in code and ("config" in code or "stack-branch\\." in code):
                     offenders.append(f"{f.name}:{i}")
-        check("dualwrite: no legacy-only write left in srv/ (the ratchet)",
+        check("dualwrite: the old spelling is gone from srv/ (the ratchet)",
               not offenders, str(offenders[:4]))
 
 
@@ -500,7 +446,7 @@ def run_checks(repo, shas, only):
         check("verdict: unpushed branch has no origin copy", v["originExists"] is False)
         check("verdict: gates ward red with no recorded verdict", not ward(v, "gates")["ok"])
         check("verdict: not pushable while a hard ward is red", v["ok"] is False, str(v["reasons"]))
-        git(repo, "config", "stack-branch.base.gates-green-tree", git(repo, "rev-parse", "base^{tree}"))
+        git(repo, "config", "branch.base.stack-gates-green-tree", git(repo, "rev-parse", "base^{tree}"))
         repostate.invalidate()
         v = push._origin_verdict("base")
         check("verdict: recorded green tree opens the door", v["ok"] is True, str(v["reasons"]))
@@ -537,7 +483,7 @@ def run_checks(repo, shas, only):
         set_prs(sync, repo, ["pub"])
         check("chain: stacked child targets its parent's open PR",
               push._pr_base("legacy") == "main", push._pr_base("legacy"))
-        git(repo, "config", "stack-branch.stacked-on-pub.parent", "pub")
+        git(repo, "config", "branch.stacked-on-pub.stack-parent", "pub")
         git(repo, "branch", "stacked-on-pub", "pub")
         from srv import repostate as rs
         rs.invalidate()
@@ -548,8 +494,7 @@ def run_checks(repo, shas, only):
         rs.invalidate()
         check("chain: a child missing its parent's ORIGIN copy is flagged",
               push._chain_break("stacked-on-pub") == "pub", push._chain_break("stacked-on-pub"))
-        git(repo, "branch", "-D", "stacked-on-pub")
-        git(repo, "config", "--remove-section", "stack-branch.stacked-on-pub")
+        git(repo, "branch", "-D", "stacked-on-pub")   # git GCs branch.stacked-on-pub.* with it
         rs.invalidate()
 
     if want("sync"):

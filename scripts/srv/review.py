@@ -44,7 +44,6 @@ _MODEL_CFG = re.compile(
     r"^(stack\.main-branch="
     r"|branch\.[^=]+\.description="
     r"|branch\.[^=]+\.stack-(parent|requires|project|ticket)="
-    r"|stack-branch\.[^=]+\.(parent|requires|project|ticket)="
     r"|stack-project\.[^=]+\.(branch|archived|interest|ticket|focus)=)")
 
 
@@ -104,9 +103,6 @@ def _known_forest_name(name):
     if ctx.run(["git", "config", "--get-all", f"stack-project.{name}.branch"]).stdout.strip():
         return True
     tags = {}
-    for line in ctx.run(["git", "config", "--get-regexp", r"^stack-branch\..*\.project$"]).stdout.splitlines():
-        key, _, val = line.partition(" ")
-        tags[key[len("stack-branch."):-len(".project")]] = val.strip()
     for line in ctx.run(["git", "config", "--get-regexp", r"^branch\..*\.stack-project$"]).stdout.splitlines():
         key, _, val = line.partition(" ")
         tags[key[len("branch."):-len(".stack-project")]] = val.strip()
@@ -290,8 +286,7 @@ def _is_convergence(branch, stdout):
             return False  # has its own contribution — an ordinary node, not a convergence
     except ValueError:
         return False
-    return bool(ctx.run(["git", "config", "--get-all", f"branch.{branch}.stack-requires"]).stdout.strip()
-                or ctx.run(["git", "config", "--get-all", f"stack-branch.{branch}.requires"]).stdout.strip())
+    return bool(ctx.run(["git", "config", "--get-all", f"branch.{branch}.stack-requires"]).stdout.strip())
 
 
 def node(req, u):
@@ -588,7 +583,7 @@ def project_rename(req, raw):
         return req._send(200, json.dumps({"ok": False, "err": "a forest name is lowercase letters, digits and dashes"}))
     if to == proj:
         return req._send(200, json.dumps({"ok": True, "project": proj}))
-    keys = _focus_git(repo, "config", "--get-regexp", r"^(branch\..*\.stack-project|stack-branch\..*\.project)$").stdout.splitlines()
+    keys = _focus_git(repo, "config", "--get-regexp", r"^branch\..*\.stack-project$").stdout.splitlines()
     links = [ln.split(" ", 1) for ln in keys if " " in ln]
     if any(v == to for _, v in links) or _focus_git(repo, "config", "--get-regexp", rf"^stack-project\.{re.escape(to)}\.").stdout.strip():
         return req._send(200, json.dumps({"ok": False, "err": f"{to} is already a forest"}))

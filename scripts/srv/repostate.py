@@ -15,18 +15,6 @@ import time
 from . import ctx, watch
 
 _LOCK = threading.Lock()
-_SHADOW_SEEN = set()
-
-
-def _shadowed(branch, key, target, legacy):
-    # once per (branch, key, pair) — a hot read path must not spam the log
-    sig = (branch, key, target, legacy)
-    if sig in _SHADOW_SEEN:
-        return
-    _SHADOW_SEEN.add(sig)
-    ctx.log(f"stack-config: {branch}.{key} disagrees across namespaces — reading "
-            f"branch.{branch}.stack-{key}={target!r}, ignoring stack-branch.{branch}.{key}={legacy!r}. "
-            "Something wrote the old spelling only; route it through srv/stackcfg.py.")
 _SNAP = {}   # repo cwd -> RepoState
 # A snapshot serves as long as the stat watcher's generation hasn't moved; the spawned
 # fingerprint re-check is only the safety net for a change the stat walk can't see.
@@ -72,42 +60,24 @@ class RepoState:
         return list(self.cfg.get(key, []))
 
     def branch_key(self, branch, key, default=""):
-        """branch.<b>.stack-<key> — the TARGET namespace, so git GCs it when the branch is
-        deleted and carries it on rename — falling back to the pre-migration stack-branch.<b>.<key>
-        spelling. The target wins, matching every other reader in the tree: during the keystone
-        sweep a key exists in both, and a reader that preferred the old copy would answer with
-        the value the sweep just superseded. This is the ONE place both are read; the migration
-        ends by deleting the fallback arm here."""
-        target = self.get(f"branch.{branch}.stack-{key}")
-        legacy = self.get(f"stack-branch.{branch}.{key}")
-        if target and legacy and target != legacy:
-            # The migration's one silent failure mode, made loud: a writer still emitting only
-            # the legacy spelling after the sweep is SHADOWED — readers take the target, so the
-            # write reports success and does nothing (a re-parent that no-ops). Every read comes
-            # through here, so this is the cheapest possible place to notice it.
-            _shadowed(branch, key, target, legacy)
-        return target or legacy or default
+        """branch.<b>.stack-<key> — git GCs it when the branch is deleted and carries it on
+        rename. The pre-migration stack-branch.<b>.<key> spelling is no longer read: every repo
+        was swept (stack-config-move --check clean, 2026-11-12) and every writer emits this one."""
+        return self.get(f"branch.{branch}.stack-{key}") or default
 
     def branch_key_all(self, branch, key):
-        """The multivar form of branch_key: the target namespace's values if it has any, else
-        the pre-migration spelling's. Never concatenated — a half-swept key would double
-        every requires edge."""
-        return (self.get_all(f"branch.{branch}.stack-{key}")
-                or self.get_all(f"stack-branch.{branch}.{key}"))
+        """The multivar form of branch_key."""
+        return self.get_all(f"branch.{branch}.stack-{key}")
 
     def branch_keys(self, key):
-        """{branch: value} for one suffix across every branch, both namespaces, target winning.
-        Branch names contain dots (viewer/map-shows-gates, wt-1.2), so affixes are stripped —
-        never split on "." — which is also why this lives here instead of in each enumerator."""
+        """{branch: value} for one suffix across every branch. Branch names contain dots
+        (viewer/map-shows-gates, wt-1.2), so affixes are stripped — never split on "." — which
+        is also why this lives here instead of in each enumerator."""
         out = {}
-        old_pre, old_suf = "stack-branch.", f".{key}"
-        new_pre, new_suf = "branch.", f".stack-{key}"
+        pre, suf = "branch.", f".stack-{key}"
         for k in self.cfg:
-            if k.startswith(old_pre) and k.endswith(old_suf):
-                out.setdefault(k[len(old_pre):-len(old_suf)], self.get(k))
-        for k in self.cfg:   # second pass: the target namespace overwrites
-            if k.startswith(new_pre) and k.endswith(new_suf):
-                out[k[len(new_pre):-len(new_suf)]] = self.get(k)
+            if k.startswith(pre) and k.endswith(suf):
+                out[k[len(pre):-len(suf)]] = self.get(k)
         return {b: v for b, v in out.items() if v}
 
     def parent(self, branch):
@@ -150,8 +120,7 @@ class RepoState:
         sp = self.parent(branch)
         parts = [self.local(branch), self.remote(branch), self.local(sp), self.remote(sp), self.remote(self.main()),
                  self.track(branch)[1], str(self.published(branch))]
-        parts += [f"{k}={v}" for k, vs in sorted(self.cfg.items()) if k.startswith((f"stack-branch.{branch}.", f"branch.{branch}."))
-                  for v in vs]
+        parts += [f"{k}={v}" for k, vs in sorted(self.cfg.items()) if k.startswith(f"branch.{branch}.") for v in vs]
         parts += [self.sha.get(r, "") for r in sorted(self.sha) if r.startswith("refs/remotes/") and r.endswith(f"/{branch}")]
         return hashlib.sha1("\x1f".join(parts).encode()).hexdigest()
 
@@ -170,8 +139,7 @@ class RepoState:
         parts = [main, self.ref_any(main), *extra]
         for b in branches:
             parts += [b, self.ref_any(b)]
-            parts += [f"{k}={v}" for k, vs in sorted(self.cfg.items())
-                      if k.startswith((f"stack-branch.{b}.", f"branch.{b}.")) for v in vs]
+            parts += [f"{k}={v}" for k, vs in sorted(self.cfg.items()) if k.startswith(f"branch.{b}.") for v in vs]
         return hashlib.sha1(repr(parts).encode()).hexdigest()
 
     def remote_tips(self, remote="origin"):

@@ -59,8 +59,7 @@ def _members(project):
 
 
 def _parent(branch):
-    return _git("config", f"branch.{branch}.stack-parent").stdout.strip() \
-        or _git("config", f"stack-branch.{branch}.parent").stdout.strip() or "main"
+    return _git("config", f"branch.{branch}.stack-parent").stdout.strip() or "main"
 
 
 def _behind(branches):

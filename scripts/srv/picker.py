@@ -10,8 +10,7 @@ from . import ctx
 
 
 def _project_of(branch):
-    p = (ctx.run(["git", "config", f"branch.{branch}.stack-project"]).stdout.strip()
-         or ctx.run(["git", "config", f"stack-branch.{branch}.project"]).stdout.strip())
+    p = ctx.run(["git", "config", f"branch.{branch}.stack-project"]).stdout.strip()
     if p:
         return p
     for line in ctx.run(["git", "config", "--get-regexp",
