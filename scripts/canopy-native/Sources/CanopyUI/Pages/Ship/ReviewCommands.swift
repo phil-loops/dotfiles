@@ -428,7 +428,15 @@ enum ReviewCommands {
             route: { id in
                 guard let app = weakApp, let id, let b = ShipRows.splitID(id) else { return nil }
                 if let p = Route.integrationOf(b.name), app.store.view(Project.self, "\(b.repo):\(p)") != nil { return RouteTo("forest.preview", target: "\(b.repo):\(p)") }
+                if branch(id) == nil, ForeignStacks.prNumber(b.name) != nil { return RouteTo("review.preview.pr", target: id) }
                 return branch(id) != nil ? RouteTo("branch.preview", target: id) : nil
+            }))
+        r.register(Command(
+            id: "review.preview.pr", title: "Preview a teammate's PR — its imported head on a side port, opened once it answers", scope: .review,
+            needsArg: true, quiet: true,
+            local: { id, _ in
+                guard let id, let b = ShipRows.splitID(id), ForeignStacks.prNumber(b.name) != nil else { return }
+                open(tr.url(tr.atRepo(b.repo, "/preview-wait") + "?branch=\(b.name.uriComponent)"))
             }))
         r.register(Command(
             id: "review.github", title: "Go to GitHub to submit your review", scope: .review, quiet: true,

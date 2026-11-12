@@ -396,10 +396,32 @@ enum DiffCommands {
             app.go(.review(repo: b.repo, branch: b.name, stretch: pg.base == .main ? "main" : ""))
         }
         let isBranch: (String?) -> Bool = { _ in pg.integration == nil && pg.branch != nil }
-        r.register(Command(id: "review.branch.next", title: "Review the next branch in merge order", scope: .review, verb: .nextSibling,
-                           label: "branch", pair: "review.branch.prev", available: isBranch, local: { _, _ in try hop(pg.neighbour(1)) }))
-        r.register(Command(id: "review.branch.prev", title: "Review the previous branch in merge order", scope: .review, verb: .previousSibling,
-                           label: "branch", available: isBranch, local: { _, _ in try hop(pg.neighbour(-1)) }))
+        // a teammate's PR (review/pr-N): J / K walk its stack as GitHub chains it, importing the neighbour first
+        let foreignPR: () -> Int? = { pg.branch == nil ? ForeignStacks.prNumber(pg.target?.name) : nil }
+        struct Opened: Decodable { var ok: Bool; var path: String?; var err: String? }
+        func foreignHop(_ n: Int, _ d: Int) {
+            guard let t = pg.target else { return }
+            let stacks = ForeignStacks.of(app)
+            Task { @MainActor in
+                let (nodes, err) = await stacks.load(app, repo: t.repo, n)
+                guard let nodes else { return app.runner.say("no stack for #\(n): \(err ?? "")") }
+                guard let next = ForeignStacks.step(nodes, from: n, d) else {
+                    return app.runner.say(d > 0 ? "#\(n) is the last PR in this stack" : "#\(n) is the first PR in this stack")
+                }
+                app.runner.say("opening #\(next.number)…")
+                let got = await app.transport.ask(app.transport.atRepo(t.repo, "/open-url"), ["url": next.url, "open": "viewer"], as: Opened.self)
+                guard let path = got?.path, got?.ok == true else { return app.runner.say("couldn't open #\(next.number): \(got?.err ?? "the server didn't answer")") }
+                app.open(address: path)
+                let at = (nodes.firstIndex { $0.number == next.number } ?? 0) + 1
+                app.runner.say("#\(next.number) · \(at) of \(nodes.count) in \(next.author)'s stack · \(next.title)")
+            }
+        }
+        r.register(Command(id: "review.branch.next", title: "Review the next branch in merge order (a teammate's PR: the next in its stack)", scope: .review, verb: .nextSibling,
+                           label: "branch", pair: "review.branch.prev", available: { isBranch($0) || foreignPR() != nil },
+                           local: { _, _ in if let n = foreignPR() { return foreignHop(n, 1) }; try hop(pg.neighbour(1)) }))
+        r.register(Command(id: "review.branch.prev", title: "Review the previous branch in merge order (a teammate's PR: the one before in its stack)", scope: .review, verb: .previousSibling,
+                           label: "branch", available: { isBranch($0) || foreignPR() != nil },
+                           local: { _, _ in if let n = foreignPR() { return foreignHop(n, -1) }; try hop(pg.neighbour(-1)) }))
         func children(_ id: String) -> [Branch] {
             app.store.list(Branch.self).filter { $0.parentId == id }.sorted { ($0.order, $0.name) < ($1.order, $1.name) }
         }

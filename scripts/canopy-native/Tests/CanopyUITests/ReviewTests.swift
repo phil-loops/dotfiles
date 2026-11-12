@@ -1409,6 +1409,39 @@ import Testing
         #expect(context?.oldMore.isEmpty == true, "a context line keeps its cut")
     }
 
+    /// A teammate's PR (review/pr-N) walks its stack with J / K, as GitHub chains it: the end says so, a
+    /// step imports the neighbour through /open-url and opens it, and preview offers itself there too.
+    @Test func jkWalkATeammatesStack() async throws {
+        Self.nextPort += 1
+        let p = Self.nextPort
+        ShipStub.answer(p, "GET", "/loops/node", Self.payload)
+        ShipStub.answer(p, "GET", "/node", Self.payload)   // a read that goes out before the repo list is set
+        ShipStub.answer(p, "GET", "/loops/foreign-stack", #"""
+            {"ok":true,"root":10466,"nodes":[
+             {"number":10466,"title":"feat: HubSpot OAuth","head":"dan/hubspot-oauth","base":"main","parent":null,"depth":0,"author":"danrowden","draft":false,"url":"https://github.com/loops-so/loops/pull/10466"},
+             {"number":10468,"title":"feat: HubSpot endpoints","head":"dan/hubspot-endpoints","base":"dan/hubspot-oauth","parent":10466,"depth":1,"author":"danrowden","draft":false,"url":"https://github.com/loops-so/loops/pull/10468"}]}
+            """#)
+        ShipStub.answer(p, "POST", "/loops/open-url", #"{"ok":true,"path":"/v2/b/loops/review/pr-10466"}"#)
+        var c = AppConfig()
+        c.route = .review(repo: "loops", branch: "review/pr-10468")
+        let a = AppModel(config: c, port: p, telemetry: false, protocolClasses: [ShipStub.self])
+        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../CanopyCoreTests/Fixtures/state.json")
+        a.store.hydrate(try Snapshot.decode(Data(contentsOf: url)))
+        a.transport.repos = ["loops"]
+        ShipState.of(a).openURL = { _ in Issue.record("a test tried to open a browser") }
+        let pg = ReviewPageState.of(a)
+        pg.sync()
+        await until("the diff") { pg.payload != nil }
+        #expect(pg.branch == nil && a.registry.command("review.branch.next")!.available!(nil), "J offers itself on a teammate's PR")
+        #expect(a.registry.command("review.preview")!.route!("loops:review/pr-10468")?.id == "review.preview.pr")
+        a.runner.dispatch("review.branch.next", via: .key)
+        await until("the end of the stack") { (a.runner.note ?? "").contains("last PR in this stack") }
+        a.runner.dispatch("review.branch.prev", via: .key)
+        await until("the PR before") { a.router.route == .review(repo: "loops", branch: "review/pr-10466") }
+        #expect(ShipStub.posts(p).last { $0.path == "/loops/open-url" }!.body["url"] == .string("https://github.com/loops-so/loops/pull/10466"))
+        await until("where it is said") { (a.runner.note ?? "").contains("1 of 2 in danrowden's stack") }
+    }
+
     /// The code beside the diff searches its text, not its line numbers, and lights its matches.
     @Test func slashSearchesTheCodeBesideTheDiff() async throws {
         let (a, p) = try await app()
