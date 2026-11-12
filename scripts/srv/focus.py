@@ -18,7 +18,7 @@ import subprocess
 import threading
 import time
 
-from . import ctx, restack, sync, watch
+from . import ctx, repostate, restack, sync, watch
 
 POLL_S = 90
 _lock = threading.Lock()
@@ -54,9 +54,10 @@ def _tip(ref):
 
 def _projects():
     """Every registered forest outside the archive."""
-    out = _git("config", "--name-only", "--get-regexp", r"^stack-project\..*\.branch$").stdout
-    names = sorted({line[len("stack-project."):-len(".branch")] for line in out.splitlines() if line})
-    return [p for p in names if _git("config", "--bool", f"stack-project.{p}.archived").stdout.strip() != "true"]
+    snap = repostate.snapshot()   # the config is already in hand: no spawn per forest
+    names = sorted({k[len("stack-project."):-len(".branch")] for k in snap.cfg
+                    if k.startswith("stack-project.") and k.endswith(".branch") and snap.cfg[k]})
+    return [p for p in names if snap.get(f"stack-project.{p}.archived").strip().lower() not in ("true", "yes", "on", "1")]
 
 
 def _focus_projects():
