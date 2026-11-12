@@ -297,6 +297,11 @@ def gates_progress(req, u):
         next((e for e in reversed(starts) if e.get("gate") not in done), None)
     if pick and pick["log"].startswith(journal(run) + "."):
         out["tail"] = {"gate": pick["gate"], "lines": _tail(pick["log"], 40)}
+        # how long the gate has been silent: the strip reads a long silence as stuck, not slow
+        try:
+            out["tail"]["age"] = round(max(0.0, time.time() - os.path.getmtime(pick["log"])), 1)
+        except OSError:
+            pass
     if result:
         out["result"] = {"ok": result.get("ok"), "gates": result.get("gates", []), "note": result.get("note")}
     elif not running:
