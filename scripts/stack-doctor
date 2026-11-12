@@ -102,7 +102,7 @@ prune() {
            echo "    dropped  $key = $v (no ref)"; fi
       pruned=$((pruned+1))
     done < <(git config --get-all "$key" 2>/dev/null)
-  done < <(git config --name-only --get-regexp '^(stack-project\..*\.branch|stack-branch\..*\.requires)$' 2>/dev/null | sort -u)
+  done < <(git config --name-only --get-regexp '^stack-project\..*\.branch$' 2>/dev/null | sort -u)
 
   while IFS= read -r key; do
     [ -n "$key" ] || continue
@@ -119,11 +119,11 @@ prune() {
   live_projects=$'\n'
   while IFS= read -r key; do
     [ -n "$key" ] || continue
-    name="${key#stack-branch.}"; branch="${name%.*}"
+    branch="${${key#branch.}%.stack-project}"
     alive "$branch" || continue
-    v=$(git config "branch.$branch.stack-project" 2>/dev/null || git config "stack-branch.$branch.project" 2>/dev/null || true)
+    v=$(git config "branch.$branch.stack-project" 2>/dev/null || true)
     [ -n "$v" ] && live_projects+="$v"$'\n'
-  done < <(git config --name-only --get-regexp '^stack-branch\..*\.project$' 2>/dev/null)
+  done < <(git config --name-only --get-regexp '^branch\..*\.stack-project$' 2>/dev/null)
   while IFS= read -r key; do
     [ -n "$key" ] || continue
     name="${key#branch.}"; branch="${name%.stack-project}"
@@ -160,7 +160,7 @@ OM=$(git rev-parse --verify -q origin/main 2>/dev/null || git rev-parse --verify
 sha() { git rev-parse --short "$1" 2>/dev/null; }
 # real parent commit of a branch = its first-parent commit
 realparent() { git rev-parse --short "$1^" 2>/dev/null; }
-cfg_parent() { git config "branch.$1.stack-parent" 2>/dev/null || git config "stack-branch.$1.parent" 2>/dev/null || echo main; }
+cfg_parent() { git config "branch.$1.stack-parent" 2>/dev/null || echo main; }
 cfg_chain_has() { # walk the CONFIG parent chain from $1 (inclusive); true if $2 appears
   local x="$1" g=0
   while [ -n "$x" ] && [ "$x" != "main" ] && [ "$x" != "origin/main" ] && [ "$g" -lt 64 ]; do
@@ -262,9 +262,9 @@ for proj in $projects; do
     if ! git rev-parse --verify -q "$b" >/dev/null; then
       lines+="  ✗ MISSING  $b (in config, no ref)"$'\n'; proj_problem=1; continue
     fi
-    role=$(git config "branch.$b.stack-role" 2>/dev/null || git config "stack-branch.$b.role" 2>/dev/null || true)
+    role=$(git config "branch.$b.stack-role" 2>/dev/null || true)
     if [ "$role" = "proof" ]; then proof_members+="$b"$'\n'; else shippable_alive=1; fi
-    parent=$(git config "branch.$b.stack-parent" 2>/dev/null || git config "stack-branch.$b.parent" 2>/dev/null || echo main)
+    parent=$(git config "branch.$b.stack-parent" 2>/dev/null || echo main)
     glyph="✓"; detail=""
     # orphan check: only when parent is a real, existing branch (not main/origin/main)
     if [ "$parent" != "main" ] && [ "$parent" != "origin/main" ] && git rev-parse --verify -q "$parent" >/dev/null; then
@@ -292,12 +292,12 @@ for proj in $projects; do
       fi
     fi
     lines+="  $glyph $b${role:+ [$role]}${detail:+  — $detail}"$'\n'
-    reqs=$(git config --get-all "branch.$b.stack-requires" 2>/dev/null || git config --get-all "stack-branch.$b.requires" 2>/dev/null || true)
+    reqs=$(git config --get-all "branch.$b.stack-requires" 2>/dev/null || true)
     nreq=$(printf '%s' "$reqs" | grep -c . || true)
     if { [ "$parent" = "main" ] || [ "$parent" = "origin/main" ]; } && [ "$nreq" = "1" ]; then
       lines+="  ⛓ $b — one requires ($reqs) on a main-rooted branch: mis-encoded chain — set parent=$reqs, drop the requires"$'\n'; proj_problem=1
     fi
-    afters=$(git config --get-all "branch.$b.stack-after" 2>/dev/null || git config --get-all "stack-branch.$b.after" 2>/dev/null || true)
+    afters=$(git config --get-all "branch.$b.stack-after" 2>/dev/null || true)
     if [ -n "$afters" ]; then
       # ⌫ an `after` already reachable through the parent chain is pure config debt
       while IFS= read -r af; do
@@ -325,7 +325,7 @@ for proj in $projects; do
         dep_ids=$(git log -p --no-merges "$(cfg_parent "$rq")..$rq" 2>/dev/null | git patch-id --stable | cut -d' ' -f1 | sort)
         { [ -n "$own_ids" ] && [ -n "$dep_ids" ]; } || continue
         if [ -z "$(comm -12 <(echo "$own_ids") <(echo "$dep_ids"))" ]; then
-          lines+="  ⇢ $b — requires $rq carries none of its commits: merge-order only — move it to stack-branch.$b.after"$'\n'; proj_problem=1
+          lines+="  ⇢ $b — requires $rq carries none of its commits: merge-order only — move it to branch.$b.stack-after"$'\n'; proj_problem=1
         fi
       done <<< "$reqs"
       # ⑂ converged bases must be independent — one building on another means linearize

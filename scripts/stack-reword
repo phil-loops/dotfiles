@@ -15,11 +15,11 @@ belongs to the parent gets reworded on the parent. Refuses if ANY remote ref alr
 the commit — rewording pushed history is a force-push, and that's never this tool's call.
 
 Mechanics: no rebase, no checkout, no working-tree contact. Every commit from <sha> up to
-the branch tip — and up every descendant branch (branch.*.stack-parent, or the legacy stack-branch.*.parent) — is rebuilt with
+the branch tip — and up every descendant branch (branch.*.stack-parent) — is rebuilt with
 `git commit-tree` on the same tree, same author, new parent. Refs move via update-ref,
 which is safe even for a checked-out branch because the tree it points at is unchanged.
 Tree-keyed verdicts (gates-green-tree, review-flags-tree) therefore survive; a recorded
-frozen base (stack-branch.<child>.base) that pointed at a rewritten commit is re-pointed.
+frozen base (branch.<child>.stack-base) that pointed at a rewritten commit is re-pointed.
 
 A descendant that no longer sits on its parent's tip is left alone with a warning
 (restack it first). Prints one line per moved ref; exit 0 on success, 1 on refusal, 2 on usage.
@@ -89,8 +89,7 @@ if not sha:
     die(f"not a commit: {sha_arg}")
 
 def parent_of(b):
-    return (git(["config", f"branch.{b}.stack-parent"], check=False).strip()
-            or git(["config", f"stack-branch.{b}.parent"], check=False).strip())
+    return (git(["config", f"branch.{b}.stack-parent"], check=False).strip())
 
 
 # ---- placement + safety ------------------------------------------------
@@ -110,9 +109,6 @@ if remote_holders:
 
 def children_of(b):
     parents = {}
-    for ln in git(["config", "--get-regexp", r"^stack-branch\..*\.parent$"], check=False).splitlines():
-        key, _, val = ln.partition(" ")
-        parents[key[len("stack-branch."):-len(".parent")]] = val.strip()
     for ln in git(["config", "--get-regexp", r"^branch\..*\.stack-parent$"], check=False).splitlines():
         key, _, val = ln.partition(" ")
         parents[key[len("branch."):-len(".stack-parent")]] = val.strip()
@@ -210,9 +206,9 @@ for child in subtree(branch)[1:]:
 
 for node, old_tip, new_tip in moves:
     git(["update-ref", "-m", f"stack-reword {sha[:10]}", f"refs/heads/{node}", new_tip, old_tip])
-    for key in (f"stack-branch.{node}.base", f"branch.{node}.stack-base"):
-        recorded = git(["config", key], check=False).strip()
-        if recorded in rewritten:
-            git(["config", key, rewritten[recorded]])
+    key = f"branch.{node}.stack-base"
+    recorded = git(["config", key], check=False).strip()
+    if recorded in rewritten:
+        git(["config", key, rewritten[recorded]])
     print(f"{node}: {old_tip[:10]} → {new_tip[:10]}")
 print(f"reworded {sha[:10]} → {rewritten[sha][:10]}")

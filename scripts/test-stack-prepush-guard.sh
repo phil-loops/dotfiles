@@ -108,9 +108,9 @@ code="$(cd "$r" && run_guard "refs/heads/main $mergetip refs/heads/main $ZERO")"
 # --- proof branch (role=proof, old namespace) → block -----------------------
 r="$(mkrepo)"
 echo a > "$r/a"; git -C "$r" add .; git -C "$r" commit -qm "feat: a"
-git -C "$r" config stack-branch.e2e.role proof
+git -C "$r" config branch.e2e.stack-role proof
 code="$(cd "$r" && run_guard "refs/heads/e2e $(sha "$r") refs/heads/e2e $ZERO")"
-[[ "$code" == 1 ]] && ok "proof branch (stack-branch.*.role) → block (1)" || bad "proof branch returned $code"
+[[ "$code" == 1 ]] && ok "proof branch (branch.*.stack-role) → block (1)" || bad "proof branch returned $code"
 
 # --- proof branch (new namespace key) → block --------------------------------
 r="$(mkrepo)"

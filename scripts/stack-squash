@@ -94,12 +94,8 @@ def out(d):
 
 
 def children_of(b):
-    """branches whose stack-branch.<child>.parent points at b (direct children)."""
+    """branches whose branch.<child>.stack-parent points at b (direct children)."""
     parents = {}
-    for ln in git(["config", "--get-regexp", r"^stack-branch\..*\.parent$"]).stdout.splitlines():
-        key, _, val = ln.partition(" ")
-        if key.startswith("stack-branch.") and key.endswith(".parent"):
-            parents[key[len("stack-branch."):-len(".parent")]] = val.strip()
     for ln in git(["config", "--get-regexp", r"^branch\..*\.stack-parent$"]).stdout.splitlines():
         key, _, val = ln.partition(" ")
         if key.startswith("branch.") and key.endswith(".stack-parent"):
@@ -206,8 +202,7 @@ if git(["rev-parse", "--verify", "--quiet", branch]).returncode != 0:
 
 orig_tip = git(["rev-parse", branch]).stdout.strip()   # pre-squash tip: reseat cut + rollback point
 
-parent = (git(["config", f"branch.{branch}.stack-parent"]).stdout.strip()
-          or git(["config", f"stack-branch.{branch}.parent"]).stdout.strip() or MAIN)
+parent = (git(["config", f"branch.{branch}.stack-parent"]).stdout.strip() or MAIN)
 
 # squash base: the FROZEN commit the branch sits on, via stack-base (resolves the
 # recorded stack-branch.<b>.base, else merge-base(parent, branch)). Never reset
@@ -324,10 +319,8 @@ patch_clip = "\n".join(patch.splitlines()[:300])   # keep the prompt bounded
 # area the voice corpus (main) teaches. The branch's OWN ticket
 # (branch.<b>.stack-ticket) beats the project's (stack-project.<p>.ticket): a forest whose
 # nodes each answer a sub-issue scopes each commit to the sub-issue it actually fixes.
-project = (git(["config", f"branch.{branch}.stack-project"]).stdout.strip()
-           or git(["config", f"stack-branch.{branch}.project"]).stdout.strip())
+project = (git(["config", f"branch.{branch}.stack-project"]).stdout.strip())
 ticket = (git(["config", f"branch.{branch}.stack-ticket"]).stdout.strip()
-          or git(["config", f"stack-branch.{branch}.ticket"]).stdout.strip()
           or (git(["config", f"stack-project.{project}.ticket"]).stdout.strip()
               if project else "")).lower()
 scope = ticket or project

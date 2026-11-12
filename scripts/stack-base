@@ -25,7 +25,7 @@ if ! git rev-parse --verify --quiet "refs/heads/${branch}" >/dev/null; then
   exit 1
 fi
 
-local parent=$(git config "branch.${branch}.stack-parent" 2>/dev/null || git config "stack-branch.${branch}.parent" 2>/dev/null || echo main)
+local parent=$(git config "branch.${branch}.stack-parent" 2>/dev/null || echo main)
 git rev-parse --verify --quiet "$parent" >/dev/null || parent=main
 
 local base=$(git merge-base "$parent" "$branch" 2>/dev/null || true)
@@ -38,7 +38,7 @@ fi
 # A record strictly behind the fork point means the branch was rebased forward, and keeping it
 # would let a squash swallow the parent's advance; a fork point older than the record is a
 # rewritten parent, which is the case the record exists to survive.
-local recorded=$(git config "branch.${branch}.stack-base" 2>/dev/null || git config "stack-branch.${branch}.base" 2>/dev/null || true)
+local recorded=$(git config "branch.${branch}.stack-base" 2>/dev/null || true)
 if [[ -n "$recorded" ]] \
    && git rev-parse --verify --quiet "$recorded" >/dev/null \
    && git merge-base --is-ancestor "$recorded" "$branch" 2>/dev/null; then
