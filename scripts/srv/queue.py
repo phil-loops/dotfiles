@@ -157,6 +157,9 @@ def compose(ht, procs, gates, now=None, idle_after=IDLE_AFTER_S):
     for p in procs:
         if p["pid"] in queued_pids or not HEAVY.search(p["command"]):
             continue
+        # a shell whose command line merely names a heavy tool (zsh -c '… tsc …') is not the work
+        if os.path.basename(p["command"].split()[0]).lstrip("-") in ("zsh", "bash", "sh", "login", "fish"):
+            continue
         # under a ticket, or above one (a run whose child holds the slot): queued either way
         if any(x in queued_pids for x in ancestors(p["pid"])) or any(x in ticket_pids for x in tree(p["pid"])):
             continue

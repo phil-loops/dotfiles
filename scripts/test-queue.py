@@ -40,6 +40,7 @@ procs = [
     {"pid": 300, "ppid": 1, "cpu": 0.0, "rssMb": 5, "age": 60, "command": "python3 /s/heavy-turn -- stack-gates"},
     {"pid": 400, "ppid": 1, "cpu": 300.0, "rssMb": 1800, "age": 120, "command": "/u/bin/seed-gen --sync /w/warm"},   # outside the queue
     {"pid": 500, "ppid": 1, "cpu": 0.0, "rssMb": 10, "age": 5, "command": "/bin/zsh -l"},
+    {"pid": 600, "ppid": 1, "cpu": 0.0, "rssMb": 3, "age": 50, "command": "/bin/zsh -c 'npx tsc --noEmit'"},   # a shell naming the tool, not the tool
 ]
 gates = [{"branch": "feat", "pid": 190, "started": NOW - 310, "step": "typecheck"},
          {"branch": "other", "pid": 300, "started": NOW - 60, "step": "1st in line"}]
