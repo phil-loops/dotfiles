@@ -28,9 +28,14 @@ Every route says what it touches, and one dispatcher enforces it before the hand
 
 A command reports ok only once its effect has happened. Work it can't finish now is held or shown pending, never "ok". A claim names the evidence it rests on.
 
-- **Held by:** the runner's hold (`Hold`, `releaseHeld`, `dropHeld`) for keys pressed before their data arrives. Teammate J / K and space d use it.
-- **Not held yet:** a `local` command can still start a task and return, which the runner records as ok. Four commands do (keys reload, forest merge check, tutor pickup, sync); their pages show the result, so they're honest today, but the type doesn't stop the next one. The fix is a command shape whose outcome the runner owns.
-- **Evidence:** J / K and space d reported success before reading anything; the PR packet said "green for this exact tree" for a tree no gate ran on; telemetry lost undo pairs across restarts.
+Waiting comes in two kinds, and each has its own shape:
+
+- **Can't act yet.** The key was pressed before its page could act (teammate J / K before the stack is read, space d before the findings are). It's a `local` that throws `Hold`: the runner keeps it, runs it when the page calls `releaseHeld`, and drops it on the next key, so it never yanks you somewhere after you've moved on.
+- **Acting, but it takes time.** A keys reload, the forest merge check, a tutor pickup. It's a `task`: the runner awaits it and records ok, with the line it returns, only once it has finished; a throw is the refusal.
+
+- **Held by:** the runner owns both outcomes (`Hold`/`releaseHeld`/`dropHeld`, and `task`). `RunnerTests` proves a task isn't ok while it runs.
+- **Not held by the type:** Swift can't stop a `local` from starting a task of its own and returning. Today the only ones that do are the sync motion's start and its dirt decisions, which show their outcome step by step on the branch page and record each step's write. The shapes make the honest path the easy one; review still has to catch the other.
+- **Evidence:** J / K and space d reported success before reading anything; the PR packet said "green for this exact tree" for a tree no gate ran on; telemetry lost undo pairs across restarts. A test asserted on "the next post" while the previous one was still in flight, and failed one run in three under load.
 
 ## 3 · Every fact has one owner
 
