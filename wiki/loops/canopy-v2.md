@@ -24,6 +24,7 @@ Patching that is what the last two days were, and it still doesn't delight. [[ca
 
 **The pages:**
 
+- [[canopy-v2-foundations]] — the three rules under everything: declared authority, true answers, one owner per fact.
 - [[canopy-v2-architecture]] — one local store kept current by server-pushed changes; optimistic commands.
 - [[canopy-v2-interaction]] — commands, keys, the palette, and the three surfaces.
 - [[canopy-v2-joy]] — what makes it feel good.
