@@ -17,7 +17,7 @@ description: Present a design, plan or walkthrough as a native macOS app (Swift 
 | Forest | — | `"mode": "forest"` | a project's branches in merge order (branch-deck decks) |
 | Review | — | `"mode": "deck"` or no mode | designs and walkthroughs to read |
 | Runs | — | `"mode": "live"` | live runs, read-only |
-| API | ⌘6 | `show --api [<bench>]` | the loops-postman console (:7070) and the registered benches (see *Benches*), each started when it's down |
+| Bench | ⌘6 | `"mode": "bench"` (`show --api` for the console) | benches: claims about a live system, replayed and kept as evidence (see *Benches*); the loops-postman console (:7070) while none is open |
 
 **Who takes the screen — one rule.** Every door (`show`, `canopy`, `stack web`, `show --api`) writes a request `{target, actor, intent}` into `~/.cache/show/inbox/` and hands it to Show with `open -g`. Show comes forward only when Phil is the actor (his terminal, Finder, a `canopy://` link) or a session passes `--focus` / `SHOW_FOCUS=1` because Phil asked to see it now. Anything else a session sends **arrives**: a notification naming it and the session's topic, a rail badge (a deck tops its shelf; a canopy page counts on ⌘1), a ◆ row in History (⌘Y). Nothing switches or opens, and ⌘1 stays on its page. A Claude session is detected by `CLAUDECODE`.
 
@@ -41,7 +41,7 @@ Open documents reload by themselves when their file changes on disk, keeping the
 
 - Launcher: `~/.dotfiles/scripts/show` (on PATH). Source: `~/.dotfiles/scripts/show-app/*.swift`, a Swift package (`show-app/Package.swift`) that links canopy-native's `CanopyUI` for the Canopy workspace. It builds from its own copy in `~/.cache/show/src`: show-app as it stands, canopy-native as last committed (`SHOW_CANOPY=worktree` links the live one, for work on `Embed.swift`, the seam), so another session's half-saved canopy file never reaches Show; `show --build`, `--selftest`, `--snapshot` and the checks rebuild `~/.cache/show/Show.app` first when either changed, since they run the code itself.
 
-**Source layout** (`scripts/show-app/`, one file per area): `App.swift` is the AppDelegate, launch, menus, the one window and `Workspace` routing; `Events.swift` the one record and its rules (`Target`, `ShowRequest` + `comesForward`, the inbox, `ShowEvent`, the pure `ShowState` fold, `EventLog`, History's rows); `Arrival.swift` `handle`/`arrive` (`Topics` from `claude-say --topic`, the arrival notification); `main.swift` parses the command line and starts the app (Swift only runs top-level code from `main.swift`). `Shell.swift` holds the rail, `WorkspaceController`, the shelf/library and the ⌘O finder; `Render.swift` the markdown renderer (tables, code, images); `Decks.swift` `DeckController` and `PageText` (the reading measure), plus the Inbox's reply field; `Thread.swift` the `.thread.json` sidecar, `ThreadDelivery` (live author or headless) and the deck's headless `DeckAgent`; `Forest.swift` the merge-order `ForestOrder`, the forest tint, ⌘⇧O's canopy route, `BranchFreshness` (the moved-branch check) and ⌘⇧R; `Tutor.swift` the Learn session types, sidecar, headless `TutorAgent`, worksheet and `--tutor-ask`; `TutorSidebar.swift` the open session's stations and due re-tests; `LearnStart.swift` the Due shelf group, new sessions from the template, ⌘N and `--tutor-start`; `Live.swift` the Live view (status header, status-grouped list, compare/data/source rendering, Stop after this round, `--check-live`, the live-runs registry); `Keys.swift` the `KeyTable` (one list that generates the menus and the `?` sheet; other areas add keys with `KeyTable.register([...])`), the key router, the focus order and its outline; `Snapshot.swift` `--snapshot` plus `--check-routing` / `--tutor-check`; `Model.swift` the shared `Deck` / `Section` / `SignOff` types; `Console.swift` the API workspace; `Plan.swift` plans (model, lint, synthesized pages, the grid); `Canopy.swift` the Canopy workspace (`CanopyHost`, which starts the viewer server when it's down).
+**Source layout** (`scripts/show-app/`, one file per area): `App.swift` is the AppDelegate, launch, menus, the one window and `Workspace` routing; `Events.swift` the one record and its rules (`Target`, `ShowRequest` + `comesForward`, the inbox, `ShowEvent`, the pure `ShowState` fold, `EventLog`, History's rows); `Arrival.swift` `handle`/`arrive` (`Topics` from `claude-say --topic`, the arrival notification); `main.swift` parses the command line and starts the app (Swift only runs top-level code from `main.swift`). `Shell.swift` holds the rail, `WorkspaceController`, the shelf/library and the ⌘O finder; `Render.swift` the markdown renderer (tables, code, images); `Decks.swift` `DeckController` and `PageText` (the reading measure), plus the Inbox's reply field; `Thread.swift` the `.thread.json` sidecar, `ThreadDelivery` (live author or headless) and the deck's headless `DeckAgent`; `Forest.swift` the merge-order `ForestOrder`, the forest tint, ⌘⇧O's canopy route, `BranchFreshness` (the moved-branch check) and ⌘⇧R; `Tutor.swift` the Learn session types, sidecar, headless `TutorAgent`, worksheet and `--tutor-ask`; `TutorSidebar.swift` the open session's stations and due re-tests; `LearnStart.swift` the Due shelf group, new sessions from the template, ⌘N and `--tutor-start`; `Live.swift` the Live view (status header, status-grouped list, compare/data/source rendering, Stop after this round, `--check-live`, the live-runs registry); `Keys.swift` the `KeyTable` (one list that generates the menus and the `?` sheet; other areas add keys with `KeyTable.register([...])`), the key router, the focus order and its outline; `Snapshot.swift` `--snapshot` plus `--check-routing` / `--tutor-check`; `Model.swift` the shared `Deck` / `Section` / `SignOff` types; `Console.swift` the Bench workspace's pages (the API console and each bench, as local pages whose server Show starts); `Plan.swift` plans (model, lint, synthesized pages, the grid); `Canopy.swift` the Canopy workspace (`CanopyHost`, which starts the viewer server when it's down).
 - Decks live in `~/.dotfiles/show/<name>.json`.
 
 ## Deck format
@@ -100,19 +100,31 @@ A plan is a deck with a top-level `"plan"` object and `"mode": "plan"`, which op
 - **Lint** (`Show --check-plan <file>`, exit 1 on errors; also drawn on the grid): one authority per stage, moving only at a `flip`; no row dropping out and coming back; no reader moving and nothing `gone` before the flip; a rollback line on every transition; branch and extra stages that exist; an extra left out past its ▼ cliff warns unless `accepted` says why.
 - The cliff is the stage from which leaving an extra out costs more, usually the first stored event of a shape it changes. An extra whose cliff comes before the stage you ship is in the MVP or explicitly accepted.
 
-## Benches: tool pages in the API workspace
+## Benches: claims about a live system, replayed and kept as evidence
 
-A bench is a local web page for one piece of work (a staging replay, a seed tool) that lives beside the API console and belongs to a forest. Register it as `~/.dotfiles/show/benches/<id>.json`:
+A bench is a set of claims about a live environment, tied to a forest: "this request answers X today and should answer Y once branch B is deployed". It is a Show document with `"mode": "bench"`, so it gets the shelf, the finder, ⌫ archive, History and a topic (its forest) like any other; it opens in the **Bench** workspace (⌘6) as a full-window page with the shelf folded away (⌃⌘S brings it back). While no bench is open, Bench shows the API console.
 
 ```json
-{ "title": "LOO-6235 replay", "url": "http://127.0.0.1:7235/", "start": "exec loo-6235-repro",
-  "repo": "loops", "project": "draft-on-a-disabled-domain", "branches": ["<branch>", "…"] }
+{ "mode": "bench", "title": "LOO-6235 staging replay", "replyTo": "…", "sections": [],
+  "bench": { "ticket": "LOO-6235", "repo": "loops", "project": "<stack-project>", "about": "one or two sentences",
+    "env": { "name": "staging", "base": "https://app.l3s.email/api/v1", "key": "<Keychain service holding the API key>" },
+    "groups": [{ "id": "drafting", "title": "Drafting on a disabled domain", "branch": "<branch that fixes these>" }],
+    "steps": [
+      { "id": "list", "request": { "method": "GET", "path": "/transactional-emails?perPage=20" },
+        "capture": { "ownTx": "data[!systemEmailType].id" } },
+      { "id": "draft", "group": "drafting", "label": "Create a transactional draft",
+        "request": { "method": "POST", "path": "/transactional-emails/{newTx|ownTx}/draft" }, "needs": "a transactional email on this team",
+        "claim": { "today": { "status": 400, "says": "No sending domain", "text": "no sending domain configured" },
+                   "fixed": { "status": 200, "text": "ok" } } } ] } }
 ```
 
-- `show --api <id>` opens it (quiet arrival unless `--focus`); the target is `{"bench": "<id>"}` and it shows in History.
-- The API workspace grows a switcher once any bench is registered. Each page keeps its own web view, so switching loses nothing. **⌘⇧B** goes to the next one; **⌘⇧O** opens the bench's forest (`/v2/p/<repo>/<project>`) in Canopy.
-- Show starts a bench's server with its `start` line (zsh) when nothing answers at `url`; the server outlives Show. ⌘R reloads the page, or starts it again.
-- The page is the bench's own; build it as a single-file server under `~/.dotfiles/scripts/` (`loo-6235-repro` is the worked example: a run button, one-at-a-time or all at once, a column per run, a full request trail).
+- **Steps run in order.** A step with a `claim` is a row in its group's table; one without is a lookup. `capture` saves values from a 2xx answer (`a.b`, `list[field&!other].id` for the first matching element, `list[].id` for the first); the first capture of a name wins. `{a|b}` in a path or body takes the first captured name, `{a?}` is optional, `{now}` is the run's time. A step whose names are all missing is not run and shows its `needs`.
+- **The verdict is a pure function** of claim and answer: `fixed`, `same as today`, `unexpected`, or not run. `status` must match and `says`, when given, must be in the answer's message; `text` is only what the table shows.
+- **Runs are evidence**: one JSON line per run in `~/Library/Application Support/Show/bench-runs/<file name>.jsonl`, with the environment, the branch tips at that moment, every answer and the full request trail (key redacted). Never edited, never deleted by Show.
+- **Writes wait for you.** "Run, asking before each write" sends reads on its own and stops before every request that isn't a GET (or has `"writes": true`): send, skip, send this and the rest, or stop. "Run all without stopping" is the other button. Only staging and local hosts are accepted, and the key is read from the Keychain on each run.
+- **`bench`** (`scripts/bench`) is the one runner: `bench check <file>` lints a scenario (run it after writing one), `bench status <file>` prints the latest verdict per branch, `bench serve` is the page server (:7240) Show starts when it's down.
+- **Keys in Bench**: ⌘⇧O opens the bench's forest in Canopy; ⌘⇧B closes the bench and shows the API console; ⌘R reloads.
+- Hand one over like a deck: `show <bench.json>` (`--focus` only when asked).
 
 ## Forest workspace
 
