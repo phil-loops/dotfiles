@@ -36,6 +36,12 @@ A command reports ok only once its effect has happened. Work it can't finish now
 
 Refs and config live in the repo snapshot. Everything else derives from them, cached under a key that never changes meaning: a commit sha, a tree sha, a write generation.
 
-- **Held by:** `repostate` owns refs, config, the trunk (`trunk()`, `diff_base()`) and trees by commit. The client store owns entities; `/state` and its stream are the only way in.
-- **Not held yet:** the server has 44 module-level caches. A test can import every module and fail on a mutable global that isn't registered with an owner and a key.
-- **Evidence:** two private tree caches, five copies of the trunk rule, a telemetry map outside the rollup it fed, a search memo keyed by text length, and the CLI's packet deciding "green" with a different rule from the viewer's.
+- **Held by:** `repostate` owns refs, config, the trunk (`trunk()`, `diff_base()`) and trees by commit. `openprs` owns which PRs are open on origin and the fork, and what GitHub says about each. The client store owns entities; `/state` and its stream are the only way in.
+- **Evidence:** two private tree caches, five copies of the trunk rule, a telemetry map outside the rollup it fed, a search memo keyed by text length, the CLI's packet deciding "green" with a different rule from the viewer's. Worst: three sweeps of GitHub's open-PR list, on 30, 60 and 90 second clocks, that could disagree about whether a PR existed.
+
+**Friction, and the revision:**
+
+- *External data has no identity.* GitHub's answers can't be keyed by a sha, so "a key that never changes meaning" can't hold for them. The rule for external data is one owner per listing, which reports its age and whether its last read failed. Readers needing different freshness ask the one owner with `fresh=True`; they never keep a copy.
+- *One owner, two costs.* Mergeability and reviews cost GitHub 2.3 s against 0.5 s for the list. So the owner keeps two sweeps: the cheap one defines which PRs exist, and the costly one only decorates PRs the cheap one has.
+- *Not every global is a fact.* The server has 119 mutable module globals. Most are constants, counters, or jobs in flight, not copies of facts. The test this rule needs asks each one to say which kind it is and what keys it, at the line that defines it. Not built yet.
+- *Still more than one owner:* open PRs' bodies and threads (`packet`, `ghreview`) and every PR's state (`sync`, through `stack-forest`) are separate GitHub reads with their own caches.
