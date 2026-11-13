@@ -18,7 +18,7 @@ import subprocess
 import threading
 import time
 
-from . import ctx, repostate, restack, sync, watch
+from . import ctx, openprs, repostate, restack, sync, watch
 
 POLL_S = 90
 _lock = threading.Lock()
@@ -139,7 +139,7 @@ def _restack(project, hold=(), merged=None):
         if merged is not None:
             cmd.append("--contract-only")
             env = {**os.environ, "STACK_RESTACK_MERGED_HEADS": "\n".join(f"{b} {h or '-'}" for b, h in sorted(merged.items())),
-                   "STACK_RESTACK_OPEN_PR_HEADS": f" {' '.join(sorted(sync._open_pr_heads()))} "}
+                   "STACK_RESTACK_OPEN_PR_HEADS": f" {' '.join(sorted(openprs.heads()))} "}
         rc = subprocess.run(cmd, cwd=wt, stdout=lf, stderr=lf, env=env).returncode
     parked, current = restack._parked()
     if parked:
@@ -161,7 +161,7 @@ def _sync_project(project, st, cwds):
     if prev.get("state") in ("conflict", "stuck", "refused") and prev.get("sig") == sig:
         return False
     roots = [b for b in branches if _parent(b) == "main"]
-    open_prs = sync._open_pr_heads()
+    open_prs = openprs.heads()
     # A published root (an open PR, or pushed to origin and not merged) must not move — but only
     # its own subtree is held; the other roots still contract and restack (2026-10-27: #11228
     # merged and its forest sat skipped wholesale because a sibling root had an open PR).

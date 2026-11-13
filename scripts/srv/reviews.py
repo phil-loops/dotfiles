@@ -15,6 +15,7 @@ from urllib.parse import parse_qs, quote, unquote, urlencode
 from srv import ctx
 from . import stackcfg
 from . import watch
+from . import openprs
 from srv import picker
 from srv import sync
 
@@ -551,7 +552,7 @@ def _reseat_walk(parent, results, published=None):
     # level made a chain-base reword sit on "saving…" for ~a minute (2026-08-24).
     parent_tip = ctx.run(["git", "rev-parse", parent]).stdout.strip()
     if published is None:
-        published = sync._open_pr_heads(fresh=True)
+        published = openprs.heads(fresh=True)
     for child in _children_of(parent):
         if _seated(parent, child):
             results.append({"branch": child, "status": "seated"})

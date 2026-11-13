@@ -77,9 +77,9 @@ ctx.SCRIPTS = HERE
 ctx.ROOT = root
 ctx.run = lambda argv, **kw: subprocess.run(argv, cwd=repo, capture_output=True, text=True, env=env)
 ctx.log = lambda *a, **k: None
-from srv import focus, sync  # noqa: E402
+from srv import focus, openprs, sync  # noqa: E402
 
-sync._open_pr_heads = lambda *a, **k: {"kid"}
+openprs.heads = lambda *a, **k: {"kid"}
 focus._busy = lambda branches, cwds: "busy" if branches == ["busy"] else ""
 merged = {b: git("rev-parse", b) for b in ("leaf", "par", "busy", "arch")}
 

@@ -10,9 +10,9 @@ import subprocess
 import tempfile
 import threading
 from urllib.parse import parse_qs
-from concurrent.futures import ThreadPoolExecutor
 
 from . import ctx
+from . import openprs
 from . import prompts
 from . import stackcfg
 from . import rebase
@@ -58,97 +58,6 @@ def _deploy_critical(branch):
     out = repostate.snapshot().once(("deploy-critical", branch), lambda: ctx.run(
         ["git", "diff", f"{branch}...origin/main", "--name-only", "--", *globs]).stdout)
     return [f for f in out.splitlines() if f.strip()]
-
-
-# ── published = has an OPEN PR (on the fork; origin=Loops-so has none) ────────
-_PR_TTL = 30.0
-_PR_FRESH_TTL = 5.0   # fresh=True reuses a sweep this recent (dedupes a reseat walk's per-parent checks)
-_pr_cache = {}   # repo -> {"at", "heads"} — per-repo: monotoad's PRs are not loops' PRs
-_pr_lock = threading.Lock()
-_pr_refreshing = set()   # repos with a background sweep in flight
-
-
-def _pr_ent(repo):
-    return _pr_cache.setdefault(repo, {"at": -1e9, "heads": None})   # heads=None → never swept
-
-
-def _pr_slugs():
-    # owner/repo slugs resolved in the CALLING thread — ctx.run's repo binding is
-    # thread-local, so the background refresher can't resolve them itself.
-    slugs = []
-    for remote in ("origin", "phil-loops"):
-        url = ctx.run(["git", "remote", "get-url", remote]).stdout.strip()
-        m = re.search(r"[:/]([^/:]+/[^/]+?)(?:\.git)?$", url) if url else None
-        if m:
-            slugs.append(m.group(1))
-    return slugs
-
-
-def _sweep_pr_heads(slugs):
-    """One gh sweep across both remotes, in parallel. None = total gh outage."""
-    def one(slug):
-        try:
-            out = ctx.run(["gh", "pr", "list", "-R", slug, "--state", "open",
-                           "--json", "headRefName", "--limit", "300"]).stdout
-            return {pr["headRefName"] for pr in json.loads(out or "[]")}
-        except Exception:
-            return None
-    heads, got_any = set(), False
-    with ThreadPoolExecutor(max_workers=2) as ex:
-        for res in ex.map(one, slugs):
-            if res is not None:
-                heads |= res
-                got_any = True
-    return heads if got_any else None
-
-
-def _store_pr_heads(repo, swept):
-    with _pr_lock:
-        ent = _pr_ent(repo)
-        ent["outage"] = swept is None
-        if swept is not None:
-            ent["heads"] = swept   # keep last-good heads on a full gh outage
-        elif ent["heads"] is None:
-            ent["heads"] = set()   # cache empty on outage so we don't re-block every call
-        ent["at"] = time.monotonic()
-        return ent["heads"]
-
-
-def _pr_sweep_failed():
-    """Last gh sweep came back empty-handed — the open-PR set is a guess (last-good or
-    empty), not evidence. Mutating guards must not read 'not in the set' as 'unpublished'
-    for a PUSHED branch; that empty-guard path is how a PR'd parent got rewritten."""
-    with _pr_lock:
-        return bool(_pr_ent(ctx.repo_cwd()).get("outage"))
-
-
-def _refresh_pr_heads(repo, slugs):
-    try:
-        _store_pr_heads(repo, _sweep_pr_heads(slugs))
-    finally:
-        _pr_refreshing.discard(repo)
-
-
-def _open_pr_heads(fresh=False):
-    """Branch names with an OPEN PR, unioned across ORIGIN and the phil-loops fork —
-    Phil's real PRs live on origin (Loops-so), the fork is the automation surface;
-    missing either side lets prep/squash rewrite a published branch (bit us on #9405).
-    Stale-while-revalidate: a fresh set serves with no gh call, a stale one serves
-    immediately and re-sweeps in the background; only a never-swept cache blocks once.
-    fresh=True (the mutating callers: sync/prep/push/ship/reseat guards) blocks on a
-    live sweep unless one just landed — never rewrite a branch on a stale head-set."""
-    repo = ctx.repo_cwd()
-    now = time.monotonic()
-    with _pr_lock:
-        ent = _pr_ent(repo)
-        heads, age = ent["heads"], now - ent["at"]
-        if heads is not None and (age < _PR_FRESH_TTL if fresh else True):
-            if not fresh and age >= _PR_TTL and repo not in _pr_refreshing:
-                _pr_refreshing.add(repo)
-                threading.Thread(target=_refresh_pr_heads, args=(repo, _pr_slugs()), daemon=True).start()
-            return heads
-    # cold cache, or a mutator demanding freshness: block on one sweep
-    return _store_pr_heads(repo, _sweep_pr_heads(_pr_slugs()))
 
 
 def _shared(branch):
@@ -207,7 +116,7 @@ def state(branch, fresh_prs=False, with_patches=False):
     # unpublished — refuse to auto-rewrite it rather than run with a toothless guard
     # (2026-08-23: exactly how a PR'd parent got rebased under its child). Unpushed
     # branches can't have an open PR, so they stay syncable through an outage.
-    pr_blind = shared in ("ahead", "synced") and not published and _pr_sweep_failed()
+    pr_blind = shared in ("ahead", "synced") and not published and openprs.failed()
     if pr_blind:
         restack = False
         why = "pushed to origin but gh is unreachable — can't verify it has no open PR; not rebasing"
@@ -253,7 +162,7 @@ def state_cached(branch, with_patches=False):
 
     def refs_key():
         snap = repostate.snapshot()
-        return snap.branch_fingerprint(branch), _pr_sweep_failed()
+        return snap.branch_fingerprint(branch), openprs.failed()
     rk = refs_key()
     held = [p for p, attached in watch.holders(branch) if attached]
     key = ("sync-state", ctx.repo_cwd(), branch, with_patches, rk, watch.dirt_stamp(held))

@@ -122,8 +122,8 @@ class RepoState:
 
     def pr_heads(self, fresh=False):
         if self._pr_heads is None or fresh:
-            from . import sync
-            self._pr_heads = sync._open_pr_heads(fresh=fresh)
+            from . import openprs
+            self._pr_heads = openprs.heads(fresh=fresh)
         return self._pr_heads
 
     def published(self, branch):
