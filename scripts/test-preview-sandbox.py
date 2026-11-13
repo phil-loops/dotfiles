@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""srv/preview.py in the sandbox: the list is empty and every write refuses in words, so a
-sandbox never lists or touches the machine's real dev servers."""
+"""srv/preview.py in the sandbox: the list is empty, so a sandbox never lists the machine's real dev
+servers (its writes refuse at the dispatcher — test-routes.py)."""
 import json
 import os
 import sys
@@ -38,9 +38,7 @@ class Req:
 
 r = Req(); preview.previews(r)
 check("the sandbox lists no previews", r.status == 200 and r.body == {"ok": True, "previews": [], "substrate": None, "sandbox": True}, r.body)
-for name in ("start", "start_integration", "start_main", "restart", "swap", "kill", "reap", "stack_up"):
-    r = Req(); getattr(preview, name)(r, "{}")
-    check(f"{name} refuses in the sandbox", r.status == 200 and r.body == {"ok": False, "err": preview.SANDBOX_REFUSAL}, r.body)
+# the writes refuse in the sandbox at the dispatcher: test-routes.py, for every machine route
 
 print(f"\n{'OK' if not failures else 'FAIL'} — {failures} failure(s)")
 sys.exit(1 if failures else 0)

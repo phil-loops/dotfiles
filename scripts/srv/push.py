@@ -839,9 +839,7 @@ def force_origin(req, raw):
     reviews and ZERO comments (nobody's read-state gets invalidated), gates green for this
     exact tree, and the client's lease must still be origin's head — then the push itself is
     --force-with-lease, so git refuses if origin moves in the gap. Human finger only, same
-    as push-origin; anything outside this scope stays the additive vehicle's job."""
-    if not actor.is_phil(req):
-        return req._send(403, json.dumps({"ok": False, "err": "only Phil's click replaces origin's copy"}))
+    as push-origin (srv/routes.py); anything outside this scope stays the additive vehicle's job."""
     d = json.loads(raw or "{}")
     branch = d.get("branch", "")
     lease = d.get("lease", "")
@@ -873,9 +871,6 @@ def force_origin(req, raw):
 
 
 def push_origin(req, raw):
-    if not actor.is_phil(req):
-        # enforced, not only promised: a session's curl gets a refusal, never a push
-        return req._send(403, json.dumps({"ok": False, "err": "only Phil's click pushes to origin"}))
     d = json.loads(raw or "{}")
     branch = d.get("branch", "")
     v = _origin_verdict(branch)

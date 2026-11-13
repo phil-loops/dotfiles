@@ -46,6 +46,7 @@ from srv import keymap   # own line: same reason
 from srv import todo   # own line: same reason
 from srv import viewed   # own line: same reason
 from srv import story   # own line: same reason
+from srv import routes   # every POST route: srv/routes.py
 state.ASSET = lambda: asset_sig()   # tabs on an older build reload (srv/state.py)
 srvctx.CWD = CWD   # set the default repo before any run() fires (run reads srvctx.repo_cwd())
 
@@ -99,7 +100,6 @@ def _log(line):
     reqlog.append(_LOG_FILE, msg)
 
 
-_REVIEW_POSTS = {"/review-draft": reviewdesk.draft, "/review-apply": reviewdesk.apply, "/review-helix": reviewdesk.helix, "/review-address": reviewdesk.address, "/review-note": reviewdesk.note}
 
 
 def run(args, timeout=None):
@@ -471,124 +471,7 @@ class H(BaseHTTPRequestHandler):
             srvctx.clear_repo()
 
     def _dispatch_post(self, raw):
-        if self.path == "/heartbeat":
-            self._send(200, '{"ok":true}')
-            return
-        if self.path == "/open-url":   # Chrome ext (URL-only): parse a raw GitHub URL → nvim or viewer route
-            return reviews.open_url(self, raw)
-        if self.path == "/pr-forest":   # Chrome ext: forest membership + child seating for a PR
-            return reviews.pr_forest(self, raw)
-        if self.path == "/reseat-children":      # viewer: rebase drifted children back onto a rewritten branch
-            return reviews.reseat(self, raw)
-        if self.path == "/track":   # append one local usage event to .git/stack-usage.jsonl
-            return usage.track(self, raw)
-        if self.path == "/project-describe":   # the forest's own line (Phil's wins; Claude's is a draft)
-            return review.project_describe(self, raw)
-        if self.path == "/project-rename":   # rename a forest: its keys and every branch's link move together
-            return review.project_rename(self, raw)
-        if self.path == "/project-state":   # move a project between focus, the workbench and the archive
-            return review.project_state(self, raw)
-        if self.path == "/focus":      # pin/unpin or reorder the focus lane (stack-project.<p>.focus N)
-            return review.focus_set(self, raw)
-        if self.path == "/open":   # open the file on that branch in the warm review-nvim
-            return picker.open_file(self, raw)
-        if self.path == "/preview":   # spin a side-port `next dev` for this branch (no touch to :3000)
-            return preview.start(self, raw)
-        if self.path == "/preview-integration":   # …for the ✦<project> ghost, via its playground worktree
-            return preview.start_integration(self, raw)
-        if self.path == "/preview-main":   # run (or attach to) main on :3000
-            return preview.start_main(self, raw)
-        if self.path == "/queue-kill":     # x on a Machine queue row: SIGTERM a slot holder, waiter or un-queued heavy work
-            return queue.kill(self, raw)
-        if self.path == "/preview-kill":   # stop one side-port preview (by its worktree dir)
-            return preview.kill(self, raw)
-        if self.path == "/preview-restart":   # kill + fresh next dev on the same port
-            return preview.restart(self, raw)
-        if self.path == "/preview-swap":   # flip the SAME port to another branch's build (before/after in one tab)
-            return preview.swap(self, raw)
-        if self.path == "/preview-reap":   # stop orphaned/crashed previews
-            return preview.reap(self, raw)
-        if self.path == "/stack-up":   # bring the shared Docker stack (Postgres/ClickHouse/…) up
-            return preview.stack_up(self, raw)
-        if self.path == "/sync":   # rebase an unpublished root branch onto fresh origin/main
-            return sync.post_sync(self, raw)
-        if self.path == "/fix-upstream":   # neutralize a footgun tracking ref (unset upstream)
-            return sync.fix_upstream(self, raw)
-        if self.path == "/diverged-additive":   # draft the additive PR update (push-vehicle branch, never pushes)
-            return sync.diverged_additive(self, raw)
-        if self.path == "/prep-push":   # ONE state-routed prep: additive / restack / squash → one outgoing commit
-            return push.prep_push(self, raw)
-        if self.path == "/outline":   # rewrite the outline's changed unpushed messages in one pass (+ description, landing text)
-            return outline.save(self, raw)
-        if self.path == "/outline-undo":   # restore the last outline save, if still unpushed and unmoved
-            return outline.undo(self, raw)
-        if self.path == "/packet-guide":   # (re)draft the packet's reading guide with headless claude
-            return packet.guide(self, raw)
-        if self.path == "/dirty-resolve":   # sync's routed decision on a dirty tree: include / stash / pop
-            return push.dirty_resolve(self, raw)
-        if self.path == "/reconcile":   # diverged-from-PR-head branch → eject Claude to reconcile (no force-push)
-            return sync.post_reconcile(self, raw)
-        if self.path == "/revert-commit":  # history row ↶: undo one own commit with a new revert commit
-            return review.revert_commit(self, raw)
-        if self.path == "/squash":   # collapse parent..branch into one voiced commit
-            return review.squash(self, raw)
-        if self.path == "/prep":     # prep-for-push: squash UNPUSHED commits → one, then oxfmt
-            return review.prep(self, raw)
-        if self.path == "/gates":    # sync strip: run repo gates → per-gate verdict (detach:true → journal)
-            return push.gates(self, raw)
-        if self.path == "/review":   # spawn a review run of the branch's diff; the run's verdict is recorded
-            return verdicts.review(self, raw)
-        if self.path == "/gates-waive":   # Phil ships this exact tree without gates (his click only)
-            return verdicts.waive(self, raw)
-        if self.path == "/delta-tests":  # prep-to-merge: run the tests related to the branch's delta
-            return push.delta_tests(self, raw)
-        if self.path == "/push-origin":  # shared-history door: FF-only single-clean-commit push; human finger only
-            return push.push_origin(self, raw)
-        if self.path == "/force-origin":  # the ONE force exception: no PR, or a draft with zero reviews/comments; lease-guarded
-            return push.force_origin(self, raw)
-        if self.path == "/viewed":   # the review page's v: view or un-view change blocks (srv/viewed.py)
-            return viewed.post(self, raw)
-        if self.path == "/todo-item":   # the tracker page moves an item (state, rank)
-            return todo.post(self, raw)
-        if self.path in _REVIEW_POSTS:   # the branch page's review: the ledger (and Phil's pending review), local suggestion commits
-            return _REVIEW_POSTS[self.path](self, raw)
-        if self.path == "/outbox-hold":   # hold for morning: stamp/clear branch.<b>.stack-hold-until (branch or forest)
-            return outbox.hold(self, raw)
-        if self.path == "/restack":          # restack one project (background, scratch worktree)
-            return restack.restack(self, raw)
-        if self.path == "/chat":             # a read-only chat turn (the mail-map's Q&A proxies here) → SSE replay+live
-            return chat.start(self, raw)
-        if self.path == "/tutor":            # a Socratic turn → headless read-only claude, streamed (SSE)
-            return tutor.start(self, raw)
-        if self.path == "/lsp/hover":        # on-demand types for a diff token (read-only, starts tsgo on first ask)
-            return lsp.hover(self, raw)
-        if self.path == "/lsp/definition":
-            return lsp.definition(self, raw)
-        if self.path == "/lsp/type-definition":
-            return lsp.type_definition(self, raw)
-        if self.path == "/lsp/implementation":
-            return lsp.implementation(self, raw)
-        if self.path == "/lsp/references":
-            return lsp.references(self, raw)
-        if self.path == "/lsp/symbols":
-            return lsp.symbols(self, raw)
-        if self.path == "/lsp/workspace-symbols":   # space S: symbols matching a query across the file's project
-            return lsp.workspace_symbols(self, raw)
-        if self.path == "/syntax/units":     # a file's declarations from its syntax tree (Helix's grammars + queries)
-            return syntax.units(self, raw)
-        if self.path == "/lsp/rename":       # rename a name across the program at the branch tip: preview, then one commit
-            return lsp.rename(self, raw)
-        if self.path == "/lsp/prepare":      # move the type trees to a branch page's tip + base (no tsgo)
-            return lsp.prepare(self, raw)
-        if self.path == "/tutor-stop":
-            return tutor.stop(self, raw)
-        if self.path == "/learning-evidence":   # the learner audits a credit: edit or delete one evidence row
-            return tutor.learning_evidence(self, raw)
-        if self.path == "/learning-question":   # the learner's own questions, attached to concepts
-            return tutor.learning_question(self, raw)
-        if self.path == "/integrate":        # ghost "feature" node → does the whole project land on main cleanly?
-            return integrate.check(self, raw)
-        self._send(404, "{}")
+        return routes.post(self, self.path, raw)   # srv/routes.py: every POST, its effects, who may send it
 
 
 class Server(ThreadingHTTPServer):
