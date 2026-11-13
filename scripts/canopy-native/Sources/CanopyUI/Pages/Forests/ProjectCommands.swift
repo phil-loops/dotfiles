@@ -123,9 +123,10 @@ enum ProjectCommands {
         r.register(Command(
             id: "forest.integrate", title: "Check the whole forest merges onto main", scope: .project, label: "merges?",
             available: { m.integratable($0) },
-            local: { id, _ in
-                guard let id else { return }
-                Task { await m.checkIntegration(id, again: true) }
+            task: { id, _ in
+                guard let id else { return nil }
+                await m.checkIntegration(id, again: true)
+                return nil   // the verdict shows on the forest's row
             }))
         r.register(Command(
             id: "forest.integration", title: "Read the whole forest's diff against main", scope: .project, leader: LocalKey(",i"), label: "whole diff",

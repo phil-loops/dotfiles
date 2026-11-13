@@ -197,6 +197,32 @@ public final class Runner {
             return
         }
 
+        if let task = cmd.task {
+            let runKey = "\(id)|\(target ?? "")"
+            let started = Date()
+            runs[runKey] = Run(state: .sending, t0: started)
+            Task { @MainActor [weak self] in
+                let outcome: Result<String?, Error>
+                do { outcome = .success(try await task(target, arg)) } catch { outcome = .failure(error) }
+                guard let self else { return }
+                let settledMs = (Date().timeIntervalSince(t0) * 10000).rounded() / 10
+                switch outcome {
+                case .success(let said):
+                    if let said { self.say(said) }
+                    self.runs[runKey] = Run(state: .done, t0: started, t1: Date())
+                    self.echo(named, via, true)
+                    feedback(["outcome": "ok", "settledMs": .number(settledMs)])
+                case .failure(let error):
+                    let err = String(describing: error)
+                    self.say(err)
+                    self.runs[runKey] = Run(state: .failed, t0: started, t1: Date(), err: err)
+                    self.echo(named, via, false, explained: true)
+                    feedback(["outcome": "refused", "err": .string(String(err.prefix(48))), "settledMs": .number(settledMs)])
+                }
+            }
+            return
+        }
+
         var w: Write?
         // a write may move the cursor as part of it (, m moves on): its undo and its refusal move it back
         let before = undoing ? nil : context?.placeNow()

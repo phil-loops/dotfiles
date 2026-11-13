@@ -76,6 +76,25 @@ final class Ctx: CommandContext {
         #expect(built == 0, "ret never sends")
     }
 
+    @Test func aTaskIsOkOnlyOnceItHasFinished() async throws {
+        let (runner, _, _) = try setup()
+        var go: CheckedContinuation<Void, Never>?
+        runner.registry.register(Command(id: "t.slow", title: "S", scope: .global, task: { _, _ in
+            await withCheckedContinuation { go = $0 }
+            return "done"
+        }))
+        runner.registry.register(Command(id: "t.no", title: "N", scope: .global, task: { _, _ in throw Refusal("not here") }))
+        runner.dispatch("t.slow", via: .key)
+        for _ in 0..<100 where go == nil { try await Task.sleep(nanoseconds: 1_000_000) }
+        #expect(runner.runOf("t.slow", nil)?.state == .sending && runner.fired == nil, "running: no ok yet")
+        go?.resume()
+        for _ in 0..<100 where runner.runOf("t.slow", nil)?.state == .sending { try await Task.sleep(nanoseconds: 1_000_000) }
+        #expect(runner.runOf("t.slow", nil)?.state == .done && runner.fired?.ok == true && runner.note == "done", "ok once it finished")
+        runner.dispatch("t.no", via: .key)
+        for _ in 0..<100 where runner.runOf("t.no", nil)?.state != .failed { try await Task.sleep(nanoseconds: 1_000_000) }
+        #expect(runner.fired?.ok == false && runner.note == "not here", "a throw is the refusal")
+    }
+
     @Test func aKeyPressedBeforeItsPageCanActIsHeldAndRunsOnRelease() throws {
         let (runner, _, _) = try setup()
         var ready = false, ran = 0
