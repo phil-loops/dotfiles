@@ -221,6 +221,10 @@ public struct Command {
     public var local: ((_ target: String?, _ arg: Any?) throws -> Void)?
     /// a server write; throw `Refusal` to refuse before sending
     public var write: ((_ target: String, _ arg: Any?) throws -> Write?)?
+    /// work that takes time (a reload, a check, a pickup): the runner awaits it and owns its outcome —
+    /// ok, with the line it returns, only once it has finished; a throw is the refusal. A key that
+    /// can't act YET (its page is still reading) is a `local` that throws `Hold` instead.
+    public var task: ((_ target: String?, _ arg: Any?) async throws -> String?)?
 
     public init(id: String, title: String, scope: Scope, budget: Budget = .local,
                 verb: Verb? = nil, verbs: [Verb] = [], leader: LocalKey? = nil,
@@ -229,12 +233,13 @@ public struct Command {
                 recordsJump: Bool = false,
                 available: ((String?) -> Bool)? = nil, route: ((String?) -> RouteTo?)? = nil,
                 local: ((_ target: String?, _ arg: Any?) throws -> Void)? = nil,
-                write: ((_ target: String, _ arg: Any?) throws -> Write?)? = nil) {
+                write: ((_ target: String, _ arg: Any?) throws -> Write?)? = nil,
+                task: ((_ target: String?, _ arg: Any?) async throws -> String?)? = nil) {
         self.id = id; self.title = title; self.scope = scope; self.budget = budget; self.label = label
         self.verbs = (verb.map { [$0] } ?? []) + verbs; self.leader = leader
         self.modes = modes; self.needsArg = needsArg; self.takes = takes
         self.pair = pair; self.group = group; self.hint = hint; self.v1 = v1; self.quiet = quiet; self.recordsJump = recordsJump; self.available = available
-        self.route = route; self.local = local; self.write = write
+        self.route = route; self.local = local; self.write = write; self.task = task
     }
 }
 

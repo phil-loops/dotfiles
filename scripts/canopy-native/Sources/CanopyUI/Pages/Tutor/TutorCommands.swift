@@ -243,11 +243,13 @@ enum TutorCommands {
             }))
         r.register(Command(
             id: "tutor.pickup", title: "Pick up a terminal session here, as a copy", scope: .pickup, budget: .slowIO, quiet: true,
-            local: { [weak t] session, _ in
-                guard let t, let session else { return }
-                Task { @MainActor in
-                    do { try await t.pickUp(session) } catch { t.error = String(describing: error) }
+            task: { [weak t] session, _ in
+                guard let t, let session else { return nil }
+                do { try await t.pickUp(session) } catch {
+                    t.error = String(describing: error)
+                    throw Refusal(t.error ?? "couldn't pick it up")
                 }
+                return nil
             }))
 
         // ── the graph's writes ──
