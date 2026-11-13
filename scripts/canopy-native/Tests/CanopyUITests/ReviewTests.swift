@@ -603,9 +603,9 @@ import Testing
         for k in keys0 { pg.viewedOverride[k] = nil }
         pg.viewedOverride[block.key] = .viewed
         pg.setCursor("l|a.ts|R:3")
-        let before = ShipStub.posts(p).count
         keys(a, ",", "M")
-        await until("the unmark") { ShipStub.posts(p).count > before }
+        // the earlier , m's post may still be in flight: wait for the unmark's own post, not just any new one
+        await until("the unmark") { ShipStub.posts(p).last { $0.path == "/loops/viewed" }?.body["marks"]?.object?[block.key] != nil }
         #expect(ShipStub.posts(p).last { $0.path == "/loops/viewed" }!.body["marks"]
                 == .object([block.key: .string("none"), keys0[0]: .string("viewed"), keys0[1]: .string("viewed"), keys0[2]: .string("none")]))
         let rows = fv().rows
