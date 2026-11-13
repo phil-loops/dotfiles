@@ -19,7 +19,8 @@ var prefs = UserDefaults.standard
 enum Workspace: String, CaseIterable {
     case canopy, learn, machine, inbox, plans, forest, review, runs, api
 
-    var name: String { self == .api ? "API" : rawValue.capitalized }
+    /// `api` is the Bench workspace: bench documents, and the API console while none is open. The raw value stays for the event log.
+    var name: String { self == .api ? "Bench" : rawValue.capitalized }
 
     var symbol: String {
         switch self {
@@ -27,7 +28,7 @@ enum Workspace: String, CaseIterable {
         case .review: return "rectangle.stack"
         case .learn: return "graduationcap"
         case .runs: return "dot.radiowaves.left.and.right"
-        case .api: return "bolt"
+        case .api: return "testtube.2"
         case .canopy: return "leaf"
         case .machine: return "server.rack"
         case .inbox: return "tray"
@@ -78,6 +79,7 @@ enum Workspace: String, CaseIterable {
         case "tutor": return (.learn, head?.mode == nil ? "kind \"tutor\"" : "mode \"tutor\"")
         case "live": return (.runs, "mode \"live\"")
         case "plan": return (.plans, "mode \"plan\"")
+        case "bench": return (.api, "mode \"bench\"")
         case let other?: return (.review, "mode \"\(other)\"")
         case nil: return (.review, "no mode")
         }
@@ -187,7 +189,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         } else {
             window.makeKeyAndOrderFront(nil)
         }
-        workspaces[active]?.console?.start()
+        workspaces[active]?.startLocalPage()
         workspaces[active]?.canopy?.start()
         workspaces[active]?.restoreFocus(in: window)
         if !background {
@@ -289,9 +291,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             workspaces[.canopy]?.canopy?.start(route: route.isEmpty ? nil : route)
         case .api:
             switchTo(.api)
-        case .bench(let id):
-            switchTo(.api)
-            workspaces[.api]?.console?.show(id)
         }
     }
 
@@ -352,7 +351,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     /// Brings a workspace forward in the same window: its view swaps in, nothing else moves.
     func switchTo(_ workspace: Workspace) {
         if snapshotPath == nil && selfTest == nil {
-            workspaces[workspace]?.console?.start()
+            workspaces[workspace]?.startLocalPage()
             workspaces[workspace]?.canopy?.start()
         }
         guard workspace != active else { return }

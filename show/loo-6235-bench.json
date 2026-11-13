@@ -1,0 +1,227 @@
+{
+ "mode": "bench",
+ "title": "LOO-6235 staging replay",
+ "replyTo": "21327d40",
+ "sections": [],
+ "bench": {
+  "ticket": "LOO-6235",
+  "repo": "loops",
+  "project": "draft-on-a-disabled-domain",
+  "about": "Seven API requests that a team with a disabled sending domain gets wrong answers to. Run them now, deploy, then run them again and compare.",
+  "env": {
+   "name": "staging",
+   "base": "https://app.l3s.email/api/v1",
+   "key": "loops-staging-disabled-domain-key"
+  },
+  "groups": [
+   {
+    "id": "drafting",
+    "title": "Drafting on a disabled domain",
+    "branch": "allow-content-api-drafts-on-a-disabled-domain"
+   },
+   {
+    "id": "saying",
+    "title": "Saying the domain is disabled",
+    "branch": "say-when-the-sending-domain-is-disabled"
+   }
+  ],
+  "steps": [
+   {
+    "id": "who",
+    "request": {
+     "method": "GET",
+     "path": "/api-key"
+    },
+    "capture": {
+     "team": "teamName"
+    }
+   },
+   {
+    "id": "campaign",
+    "group": "drafting",
+    "label": "Create a campaign",
+    "request": {
+     "method": "POST",
+     "path": "/campaigns",
+     "body": {
+      "name": "LOO-6235 repro {now}"
+     }
+    },
+    "claim": {
+     "today": {
+      "status": 400,
+      "says": "No sending domain",
+      "text": "no sending domain configured"
+     },
+     "fixed": {
+      "status": 201,
+      "text": "created"
+     }
+    }
+   },
+   {
+    "id": "transactional",
+    "group": "drafting",
+    "label": "Create a transactional email",
+    "request": {
+     "method": "POST",
+     "path": "/transactional-emails",
+     "body": {
+      "name": "LOO-6235 repro {now}"
+     }
+    },
+    "capture": {
+     "newTx": "id"
+    },
+    "claim": {
+     "today": {
+      "status": 400,
+      "says": "No sending domain",
+      "text": "no sending domain configured"
+     },
+     "fixed": {
+      "status": 201,
+      "text": "created"
+     }
+    }
+   },
+   {
+    "id": "list",
+    "request": {
+     "method": "GET",
+     "path": "/transactional-emails?perPage=20"
+    },
+    "capture": {
+     "ownTx": "data[!systemEmailType].id",
+     "anyTx": "data[].id",
+     "draftTx": "data[!systemEmailType&draftEmailMessageId].id",
+     "sentTx": "data[!systemEmailType&publishedEmailMessageId].id",
+     "ownDraftMsg": "data[!systemEmailType&draftEmailMessageId].draftEmailMessageId",
+     "ownSentMsg": "data[!systemEmailType&publishedEmailMessageId].publishedEmailMessageId",
+     "anyMsg": "data[publishedEmailMessageId].publishedEmailMessageId"
+    }
+   },
+   {
+    "id": "draft",
+    "group": "drafting",
+    "label": "Create a transactional draft",
+    "request": {
+     "method": "POST",
+     "path": "/transactional-emails/{newTx|ownTx|anyTx}/draft"
+    },
+    "needs": "a transactional email on this team; make one in the staging app",
+    "capture": {
+     "msg": "draftEmailMessageId"
+    },
+    "claim": {
+     "today": {
+      "status": 400,
+      "says": "No sending domain",
+      "text": "no sending domain configured"
+     },
+     "fixed": {
+      "status": 200,
+      "text": "ok"
+     }
+    }
+   },
+   {
+    "id": "read",
+    "group": "drafting",
+    "label": "Read an email message",
+    "request": {
+     "method": "GET",
+     "path": "/email-messages/{msg|ownDraftMsg|ownSentMsg|anyMsg}"
+    },
+    "needs": "an email message on this team",
+    "capture": {
+     "rev": "contentRevisionId"
+    },
+    "claim": {
+     "today": {
+      "status": 400,
+      "says": "No sending domain",
+      "text": "no sending domain configured"
+     },
+     "fixed": {
+      "status": 200,
+      "text": "ok"
+     }
+    }
+   },
+   {
+    "id": "update",
+    "group": "drafting",
+    "label": "Update an email message",
+    "request": {
+     "method": "POST",
+     "path": "/email-messages/{msg|ownDraftMsg|ownSentMsg|anyMsg}",
+     "body": {
+      "expectedRevisionId": "{rev?}",
+      "subject": "LOO-6235 repro {now}"
+     }
+    },
+    "needs": "an email message on this team",
+    "claim": {
+     "today": {
+      "status": 400,
+      "says": "No sending domain",
+      "text": "no sending domain configured"
+     },
+     "fixed": {
+      "status": 200,
+      "text": "ok"
+     }
+    }
+   },
+   {
+    "id": "publish",
+    "group": "saying",
+    "label": "Publish a transactional",
+    "request": {
+     "method": "POST",
+     "path": "/transactional-emails/{newTx|draftTx}/publish"
+    },
+    "needs": "a non-system transactional email with an unpublished draft on this team",
+    "claim": {
+     "today": {
+      "status": 422,
+      "says": "not verified",
+      "text": "domain is not verified"
+     },
+     "fixed": {
+      "status": 422,
+      "says": "has been disabled",
+      "text": "domain has been disabled"
+     }
+    }
+   },
+   {
+    "id": "send",
+    "group": "saying",
+    "label": "Send a transactional",
+    "request": {
+     "method": "POST",
+     "path": "/transactional",
+     "body": {
+      "transactionalId": "{sentTx}",
+      "email": "loo-6235-repro@example.com"
+     }
+    },
+    "needs": "a published, non-system transactional email on this team",
+    "claim": {
+     "today": {
+      "status": 400,
+      "says": "not verified",
+      "text": "domain is not verified"
+     },
+     "fixed": {
+      "status": 400,
+      "says": "has been disabled",
+      "text": "domain has been disabled"
+     }
+    }
+   }
+  ]
+ }
+}

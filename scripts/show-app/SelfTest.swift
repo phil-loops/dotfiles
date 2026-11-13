@@ -225,20 +225,20 @@ final class SelfTestDriver {
             check("⌘\(key) switches to \(workspace.name)", app.active == workspace, "front is \(app.active.name)")
         }
         check("Forest, Review and Runs have no ⌘ number", [Workspace.forest, .review, .runs].allSatisfy { $0.key.isEmpty })
-        check("API is ⌘6", Workspace.api.key == "6")
-        let benchFile = (Bench.directory as NSString).appendingPathComponent("replay.json")
-        try? FileManager.default.createDirectory(atPath: Bench.directory, withIntermediateDirectories: true)
-        try? #"{"title": "Replay", "url": "http://127.0.0.1:9/", "start": "true", "repo": "loops", "project": "some-forest"}"#
+        check("Bench is ⌘6", Workspace.api.key == "6")
+        let benchFile = (decksDirectory as NSString).appendingPathComponent("selftest-bench.json")
+        try? #"{"mode": "bench", "title": "Replay", "sections": [], "bench": {"repo": "loops", "project": "some-forest", "steps": []}}"#
             .write(toFile: benchFile, atomically: true, encoding: .utf8)
-        check("a bench file registers with its forest", Bench.registered().map(\.id) == ["replay"] && Bench.registered().first?.canopyRoute == "/v2/p/loops/some-forest")
-        check("a bench target round-trips and routes to API", Target(key: Target.bench("replay").key) == .bench("replay") && Target.bench("replay").workspace == .api)
-        app.open(.bench("replay"))
-        let console = app.workspaces[.api]?.console
-        check("opening a bench brings API forward on it", app.active == .api && console?.current == "replay", "front is \(app.active.name), bench \(console?.current ?? "none")")
-        console?.showNext()
-        check("⌘⇧B cycles back to the console", console?.current == Bench.console.id)
-        app.open(.bench("missing"))
-        check("an unknown bench leaves the page alone", console?.current == Bench.console.id)
+        let benchPath = canonicalPath(benchFile)
+        check("a bench document routes to the Bench workspace", Workspace.route(benchPath).workspace == .api)
+        check("a bench is on the shelf under its forest", shelfEntry(benchPath)?.topic == "some-forest" && shelfEntry(benchPath)?.title == "Replay")
+        app.openPath(benchPath)
+        let bench = app.workspaces[.api]
+        check("opening a bench brings Bench forward on it", app.active == .api && bench?.currentBench?.head.canopyRoute == "/v2/p/loops/some-forest",
+              "front is \(app.active.name), open \(bench?.current ?? "nothing")")
+        check("the open bench titles the window", bench?.documentTitle == "Replay" && bench?.subtitle == "some-forest")
+        bench?.showConsole()
+        check("⌘⇧B closes the bench and leaves the console", bench?.current == nil && bench?.currentBench == nil)
         try? FileManager.default.removeItem(atPath: benchFile)
         // the finder steps below start in Review, which has no key now
         app.switchTo(.review)

@@ -1,8 +1,0 @@
-{
-  "title": "LOO-6235 replay",
-  "url": "http://127.0.0.1:7235/",
-  "start": "exec loo-6235-repro",
-  "repo": "loops",
-  "project": "draft-on-a-disabled-domain",
-  "branches": ["allow-content-api-drafts-on-a-disabled-domain", "say-when-the-sending-domain-is-disabled"]
-}

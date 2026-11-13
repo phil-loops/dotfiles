@@ -663,7 +663,12 @@ func shelfEntry(_ path: String) -> ShelfEntry? {
         let progress = [counts, live.status?.state].compactMap { $0 }.joined(separator: " · ")
         return ShelfEntry(path: path, workspace: workspace, title: live.title, state: state, progress: progress, touched: touched,
                           topic: Topics.cached(live.replyTo))
-    case .api, .canopy, .machine:
+    case .api:
+        guard let head = loadBenchHead(path) else { return nil }
+        let unread = showEvents.state.waiting.contains(.document(path))
+        return ShelfEntry(path: path, workspace: workspace, title: head.title, state: unread ? .waiting : .done,
+                          progress: "", touched: touched, topic: head.bench.project ?? Topics.cached(head.replyTo))
+    case .canopy, .machine:
         return nil
     case .forest, .review, .plans:
         guard let deck = try? loadDeck(path) else { return nil }
@@ -918,25 +923,55 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
     }
 
     var currentDeck: DeckController? { current.flatMap { decks[$0] } }
+    private(set) var benches: [String: BenchPageController] = [:]
+    var currentBench: BenchPageController? { current.flatMap { benches[$0] } }
 
     var documentTitle: String {
         if let tutor { return tutor.title }
-        return currentDeck?.title ?? "Show"
+        return currentBench?.head.title ?? currentDeck?.title ?? "Show"
     }
 
     var subtitle: String {
         if let tutor { return tutor.subtitle }
-        return currentDeck?.subtitle ?? ""
+        return currentBench?.head.bench.project ?? currentDeck?.subtitle ?? ""
+    }
+
+    /// The Bench workspace's page comes up: the open bench's, else the API console's.
+    func startLocalPage() {
+        if let bench = currentBench {
+            bench.start()
+        } else {
+            console?.start()
+        }
+    }
+
+    /// ⌘⇧O in Bench: the open bench's forest in the Canopy workspace.
+    func openBenchForest() {
+        guard let bench = currentBench else {
+            say("Open a bench first; the API console belongs to no forest")
+            return
+        }
+        guard let route = bench.head.canopyRoute else {
+            say("“\(bench.head.title)” names no repo and project, so canopy has no forest for it")
+            return
+        }
+        (NSApp.delegate as? AppDelegate)?.open(.canopy(route))
+    }
+
+    /// ⌘⇧B in Bench: closes the open bench, which puts the API console back and the shelf with it.
+    func showConsole() {
+        guard workspace == .api else { return }
+        current = nil
+        showNothing()
+        syncShelfSelection()
+        onTitleChange?()
+        if snapshotPath == nil && selfTest == nil { console?.start() }
     }
 
     /// Opens `path` here, or reloads it when it's already the open document. The document it replaces is pushed on the back
     /// stack as is (a revisited document stays deeper in it too), so ⌘[ retraces every step.
     func open(_ path: String, remember: Bool = true) {
         _ = view
-        if let console {
-            console.start()
-            return
-        }
         if let canopy {
             canopy.start()
             return
@@ -954,8 +989,27 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
         switch workspace {
         case .learn:
             tutor?.show(path: path)
-        case .api, .canopy, .machine:
+        case .canopy, .machine:
             return
+        case .api:
+            _ = BenchPageController.keys
+            let page: BenchPageController
+            if let existing = benches[path] {
+                page = existing
+            } else {
+                guard let head = loadBenchHead(path) else {
+                    current = nil
+                    say("“\((path as NSString).lastPathComponent)” isn't a bench document Show can read")
+                    showNothing()
+                    return
+                }
+                page = BenchPageController(path: path, head: head)
+                benches[path] = page
+            }
+            display(page)
+            // a bench is a full-window page, like a plan canvas: the shelf folds away and ⌃⌘S brings it back
+            canvasChanged(true)
+            if snapshotPath == nil && selfTest == nil { page.start() }
         case .forest, .review, .runs, .inbox, .plans:
             let controller: DeckController
             if let existing = decks[path] {
@@ -1026,6 +1080,7 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
                 : "Nothing open. Pick a session from the shelf, or press ⌘O.")
         case .api:
             if let console { display(console) }
+            canvasChanged(false)
         case .canopy, .machine:
             if let canopy { display(canopy) }
         case .runs:
@@ -1058,6 +1113,8 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
     func reload() {
         if let tutor {
             tutor.reload()
+        } else if let bench = currentBench {
+            bench.reload()
         } else if let console {
             console.reload()
         } else if let canopy {
@@ -1322,6 +1379,7 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
             return
         }
         decks[entry.path] = nil
+        benches[entry.path] = nil
         showEvents.append(ShowEvent(kind: .dismissed, target: .document(entry.path), workspace: workspace, title: entry.title))
         if wasOpen {
             current = nil

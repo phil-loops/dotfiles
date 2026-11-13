@@ -3,8 +3,8 @@
 # no args: bring Show to the front, or start it back on the last workspace and documents), rebuilding it when any show-app/*.swift changes. Re-showing an open file reloads it.
 # Show comes forward only when Phil asked: run from his terminal, or with --focus / SHOW_FOCUS=1 (a session whose user asked to
 # see it now). From a Claude session otherwise it arrives — History (⌘Y), a rail badge, a notification — and nothing moves.
-# show --api [<bench>] — the API workspace (⌘6): the loops-postman console, or the bench registered as
-#   ~/.dotfiles/show/benches/<bench>.json; either is started when it isn't up.
+# show --api — the Bench workspace (⌘6) on its API console (loops-postman, started when it isn't up). A bench itself is a
+#   document: show <bench.json>.
 # show --canopy [--focus] [/v2/…] — the Canopy workspace (⌘1; its machine page has ⌘3): the forest viewer, at a page when given one.
 # show --status <deck | /v2/…> — whether it's waiting, opened or dismissed, from Show's event log.
 # show --build — just (re)build. show --snapshot <file.json> <out.png> [--appearance light|dark] — render the window offscreen, no window shown.
@@ -137,7 +137,7 @@ focus=0
 
 case "${1:-}" in
   -h|--help)
-    echo "usage: show [--focus] [<file.json>…] | show --api [--focus] [<bench>] | show --canopy [--focus] [/v2/…] | show --status <deck | /v2/…> | show --build | show --snapshot <file.json> <out.png> [--appearance light|dark] | show --selftest | show --check-routing <file.json> | show --check-live <deck.json> | show --tutor [<session.json>] | show --tutor-check <session.json> | show --tutor-ask <session.json> <message>" >&2
+    echo "usage: show [--focus] [<file.json>…] | show --api | show --canopy [--focus] [/v2/…] | show --status <deck | /v2/…> | show --build | show --snapshot <file.json> <out.png> [--appearance light|dark] | show --selftest | show --check-routing <file.json> | show --check-live <deck.json> | show --tutor [<session.json>] | show --tutor-check <session.json> | show --tutor-ask <session.json> <message>" >&2
     exit 64
     ;;
   --canopy)
@@ -151,16 +151,9 @@ case "${1:-}" in
     ;;
   --api)
     shift
-    bench=""
-    for arg in "$@"; do
-      if [[ "$arg" == "--focus" ]]; then focus=1; else bench="$arg"; fi
-    done
+    [[ "${1:-}" == "--focus" ]] && focus=1
     ready
-    if [[ -n "$bench" ]]; then
-      request "$(python3 -c 'import json, sys; print(json.dumps({"bench": sys.argv[1]}))' "$bench")"
-    else
-      request '{"api": true}'
-    fi
+    request '{"api": true}'
     ;;
   --status)
     [[ $# -eq 2 ]] || { echo "usage: show --status <deck path | /v2/… route>" >&2; exit 64; }

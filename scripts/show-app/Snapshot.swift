@@ -196,7 +196,7 @@ func checkRouting(_ raw: String) -> Int32 {
     }
     let route = Workspace.route(path)
     print("workspace: \(route.workspace.rawValue) (⌘\(route.workspace.key), by \(route.reason))")
-    if route.workspace != .learn, case let unknown = unknownParts(ofDeckAt: path), !unknown.isEmpty {
+    if route.workspace != .learn, route.workspace != .api, case let unknown = unknownParts(ofDeckAt: path), !unknown.isEmpty {
         print("unknown to this build: \(unknown.joined(separator: ", "))")
     }
     if let entry = shelfEntry(path) {

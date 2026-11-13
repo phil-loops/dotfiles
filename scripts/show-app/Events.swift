@@ -6,24 +6,19 @@ enum Target: Hashable {
     /// A canopy address (`/v2/…`); empty is canopy's home.
     case canopy(String)
     case api
-    /// A bench in the API workspace, by its registry id (`<decks>/benches/<id>.json`).
-    case bench(String)
 
-    /// One string per target: a document's path, `canopy:<route>`, `bench:<id>`, or `api:`. History rows and notifications carry it.
+    /// One string per target: a document's path, `canopy:<route>`, or `api:`. History rows and notifications carry it.
     var key: String {
         switch self {
         case .document(let path): return path
         case .canopy(let route): return "canopy:" + route
         case .api: return "api:"
-        case .bench(let id): return "bench:" + id
         }
     }
 
     init(key: String) {
         if key == "api:" {
             self = .api
-        } else if key.hasPrefix("bench:") {
-            self = .bench(String(key.dropFirst("bench:".count)))
         } else if key.hasPrefix("canopy:") {
             self = .canopy(String(key.dropFirst("canopy:".count)))
         } else {
@@ -41,14 +36,14 @@ enum Target: Hashable {
         switch self {
         case .document(let path): return Workspace.route(path).workspace
         case .canopy: return .canopy
-        case .api, .bench: return .api
+        case .api: return .api
         }
     }
 }
 
 extension Target: Codable {
     private enum Keys: String, CodingKey {
-        case document, canopy, api, bench
+        case document, canopy, api
     }
 
     init(from decoder: Decoder) throws {
@@ -57,12 +52,10 @@ extension Target: Codable {
             self = .document(path)
         } else if let route = try c.decodeIfPresent(String.self, forKey: .canopy) {
             self = .canopy(route)
-        } else if let id = try c.decodeIfPresent(String.self, forKey: .bench) {
-            self = .bench(id)
         } else if c.contains(.api) {
             self = .api
         } else {
-            throw DecodingError.dataCorrupted(.init(codingPath: c.codingPath, debugDescription: "a target names document, canopy, bench or api"))
+            throw DecodingError.dataCorrupted(.init(codingPath: c.codingPath, debugDescription: "a target names document, canopy or api"))
         }
     }
 
@@ -72,7 +65,6 @@ extension Target: Codable {
         case .document(let path): try c.encode(path, forKey: .document)
         case .canopy(let route): try c.encode(route, forKey: .canopy)
         case .api: try c.encode(true, forKey: .api)
-        case .bench(let id): try c.encode(id, forKey: .bench)
         }
     }
 }

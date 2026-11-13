@@ -1,0 +1,498 @@
+#!/usr/bin/env node
+// bench — replay a scenario's claims against a live environment and keep every run as evidence.
+//
+// A bench is a set of claims about a live system: "this request answers X today and should answer Y once branch B is
+// deployed". The scenario (a Show document, `"mode": "bench"`, see the show skill) states the claims; this runner observes
+// them; the verdict is a pure function of claim and observation (`verdict`); the page only renders what `/state` returns.
+//
+//   bench serve [--port 7240]     the page server Show's Bench workspace loads (http://127.0.0.1:7240/b?file=<scenario>)
+//   bench check <scenario.json>   lint a scenario; exit 1 on errors
+//   bench status <scenario.json>  the latest run's verdict per group, one line each
+//
+// Runs are append-only JSON lines in ~/Library/Application Support/Show/bench-runs/<scenario>.jsonl (BENCH_RUNS overrides).
+// The API key comes from the Keychain item the scenario names, on every run, and never reaches the page or a run record.
+// Only staging and local hosts are allowed; a step that writes waits for a click unless the run was started as "auto".
+import { execFileSync } from "node:child_process";
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { createServer } from "node:http";
+import { homedir } from "node:os";
+import { basename, join, resolve } from "node:path";
+
+const ALLOWED_HOSTS = ["app.l3s.email", "localhost", "127.0.0.1"];
+const SHOW_DIR = resolve((process.env.SHOW_DIR ?? join(homedir(), ".dotfiles", "show")).replace(/^~/, homedir()));
+const RUNS_DIR = process.env.BENCH_RUNS ?? join(homedir(), "Library", "Application Support", "Show", "bench-runs");
+
+// ---------- scenario ---------------------------------------------------------------------------------------------------
+
+function loadScenario(file) {
+  const path = resolve(file);
+  const doc = JSON.parse(readFileSync(path, "utf8"));
+  const bench = doc.bench ?? {};
+  return { path, id: basename(path, ".json"), title: doc.title ?? basename(path), ...bench, groups: bench.groups ?? [], steps: bench.steps ?? [] };
+}
+
+function lint(s) {
+  const errors = [];
+  const say = (m) => errors.push(m);
+  if (!s.env?.base) say("env.base is missing");
+  else if (!ALLOWED_HOSTS.includes(new URL(s.env.base).hostname)) say(`env.base host ${new URL(s.env.base).hostname} is not allowed (${ALLOWED_HOSTS.join(", ")})`);
+  if (!s.env?.key) say("env.key (a Keychain service name) is missing");
+  if (!s.steps.length) say("no steps");
+  const ids = new Set(), groups = new Set(s.groups.map((g) => g.id)), known = new Set(["now"]);
+  for (const step of s.steps) {
+    const at = `step ${step.id ?? "?"}`;
+    if (!step.id) say("a step has no id");
+    if (ids.has(step.id)) say(`${at}: id used twice`);
+    ids.add(step.id);
+    if (!step.request?.method || !step.request?.path) say(`${at}: request needs method and path`);
+    if (step.claim && !(step.claim.today?.status && step.claim.fixed?.status)) say(`${at}: a claim needs today.status and fixed.status`);
+    if (step.claim && !groups.has(step.group)) say(`${at}: a claim's group must name one of groups[].id`);
+    for (const [, names] of JSON.stringify(step.request ?? {}).matchAll(/\{([\w|?]+)\}/g)) {
+      for (const name of names.replace("?", "").split("|")) if (!known.has(name)) say(`${at}: {${name}} is never captured before it is used`);
+    }
+    Object.keys(step.capture ?? {}).forEach((name) => known.add(name));
+  }
+  return errors;
+}
+
+/// `data[!systemEmailType&draftEmailMessageId].id`: dotted path; `[conds]` picks the first array element whose named
+/// fields are truthy (or falsy with `!`), `[]` the first element.
+function pick(value, path) {
+  for (const part of path.split(".")) {
+    const [, key, conds] = part.match(/^(\w+)(?:\[([^\]]*)\])?$/) ?? [];
+    if (!key || value == null) return undefined;
+    value = value[key];
+    if (conds !== undefined) {
+      const tests = conds.split("&").filter(Boolean);
+      value = (Array.isArray(value) ? value : []).find((item) => tests.every((t) => (t.startsWith("!") ? !item?.[t.slice(1)] : item?.[t])));
+    }
+  }
+  return value ?? undefined;
+}
+
+/// Fills `{a|b}` (first captured wins) and `{a?}` (optional: a body key holding only it is dropped). Returns the names
+/// that were required and missing.
+function fill(template, vars) {
+  const missing = [];
+  const text = (s) =>
+    s.replace(/\{([\w|?]+)\}/g, (_, names) => {
+      const optional = names.endsWith("?");
+      const found = names.replace("?", "").split("|").map((n) => vars[n]).find((v) => v !== undefined);
+      if (found === undefined && !optional) missing.push(names);
+      return found ?? "";
+    });
+  const walk = (v) => {
+    if (typeof v === "string") return text(v);
+    if (Array.isArray(v)) return v.map(walk);
+    if (v && typeof v === "object") {
+      return Object.fromEntries(Object.entries(v).flatMap(([k, x]) => (typeof x === "string" && /^\{\w+\?\}$/.test(x) && vars[x.slice(1, -2)] === undefined ? [] : [[k, walk(x)]])));
+    }
+    return v;
+  };
+  return { value: walk(template), missing };
+}
+
+/// The verdict: what an observation says about a claim. Pure; every view uses this and nothing else.
+function verdict(claim, seen) {
+  if (!claim) return "lookup";
+  if (!seen || seen.status == null) return "not-run";
+  const holds = (side) => seen.status === side.status && (!side.says || (seen.message ?? "").includes(side.says));
+  return holds(claim.fixed) ? "fixed" : holds(claim.today) ? "today" : "unexpected";
+}
+
+// ---------- evidence ---------------------------------------------------------------------------------------------------
+
+const runsFile = (s) => join(RUNS_DIR, `${s.id}.jsonl`);
+function loadRuns(s) {
+  if (!existsSync(runsFile(s))) return [];
+  return readFileSync(runsFile(s), "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line));
+}
+function recordRun(s, run) {
+  mkdirSync(RUNS_DIR, { recursive: true });
+  appendFileSync(runsFile(s), JSON.stringify(run) + "\n");
+}
+
+function readKey(s) {
+  if (process.env.BENCH_KEY) return process.env.BENCH_KEY;
+  try {
+    return execFileSync("security", ["find-generic-password", "-s", s.env.key, "-w"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+  } catch {
+    return null;
+  }
+}
+
+function branchTip(s, branch) {
+  const repo = process.env.BENCH_REPO ?? join(homedir(), "coding", s.repo ?? "");
+  try {
+    return execFileSync("git", ["-C", repo, "rev-parse", "--short=10", `refs/heads/${branch}`], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+  } catch {
+    return null;
+  }
+}
+
+// ---------- running ----------------------------------------------------------------------------------------------------
+
+class Stopped extends Error {}
+/// The run in flight per scenario path. In "ask" mode a step that writes waits in `pending` for send, skip, rest or stop.
+const active = new Map();
+
+async function send(s, key, a, step, request) {
+  const url = s.env.base + request.path;
+  const writes = step.writes ?? request.method !== "GET";
+  if (a.mode === "ask" && writes) {
+    const answer = await new Promise((resolve) => (a.pending = { step: step.id, method: request.method, url, body: request.body ?? null, resolve }));
+    a.pending = null;
+    if (answer === "stop") throw new Stopped();
+    if (answer === "rest") a.mode = "auto";
+    if (answer === "skip") {
+      a.run.trail.push({ step: step.id, at: new Date().toISOString(), method: request.method, url, requestBody: request.body ?? null, skipped: true });
+      return { skipped: "you skipped it" };
+    }
+  }
+  const started = Date.now();
+  const entry = { step: step.id, at: new Date(started).toISOString(), method: request.method, url, writes,
+    requestHeaders: { Authorization: "Bearer ••••" + key.slice(-4), ...(request.body ? { "Content-Type": "application/json" } : {}) },
+    requestBody: request.body ?? null };
+  a.run.trail.push(entry);
+  try {
+    const res = await fetch(url, { method: request.method,
+      headers: { Authorization: `Bearer ${key}`, ...(request.body ? { "Content-Type": "application/json" } : {}) },
+      body: request.body ? JSON.stringify(request.body) : undefined, signal: AbortSignal.timeout(20000) });
+    const text = await res.text();
+    let json = null;
+    try { json = JSON.parse(text); } catch {}
+    Object.assign(entry, { status: res.status, ms: Date.now() - started,
+      responseHeaders: Object.fromEntries(["content-type", "x-request-id"].flatMap((h) => (res.headers.get(h) ? [[h, res.headers.get(h)]] : []))),
+      responseBody: json ?? text.slice(0, 20000) });
+    return { status: res.status, json, message: json?.message ?? (json ? "" : text.slice(0, 200)), ms: entry.ms };
+  } catch (error) {
+    Object.assign(entry, { status: 0, ms: Date.now() - started, responseBody: `request failed: ${error.message}` });
+    return { status: 0, json: null, message: `request failed: ${error.message}`, ms: entry.ms };
+  }
+}
+
+async function execute(s, key, a) {
+  const vars = { now: a.run.at.slice(0, 16).replace("T", " ") };
+  for (const step of s.steps) {
+    const { value: request, missing } = fill(step.request, vars);
+    if (missing.length) {
+      a.run.seen[step.id] = { skipped: step.needs ?? `nothing earlier gave it ${missing.join(", ")}` };
+      continue;
+    }
+    const seen = await send(s, key, a, step, request);
+    a.run.seen[step.id] = seen.skipped ? seen : { status: seen.status, message: seen.message, ms: seen.ms };
+    if (seen.status >= 200 && seen.status < 300) {
+      for (const [name, path] of Object.entries(step.capture ?? {})) {
+        const value = pick(seen.json, path);
+        if (value !== undefined && vars[name] === undefined) vars[name] = value;
+      }
+    }
+    if (vars.team) a.run.team = vars.team;
+  }
+}
+
+async function startRun(s, key, mode) {
+  const a = { mode, pending: null,
+    run: { at: new Date().toISOString(), scenario: s.id, env: { name: s.env.name, base: s.env.base }, mode, team: null,
+      tips: Object.fromEntries(s.groups.filter((g) => g.branch).map((g) => [g.branch, branchTip(s, g.branch)])), seen: {}, trail: [] } };
+  active.set(s.path, a);
+  try {
+    await execute(s, key, a);
+  } catch (error) {
+    a.run.stopped = error instanceof Stopped ? "you stopped it" : error.message;
+  }
+  recordRun(s, a.run);
+  active.delete(s.path);
+}
+
+// ---------- what the page is told --------------------------------------------------------------------------------------
+
+function state(s) {
+  const a = active.get(s.path);
+  const runs = loadRuns(s).slice(-8);
+  if (a) runs.push({ ...a.run, inProgress: true });
+  const requestLine = (step) => `${step.request.method} ${step.request.path.replace(/\{[\w|?]+\}/g, "{id}")}`;
+  return {
+    title: s.title, ticket: s.ticket ?? null, about: s.about ?? "", env: { name: s.env.name, base: s.env.base, key: s.env.key },
+    hasKey: Boolean(readKey(s)), problems: lint(s),
+    groups: s.groups.map((g) => ({ ...g, tip: g.branch ? branchTip(s, g.branch) : null,
+      href: g.branch && s.repo ? `canopy://v2/b/${s.repo}/${g.branch}` : null,
+      steps: s.steps.filter((step) => step.claim && step.group === g.id).map((step) => ({ id: step.id, label: step.label ?? step.id, line: requestLine(step), claim: step.claim })) })),
+    runs: runs.map((run) => ({ ...run, verdicts: Object.fromEntries(s.steps.filter((step) => step.claim).map((step) => [step.id, verdict(step.claim, run.seen[step.id])])) })),
+    pending: a?.pending ? { ...a.pending, resolve: undefined, writes: true } : null,
+  };
+}
+
+const PAGE = `<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bench</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    color-scheme: light dark;
+    --paper: light-dark(#eef1f6, #131929);
+    --sheet: light-dark(#f9fafc, #1a2135);
+    --ink: light-dark(#1a2238, #e4e8f4);
+    --soft: light-dark(#5a6482, #98a2c0);
+    --rule: light-dark(#c9d0e0, #2c3552);
+    --press: light-dark(#2b3fd6, #8e9bff);
+    --press-ink: light-dark(#ffffff, #10162a);
+    --still: light-dark(#a85b00, #f2b25c);
+    --fixed: light-dark(#0b7d62, #58d6b4);
+    --sans: "Archivo", "Helvetica Neue", Arial, sans-serif;
+    --wire: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { background: var(--paper); }
+  body { margin: 0; padding: 40px clamp(20px, 5vw, 64px) 96px; color: var(--ink); font: 15px/1.5 var(--sans); font-stretch: 100%; }
+  main { max-width: 1120px; margin: 0 auto; }
+  a { color: inherit; text-decoration-color: var(--rule); text-underline-offset: 3px; }
+  a:hover { text-decoration-color: currentColor; }
+  :focus-visible { outline: 2px solid var(--press); outline-offset: 3px; border-radius: 3px; }
+
+  .top { display: flex; align-items: baseline; justify-content: space-between; gap: 24px; flex-wrap: wrap; color: var(--soft); font-size: 13px; }
+  .top b { color: var(--ink); font-weight: 600; }
+  h1 { font: 650 clamp(30px, 4.6vw, 52px)/1.06 var(--sans); font-stretch: 112%; letter-spacing: -0.015em; margin: 28px 0 14px; max-width: 20ch; text-wrap: balance; }
+  h1.still { color: var(--still); } h1.fixed { color: var(--fixed); }
+  .lede { max-width: 62ch; color: var(--soft); margin: 0 0 26px; }
+  .press { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  button.run { font: 600 15px var(--sans); font-stretch: 108%; color: var(--press-ink); background: var(--press); border: 0; border-radius: 4px; padding: 13px 24px; cursor: pointer; box-shadow: 0 3px 0 color-mix(in srgb, var(--press) 55%, var(--ink)); transition: transform .08s, box-shadow .08s; }
+  button.run:active:not(:disabled) { transform: translateY(3px); box-shadow: none; }
+  button.run:disabled { opacity: .4; cursor: default; }
+  #note { color: var(--soft); font-size: 13px; }
+  button.quiet { font: 500 14px var(--sans); color: var(--ink); background: none; border: 1px solid var(--rule); border-radius: 4px; padding: 11px 16px; cursor: pointer; }
+  button.quiet:hover:not(:disabled) { border-color: var(--ink); }
+  button.quiet:disabled { opacity: .4; cursor: default; }
+  .press[hidden], #next[hidden] { display: none; }
+  #next { background: var(--sheet); border: 1px solid var(--ink); max-width: 860px; }
+  #next .ask { padding: 16px 20px 4px; }
+  #next .ask p { margin: 0 0 8px; font-weight: 600; }
+  #next .ask p small { font-weight: 400; color: var(--soft); margin-left: 8px; font-size: 13px; }
+  #next pre { margin: 0 0 12px; font: 12.5px/1.5 var(--wire); white-space: pre-wrap; word-break: break-word; max-height: 220px; overflow: auto; }
+  #next .acts { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; padding: 14px 20px 18px; border-top: 1px solid var(--rule); }
+  #next .acts .gap { flex: 1; }
+  #setup { margin-top: 22px; padding: 16px 18px; background: var(--sheet); border-left: 3px solid var(--still); max-width: 78ch; }
+  #setup[hidden] { display: none; }
+  #setup pre { margin: 10px 0 0; font: 12.5px var(--wire); white-space: pre-wrap; word-break: break-all; }
+
+  section { margin-top: 56px; }
+  h2 { font: 600 21px/1.2 var(--sans); font-stretch: 108%; margin: 0; }
+  .branch { margin: 6px 0 16px; font-size: 13px; color: var(--soft); }
+  .branch a { font-family: var(--wire); font-size: 12.5px; color: var(--ink); }
+  .scroll { overflow-x: auto; background: var(--sheet); border: 1px solid var(--rule); }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 12px 18px; border-bottom: 1px solid var(--rule); white-space: nowrap; vertical-align: top; }
+  tr:last-child td { border-bottom: 0; }
+  th { font-size: 12.5px; font-weight: 500; color: var(--soft); }
+  th small { display: block; font-size: 11.5px; font-weight: 400; }
+  th:nth-child(1) { width: 32%; } th:nth-child(2) { width: 24%; } th:nth-child(3) { width: 21%; }
+  td.what { font-weight: 550; }
+  .line { display: block; font: 12px var(--wire); font-weight: 400; color: var(--soft); margin-top: 3px; }
+  td.expect { color: var(--soft); font-size: 13.5px; }
+  td.expect b, td.got b { font: 500 13.5px var(--wire); margin-right: 8px; color: var(--ink); }
+  td.got { border-left: 1px solid var(--rule); font-size: 13.5px; }
+  td.got.still, td.got.still b { color: var(--still); }
+  td.got.fixed, td.got.fixed b { color: var(--fixed); }
+  td.got.latest { background: color-mix(in srgb, currentColor 7%, transparent); font-weight: 600; }
+  td.got .why { display: block; max-width: 30ch; white-space: normal; font-size: 12px; font-weight: 400; color: var(--soft); margin-top: 3px; }
+  td.none { border-left: 1px solid var(--rule); color: var(--soft); font-size: 13px; }
+
+  .trailhead { display: flex; align-items: baseline; justify-content: space-between; gap: 20px; flex-wrap: wrap; margin-bottom: 14px; }
+  .tabs { display: flex; gap: 4px; flex-wrap: wrap; }
+  .tabs button { font: 500 13px var(--sans); color: var(--soft); background: none; border: 1px solid var(--rule); border-radius: 4px; padding: 6px 12px; cursor: pointer; }
+  .tabs button[aria-pressed="true"] { color: var(--press-ink); background: var(--ink); border-color: var(--ink); }
+  ol.trail { list-style: none; margin: 0; padding: 0; counter-reset: req; background: var(--sheet); border: 1px solid var(--rule); }
+  ol.trail > li { counter-increment: req; border-bottom: 1px solid var(--rule); }
+  ol.trail > li:last-child { border-bottom: 0; }
+  ol.trail summary { display: grid; grid-template-columns: 2.2em 3.2em 1fr auto; gap: 12px; align-items: baseline; padding: 11px 18px; cursor: pointer; list-style: none; font: 12.5px var(--wire); }
+  ol.trail summary::-webkit-details-marker { display: none; }
+  ol.trail summary::before { content: counter(req); color: var(--soft); }
+  ol.trail summary .st { font-weight: 500; }
+  ol.trail li.ok .st { color: var(--fixed); } ol.trail li.no .st { color: var(--still); }
+  ol.trail li.skip { color: var(--soft); } ol.trail li.skip summary { cursor: default; }
+  ol.trail summary .u { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  ol.trail summary .t { color: var(--soft); font-family: var(--sans); font-size: 12.5px; }
+  ol.trail details[open] summary { background: color-mix(in srgb, var(--ink) 5%, transparent); }
+  .exchange { display: grid; grid-template-columns: 1fr 1fr; gap: 0; border-top: 1px solid var(--rule); }
+  .exchange > div { padding: 14px 18px 18px; min-width: 0; }
+  .exchange > div + div { border-left: 1px solid var(--rule); }
+  .exchange h3 { font: 600 12.5px var(--sans); margin: 0 0 8px; color: var(--soft); }
+  .exchange pre { margin: 0 0 12px; font: 12px/1.5 var(--wire); white-space: pre-wrap; word-break: break-word; max-height: 420px; overflow: auto; }
+  .hint { color: var(--soft); padding: 18px; background: var(--sheet); border: 1px solid var(--rule); }
+  @media (max-width: 720px) { .exchange { grid-template-columns: 1fr; } .exchange > div + div { border-left: 0; border-top: 1px solid var(--rule); } }
+  @media (prefers-reduced-motion: reduce) { button.run { transition: none; } }
+</style>
+<main>
+  <div class="top"><span><b id="ticket"></b> replayed against <span id="env"></span></span><span id="team"></span></div>
+  <h1 id="verdict">Nothing run yet.</h1>
+  <p class="lede" id="lede"></p>
+  <div class="press" id="starters"><button class="run" id="ask">Run, asking before each write</button><button class="quiet" id="auto">Run all without stopping</button><span id="note" role="status"></span></div>
+  <div id="next" hidden></div>
+  <div id="setup" hidden></div>
+  <div id="groups"></div>
+  <section><div class="trailhead"><h2>Every request, in the order it was sent</h2><div class="tabs" id="tabs"></div></div><div id="trail"></div></section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const file = new URLSearchParams(location.search).get("file");
+const api = (path, more = "") => path + "?file=" + encodeURIComponent(file) + more;
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const clock = (at) => new Date(at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+let busy = false, last = "", shownRun = null, openReqs = new Set();
+
+function headline(state) {
+  const run = state.runs[state.runs.length - 1];
+  if (!run) return ["", "Nothing run yet.", state.about];
+  if (run.inProgress) return ["", "Run in progress.", run.trail.filter((t) => !t.skipped).length + " requests sent so far. Nothing that writes is sent until you say so."];
+  const all = Object.values(run.verdicts), count = (k) => all.filter((v) => v === k).length;
+  const notes = [count("not-run") && count("not-run") + " could not run; the table says why.", count("unexpected") && count("unexpected") + " answered something neither side of the claim expects; read the trail below.", run.stopped && "The run ended early: " + run.stopped + "."].filter(Boolean).join(" ");
+  if (!count("fixed")) return ["still", "Nothing has changed yet.", notes || state.env.name + " still answers the way it does today. Deploy, then run again."];
+  if (count("fixed") === all.length) return ["fixed", "Everything is fixed.", notes || state.env.name + " now answers every request the way the branches intend."];
+  const done = state.groups.filter((g) => g.steps.length && g.steps.every((s) => run.verdicts[s.id] === "fixed")).map((g) => g.title);
+  return ["", done.length ? done.join(" and ") + ": fixed. The rest: not yet." : count("fixed") + " of " + all.length + " claims are fixed.", notes || "The table shows which requests still answer the old way."];
+}
+
+function cell(run, step, latest) {
+  const seen = run.seen[step.id], kind = run.verdicts[step.id];
+  if (!seen) return '<td class="none">' + (run.inProgress ? "" : "not reached") + "</td>";
+  if (seen.skipped) return '<td class="none">Not run: ' + esc(seen.skipped) + "</td>";
+  const word = { fixed: "fixed", today: "same as today", unexpected: "unexpected" }[kind], cls = { fixed: "fixed", today: "still", unexpected: "odd" }[kind];
+  return '<td class="got ' + cls + (latest ? " latest" : "") + '"><b>' + (seen.status || "failed") + "</b>" + word + (kind === "unexpected" ? '<span class="why">' + esc(seen.message) + "</span>" : "") + "</td>";
+}
+
+function render(state) {
+  const runs = state.runs, latest = runs[runs.length - 1], live = Boolean(latest?.inProgress);
+  document.title = state.title;
+  $("ticket").textContent = state.ticket ?? state.title; $("env").textContent = state.env.name + ", " + state.env.base;
+  $("team").textContent = latest?.team ? "Key belongs to " + latest.team : "";
+  $("setup").hidden = state.hasKey && !state.problems.length;
+  $("setup").innerHTML = state.problems.length ? "This scenario has problems and cannot run:<pre>" + esc(state.problems.join("\\n")) + "</pre>"
+    : "No API key yet. Store the key this bench should use, then come back:<pre>security add-generic-password -s " + esc(state.env.key) + " -a loops -w</pre>";
+  $("starters").hidden = live;
+  $("ask").disabled = $("auto").disabled = busy || !state.hasKey || state.problems.length > 0;
+  const [tone, head, lede] = headline(state);
+  $("verdict").className = tone; $("verdict").textContent = head; $("lede").textContent = lede;
+  renderNext(state, live);
+  $("groups").innerHTML = state.groups.filter((g) => g.steps.length).map((g) =>
+    "<section><h2>" + esc(g.title) + "</h2>" + (g.branch ? '<p class="branch">Fixed by <a href="' + esc(g.href) + '">' + esc(g.branch) + "</a>" + (g.tip ? ", now at " + esc(g.tip) : ", which is no longer a local branch") + "</p>" : "") +
+    '<div class="scroll"><table><tr><th>Request</th><th>Answers today</th><th>Should answer</th>' +
+    (runs.length ? runs.map((r, i) => "<th>Run " + (i + 1) + "<small>" + esc(clock(r.at)) + "</small></th>").join("") : "<th>Runs</th>") + "</tr>" +
+    g.steps.map((s) => '<tr><td class="what">' + esc(s.label) + '<span class="line">' + esc(s.line) + "</span></td>" +
+      '<td class="expect"><b>' + s.claim.today.status + "</b>" + esc(s.claim.today.text ?? "") + '</td><td class="expect"><b>' + s.claim.fixed.status + "</b>" + esc(s.claim.fixed.text ?? "") + "</td>" +
+      (runs.length ? runs.map((r, i) => cell(r, s, i === runs.length - 1)).join("") : '<td class="none">not run yet</td>') + "</tr>").join("") +
+    "</table></div></section>").join("");
+  if (!runs.some((r) => r.at === shownRun)) shownRun = latest?.at ?? null;
+  renderTrail(runs);
+}
+
+function renderNext(state, live) {
+  const n = state.pending, box = $("next");
+  box.hidden = !live;
+  if (!live) return;
+  if (!n) { box.innerHTML = '<div class="ask"><p>Waiting for the answer…</p></div>'; return; }
+  box.innerHTML = '<div class="ask"><p>Next request<small>writes to ' + esc(state.env.name) + " if it succeeds</small></p><pre>" + esc(n.method) + " " + esc(n.url) + (n.body ? "\\n\\n" + pretty(n.body) : "") + "</pre></div>" +
+    '<div class="acts"><button class="run" data-do="send">Send this request</button><button class="quiet" data-do="skip">Skip it</button><span class="gap"></span><button class="quiet" data-do="rest">Send this and the rest</button><button class="quiet" data-do="stop">Stop the run</button></div>';
+  box.querySelector("button")?.focus();
+}
+
+const pretty = (v) => esc(v == null ? "(none)" : typeof v === "string" ? v : JSON.stringify(v, null, 2));
+function renderTrail(runs) {
+  $("tabs").innerHTML = runs.map((r, i) => '<button data-at="' + esc(r.at) + '" aria-pressed="' + (r.at === shownRun) + '">Run ' + (i + 1) + ", " + esc(clock(r.at)) + (r.inProgress ? ", in progress" : r.stopped ? ", stopped early" : "") + "</button>").join("");
+  const run = runs.find((r) => r.at === shownRun);
+  if (!run) { $("trail").innerHTML = '<p class="hint">After a run, each request it sent is listed here with its full response.</p>'; return; }
+  $("trail").innerHTML = '<ol class="trail">' + run.trail.map((t, j) => {
+    if (t.skipped) return '<li class="skip"><details><summary><span class="st">skip</span><span class="u">' + esc(t.method) + " " + esc(t.url) + '</span><span class="t">you skipped it</span></summary></details></li>';
+    const k = run.at + ":" + j, ok = t.status >= 200 && t.status < 300;
+    return '<li class="' + (ok ? "ok" : "no") + '"><details data-k="' + k + '"' + (openReqs.has(k) ? " open" : "") + '><summary><span class="st">' + (t.status ?? "…") + '</span><span class="u">' + esc(t.method) + " " + esc(t.url) + '</span><span class="t">' + (t.ms ?? "") + " ms</span></summary>" +
+      '<div class="exchange"><div><h3>Sent at ' + esc(new Date(t.at).toLocaleTimeString()) + "</h3><pre>" + esc(t.method) + " " + esc(t.url) + "\\n" + Object.entries(t.requestHeaders ?? {}).map(([h, v]) => esc(h) + ": " + esc(v)).join("\\n") + "</pre><h3>Body</h3><pre>" + pretty(t.requestBody) + "</pre></div>" +
+      "<div><h3>Answered " + (t.status || "nothing") + " in " + (t.ms ?? "?") + " ms</h3><pre>" + Object.entries(t.responseHeaders ?? {}).map(([h, v]) => esc(h) + ": " + esc(v)).join("\\n") + "</pre><h3>Body</h3><pre>" + pretty(t.responseBody) + "</pre></div></div></details></li>";
+  }).join("") + "</ol>";
+}
+
+$("tabs").onclick = (e) => { const at = e.target.dataset?.at; if (at) { shownRun = at; renderTrail(JSON.parse(last).runs); } };
+$("trail").addEventListener("toggle", (e) => { const k = e.target.dataset?.k; if (k) e.target.open ? openReqs.add(k) : openReqs.delete(k); }, true);
+async function post(path, more) {
+  busy = true; document.querySelectorAll("button.run, button.quiet").forEach((b) => (b.disabled = true));
+  try { const text = await (await fetch(api(path, more), { method: "POST" })).text(); const state = JSON.parse(text); busy = false; last = text; $("note").textContent = state.error ?? ""; render(state); }
+  catch (e) { busy = false; $("note").textContent = "That failed: " + e.message; load(true); }
+}
+$("next").onclick = (e) => { const act = e.target.dataset?.do; if (act && !busy) post("/next", "&do=" + act); };
+$("ask").onclick = () => { shownRun = null; post("/run", "&mode=ask"); };
+$("auto").onclick = () => { shownRun = null; post("/run", "&mode=auto"); };
+async function load(force) {
+  if (busy) return;
+  const text = await (await fetch(api("/state"))).text();
+  if (force || text !== last) { last = text; render(JSON.parse(text)); }
+}
+load(); setInterval(load, 1500); document.addEventListener("visibilitychange", () => load());
+</script>
+</html>`;
+
+// ---------- commands ---------------------------------------------------------------------------------------------------
+
+function scenarioFor(url) {
+  const file = resolve(url.searchParams.get("file") ?? "");
+  if (!file.startsWith(SHOW_DIR + "/") || !file.endsWith(".json")) throw new Error(`a scenario must be a .json file under ${SHOW_DIR}`);
+  return loadScenario(file);
+}
+
+function serve(port) {
+  createServer(async (req, res) => {
+    const json = (code, body) => { res.writeHead(code, { "Content-Type": "application/json" }); res.end(JSON.stringify(body)); };
+    const url = new URL(req.url, "http://x");
+    try {
+      if (req.method === "GET" && url.pathname === "/") return json(200, { bench: true });
+      if (req.method === "GET" && url.pathname === "/b") {
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+        return res.end(PAGE);
+      }
+      const s = scenarioFor(url);
+      if (req.method === "GET" && url.pathname === "/state") return json(200, state(s));
+      if (req.method === "POST" && url.pathname === "/run") {
+        const key = readKey(s), problems = lint(s);
+        if (problems.length) return json(200, { ...state(s), error: "the scenario has problems" });
+        if (!key) return json(200, { ...state(s), error: "no key in the Keychain" });
+        if (active.has(s.path)) return json(200, { ...state(s), error: "a run is already in progress" });
+        const done = startRun(s, key, url.searchParams.get("mode") === "auto" ? "auto" : "ask");
+        const a = active.get(s.path);
+        await Promise.race([done, (async () => { while (active.get(s.path) === a && !a.pending) await new Promise((r) => setTimeout(r, 40)); })()]);
+        return json(200, state(s));
+      }
+      if (req.method === "POST" && url.pathname === "/next") {
+        const a = active.get(s.path), answer = url.searchParams.get("do");
+        if (!a?.pending || !["send", "skip", "rest", "stop"].includes(answer)) return json(200, { ...state(s), error: "nothing is waiting" });
+        const { resolve: go } = a.pending;
+        a.pending = null;
+        go(answer);
+        while (active.get(s.path) === a && !a.pending) await new Promise((r) => setTimeout(r, 40));
+        return json(200, state(s));
+      }
+      json(404, { error: "not found" });
+    } catch (error) {
+      json(400, { error: error.message });
+    }
+  }).listen(port, "127.0.0.1", () => console.log(`bench on http://127.0.0.1:${port}`));
+}
+
+const [command, ...rest] = process.argv.slice(2);
+if (command === "serve") {
+  serve(Number(rest[rest.indexOf("--port") + 1] && rest.includes("--port") ? rest[rest.indexOf("--port") + 1] : process.env.BENCH_PORT ?? 7240));
+} else if (command === "check" && rest[0]) {
+  const problems = lint(loadScenario(rest[0]));
+  console.log(problems.length ? problems.map((p) => "✗ " + p).join("\n") : "✓ scenario is sound");
+  process.exit(problems.length ? 1 : 0);
+} else if (command === "status" && rest[0]) {
+  const s = loadScenario(rest[0]), run = loadRuns(s).at(-1);
+  if (!run) console.log("no runs yet");
+  for (const g of run ? s.groups : []) {
+    const kinds = s.steps.filter((step) => step.claim && step.group === g.id).map((step) => verdict(step.claim, run.seen[step.id]));
+    console.log(`${g.branch ?? g.id}: ${kinds.filter((k) => k === "fixed").length} of ${kinds.length} fixed on ${run.env.name}, ${run.at}`);
+  }
+} else {
+  console.error("usage: bench serve [--port 7240] | bench check <scenario.json> | bench status <scenario.json>");
+  process.exit(64);
+}
