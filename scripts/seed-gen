@@ -56,6 +56,10 @@ wait_lock(){ # $1 = lock dir; returns once we hold it, 1 after 600s of someone e
   done
   return 0
 }
+sync_pending(){ # $1 = git dir; true while a queued --sync for this tree has not started yet
+  local pid; pid=$(cat "$1/seed-gen-sync.pending" 2>/dev/null) || return 1
+  [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null
+}
 take_lock(){ wait_lock "$1/.rebuilding"; }   # $1 = the .gen dir
 drop_lock(){ rmdir "$1/.rebuilding" 2>/dev/null; }
 
@@ -557,6 +561,7 @@ if [[ "$(realpath_of "$dir")" != "$(realpath_of "$src")" ]]; then
   tree_lock="$_gitdir/seed-gen.lock"; trap drop_tree_lock EXIT
 
   if (( sync )); then
+    rm -f "$_gitdir/seed-gen-sync.pending"
     head=$(git -C "$dir" rev-parse HEAD 2>/dev/null) || exit 0
     out=$(deps_home "$dir" "$src") || true
     deps="${out##*$'\n'}"
@@ -689,10 +694,15 @@ if [[ "$(realpath_of "$dir")" != "$(realpath_of "$src")" ]]; then
   # here runs another commit's code until a --sync makes the tree describe its own HEAD. Start one
   # detached on every seed (worktree creation and each checkout/merge/rewrite hook): it waits for
   # this run's lock, queues as batch work, and is a fast no-op when the tree is already current.
-  if [[ -z "${SEED_GEN_NO_BACKGROUND_SYNC:-}" ]]; then
+  # One queued sync per tree: a --sync reads HEAD when it starts, so the one still waiting for a
+  # slot already covers this checkout. Queueing another per hook put 410 tickets for one tree in
+  # the queue in a day (2026-11-12). The pending file names the waiting ticket's pid; the sync
+  # removes it before it reads HEAD, and a dead pid (a killed ticket) does not count.
+  if [[ -z "${SEED_GEN_NO_BACKGROUND_SYNC:-}" ]] && ! sync_pending "$_gitdir"; then
     self="$(cd "$(dirname "$0")" && pwd -P)"
     nohup "$self/heavy-turn" --batch --class seed-gen -- "$self/seed-gen" --sync "$dir" \
       >"$_gitdir/seed-gen-sync.log" 2>&1 </dev/null &
+    echo $! > "$_gitdir/seed-gen-sync.pending"
   fi
   exit 0
 fi
