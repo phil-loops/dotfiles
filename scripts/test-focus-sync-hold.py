@@ -61,9 +61,9 @@ ctx.SCRIPTS = HERE
 ctx.ROOT = root
 ctx.run = lambda argv, **kw: subprocess.run(argv, cwd=repo, capture_output=True, text=True, env=env)
 ctx.log = lambda *a, **k: None
-from srv import focus, sync  # noqa: E402
+from srv import focus, openprs, sync  # noqa: E402
 
-sync._open_pr_heads = lambda *a, **k: {"b"}
+openprs.heads = lambda *a, **k: {"b"}
 sync._already_merged = lambda b: False
 focus._busy = lambda branches, cwds: ""
 calls = []

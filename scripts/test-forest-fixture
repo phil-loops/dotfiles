@@ -149,12 +149,14 @@ def wire_srv(repo):
     ctx.init(run=run, ROOT=repo, SCRIPTS=HERE, CWD=repo, MAIN_WT=repo, repos={})
     ctx.set_repo(repo)
     from srv import sync
-    sync._pr_cache[repo] = {"at": time.monotonic(), "heads": set(), "outage": False}
+    from srv import openprs
+    openprs.seed(repo, [])
     return sync
 
 
 def set_prs(sync, repo, heads):
-    sync._pr_cache[repo] = {"at": time.monotonic(), "heads": set(heads), "outage": False}
+    from srv import openprs
+    openprs.seed(repo, heads)
     from srv import repostate
     repostate.invalidate()
 

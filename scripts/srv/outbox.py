@@ -15,10 +15,9 @@ import os
 import re
 import subprocess
 import threading
-import time
 from datetime import datetime, timezone
 
-from . import ctx, lru, push, repostate, stackcfg, sync
+from . import ctx, lru, openprs, push, repostate, stackcfg, sync
 from . import packet   # own line: packet imports this module back
 
 FIXTURE_ENV = "STACK_OUTBOX_PR_FIXTURE"
@@ -34,61 +33,6 @@ def _fixture():
             return json.load(f)
     except (OSError, ValueError):
         return {}
-
-
-# ── open-PR detail: mergeability + approvals, which the shared state map doesn't carry ──
-# Its own SWR cache over OPEN PRs only (~2s for a dozen, vs doubling the 500-PR state sweep
-# every forest open already waits on). Never blocks: a cold read answers {} and fetches behind.
-_DETAIL_TTL = 90.0
-_DETAIL = {}
-_DETAIL_LOCK = threading.Lock()
-_DETAIL_REFRESHING = set()
-
-
-def _fetch_detail():
-    r = ctx.run(["gh", "pr", "list", "--state", "open", "--limit", "200", "--json",
-                 "headRefName,number,mergeStateStatus,mergeable,baseRefName,createdAt,latestReviews"],
-                timeout=30)
-    if r.returncode != 0:
-        return None
-    try:
-        rows = json.loads(r.stdout or "[]")
-    except ValueError:
-        return None
-    out = {}
-    for p in rows:
-        approvals = [rv for rv in p.get("latestReviews") or [] if rv.get("state") == "APPROVED"]
-        out[p.get("headRefName")] = {
-            "mergeState": p.get("mergeStateStatus") or "",
-            "mergeable": p.get("mergeable") or "",
-            "baseRef": p.get("baseRefName") or "",
-            "createdAt": p.get("createdAt") or "",
-            "approvals": len(approvals),
-            "approvedAt": max((rv.get("submittedAt") or "" for rv in approvals), default=""),
-        }
-    return out
-
-
-def _refresh_detail(repo):
-    try:
-        ctx.set_repo(repo)
-        fresh = _fetch_detail()
-        if fresh is not None:
-            with _DETAIL_LOCK:
-                _DETAIL[repo] = {"at": time.time(), "data": fresh}
-    finally:
-        _DETAIL_REFRESHING.discard(repo)
-
-
-def _detail_map():
-    repo = ctx.repo_cwd()
-    with _DETAIL_LOCK:
-        ent = _DETAIL.get(repo)
-        stale = not ent or time.time() - ent["at"] >= _DETAIL_TTL
-        if stale and repo not in _DETAIL_REFRESHING:
-            _DETAIL_REFRESHING.add(repo)
-            threading.Thread(target=_refresh_detail, args=(repo,), daemon=True).start()
-        return ent["data"] if ent else {}
 
 
 def _pr_states():
@@ -111,7 +55,7 @@ def _pr_map():
     states = _pr_states()
     if states is None:
         return {}, "warming"
-    detail = _detail_map()
+    detail = openprs.detail()   # mergeability + approvals, from the one open-PR owner
     return {b: {**p, **detail.get(b, {})} for b, p in states.items()}, "gh"
 
 

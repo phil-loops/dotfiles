@@ -47,6 +47,7 @@ from srv import todo   # own line: same reason
 from srv import viewed   # own line: same reason
 from srv import story   # own line: same reason
 from srv import routes   # every POST route: srv/routes.py
+from srv import openprs   # the repo's open PRs: one owner
 state.ASSET = lambda: asset_sig()   # tabs on an older build reload (srv/state.py)
 srvctx.CWD = CWD   # set the default repo before any run() fires (run reads srvctx.repo_cwd())
 
@@ -601,7 +602,7 @@ def warm():
     srvctx.run(["git", "worktree", "prune"])
     try:
         sync._pr_state_map()
-        sync._open_pr_heads()
+        openprs.heads()
     except Exception:
         pass
 

@@ -10,6 +10,7 @@ from urllib.parse import parse_qs
 from . import ctx, memo, repostate, watch
 from . import push
 from . import sync
+from . import openprs
 
 
 def _outgoing(branch):
@@ -55,7 +56,7 @@ def _route_cached(branch):
         snap = repostate.snapshot()
         return (snap.branch_fingerprint(branch),
                 snap.inputs_fingerprint([b for b in (snap.track(branch)[0], f"{branch}-additive") if b]),
-                "" if snap.remote(branch) else snap.remote_tips(), sync._pr_sweep_failed())
+                "" if snap.remote(branch) else snap.remote_tips(), openprs.failed())
     rk = refs_key()
     held = [p for p, attached in watch.holders(branch) if attached]
     key = ("prep-route", ctx.repo_cwd(), branch, rk, watch.dirt_stamp(held))

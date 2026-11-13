@@ -18,6 +18,7 @@ from urllib.parse import quote, parse_qs
 
 from . import ctx, stage, sync, repostate, shellout, stackcfg, gate_queue, runs
 from . import actor, verdicts   # own line: Phil-only checks + the waiver
+from . import openprs
 
 
 def delta_tests(req, raw):
@@ -944,7 +945,7 @@ def prep_push(req, raw):
         return req._send(404, json.dumps({"ok": False, "err": "no such branch"}))
     if branch in ("main", "master"):
         return req._send(200, json.dumps({"ok": False, "err": "trunk doesn't go through this door"}))
-    published = branch in sync._open_pr_heads(fresh=True)
+    published = branch in openprs.heads(fresh=True)
     tip_before = _tip(branch)
     routed = []
 

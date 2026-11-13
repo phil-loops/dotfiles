@@ -3,20 +3,14 @@
 # The viewer's own forests live in git config (branch.<b>.stack-*); a teammate's stack has none, so
 # it is derived, never configured: the repo's open PRs, each base → head ref chained into a parent
 # edge (their PR bases point at each other). Read-only by construction — the one verb a foreign node
-# will carry is preview (slice 3). GitHub is read through `gh`, cached briefly, never written.
+# will carry is preview (slice 3). GitHub is read through srv/openprs.py, the one owner of the open PRs, never written.
 #
 #   GET /foreign-stack?number=N   → {ok, root, nodes: [{number, title, head, base, parent, depth, author, draft, url}]}
 import json
 import re
-import threading
-import time
 from urllib.parse import parse_qs
-from . import ctx
+from . import ctx, openprs
 
-FIELDS = "number,title,headRefName,baseRefName,author,isDraft,url,isCrossRepository"
-TTL = 60.0
-_cache = {}            # slug -> (monotonic, prs)
-_lock = threading.Lock()
 
 
 def stack_of(prs, number):
@@ -62,32 +56,13 @@ def _slug():
     return m.group(1) if m else ""
 
 
-def open_prs(slug):
-    """The repo's open PRs, at most a minute old; None when gh can't answer."""
-    now = time.monotonic()
-    with _lock:
-        hit = _cache.get(slug)
-        if hit and now - hit[0] < TTL:
-            return hit[1]
-    r = ctx.run(["gh", "pr", "list", "-R", slug, "--state", "open", "--json", FIELDS, "--limit", "300"])
-    if r.returncode != 0:
-        return None
-    try:
-        prs = json.loads(r.stdout or "[]")
-    except ValueError:
-        return None
-    with _lock:
-        _cache[slug] = (now, prs)
-    return prs
-
-
 def get(req, u):
     raw = (parse_qs(u.query).get("number") or [""])[0].lstrip("#")
     if not raw.isdigit():
         return req._send(400, json.dumps({"ok": False, "err": "want ?number=<PR number>"}))
     slug = _slug()
-    prs = open_prs(slug) if slug else None
-    if prs is None:
+    prs = openprs.of_slug(slug) if slug else None
+    if prs is None or (not prs and openprs.failed()):
         return req._send(200, json.dumps({"ok": False, "err": "GitHub didn't answer — gh pr list failed"}))
     s = stack_of(prs, int(raw))
     if s is None:
