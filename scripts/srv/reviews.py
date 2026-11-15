@@ -99,7 +99,11 @@ def requests(req):   # GET /review-requests — Home's review section: open PRs 
 
 _WARM_EVERY = 300   # the review queue moves on human timescales; gh search is a ~1s network call
 _WARM_MAX = 5       # bound the git work — the queue is normally 1-2 PRs
-_warming = {}       # branch -> its prepare; a cold one outlives _WARM_EVERY, and re-firing stacked 3 per PR
+_warming = {}       # branch -> (its prepare, the state it was fired against); a cold one outlives
+                    # _WARM_EVERY, and re-firing stacked 3 per PR
+_warmed = {}        # branch -> the state its last successful prepare ran against. A PR that has not
+                    # moved under an unmoved donor is already warm: re-preparing it every cycle was
+                    # 327 queue tickets for one PR in a day (2026-11-12)
 
 
 def _warm_review_requests():
@@ -117,9 +121,40 @@ def _warm_review_requests():
                 ctx.run([os.path.join(ctx.SCRIPTS, "stack-review-import"), num]).returncode != 0:
             continue
         branch = f"review/pr-{num}"
-        if branch in _warming and _warming[branch].poll() is None or _preparing(branch):
+        proc, fired = _warming.get(branch, (None, None))
+        if proc is not None and proc.poll() is None or _preparing(branch):
             continue
-        _warming[branch] = picker.prepare_branch(branch)
+        if proc is not None and proc.returncode == 0:
+            _warmed[branch] = fired
+        state = _warm_state(branch)
+        if state and _warmed.get(branch) == state and _keep_tree(branch):
+            continue
+        _warming[branch] = (picker.prepare_branch(branch), state)
+
+
+def _warm_state(branch):
+    """What a prepare's result depends on: the branch's tip and the donor's HEAD (its node_modules
+    and .gen seed). None when either is unknown, which always prepares."""
+    cwd = ctx.repo_cwd()
+    def out(argv, at=cwd):
+        r = subprocess.run(argv, cwd=at, capture_output=True, text=True)
+        return r.stdout.strip() if r.returncode == 0 else ""
+    tip = out(["git", "rev-parse", "--verify", "-q", branch])
+    donor = out([os.path.join(ctx.SCRIPTS, "stack-donor"), cwd]) or cwd
+    head = out(["git", "rev-parse", "HEAD"], donor) if os.path.isdir(donor) else ""
+    return (tip, head) if tip and head else None
+
+
+def _keep_tree(branch):
+    """The branch's scratch tree is still there; touch it, since its mtime is what the reaper reads
+    as last use and a skipped prepare would otherwise let a queued PR's tree age out."""
+    tree = os.path.join(os.environ.get("STACK_OPEN_DIR", os.path.expanduser("~/Library/Caches/stack-study")),
+                        branch.replace("/", "_"))
+    try:
+        os.utime(tree)
+    except OSError:
+        return False
+    return True
 
 
 def _preparing(branch):
