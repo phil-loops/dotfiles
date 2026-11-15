@@ -107,7 +107,9 @@ A bench is a set of claims about a live environment, tied to a forest: "this req
 ```json
 { "mode": "bench", "title": "LOO-6235 staging replay", "replyTo": "…", "sections": [],
   "bench": { "ticket": "LOO-6235", "repo": "loops", "project": "<stack-project>", "about": "one or two sentences",
-    "env": { "name": "staging", "base": "https://app.l3s.email/api/v1", "key": "<Keychain service holding the API key>" },
+    "envs": [{ "name": "local", "base": "http://localhost:3035/api/v1", "key": "<Keychain service>", "fixture": "loo-6235.ts", "branch": "<branch its server runs>" },
+             { "name": "staging", "base": "https://app.l3s.email/api/v1", "key": "<Keychain service holding the API key>" }],
+    "checks": [{ "label": "The team has a published transactional email", "path": "/transactional-emails?perPage=20", "has": "data[publishedEmailMessageId].id", "fix": "what to do by hand" }],
     "groups": [{ "id": "drafting", "title": "Drafting on a disabled domain", "branch": "<branch that fixes these>" }],
     "steps": [
       { "id": "list", "request": { "method": "GET", "path": "/transactional-emails?perPage=20" },
@@ -122,6 +124,9 @@ A bench is a set of claims about a live environment, tied to a forest: "this req
 - **The verdict is a pure function** of claim and answer: `fixed`, `same as today`, `unexpected`, or not run. `status` must match and `says`, when given, must be in the answer's message; `text` is only what the table shows.
 - **Runs are evidence**: one JSON line per run in `~/Library/Application Support/Show/bench-runs/<file name>.jsonl`, with the environment, the branch tips at that moment, every answer and the full request trail (key redacted). Never edited, never deleted by Show.
 - **Writes wait for you.** "Run, asking before each write" sends reads on its own and stops before every request that isn't a GET (or has `"writes": true`): send, skip, send this and the rest, or stop. "Run all without stopping" is the other button. Only staging and local hosts are accepted, and the key is read from the Keychain on each run.
+- **Environments.** `envs` lists where the claims can be replayed; the first is the page's default and the page links to the others (`?env=<name>`). Runs, the checklist and `bench status` are per environment. An environment with a `branch` serves that one branch, so only that branch's groups count toward its headline and status.
+- **Setup.** A local environment with a `fixture` (a script in `scripts/bench-fixtures/`, run with tsx from the loops checkout that has `branch` checked out; it must refuse a non-local database and print `{"team", "key"}` as its last line) is built from nothing by `bench setup <file> --env local`: fixture, key into the Keychain, a `loops-preview` on the base's port when nothing answers there, then the checklist. An environment without one is standing state someone arranged by hand.
+- **The checklist** (`bench checks <file> [--env name]`, and on the page above the tables): the key is in the Keychain, the environment accepts it, then each of `checks`, a GET whose answer must be 2xx and, with `has`, contain something at that capture path. A miss shows the setup command (fixture environments) or the check's `fix`.
 - **`bench`** (`scripts/bench`) is the one runner: `bench check <file>` lints a scenario (run it after writing one), `bench status <file>` prints the latest verdict per branch, `bench serve` is the page server (:7240) Show starts when it's down.
 - **Keys in Bench**: ⌘⇧O opens the bench's forest in Canopy; ⌘⇧B closes the bench and shows the API console; ⌘R reloads.
 - Hand one over like a deck: `show <bench.json>` (`--focus` only when asked).

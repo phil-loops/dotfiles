@@ -1,6 +1,6 @@
 {
  "mode": "bench",
- "title": "LOO-6235 staging replay",
+ "title": "LOO-6235 replay",
  "replyTo": "21327d40",
  "sections": [],
  "bench": {
@@ -8,11 +8,34 @@
   "repo": "loops",
   "project": "draft-on-a-disabled-domain",
   "about": "Seven API requests that a team with a disabled sending domain gets wrong answers to. Run them now, deploy, then run them again and compare.",
-  "env": {
-   "name": "staging",
-   "base": "https://app.l3s.email/api/v1",
-   "key": "loops-staging-disabled-domain-key"
-  },
+  "envs": [
+   {
+    "name": "local",
+    "base": "http://localhost:3035/api/v1",
+    "key": "loops-local-loo-6235-bench-key",
+    "fixture": "loo-6235.ts",
+    "branch": "say-when-the-sending-domain-is-disabled"
+   },
+   {
+    "name": "staging",
+    "base": "https://app.l3s.email/api/v1",
+    "key": "loops-staging-disabled-domain-key"
+   }
+  ],
+  "checks": [
+   {
+    "label": "The team has a published transactional email to send",
+    "path": "/transactional-emails?perPage=20",
+    "has": "data[!systemEmailType&publishedEmailMessageId].id",
+    "fix": "publish one in the app before the domain is disabled; it cannot be published afterwards"
+   },
+   {
+    "label": "The team has a transactional email with an unpublished draft",
+    "path": "/transactional-emails?perPage=20",
+    "has": "data[!systemEmailType&draftEmailMessageId].id",
+    "fix": "the run makes one itself once drafting is fixed; otherwise create a draft in the app"
+   }
+  ],
   "groups": [
    {
     "id": "drafting",
