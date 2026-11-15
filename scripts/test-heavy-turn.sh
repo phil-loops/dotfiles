@@ -172,5 +172,74 @@ st=$(HEAVY_TURN_SLOTS=1 "$HT" --status 2>&1)
 [[ "$st" == *"slots held"* && "$st" != *"waiting  "* ]] && ok "a killed waiter drops its ticket" || bad "a killed waiter drops its ticket" "$st"
 wait
 
+# 13. a slot is for work that will change something
+# --unless: a satisfied probe ends the request before it queues, and the command never runs
+rm -f "$WORK/ran"
+HEAVY_TURN_SLOTS=1 "$HT" --class need --unless "true" -- touch "$WORK/ran" 2>/dev/null
+[[ ! -e "$WORK/ran" ]] && ok "--unless: done work is not run" || bad "--unless: done work is not run" "ran"
+assert_eq "--unless: journaled unneeded" unneeded "$(tail -1 "$HEAVY_TURN_JOURNAL" | cut -f6)"
+HEAVY_TURN_SLOTS=1 "$HT" --class need --unless "false" -- touch "$WORK/ran" 2>/dev/null
+[[ -e "$WORK/ran" ]] && ok "--unless: needed work runs" || bad "--unless: needed work runs" "did not run"
+# …and the probe is asked again at the grant: work someone else did while this waited is skipped
+rm -f "$WORK/ran" "$WORK/done"
+HEAVY_TURN_SLOTS=1 "$HT" -- sh -c "sleep 1; touch '$WORK/done'" 2>/dev/null &
+sleep 0.3
+HEAVY_TURN_SLOTS=1 "$HT" --class need --unless "test -e '$WORK/done'" -- touch "$WORK/ran" 2>/dev/null
+wait
+[[ ! -e "$WORK/ran" ]] && ok "--unless: work done while waiting is not repeated" || bad "--unless: work done while waiting is not repeated" "ran"
+assert_eq "--unless: the grant-time skip is journaled unneeded" unneeded "$(grep "$(printf '\tneed\t')" "$HEAVY_TURN_JOURNAL" | tail -1 | cut -f6)"
+# --key: five requests for the same waiting work are one ticket
+: > "$WORK/keyed"
+HEAVY_TURN_SLOTS=1 "$HT" -- sleep 1.5 2>/dev/null &
+sleep 0.3
+for _ in 1 2 3 4 5; do
+  HEAVY_TURN_SLOTS=1 "$HT" --class fold --key same -- sh -c "echo x >> '$WORK/keyed'" 2>/dev/null &
+  sleep 0.1
+done
+HEAVY_TURN_SLOTS=1 "$HT" --class fold --key other -- sh -c "echo y >> '$WORK/keyed'" 2>/dev/null &
+sleep 0.2
+st=$(HEAVY_TURN_SLOTS=1 "$HT" --status)
+assert_eq "--key: one waiting ticket per key" 2 "$(grep -c 'waiting  fold' <<< "$st")"
+wait
+assert_eq "--key: the folded work ran once per key" "x y" "$(sort "$WORK/keyed" | tr '\n' ' ' | sed 's/ $//')"
+assert_eq "--key: four folds journaled" 4 "$(cut -f2,6 "$HEAVY_TURN_JOURNAL" | grep -c "$(printf 'fold\tfolded')")"
+# …and a key only folds into WAITING work: a running holder has read its inputs already
+HEAVY_TURN_SLOTS=2 "$HT" --class fold --key live -- sleep 1 2>/dev/null &
+sleep 0.3
+rm -f "$WORK/ran"
+HEAVY_TURN_SLOTS=2 "$HT" --class fold --key live -- touch "$WORK/ran" 2>/dev/null
+wait
+[[ -e "$WORK/ran" ]] && ok "--key: a request behind a RUNNING twin still runs" || bad "--key: a request behind a RUNNING twin still runs" "folded"
+
+# 14. a slot is for bounded work: a holder past the bound stops counting against the budget
+HEAVY_TURN_SLOTS=1 HEAVY_TURN_MAX_HOLD=0.5 "$HT" --class long -- sleep 3 2>/dev/null &
+sleep 0.2
+st=$(HEAVY_TURN_SLOTS=1 HEAVY_TURN_MAX_HOLD=0.5 "$HT" --status)
+[[ "$st" == *"1/1 slots held"* ]] && ok "bound: a holder inside the bound counts" || bad "bound: a holder inside the bound counts" "$st"
+sleep 0.6
+t0=$(python3 -c 'import time;print(time.time())')
+HEAVY_TURN_SLOTS=1 HEAVY_TURN_MAX_HOLD=0.5 "$HT" -- true 2>/dev/null
+el=$(python3 -c "import time;print(int((time.time()-$t0)*10))")
+(( el < 15 )) && ok "bound: work is admitted past an overstayed holder" || bad "bound: work is admitted past an overstayed holder" "waited ${el}00ms"
+st=$(HEAVY_TURN_SLOTS=1 HEAVY_TURN_MAX_HOLD=0.5 "$HT" --status)
+[[ "$st" == *"0/1 slots held"*"OVERSTAYED"* ]] && ok "bound: status names the overstayer" || bad "bound: status names the overstayer" "$st"
+# …but it keeps its class cap, so a second unbounded job of the class does not start beside it
+HEAVY_TURN_SLOTS=2 HEAVY_TURN_MAX_HOLD=0.5 HEAVY_TURN_CAP_LONG=1 "$HT" --class long -- touch "$WORK/second-long" 2>/dev/null &
+sleep 0.5
+[[ ! -e "$WORK/second-long" ]] && ok "bound: an overstayer still holds its class cap" || bad "bound: an overstayer still holds its class cap" "second ran"
+wait
+
+# 15. the audit names a class that breaks either rule
+aj="$WORK/audit.tsv"; day=2020-01-01
+for i in $(seq 1 12); do printf '%sT00:00:%02d\tnoop batch\t1\t5\t1\t0\t90\t/\tx\n' $day $i; done > "$aj"
+printf '%sT01:00:00\tforever\t1\t0\t4000\t0\t90\t/\tx\n' $day >> "$aj"
+printf '%sT02:00:00\tfine\t1\t0\t30\t0\t90\t/\tx\n' $day >> "$aj"
+out=$(HEAVY_TURN_JOURNAL="$aj" "$HT" --audit $day); rc=$?
+assert_eq "audit: exits 1 on a broken rule" 1 "$rc"
+[[ "$out" == *"✗ noop batch: 12 of 12"* ]] && ok "audit: names the class asking for slots it does not need" || bad "audit: names the no-op class" "$out"
+[[ "$out" == *"✗ forever: 1 run(s) held a slot past"* ]] && ok "audit: names the unbounded class" || bad "audit: names the unbounded class" "$out"
+printf '%sT02:00:00\tfine\t1\t0\t30\t0\t90\t/\tx\n' $day > "$aj"
+HEAVY_TURN_JOURNAL="$aj" "$HT" --audit $day >/dev/null; assert_eq "audit: exits 0 on a clean day" 0 "$?"
+
 echo "---- $PASS passed, $FAIL failed"
 (( FAIL == 0 ))

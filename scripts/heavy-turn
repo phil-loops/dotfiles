@@ -6,12 +6,29 @@ gates steps, node_modules clones, preview setup. Extra callers wait their turn i
 stacking — every slow-viewer episode on the 16GB box lined up with two or three of these
 running at once on top of a full swap.
 
-  heavy-turn [--class <name>] [--batch] -- <cmd...>   run <cmd> once a slot is free
+  heavy-turn [--class <name>] [--batch] [--key <k>] [--unless <probe>] -- <cmd...>
+                                                     run <cmd> once a slot is free
   heavy-turn --acquire [--class <name>] [--batch] --owner <pid>
                                                      block until a slot is free, hold it
                                                      for <pid>, print the ticket id
   heavy-turn --release <ticket>                      give a held slot back
   heavy-turn --status [--json]                       who holds, who waits
+  heavy-turn --audit [YYYY-MM-DD]                    a day's journal against the two rules below
+
+Two rules, enforced here and not left to callers:
+
+  A slot is for work that will change something. --unless <probe> is a shell command that exits 0
+  when the work is already done; it runs before queueing and again at the grant (someone else may
+  have done the work while this waited), and a satisfied probe ends the request without <cmd>
+  running (journal status `unneeded`). --key <k> names the work: a request whose key matches one
+  still waiting is the same work asked for twice and ends at once (`folded`); it is for callers
+  that do not wait for the result. Before these, callers that fired per event or per timer put
+  572 seed-gen and 327 review-warm tickets in one day's queue, most of them no-ops (2026-11-12).
+
+  A slot is for bounded work. A holder past HEAVY_TURN_MAX_HOLD awake seconds (1800) has overstayed:
+  it keeps running and keeps its class cap, but stops counting against the budget, since the
+  queue cannot schedule around a job with no end (2026-11-12: a six-hour eval held half of it).
+  The memory floor still answers for what such a job costs the machine.
 
 Order: interactive callers (the default) before --batch ones, then first come first served.
 A batch caller never takes a slot while an interactive one is waiting. A class may carry its
@@ -32,6 +49,7 @@ granted, class, pid, wait s, run s (awake seconds: sleep is not counted), exit, 
 it take" outlives the process.
 
 Env: HEAVY_TURN_SLOTS (2), HEAVY_TURN_DIR (/tmp/heavy-turn), HEAVY_TURN_MEM_FLOOR (30),
+HEAVY_TURN_MAX_HOLD (1800),
 HEAVY_TURN_JOURNAL, HEAVY_TURN_MEM_LEVEL (forces the measured level; tests).
 """
 import fcntl
@@ -48,6 +66,7 @@ from pathlib import Path
 ROOT = Path(os.environ.get("HEAVY_TURN_DIR", "/tmp/heavy-turn"))
 SLOTS = int(os.environ.get("HEAVY_TURN_SLOTS", "2"))
 MEM_FLOOR = int(os.environ.get("HEAVY_TURN_MEM_FLOOR", "30"))
+MAX_HOLD = float(os.environ.get("HEAVY_TURN_MAX_HOLD", "1800"))
 JOURNAL = Path(os.environ.get("HEAVY_TURN_JOURNAL",
                               os.path.expanduser("~/.cache/heavy-turn/journal.tsv")))
 CLASS_CAPS = {"gates": 1, "clone": 1, "preview": 1, "review-warm": 1}
@@ -164,6 +183,11 @@ def save(t):
     os.replace(tmp, p)
 
 
+def overstayed(t):
+    up = t.get("granted_up")
+    return t["state"] == "running" and up is not None and 0 <= time.monotonic() - up > MAX_HOLD
+
+
 def order(t):
     return (1 if t["batch"] else 0, t["created"])
 
@@ -174,7 +198,8 @@ def try_claim(me):
     running = [t for t in live if t["state"] == "running"]
     level = mem_level()
     slots = budget(level)
-    if len(running) >= slots:
+    counted = sum(1 for t in running if not overstayed(t))
+    if counted >= slots:
         return False
     per_class = {}
     for t in running:
@@ -182,7 +207,7 @@ def try_claim(me):
     waiting = sorted((t for t in live if t["state"] == "waiting"), key=order)
     interactive_waiting = any(not t["batch"] and per_class.get(t["cls"], 0) < cap_of(t["cls"])
                               for t in waiting)
-    free = slots - len(running)
+    free = slots - counted
     # Walk the queue in order, handing out the free slots; a waiter whose class is at its cap
     # is skipped rather than blocking everyone behind it.
     for t in waiting:
@@ -207,7 +232,8 @@ def try_claim(me):
 def describe(t, now):
     since = now - t.get("granted", t["created"] / 1e9)
     cmd = " ".join(t.get("cmd") or [])[:90]
-    return f"{t['cls']}{' (batch)' if t['batch'] else ''} pid {t['pid']} {int(since)}s  {cmd}"
+    late = " OVERSTAYED, not counted" if overstayed(t) else ""
+    return f"{t['cls']}{' (batch)' if t['batch'] else ''} pid {t['pid']} {int(since)}s{late}  {cmd}"
 
 
 def why_waiting(me):
@@ -217,18 +243,34 @@ def why_waiting(me):
     level = mem_level()
     held = [t for t in live if t["state"] == "running"]
     ahead = [t for t in live if t["state"] == "waiting" and order(t) < order(me)]
-    lines = [f"heavy-turn: waiting for a slot ({len(held)}/{budget(level)} held"
+    lines = [f"heavy-turn: waiting for a slot ({sum(1 for t in held if not overstayed(t))}/{budget(level)} held"
              + (f", {len(ahead)} ahead" if ahead else "") + pressure_note(level) + ")"]
     lines += [f"  held: {describe(t, now)}" for t in held]
     return "\n".join(lines)
 
 
-def enqueue(cls, batch, pid, cmd):
+def ticket(cls, batch, pid, cmd, key=None):
     t = {"id": uuid.uuid4().hex[:12], "pid": pid, "cls": cls, "batch": batch,
          "created": time.time_ns(), "created_up": time.monotonic(), "state": "waiting", "cmd": cmd, "cwd": os.getcwd()}
+    if key:
+        t["key"] = key
+    return t
+
+
+def enqueue(cls, batch, pid, cmd, key=None):
+    """The new waiting ticket, or None when one with the same key is already waiting."""
+    t = ticket(cls, batch, pid, cmd, key)
     with locked():
+        if key and any(o["state"] == "waiting" and o.get("key") == key for o in tickets()):
+            journal(t, "folded")
+            return None
         save(t)
     return t
+
+
+def done_already(probe):
+    return bool(probe) and subprocess.call(probe, shell=True, stdin=subprocess.DEVNULL,
+                                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) == 0
 
 
 def drop(tid):
@@ -253,10 +295,15 @@ def wait_for_slot(t, quiet=False):
         print(f"heavy-turn: slot free after {int(el)}s — running", file=sys.stderr, flush=True)
 
 
-def run(cls, batch, cmd):
+def run(cls, batch, cmd, key=None, unless=None):
     if os.environ.get("HEAVY_TURN_HELD"):
         return subprocess.call(cmd)
-    t = enqueue(cls, batch, os.getpid(), cmd)
+    if done_already(unless):
+        journal(ticket(cls, batch, os.getpid(), cmd, key), "unneeded")
+        return 0
+    t = enqueue(cls, batch, os.getpid(), cmd, key)
+    if t is None:
+        return 0
     child = None
     rc = "signal"
 
@@ -272,6 +319,9 @@ def run(cls, batch, cmd):
     signal.signal(signal.SIGHUP, stop)
     try:
         wait_for_slot(t)
+        if done_already(unless):
+            rc = "unneeded"
+            return 0
         env = dict(os.environ, HEAVY_TURN_HELD=t["id"])
         child = subprocess.Popen(cmd, env=env)
         while True:
@@ -325,7 +375,7 @@ def status(as_json):
                           "held": [strip(t) for t in held],
                           "waiting": [strip(t) for t in waiting]}))
         return 0
-    print(f"heavy-turn: {len(held)}/{budget(level)} slots held, {len(waiting)} waiting"
+    print(f"heavy-turn: {sum(1 for t in held if not overstayed(t))}/{budget(level)} slots held, {len(waiting)} waiting"
           + pressure_note(level))
     for t in held:
         print(f"  held     {describe(t, now)}")
@@ -334,8 +384,55 @@ def status(as_json):
     return 0
 
 
+def audit(day):
+    """A day's journal against the two rules. Exit 1 when a class breaks one.
+    "Quick" is the evidence available for a no-op: admitted, exit 0, done within 2 awake seconds."""
+    day = day or time.strftime("%Y-%m-%d")
+    rows = {}
+    try:
+        lines = JOURNAL.read_text().splitlines()
+    except OSError:
+        lines = []
+    for line in lines:
+        f = line.split("\t")
+        if len(f) < 9 or not f[0].startswith(day):
+            continue
+        r = rows.setdefault(f[1], {"n": 0, "folded": 0, "unneeded": 0, "admitted": 0, "quick": 0,
+                                   "over": 0, "waited": 0})
+        r["n"] += 1
+        if f[5] in ("folded", "unneeded"):
+            r[f[5]] += 1
+            continue
+        try:
+            wait, ran = float(f[3]), float(f[4])
+        except ValueError:
+            continue
+        r["waited"] += wait
+        if f[5] in ("reaped", "signal") or ran == 0 and f[5] not in ("0", "released"):
+            continue                    # never admitted: died waiting
+        r["admitted"] += 1
+        r["quick"] += f[5] == "0" and ran <= 2
+        r["over"] += ran > MAX_HOLD
+    print(f"heavy-turn audit {day}")
+    print(f"  {'class':<22}{'asked':>6}{'folded':>8}{'unneeded':>9}{'admitted':>9}{'quick':>7}{'overstay':>9}{'waited s':>10}")
+    broken = []
+    for cls, r in sorted(rows.items(), key=lambda kv: -kv[1]["n"]):
+        print(f"  {cls:<22}{r['n']:>6}{r['folded']:>8}{r['unneeded']:>9}{r['admitted']:>9}{r['quick']:>7}{r['over']:>9}{r['waited']:>10.0f}")
+        if r["admitted"] >= 10 and r["quick"] * 2 > r["admitted"]:
+            broken.append(f"{cls}: {r['quick']} of {r['admitted']} admitted runs finished within 2s — "
+                          "it asks for slots it does not need (give it --unless)")
+        if r["over"]:
+            broken.append(f"{cls}: {r['over']} run(s) held a slot past {MAX_HOLD:.0f}s — unbounded work, keep it out of the queue")
+    for b in broken:
+        print(f"  ✗ {b}")
+    if not rows:
+        print("  no tickets")
+    return 1 if broken else 0
+
+
 def main(argv):
     cls, batch, owner, mode, arg, as_json = "default", False, None, "run", None, False
+    key = unless = None
     i = 0
     while i < len(argv):
         a = argv[i]
@@ -346,6 +443,14 @@ def main(argv):
             cls = argv[i + 1]; i += 2
         elif a == "--batch":
             batch = True; i += 1
+        elif a == "--key":
+            key = argv[i + 1]; i += 2
+        elif a == "--unless":
+            unless = argv[i + 1]; i += 2
+        elif a == "--audit":
+            mode = "audit"
+            arg = argv[i + 1] if i + 1 < len(argv) and not argv[i + 1].startswith("-") else None
+            i += 2 if arg else 1
         elif a == "--owner":
             owner = int(argv[i + 1]); i += 2
         elif a == "--acquire":
@@ -367,6 +472,8 @@ def main(argv):
     cmd = argv[i:]
     if mode == "status":
         return status(as_json)
+    if mode == "audit":
+        return audit(arg)
     if mode == "release":
         return release(arg)
     if mode == "acquire":
@@ -377,7 +484,7 @@ def main(argv):
     if not cmd:
         print("heavy-turn: no command (heavy-turn [--class c] [--batch] -- <cmd...>)", file=sys.stderr)
         return 2
-    return run(cls, batch, cmd)
+    return run(cls, batch, cmd, key, unless)
 
 
 if __name__ == "__main__":
