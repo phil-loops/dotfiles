@@ -1,4 +1,5 @@
 import AppKit
+import CryptoKit
 
 final class Renderer {
     /// Pages read like a printed brief: the system serif for prose; titles, headings and labels stay in the system sans.
@@ -39,13 +40,14 @@ final class Renderer {
             lines = lines.dropFirst()
             let text = raw.trimmingCharacters(in: .whitespaces)
             if text.hasPrefix("```") {
+                let language = text.dropFirst(3).trimmingCharacters(in: .whitespaces)
                 var code: [String] = []
                 while let next = lines.first, !next.trimmingCharacters(in: .whitespaces).hasPrefix("```") {
                     code.append(next)
                     lines = lines.dropFirst()
                 }
                 lines = lines.dropFirst()
-                out.append(block(code.joined(separator: "\n")))
+                out.append(language == "dot" ? diagram(code.joined(separator: "\n")) : block(code.joined(separator: "\n")))
             } else if text.hasPrefix("|") {
                 var rows = [text]
                 while let next = lines.first, next.trimmingCharacters(in: .whitespaces).hasPrefix("|") {
@@ -140,6 +142,44 @@ final class Renderer {
         p.minimumLineHeight = height
         p.maximumLineHeight = height
         return NSAttributedString(string: code + "\n", attributes: [.font: mono, .foregroundColor: NSColor.labelColor, .paragraphStyle: p])
+    }
+
+    /// A ```dot fence drawn by Graphviz in the page's colors, cached by source and theme; a graph that fails to draw shows its error above the source.
+    private func diagram(_ source: String) -> NSAttributedString {
+        let dark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        let (ink, muted) = dark ? ("#e6e6e6", "#9a9a9a") : ("#1f1f1f", "#6b6b6b")
+        let defaults = ["-Gbgcolor=transparent", "-Gdpi=144", "-Gfontname=Helvetica", "-Nfontname=Helvetica", "-Efontname=Helvetica",
+                        "-Gfontcolor=\(ink)", "-Ncolor=\(muted)", "-Nfontcolor=\(ink)", "-Ecolor=\(muted)", "-Efontcolor=\(muted)",
+                        "-Nshape=box", "-Nstyle=rounded", "-Nmargin=0.15,0.08", "-Granksep=0.35", "-Gnodesep=0.3"]
+        let key = SHA256.hash(data: Data((defaults.joined() + source).utf8)).map { String(format: "%02x", $0) }.joined()
+        let folder = (NSHomeDirectory() as NSString).appendingPathComponent(".cache/show/diagrams")
+        let file = (folder as NSString).appendingPathComponent("\(key.prefix(24))@2x.png")
+        if !FileManager.default.fileExists(atPath: file) {
+            try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+            let dot = Process()
+            dot.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            dot.arguments = ["dot", "-Tpng", "-o", file] + defaults
+            var environment = ProcessInfo.processInfo.environment
+            environment["PATH"] = "/opt/homebrew/bin:/usr/local/bin:" + (environment["PATH"] ?? "/usr/bin:/bin")
+            dot.environment = environment
+            let input = Pipe(), errors = Pipe()
+            dot.standardInput = input
+            dot.standardError = errors
+            do {
+                try dot.run()
+                input.fileHandleForWriting.write(Data(source.utf8))
+                try? input.fileHandleForWriting.close()
+                dot.waitUntilExit()
+            } catch {
+                return block("Graphviz could not run: \(error.localizedDescription)\n\n" + source)
+            }
+            if dot.terminationStatus != 0 {
+                try? FileManager.default.removeItem(atPath: file)
+                let message = String(data: errors.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+                return block("Graphviz: \(message.trimmingCharacters(in: .whitespacesAndNewlines))\n\n" + source)
+            }
+        }
+        return picture(path: file, alt: "")
     }
 
     private func imageLine(_ text: String) -> (alt: String, path: String)? {
