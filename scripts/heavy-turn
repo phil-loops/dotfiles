@@ -28,7 +28,7 @@ Running work is never preempted; only admission waits, and one slot always stays
 unqueued hog can't starve the queue forever.
 
 Every finished ticket appends a line to HEAVY_TURN_JOURNAL (~/.cache/heavy-turn/journal.tsv):
-granted, class, pid, wait s, run s, exit, mem %, cwd, cmd — so "who ran that, and how long did
+granted, class, pid, wait s, run s (awake seconds: sleep is not counted), exit, mem %, cwd, cmd — so "who ran that, and how long did
 it take" outlives the process.
 
 Env: HEAVY_TURN_SLOTS (2), HEAVY_TURN_DIR (/tmp/heavy-turn), HEAVY_TURN_MEM_FLOOR (30),
@@ -78,10 +78,13 @@ def pressure_note(level):
 def journal(t, status):
     now = time.time()
     granted = t.get("granted")
-    created = t["created"] / 1e9
+    # wait and run count awake seconds: a laptop that slept mid-run journaled a 3s job as 931s
+    up, up0, up1 = time.monotonic(), t.get("created_up"), t.get("granted_up")
+    if up0 is None or up0 > up:        # a ticket from before the awake stamps, or from before a reboot
+        up, up0, up1 = now, t["created"] / 1e9, granted
     row = [time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(granted or now)),
            t["cls"] + (" batch" if t["batch"] else ""), str(t["pid"]),
-           f"{(granted or now) - created:.0f}", f"{now - granted:.0f}" if granted else "0",
+           f"{(up1 or up) - up0:.0f}", f"{up - up1:.0f}" if up1 else "0",
            str(status), str(t.get("mem", "")), t.get("cwd", ""), " ".join(t.get("cmd") or [])]
     try:
         JOURNAL.parent.mkdir(parents=True, exist_ok=True)
@@ -192,6 +195,7 @@ def try_claim(me):
         if t["id"] == me["id"]:
             me["state"] = "running"
             me["granted"] = time.time()
+            me["granted_up"] = time.monotonic()
             me["mem"] = level
             save(me)
             return True
@@ -221,7 +225,7 @@ def why_waiting(me):
 
 def enqueue(cls, batch, pid, cmd):
     t = {"id": uuid.uuid4().hex[:12], "pid": pid, "cls": cls, "batch": batch,
-         "created": time.time_ns(), "state": "waiting", "cmd": cmd, "cwd": os.getcwd()}
+         "created": time.time_ns(), "created_up": time.monotonic(), "state": "waiting", "cmd": cmd, "cwd": os.getcwd()}
     with locked():
         save(t)
     return t
