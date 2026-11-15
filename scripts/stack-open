@@ -12,6 +12,7 @@
 #   stack-open --here <path> [<pos>]   open <path> in the MAIN working checkout (no worktree)
 #                                       — for jumping from a GitHub blob view to your editor
 #   stack-open --prepare <branch>  create/refresh the worktree only (prefetch)
+#   stack-open --prepared <branch> exit 0 when --prepare would change nothing
 #   stack-open --prune [<days>]    remove scratch worktrees idle > days (default 3)
 #   stack-open --gc [<days>] [--dry-run] [--json]  the expiry ladder, with a size report: idle > days
 #                                       (default 1) loses its regenerable weight (a real
@@ -988,6 +989,11 @@ case "${1:-}" in
   # STACK_OPEN_NO_GEN_SYNC set by the caller still opts out of any heal (stack-open-test's
   # bare-seeding cases assert the link).
   --prepare) d=$(STACK_OPEN_NO_GEN_SYNC=1 ensure_worktree "${2:?branch}") && sync_tree "$d"; exit 0;;
+  --prepared)   # exit 0 when --prepare has nothing to do: the need probe a queued warm-up runs under
+    d=$(existing_worktree "${2:?branch}"); [[ -n "$d" ]] || d="$SCRATCH/${2//\//_}"
+    [[ -d "$d" && "$(git -C "$d" rev-parse HEAD 2>/dev/null)" == "$(git rev-parse "$2" 2>/dev/null)" ]] || exit 1
+    "$SCRIPTS/seed-gen" --synced "$d" || exit 1
+    touch "$d"; exit 0;;   # the dir's mtime is last use to the reaper: a skipped warm must not let it age out
   --path)    d=$(STACK_OPEN_NO_GEN_SYNC=1 ensure_worktree "${2:?branch}") || exit 1; sync_tree "$d"; echo "$d"; exit 0;;   # create-if-needed + print the checkout dir
   --serve-path) d=$(STACK_OPEN_SKIP_PRIMARY=1 STACK_OPEN_NO_GEN_SYNC=1 ensure_worktree "${2:?branch}") || exit 1; sync_tree "$d"; echo "$d"; exit 0;;   # --path, but never
              # the primary checkout — a dir loops-preview may serve (it refuses MAIN)

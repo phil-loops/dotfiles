@@ -1,6 +1,7 @@
 # srv/picker.py — the open-in-nvim actions.
 #   POST /open            open a file on a branch in the warm review-nvim
 import os
+import shlex
 import re
 import json
 import signal
@@ -87,9 +88,14 @@ def review_on_branch(branch):   # open <branch> as the whole-PR gm Diffview in t
 
 
 def prepare_branch(branch):   # background worktree prefetch (stack-open --prepare) — fire-and-forget
-    # a batch heavy-turn: a warm-up only speeds a later open, so it waits behind gates and memory pressure
-    return ctx.fire([os.path.join(ctx.SCRIPTS, "heavy-turn"), "--class", "review-warm", "--batch", "--",
-                     os.path.join(ctx.SCRIPTS, "stack-open"), "--prepare", branch],
+    # a batch heavy-turn: a warm-up only speeds a later open, so it waits behind gates and memory pressure.
+    # The queue owns "is this work": --unless drops a warm-up of a tree already prepared, --key folds
+    # one into the same warm-up still waiting — callers fire freely and keep no record of their own.
+    so = os.path.join(ctx.SCRIPTS, "stack-open")
+    return ctx.fire([os.path.join(ctx.SCRIPTS, "heavy-turn"), "--class", "review-warm", "--batch",
+                     "--key", f"prepare:{ctx.repo_cwd()}:{branch}",
+                     "--unless", shlex.join([so, "--prepared", branch]), "--",
+                     so, "--prepare", branch],
              cwd=ctx.repo_cwd(), start_new_session=True)
 
 
