@@ -234,7 +234,8 @@ async function startRun(s, key, mode) {
 }
 
 /// An environment that serves one branch can only speak for that branch's claims.
-const applies = (env, group) => !env.branch || !group.branch || group.branch === env.branch;
+/// A branch that is gone locally has merged (contracted out of its forest), so every server already carries it.
+const applies = (s, group) => !s.env.branch || !group.branch || group.branch === s.env.branch || branchTip(s, group.branch) === null;
 
 // ---------- what the page is told --------------------------------------------------------------------------------------
 
@@ -247,7 +248,7 @@ function state(s) {
     title: s.title, ticket: s.ticket ?? null, about: s.about ?? "", env: { name: s.env.name, base: s.env.base, key: s.env.key, branch: s.env.branch ?? null },
     envs: s.envs.map((e) => e.name), setup: s.env.fixture ? `bench setup ${s.path.replace(homedir(), "~")} --env ${s.env.name}` : null,
     hasKey: Boolean(readKey(s)), problems: lint(s),
-    groups: s.groups.map((g) => ({ ...g, applies: applies(s.env, g), tip: g.branch ? branchTip(s, g.branch) : null,
+    groups: s.groups.map((g) => ({ ...g, applies: applies(s, g), tip: g.branch ? branchTip(s, g.branch) : null,
       href: g.branch && s.repo ? `canopy://v2/b/${s.repo}/${g.branch}` : null,
       steps: s.steps.filter((step) => step.claim && step.group === g.id).map((step) => ({ id: step.id, label: step.label ?? step.id, line: requestLine(step), claim: step.claim })) })),
     runs: runs.map((run) => ({ ...run, verdicts: Object.fromEntries(s.steps.filter((step) => step.claim).map((step) => [step.id, verdict(step.claim, run.seen[step.id])])) })),
@@ -489,7 +490,7 @@ function render(state) {
   $("verdict").className = tone; $("verdict").textContent = head; $("lede").textContent = lede;
   renderNext(state, live);
   $("groups").innerHTML = state.groups.filter((g) => g.steps.length).map((g) =>
-    "<section><h2>" + esc(g.title) + "</h2>" + (g.branch ? '<p class="branch">Fixed by <a href="' + esc(g.href) + '">' + esc(g.branch) + "</a>" + (g.tip ? ", now at " + esc(g.tip) : ", which is no longer a local branch") + (g.applies ? "" : ". " + esc(state.env.name) + " serves " + esc(state.env.branch) + ", so these answers say nothing about this branch") + "</p>" : "") +
+    "<section><h2>" + esc(g.title) + "</h2>" + (g.branch ? '<p class="branch">Fixed by <a href="' + esc(g.href) + '">' + esc(g.branch) + "</a>" + (g.tip ? ", now at " + esc(g.tip) : ", which is gone locally, so merged") + (g.applies ? "" : ". " + esc(state.env.name) + " serves " + esc(state.env.branch) + ", so these answers say nothing about this branch") + "</p>" : "") +
     '<div class="scroll"><table><tr><th>Request</th><th>Answers today</th><th>Should answer</th>' +
     (runs.length ? runs.map((r, i) => "<th>Run " + (i + 1) + "<small>" + esc(clock(r.at)) + "</small></th>").join("") : "<th>Runs</th>") + "</tr>" +
     g.steps.map((s) => '<tr><td class="what">' + esc(s.label) + '<span class="line">' + esc(s.line) + "</span></td>" +
@@ -617,7 +618,7 @@ if (command === "serve") {
   if (!all.length) console.log("no runs yet");
   for (const env of s.envs) {
     const run = all.filter((r) => r.env?.name === env.name).at(-1);
-    for (const g of run ? s.groups.filter((g) => applies(env, g)) : []) {
+    for (const g of run ? s.groups.filter((g) => applies({ ...s, env }, g)) : []) {
       const kinds = s.steps.filter((step) => step.claim && step.group === g.id).map((step) => verdict(step.claim, run.seen[step.id]));
       console.log(`${g.branch ?? g.id}: ${kinds.filter((k) => k === "fixed").length} of ${kinds.length} fixed on ${run.env.name}, ${run.at}`);
     }
