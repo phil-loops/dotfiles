@@ -7,7 +7,15 @@
 //
 //   bench serve [--port 7240]     the page server Show's Bench workspace loads (http://127.0.0.1:7240/b?file=<scenario>)
 //   bench check <scenario.json>   lint a scenario; exit 1 on errors
-//   bench status <scenario.json>  the latest run's verdict per group, one line each
+//   bench status <scenario.json>  the latest run's verdict per group and environment, one line each
+//   bench setup <scenario.json> [--env local]   build the state the claims need: run the environment's fixture in the
+//                                 loops checkout that has its branch, keep the key it makes in the Keychain, start a
+//                                 preview server on the environment's port, then print the checklist
+//   bench checks <scenario.json> [--env name]   the checklist alone: what must be true before a run means anything
+//
+// A scenario lists its environments in `envs` (the first is the default; `?env=<name>` picks another). An environment
+// with a `fixture` (a script in scripts/bench-fixtures) and a `branch` can be set up from nothing; one without is
+// somebody's standing state, and `checks` (read-only requests) say whether that state is there.
 //
 // Runs are append-only JSON lines in ~/Library/Application Support/Show/bench-runs/<scenario>.jsonl (BENCH_RUNS overrides).
 // The API key comes from the Keychain item the scenario names, on every run, and never reaches the page or a run record.
@@ -16,27 +24,47 @@ import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { homedir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const ALLOWED_HOSTS = ["app.l3s.email", "localhost", "127.0.0.1"];
 const SHOW_DIR = resolve((process.env.SHOW_DIR ?? join(homedir(), ".dotfiles", "show")).replace(/^~/, homedir()));
+const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "bench-fixtures");
+const LOCAL_HOSTS = ["localhost", "127.0.0.1"];
 const RUNS_DIR = process.env.BENCH_RUNS ?? join(homedir(), "Library", "Application Support", "Show", "bench-runs");
 
 // ---------- scenario ---------------------------------------------------------------------------------------------------
 
-function loadScenario(file) {
+function loadScenario(file, envName) {
   const path = resolve(file);
   const doc = JSON.parse(readFileSync(path, "utf8"));
   const bench = doc.bench ?? {};
-  return { path, id: basename(path, ".json"), title: doc.title ?? basename(path), ...bench, groups: bench.groups ?? [], steps: bench.steps ?? [] };
+  const envs = bench.envs ?? (bench.env ? [bench.env] : []);
+  if (envName && !envs.some((e) => e.name === envName)) throw new Error(`no environment named ${envName} (${envs.map((e) => e.name).join(", ")})`);
+  const env = envs.find((e) => e.name === envName) ?? envs[0];
+  return { path, id: basename(path, ".json"), title: doc.title ?? basename(path), ...bench, env, envs, slot: `${path}#${env?.name}`,
+    groups: bench.groups ?? [], steps: bench.steps ?? [], checks: bench.checks ?? [] };
 }
+
+const isLocal = (env) => LOCAL_HOSTS.includes(new URL(env.base).hostname);
 
 function lint(s) {
   const errors = [];
   const say = (m) => errors.push(m);
-  if (!s.env?.base) say("env.base is missing");
-  else if (!ALLOWED_HOSTS.includes(new URL(s.env.base).hostname)) say(`env.base host ${new URL(s.env.base).hostname} is not allowed (${ALLOWED_HOSTS.join(", ")})`);
-  if (!s.env?.key) say("env.key (a Keychain service name) is missing");
+  if (!s.envs.length) say("no environment (envs)");
+  for (const env of s.envs) {
+    const at = `env ${env.name ?? "?"}`;
+    if (!env.name) say("an environment has no name");
+    if (!env.base) say(`${at}: base is missing`);
+    else if (!ALLOWED_HOSTS.includes(new URL(env.base).hostname)) say(`${at}: host ${new URL(env.base).hostname} is not allowed (${ALLOWED_HOSTS.join(", ")})`);
+    if (!env.key) say(`${at}: key (a Keychain service name) is missing`);
+    if (env.fixture && !(env.base && isLocal(env))) say(`${at}: a fixture writes to a database, so it is only allowed on a local environment`);
+    if (env.fixture && !existsSync(join(FIXTURES, env.fixture))) say(`${at}: fixture ${env.fixture} is not in scripts/bench-fixtures`);
+    if (env.fixture && !env.branch) say(`${at}: a fixture needs branch, the checkout it runs in`);
+  }
+  for (const check of s.checks) {
+    if (!check.label || !check.path) say("a check needs label and path");
+  }
   if (!s.steps.length) say("no steps");
   const ids = new Set(), groups = new Set(s.groups.map((g) => g.id)), known = new Set(["now"]);
   for (const step of s.steps) {
@@ -195,32 +223,99 @@ async function startRun(s, key, mode) {
   const a = { mode, pending: null,
     run: { at: new Date().toISOString(), scenario: s.id, env: { name: s.env.name, base: s.env.base }, mode, team: null,
       tips: Object.fromEntries(s.groups.filter((g) => g.branch).map((g) => [g.branch, branchTip(s, g.branch)])), seen: {}, trail: [] } };
-  active.set(s.path, a);
+  active.set(s.slot, a);
   try {
     await execute(s, key, a);
   } catch (error) {
     a.run.stopped = error instanceof Stopped ? "you stopped it" : error.message;
   }
   recordRun(s, a.run);
-  active.delete(s.path);
+  active.delete(s.slot);
 }
+
+/// An environment that serves one branch can only speak for that branch's claims.
+const applies = (env, group) => !env.branch || !group.branch || group.branch === env.branch;
 
 // ---------- what the page is told --------------------------------------------------------------------------------------
 
 function state(s) {
-  const a = active.get(s.path);
-  const runs = loadRuns(s).slice(-8);
+  const a = active.get(s.slot);
+  const runs = loadRuns(s).filter((run) => run.env?.name === s.env.name).slice(-8);
   if (a) runs.push({ ...a.run, inProgress: true });
   const requestLine = (step) => `${step.request.method} ${step.request.path.replace(/\{[\w|?]+\}/g, "{id}")}`;
   return {
-    title: s.title, ticket: s.ticket ?? null, about: s.about ?? "", env: { name: s.env.name, base: s.env.base, key: s.env.key },
+    title: s.title, ticket: s.ticket ?? null, about: s.about ?? "", env: { name: s.env.name, base: s.env.base, key: s.env.key, branch: s.env.branch ?? null },
+    envs: s.envs.map((e) => e.name), setup: s.env.fixture ? `bench setup ${s.path.replace(homedir(), "~")} --env ${s.env.name}` : null,
     hasKey: Boolean(readKey(s)), problems: lint(s),
-    groups: s.groups.map((g) => ({ ...g, tip: g.branch ? branchTip(s, g.branch) : null,
+    groups: s.groups.map((g) => ({ ...g, applies: applies(s.env, g), tip: g.branch ? branchTip(s, g.branch) : null,
       href: g.branch && s.repo ? `canopy://v2/b/${s.repo}/${g.branch}` : null,
       steps: s.steps.filter((step) => step.claim && step.group === g.id).map((step) => ({ id: step.id, label: step.label ?? step.id, line: requestLine(step), claim: step.claim })) })),
     runs: runs.map((run) => ({ ...run, verdicts: Object.fromEntries(s.steps.filter((step) => step.claim).map((step) => [step.id, verdict(step.claim, run.seen[step.id])])) })),
     pending: a?.pending ? { ...a.pending, resolve: undefined, writes: true } : null,
   };
+}
+
+// ---------- before a run -----------------------------------------------------------------------------------------------
+
+/// What must be true for a run to mean anything, observed with read-only requests: the key, the server, then the
+/// scenario's own `checks` ({label, path, has?, fix?}; `has` is a `pick` path that must find something).
+async function checks(s) {
+  const key = readKey(s), fixWith = s.env.fixture ? "run the setup command" : null;
+  const out = [{ label: "An API key is in the Keychain", ok: Boolean(key), detail: key ? "" : s.env.key, fix: fixWith ?? `security add-generic-password -s ${s.env.key} -a loops -w` }];
+  if (!key) return out;
+  const get = async (path) => {
+    try {
+      const res = await fetch(s.env.base + path, { headers: { Authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(8000) });
+      return { status: res.status, json: await res.json().catch(() => null) };
+    } catch (error) {
+      return { status: 0, json: null, error: error.message };
+    }
+  };
+  const who = await get("/api-key");
+  out.push({ label: `${s.env.name} answers and accepts the key`, ok: who.status === 200,
+    detail: who.status === 200 ? `key belongs to ${who.json?.teamName ?? "a team"}` : who.status ? `answered ${who.status}` : `no answer from ${s.env.base}`,
+    fix: fixWith ?? (who.status ? "store a key this environment accepts" : "check the environment is up") });
+  if (who.status !== 200) return out;
+  for (const check of s.checks) {
+    const seen = await get(check.path);
+    const ok = seen.status >= 200 && seen.status < 300 && (!check.has || pick(seen.json, check.has) !== undefined);
+    out.push({ label: check.label, ok, detail: ok ? "" : seen.status >= 200 && seen.status < 300 ? "not found" : `answered ${seen.status || "nothing"}`, fix: fixWith ?? check.fix ?? "" });
+  }
+  return out;
+}
+
+function checkoutOf(s, branch) {
+  const repo = process.env.BENCH_REPO ?? join(homedir(), "coding", s.repo ?? "");
+  const blocks = execFileSync("git", ["-C", repo, "worktree", "list", "--porcelain"], { encoding: "utf8" }).split("\n\n");
+  const block = blocks.find((b) => b.split("\n").includes(`branch refs/heads/${branch}`));
+  return block?.split("\n")[0].replace(/^worktree /, "") ?? null;
+}
+
+async function setup(s) {
+  const env = s.env, problems = lint(s);
+  if (problems.length) throw new Error(problems.join("\n"));
+  if (!env.fixture) throw new Error(`${env.name} has no fixture: its state is set up by hand. \`bench checks\` says what is missing.`);
+  const dir = checkoutOf(s, env.branch);
+  if (!dir) throw new Error(`no worktree has ${env.branch} checked out; check it out somewhere, then run this again`);
+  console.log(`▸ fixture ${env.fixture} in ${dir}`);
+  const printed = execFileSync("npx", ["tsx", "--tsconfig", "script-runner/tsconfig.json", "--import", "dotenv/config", join(FIXTURES, env.fixture)],
+    { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 1 << 26 });
+  const made = JSON.parse(printed.trim().split("\n").at(-1));
+  execFileSync("security", ["add-generic-password", "-U", "-s", env.key, "-a", "loops", "-w", made.key]);
+  console.log(`▸ ${made.team}: key ••••${made.key.slice(-4)} kept in the Keychain as ${env.key}`);
+  const up = async () => { try { return (await fetch(env.base + "/api-key", { signal: AbortSignal.timeout(60000) })).status > 0; } catch { return false; } };
+  if (!(await up())) {
+    console.log(`▸ nothing answers at ${env.base}; starting a preview of ${env.branch}`);
+    execFileSync("loops-preview", [dir, "--port", new URL(env.base).port], { stdio: "inherit" });
+    for (let i = 0; i < 90 && !(await up()); i++) await new Promise((r) => setTimeout(r, 2000));
+  }
+  return printChecks(s);
+}
+
+async function printChecks(s) {
+  const list = await checks(s);
+  for (const c of list) console.log(`${c.ok ? "✓" : "✗"} ${c.label}${c.detail ? ` (${c.detail})` : ""}${c.ok || !c.fix ? "" : `\n    ${c.fix === "run the setup command" ? `bench setup ${s.path} --env ${s.env.name}` : c.fix}`}`);
+  return list.every((c) => c.ok);
 }
 
 const PAGE = `<!doctype html>
@@ -278,6 +373,16 @@ const PAGE = `<!doctype html>
   #setup { margin-top: 22px; padding: 16px 18px; background: var(--sheet); border-left: 3px solid var(--still); max-width: 78ch; }
   #setup[hidden] { display: none; }
   #setup pre { margin: 10px 0 0; font: 12.5px var(--wire); white-space: pre-wrap; word-break: break-all; }
+  .envs a { margin-left: 14px; } .envs a[aria-current] { color: var(--ink); font-weight: 600; text-decoration: none; }
+  #ready { margin-top: 26px; max-width: 78ch; font-size: 14px; }
+  #ready[hidden] { display: none; }
+  #ready ul { list-style: none; margin: 0; padding: 0; }
+  #ready li { padding: 5px 0 5px 26px; position: relative; color: var(--soft); }
+  #ready li::before { content: "✓"; position: absolute; left: 2px; color: var(--fixed); }
+  #ready li.miss { color: var(--ink); } #ready li.miss::before { content: "✗"; color: var(--still); }
+  #ready small { display: block; color: var(--soft); font-size: 13px; }
+  #ready pre { margin: 10px 0 0; padding: 10px 12px; background: var(--sheet); font: 12.5px var(--wire); white-space: pre-wrap; word-break: break-all; }
+  #ready button { margin-top: 10px; }
 
   section { margin-top: 56px; }
   h2 { font: 600 21px/1.2 var(--sans); font-stretch: 108%; margin: 0; }
@@ -327,19 +432,21 @@ const PAGE = `<!doctype html>
   @media (prefers-reduced-motion: reduce) { button.run { transition: none; } }
 </style>
 <main>
-  <div class="top"><span><b id="ticket"></b> replayed against <span id="env"></span></span><span id="team"></span></div>
+  <div class="top"><span><b id="ticket"></b> replayed against <span id="env"></span></span><span><span id="team"></span><span class="envs" id="envs"></span></span></div>
   <h1 id="verdict">Nothing run yet.</h1>
   <p class="lede" id="lede"></p>
   <div class="press" id="starters"><button class="run" id="ask">Run, asking before each write</button><button class="quiet" id="auto">Run all without stopping</button><span id="note" role="status"></span></div>
   <div id="next" hidden></div>
   <div id="setup" hidden></div>
+  <div id="ready" hidden></div>
   <div id="groups"></div>
   <section><div class="trailhead"><h2>Every request, in the order it was sent</h2><div class="tabs" id="tabs"></div></div><div id="trail"></div></section>
 </main>
 <script>
 const $ = (id) => document.getElementById(id);
 const file = new URLSearchParams(location.search).get("file");
-const api = (path, more = "") => path + "?file=" + encodeURIComponent(file) + more;
+const envName = new URLSearchParams(location.search).get("env");
+const api = (path, more = "") => path + "?file=" + encodeURIComponent(file) + (envName ? "&env=" + encodeURIComponent(envName) : "") + more;
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 const clock = (at) => new Date(at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 let busy = false, last = "", shownRun = null, openReqs = new Set();
@@ -348,11 +455,11 @@ function headline(state) {
   const run = state.runs[state.runs.length - 1];
   if (!run) return ["", "Nothing run yet.", state.about];
   if (run.inProgress) return ["", "Run in progress.", run.trail.filter((t) => !t.skipped).length + " requests sent so far. Nothing that writes is sent until you say so."];
-  const all = Object.values(run.verdicts), count = (k) => all.filter((v) => v === k).length;
+  const all = state.groups.filter((g) => g.applies).flatMap((g) => g.steps.map((s) => run.verdicts[s.id])), count = (k) => all.filter((v) => v === k).length;
   const notes = [count("not-run") && count("not-run") + " could not run; the table says why.", count("unexpected") && count("unexpected") + " answered something neither side of the claim expects; read the trail below.", run.stopped && "The run ended early: " + run.stopped + "."].filter(Boolean).join(" ");
   if (!count("fixed")) return ["still", "Nothing has changed yet.", notes || state.env.name + " still answers the way it does today. Deploy, then run again."];
   if (count("fixed") === all.length) return ["fixed", "Everything is fixed.", notes || state.env.name + " now answers every request the way the branches intend."];
-  const done = state.groups.filter((g) => g.steps.length && g.steps.every((s) => run.verdicts[s.id] === "fixed")).map((g) => g.title);
+  const done = state.groups.filter((g) => g.applies && g.steps.length && g.steps.every((s) => run.verdicts[s.id] === "fixed")).map((g) => g.title);
   return ["", done.length ? done.join(" and ") + ": fixed. The rest: not yet." : count("fixed") + " of " + all.length + " claims are fixed.", notes || "The table shows which requests still answer the old way."];
 }
 
@@ -367,7 +474,11 @@ function cell(run, step, latest) {
 function render(state) {
   const runs = state.runs, latest = runs[runs.length - 1], live = Boolean(latest?.inProgress);
   document.title = state.title;
-  $("ticket").textContent = state.ticket ?? state.title; $("env").textContent = state.env.name + ", " + state.env.base;
+  $("ticket").textContent = state.ticket ?? state.title; $("env").textContent = state.env.name + ", " + state.env.base + (state.env.branch ? ", set up to serve " + state.env.branch : "");
+  $("envs").innerHTML = state.envs.length > 1 ? state.envs.map((n) => '<a href="/b?file=' + encodeURIComponent(file) + "&env=" + encodeURIComponent(n) + '"' + (n === state.env.name ? ' aria-current="page"' : "") + ">" + esc(n) + "</a>").join("") : "";
+  setupCommand = state.setup;
+  if (wasLive && !live) loadChecks();
+  wasLive = live;
   $("team").textContent = latest?.team ? "Key belongs to " + latest.team : "";
   $("setup").hidden = state.hasKey && !state.problems.length;
   $("setup").innerHTML = state.problems.length ? "This scenario has problems and cannot run:<pre>" + esc(state.problems.join("\\n")) + "</pre>"
@@ -378,7 +489,7 @@ function render(state) {
   $("verdict").className = tone; $("verdict").textContent = head; $("lede").textContent = lede;
   renderNext(state, live);
   $("groups").innerHTML = state.groups.filter((g) => g.steps.length).map((g) =>
-    "<section><h2>" + esc(g.title) + "</h2>" + (g.branch ? '<p class="branch">Fixed by <a href="' + esc(g.href) + '">' + esc(g.branch) + "</a>" + (g.tip ? ", now at " + esc(g.tip) : ", which is no longer a local branch") + "</p>" : "") +
+    "<section><h2>" + esc(g.title) + "</h2>" + (g.branch ? '<p class="branch">Fixed by <a href="' + esc(g.href) + '">' + esc(g.branch) + "</a>" + (g.tip ? ", now at " + esc(g.tip) : ", which is no longer a local branch") + (g.applies ? "" : ". " + esc(state.env.name) + " serves " + esc(state.env.branch) + ", so these answers say nothing about this branch") + "</p>" : "") +
     '<div class="scroll"><table><tr><th>Request</th><th>Answers today</th><th>Should answer</th>' +
     (runs.length ? runs.map((r, i) => "<th>Run " + (i + 1) + "<small>" + esc(clock(r.at)) + "</small></th>").join("") : "<th>Runs</th>") + "</tr>" +
     g.steps.map((s) => '<tr><td class="what">' + esc(s.label) + '<span class="line">' + esc(s.line) + "</span></td>" +
@@ -387,6 +498,21 @@ function render(state) {
     "</table></div></section>").join("");
   if (!runs.some((r) => r.at === shownRun)) shownRun = latest?.at ?? null;
   renderTrail(runs);
+}
+
+let setupCommand = null, wasLive = false;
+async function loadChecks() {
+  const box = $("ready");
+  let list;
+  try { list = await (await fetch(api("/checks"))).json(); } catch { return; }
+  if (!Array.isArray(list)) return;
+  const missing = list.filter((c) => !c.ok);
+  box.hidden = false;
+  box.innerHTML = "<ul>" + list.map((c) => '<li class="' + (c.ok ? "" : "miss") + '">' + esc(c.label) + (c.detail ? "<small>" + esc(c.detail) + "</small>" : "") +
+      (!c.ok && c.fix && c.fix !== "run the setup command" ? "<small>" + esc(c.fix) + "</small>" : "") + "</li>").join("") + "</ul>" +
+    (missing.length && setupCommand ? "<pre>" + esc(setupCommand) + "</pre>" : "") +
+    (missing.length ? '<button class="quiet" id="recheck">Check again</button>' : "");
+  const again = $("recheck"); if (again) again.onclick = loadChecks;
 }
 
 function renderNext(state, live) {
@@ -428,7 +554,7 @@ async function load(force) {
   const text = await (await fetch(api("/state"))).text();
   if (force || text !== last) { last = text; render(JSON.parse(text)); }
 }
-load(); setInterval(load, 1500); document.addEventListener("visibilitychange", () => load());
+load().then(loadChecks); setInterval(load, 1500); document.addEventListener("visibilitychange", () => load());
 </script>
 </html>`;
 
@@ -437,7 +563,7 @@ load(); setInterval(load, 1500); document.addEventListener("visibilitychange", (
 function scenarioFor(url) {
   const file = resolve(url.searchParams.get("file") ?? "");
   if (!file.startsWith(SHOW_DIR + "/") || !file.endsWith(".json")) throw new Error(`a scenario must be a .json file under ${SHOW_DIR}`);
-  return loadScenario(file);
+  return loadScenario(file, url.searchParams.get("env") ?? undefined);
 }
 
 function serve(port) {
@@ -452,23 +578,24 @@ function serve(port) {
       }
       const s = scenarioFor(url);
       if (req.method === "GET" && url.pathname === "/state") return json(200, state(s));
+      if (req.method === "GET" && url.pathname === "/checks") return json(200, await checks(s));
       if (req.method === "POST" && url.pathname === "/run") {
         const key = readKey(s), problems = lint(s);
         if (problems.length) return json(200, { ...state(s), error: "the scenario has problems" });
         if (!key) return json(200, { ...state(s), error: "no key in the Keychain" });
-        if (active.has(s.path)) return json(200, { ...state(s), error: "a run is already in progress" });
+        if (active.has(s.slot)) return json(200, { ...state(s), error: "a run is already in progress" });
         const done = startRun(s, key, url.searchParams.get("mode") === "auto" ? "auto" : "ask");
-        const a = active.get(s.path);
-        await Promise.race([done, (async () => { while (active.get(s.path) === a && !a.pending) await new Promise((r) => setTimeout(r, 40)); })()]);
+        const a = active.get(s.slot);
+        await Promise.race([done, (async () => { while (active.get(s.slot) === a && !a.pending) await new Promise((r) => setTimeout(r, 40)); })()]);
         return json(200, state(s));
       }
       if (req.method === "POST" && url.pathname === "/next") {
-        const a = active.get(s.path), answer = url.searchParams.get("do");
+        const a = active.get(s.slot), answer = url.searchParams.get("do");
         if (!a?.pending || !["send", "skip", "rest", "stop"].includes(answer)) return json(200, { ...state(s), error: "nothing is waiting" });
         const { resolve: go } = a.pending;
         a.pending = null;
         go(answer);
-        while (active.get(s.path) === a && !a.pending) await new Promise((r) => setTimeout(r, 40));
+        while (active.get(s.slot) === a && !a.pending) await new Promise((r) => setTimeout(r, 40));
         return json(200, state(s));
       }
       json(404, { error: "not found" });
@@ -486,13 +613,19 @@ if (command === "serve") {
   console.log(problems.length ? problems.map((p) => "✗ " + p).join("\n") : "✓ scenario is sound");
   process.exit(problems.length ? 1 : 0);
 } else if (command === "status" && rest[0]) {
-  const s = loadScenario(rest[0]), run = loadRuns(s).at(-1);
-  if (!run) console.log("no runs yet");
-  for (const g of run ? s.groups : []) {
-    const kinds = s.steps.filter((step) => step.claim && step.group === g.id).map((step) => verdict(step.claim, run.seen[step.id]));
-    console.log(`${g.branch ?? g.id}: ${kinds.filter((k) => k === "fixed").length} of ${kinds.length} fixed on ${run.env.name}, ${run.at}`);
+  const s = loadScenario(rest[0]), all = loadRuns(s);
+  if (!all.length) console.log("no runs yet");
+  for (const env of s.envs) {
+    const run = all.filter((r) => r.env?.name === env.name).at(-1);
+    for (const g of run ? s.groups.filter((g) => applies(env, g)) : []) {
+      const kinds = s.steps.filter((step) => step.claim && step.group === g.id).map((step) => verdict(step.claim, run.seen[step.id]));
+      console.log(`${g.branch ?? g.id}: ${kinds.filter((k) => k === "fixed").length} of ${kinds.length} fixed on ${run.env.name}, ${run.at}`);
+    }
   }
+} else if ((command === "setup" || command === "checks") && rest[0]) {
+  const s = loadScenario(rest[0], rest.includes("--env") ? rest[rest.indexOf("--env") + 1] : undefined);
+  (command === "setup" ? setup(s) : printChecks(s)).then((ok) => process.exit(ok ? 0 : 1), (error) => { console.error("✗ " + error.message); process.exit(1); });
 } else {
-  console.error("usage: bench serve [--port 7240] | bench check <scenario.json> | bench status <scenario.json>");
+  console.error("usage: bench serve [--port 7240] | bench check|status <scenario.json> | bench setup|checks <scenario.json> [--env name]");
   process.exit(64);
 }
