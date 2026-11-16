@@ -6,9 +6,11 @@
 #   POST /gates-waive     {branch}          → Phil ships this exact tree without gates (Phil only)
 #
 # Records (branch.<b>.stack-*, via stackcfg):
-#   review-flags-tree, review-flag (multivar), review-depth, review-run (the run id) — from a finished run
+#   review-flags-tree, review-flags-delta, review-flag (multivar), review-depth, review-run (the run id)
+#                                                                          — from a finished run
 #   gates-waived-tree, gates-waived-by                                     — written from Phil's click
-# Both die with the next edit: readers compare them to the branch's current tree. 2026-11-05: a session
+# Both die with the next edit: readers compare them to the branch's current tree. A review also stands
+# on its delta (review_stands): a restack under the branch leaves the diff the reviewer read unchanged. 2026-11-05: a session
 # hand-wrote review-flags-tree on three trees nobody reviewed, and a dropped guard reached the PR.
 import json
 import os
@@ -30,6 +32,26 @@ def _key(branch):
     return push._gate_key(branch)
 
 
+def _delta(branch, snap=None):
+    from . import push   # the gates' delta seal, so a review and a green lapse on the same edits
+    return push._delta_id(branch, snap)
+
+
+def review_stands(branch, snap=None):
+    """How the review verdict for <branch> holds — "tree" when it was recorded on the tip's tree,
+    "delta" when the tip moved but the branch's own hunks (the diff the reviewer read) did not,
+    "" when it lapsed. The one reader, like push.verdict_stands for gates."""
+    snap = snap or repostate.snapshot()
+    tip = snap.local(branch)
+    tree = snap.branch_key(branch, "review-flags-tree")
+    if not (tip and tree):
+        return ""
+    if tree == snap.tree(tip):
+        return "tree"
+    delta = snap.branch_key(branch, "review-flags-delta")
+    return "delta" if delta and delta == _delta(branch, snap) else ""
+
+
 def review_run(branch):
     return runs.find("review", _key(branch)) if branch else None
 
@@ -49,13 +71,17 @@ def _flag_line(f):
 
 
 def harvest(branch):
-    """Record a finished run's verdict if it reviewed the tree the branch has now — idempotent, so any
-    reader may call it. Returns the verdict it recorded (or already had), else None."""
+    """Record a finished run's verdict if it reviewed the tree the branch has now, or the same own
+    diff under a moved base — idempotent, so any reader may call it. Returns the verdict it recorded
+    (or already had), else None."""
     run = review_run(branch)
     if not run or run.alive():
         return None
     v = _verdict(run)
-    if not v or not v.get("ok") or v.get("tree") != run.meta.get("tree") or v["tree"] != _tree(branch):
+    if not v or not v.get("ok") or v.get("tree") != run.meta.get("tree"):
+        return None
+    delta = run.meta.get("delta") or ""
+    if v["tree"] != _tree(branch) and not (delta and delta == _delta(branch)):
         return None
     snap = repostate.snapshot()
     if snap.branch_key(branch, "review-flags-tree") == v["tree"] and snap.branch_key(branch, "review-run") == run.id:
@@ -65,6 +91,10 @@ def harvest(branch):
         stackcfg.add_key(branch, "review-flag", _flag_line(f))
     stackcfg.set_key(branch, "review-depth", v.get("depth", ""))
     stackcfg.set_key(branch, "review-run", run.id)
+    if delta:
+        stackcfg.set_key(branch, "review-flags-delta", delta)
+    else:
+        stackcfg.unset_all(branch, "review-flags-delta")
     stackcfg.set_key(branch, "review-flags-tree", v["tree"])   # last: the tree key is what readers trust
     return v
 
@@ -78,6 +108,10 @@ def review(req, raw):
     tree = _tree(branch) if branch else ""
     if not tree:
         return req._send(404, json.dumps({"ok": False, "err": f"no branch {branch or '(none)'}"}))
+    snap = repostate.snapshot()
+    if (not d.get("force") and review_stands(branch, snap)
+            and (not depth or snap.branch_key(branch, "review-depth") == depth)):
+        return req._send(200, json.dumps({"ok": True, "cached": True}))
     old = review_run(branch)
     if old and old.meta.get("tree") == tree and (not depth or old.meta.get("depth") == depth):
         if old.alive():
@@ -93,7 +127,8 @@ def review(req, raw):
         cmd += ["--depth", depth]
     try:
         runs.start("review", key, cmd, cwd=ctx.repo_cwd(),
-                   meta={"branch": branch, "tree": tree, "depth": depth, "by": getattr(req, "_actor", "")})
+                   meta={"branch": branch, "tree": tree, "delta": _delta(branch, snap), "depth": depth,
+                         "by": getattr(req, "_actor", "")})
     except runs.Busy:
         return req._send(200, json.dumps({"ok": False, "err": "a review is already running for this branch"}))
     runs.prune("review", REVIEW_RUNS_KEPT)
