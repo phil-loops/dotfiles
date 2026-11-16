@@ -234,8 +234,9 @@ async function startRun(s, key, mode) {
 }
 
 /// An environment that serves one branch can only speak for that branch's claims.
+/// A proof branch that combines several lists them in `carries` and speaks for each.
 /// A branch that is gone locally has merged (contracted out of its forest), so every server already carries it.
-const applies = (s, group) => !s.env.branch || !group.branch || group.branch === s.env.branch || branchTip(s, group.branch) === null;
+const applies = (s, group) => !s.env.branch || !group.branch || group.branch === s.env.branch || (s.env.carries ?? []).includes(group.branch) || branchTip(s, group.branch) === null;
 
 // ---------- what the page is told --------------------------------------------------------------------------------------
 
