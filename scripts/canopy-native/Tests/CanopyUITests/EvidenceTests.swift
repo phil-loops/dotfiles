@@ -30,6 +30,18 @@ import Testing
         #expect(try !judgeable(Self.card(running: true)), "a render in flight may replace what's on screen")
     }
 
+    @Test func aFieldPredictionSaysWhereTheChangeLanded() throws {
+        func f(_ changed: Bool, _ contained: Bool?) throws -> EvidenceCard.Finding {
+            let c = contained.map { ",\"contained\":\($0)" } ?? ""
+            return try JSONDecoder().decode(EvidenceCard.Finding.self, from: Data(
+                "{\"scene\":\"s\",\"predicted\":\"field\",\"changed\":\(changed),\"departure\":false\(c)}".utf8))
+        }
+        #expect(try f(true, true).predictedWords == "only the field changes")
+        #expect(try f(true, true).observedWords == "changed, only the field")
+        #expect(try f(true, false).observedWords == "changed beyond the field")
+        #expect(try f(false, nil).observedWords == "unchanged")
+    }
+
     @Test func evidenceKeysKeepTheRules() throws {
         let (a, _) = try ShipTests().app()
         let v = KeyboardRule.violations(a) { $0.hasPrefix("evidence.") }

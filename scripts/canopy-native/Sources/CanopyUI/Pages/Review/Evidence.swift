@@ -14,6 +14,24 @@ public struct EvidenceCard: Decodable, Equatable, Sendable {
     public struct Measure: Decodable, Equatable, Sendable { var changedPixels: Int?; var maxDelta: Int? }
     public struct Finding: Decodable, Equatable, Sendable {
         var scene: String; var predicted: String; var changed: Bool; var departure: Bool; var measure: Measure?
+        /// for a "field" prediction that changed: whether every changed pixel sits on the field itself
+        var contained: Bool?
+
+        var predictedWords: String {
+            switch predicted {
+            case "same": "unchanged"
+            case "field": "only the field changes"
+            default: "a change"
+            }
+        }
+        var observedWords: String {
+            guard changed else { return "unchanged" }
+            switch contained {
+            case true?: return "changed, only the field"
+            case false?: return "changed beyond the field"
+            case nil: return "changed"
+            }
+        }
     }
     public struct Manifest: Decodable, Equatable, Sendable {
         var basis: Basis; var recipe: Recipe; var expectation: String; var obligations: [Obligation]
@@ -216,14 +234,13 @@ struct EvidencePanel: View {
 
     private func row(_ f: EvidenceCard.Finding, _ m: EvidenceCard.Manifest, on: Bool) -> some View {
         let title = m.obligations.first { $0.id == f.scene }?.title ?? f.scene
-        let what = f.changed ? "changed" : "unchanged"
         let size = f.measure.flatMap { x in x.changedPixels.map { "\($0.formatted()) px, Δ\(x.maxDelta ?? 0)" } } ?? ""
         return VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 6) {
                 Text(f.departure ? "!" : " ").font(Theme.mono(12)).foregroundStyle(theme.ember)
                 Text(title).font(Theme.text(13, weight: on ? .semibold : .regular))
             }
-            Text("predicted \(f.predicted == "same" ? "unchanged" : "a change") · \(what)\(size.isEmpty ? "" : " · \(size)")").lineLimit(1)
+            Text("predicted \(f.predictedWords) · \(f.observedWords)\(size.isEmpty ? "" : " · \(size)")").lineLimit(1)
                 .font(Theme.mono(11)).foregroundStyle(f.departure ? theme.ember : theme.inkFaint)
                 .padding(.leading, 18)
         }
