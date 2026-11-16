@@ -84,10 +84,21 @@ for (const scene of scenesOf(recipe)) {
     await page.mouse.move(0, 0);
     // a fixed window anchored at the field's corner: the same size on both sides, so a field that grows
     // shows as change inside the window instead of a differently sized picture
+    // a field in a dialog is cropped to the dialog: the page behind it is another scene's business,
+    // and its restyled fields would otherwise read as this field changing its surroundings
     const box = await field.evaluate((f, { pad, win, theme }) => {
       const fr = f.getBoundingClientRect();
       const fit = (want, size, room) => Math.max(0, Math.min(want, room - size));
-      const clip = { x: fit(fr.left - pad, win[0], innerWidth), y: fit(fr.top - pad, win[1], innerHeight), width: win[0], height: win[1] };
+      const dialog = f.closest('[role="dialog"], [role="alertdialog"]');
+      const dr = dialog?.getBoundingClientRect();
+      // inside its rounded corners: the page behind shows through them
+      // (the rounding may sit on the dialog or on the panel just inside it)
+      const radius = (el) => parseFloat(getComputedStyle(el).borderTopLeftRadius) || 0;
+      const r = dialog ? Math.ceil(Math.max(radius(dialog), ...[...dialog.querySelectorAll(":scope > *, :scope > * > *")].map(radius))) : 0;
+      const clip = dr
+        ? { x: Math.max(0, dr.left + r), y: Math.max(0, dr.top + r),
+            width: Math.min(dr.width - 2 * r, innerWidth - Math.max(0, dr.left + r)), height: Math.min(dr.height - 2 * r, innerHeight - Math.max(0, dr.top + r)) }
+        : { x: fit(fr.left - pad, win[0], innerWidth), y: fit(fr.top - pad, win[1], innerHeight), width: win[0], height: win[1] };
       return {
         clip, field: [fr.left - clip.x, fr.top - clip.y, fr.width, fr.height],
         checks: { theme: document.documentElement.classList.contains(theme), focus: document.activeElement === f },
