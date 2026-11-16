@@ -171,6 +171,23 @@ final class EvidenceState {
         }
     }
 
+    private var crops: [String: NSImage] = [:]
+
+    /// A capture cut to `region` (device px, top-left origin), clamped to the picture; the whole
+    /// capture when there's no region.
+    func around(_ sha: String, _ region: CGRect?) -> NSImage? {
+        guard let img = images[sha] else { return nil }
+        guard let region else { return img }
+        let key = "\(sha)|\(region.debugDescription)"
+        if let c = crops[key] { return c }
+        guard let cg = img.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return img }
+        let r = region.intersection(CGRect(x: 0, y: 0, width: cg.width, height: cg.height)).integral
+        guard !r.isEmpty, let cut = cg.cropping(to: r) else { return img }
+        let out = NSImage(cgImage: cut, size: NSSize(width: r.width, height: r.height))
+        crops[key] = out
+        return out
+    }
+
     /// The after picture dimmed, with every pixel that differs from before lit in gold.
     func heat(_ before: String, _ after: String) -> NSImage? {
         let key = before + after
@@ -341,8 +358,8 @@ struct EvidencePanel: View {
     @Environment(\.theme) private var theme
     let target: ReviewPageState.Target
 
-    static let tileWidth: CGFloat = 228
-    static let tileHeight: CGFloat = 64
+    static let tileWidth: CGFloat = 300
+    static let pictureHeight: CGFloat = 70
     static let gap: CGFloat = 10
 
     var body: some View {
@@ -429,7 +446,7 @@ struct EvidencePanel: View {
                         .overlay(Capsule().stroke(x.id == v ? theme.goldLeaf : theme.rule))
                         .help("space \(i + 1)")
                 }
-                Text(ev.alone.map { "showing all \($0)" } ?? "before | after").font(Theme.mono(11)).foregroundStyle(ev.alone == nil ? theme.inkFaint : theme.goldLeaf)
+                Text(ev.alone.map { "showing all \($0)" } ?? "before above after · ,t flips all").font(Theme.mono(11)).foregroundStyle(ev.alone == nil ? theme.inkFaint : theme.goldLeaf)
                     .padding(.leading, 6)
                 Spacer()
                 Text("\(m.findings.count) scenes · before \(m.basis.beforeCommit.prefix(8)) → after \(m.basis.afterCommit.prefix(8))")
@@ -484,32 +501,30 @@ struct EvidencePanel: View {
     }
 
     private func tile(_ c: EvidenceCard, _ m: EvidenceCard.Manifest, _ f: EvidenceCard.Field, _ v: String, width: CGFloat, on: Bool, _ ev: EvidenceState) -> some View {
-        let iw = width - 12, ih = iw * Self.tileHeight / (Self.tileWidth - 12)
+        let iw = width - 12
         let scene = f.scenes[v]
         let finding = scene.flatMap { c.finding($0) }
-        let before = scene.flatMap { m.before.scenes[$0] }.flatMap { ev.images[$0] }
-        let after = scene.flatMap { m.after.scenes[$0] }.flatMap { ev.images[$0] }
+        let bs = scene.flatMap { m.before.scenes[$0] }, asha = scene.flatMap { m.after.scenes[$0] }
+        // both pictures cut to the same region: the field on either side, with a margin of its surroundings
+        let boxes = [scene.flatMap { m.before.fields?[$0] }, scene.flatMap { m.after.fields?[$0] }].compactMap { $0 }.filter { $0.count == 4 }
+        let region: CGRect? = boxes.isEmpty ? nil : boxes.map { CGRect(x: $0[0], y: $0[1], width: $0[2], height: $0[3]) }
+            .reduce(CGRect.null) { $0.union($1) }.insetBy(dx: -40, dy: -32)
+        let before = bs.flatMap { ev.around($0, region) }, after = asha.flatMap { ev.around($0, region) }
         let mark = finding.map { $0.departure ? "●" : $0.changed ? "✓" : "=" } ?? "·"
         let markColor = finding?.departure == true ? theme.goldLeaf : finding?.changed == true ? theme.patina : theme.inkFaint
-        return VStack(alignment: .leading, spacing: 5) {
-            ZStack(alignment: .topLeading) {
-                switch ev.alone {
-                case "before"?: shot(before, iw, ih)
-                case "after"?: shot(after, iw, ih)
-                default:
-                    shot(before, iw, ih)
-                    shot(after, iw, ih)
-                        .mask(alignment: .trailing) { Rectangle().frame(width: (iw) / 2) }
-                    theme.goldLeaf.opacity(0.5).frame(width: 1, height: ih).offset(x: (iw) / 2)
-                }
-            }
-            .frame(width: iw, height: ih)
-            .clipShape(RoundedRectangle(cornerRadius: 4))
+        return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 5) {
                 Text(mark).foregroundStyle(markColor)
                 Text(f.title).foregroundStyle(on ? theme.ink : theme.inkDim).lineLimit(1)
             }
-            .font(Theme.text(11.5))
+            .font(Theme.text(12, weight: on ? .semibold : .regular))
+            switch ev.alone {
+            case "before"?: picture(before, "before", iw, Self.pictureHeight * 2 + 4)
+            case "after"?: picture(after, "after", iw, Self.pictureHeight * 2 + 4)
+            default:
+                picture(before, "before", iw, Self.pictureHeight)
+                picture(after, "after", iw, Self.pictureHeight)
+            }
         }
         .padding(6)
         .background(RoundedRectangle(cornerRadius: 7).fill(on ? theme.goldWash : theme.vellumRaise))
@@ -517,16 +532,20 @@ struct EvidencePanel: View {
         .labelTarget(pane: evidencePane, key: "e|\(f.id)")
     }
 
-    /// A capture scaled to the tile's width, its top-left kept (the field sits there), clipped below.
-    @ViewBuilder private func shot(_ img: NSImage?, _ w: CGFloat, _ h: CGFloat) -> some View {
-        if let img, img.size.width > 0 {
-            Image(nsImage: img).resizable().interpolation(.high)
-                .frame(width: w, height: w * img.size.height / img.size.width)
-                .frame(width: w, height: h, alignment: .topLeading)
-                .clipped()
-        } else {
-            theme.vellumEdge.frame(width: w, height: h)
+    /// One side's crop, fitted and centred in its slot, with the side named in its corner.
+    private func picture(_ img: NSImage?, _ side: String, _ w: CGFloat, _ h: CGFloat) -> some View {
+        ZStack(alignment: .topLeading) {
+            theme.vellumNight
+            if let img, img.size.width > 0 {
+                Image(nsImage: img).resizable().interpolation(.high).aspectRatio(contentMode: .fit)
+                    .frame(width: w, height: h)
+            }
+            Text(side).font(Theme.mono(9.5)).foregroundStyle(theme.inkFaint)
+                .padding(.horizontal, 4).padding(.vertical, 1)
+                .background(theme.vellumNight.opacity(0.8))
         }
+        .frame(width: w, height: h)
+        .clipShape(RoundedRectangle(cornerRadius: 4))
     }
 
     /// The selected field enlarged: a wipe, before left of the seam and after right of it, or its
