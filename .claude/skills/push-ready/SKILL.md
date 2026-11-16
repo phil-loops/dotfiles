@@ -120,7 +120,8 @@ curl -s -X POST http://localhost:$(stack-review-port)/gates \
   -H 'Content-Type: application/json' -H 'X-Stack-Actor: claude' \
   -H "X-Stack-Session: ${CLAUDE_CODE_SESSION_ID:-}" -d '{"branch":"<b>","detach":true}'
 # then poll "http://localhost:$(stack-review-port)/gates-progress?branch=<b>" until .result is set
-# (polling is what records the green verdict)
+# (polling is what records the green verdict); {"cached":true,"gates":[]} means the verdict
+# already stands — for this tree, or for the branch's own hunks under a moved base — and nothing ran
 ```
 
 (The `X-Stack-*` headers attribute the call to this session in the viewer's request and usage
@@ -134,9 +135,11 @@ refuses a session; if a gate can't pass, say so and leave the call to him.
 
 ### 6 · Verify + hand off
 
-Done means `git config branch.<b>.stack-gates-green-tree` equals
-`git rev-parse '<b>^{tree}'` — check it, don't assume — and, unless review was `off`,
-`stack-review-flags-tree` equals it too (written by the run, never by you). Any commit landed after green invalidates
+Done means the server's own reader says so — `curl -s localhost:$(stack-review-port)/state | jq
+'.entities.branch["<repo>:<b>"].gates'` is `"green"` — check it, don't assume. Never compare
+`gates-green-tree` to the tree yourself: a verdict also stands on its sealed delta, so a forward
+restack reads as lapsed (2026-11-15: two branches re-gated for nothing). Unless review was `off`,
+`stack-review-flags-tree` equals the tree too (written by the run, never by you). Any commit landed after green invalidates
 the verdict; re-run. Point canopy at it (`stack-review-serve <project>` reuses the live server and opens canopy;
 or `canopy /v2/b/<repo>/<branch>`) and report in a few lines: branch, tip SHA,
 per-gate results, review flags (count + one line each), the `canopy /v2/…` route, push button unlocked.
@@ -146,5 +149,9 @@ per-gate results, review flags (count + one line each), the `canopy /v2/…` rou
 - No push, no PRs — the user's job starts where this ends (spine hard rule).
 - Never amend, never merge commits; fixes are new commits (`--fixup` for outline targets), then fold.
 - A restack conflict that's real overlapping logic → stop and check with the user.
-- Multi-branch: gate bottom-up; a red parent makes children's verdicts meaningless.
+- Multi-branch: review every branch to a fixpoint first — request all the runs, fold every
+  CONFIRMED fix, re-run only the branches a fix touched — then gate once, bottom-up. A fix low in
+  the stack moves every descendant's tree, so gating between review rounds pays the whole stack
+  again each round (2026-11-15: three full re-gates of an 8-branch forest). A red parent makes
+  children's verdicts meaningless.
 - Want PR bodies and a merge-order handoff too? That's `/land-forest`, not this.
