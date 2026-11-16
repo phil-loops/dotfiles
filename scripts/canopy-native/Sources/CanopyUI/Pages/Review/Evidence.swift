@@ -16,6 +16,8 @@ public struct EvidenceCard: Decodable, Equatable, Sendable {
     }
     public struct Side: Decodable, Equatable, Sendable { var scenes: [String: String]; var fields: [String: [Int]]?; var capturedAt: String? }
     public struct Asked: Decodable, Equatable, Sendable { var expectation: String; var predict: [String: String] }
+    /// the UI files the change touches, measured from the diff, and which of them a scene looks at
+    public struct Coverage: Decodable, Equatable, Sendable { var changed: [String]; var covered: [String]; var uncovered: [String] }
     public struct Measure: Decodable, Equatable, Sendable {
         var changedPixels: Int?; var maxDelta: Int?; var box: [Int]?; var sizeChanged: [Int]?
     }
@@ -48,6 +50,7 @@ public struct EvidenceCard: Decodable, Equatable, Sendable {
         /// what the captures were predicted under; a re-explanation keeps it
         var captured: Asked?
         var amends: String?; var retrospective: Bool?
+        var coverage: Coverage?
     }
     public struct Status: Decodable, Equatable, Sendable {
         var judged: Bool; var verdict: String?; var at: String?; var note: String?; var carriedFrom: String?
@@ -483,8 +486,14 @@ struct EvidencePanel: View {
                 Text("\(m.findings.count) scenes · before \(m.basis.beforeCommit.prefix(8)) → after \(m.basis.afterCommit.prefix(8))")
                     .font(Theme.mono(11)).foregroundStyle(theme.inkFaint)
             }
+            if let cov = m.coverage {
+                let names = cov.uncovered.map { ($0 as NSString).lastPathComponent }
+                Text("looks at \(cov.covered.count) of \(cov.changed.count) changed UI files"
+                     + (names.isEmpty ? "" : " · accepting also accepts, unseen: " + names.joined(separator: ", ")))
+                    .font(Theme.text(11.5)).foregroundStyle(names.isEmpty ? theme.inkFaint : theme.goldLeaf).lineLimit(2)
+            }
             if !gaps.isEmpty {
-                Text("not captured: " + gaps.joined(separator: " · ")).font(Theme.text(11.5)).foregroundStyle(theme.inkFaint).lineLimit(2)
+                Text("why: " + gaps.joined(separator: " · ")).font(Theme.text(11.5)).foregroundStyle(theme.inkFaint).lineLimit(2)
             }
         }
     }
