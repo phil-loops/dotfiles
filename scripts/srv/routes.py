@@ -16,6 +16,7 @@
 import json
 from collections import namedtuple
 
+from . import evidence   # own line: the big import below is contested across sessions
 from . import (actor, chat, integrate, lsp, outbox, outline, packet, picker, preview, push, queue, restack,
                review, reviewdesk, reviews, sync, syntax, todo, tutor, usage, verdicts, viewed)
 
@@ -69,6 +70,8 @@ POST = {
     "/learning-evidence": _r(tutor.learning_evidence, "repo"),
     "/learning-question": _r(tutor.learning_question, "repo"),
     "/gates-waive": _r(verdicts.waive, "repo", phil=True),     # ships this tree without gates
+    "/evidence-run": _r(evidence.run, "repo"),           # renders before/after evidence (a run)
+    "/evidence-judge": _r(evidence.judge, "repo", phil=True),  # Phil's verdict on the manifest he saw
 
     # ── branches move ──
     "/reseat-children": _r(reviews.reseat, "history"),
