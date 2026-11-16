@@ -28,6 +28,8 @@ struct ReviewPage: View {
                 switch pg.tab {
                 case "conversation":
                     ConversationPanel(branchID: pg.id).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                case "evidence":
+                    if let t = pg.target { EvidencePanel(target: t) }
                 default:
                     if pg.integration == nil { StretchWords(branchID: pg.id).padding(.horizontal, 16).padding(.bottom, 6) }
                     HStack(alignment: .top, spacing: 0) {
