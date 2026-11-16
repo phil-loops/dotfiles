@@ -31,7 +31,12 @@ export function scenesOf(r) {
 }
 
 const { chromium } = need("playwright");
-const browser = await chromium.launch({ channel: "chrome" });
+// GPU rasterization differs by a pixel or two between identical runs; admission needs identical bytes
+const browser = await chromium.launch({
+  channel: "chrome",
+  args: ["--disable-gpu", "--disable-gpu-rasterization", "--force-color-profile=srgb", "--disable-lcd-text",
+    "--font-render-hinting=none", "--disable-partial-raster", "--disable-skia-runtime-opts"],
+});
 const viewport = recipe.viewport || { width: 1440, height: 900 };
 
 // ── sign in once; every scene context starts from these cookies ──
@@ -79,8 +84,7 @@ for (const scene of scenesOf(recipe)) {
     await page.mouse.move(0, 0);
     // a fixed window anchored at the field's corner: the same size on both sides, so a field that grows
     // shows as change inside the window instead of a differently sized picture
-    const box = await page.evaluate(({ field, pad, win, theme }) => {
-      const f = document.querySelector(field);
+    const box = await field.evaluate((f, { pad, win, theme }) => {
       const fr = f.getBoundingClientRect();
       const fit = (want, size, room) => Math.max(0, Math.min(want, room - size));
       const clip = { x: fit(fr.left - pad, win[0], innerWidth), y: fit(fr.top - pad, win[1], innerHeight), width: win[0], height: win[1] };
@@ -88,7 +92,7 @@ for (const scene of scenesOf(recipe)) {
         clip, field: [fr.left - clip.x, fr.top - clip.y, fr.width, fr.height],
         checks: { theme: document.documentElement.classList.contains(theme), focus: document.activeElement === f },
       };
-    }, { field: scene.field, pad: scene.pad ?? 24, win: scene.window || [560, 140], theme: scene.theme });
+    }, { pad: scene.pad ?? 24, win: scene.window || [560, 140], theme: scene.theme });
     const checks = { theme: box.checks.theme, focus: box.checks.focus === Boolean(scene.focus) };
     const failed = Object.entries(checks).filter(([, ok]) => !ok).map(([k]) => k);
     if (failed.length) await fail(`scene ${scene.id}: precondition failed: ${failed.join(", ")}`, browser);
