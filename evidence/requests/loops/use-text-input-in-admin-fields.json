@@ -1,0 +1,7 @@
+{
+ "recipe": "admin-fields",
+ "expectation": "Every hand-styled admin field takes the shared text-input look, readable in light and dark mode, and nothing around it moves. (Not captured \u2014 they need data the seed doesn't have: the forms honeypot editor, the Svix select, the pending-deletion confirm field, the custom snooze duration.)",
+ "predict": {
+  "*": "field"
+ }
+}

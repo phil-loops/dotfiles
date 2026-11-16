@@ -1,7 +1,0 @@
-{
- "recipe": "admin-review-tab-fields",
- "expectation": "Each review tab field takes the shared text-input look, readable in light and dark mode, and nothing around it moves. (Not captured: the pending-deletion confirm field and the custom snooze duration, which need data the seed doesn't have.)",
- "predict": {
-  "*": "field"
- }
-}

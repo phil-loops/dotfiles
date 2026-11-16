@@ -1,7 +1,0 @@
-{
- "recipe": "admin-filter-fields",
- "expectation": "Each field takes the shared text-input look, readable in light and dark mode, and nothing around it moves. (Not captured: the forms honeypot editor, which needs a form with honeypot fields.)",
- "predict": {
-  "*": "field"
- }
-}
