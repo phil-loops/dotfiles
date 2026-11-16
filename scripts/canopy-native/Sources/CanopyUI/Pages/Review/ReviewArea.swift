@@ -11,6 +11,7 @@ enum ReviewArea: PageArea {
         app.addSurface(ReviewSurface())
         app.registry.addScopes([.filter], to: "review")
         DiffCommands.install(app)
+        EvidenceCommands.install(app)
         placeInSheet(app.registry)
         let pg = ReviewPageState.of(app)
         ShipState.of(app).host = pg
@@ -18,6 +19,11 @@ enum ReviewArea: PageArea {
                                             split: { [weak pg] l, below in pg?.openInSplit(l, below: below) }))
         // space c's conversation is a layer over the diff: esc takes it away before anything older
         app.addCloser(first: true, isOpen: { [weak app, weak pg] in app?.router.route.surfaceID == "review" && pg?.tab == "conversation" },
+                      close: { [weak app, weak pg] in
+                          pg?.tab = "files"
+                          app?.focus(pane: reviewDiffPane)
+                      })
+        app.addCloser(first: true, isOpen: { [weak app, weak pg] in app?.router.route.surfaceID == "review" && pg?.tab == "evidence" },
                       close: { [weak app, weak pg] in
                           pg?.tab = "files"
                           app?.focus(pane: reviewDiffPane)
@@ -71,6 +77,8 @@ struct ReviewSurface: SurfaceProvider {
         switch pg.tab {
         case "conversation":
             return guest
+        case "evidence":
+            return [Pane(id: evidencePane, title: "evidence", rows: EvidenceState.rows(app), pageSize: 8)]
         default:
             var out: [Pane] = []
             if let l = pg.line { out.append(Pane(id: reviewLinePane, title: "line", rows: l.points.map(\.key), column: 1, row: -2, pageSize: 4)) }
@@ -92,6 +100,7 @@ struct ReviewSurface: SurfaceProvider {
         guard app.keys.layer != .map else { return [] }
         if app.insertField == ReviewPage.filterField { return [.filter] }
         var out = ShipSeam.scopes(app)
+        if pg.tab == "evidence" { out.insert(.evidence, at: 0) }
         if app.pane?.id == reviewLinePane { out.insert(.branchLine, at: 0) }
         if app.pane?.id == reviewDiffPane, let h = pg.here {
             let s = Scope(rawValue: h.kind.rawValue)
@@ -105,7 +114,7 @@ struct ReviewSurface: SurfaceProvider {
         let pg = ReviewPageState.of(app)
         if let t = ShipSeam.target(for: scope, app) { return t }
         switch scope {
-        case .review, .filter: return pg.id.isEmpty ? nil : pg.id
+        case .review, .filter, .evidence: return pg.id.isEmpty ? nil : pg.id
         case .line, .gap, .thread, .pending:
             guard app.pane?.id == reviewDiffPane, let h = pg.here, h.kind.rawValue == scope.rawValue else { return nil }
             return h.kind == .line || h.kind == .gap ? h.key : h.id
