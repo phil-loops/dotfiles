@@ -1,7 +1,0 @@
-{
- "recipe": "team-detail-editors",
- "expectation": "Each team detail editor field takes the shared text-input look, readable in light and dark mode, and nothing around it moves. (Not captured: the Svix select, which stays loading without a Svix app.)",
- "predict": {
-  "*": "field"
- }
-}
