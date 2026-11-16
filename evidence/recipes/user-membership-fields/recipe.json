@@ -1,0 +1,137 @@
+{
+ "kind": "app",
+ "title": "User memberships fields, in the running app",
+ "viewport": {
+  "width": 1440,
+  "height": 900
+ },
+ "views": [
+  {
+   "id": "lookup",
+   "title": "User lookup",
+   "path": "/admin?top-level-admin-dashboardTab=user-memberships",
+   "field": "input[placeholder=\"User ID or email\"]",
+   "window": [
+    560,
+    120
+   ],
+   "steps": []
+  },
+  {
+   "id": "team-id",
+   "title": "Add membership: team ID",
+   "path": "/admin?top-level-admin-dashboardTab=user-memberships",
+   "steps": [
+    {
+     "fill": [
+      "input[placeholder=\"User ID or email\"]",
+      "user-1@example.com"
+     ]
+    },
+    {
+     "click": "button:text-is(\"Look up\")"
+    }
+   ],
+   "field": "input[placeholder=\"teamId\"]",
+   "window": [
+    640,
+    120
+   ]
+  },
+  {
+   "id": "team-role",
+   "title": "Add membership: role",
+   "path": "/admin?top-level-admin-dashboardTab=user-memberships",
+   "steps": [
+    {
+     "fill": [
+      "input[placeholder=\"User ID or email\"]",
+      "user-1@example.com"
+     ]
+    },
+    {
+     "click": "button:text-is(\"Look up\")"
+    }
+   ],
+   "field": "select:near(input[placeholder=\"teamId\"])",
+   "window": [
+    420,
+    120
+   ]
+  },
+  {
+   "id": "access-notes",
+   "title": "Disable user: notes",
+   "path": "/admin?top-level-admin-dashboardTab=user-memberships",
+   "steps": [
+    {
+     "fill": [
+      "input[placeholder=\"User ID or email\"]",
+      "user-1@example.com"
+     ]
+    },
+    {
+     "click": "button:text-is(\"Look up\")"
+    },
+    {
+     "click": "button:text-is(\"Disable user\")"
+    }
+   ],
+   "field": "#membership-access-notes",
+   "window": [
+    640,
+    200
+   ]
+  },
+  {
+   "id": "reason",
+   "title": "Make owner: reason",
+   "path": "/admin?top-level-admin-dashboardTab=user-memberships",
+   "steps": [
+    {
+     "fill": [
+      "input[placeholder=\"User ID or email\"]",
+      "user-1@example.com"
+     ]
+    },
+    {
+     "click": "button:text-is(\"Look up\")"
+    },
+    {
+     "click": "button:text-is(\"Make owner\")"
+    }
+   ],
+   "field": "#membership-action-reason",
+   "window": [
+    640,
+    200
+   ]
+  }
+ ],
+ "variants": [
+  {
+   "id": "light",
+   "title": "light",
+   "theme": "light",
+   "focus": false
+  },
+  {
+   "id": "light-focus",
+   "title": "light, focused",
+   "theme": "light",
+   "focus": true
+  },
+  {
+   "id": "dark",
+   "title": "dark",
+   "theme": "dark",
+   "focus": false
+  },
+  {
+   "id": "dark-focus",
+   "title": "dark, focused",
+   "theme": "dark",
+   "focus": true
+  }
+ ]
+}

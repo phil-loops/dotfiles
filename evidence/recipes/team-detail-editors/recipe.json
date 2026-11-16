@@ -1,0 +1,169 @@
+{
+ "kind": "app",
+ "title": "Team detail editors, in the running app",
+ "viewport": {
+  "width": 1440,
+  "height": 900
+ },
+ "views": [
+  {
+   "id": "parent",
+   "title": "Billing parent: team ID",
+   "path": "/admin?top-level-admin-dashboardTab=team-breakdown&teamId=default-team",
+   "steps": [
+    {
+     "click": "button:text-is(\"Set Billing Parent\")"
+    }
+   ],
+   "field": "#parent-team-id",
+   "window": [
+    640,
+    200
+   ]
+  },
+  {
+   "id": "comped",
+   "title": "Comp account: notes",
+   "path": "/admin?top-level-admin-dashboardTab=team-breakdown&teamId=default-team",
+   "steps": [
+    {
+     "click": "button:text-matches(\"^(Comp Account|Remove Comp)$\")"
+    }
+   ],
+   "field": "#comped-notes",
+   "window": [
+    640,
+    200
+   ]
+  },
+  {
+   "id": "access",
+   "title": "Member access: notes",
+   "path": "/admin?top-level-admin-dashboardTab=team-breakdown&teamId=default-team",
+   "steps": [
+    {
+     "click": "button:text-is(\"Disable Access\")"
+    }
+   ],
+   "field": "#access-notes",
+   "window": [
+    640,
+    200
+   ]
+  },
+  {
+   "id": "role",
+   "title": "Member role: notes",
+   "path": "/admin?top-level-admin-dashboardTab=team-breakdown&teamId=default-team",
+   "steps": [
+    {
+     "click": "button:text-is(\"Make Owner\")"
+    }
+   ],
+   "field": "#role-notes",
+   "window": [
+    640,
+    200
+   ]
+  },
+  {
+   "id": "safety",
+   "title": "Safety checks: notes",
+   "path": "/admin?top-level-admin-dashboardTab=team-breakdown&teamId=default-team&team-detail-feedTab=Team%20Settings%20%26%20Safety",
+   "steps": [
+    {
+     "click": "button:text-matches(\"(Enable|Disable) Safety Checks\")"
+    }
+   ],
+   "field": "#notes",
+   "window": [
+    640,
+    200
+   ]
+  },
+  {
+   "id": "attachments",
+   "title": "Attachments: notes",
+   "path": "/admin?top-level-admin-dashboardTab=team-breakdown&teamId=default-team&team-detail-feedTab=Team%20Settings%20%26%20Safety",
+   "steps": [
+    {
+     "click": "button:text-matches(\"(Enable|Disable) Attachments\")"
+    }
+   ],
+   "field": "#notes",
+   "window": [
+    640,
+    200
+   ]
+  },
+  {
+   "id": "critical",
+   "title": "Critical notice: notes",
+   "path": "/admin?top-level-admin-dashboardTab=team-breakdown&teamId=default-team&team-detail-feedTab=Team%20Settings%20%26%20Safety",
+   "steps": [
+    {
+     "click": "button:text-matches(\"(Enable|Disable) Critical Notice\")"
+    }
+   ],
+   "field": "#notes",
+   "window": [
+    640,
+    200
+   ]
+  },
+  {
+   "id": "rate",
+   "title": "API rate limit: select",
+   "path": "/admin?top-level-admin-dashboardTab=team-breakdown&teamId=default-team&team-detail-feedTab=Team%20Settings%20%26%20Safety",
+   "field": "select:has(option[value=\"To10\"])",
+   "window": [
+    420,
+    120
+   ]
+  },
+  {
+   "id": "rate-notes",
+   "title": "API rate limit: notes",
+   "path": "/admin?top-level-admin-dashboardTab=team-breakdown&teamId=default-team&team-detail-feedTab=Team%20Settings%20%26%20Safety",
+   "steps": [
+    {
+     "select": [
+      "select:has(option[value=\"To10\"])",
+      "To30"
+     ]
+    }
+   ],
+   "field": "#notes",
+   "window": [
+    640,
+    200
+   ]
+  }
+ ],
+ "variants": [
+  {
+   "id": "light",
+   "title": "light",
+   "theme": "light",
+   "focus": false
+  },
+  {
+   "id": "light-focus",
+   "title": "light, focused",
+   "theme": "light",
+   "focus": true
+  },
+  {
+   "id": "dark",
+   "title": "dark",
+   "theme": "dark",
+   "focus": false
+  },
+  {
+   "id": "dark-focus",
+   "title": "dark, focused",
+   "theme": "dark",
+   "focus": true
+  }
+ ]
+}

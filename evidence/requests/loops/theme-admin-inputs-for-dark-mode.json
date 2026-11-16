@@ -1,5 +1,0 @@
-{
- "recipe": "time-range-filter",
- "expectation": "Dark mode: the hours input fills with the surface color and its text turns light. Light mode looks exactly the same as before. Focus stays clearly visible.",
- "predict": {"light": "same", "light-focus": "same", "dark": "changes", "dark-focus": "changes"}
-}
