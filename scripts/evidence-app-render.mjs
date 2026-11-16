@@ -99,8 +99,16 @@ for (const scene of scenesOf(recipe)) {
         ? { x: Math.max(0, dr.left + r), y: Math.max(0, dr.top + r),
             width: Math.min(dr.width - 2 * r, innerWidth - Math.max(0, dr.left + r)), height: Math.min(dr.height - 2 * r, innerHeight - Math.max(0, dr.top + r)) }
         : { x: fit(fr.left - pad, win[0], innerWidth), y: fit(fr.top - pad, win[1], innerHeight), width: win[0], height: win[1] };
+      // the frame: where this picture sits on the page, so a moved dialog or field reads as moved
+      // even when the cropped pixels come out identical
+      const page = (r) => r && [r.left + scrollX, r.top + scrollY, r.width, r.height].map((n) => Math.round(n));
       return {
         clip, field: [fr.left - clip.x, fr.top - clip.y, fr.width, fr.height],
+        frame: {
+          crop: page({ left: clip.x, top: clip.y, width: clip.width, height: clip.height }),
+          field: page(fr), dialog: page(dr) || null,
+          viewport: [innerWidth, innerHeight], scroll: [Math.round(scrollX), Math.round(scrollY)],
+        },
         checks: { theme: document.documentElement.classList.contains(theme), focus: document.activeElement === f },
       };
     }, { pad: scene.pad ?? 24, win: scene.window || [560, 140], theme: scene.theme });
@@ -112,7 +120,7 @@ for (const scene of scenesOf(recipe)) {
       mask: (scene.mask || recipe.mask || []).map((m) => page.locator(m)), maskColor: "#FF00FF",
     });
     fs.writeFileSync(path.join(out, "scenes", `${scene.id}.png`), png);
-    scenes[scene.id] = { sha: sha(png), checks, field: box.field.map((n) => Math.round(n * 2)), errors };
+    scenes[scene.id] = { sha: sha(png), checks, field: box.field.map((n) => Math.round(n * 2)), frame: box.frame, errors };
   } catch (e) {
     await page.screenshot({ path: path.join(out, `failed-${scene.id}.png`), fullPage: true }).catch(() => {});
     await fail(`scene ${scene.id}: ${String(e.message || e).split("\n")[0]}`, browser);

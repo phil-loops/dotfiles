@@ -19,6 +19,7 @@ Design + principles: memory project_branch-proof-design.md. The shape:
 Cache (losing it costs a re-render): ~/.cache/canopy/evidence. Ledger (not cache):
 ~/.local/share/canopy/evidence/ledger.jsonl.
 """
+import fcntl
 import hashlib
 import json
 import os
@@ -28,8 +29,9 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
+from contextlib import contextmanager
 
-SCHEMA = 1
+SCHEMA = 2
 HOME = os.path.expanduser("~")
 DOT = os.path.join(HOME, ".dotfiles")
 RECIPES = os.path.join(DOT, "evidence", "recipes")
@@ -260,7 +262,7 @@ def render(repo, tree, recipe_digest, frozen_recipe, env, contract, donor, fresh
     have = adm and adm.get("status") == "admitted" and all(blob_path(s) for s in adm["scenes"].values())
     if have and not fresh:
         log(f"  reused admitted render {render_id[:12]}")
-        return {"renderId": render_id, "scenes": adm["scenes"], "reused": True}
+        return {"renderId": render_id, "scenes": adm["scenes"], "identity": identity, "reused": True}
     snap = snapshot(repo, tree)
     runs = [_attempt(snap, frozen_recipe, donor, render_id, n, log) for n in ((1,) if have else (1, 2))]
     results = [r for _, r in runs]
@@ -290,7 +292,7 @@ def render(repo, tree, recipe_digest, frozen_recipe, env, contract, donor, fresh
             "build": results[0]["build"], "attempts": [d for d, _ in runs],
             "at": time.strftime("%Y-%m-%dT%H:%M:%S%z")}))
         log(f"  admitted render {render_id[:12]} (2 attempts matched)")
-    return {"renderId": render_id, "scenes": expected, "reused": False}
+    return {"renderId": render_id, "scenes": expected, "identity": identity, "reused": False}
 
 
 # ── app recipes: the real app, served from exactly one commit ─────────────────────────────────
@@ -322,6 +324,27 @@ def _checkout(repo, side, commit, log):
     if head != commit or dirty:
         raise Refused(f"{d} isn't a clean checkout of {commit[:10]}: HEAD {head[:10]}{', modified: ' + dirty if dirty else ''}")
     return d
+
+
+@contextmanager
+def _lease(d):
+    """Hold a side's checkout and server from checkout to teardown. The paths are shared by every
+    branch's runs, so without this a second run could re-point the checkout under the first one's
+    capture and have it admitted under the wrong tree."""
+    os.makedirs(os.path.dirname(d), exist_ok=True)
+    f = open(d + ".lease", "w")
+    try:
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        f.close()
+        raise Refused(f"another evidence run holds {os.path.basename(d)} — try again when it finishes")
+    try:
+        f.write(f"{os.getpid()}\n")
+        f.flush()
+        yield
+    finally:
+        fcntl.flock(f, fcntl.LOCK_UN)
+        f.close()
 
 
 def _stop(d):
@@ -391,20 +414,26 @@ def app_render(repo, side, commit, tree, recipe_digest, frozen_recipe, contract,
     identity = {"schema": SCHEMA, "kind": "app", "tree": tree, "recipe": recipe_digest, "env": env,
                 "contract": contract, "run": nonce}
     render_id = _sha(_canon(identity))
-    d = _checkout(repo, side, commit, log)
-    try:
-        base = _serve(d, log)
-        runs = [_attempt(base, frozen_recipe, donor, render_id, n, log, APP_RENDERER, {"EVIDENCE_LOGIN": _login_token(d)})
-                for n in (1, 2)]
-    finally:
-        _stop(d)
+    d = os.path.join(HOME, "coding", f"{repo_name(repo)}-evidence-{side}")
+    with _lease(d):
+        d = _checkout(repo, side, commit, log)
+        try:
+            base = _serve(d, log)
+            served = _git(d, "rev-parse", "HEAD")
+            if served != commit:
+                raise Refused(f"{d} served {served[:10]}, not {commit[:10]}")
+            runs = [_attempt(base, frozen_recipe, donor, render_id, n, log, APP_RENDERER, {"EVIDENCE_LOGIN": _login_token(d)})
+                    for n in (1, 2)]
+        finally:
+            _stop(d)
     results = [r for _, r in runs]
     for r in results:
         if r.get("browser") != contract["browser"]:
             raise Refused(f"rendered with Chrome {r.get('browser')}, pinned {contract['browser']}")
     observed = [{k: v["sha"] for k, v in r["scenes"].items()} for r in results]
-    if observed[0] != observed[1]:
-        diff = sorted(k for k in observed[0] if observed[0][k] != observed[1].get(k))
+    framed = [{k: v.get("frame") for k, v in r["scenes"].items()} for r in results]
+    if observed[0] != observed[1] or framed[0] != framed[1]:
+        diff = sorted(k for k in observed[0] if observed[0][k] != observed[1].get(k) or framed[0].get(k) != framed[1].get(k))
         _write_atomic(_admission_path(render_id), _canon({
             "status": "conflicted", "renderId": render_id, "identity": identity,
             "why": f"independent attempts disagree on {', '.join(diff)}", "at": time.strftime("%Y-%m-%dT%H:%M:%S%z")}))
@@ -418,11 +447,13 @@ def app_render(repo, side, commit, tree, recipe_digest, frozen_recipe, contract,
                 shutil.copyfile(os.path.join(dd, "scenes", f"{scene}.png"), tmp)
                 os.replace(tmp, dest)
     fields = {k: v["field"] for k, v in results[0]["scenes"].items()}
+    at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
     _write_atomic(_admission_path(render_id), _canon({
-        "status": "admitted", "renderId": render_id, "identity": identity, "scenes": observed[0], "fields": fields,
-        "attempts": [dd for dd, _ in runs], "at": time.strftime("%Y-%m-%dT%H:%M:%S%z")}))
-    log(f"  admitted {side} capture {render_id[:12]} (2 attempts matched)")
-    return {"renderId": render_id, "scenes": observed[0], "fields": fields, "reused": False}
+        "status": "repeatable", "renderId": render_id, "identity": identity, "scenes": observed[0], "fields": fields,
+        "frames": framed[0], "attempts": [dd for dd, _ in runs], "at": at}))
+    log(f"  {side} capture {render_id[:12]} repeated (2 captures matched)")
+    return {"renderId": render_id, "scenes": observed[0], "fields": fields, "frames": framed[0],
+            "identity": identity, "capturedAt": at, "reused": False}
 
 
 def inside(box, fields, slack=16):
@@ -443,7 +474,7 @@ def load_manifest(mid):
     if len(mid) != 64 or any(c not in "0123456789abcdef" for c in mid):
         return None
     m = _read_json(_manifest_path(mid))
-    return m if m and m.get("schema") == SCHEMA else None
+    return m if m and m.get("schema") in (1, SCHEMA) else None
 
 
 def measure(before_sha, after_sha, modules):
@@ -522,13 +553,19 @@ def run(repo, branch, fresh=False, log=print):
             sides[side] = render(repo, b[side + "Tree"], digest, frozen, env, contract, modules, fresh, log)
         if set(sides[side]["scenes"]) != set(scene_ids):
             raise Refused(f"{side} render is missing scenes")
-    return publish(repo_id, branch, b, req, digest, recipe, sides, donor)
+    return publish(repo_id, branch, b, req, digest, recipe, sides, donor, captured=_asked(req))
+
+
+def _asked(req):
+    """What a request asked at capture time — the prediction a capture is held to, forever."""
+    return {"expectation": req["expectation"], "predict": req["predict"], "gaps": req.get("gaps", [])}
 
 
 def restate(repo, branch, log=print):
-    """A new manifest from the latest one's admitted captures, under the request as it reads now: a
-    changed expectation, prediction or coverage note re-judges the same pixels without re-rendering.
-    Refused unless the trees and the recipe are exactly what those captures were made from."""
+    """Re-explain the latest captures under the request as it reads now. The result is an AMENDMENT:
+    it names the manifest it re-explains, is marked retrospective, and keeps the prediction the
+    captures were made under — a new story told after seeing the pixels never passes for a prediction.
+    Refused unless the trees and recipe are exactly what those captures were made from."""
     repo_id = repo_name(repo)
     req = load_request(repo_id, branch)
     if not req:
@@ -537,18 +574,22 @@ def restate(repo, branch, log=print):
     if not mid:
         raise Refused(f"nothing captured for {branch} yet — run it first")
     m = load_manifest(mid)
+    why = eligibility(m)
+    if why:
+        raise Refused(f"can't re-explain {mid[:12]}: {'; '.join(why)}")
     b = basis(repo, branch)
     if (b["beforeTree"], b["afterTree"]) != (m["basis"]["beforeTree"], m["basis"]["afterTree"]):
         raise Refused("the branch or its base moved since the capture — run it again")
     digest, _, recipe = freeze_recipe(req["recipe"])
     if req["recipe"] != m["recipe"]["name"] or digest != m["recipe"]["digest"]:
         raise Refused("the recipe changed since the capture — run it again")
-    log(f"restating {mid[:12]} under the current request")
+    log(f"re-explaining {mid[:12]} under the current request (retrospective)")
     sides = {s: m[s] for s in ("before", "after")}
-    return publish(repo_id, branch, b, req, digest, recipe, sides, donor_modules(repo))
+    return publish(repo_id, branch, b, req, digest, recipe, sides, donor_modules(repo),
+                   captured=m["captured"], amends=mid)
 
 
-def publish(repo_id, branch, b, req, digest, recipe, sides, donor):
+def publish(repo_id, branch, b, req, digest, recipe, sides, donor, captured, amends=None):
     app = recipe.get("kind") == "app"
     scene_ids = [s["id"] for s in scenes_of(recipe)]
     predict = predictions(req, scene_ids)
@@ -557,14 +598,20 @@ def publish(repo_id, branch, b, req, digest, recipe, sides, donor):
         fields = [sides[s].get("fields", {}).get(sid) for s in ("before", "after")]
         findings.append(finding(sid, predict[sid], sides["before"]["scenes"][sid], sides["after"]["scenes"][sid],
                                 [f for f in fields if f], donor))
+    keep = ("renderId", "scenes", "identity") + (("fields", "frames", "capturedAt") if app else ())
     manifest = {
         "schema": SCHEMA, "repo": repo_id, "basis": b,
+        # what kind of claim this is: a closed, independently admitted render, or captures from live
+        # local previews under a shared, mutable dev environment (repeatable, not reproducible)
+        "claim": "live" if app else "deterministic",
         "recipe": {"name": req["recipe"], "digest": digest, "title": recipe.get("title", req["recipe"]),
                    "kind": recipe.get("kind", "component")},
+        "captured": captured,
         "expectation": req["expectation"], "predict": req["predict"], "obligations": obligations(recipe),
         "gaps": req.get("gaps", []),
-        "before": {k: sides["before"][k] for k in ("renderId", "scenes") } | ({"fields": sides["before"]["fields"]} if app else {}),
-        "after": {k: sides["after"][k] for k in ("renderId", "scenes")} | ({"fields": sides["after"]["fields"]} if app else {}),
+        "amends": amends, "retrospective": amends is not None,
+        "before": {k: sides["before"][k] for k in keep if k in sides["before"]},
+        "after": {k: sides["after"][k] for k in keep if k in sides["after"]},
         "findings": findings,
     }
     text = _canon(manifest)
@@ -576,6 +623,24 @@ def publish(repo_id, branch, b, req, digest, recipe, sides, donor):
     with open(idx, "a") as f:
         f.write(_canon({"id": mid, "at": time.time(), "after": b["afterCommit"]}) + "\n")
     return mid
+
+
+def eligibility(m):
+    """Why this manifest can't be judged, carried or re-explained — empty when it can. The one check
+    every consumer uses (card, judge, carry, restate), so none of them can be more lenient."""
+    if not m:
+        return ["no such manifest"]
+    if m.get("schema") != SCHEMA:
+        return ["recorded by an older engine without its framing or claim class — render it again"]
+    why = []
+    if any(not blob_path(sha) for side in ("before", "after") for sha in m[side]["scenes"].values()):
+        why.append("some of its images are gone from the cache — render it again")
+    if m.get("claim") == "deterministic":
+        for side in ("before", "after"):
+            adm = _read_json(_admission_path(m[side]["renderId"])) or {}
+            if adm.get("status") != "admitted":
+                why.append(f"its {side} render is {adm.get('status') or 'no longer admitted'}")
+    return why
 
 
 def latest(repo_id, branch):
@@ -598,10 +663,16 @@ def latest(repo_id, branch):
 # ── judgments ─────────────────────────────────────────────────────────────────────────────────
 
 def observation(m):
-    """What Phil saw, as one key: equal observations may share a judgment; nothing else may."""
-    return _sha(_canon({k: m[k] for k in ("expectation", "predict", "obligations")}
-                       | {"before": m["before"]["scenes"], "after": m["after"]["scenes"]}
-                       | ({"gaps": m["gaps"]} if m.get("gaps") else {})))
+    """What Phil saw, as one key: equal observations may share a judgment; nothing else may. From
+    schema 2 that includes where every picture sat on the page and what kind of claim it is, so a
+    dialog that moved can't carry a verdict given to it in its old place."""
+    key = ({k: m[k] for k in ("expectation", "predict", "obligations")}
+           | {"before": m["before"]["scenes"], "after": m["after"]["scenes"]}
+           | ({"gaps": m["gaps"]} if m.get("gaps") else {}))
+    if m.get("schema", 1) >= 2:
+        key |= {"schema": m["schema"], "claim": m["claim"], "captured": m["captured"],
+                "framing": {side: {k: m[side].get(k) for k in ("fields", "frames")} for side in ("before", "after")}}
+    return _sha(_canon(key))
 
 
 def _judgments():
@@ -624,11 +695,9 @@ def judge(mid, verdict, note, actor):
     if verdict not in ("accept", "reject"):
         raise Refused("verdict is accept or reject")
     m = load_manifest(mid)
-    if not m:
-        raise Refused(f"no complete manifest {mid[:12]}")
-    missing = [s for side in ("before", "after") for s in m[side]["scenes"].values() if not blob_path(s)]
-    if missing:
-        raise Refused("some of this manifest's images are gone; re-run before judging")
+    why = eligibility(m)
+    if why:
+        raise Refused(f"can't judge {mid[:12]}: {'; '.join(why)}")
     entry = {"schema": SCHEMA, "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "actor": actor, "verdict": verdict,
              "note": note or "", "manifest": mid, "observation": observation(m), "contents": m}
     os.makedirs(os.path.dirname(LEDGER), exist_ok=True)
@@ -675,6 +744,7 @@ def card(repo, branch):
         out["current"] = same_trees and same_ask
     except Refused:
         pass
-    out.update({"manifest": m, "id": mid, "status": status(m, mid),
+    why = eligibility(m)
+    out.update({"manifest": m, "id": mid, "status": status(m, mid), "eligible": not why, "why": why,
                 "available": all(blob_path(s) for side in ("before", "after") for s in m[side]["scenes"].values())})
     return out
