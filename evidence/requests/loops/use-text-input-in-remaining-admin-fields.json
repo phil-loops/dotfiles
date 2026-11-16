@@ -1,0 +1,12 @@
+{
+ "recipe": "admin-remaining-fields",
+ "expectation": "Fields that already worked in dark mode trade their hand-rolled look for the shared text-input one; sizes follow the shared style.",
+ "predict": {
+  "*": "field"
+ },
+ "gaps": [
+  "Svix: delivery select \u2014 stays loading without a Svix app",
+  "Pending deletions: confirm email \u2014 needs a team awaiting deletion",
+  "Account limits: custom snooze hours \u2014 appears only for a custom duration"
+ ]
+}

@@ -1,0 +1,340 @@
+{
+ "kind": "app",
+ "title": "The rest of the admin fields, in the running app",
+ "viewport": {
+  "width": 1440,
+  "height": 900
+ },
+ "views": [
+  {
+   "id": "parent",
+   "title": "Billing parent: team ID",
+   "path": "/admin?top-level-admin-dashboardTab=team-breakdown&teamId=default-team",
+   "steps": [
+    {
+     "click": "button:text-is(\"Set Billing Parent\")"
+    }
+   ],
+   "field": "#parent-team-id",
+   "window": [
+    640,
+    200
+   ]
+  },
+  {
+   "id": "comped",
+   "title": "Comp account: notes",
+   "path": "/admin?top-level-admin-dashboardTab=team-breakdown&teamId=default-team",
+   "steps": [
+    {
+     "click": "button:text-matches(\"^(Comp Account|Remove Comp)$\")"
+    }
+   ],
+   "field": "#comped-notes",
+   "window": [
+    640,
+    200
+   ]
+  },
+  {
+   "id": "access",
+   "title": "Member access: notes",
+   "path": "/admin?top-level-admin-dashboardTab=team-breakdown&teamId=default-team",
+   "steps": [
+    {
+     "click": "button:text-is(\"Disable Access\")"
+    }
+   ],
+   "field": "#access-notes",
+   "window": [
+    640,
+    200
+   ]
+  },
+  {
+   "id": "role",
+   "title": "Member role: notes",
+   "path": "/admin?top-level-admin-dashboardTab=team-breakdown&teamId=default-team",
+   "steps": [
+    {
+     "click": "button:text-is(\"Make Owner\")"
+    }
+   ],
+   "field": "#role-notes",
+   "window": [
+    640,
+    200
+   ]
+  },
+  {
+   "id": "safety",
+   "title": "Safety checks: notes",
+   "path": "/admin?top-level-admin-dashboardTab=team-breakdown&teamId=default-team&team-detail-feedTab=Team%20Settings%20%26%20Safety",
+   "steps": [
+    {
+     "click": "button:text-matches(\"(Enable|Disable) Safety Checks\")"
+    }
+   ],
+   "field": "#notes",
+   "window": [
+    640,
+    200
+   ]
+  },
+  {
+   "id": "attachments",
+   "title": "Attachments: notes",
+   "path": "/admin?top-level-admin-dashboardTab=team-breakdown&teamId=default-team&team-detail-feedTab=Team%20Settings%20%26%20Safety",
+   "steps": [
+    {
+     "click": "button:text-matches(\"(Enable|Disable) Attachments\")"
+    }
+   ],
+   "field": "#notes",
+   "window": [
+    640,
+    200
+   ]
+  },
+  {
+   "id": "critical",
+   "title": "Critical notice: notes",
+   "path": "/admin?top-level-admin-dashboardTab=team-breakdown&teamId=default-team&team-detail-feedTab=Team%20Settings%20%26%20Safety",
+   "steps": [
+    {
+     "click": "button:text-matches(\"(Enable|Disable) Critical Notice\")"
+    }
+   ],
+   "field": "#notes",
+   "window": [
+    640,
+    200
+   ]
+  },
+  {
+   "id": "rate",
+   "title": "API rate limit: select",
+   "path": "/admin?top-level-admin-dashboardTab=team-breakdown&teamId=default-team&team-detail-feedTab=Team%20Settings%20%26%20Safety",
+   "field": "select:has(option[value=\"To10\"])",
+   "window": [
+    420,
+    120
+   ]
+  },
+  {
+   "id": "rate-notes",
+   "title": "API rate limit: notes",
+   "path": "/admin?top-level-admin-dashboardTab=team-breakdown&teamId=default-team&team-detail-feedTab=Team%20Settings%20%26%20Safety",
+   "steps": [
+    {
+     "select": [
+      "select:has(option[value=\"To10\"])",
+      "To30"
+     ]
+    }
+   ],
+   "field": "#notes",
+   "window": [
+    640,
+    200
+   ]
+  },
+  {
+   "id": "lookup",
+   "title": "User lookup",
+   "path": "/admin?top-level-admin-dashboardTab=user-memberships",
+   "field": "input[placeholder=\"User ID or email\"]",
+   "window": [
+    560,
+    120
+   ],
+   "steps": []
+  },
+  {
+   "id": "team-id",
+   "title": "Add membership: team ID",
+   "path": "/admin?top-level-admin-dashboardTab=user-memberships",
+   "steps": [
+    {
+     "fill": [
+      "input[placeholder=\"User ID or email\"]",
+      "user-1@example.com"
+     ]
+    },
+    {
+     "click": "button:text-is(\"Look up\")"
+    }
+   ],
+   "field": "input[placeholder=\"teamId\"]",
+   "window": [
+    640,
+    120
+   ]
+  },
+  {
+   "id": "team-role",
+   "title": "Add membership: role",
+   "path": "/admin?top-level-admin-dashboardTab=user-memberships",
+   "steps": [
+    {
+     "fill": [
+      "input[placeholder=\"User ID or email\"]",
+      "user-1@example.com"
+     ]
+    },
+    {
+     "click": "button:text-is(\"Look up\")"
+    }
+   ],
+   "field": "select:near(input[placeholder=\"teamId\"])",
+   "window": [
+    420,
+    120
+   ]
+  },
+  {
+   "id": "access-notes",
+   "title": "Disable user: notes",
+   "path": "/admin?top-level-admin-dashboardTab=user-memberships",
+   "steps": [
+    {
+     "fill": [
+      "input[placeholder=\"User ID or email\"]",
+      "user-1@example.com"
+     ]
+    },
+    {
+     "click": "button:text-is(\"Look up\")"
+    },
+    {
+     "click": "button:text-is(\"Disable user\")"
+    }
+   ],
+   "field": "#membership-access-notes",
+   "window": [
+    640,
+    200
+   ]
+  },
+  {
+   "id": "reason",
+   "title": "Make owner: reason",
+   "path": "/admin?top-level-admin-dashboardTab=user-memberships",
+   "steps": [
+    {
+     "fill": [
+      "input[placeholder=\"User ID or email\"]",
+      "user-1@example.com"
+     ]
+    },
+    {
+     "click": "button:text-is(\"Look up\")"
+    },
+    {
+     "click": "button:text-is(\"Make owner\")"
+    }
+   ],
+   "field": "#membership-action-reason",
+   "window": [
+    640,
+    200
+   ]
+  },
+  {
+   "id": "limits-lookback",
+   "title": "Account limits: lookback",
+   "path": "/admin?top-level-admin-dashboardTab=account-limit-notice-review",
+   "field": "select:has(option[value=\"1\"])",
+   "window": [
+    420,
+    120
+   ]
+  },
+  {
+   "id": "limits-snooze",
+   "title": "Account limits: snooze notes",
+   "path": "/admin?top-level-admin-dashboardTab=account-limit-notice-review",
+   "steps": [
+    {
+     "click": "button:has-text(\"Snooze\")"
+    }
+   ],
+   "field": "textarea[placeholder=\"Add notes about why you're snoozing...\"]",
+   "window": [
+    640,
+    200
+   ]
+  },
+  {
+   "id": "assess-decision",
+   "title": "Domain assessment: decision",
+   "path": "/admin?top-level-admin-dashboardTab=team-breakdown&teamId=default-team",
+   "field": "select:has(option[value=\"BlockDomain\"])",
+   "window": [
+    560,
+    120
+   ]
+  },
+  {
+   "id": "assess-notes",
+   "title": "Domain assessment: notes",
+   "path": "/admin?top-level-admin-dashboardTab=team-breakdown&teamId=default-team",
+   "field": "textarea[placeholder=\"Enter your assessment of this domain...\"]",
+   "window": [
+    640,
+    200
+   ]
+  },
+  {
+   "id": "metrics-days",
+   "title": "Sending metrics: days",
+   "path": "/admin?top-level-admin-dashboardTab=team-breakdown&teamId=default-team",
+   "steps": [
+    {
+     "click": "button:text-is(\"Sending Metrics\")"
+    }
+   ],
+   "field": "select:has(option[value=\"3\"])",
+   "window": [
+    420,
+    120
+   ]
+  },
+  {
+   "id": "unsafe-page-size",
+   "title": "Unsafe assets: page size",
+   "path": "/admin?top-level-admin-dashboardTab=unsafe-email-assets",
+   "field": "select:has(option[value=\"5\"])",
+   "window": [
+    420,
+    120
+   ]
+  }
+ ],
+ "variants": [
+  {
+   "id": "light",
+   "title": "light",
+   "theme": "light",
+   "focus": false
+  },
+  {
+   "id": "light-focus",
+   "title": "light, focused",
+   "theme": "light",
+   "focus": true
+  },
+  {
+   "id": "dark",
+   "title": "dark",
+   "theme": "dark",
+   "focus": false
+  },
+  {
+   "id": "dark-focus",
+   "title": "dark, focused",
+   "theme": "dark",
+   "focus": true
+  }
+ ]
+}

@@ -1,13 +1,10 @@
 {
- "recipe": "admin-fields",
- "expectation": "Every hand-styled admin field takes the shared text-input look, readable in light and dark mode, and nothing around it moves.",
+ "recipe": "admin-dark-mode-fixes",
+ "expectation": "In dark mode these fields stop being white boxes with unreadable text and take the shared text-input look; light mode takes the same look.",
  "predict": {
   "*": "field"
  },
  "gaps": [
-  "Forms: honeypot editor \u2014 no form with honeypot fields in the seed",
-  "Svix: delivery select \u2014 stays loading without a Svix app",
-  "Pending deletions: confirm email \u2014 needs a team awaiting deletion",
-  "Account limits: custom snooze hours \u2014 appears only for a custom duration"
+  "Forms: honeypot editor \u2014 no form with honeypot fields in the seed"
  ]
 }
