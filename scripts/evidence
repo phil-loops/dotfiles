@@ -1,0 +1,48 @@
+#!/usr/bin/env python3
+"""evidence — render a branch's before/after evidence and publish it as a comparison manifest.
+
+  evidence run <branch> [--fresh]   render (or reuse admitted renders) and publish; prints the manifest id
+  evidence card <branch>            what canopy's branch page shows, as JSON
+  evidence show <manifest-id>       one manifest, as JSON
+
+Run from inside the repo. Judging is Phil's click in canopy; there is deliberately no judge command.
+"""
+import json
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+import evidence_core as E  # noqa: E402
+
+
+def main(argv):
+    if len(argv) < 2 or argv[0] not in ("run", "card", "show"):
+        print(__doc__.strip(), file=sys.stderr)
+        return 2
+    cmd, arg = argv[0], argv[1]
+    repo = os.getcwd()
+    try:
+        if cmd == "run":
+            mid = E.run(repo, arg, fresh="--fresh" in argv, log=lambda s: print(s, file=sys.stderr, flush=True))
+            m = E.load_manifest(mid)
+            for f in m["findings"]:
+                mark = "!" if f["departure"] else " "
+                print(f"{mark} {f['scene']:<14} predicted {f['predicted']:<8} {'changed' if f['changed'] else 'same'}",
+                      file=sys.stderr)
+            print(mid)
+        elif cmd == "card":
+            print(json.dumps(E.card(repo, arg), indent=1))
+        else:
+            m = E.load_manifest(arg)
+            if not m:
+                print(f"evidence: no manifest {arg}", file=sys.stderr)
+                return 1
+            print(json.dumps(m, indent=1))
+    except E.Refused as e:
+        print(f"evidence: {e}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

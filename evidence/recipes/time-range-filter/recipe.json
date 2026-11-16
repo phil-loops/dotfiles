@@ -1,0 +1,15 @@
+{
+ "title": "TimeRangeFilter at 24 hours",
+ "component": {"file": "components/admin/filters/TimeRangeFilter.tsx", "export": "TimeRangeFilter"},
+ "props": {"id": "hours", "label": "Time range", "value": 24},
+ "callbacks": ["onChange"],
+ "valueSelector": "input",
+ "frame": {"class": "bg-background", "style": "padding:24px;width:280px"},
+ "viewport": {"width": 640, "height": 400},
+ "scenes": [
+  {"id": "light", "title": "Light", "theme": "light", "focus": null},
+  {"id": "light-focus", "title": "Light, focused", "theme": "light", "focus": "input"},
+  {"id": "dark", "title": "Dark", "theme": "dark", "focus": null},
+  {"id": "dark-focus", "title": "Dark, focused", "theme": "dark", "focus": "input"}
+ ]
+}
