@@ -103,6 +103,16 @@ import Testing
         #expect(rep.colorAt(x: 0, y: 0)!.redComponent < 0.1, "the unchanged pixel is dimmed")
     }
 
+    @Test func theEnginesEligibilityGatesJudgingAndTheClaimIsSaid() throws {
+        var c = try JSONDecoder().decode(EvidenceCard.self, from: Data(Self.app.utf8))
+        #expect(c.judgeable)
+        c.eligible = false
+        #expect(!c.judgeable, "a manifest the engine won't let anyone judge can't be judged from canopy either")
+        let live = Self.app.replacingOccurrences(of: "\"gaps\":[\"svix\"],", with: "\"gaps\":[\"svix\"],\"claim\":\"live\",")
+        let lc = try JSONDecoder().decode(EvidenceCard.self, from: Data(live.utf8))
+        #expect(lc.claimWords?.contains("repeatable, not reproducible") == true)
+    }
+
     @Test func evidenceKeysKeepTheRules() throws {
         let (a, _) = try ShipTests().app()
         let v = KeyboardRule.violations(a) { $0.hasPrefix("evidence.") }
