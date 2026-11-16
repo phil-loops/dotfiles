@@ -2,7 +2,8 @@
 # the records; this module only serves them and starts runs).
 #
 #   GET  /evidence        ?branch=                → the card: request, latest manifest, whether it
-#                                                    matches the branch's current basis, Phil's judgment
+#                                                    matches the branch's current basis, Phil's judgment.
+#                                                    Reading a stale card starts its re-capture (see _refresh)
 #   GET  /evidence-blob   ?sha=                   → one captured PNG, by content hash
 #   POST /evidence-run    {branch, fresh?}        → a run (kind "evidence"); any caller
 #   POST /evidence-judge  {manifest, verdict, note?} → Phil's verdict on the manifest he was SHOWN.
@@ -36,6 +37,45 @@ def _run_state(branch):
     return {"running": run.alive(), "exit": run.exit_code(), "started": run.started, "tail": tail}
 
 
+AUTO = os.path.join(E.CACHE, "auto")
+
+
+def _subject(card):
+    """The state a capture would be of: both trees and the request as it reads now. A sync that
+    replays the same patch onto a newer main is a new subject — its before side really is different."""
+    req = card.get("request")
+    b = E.basis(ctx.repo_cwd(), card["_branch"])
+    return E._sha(E._canon({"trees": [b["beforeTree"], b["afterTree"]], "request": req}))
+
+
+def _refresh(branch, card):
+    """Evidence stays current by itself: a card that's stale (no capture, the branch or its base
+    moved, the request changed, or the record predates the current engine) starts a re-capture of
+    the current subject — at most one evidence run on the machine at a time, and at most one
+    automatic attempt per subject, so a recipe that fails can't loop. Pull, not push: only cards
+    someone opens. A judgment needs no re-click when the new pixels are identical (it carries)."""
+    if not card.get("request") or (card.get("current") and card.get("eligible") is not False):
+        return None
+    if any(r.alive() for r in runs.every("evidence")) or E.busy(ctx.repo_cwd()):
+        return None
+    card["_branch"] = branch
+    try:
+        subject = _subject(card)
+    except E.Refused:
+        return None
+    mark = os.path.join(AUTO, E._sha(_key(branch).encode()) + ".json")
+    if (E._read_json(mark) or {}).get("subject") == subject:
+        return None
+    E._write_atomic(mark, E._canon({"branch": branch, "subject": subject}))
+    try:
+        runs.start("evidence", _key(branch), [os.path.join(ctx.SCRIPTS, "evidence"), "run", branch],
+                   cwd=ctx.repo_cwd(), meta={"branch": branch, "by": "auto"})
+    except runs.Busy:
+        return None
+    runs.prune("evidence", RUNS_KEPT)
+    return subject
+
+
 def get(req, u):
     branch = (parse_qs(u.query).get("branch") or [""])[0]
     if not branch:
@@ -44,7 +84,9 @@ def get(req, u):
         card = E.card(ctx.repo_cwd(), branch)
     except E.Refused as e:
         return req._send(200, json.dumps({"ok": False, "err": str(e)}))
-    req._send(200, json.dumps({"ok": True, **card, "run": _run_state(branch)}))
+    auto = _refresh(branch, card)
+    card.pop("_branch", None)
+    req._send(200, json.dumps({"ok": True, **card, "run": _run_state(branch), "autoStarted": bool(auto)}))
 
 
 def blob(req, u):

@@ -347,6 +347,17 @@ def _lease(d):
         f.close()
 
 
+def busy(repo):
+    """Whether any run holds an evidence checkout right now (CLI runs included, not just the viewer's)."""
+    for side in ("before", "after"):
+        try:
+            with _lease(os.path.join(HOME, "coding", f"{repo_name(repo)}-evidence-{side}")):
+                pass
+        except Refused:
+            return True
+    return False
+
+
 def _stop(d):
     subprocess.run([PREVIEW, d, "--kill"], capture_output=True)
 
