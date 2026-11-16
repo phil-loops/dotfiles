@@ -14,7 +14,8 @@ public struct EvidenceCard: Decodable, Equatable, Sendable {
         var id: String; var title: String?
         var view: String?; var viewTitle: String?; var variant: String?; var variantTitle: String?
     }
-    public struct Side: Decodable, Equatable, Sendable { var scenes: [String: String]; var fields: [String: [Int]]? }
+    public struct Side: Decodable, Equatable, Sendable { var scenes: [String: String]; var fields: [String: [Int]]?; var capturedAt: String? }
+    public struct Asked: Decodable, Equatable, Sendable { var expectation: String; var predict: [String: String] }
     public struct Measure: Decodable, Equatable, Sendable {
         var changedPixels: Int?; var maxDelta: Int?; var box: [Int]?; var sizeChanged: [Int]?
     }
@@ -42,6 +43,11 @@ public struct EvidenceCard: Decodable, Equatable, Sendable {
     public struct Manifest: Decodable, Equatable, Sendable {
         var basis: Basis; var recipe: Recipe; var expectation: String; var obligations: [Obligation]
         var before: Side; var after: Side; var findings: [Finding]; var gaps: [String]?
+        /// "live" (local previews under a shared dev environment: repeatable, not reproducible) or "deterministic"
+        var claim: String?
+        /// what the captures were predicted under; a re-explanation keeps it
+        var captured: Asked?
+        var amends: String?; var retrospective: Bool?
     }
     public struct Status: Decodable, Equatable, Sendable {
         var judged: Bool; var verdict: String?; var at: String?; var note: String?; var carriedFrom: String?
@@ -62,6 +68,9 @@ public struct EvidenceCard: Decodable, Equatable, Sendable {
     var available: Bool?
     var status: Status?
     var run: Run?
+    /// the engine's one eligibility check: false, with reasons, when this can't be judged or carried
+    var eligible: Bool?
+    var why: [String]?
 
     /// Scenes in reading order: what departed from the prediction first, then the recipe's order.
     var findings: [Finding] {
@@ -111,7 +120,19 @@ public struct EvidenceCard: Decodable, Equatable, Sendable {
     }
 
     /// Phil may judge only a complete manifest of the branch as it is now.
-    var judgeable: Bool { id != nil && current == true && available == true && run?.running != true }
+    var judgeable: Bool { id != nil && current == true && available == true && run?.running != true && eligible != false }
+
+    /// The claim in words — what accepting this does and doesn't establish.
+    var claimWords: String? {
+        guard let m = manifest else { return nil }
+        switch m.claim {
+        case "live":
+            let at = m.after.capturedAt.map { " · captured \($0.prefix(16).replacingOccurrences(of: "T", with: " "))" } ?? ""
+            return "live capture: local previews of each commit against the shared dev database — repeatable, not reproducible\(at)"
+        case "deterministic": return "deterministic render: each commit's own code, admitted by two independent renders"
+        default: return nil
+        }
+    }
 }
 
 let evidencePane = "evidence"
@@ -405,6 +426,16 @@ struct EvidencePanel: View {
                     .font(Theme.text(13)).foregroundStyle(theme.inkDim)
                     .padding(.leading, 10)
                     .overlay(alignment: .leading) { theme.goldDeep.frame(width: 2) }
+                if let w = c.claimWords {
+                    Text(w).font(Theme.mono(11)).foregroundStyle(theme.inkFaint)
+                }
+                if c.manifest?.retrospective == true, let asked = c.manifest?.captured {
+                    Text("re-explained after capture — the captures were predicted as: \(asked.expectation)")
+                        .font(Theme.text(12)).foregroundStyle(theme.ember)
+                }
+                if let why = c.why, !why.isEmpty {
+                    Text("can't be judged: " + why.joined(separator: "; ")).font(Theme.text(12)).foregroundStyle(theme.ember)
+                }
                 if let run = c.run, run.running {
                     Text("rendering… \(run.tail?.last ?? "")").font(Theme.mono(11)).foregroundStyle(theme.goldDeep)
                 } else if let run = c.run, let code = run.exit, code != 0 {
