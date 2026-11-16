@@ -430,13 +430,12 @@ def _tree(rev):
 
 def _review_flags(branch):
     """The review run's findings (branch.<b>.stack-review-flag, multivar — srv/verdicts.py writes them), valid
-    only for the tree they were written against (review-flags-tree — same staleness contract
-    as gates-green-tree). Stale/absent → None (the UI hides); an EMPTY fresh list is a state:
-    reviewed-clean."""
+    only while the review stands (verdicts.review_stands — its tree, or its own diff under a moved
+    base, the same contract as the gates). Stale/absent → None (the UI hides); an EMPTY fresh list
+    is a state: reviewed-clean."""
     verdicts.harvest(branch)
     snap = repostate.snapshot()
-    tree = snap.branch_key(branch, "review-flags-tree")
-    if not tree or tree != snap.tree(branch):
+    if not verdicts.review_stands(branch, snap):
         return None
     return {"flags": [l.strip() for l in snap.branch_key_all(branch, "review-flag") if l.strip()]}
 

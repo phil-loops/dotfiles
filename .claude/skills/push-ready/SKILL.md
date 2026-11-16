@@ -139,7 +139,8 @@ Done means the server's own reader says so — `curl -s localhost:$(stack-review
 '.entities.branch["<repo>:<b>"].gates'` is `"green"` — check it, don't assume. Never compare
 `gates-green-tree` to the tree yourself: a verdict also stands on its sealed delta, so a forward
 restack reads as lapsed (2026-11-15: two branches re-gated for nothing). Unless review was `off`,
-`stack-review-flags-tree` equals the tree too (written by the run, never by you). Any commit landed after green invalidates
+`GET /review-flags?branch=<b>` returns a list — `null` means no review stands (reviews carry the
+same delta seal; written by the run, never by you). Any commit landed after green invalidates
 the verdict; re-run. Point canopy at it (`stack-review-serve <project>` reuses the live server and opens canopy;
 or `canopy /v2/b/<repo>/<branch>`) and report in a few lines: branch, tip SHA,
 per-gate results, review flags (count + one line each), the `canopy /v2/…` route, push button unlocked.
