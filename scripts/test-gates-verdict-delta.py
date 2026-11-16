@@ -78,6 +78,10 @@ write("b.txt", "alpha\nbeta\ngamma\n"); git("commit", "-q", "-am", "main: gamma"
 git("rebase", "-q", "main", "feat")
 check("a forward rebase keeps the verdict as delta", stands("feat") == "delta", stands("feat"))
 
+# polling the old run's progress re-offers its green for the pre-rebase tree: it must not lapse the carried one
+pre_rebase_tree = git("rev-parse", "ORIG_HEAD^{tree}")
+check("harvesting the old run's green leaves the carried verdict alone", not push._harvest_green("feat", pre_rebase_tree) and stands("feat") == "delta", stands("feat"))
+
 # a carried verdict is asked on every snapshot (any config write starts one): it reads no new diff
 spawned, _run = [], ctx.run
 ctx.run = lambda argv, **kw: (spawned.append(argv) if argv[:2] == ["git", "diff"] else None, _run(argv, **kw))[1]
