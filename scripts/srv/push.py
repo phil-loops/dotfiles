@@ -282,11 +282,7 @@ def gates_progress(req, u):
         return req._send(200, json.dumps({"running": False, "err": "no gates run for this branch"}))
     events = gate_events(run)
     result = next((e for e in events if e.get("event") == "result"), None)
-    if result and result.get("ok"):
-        # green is recorded against the TREE the run was spawned on — a message-only reword
-        # while the gates ran keeps the same tree, so the verdict carries; any content change
-        # (rebase, new commit) makes a new tree and the door stays locked
-        _record_green(branch, run.meta["tree"], result.get("gates", []))
+    if result and result.get("ok") and _harvest_green(branch, run.meta["tree"], result.get("gates", [])):
         repostate.invalidate()   # the verdict landed outside a POST: unstale the snapshot now
     running = run.alive()
     out = {"running": running, "elapsed": round(time.time() - run.started, 1), "events": events}
@@ -385,6 +381,17 @@ def _skipped(gates):
     # stack-gates marks a skip "skipped": true; a verdict from before that says so in warn
     return {g.get("name") for g in gates or ()
             if g.get("skipped") or (g.get("warn") or "").endswith("skipped by you")}
+
+
+def _harvest_green(branch, tree, gates=()):
+    """Record a finished run's green — against the TREE it was spawned on, so a message-only
+    reword while it ran carries — unless a verdict already stands for a newer tree: re-recording
+    an older tree clears the delta seal, so polling a run's progress after a forward restack
+    used to lapse the very verdict that restack carried (2026-11-16). Returns whether it wrote."""
+    if tree != _tree(branch) and (verdict_stands(branch) or _green_tree(branch) == tree):
+        return False
+    _record_green(branch, tree, gates)
+    return True
 
 
 def _record_green(branch, tree, gates=()):
