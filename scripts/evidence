@@ -2,6 +2,7 @@
 """evidence — render a branch's before/after evidence and publish it as a comparison manifest.
 
   evidence run <branch> [--fresh]   render (or reuse admitted renders) and publish; prints the manifest id
+  evidence restate <branch>         re-publish the latest captures under the request as it reads now
   evidence card <branch>            what canopy's branch page shows, as JSON
   evidence show <manifest-id>       one manifest, as JSON
 
@@ -16,14 +17,15 @@ import evidence_core as E  # noqa: E402
 
 
 def main(argv):
-    if len(argv) < 2 or argv[0] not in ("run", "card", "show"):
+    if len(argv) < 2 or argv[0] not in ("run", "restate", "card", "show"):
         print(__doc__.strip(), file=sys.stderr)
         return 2
     cmd, arg = argv[0], argv[1]
     repo = os.getcwd()
     try:
-        if cmd == "run":
-            mid = E.run(repo, arg, fresh="--fresh" in argv, log=lambda s: print(s, file=sys.stderr, flush=True))
+        if cmd in ("run", "restate"):
+            log = lambda s: print(s, file=sys.stderr, flush=True)
+            mid = E.run(repo, arg, fresh="--fresh" in argv, log=log) if cmd == "run" else E.restate(repo, arg, log=log)
             m = E.load_manifest(mid)
             for f in m["findings"]:
                 mark = "!" if f["departure"] else " "

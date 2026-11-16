@@ -297,7 +297,8 @@ def render(repo, tree, recipe_digest, frozen_recipe, env, contract, donor, fresh
 
 def app_scenes(recipe):
     """Every view in every variant — the same expansion the app renderer makes."""
-    return [{**v, **x, "id": f"{v['id']}-{x['id']}", "title": f"{v['title']}, {x['title']}", "view": v["id"]}
+    return [{**v, **x, "id": f"{v['id']}-{x['id']}", "title": f"{v['title']}, {x['title']}", "view": v["id"],
+             "viewTitle": v["title"], "variant": x["id"], "variantTitle": x["title"]}
             for v in recipe["views"] for x in recipe["variants"]]
 
 
@@ -521,6 +522,36 @@ def run(repo, branch, fresh=False, log=print):
             sides[side] = render(repo, b[side + "Tree"], digest, frozen, env, contract, modules, fresh, log)
         if set(sides[side]["scenes"]) != set(scene_ids):
             raise Refused(f"{side} render is missing scenes")
+    return publish(repo_id, branch, b, req, digest, recipe, sides, donor)
+
+
+def restate(repo, branch, log=print):
+    """A new manifest from the latest one's admitted captures, under the request as it reads now: a
+    changed expectation, prediction or coverage note re-judges the same pixels without re-rendering.
+    Refused unless the trees and the recipe are exactly what those captures were made from."""
+    repo_id = repo_name(repo)
+    req = load_request(repo_id, branch)
+    if not req:
+        raise Refused(f"no evidence request for {branch}")
+    mid = latest(repo_id, branch)
+    if not mid:
+        raise Refused(f"nothing captured for {branch} yet — run it first")
+    m = load_manifest(mid)
+    b = basis(repo, branch)
+    if (b["beforeTree"], b["afterTree"]) != (m["basis"]["beforeTree"], m["basis"]["afterTree"]):
+        raise Refused("the branch or its base moved since the capture — run it again")
+    digest, _, recipe = freeze_recipe(req["recipe"])
+    if req["recipe"] != m["recipe"]["name"] or digest != m["recipe"]["digest"]:
+        raise Refused("the recipe changed since the capture — run it again")
+    log(f"restating {mid[:12]} under the current request")
+    sides = {s: m[s] for s in ("before", "after")}
+    return publish(repo_id, branch, b, req, digest, recipe, sides, donor_modules(repo))
+
+
+def publish(repo_id, branch, b, req, digest, recipe, sides, donor):
+    app = recipe.get("kind") == "app"
+    scene_ids = [s["id"] for s in scenes_of(recipe)]
+    predict = predictions(req, scene_ids)
     findings = []
     for sid in scene_ids:
         fields = [sides[s].get("fields", {}).get(sid) for s in ("before", "after")]
@@ -531,6 +562,7 @@ def run(repo, branch, fresh=False, log=print):
         "recipe": {"name": req["recipe"], "digest": digest, "title": recipe.get("title", req["recipe"]),
                    "kind": recipe.get("kind", "component")},
         "expectation": req["expectation"], "predict": req["predict"], "obligations": obligations(recipe),
+        "gaps": req.get("gaps", []),
         "before": {k: sides["before"][k] for k in ("renderId", "scenes") } | ({"fields": sides["before"]["fields"]} if app else {}),
         "after": {k: sides["after"][k] for k in ("renderId", "scenes")} | ({"fields": sides["after"]["fields"]} if app else {}),
         "findings": findings,
@@ -568,7 +600,8 @@ def latest(repo_id, branch):
 def observation(m):
     """What Phil saw, as one key: equal observations may share a judgment; nothing else may."""
     return _sha(_canon({k: m[k] for k in ("expectation", "predict", "obligations")}
-                       | {"before": m["before"]["scenes"], "after": m["after"]["scenes"]}))
+                       | {"before": m["before"]["scenes"], "after": m["after"]["scenes"]}
+                       | ({"gaps": m["gaps"]} if m.get("gaps") else {})))
 
 
 def _judgments():
@@ -637,7 +670,8 @@ def card(repo, branch):
     try:
         b = basis(repo, branch)
         same_trees = (b["afterTree"], b["beforeTree"]) == (m["basis"]["afterTree"], m["basis"]["beforeTree"])
-        same_ask = (req["recipe"], req["expectation"], req["predict"]) == (m["recipe"]["name"], m["expectation"], m["predict"])
+        same_ask = ((req["recipe"], req["expectation"], req["predict"], req.get("gaps", []))
+                    == (m["recipe"]["name"], m["expectation"], m["predict"], m.get("gaps", [])))
         out["current"] = same_trees and same_ask
     except Refused:
         pass

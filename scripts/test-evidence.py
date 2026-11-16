@@ -90,6 +90,12 @@ except E.Refused:
     check(True, "a manifest whose images are gone can't be judged")
 check(E.blob_path("../../etc/passwd") is None, "blob lookup takes only a bare digest")
 
+
+# ── coverage is part of what was judged ──
+g1 = dict(base, gaps=["svix"])
+g2 = dict(base, gaps=["svix", "honeypot"])
+check(E.observation(g1) != E.observation(g2), "a manifest that admits a different gap is a different observation")
+check(E.observation(dict(base, gaps=[])) == E.observation(base), "no gaps reads the same as a manifest from before gaps existed")
 # ── predictions + the field rule ──
 ids = ["a-light", "a-dark", "b-light"]
 check(E.predictions({"predict": {"*": "field", "b-light": "same"}}, ids) == {"a-light": "field", "a-dark": "field", "b-light": "same"},
