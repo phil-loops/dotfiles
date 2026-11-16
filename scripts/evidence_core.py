@@ -455,7 +455,9 @@ def card(repo, branch):
     m = load_manifest(mid)
     try:
         b = basis(repo, branch)
-        out["current"] = (b["afterTree"], b["beforeTree"]) == (m["basis"]["afterTree"], m["basis"]["beforeTree"])
+        same_trees = (b["afterTree"], b["beforeTree"]) == (m["basis"]["afterTree"], m["basis"]["beforeTree"])
+        same_ask = (req["recipe"], req["expectation"], req["predict"]) == (m["recipe"]["name"], m["expectation"], m["predict"])
+        out["current"] = same_trees and same_ask
     except Refused:
         pass
     out.update({"manifest": m, "id": mid, "status": status(m, mid),
