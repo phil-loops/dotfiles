@@ -1,0 +1,81 @@
+{
+ "kind": "app",
+ "title": "Admin filter and lookup fields, in the running app",
+ "viewport": {
+  "width": 1440,
+  "height": 900
+ },
+ "views": [
+  {
+   "id": "time-range",
+   "title": "Disabled domains: time range",
+   "path": "/admin?top-level-admin-dashboardTab=disabled-domains",
+   "field": "input[type=number][max=\"720\"]",
+   "steps": [
+    {
+     "click": "button[aria-label=\"Filter options\"]"
+    }
+   ],
+   "window": [
+    420,
+    120
+   ]
+  },
+  {
+   "id": "ai-review",
+   "title": "AI review: team filter",
+   "path": "/admin?top-level-admin-dashboardTab=ai-content-review",
+   "field": "input[placeholder=\"Filter by team ID\"]",
+   "window": [
+    560,
+    120
+   ]
+  },
+  {
+   "id": "lookup-email",
+   "title": "Email lookup: address",
+   "path": "/admin/team-email-lookup?teamId=default-team",
+   "field": "form input[type=email]",
+   "window": [
+    900,
+    120
+   ]
+  },
+  {
+   "id": "lookup-kind",
+   "title": "Email lookup: kind",
+   "path": "/admin/team-email-lookup?teamId=default-team",
+   "field": "form select",
+   "window": [
+    360,
+    120
+   ]
+  }
+ ],
+ "variants": [
+  {
+   "id": "light",
+   "title": "light",
+   "theme": "light",
+   "focus": false
+  },
+  {
+   "id": "light-focus",
+   "title": "light, focused",
+   "theme": "light",
+   "focus": true
+  },
+  {
+   "id": "dark",
+   "title": "dark",
+   "theme": "dark",
+   "focus": false
+  },
+  {
+   "id": "dark-focus",
+   "title": "dark, focused",
+   "theme": "dark",
+   "focus": true
+  }
+ ]
+}

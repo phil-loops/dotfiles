@@ -90,5 +90,35 @@ except E.Refused:
     check(True, "a manifest whose images are gone can't be judged")
 check(E.blob_path("../../etc/passwd") is None, "blob lookup takes only a bare digest")
 
+# ── predictions + the field rule ──
+ids = ["a-light", "a-dark", "b-light"]
+check(E.predictions({"predict": {"*": "field", "b-light": "same"}}, ids) == {"a-light": "field", "a-dark": "field", "b-light": "same"},
+      "\"*\" covers every scene the request doesn't name")
+for bad, what in (({"a-light": "same"}, "an unnamed scene with no \"*\""), ({"*": "same", "zz": "same"}, "a scene the recipe lacks"),
+                  ({"*": "maybe"}, "an unknown prediction")):
+    try:
+        E.predictions({"predict": bad}, ids)
+        check(False, f"{what} is refused")
+    except E.Refused:
+        check(True, f"{what} is refused")
+field = [[100, 100, 200, 40]]
+check(E.inside([110, 104, 50, 20], field), "a change on the field is inside it")
+check(E.inside([90, 90, 220, 60], field), "a focus ring just past the field's edge still counts as the field")
+check(not E.inside([100, 100, 200, 120], field), "a change that runs below the field is outside it")
+check(E.inside([0, 0, 10, 10], [[0, 0, 10, 10], [200, 200, 10, 10]]) and E.inside([200, 200, 5, 5], [[0, 0, 10, 10], [200, 200, 10, 10]]),
+      "a field that moved is judged against where it was on either side")
+orig = E.measure
+try:
+    E.measure = lambda b, a, m: {"changedPixels": 5, "maxDelta": 9, "box": [110, 104, 50, 20], "size": [400, 300]}
+    f = E.finding("s", "field", "x", "y", field, None)
+    check(not f["departure"] and f["contained"], "a field prediction holds when only the field changed")
+    E.measure = lambda b, a, m: {"changedPixels": 5, "maxDelta": 9, "box": [0, 0, 400, 300], "size": [400, 300]}
+    check(E.finding("s", "field", "x", "y", field, None)["departure"], "a change past the field departs")
+    E.measure = lambda b, a, m: {"changedPixels": 0, "maxDelta": 0, "box": None, "size": [400, 300], "sizeChanged": [400, 310]}
+    check(E.finding("s", "field", "x", "y", field, None)["departure"], "a crop that changed size departs (something around the field moved)")
+    check(E.finding("s", "field", "x", "x", field, None)["departure"], "a field predicted to change that didn't departs")
+finally:
+    E.measure = orig
+
 print(f"\n{len(failures)} failed" if failures else "\nall passed")
 sys.exit(1 if failures else 0)

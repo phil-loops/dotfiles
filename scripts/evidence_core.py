@@ -22,9 +22,12 @@ Cache (losing it costs a re-render): ~/.cache/canopy/evidence. Ledger (not cache
 import hashlib
 import json
 import os
+import secrets
 import shutil
 import subprocess
 import time
+import urllib.error
+import urllib.request
 
 SCHEMA = 1
 HOME = os.path.expanduser("~")
@@ -34,6 +37,12 @@ REQUESTS = os.path.join(DOT, "evidence", "requests")
 CACHE = os.environ.get("EVIDENCE_CACHE") or os.path.join(HOME, ".cache", "canopy", "evidence")
 LEDGER = os.environ.get("EVIDENCE_LEDGER") or os.path.join(HOME, ".local", "share", "canopy", "evidence", "ledger.jsonl")
 RENDERER = os.path.join(DOT, "scripts", "evidence-render.mjs")
+APP_RENDERER = os.path.join(DOT, "scripts", "evidence-app-render.mjs")
+PREVIEW = os.path.join(DOT, "scripts", "loops-preview")
+PROVENANCE = os.path.join(DOT, "scripts", "loops-provenance")
+APP_LOGIN = "user-1@example.com"
+APP_DB = "loops-psql-1"
+PREDICTIONS = ("same", "changes", "field")
 MEASURE = os.path.join(DOT, "scripts", "evidence-measure.mjs")
 CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 # what the renderer imports from the donor: each must be the version the rendered tree locks
@@ -200,8 +209,8 @@ def environment(repo, commit, donor):
     return {"packages": versions, "node": node}, modules
 
 
-def renderer_contract():
-    with open(RENDERER, "rb") as f:
+def renderer_contract(renderer=RENDERER):
+    with open(renderer, "rb") as f:
         code = _sha(f.read())
     chrome = subprocess.run([CHROME, "--version"], capture_output=True, text=True).stdout.strip()
     if not chrome:
@@ -227,11 +236,11 @@ def _admission_path(render_id):
     return os.path.join(CACHE, "admissions", render_id + ".json")
 
 
-def _attempt(snap, frozen_recipe, donor, render_id, n, log):
+def _attempt(snap, frozen_recipe, donor, render_id, n, log, renderer=RENDERER, extra_env=None):
     d = os.path.join(CACHE, "attempts", render_id, f"{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}-{n}")
     os.makedirs(d)
-    env = {**os.environ, "NODE_PATH": donor}
-    r = subprocess.run(["node", RENDERER, snap, frozen_recipe, d], env=env, capture_output=True, text=True)
+    env = {**os.environ, "NODE_PATH": donor, **(extra_env or {})}
+    r = subprocess.run(["node", renderer, snap, frozen_recipe, d], env=env, capture_output=True, text=True)
     result = _read_json(os.path.join(d, "result.json"))
     if r.returncode or not result:
         why = (_read_json(os.path.join(d, "failed.json")) or {}).get("why") or r.stderr.strip()[-400:]
@@ -284,6 +293,145 @@ def render(repo, tree, recipe_digest, frozen_recipe, env, contract, donor, fresh
     return {"renderId": render_id, "scenes": expected, "reused": False}
 
 
+# ── app recipes: the real app, served from exactly one commit ─────────────────────────────────
+
+def app_scenes(recipe):
+    """Every view in every variant — the same expansion the app renderer makes."""
+    return [{**v, **x, "id": f"{v['id']}-{x['id']}", "title": f"{v['title']}, {x['title']}", "view": v["id"]}
+            for v in recipe["views"] for x in recipe["variants"]]
+
+
+def scenes_of(recipe):
+    return app_scenes(recipe) if recipe.get("kind") == "app" else recipe["scenes"]
+
+
+def _checkout(repo, side, commit, log):
+    """A detached worktree pinned to `commit`, one per side, reused across runs (its .next cache and
+    node_modules survive). Refuses unless HEAD is exactly that commit with nothing modified."""
+    d = os.path.join(HOME, "coding", f"{repo_name(repo)}-evidence-{side}")
+    if not os.path.isdir(d):
+        log(f"  creating {d}")
+        _git(repo, "worktree", "add", "--detach", d, commit)
+    else:
+        _stop(d)
+        subprocess.run([PROVENANCE, d, "--revert"], capture_output=True)
+        _git(d, "checkout", "--detach", "-f", commit)
+    head = _git(d, "rev-parse", "HEAD")
+    dirty = _git(d, "status", "--porcelain", "--untracked-files=no")
+    if head != commit or dirty:
+        raise Refused(f"{d} isn't a clean checkout of {commit[:10]}: HEAD {head[:10]}{', modified: ' + dirty if dirty else ''}")
+    return d
+
+
+def _stop(d):
+    subprocess.run([PREVIEW, d, "--kill"], capture_output=True)
+
+
+def _serve(d, log, timeout=1500):
+    """Start a preview of checkout `d` and wait until it answers; returns its base URL."""
+    # one evidence server at a time, on top of whatever other sessions run: room for exactly one more
+    running = len(json.loads(subprocess.run([PREVIEW, "--json"], capture_output=True, text=True).stdout or "[]"))
+    env = {**os.environ, "LOOPS_PREVIEW_NO_BADGE": "1", "LOOPS_PREVIEW_MAX": str(max(3, running + 1))}
+    r = subprocess.run([PREVIEW, d], env=env, capture_output=True, text=True)
+    if r.returncode:
+        raise Refused(f"loops-preview {d} failed: {(r.stderr or r.stdout).strip()[-400:]}")
+    listed = json.loads(subprocess.run([PREVIEW, "--json"], capture_output=True, text=True).stdout or "[]")
+    port = next((p["port"] for p in listed if p.get("dir") == d), None)
+    if not port:
+        raise Refused(f"loops-preview started no server for {d}")
+    base = f"http://localhost:{port}"
+    log(f"  serving {os.path.basename(d)} at {base}; waiting for it to compile")
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            with urllib.request.urlopen(base + "/api/auth/csrf", timeout=120) as resp:
+                if resp.status == 200 and b"csrfToken" in resp.read():
+                    return base
+        except (urllib.error.URLError, OSError, ValueError):
+            pass
+        time.sleep(5)
+    raise Refused(f"{base} never answered within {timeout}s")
+
+
+def _env_value(d, key):
+    for name in (".env.development.local", ".env.local", ".env.development", ".env"):
+        try:
+            with open(os.path.join(d, name)) as f:
+                for line in reversed(f.read().splitlines()):
+                    if line.strip().startswith(key + "="):
+                        return line.split("=", 1)[1].split(" #")[0].strip().strip("\"'")
+        except OSError:
+            continue
+    return None
+
+
+def _login_token(d):
+    """A one-use magic-link token for the dev user, stored the way next-auth's adapter stores one."""
+    secret = _env_value(d, "NEXTAUTH_SECRET")
+    if not secret:
+        raise Refused(f"{d} has no NEXTAUTH_SECRET")
+    token = secrets.token_hex(32)
+    hashed = hashlib.sha256((token + secret).encode()).hexdigest()
+    sql = ("insert into \"VerificationToken\" (id, identifier, token, expires) values "
+           f"('evidence-{secrets.token_hex(8)}', '{APP_LOGIN}', '{hashed}', now() + interval '15 minutes')")
+    r = subprocess.run(["docker", "exec", APP_DB, "psql", "-U", "postgres", "-At", "-c", sql], capture_output=True, text=True)
+    if r.returncode:
+        raise Refused(f"couldn't store a sign-in token: {r.stderr.strip()[-200:]}")
+    return json.dumps({"email": APP_LOGIN, "token": token})
+
+
+def app_render(repo, side, commit, tree, recipe_digest, frozen_recipe, contract, donor, nonce, log=print):
+    """Both attempts against one server for this commit, then the server goes away. Never reused by a
+    later run: the database isn't part of the identity, so only captures from one run share their data."""
+    lock = subprocess.run(["git", "-C", repo, "show", f"{commit}:package-lock.json"], capture_output=True).stdout
+    main = _git(repo, "worktree", "list", "--porcelain").splitlines()[0].split(" ", 1)[1]
+    env = {"lock": hashlib.md5(lock).hexdigest(), "packagesFrom": _git(main, "rev-parse", "HEAD"),
+           "db": "local dev database", "user": APP_LOGIN}
+    identity = {"schema": SCHEMA, "kind": "app", "tree": tree, "recipe": recipe_digest, "env": env,
+                "contract": contract, "run": nonce}
+    render_id = _sha(_canon(identity))
+    d = _checkout(repo, side, commit, log)
+    try:
+        base = _serve(d, log)
+        runs = [_attempt(base, frozen_recipe, donor, render_id, n, log, APP_RENDERER, {"EVIDENCE_LOGIN": _login_token(d)})
+                for n in (1, 2)]
+    finally:
+        _stop(d)
+    results = [r for _, r in runs]
+    for r in results:
+        if r.get("browser") != contract["browser"]:
+            raise Refused(f"rendered with Chrome {r.get('browser')}, pinned {contract['browser']}")
+    observed = [{k: v["sha"] for k, v in r["scenes"].items()} for r in results]
+    if observed[0] != observed[1]:
+        diff = sorted(k for k in observed[0] if observed[0][k] != observed[1].get(k))
+        _write_atomic(_admission_path(render_id), _canon({
+            "status": "conflicted", "renderId": render_id, "identity": identity,
+            "why": f"independent attempts disagree on {', '.join(diff)}", "at": time.strftime("%Y-%m-%dT%H:%M:%S%z")}))
+        raise Refused(f"{side} capture isn't repeatable: attempts disagree on {', '.join(diff)} — mask what moves")
+    for dd, r in runs[:1]:
+        for scene, s in r["scenes"].items():
+            dest = _blob(s["sha"])
+            if not os.path.exists(dest):
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                tmp = f"{dest}.{os.getpid()}.tmp"
+                shutil.copyfile(os.path.join(dd, "scenes", f"{scene}.png"), tmp)
+                os.replace(tmp, dest)
+    fields = {k: v["field"] for k, v in results[0]["scenes"].items()}
+    _write_atomic(_admission_path(render_id), _canon({
+        "status": "admitted", "renderId": render_id, "identity": identity, "scenes": observed[0], "fields": fields,
+        "attempts": [dd for dd, _ in runs], "at": time.strftime("%Y-%m-%dT%H:%M:%S%z")}))
+    log(f"  admitted {side} capture {render_id[:12]} (2 attempts matched)")
+    return {"renderId": render_id, "scenes": observed[0], "fields": fields, "reused": False}
+
+
+def inside(box, fields, slack=16):
+    """Whether a change box (device px) lies within the union of the field's boxes, give or take a focus ring."""
+    xs = [f[0] for f in fields] + [f[0] + f[2] for f in fields]
+    ys = [f[1] for f in fields] + [f[1] + f[3] for f in fields]
+    x0, y0, x1, y1 = min(xs) - slack, min(ys) - slack, max(xs) + slack, max(ys) + slack
+    return box[0] >= x0 and box[1] >= y0 and box[0] + box[2] <= x1 and box[1] + box[3] <= y1
+
+
 # ── comparison ────────────────────────────────────────────────────────────────────────────────
 
 def _manifest_path(mid):
@@ -309,8 +457,41 @@ def measure(before_sha, after_sha, modules):
 
 
 def obligations(recipe):
+    if recipe.get("kind") == "app":
+        return [{k: v for k, v in sc.items()} | {"viewport": recipe.get("viewport")} for sc in app_scenes(recipe)]
     shared = {k: recipe.get(k) for k in ("component", "props", "callbacks", "valueSelector", "frame", "viewport")}
     return [{**shared, **scene} for scene in recipe["scenes"]]
+
+
+def predictions(req, scene_ids):
+    """The request's per-scene prediction; "*" covers every scene it doesn't name."""
+    p = dict(req["predict"])
+    default = p.pop("*", None)
+    unknown = set(p) - set(scene_ids)
+    if unknown:
+        raise Refused(f"the prediction names scenes the recipe doesn't have: {', '.join(sorted(unknown))}")
+    missing = [s for s in scene_ids if s not in p and default is None]
+    if missing:
+        raise Refused(f"no prediction for {', '.join(missing)} (name each, or give \"*\")")
+    out = {s: p.get(s, default) for s in scene_ids}
+    bad = {k: v for k, v in out.items() if v not in PREDICTIONS}
+    if bad:
+        raise Refused(f"predict values are {', '.join(PREDICTIONS)}: {bad}")
+    return out
+
+
+def finding(sid, predicted, b_sha, a_sha, fields, modules):
+    changed = b_sha != a_sha
+    m = measure(b_sha, a_sha, modules) if changed else None
+    if predicted == "field":
+        ok = changed and bool(m) and not m.get("sizeChanged") and bool(m.get("box")) and inside(m["box"], fields)
+        departure = not ok
+    else:
+        departure = changed != (predicted == "changes")
+    out = {"scene": sid, "predicted": predicted, "changed": changed, "departure": departure, "measure": m}
+    if predicted == "field" and changed:
+        out["contained"] = not departure
+    return out
 
 
 def run(repo, branch, fresh=False, log=print):
@@ -321,37 +502,37 @@ def run(repo, branch, fresh=False, log=print):
         raise Refused(f"no evidence request for {branch} ({request_path(repo_id, branch)})")
     b = basis(repo, branch)
     digest, frozen, recipe = freeze_recipe(req["recipe"])
-    scene_ids = [s["id"] for s in recipe["scenes"]]
+    app = recipe.get("kind") == "app"
+    scene_ids = [s["id"] for s in scenes_of(recipe)]
     if len(set(scene_ids)) != len(scene_ids):
         raise Refused("recipe declares a scene twice")
-    if set(req["predict"]) != set(scene_ids):
-        raise Refused(f"the prediction must name exactly the recipe's scenes: {', '.join(scene_ids)}")
-    bad = {k: v for k, v in req["predict"].items() if v not in ("same", "changes")}
-    if bad:
-        raise Refused(f"predict values are 'same' or 'changes': {bad}")
+    predict = predictions(req, scene_ids)
     donor = donor_modules(repo)
-    contract = renderer_contract()
+    contract = renderer_contract(APP_RENDERER if app else RENDERER)
+    nonce = secrets.token_hex(8)
     sides = {}
     for side in ("before", "after"):
         log(f"{side}: {b[side + 'Commit'][:10]}")
-        env, modules = environment(repo, b[side + "Commit"], donor)
-        sides[side] = render(repo, b[side + "Tree"], digest, frozen, env, contract, modules, fresh, log)
+        if app:
+            sides[side] = app_render(repo, side, b[side + "Commit"], b[side + "Tree"], digest, frozen, contract,
+                                     donor, nonce, log)
+        else:
+            env, modules = environment(repo, b[side + "Commit"], donor)
+            sides[side] = render(repo, b[side + "Tree"], digest, frozen, env, contract, modules, fresh, log)
         if set(sides[side]["scenes"]) != set(scene_ids):
             raise Refused(f"{side} render is missing scenes")
     findings = []
     for sid in scene_ids:
-        b_sha, a_sha = sides["before"]["scenes"][sid], sides["after"]["scenes"][sid]
-        changed = b_sha != a_sha
-        predicted = req["predict"][sid]
-        findings.append({"scene": sid, "predicted": predicted, "changed": changed,
-                         "departure": changed != (predicted == "changes"),
-                         "measure": measure(b_sha, a_sha, donor) if changed else None})
+        fields = [sides[s].get("fields", {}).get(sid) for s in ("before", "after")]
+        findings.append(finding(sid, predict[sid], sides["before"]["scenes"][sid], sides["after"]["scenes"][sid],
+                                [f for f in fields if f], donor))
     manifest = {
         "schema": SCHEMA, "repo": repo_id, "basis": b,
-        "recipe": {"name": req["recipe"], "digest": digest, "title": recipe.get("title", req["recipe"])},
+        "recipe": {"name": req["recipe"], "digest": digest, "title": recipe.get("title", req["recipe"]),
+                   "kind": recipe.get("kind", "component")},
         "expectation": req["expectation"], "predict": req["predict"], "obligations": obligations(recipe),
-        "before": {k: sides["before"][k] for k in ("renderId", "scenes")},
-        "after": {k: sides["after"][k] for k in ("renderId", "scenes")},
+        "before": {k: sides["before"][k] for k in ("renderId", "scenes") } | ({"fields": sides["before"]["fields"]} if app else {}),
+        "after": {k: sides["after"][k] for k in ("renderId", "scenes")} | ({"fields": sides["after"]["fields"]} if app else {}),
         "findings": findings,
     }
     text = _canon(manifest)

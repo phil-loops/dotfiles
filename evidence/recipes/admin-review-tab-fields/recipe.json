@@ -1,0 +1,106 @@
+{
+ "kind": "app",
+ "title": "Admin review tab fields, in the running app",
+ "viewport": {
+  "width": 1440,
+  "height": 900
+ },
+ "views": [
+  {
+   "id": "limits-lookback",
+   "title": "Account limits: lookback",
+   "path": "/admin?top-level-admin-dashboardTab=account-limit-notice-review",
+   "field": "select:has(option[value=\"1\"])",
+   "window": [
+    420,
+    120
+   ]
+  },
+  {
+   "id": "limits-snooze",
+   "title": "Account limits: snooze notes",
+   "path": "/admin?top-level-admin-dashboardTab=account-limit-notice-review",
+   "steps": [
+    {
+     "click": "button:has-text(\"Snooze\")"
+    }
+   ],
+   "field": "textarea[placeholder=\"Add notes about why you're snoozing...\"]",
+   "window": [
+    640,
+    200
+   ]
+  },
+  {
+   "id": "assess-decision",
+   "title": "Domain assessment: decision",
+   "path": "/admin?top-level-admin-dashboardTab=team-breakdown&teamId=default-team",
+   "field": "select:has(option[value=\"BlockDomain\"])",
+   "window": [
+    560,
+    120
+   ]
+  },
+  {
+   "id": "assess-notes",
+   "title": "Domain assessment: notes",
+   "path": "/admin?top-level-admin-dashboardTab=team-breakdown&teamId=default-team",
+   "field": "textarea[placeholder=\"Enter your assessment of this domain...\"]",
+   "window": [
+    640,
+    200
+   ]
+  },
+  {
+   "id": "metrics-days",
+   "title": "Sending metrics: days",
+   "path": "/admin?top-level-admin-dashboardTab=team-breakdown&teamId=default-team",
+   "steps": [
+    {
+     "click": "button:text-is(\"Sending Metrics\")"
+    }
+   ],
+   "field": "select:has(option[value=\"3\"])",
+   "window": [
+    420,
+    120
+   ]
+  },
+  {
+   "id": "unsafe-page-size",
+   "title": "Unsafe assets: page size",
+   "path": "/admin?top-level-admin-dashboardTab=unsafe-email-assets",
+   "field": "select:has(option[value=\"5\"])",
+   "window": [
+    420,
+    120
+   ]
+  }
+ ],
+ "variants": [
+  {
+   "id": "light",
+   "title": "light",
+   "theme": "light",
+   "focus": false
+  },
+  {
+   "id": "light-focus",
+   "title": "light, focused",
+   "theme": "light",
+   "focus": true
+  },
+  {
+   "id": "dark",
+   "title": "dark",
+   "theme": "dark",
+   "focus": false
+  },
+  {
+   "id": "dark-focus",
+   "title": "dark, focused",
+   "theme": "dark",
+   "focus": true
+  }
+ ]
+}

@@ -1,0 +1,7 @@
+{
+ "recipe": "user-membership-fields",
+ "expectation": "Each user memberships field takes the shared text-input look, readable in light and dark mode, and nothing around it moves.",
+ "predict": {
+  "*": "field"
+ }
+}
