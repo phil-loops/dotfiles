@@ -309,7 +309,10 @@ struct EvidenceChip: View {
 
     var body: some View {
         let ev = EvidenceState.of(app)
-        Group {
+        // a zero-size anchor: SwiftUI never runs the .task of a view that draws nothing, and the chip
+        // draws nothing until that task has loaded the card
+        HStack(spacing: 0) {
+            Color.clear.frame(width: 0, height: 0)
             if let c = ev.card(target.id), c.request != nil, c.manifest != nil {
                 let judged = c.status?.judged == true
                 HStack(spacing: 6) {
