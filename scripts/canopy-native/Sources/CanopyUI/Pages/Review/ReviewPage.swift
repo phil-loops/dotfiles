@@ -112,6 +112,7 @@ private struct ReviewHeader: View {
                 .background(RoundedRectangle(cornerRadius: 3).fill(onTitle(pg, c) ? theme.goldLeaf.opacity(0.14) : .clear))
                 .padding(.horizontal, -4)
                 Spacer(minLength: 16)
+                if pg.integration == nil, let t = pg.target { EvidenceChip(target: t) }
                 if pg.integration == nil { ShipStripView(branchID: pg.id) }
             }
             if pg.tab == "files", pg.integration == nil { BranchLine().padding(.top, 4) }

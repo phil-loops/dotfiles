@@ -28,6 +28,12 @@ enum ReviewArea: PageArea {
                           pg?.tab = "files"
                           app?.focus(pane: reviewDiffPane)
                       })
+        // an enlarged field goes back to the sheet before esc leaves the tab
+        let ev = EvidenceState.of(app)
+        app.addCloser(first: true, isOpen: { [weak app, weak pg] in
+                          app?.router.route.surfaceID == "review" && pg?.tab == "evidence" && (ev.zoomed || ev.changes)
+                      },
+                      close: { ev.zoomed = false; ev.changes = false })
         watch(app, pg)
     }
 
