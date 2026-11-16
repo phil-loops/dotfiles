@@ -41,8 +41,12 @@ base = {
     "recipe": {"name": "x", "digest": "d", "title": "X"},
     "expectation": "dark changes", "predict": {"dark": "changes"},
     "obligations": [{"id": "dark", "theme": "dark"}],
-    "before": {"renderId": "rb", "scenes": {"dark": blob(1)}},
-    "after": {"renderId": "ra", "scenes": {"dark": blob(2)}},
+    "claim": "live", "captured": {"expectation": "dark changes", "predict": {"dark": "changes"}, "gaps": []},
+    "amends": None, "retrospective": False, "gaps": [],
+    "before": {"renderId": "rb", "scenes": {"dark": blob(1)}, "fields": {"dark": [10, 10, 100, 30]},
+               "frames": {"dark": {"crop": [0, 0, 400, 200], "field": [10, 10, 100, 30], "dialog": None}}},
+    "after": {"renderId": "ra", "scenes": {"dark": blob(2)}, "fields": {"dark": [10, 10, 100, 30]},
+              "frames": {"dark": {"crop": [0, 0, 400, 200], "field": [10, 10, 100, 30], "dialog": None}}},
     "findings": [],
 }
 m1 = publish(base)
@@ -96,6 +100,38 @@ g1 = dict(base, gaps=["svix"])
 g2 = dict(base, gaps=["svix", "honeypot"])
 check(E.observation(g1) != E.observation(g2), "a manifest that admits a different gap is a different observation")
 check(E.observation(dict(base, gaps=[])) == E.observation(base), "no gaps reads the same as a manifest from before gaps existed")
+
+# ── v4: claim class, framing, eligibility, amendments ──
+blob(1), blob(2)   # an earlier check deleted one to prove missing images block judging
+moved = copy.deepcopy(base)
+moved["after"]["frames"]["dark"]["crop"] = [0, 24, 400, 200]   # same pixels, the dialog 24px lower
+check(E.observation(moved) != E.observation(base), "a picture that moved on the page is a different observation, even with identical pixels")
+mm = publish(moved)
+check(E.status(moved, mm).get("carriedFrom") is None, "a verdict doesn't carry to the same pixels in a new place")
+old_engine = dict(copy.deepcopy(base), schema=1)
+check(E.eligibility(old_engine) and "older engine" in E.eligibility(old_engine)[0], "a schema-1 manifest isn't eligible")
+try:
+    E.judge(publish(old_engine), "accept", "", "browser")
+    check(False, "an ineligible manifest can't be judged")
+except E.Refused:
+    check(True, "an ineligible manifest can't be judged")
+det = dict(copy.deepcopy(base), claim="deterministic")
+E._write_atomic(E._admission_path("rb"), E._canon({"status": "admitted"}))
+E._write_atomic(E._admission_path("ra"), E._canon({"status": "conflicted"}))
+check(any("conflicted" in w for w in E.eligibility(det)), "a deterministic manifest whose render was revoked isn't eligible")
+E._write_atomic(E._admission_path("ra"), E._canon({"status": "admitted"}))
+check(E.eligibility(det) == [], "a deterministic manifest with both renders admitted is eligible")
+check(E.eligibility(base) == [], "a live manifest doesn't need admissions — its claim is repeatability")
+retro = dict(copy.deepcopy(base), predict={"dark": "same"}, expectation="nothing changes", amends="f" * 64, retrospective=True)
+check(retro["captured"]["predict"] == {"dark": "changes"} and E.observation(retro) != E.observation(base),
+      "a re-explanation keeps the capture-time prediction and is its own observation")
+try:
+    with E._lease(os.path.join(tmp, "side")):
+        with E._lease(os.path.join(tmp, "side")):
+            pass
+    check(False, "a second run can't take a checkout another run holds")
+except E.Refused:
+    check(True, "a second run can't take a checkout another run holds")
 # ── predictions + the field rule ──
 ids = ["a-light", "a-dark", "b-light"]
 check(E.predictions({"predict": {"*": "field", "b-light": "same"}}, ids) == {"a-light": "field", "a-dark": "field", "b-light": "same"},
