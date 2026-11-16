@@ -6,15 +6,20 @@
  "bench": {
   "ticket": "LOO-6235",
   "repo": "loops",
-  "project": "draft-on-a-disabled-domain",
-  "about": "Seven API requests that a team with a disabled sending domain gets wrong answers to. Run them now, deploy, then run them again and compare.",
+  "project": "one-reason-a-domain-cannot-send",
+  "about": "Requests that a team with a disabled sending domain gets wrong answers to: drafting was refused, send and publish said \"not verified\", and a preview was accepted and then dropped. Run them now, deploy, then run them again and compare.",
   "envs": [
    {
     "name": "local",
     "base": "http://localhost:3035/api/v1",
     "key": "loops-local-loo-6235-bench-key",
     "fixture": "loo-6235.ts",
-    "branch": "say-when-the-sending-domain-is-disabled"
+    "branch": "prove-one-reason-over-the-api",
+    "carries": [
+     "answer-transactional-send-with-the-domain-reason",
+     "return-the-domain-reason-from-publish",
+     "refuse-a-preview-on-a-blocked-domain"
+    ]
    },
    {
     "name": "staging",
@@ -43,9 +48,19 @@
     "branch": "allow-content-api-drafts-on-a-disabled-domain"
    },
    {
-    "id": "saying",
-    "title": "Saying the domain is disabled",
-    "branch": "say-when-the-sending-domain-is-disabled"
+    "id": "send",
+    "title": "Send says the domain is disabled",
+    "branch": "answer-transactional-send-with-the-domain-reason"
+   },
+   {
+    "id": "publish",
+    "title": "Publish says the domain is disabled",
+    "branch": "return-the-domain-reason-from-publish"
+   },
+   {
+    "id": "preview",
+    "title": "A preview is refused, not dropped",
+    "branch": "refuse-a-preview-on-a-blocked-domain"
    }
   ],
   "steps": [
@@ -198,8 +213,34 @@
     }
    },
    {
+    "id": "preview",
+    "group": "preview",
+    "label": "Send a preview",
+    "request": {
+     "method": "POST",
+     "path": "/email-messages/{msg|ownDraftMsg|ownSentMsg|anyMsg}/preview",
+     "body": {
+      "emails": [
+       "loo-6235-repro@example.com"
+      ]
+     }
+    },
+    "needs": "an email message on this team",
+    "claim": {
+     "today": {
+      "status": 200,
+      "text": "accepted, then dropped without a word"
+     },
+     "fixed": {
+      "status": 400,
+      "says": "has been disabled",
+      "text": "your domain has been disabled"
+     }
+    }
+   },
+   {
     "id": "publish",
-    "group": "saying",
+    "group": "publish",
     "label": "Publish a transactional",
     "request": {
      "method": "POST",
@@ -215,13 +256,13 @@
      "fixed": {
       "status": 422,
       "says": "has been disabled",
-      "text": "domain has been disabled"
+      "text": "your domain has been disabled"
      }
     }
    },
    {
     "id": "send",
-    "group": "saying",
+    "group": "send",
     "label": "Send a transactional",
     "request": {
      "method": "POST",
@@ -241,7 +282,7 @@
      "fixed": {
       "status": 400,
       "says": "has been disabled",
-      "text": "domain has been disabled"
+      "text": "your domain has been disabled"
      }
     }
    }
