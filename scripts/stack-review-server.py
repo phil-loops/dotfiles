@@ -26,6 +26,7 @@ from srv import focus   # own line: same reason
 from srv import footprint   # own line: same reason
 from srv import queue       # own line: same reason
 from srv import foreign     # own line: same reason
+from srv import evidence    # own line: same reason
 from srv import repostate   # own line: same reason
 from srv import procsig   # own line: same reason
 from srv import actor, reqlog   # own line: same reason
@@ -355,6 +356,10 @@ class H(BaseHTTPRequestHandler):
             return sync.force_scope_get(self, u)
         elif u.path == "/review-progress":  # a review run's state; a finished verdict is recorded on read
             return verdicts.review_progress(self, u)
+        elif u.path == "/evidence":  # read-only: the branch's rendered evidence card
+            return evidence.get(self, u)
+        elif u.path == "/evidence-blob":  # read-only: one captured PNG by content hash
+            return evidence.blob(self, u)
         elif u.path == "/review-flags":  # read-only: push-ready's findings on this tree, by place
             return push.review_flags_get(self, u)
         elif u.path == "/prep-route":  # what "prep to push" would do next (read-only verdict + delegate)
