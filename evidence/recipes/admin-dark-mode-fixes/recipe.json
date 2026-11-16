@@ -19,7 +19,8 @@
    "window": [
     420,
     120
-   ]
+   ],
+   "file": "components/admin/filters/TimeRangeFilter.tsx"
   },
   {
    "id": "ai-review",
@@ -29,7 +30,8 @@
    "window": [
     560,
     120
-   ]
+   ],
+   "file": "components/admin/AIContentReviewTab.tsx"
   },
   {
    "id": "lookup-email",
@@ -39,7 +41,8 @@
    "window": [
     900,
     120
-   ]
+   ],
+   "file": "components/admin/teamBreakdown/TeamRecipientEmailLookup.tsx"
   },
   {
    "id": "lookup-kind",
@@ -49,7 +52,8 @@
    "window": [
     360,
     120
-   ]
+   ],
+   "file": "components/admin/teamBreakdown/TeamRecipientEmailLookup.tsx"
   }
  ],
  "variants": [

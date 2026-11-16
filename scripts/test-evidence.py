@@ -132,6 +132,9 @@ try:
     check(False, "a second run can't take a checkout another run holds")
 except E.Refused:
     check(True, "a second run can't take a checkout another run holds")
+cov = dict(copy.deepcopy(base), coverage={"changed": ["a.tsx", "b.tsx"], "covered": ["a.tsx"], "uncovered": ["b.tsx"]})
+cov2 = dict(copy.deepcopy(base), coverage={"changed": ["a.tsx", "b.tsx", "c.tsx"], "covered": ["a.tsx"], "uncovered": ["b.tsx", "c.tsx"]})
+check(E.observation(cov) != E.observation(cov2), "a verdict doesn't carry when the change leaves more files unseen")
 # ── predictions + the field rule ──
 ids = ["a-light", "a-dark", "b-light"]
 check(E.predictions({"predict": {"*": "field", "b-light": "same"}}, ids) == {"a-light": "field", "a-dark": "field", "b-light": "same"},

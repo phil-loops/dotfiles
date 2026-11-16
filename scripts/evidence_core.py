@@ -420,7 +420,11 @@ def app_render(repo, side, commit, tree, recipe_digest, frozen_recipe, contract,
     later run: the database isn't part of the identity, so only captures from one run share their data."""
     lock = subprocess.run(["git", "-C", repo, "show", f"{commit}:package-lock.json"], capture_output=True).stdout
     main = _git(repo, "worktree", "list", "--porcelain").splitlines()[0].split(" ", 1)[1]
-    env = {"lock": hashlib.md5(lock).hexdigest(), "packagesFrom": _git(main, "rev-parse", "HEAD"),
+    main_head = _git(main, "rev-parse", "HEAD")
+    own_packages = bool(_git(repo, "diff", "--name-only", main_head, commit, "--", "packages/", check=False))
+    env = {"lock": hashlib.md5(lock).hexdigest(), "packagesFrom": main_head,
+           # loops-preview borrows main's built workspace packages unless this tree's differ (then it rebuilds)
+           "packages": "rebuilt from this tree" if own_packages else "same sources as main, main's build",
            "db": "local dev database", "user": APP_LOGIN}
     identity = {"schema": SCHEMA, "kind": "app", "tree": tree, "recipe": recipe_digest, "env": env,
                 "contract": contract, "run": nonce}
@@ -564,7 +568,7 @@ def run(repo, branch, fresh=False, log=print):
             sides[side] = render(repo, b[side + "Tree"], digest, frozen, env, contract, modules, fresh, log)
         if set(sides[side]["scenes"]) != set(scene_ids):
             raise Refused(f"{side} render is missing scenes")
-    return publish(repo_id, branch, b, req, digest, recipe, sides, donor, captured=_asked(req))
+    return publish(repo, branch, b, req, digest, recipe, sides, donor, captured=_asked(req))
 
 
 def _asked(req):
@@ -596,11 +600,27 @@ def restate(repo, branch, log=print):
         raise Refused("the recipe changed since the capture — run it again")
     log(f"re-explaining {mid[:12]} under the current request (retrospective)")
     sides = {s: m[s] for s in ("before", "after")}
-    return publish(repo_id, branch, b, req, digest, recipe, sides, donor_modules(repo),
+    return publish(repo, branch, b, req, digest, recipe, sides, donor_modules(repo),
                    captured=m["captured"], amends=mid)
 
 
-def publish(repo_id, branch, b, req, digest, recipe, sides, donor, captured, amends=None):
+UI_ROOTS = ("components/", "pages/", "app/")
+
+
+def coverage(repo, b, recipe):
+    """Which UI files the change touches, and which of them a scene looks at — measured from the
+    diff, not declared. What's uncovered is what accepting the evidence accepts without seeing."""
+    changed = {p for p in _git(repo, "diff", "--name-only", b["beforeCommit"], b["afterCommit"]).splitlines()
+               if p.endswith(".tsx") and p.startswith(UI_ROOTS)}
+    if recipe.get("kind") == "app":
+        looked = {v["file"] for v in recipe["views"] if v.get("file")}
+    else:
+        looked = {recipe["component"]["file"]}
+    return {"changed": sorted(changed), "covered": sorted(changed & looked), "uncovered": sorted(changed - looked)}
+
+
+def publish(repo, branch, b, req, digest, recipe, sides, donor, captured, amends=None):
+    repo_id = repo_name(repo)
     app = recipe.get("kind") == "app"
     scene_ids = [s["id"] for s in scenes_of(recipe)]
     predict = predictions(req, scene_ids)
@@ -620,6 +640,7 @@ def publish(repo_id, branch, b, req, digest, recipe, sides, donor, captured, ame
         "captured": captured,
         "expectation": req["expectation"], "predict": req["predict"], "obligations": obligations(recipe),
         "gaps": req.get("gaps", []),
+        "coverage": coverage(repo, b, recipe),
         "amends": amends, "retrospective": amends is not None,
         "before": {k: sides["before"][k] for k in keep if k in sides["before"]},
         "after": {k: sides["after"][k] for k in keep if k in sides["after"]},
@@ -681,7 +702,7 @@ def observation(m):
            | {"before": m["before"]["scenes"], "after": m["after"]["scenes"]}
            | ({"gaps": m["gaps"]} if m.get("gaps") else {}))
     if m.get("schema", 1) >= 2:
-        key |= {"schema": m["schema"], "claim": m["claim"], "captured": m["captured"],
+        key |= {"schema": m["schema"], "claim": m["claim"], "captured": m["captured"], "coverage": m.get("coverage"),
                 "framing": {side: {k: m[side].get(k) for k in ("fields", "frames")} for side in ("before", "after")}}
     return _sha(_canon(key))
 

@@ -19,7 +19,8 @@
    "window": [
     420,
     120
-   ]
+   ],
+   "file": "components/admin/filters/TimeRangeFilter.tsx"
   },
   {
    "id": "ai-review",
@@ -29,7 +30,8 @@
    "window": [
     560,
     120
-   ]
+   ],
+   "file": "components/admin/AIContentReviewTab.tsx"
   },
   {
    "id": "lookup-email",
@@ -39,7 +41,8 @@
    "window": [
     900,
     120
-   ]
+   ],
+   "file": "components/admin/teamBreakdown/TeamRecipientEmailLookup.tsx"
   },
   {
    "id": "lookup-kind",
@@ -49,7 +52,8 @@
    "window": [
     360,
     120
-   ]
+   ],
+   "file": "components/admin/teamBreakdown/TeamRecipientEmailLookup.tsx"
   },
   {
    "id": "parent",
@@ -64,7 +68,8 @@
    "window": [
     640,
     200
-   ]
+   ],
+   "file": "components/admin/teamBreakdown/TeamDetail.tsx"
   },
   {
    "id": "comped",
@@ -79,7 +84,8 @@
    "window": [
     640,
     200
-   ]
+   ],
+   "file": "components/admin/teamBreakdown/TeamDetail.tsx"
   },
   {
    "id": "access",
@@ -94,7 +100,8 @@
    "window": [
     640,
     200
-   ]
+   ],
+   "file": "components/admin/teamBreakdown/TeamDetail.tsx"
   },
   {
    "id": "role",
@@ -109,7 +116,8 @@
    "window": [
     640,
     200
-   ]
+   ],
+   "file": "components/admin/teamBreakdown/TeamDetail.tsx"
   },
   {
    "id": "safety",
@@ -124,7 +132,8 @@
    "window": [
     640,
     200
-   ]
+   ],
+   "file": "components/admin/teamBreakdown/SkipSafetyCheckComponent.tsx"
   },
   {
    "id": "attachments",
@@ -139,7 +148,8 @@
    "window": [
     640,
     200
-   ]
+   ],
+   "file": "components/admin/teamBreakdown/TeamAttachmentsComponent.tsx"
   },
   {
    "id": "critical",
@@ -154,7 +164,8 @@
    "window": [
     640,
     200
-   ]
+   ],
+   "file": "components/admin/teamBreakdown/CriticalNoticeComponent.tsx"
   },
   {
    "id": "rate",
@@ -164,7 +175,8 @@
    "window": [
     420,
     120
-   ]
+   ],
+   "file": "components/admin/teamBreakdown/ApiRateLimitComponent.tsx"
   },
   {
    "id": "rate-notes",
@@ -182,7 +194,8 @@
    "window": [
     640,
     200
-   ]
+   ],
+   "file": "components/admin/teamBreakdown/ApiRateLimitComponent.tsx"
   },
   {
    "id": "lookup",
@@ -193,7 +206,8 @@
     560,
     120
    ],
-   "steps": []
+   "steps": [],
+   "file": "components/admin/userMemberships/UserMembershipsTab.tsx"
   },
   {
    "id": "team-id",
@@ -214,7 +228,8 @@
    "window": [
     640,
     120
-   ]
+   ],
+   "file": "components/admin/userMemberships/UserMembershipsTab.tsx"
   },
   {
    "id": "team-role",
@@ -235,7 +250,8 @@
    "window": [
     420,
     120
-   ]
+   ],
+   "file": "components/admin/userMemberships/UserMembershipsTab.tsx"
   },
   {
    "id": "access-notes",
@@ -259,7 +275,8 @@
    "window": [
     640,
     200
-   ]
+   ],
+   "file": "components/admin/userMemberships/UserMembershipsTab.tsx"
   },
   {
    "id": "reason",
@@ -283,7 +300,8 @@
    "window": [
     640,
     200
-   ]
+   ],
+   "file": "components/admin/userMemberships/UserMembershipsTab.tsx"
   },
   {
    "id": "limits-lookback",
@@ -293,7 +311,8 @@
    "window": [
     420,
     120
-   ]
+   ],
+   "file": "components/admin/AccountLimitNoticeReviewTab.tsx"
   },
   {
    "id": "limits-snooze",
@@ -308,7 +327,8 @@
    "window": [
     640,
     200
-   ]
+   ],
+   "file": "components/admin/AccountLimitNoticeReviewTab.tsx"
   },
   {
    "id": "assess-decision",
@@ -318,7 +338,8 @@
    "window": [
     560,
     120
-   ]
+   ],
+   "file": "components/admin/DomainAssessment.tsx"
   },
   {
    "id": "assess-notes",
@@ -328,7 +349,8 @@
    "window": [
     640,
     200
-   ]
+   ],
+   "file": "components/admin/DomainAssessment.tsx"
   },
   {
    "id": "metrics-days",
@@ -343,7 +365,8 @@
    "window": [
     420,
     120
-   ]
+   ],
+   "file": "components/admin/DomainReview.tsx"
   },
   {
    "id": "unsafe-page-size",
@@ -353,7 +376,8 @@
    "window": [
     420,
     120
-   ]
+   ],
+   "file": "components/admin/unsafe-email-assets/UnsafeEmailAssetsTab.tsx"
   }
  ],
  "variants": [
