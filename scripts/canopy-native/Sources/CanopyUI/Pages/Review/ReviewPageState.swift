@@ -214,14 +214,12 @@ public final class ReviewPageState: ShipHost {
         Self.oldHalfWidth(files.first { $0.path == path }, usable: diffColumns > 0 ? diffColumns - 13 : 120)
     }
 
-    /// The old half's width: none when the file has nothing old to show (new, or only additions) and
-    /// all of it when it has nothing new (deleted, or only deletions), since a half with nothing in it
-    /// is wasted width; else half, since both halves carry the same context lines and a narrower one
-    /// would wrap them.
+    /// The old half gets no width for additions alone and all of it for deleted files.
+    /// Other files keep both columns so new-side context has room to wrap.
     nonisolated static func oldHalfWidth(_ f: FileDiff?, usable: Int) -> Int {
         guard let f else { return max(24, usable / 2) }
         if f.status == .added || f.del == 0 { return 0 }
-        if f.status == .deleted || f.add == 0 { return usable }
+        if f.status == .deleted { return usable }
         return max(24, usable / 2)
     }
     /// The cursor in the code: its row, half and UTF-16 range in that half's text (one character). It

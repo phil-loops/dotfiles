@@ -135,16 +135,19 @@ import Testing
         #expect(expand(f, nil, [:]).gaps.isEmpty)
     }
 
-    @Test func aHalfWithNothingToShowGetsNoWidth() {
+    @Test func onlyAdditionsAndDeletedFilesCollapseASide() {
         let both = parsePatch("x.ts", ["@@ -1,3 +1,3 @@", " a", "-b", "+B", " c"].joined(separator: "\n"))
         let adds = parsePatch("x.ts", ["@@ -1,2 +1,3 @@", " a", "+b", " c"].joined(separator: "\n"))
         let dels = parsePatch("x.ts", ["@@ -1,3 +1,2 @@", " a", "-b", " c"].joined(separator: "\n"))
         #expect(ReviewPageState.oldHalfWidth(both, usable: 100) == 50)
         #expect(ReviewPageState.oldHalfWidth(adds, usable: 100) == 0)
-        #expect(ReviewPageState.oldHalfWidth(dels, usable: 100) == 100)
+        #expect(ReviewPageState.oldHalfWidth(dels, usable: 100) == 50)
         var added = both
         added.status = .added
         #expect(ReviewPageState.oldHalfWidth(added, usable: 100) == 0)
+        var deleted = dels
+        deleted.status = .deleted
+        #expect(ReviewPageState.oldHalfWidth(deleted, usable: 100) == 100)
     }
 
     // ── review-viewed.test.ts ──
@@ -1381,6 +1384,33 @@ import Testing
         #expect(oldChunks("const value = compute(old, before)", 16) == ["const value = ", "compute(old, ", "before)"])
         #expect(oldChunks("abcdefghijklmnopqrstuvwxyz", 10) == ["abcdefghij", "klmnopqrst", "uvwxyz"], "no space: hard cuts")
         #expect(oldChunks("const value = compute(old, before)", 16).joined() == "const value = compute(old, before)")
+    }
+
+    @Test(arguments: [700, 1100, 1800])
+    func deletionOnlyContextKeepsAReadableNewColumn(_ width: Int) async throws {
+        let kept = #"import { buildEmailMessageCopyInput } from "../../../models/transactional";"#
+        let patch = ["@@ -1,3 +1,2 @@", " " + kept, "-const removed = true;", " export const kept = true;"].joined(separator: "\n")
+        let payload = String(decoding: try JSONEncoder().encode(JSONValue.object(["branch": "add-hankles-limited-label", "baseSha": "base123",
+            "files": .array([["path": "a.ts", "add": 0, "del": 1, "patch": .string(patch)]])])), as: UTF8.self)
+        let (a, _) = try await app(payload)
+        let pg = ReviewPageState.of(a)
+        pg.diffColumns = Int((CGFloat(width) - 24) / DocFont.charWidth) & ~1
+        let storage = NSTextStorage()
+        for s in ReviewDocument.segments(pg, a, CanvasColors(.dark)) { storage.append(s.build()) }
+        var contextRange: NSRange?
+        storage.enumerateAttribute(.rvRow, in: NSRange(location: 0, length: storage.length)) { value, range, _ in
+            if let row = value as? RowInfo, row.kind == .line, row.oldLine == 1 { contextRange = range }
+        }
+        let manager = NSLayoutManager()
+        let container = NSTextContainer(size: NSSize(width: CGFloat(width), height: .greatestFiniteMagnitude))
+        container.lineFragmentPadding = 0
+        storage.addLayoutManager(manager)
+        manager.addTextContainer(container)
+        manager.ensureLayout(for: container)
+        let glyphs = manager.glyphRange(forCharacterRange: try #require(contextRange), actualCharacterRange: nil)
+        var fragments = 0
+        manager.enumerateLineFragments(forGlyphRange: glyphs) { _, _, _, _, _ in fragments += 1 }
+        #expect(fragments <= 3, "new-side context must retain a readable column at \(width) points")
     }
 
     /// In split view a removed line longer than its half reads in full: its first chunk in place (no …),
