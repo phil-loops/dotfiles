@@ -33,7 +33,9 @@
 #                                  rebuilt every tick from memory + stats; and `viewed`, the change
 #           viewed                 blocks Phil has viewed per branch (srv/viewed.py)
 #   todo    todo                   the viewer's own feature tracker (srv/todo.py, ~/.dotfiles/canopy/todo),
-#                                  global rather than per repo; rebuilt when a file's stat moves
+#                                  global rather than per repo; rebuilt when a file's stat moves or the
+#                                  work journal changes. An item with journal work carries `work`: its
+#                                  bounded freshness summary (srv/workfresh.py), read read-only
 # A write the client sends (X-Stack-Write) is answered with `wrote: N`; a domain's `asOf` (on each
 # patch, and per domain in /state) is the write count its inputs were read at, so the client holds
 # its optimistic change until asOf reaches N — never until some older read happens to look equal.
@@ -52,7 +54,7 @@ import threading
 import time
 from urllib.parse import parse_qs
 
-from . import ctx, outbox, push, repostate, reviewdesk, sync, todo, viewed, watch, wiki
+from . import ctx, outbox, push, repostate, reviewdesk, sync, todo, viewed, watch, wiki, workfresh
 
 EPOCH = f"{os.getpid():x}{int(time.time()):x}"
 DOMAINS = ("git", "remote", "review", "todo", "wiki")
@@ -379,8 +381,8 @@ def refresh():
         _commit("remote", _merge(remote.values(), ("pr", "landed", "warm")), None, tick)
         review = _each_repo(lambda n: {**reviewdesk.entities(n), **viewed.entities(n)})
         _commit("review", _merge(review.values(), REVIEW_TYPES), None, tick)
-        tfp = todo.fingerprint()
-        _commit("todo", todo.entities() if tfp != _D["todo"].fp else None, tfp, tick)
+        tfp = (todo.fingerprint(), workfresh.fingerprint())
+        _commit("todo", {"todo": workfresh.attach(todo.entities()["todo"])} if tfp != _D["todo"].fp else None, tfp, tick)
         wfp = wiki.fingerprint()
         _commit("wiki", wiki.entities(wfp) if wfp != _D["wiki"].fp else None, wfp, tick)
         _each_repo(lambda n: reviewdesk.release_due())
