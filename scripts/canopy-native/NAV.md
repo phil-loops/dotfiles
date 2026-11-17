@@ -1,5 +1,7 @@
 # Navigation model
 
+> **Decided 2026-11-17 (later) — the files are back beside the diff:** Phil: "on the side i'd like to see the files themselves that changed". With 2+ files the left column lists them (viewed box, flags, open threads, +/−), the cursor's file lit; `C-w h` into it, `j`/`k`, `↵` opens one. Its width is fixed per diff, so focus never moves the code. A name that doesn't fit drops its folder, then shortens from the middle, so `x.test.ts` and `x.ts` stay apart. `, G` Return to covers the column while open; `space g` / `space b` / `space f` stay the picker.
+
 > **Decided 2026-11-17 — set-aside work opens over the reader:** `, G` opens **Return to**, a guide to flagged changes and unresolved, non-outdated threads. It overlays the diff without reserving a file-list column or changing source wrapping. Selecting an entry leaves code in place; Enter opens the named destination, and Esc returns to the original window. Flags require an exact block; missing blocks remain visible as outside the current diff. Threads open in the conversation, so read marks never have to be erased to reveal one. Current path/line and explicitly marked-read counts orient the reader. Empty means nothing set aside. `space g` / `space b` / `space f` use the complete changed-file picker, including one-file and commit-scoped diffs, with full paths. A retained old diff may stay visible during reload, but it cannot supply destinations named as the new tip or base.
 
 

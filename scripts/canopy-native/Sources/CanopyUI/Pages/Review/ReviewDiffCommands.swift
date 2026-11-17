@@ -369,10 +369,13 @@ enum DiffCommands {
                                pg.tab = "files"
                                if let path = arg as? String { pg.goTo(file: path) }
                            }))
-        r.register(Command(id: "review.in", title: "Open the selected return item", scope: .review, verb: .main, label: "in",
-                           available: { _ in app.pane?.id == reviewGuidePane && pg.guideOpen && onFiles(nil) },
+        r.register(Command(id: "review.in", title: "Open the selected file or return item", scope: .review, verb: .main, label: "in",
+                           available: { _ in onFiles(nil) && (app.pane?.id == reviewGuidePane ? pg.guideOpen : app.pane?.id == reviewTreePane) },
                            route: { _ in
                                guard let row = app.selected else { return nil }
+                               if app.pane?.id == reviewTreePane {
+                                   return row.hasPrefix("f|") ? RouteTo("review.file.go", arg: String(row.dropFirst(2))) : nil
+                               }
                                return RouteTo("review.guide.go", arg: row)
                            }))
         r.register(Command(id: "review.extend", title: "Extend the selection a line (comment on a range)", scope: .line, verb: .extend, label: "range",

@@ -171,6 +171,7 @@ public func blockAnchors(_ f: FileDiff) -> [String: Int] {
 
 public let reviewDiffPane = "diff"
 public let reviewGuidePane = "review-guide"
+public let reviewTreePane = "files"
 /// the branch's line in the header: its points, the cursor `, h` puts there
 public let reviewLinePane = "line"
 public let reviewCodePane = "code"
@@ -201,6 +202,14 @@ public final class ReviewPageState: ShipHost {
     public var diffColumns = 0
     /// A branch with more than one commit can scope its diff to one of them (the header's chip).
     public var scopesCommits: Bool { integration == nil && (branch?.commits ?? 0) > 1 }
+    /// The left column lists the diff's files when there's more than one to move between. Its width
+    /// never follows focus, so moving the keyboard into it leaves the diff where it was.
+    public var showsTree: Bool { views.count > 1 }
+    /// As wide as the longest path needs, within reason; a long folder gives way from its start.
+    public var treeWidth: CGFloat {
+        let longest = files.map(\.path.count).max() ?? 20
+        return min(300, max(180, CGFloat(longest) * 6.6 + 80))
+    }
     var guideContext: String?
     var guideReturnPane: String?
     var guideOpen: Bool { tab == "files" && guideContext == contextKey }
