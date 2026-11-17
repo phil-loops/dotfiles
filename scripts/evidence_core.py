@@ -20,6 +20,7 @@ Cache (losing it costs a re-render): ~/.cache/canopy/evidence. Ledger (not cache
 ~/.local/share/canopy/evidence/ledger.jsonl.
 """
 import fcntl
+import glob
 import hashlib
 import json
 import os
@@ -320,6 +321,7 @@ def _checkout(repo, side, commit, log):
         _stop(d)
         subprocess.run([PROVENANCE, d, "--revert"], capture_output=True)
         _git(d, "checkout", "--detach", "-f", commit)
+    _drop_builds(d)
     head = _git(d, "rev-parse", "HEAD")
     dirty = _git(d, "status", "--porcelain", "--untracked-files=no")
     if head != commit or dirty:
@@ -363,6 +365,22 @@ def _stop(d):
     subprocess.run([PREVIEW, d, "--kill"], capture_output=True)
 
 
+def _drop_builds(d):
+    """Remove the checkout's workspace package builds. They're gitignored, so a checkout survives with
+    the last run's — possibly rebuilt against another branch's packages — and loops-preview, which
+    only rebuilds what it freshly borrows, would serve them."""
+    for dist in glob.glob(os.path.join(d, "packages", "*", "dist")):
+        shutil.rmtree(dist, ignore_errors=True)
+
+
+PREVIEW_BUILD_FAILURES = ("workspace package rebuild failed", "workspace package build failed")
+
+
+def _preview_failure(output):
+    """The line where loops-preview said it is serving code other than this tree's, if any."""
+    return next((line for line in output.splitlines() if any(f in line for f in PREVIEW_BUILD_FAILURES)), None)
+
+
 def _serve(d, log, timeout=1500):
     """Start a preview of checkout `d` and wait until it answers; returns its base URL."""
     # one evidence server at a time, on top of whatever other sessions run: room for exactly one more
@@ -371,6 +389,10 @@ def _serve(d, log, timeout=1500):
     r = subprocess.run([PREVIEW, d], env=env, capture_output=True, text=True)
     if r.returncode:
         raise Refused(f"loops-preview {d} failed: {(r.stderr or r.stdout).strip()[-400:]}")
+    failed = _preview_failure(r.stdout + "\n" + r.stderr)
+    if failed:
+        _stop(d)
+        raise Refused(f"{os.path.basename(d)} would serve code that isn't this tree's: {failed.strip()}")
     listed = json.loads(subprocess.run([PREVIEW, "--json"], capture_output=True, text=True).stdout or "[]")
     port = next((p["port"] for p in listed if p.get("dir") == d), None)
     if not port:
@@ -425,7 +447,7 @@ def app_render(repo, side, commit, tree, recipe_digest, frozen_recipe, contract,
     own_packages = bool(_git(repo, "diff", "--name-only", main_head, commit, "--", "packages/", check=False))
     env = {"lock": hashlib.md5(lock).hexdigest(), "packagesFrom": main_head,
            # loops-preview borrows main's built workspace packages unless this tree's differ (then it rebuilds)
-           "packages": "rebuilt from this tree" if own_packages else "same sources as main, main's build",
+           "packages": "rebuilt from this tree" if own_packages else "borrowed: main's build, unverified against main's sources",
            "db": "local dev database", "user": APP_LOGIN}
     identity = {"schema": SCHEMA, "kind": "app", "tree": tree, "recipe": recipe_digest, "env": env,
                 "contract": contract, "run": nonce}
