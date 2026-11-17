@@ -572,7 +572,7 @@ import Testing
         ShipStub.answer(p, "POST", "/loops/viewed", #"{"ok":true}"#)
         // a.ts's first block is three lines: "-old one" (the old line 2), "+new one" (2), "+new two" (3) — two declarations
         ShipStub.answer(p, "POST", "/loops/syntax/units",
-                        #"{"ok":true,"units":[{"line":1,"endLine":2,"name":"function one","scope":1},{"line":3,"endLine":4,"name":"function two","scope":1}],"functions":[],"classes":[]}"#)
+                        #"{"ok":true,"sha":"e1b98e2a133f5c4e82b6c74fb31efca5b5c3b233","units":[{"line":1,"endLine":2,"name":"function one","scope":1},{"line":3,"endLine":4,"name":"function two","scope":1}],"functions":[],"classes":[]}"#)
         await ReviewUnits.of(a).load(pg, path: "a.ts")
         let fv = { pg.fileOf("a.ts")! }
         let block = fv().blocks[0], keys0 = fv().lineKeys[0]
@@ -607,7 +607,7 @@ import Testing
         let (a, p) = try await app()
         let pg = ReviewPageState.of(a)
         ShipStub.answer(p, "POST", "/loops/syntax/units",
-                        #"{"ok":true,"units":[{"line":1,"endLine":2,"name":"function one","scope":1}],"functions":[],"classes":[]}"#)
+                        #"{"ok":true,"sha":"e1b98e2a133f5c4e82b6c74fb31efca5b5c3b233","units":[{"line":1,"endLine":2,"name":"function one","scope":1}],"functions":[],"classes":[]}"#)
         let units = ReviewUnits.of(a)
         async let first = units.syntax(pg, path: "a.ts")
         async let second = units.syntax(pg, path: "a.ts")
