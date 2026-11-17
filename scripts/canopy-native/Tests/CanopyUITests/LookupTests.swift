@@ -211,7 +211,7 @@ final class HeldLookupStub: URLProtocol, @unchecked Sendable {
         a.nav.typed("renamed")
         #expect(a.nav.choose())
         await until("the rename preview request") { HeldLookupStub.waiting(port, "/loops/lsp/rename") }
-        HeldLookupStub.release(port, "/loops/lsp/rename", #"{"ok":true,"sha":"abc","old":"before","files":[{"path":"a.ts","edits":2}],"diff":"-before\n+renamed"}"#)
+        HeldLookupStub.release(port, "/loops/lsp/rename", try RenameOwnershipTests().preview(a))
         await until("the rename confirmation") { a.nav.picker?.title == "rename before to renamed?" }
         #expect(lookup.pop == .hover("```diff\n-before\n+renamed\n```"))
     }
