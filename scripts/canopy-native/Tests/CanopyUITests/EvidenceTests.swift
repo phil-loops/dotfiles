@@ -45,6 +45,29 @@ import Testing
         #expect(f.observedWords == "same pixels, moved on the page")
     }
 
+    static let apiCard = """
+        {"ok":true,"request":{"recipe":"r","expectation":"e"},"id":"abc","current":true,"available":true,
+         "status":{"judged":false},"run":{"running":false},
+         "manifest":{"basis":{"beforeCommit":"b","afterCommit":"a"},"recipe":{"title":"T","kind":"api"},"expectation":"e",
+           "obligations":[{"id":"limits","request":"limits"}],
+           "before":{"scenes":{"limits":"s1"}},"after":{"scenes":{"limits":"s2"}},
+           "findings":[{"scene":"limits","predicted":{"paths":["$.limit"]},"changed":true,"departure":true,
+                        "status":[200,200],"outside":["$.body.name"],"diffCount":2,
+                        "diff":[{"path":"$.body.limit","before":10,"after":20},
+                                {"path":"$.body.name","before":"t","after":{"x":[1,null]},"added":true}]}]}}
+        """
+
+    @Test func anEndpointCardReadsItsPathDiff() throws {
+        let c = try JSONDecoder().decode(EvidenceCard.self, from: Data(Self.apiCard.utf8))
+        let f = try #require(c.manifest?.findings.first)
+        #expect(c.isAPI)
+        #expect(f.predictedWords == "only $.limit changes")
+        #expect(f.diff?.map(\.path) == ["$.body.limit", "$.body.name"])
+        #expect(f.diff?.last?.after?.text == #"{"x":[1,null]}"#)
+        #expect(f.outside == ["$.body.name"])
+        #expect(c.judgeable(showing: { _ in false }), "an endpoint card's diff is in the manifest itself — no images to wait for")
+    }
+
     @Test func aFieldPredictionSaysWhereTheChangeLanded() throws {
         func f(_ changed: Bool, _ contained: Bool?) throws -> EvidenceCard.Finding {
             let c = contained.map { ",\"contained\":\($0)" } ?? ""
