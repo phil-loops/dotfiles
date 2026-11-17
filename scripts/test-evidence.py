@@ -255,6 +255,12 @@ E._write_atomic(E._admission_path(rid), E._canon({"status": "admitted", "scenes"
 got = E.render("repo", "tree-x", "dg", "frozen", {"node": "v"}, {"browser": "1"}, None, log=lambda *_: None)
 check(got.get("reused") and got.get("build") == {"css": "c1", "js": "j1"}, "a reused render returns the build its admission attested")
 check("build" in E.side_keys(app=False) and "build" in E.side_keys(app=True), "a manifest side keeps the render's build attestation")
+# ── a render sees only the environment its identity names ──
+os.environ["ACCENT"] = "#ff0000"
+renv = E._render_env("/donor", {"EVIDENCE_LOGIN": "x"})
+check("ACCENT" not in renv, "a variable the identity doesn't name never reaches the renderer (a tailwind config can read env)")
+check(renv["NODE_PATH"] == "/donor" and renv["EVIDENCE_LOGIN"] == "x" and set(renv) <= set(E.RENDER_ENV_KEYS) | {"NODE_PATH", "EVIDENCE_LOGIN"},
+      "it gets the donor, the caller's explicit extras, and the named passthroughs only")
 # ── owned execution: a run never serves a package build an earlier run left behind ──
 side = os.path.join(tmp, "side-co")
 for pkg in ("mail-pg", "prisma"):
