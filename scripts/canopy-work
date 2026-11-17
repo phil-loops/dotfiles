@@ -38,7 +38,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from srv import workdelivery, workjournal as wj  # noqa: E402
+from srv import todo, workdelivery, workjournal as wj  # noqa: E402
 
 
 READS = ("worker", "context", "status")
@@ -48,11 +48,22 @@ def out(obj):
     print(json.dumps(obj, indent=1, sort_keys=True, default=str))
 
 
+def incarnation(todo_id):
+    """The tracker record's own incarnation; a legacy record without one isn't linkable yet."""
+    try:
+        item = todo.read(todo_id)
+    except (OSError, ValueError) as e:
+        raise wj.JournalError(f"tracker item {todo_id}: {e}") from None
+    if not item.get("incarnation"):
+        raise wj.JournalError(f"tracker item {todo_id} predates incarnations; enroll it first")
+    return item["incarnation"]
+
+
 def work_id(j, args):
     if getattr(args, "work", None):
         return args.work[0] if isinstance(args.work, list) else args.work
     if getattr(args, "todo", None):
-        w = j.work_for_todo(args.todo)
+        w = j.work_for_todo(args.todo, incarnation(args.todo))
         if w is None:
             raise wj.JournalError(f"tracker item {args.todo} has no work yet")
         return w
@@ -67,7 +78,7 @@ def main():
         p.add_argument(f"--{k}")
     p = sub.add_parser("relink")
     p.add_argument("--work", required=True)
-    for k in ("todo", "repo", "project", "branch", "title"):
+    for k in ("repo", "project", "branch", "title"):
         p.add_argument(f"--{k}")
     sub.add_parser("retire").add_argument("--work", required=True)
     p = sub.add_parser("source")
@@ -143,11 +154,11 @@ def main():
     if c == "work":
         links = {k: getattr(args, k) for k in ("repo", "project", "branch", "title") if getattr(args, k)}
         if args.todo:
-            out({"work_id": j.work_for_todo(args.todo, create=True, **links)})
+            out({"work_id": j.work_for_todo(args.todo, incarnation(args.todo), create=True, **links)})
         else:
             out({"work_ids": j.works_for_branch(args.repo, args.branch)})
     elif c == "relink":
-        links = {("todo_id" if k == "todo" else k): getattr(args, k) for k in ("todo", "repo", "project", "branch", "title") if getattr(args, k)}
+        links = {k: getattr(args, k) for k in ("repo", "project", "branch", "title") if getattr(args, k)}
         j.relink(args.work, **links)
         out(j.work(args.work))
     elif c == "retire":
