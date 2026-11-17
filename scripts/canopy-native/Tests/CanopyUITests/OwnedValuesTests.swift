@@ -79,4 +79,49 @@ import Testing
         #expect(values.values["a"] == "first")
         #expect(values.before(second, "a") == "first")
     }
+
+    @Test func aCanonicalReplyUpdatesItsDescendantsBaselineWithoutReplacingTheirValue() {
+        let values = OwnedValues<String, String>()
+        values.set("a", "old")
+        let undo = values.stage([.init(key: "a", value: "old")])
+        let newer = values.stage([.init(key: "a", value: "new")])
+        values.accept(undo, replacing: [.init(key: "a", value: nil)])
+        #expect(values.values["a"] == "new")
+        values.rollback(newer)
+        #expect(values.values["a"] == nil && values.before(newer, "a") == nil)
+    }
+
+    @Test func observationsOnlyRetireUnchangedValuesWhichWereAlreadyAccepted() {
+        let values = OwnedValues<String, String>()
+        values.set("stable", "value")
+        values.set("aba", "value")
+        let pending = values.stage([.init(key: "pending", value: "value")])
+        let snapshot = values.snapshot()
+        values.set("aba", "other"); values.set("aba", "value")
+        values.set("new", "value")
+        values.accept(pending)
+        values.discardUnchanged(snapshot)
+        #expect(values.values == ["aba": "value", "pending": "value", "new": "value"])
+        let next = values.snapshot()
+        let foreign = OwnedValues<String, String>()
+        foreign.discardUnchanged(next)
+        #expect(foreign.values.isEmpty && values.values.count == 3)
+        values.discardUnchanged(next)
+        #expect(values.values.isEmpty)
+    }
+
+
+    @Test func aReadOnlyReconcilesItsOwnKeysAndAHiddenCanonicalReplyKeepsANewerAcceptance() {
+        let values = OwnedValues<String, String>()
+        values.set("a", "A"); values.set("b", "B")
+        let snapshot = values.snapshot()
+        values.discardUnchanged(snapshot, keys: ["a"])
+        #expect(values.values == ["b": "B"])
+        let undo = values.stage([.init(key: "b", value: "B")])
+        let newer = values.stage([.init(key: "b", value: "new")])
+        values.accept(newer)
+        values.accept(undo, replacing: [.init(key: "b", value: nil)])
+        #expect(values.values["b"] == "new" && values.before(newer, "b") == nil)
+    }
+
 }
