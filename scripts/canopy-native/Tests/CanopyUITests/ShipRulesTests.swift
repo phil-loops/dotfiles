@@ -112,6 +112,79 @@ import Testing
         #expect(p.tail?.lines == ["ok"])
     }
 
+    @Test func environmentFailureSkipsTheGatesThatNeverStarted() throws {
+        let json = #"{"running":false,"events":[{"event":"plan","gates":["env","typecheck","tests"]},{"event":"done","gate":"env","ok":false,"ms":42},{"event":"result","ok":false,"note":"environment not ready — tests skipped; re-run","gates":[{"name":"env","ok":false,"ms":42,"summary":"Postgres is down"}]}]}"#
+        let p = try JSONDecoder().decode(GateProgress.self, from: Data(json.utf8))
+        let rows = GatesRun.rows(p, now: 100)
+        #expect(rows.map(\.state) == [.red, .skipped, .skipped])
+        #expect(rows[0].summary == "Postgres is down")
+        #expect(rows[1].summary == "environment not ready — tests skipped; re-run")
+        #expect(rows.dropFirst().allSatisfy { $0.ms == nil })
+        #expect(GatesStrip.step[.skipped] == .skip && rows[1].label == "typecheck skipped")
+    }
+
+    @Test func checkoutFailureNeedsNoDoneEvent() throws {
+        let json = #"{"running":false,"events":[{"event":"plan","gates":["worktree"]},{"event":"result","ok":false,"gates":[{"name":"worktree","ok":false,"ms":0,"summary":"checkout is dirty"}]}]}"#
+        let p = try JSONDecoder().decode(GateProgress.self, from: Data(json.utf8))
+        #expect(GatesRun.rows(p, now: 100) == [GateRow(name: "worktree", state: .red, ms: 0, summary: "checkout is dirty")])
+    }
+
+    @Test func terminalQueueFailureNeedsNoPlanAndEndsSetup() throws {
+        let json = #"{"running":true,"elapsed":1000,"events":[{"event":"setup","step":"queue","ts":1},{"event":"result","ok":false,"gates":[{"name":"queue","ok":false,"summary":"branch changed while queued — re-run"}]}]}"#
+        let p = try JSONDecoder().decode(GateProgress.self, from: Data(json.utf8))
+        let rows = GatesRun.rows(p, now: 1000)
+        #expect(rows == [GateRow(name: "queue", state: .red, ms: nil, summary: "branch changed while queued — re-run")])
+        #expect(!GatesRun.isRunning(p) && GatesRun.setup(p) == nil)
+        #expect(GatesRun.waiting(p, rows: rows, inFlight: true, now: 1000) == nil)
+    }
+
+    @Test func terminalVerdictsPreserveWaiversAndSupersedeTransientEvents() throws {
+        let json = #"{"running":true,"events":[{"event":"plan","gates":["env","typecheck","tests"]},{"event":"done","gate":"env","ok":true,"ms":1},{"event":"start","gate":"typecheck","ts":1},{"event":"result","ok":false,"gates":[{"name":"env","ok":false,"ms":2,"summary":"final failure"},{"name":"typecheck","ok":true,"ms":0,"skipped":true,"advisory":true,"warn":"typecheck skipped (quick gates — CI checks it)"},{"name":"tests","ok":true,"ms":0,"warn":"tests skipped by you"}]}]}"#
+        let p = try JSONDecoder().decode(GateProgress.self, from: Data(json.utf8))
+        let rows = GatesRun.rows(p, now: 100)
+        #expect(rows.map(\.state) == [.red, .waived, .waived])
+        #expect(rows[0].ms == 2 && rows[0].summary == "final failure")
+        #expect(GatesRun.quick(rows) == ["typecheck"])
+        #expect(rows[2].summary == "tests skipped by you")
+        #expect(GatesRun.waiting(p, rows: rows, inFlight: true, now: 100) == nil)
+    }
+
+    @Test func aStartedGateWithoutAVerdictStopsAtTheTerminalTime() throws {
+        let json = #"{"running":true,"events":[{"event":"plan","gates":["env","tests","lint"]},{"event":"start","gate":"tests","ts":10},{"event":"result","ts":12,"ok":false,"gates":[{"name":"env","ok":false}]}],"tail":{"gate":"tests","lines":[],"age":999}}"#
+        let p = try JSONDecoder().decode(GateProgress.self, from: Data(json.utf8))
+        let rows = GatesRun.rows(p, now: 100)
+        #expect(rows.map(\.state) == [.red, .stopped, .skipped])
+        #expect(rows[1].ms == 2000 && rows[1].quiet == nil)
+        #expect(GatesRun.rows(p, now: 200) == rows)
+        #expect(GatesRun.stuck(rows) == nil)
+    }
+
+    @Test func obsoleteRunsKeepCompletedGatesAndStopOnlyTheStartedGate() throws {
+        let json = #"{"running":true,"events":[{"event":"plan","gates":["env","tests","lint"]},{"event":"done","gate":"env","ok":true,"ms":30},{"event":"start","gate":"tests","ts":10},{"event":"result","ok":false,"gates":[{"name":"queue","ok":false,"summary":"branch changed while running — re-run"}]}]}"#
+        let p = try JSONDecoder().decode(GateProgress.self, from: Data(json.utf8))
+        let rows = GatesRun.rows(p, now: 100)
+        #expect(rows.map(\.name) == ["env", "tests", "lint", "queue"])
+        #expect(rows.map(\.state) == [.green, .stopped, .skipped, .red])
+        #expect(rows[1].ms == nil && rows[1].label == "tests stopped" && GatesStrip.step[.stopped] == .idle)
+        #expect(GatesRun.rows(p, now: 200) == rows)
+    }
+
+    @Test func anEmptyTerminalResultEndsAllWaiting() throws {
+        let json = #"{"running":true,"elapsed":1000,"events":[{"event":"setup","step":"env","ts":1},{"event":"result","ok":true,"note":"no gates configured for this repo","gates":[]}]}"#
+        let p = try JSONDecoder().decode(GateProgress.self, from: Data(json.utf8))
+        #expect(!GatesRun.isRunning(p) && GatesRun.setup(p) == nil)
+        #expect(GatesRun.waiting(p, rows: [], inFlight: true, now: 1000) == nil)
+    }
+
+    @Test func aDeadSetupCannotBorrowAnOptimisticRunningState() throws {
+        let json = #"{"running":false,"dead":true,"elapsed":999,"events":[{"event":"setup","step":"queue","ts":1,"behind":"other-branch"}]}"#
+        let p = try JSONDecoder().decode(GateProgress.self, from: Data(json.utf8))
+        let rows = GatesRun.rows(p, now: 1000)
+        #expect(rows == [GateRow(name: "queue", state: .stopped, ms: nil)])
+        #expect(!GatesRun.isRunning(p))
+        #expect(GatesRun.waiting(p, rows: rows, inFlight: true, now: 1000) == nil)
+    }
+
     @Test func secs() {
         #expect(GatesRun.secs(nil) == "")
         #expect(GatesRun.secs(4400) == "4s")
