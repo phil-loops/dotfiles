@@ -18,34 +18,60 @@ public struct HelixOpen: Equatable {
     public var whole = false
     /// opened from the open file: quitting puts that pane back where Helix left off
     public var fromSide = false
+    public let session = UUID()
+    let source: BranchSource
+    let reader: ReaderContext
+
+    public static func == (lhs: HelixOpen, rhs: HelixOpen) -> Bool {
+        lhs.session == rhs.session && lhs.path == rhs.path && lhs.line == rhs.line && lhs.col == rhs.col &&
+            lhs.dir == rhs.dir && lhs.sha == rhs.sha && lhs.whole == rhs.whole && lhs.fromSide == rhs.fromSide && lhs.source == rhs.source
+    }
 }
 
 private struct HelixWhere: Decodable { var ok: Bool; var dir: String?; var sha: String?; var err: String? }
-private struct HelixLanded: Decodable { var ok: Bool; var nothing: Bool?; var message: String?; var err: String? }
 
 extension ReviewPageState {
     func openHelix(_ app: AppModel, branch: String, path: String, line: Int, col: Int, whole: Bool = false, fromSide: Bool = false) {
-        let warm = helixDirs["\(branch)@\(tip)"]
-        helix = HelixOpen(path: path, line: line, col: col, dir: warm, sha: tip, whole: whole, fromSide: fromSide)
-        if warm != nil { return app.runner.say("Helix on \(branch) · :w saves · quitting commits it") }
-        app.runner.say("checking \(branch) out for Helix…")
-        Task { @MainActor in
-            let r = await askHelixDir(app, branch: branch)
-            guard helix?.path == path, helix?.dir == nil else { return }
-            guard let r, r.ok, let dir = r.dir else {
-                helix = nil
-                return app.runner.say(r?.err ?? "couldn't check \(branch) out for Helix")
+        guard helix == nil, diffCurrent, !scoped, integration == nil, let t = target, t.name == branch,
+              let source = BranchSource.current(app, t.id), HelixLanding.fullObject(source.tip) else { return }
+        let reader = ReaderContext(app)
+        let open = HelixOpen(path: path, line: line, col: col, sha: source.tip, whole: whole, fromSide: fromSide, source: source, reader: reader)
+        helixTask?.cancel()
+        helixSession = open.session
+        pendingHelixReturn = nil
+        helixAt = nil
+        helix = open
+        app.runner.say("checking \(source.repo)/\(branch) out for Helix…")
+        helixTask = Task { @MainActor in
+            @MainActor func current() -> Bool {
+                helix?.session == open.session && !Task.isCancelled && reader.isCurrent(app) && diffCurrent && BranchSource.current(app, source.id) == source
+            }
+            defer { if helix?.session == open.session && helix?.dir == nil { helix = nil } }
+            guard current() else { return }
+            let body = ["branch": source.name, "op": "where"]
+            let answer = await app.transport.ask(app.transport.atRepo(source.repo, "/review-helix"), body, as: HelixWhere.self)
+            guard current() else { return }
+            guard let answer, answer.ok, answer.sha == source.tip, let dir = answer.dir, dir.hasPrefix("/") else {
+                return app.runner.say(answer?.err ?? "couldn't prepare Helix at the shown commit · try again")
             }
             helix?.dir = dir
-            helix?.sha = r.sha ?? tip
-            app.runner.say("Helix on \(branch) · :w saves · quitting commits it")
+            app.runner.say("Helix on \(source.repo)/\(branch) · :w saves · quitting commits it")
         }
     }
 
-    /// Make the branch's checkout before anyone asks, so `i` and `o` open Helix at once.
-    func warmHelix(_ app: AppModel) {
-        guard let t = target, integration == nil, !tip.isEmpty, helixDirs["\(t.name)@\(tip)"] == nil else { return }
-        Task { @MainActor in _ = await askHelixDir(app, branch: t.name) }
+    @discardableResult func cancelHelixPreparation() -> Bool {
+        guard let open = helix, open.dir == nil else { return false }
+        helixTask?.cancel()
+        helixTask = nil
+        helix = nil
+        helixAt = nil
+        return true
+    }
+
+    func moveHelix(session: UUID, path: String, line: Int) {
+        guard helix?.session == session, line > 0, !path.hasPrefix("/"),
+              !path.split(separator: "/", omittingEmptySubsequences: false).contains(where: { $0.isEmpty || $0 == "." || $0 == ".." }) else { return }
+        helixAt = (path, line)
     }
 
     /// Resolve origin from an explicitly targeted checkout at the observed head.
@@ -86,36 +112,51 @@ extension ReviewPageState {
         return u.hasPrefix("https://github.com/") ? u : nil
     }
 
-    private func askHelixDir(_ app: AppModel, branch: String) async -> HelixWhere? {
-        let at = tip
-        let r = await app.transport.ask(repoPath("/review-helix"), ["branch": branch, "op": "where"], as: HelixWhere.self)
-        if let r, r.ok, let dir = r.dir, (r.sha ?? at) == at { helixDirs["\(branch)@\(at)"] = dir }
-        return r
+    func finishHelix(_ app: AppModel, session: UUID, exitCode: Int32?) {
+        guard let open = helix, open.session == session else { return }
+        guard exitCode == 0 else {
+            helix = nil
+            helixAt = nil
+            if id == open.source.id { app.runner.say("Helix stopped · edits are saved in \(open.dir ?? "its checkout")") }
+            return
+        }
+        landHelix(app, session: session)
     }
 
-    /// Helix quit: commit what it changed, and the diff is back.
-    func landHelix(_ app: AppModel) {
-        guard let h = helix, let dir = h.dir, let t = target else { helix = nil; return }
+    /// Quit consumes only its own editor session; the registered write keeps that session's owner.
+    func landHelix(_ app: AppModel, session: UUID? = nil) {
+        guard let open = helix, session == nil || session == open.session, let dir = open.dir else { return }
         helix = nil
-        let at = helixAt ?? (h.path, h.line)
+        let at = helixAt ?? (open.path, open.line)
         helixAt = nil
-        let k = stopNear(path: at.path, line: at.line)
-        if h.fromSide, k == nil {
-            // a file the diff doesn't show: back in the window, at the tip Helix edited
-            show(Loc(repo: t.repo, sha: h.sha, path: at.path, line: at.line))
-        } else {
-            pendingNear = (id, at.path, at.line)
-            if let k { setCursor(k) }
-            app.focus(pane: reviewDiffPane)
+        var reader: ReaderContext?
+        if id == open.source.id, tip == open.source.tip, diffCurrent, !scoped, open.reader.isCurrent(app) {
+            let destination: HelixReturn.Destination
+            let key = stopNear(path: at.path, line: at.line)
+            if open.fromSide, key == nil, let window = code, let previous = window.doc {
+                if previous.repo == open.source.repo, previous.sha == open.source.tip, previous.path == at.path, window.text != nil {
+                    let loc = Loc(repo: open.source.repo, sha: open.source.tip, path: at.path, line: at.line)
+                    show(loc, in: window)
+                    destination = .file(window, loc)
+                } else { destination = .file(window, previous) }
+            } else {
+                destination = .diff
+                if let key { setCursor(key) }
+                app.focus(pane: reviewDiffPane)
+            }
+            reader = ReaderContext(app)
+            pendingHelixReturn = HelixReturn(app, open: open, path: at.path, line: at.line, destination: destination)
         }
-        Task { @MainActor in
-            let body = ["branch": t.name, "op": "land", "dir": dir, "sha": h.sha]
-            let r = await app.transport.ask(repoPath("/review-helix"), body, as: HelixLanded.self)
-            if r?.ok != true || r?.nothing == true { pendingNear = nil }
-            guard let r, r.ok else { return app.runner.say(r?.err ?? "the edit didn't commit — it's saved in \(dir)") }
-            app.runner.say(r.nothing == true ? "nothing changed" : "committed “\(r.message ?? "the edit")” to \(t.name)")
+        guard app.store.epoch == open.source.epoch else {
+            if pendingHelixReturn?.session == open.session { pendingHelixReturn = nil }
+            if reader?.isCurrent(app) == true { app.runner.say("the server changed · edits are saved in \(dir)") }
+            return
         }
+        let landing = HelixLanding(open: open, dir: dir, reader: reader)
+        helixLandingPermits.insert(open.session)
+        app.runner.dispatch("review.helix.land", via: .key, target: open.source.id, arg: landing)
     }
+
 }
 
 /// Helix's position from its status line ("NOR   pages/x.tsx [+]   1 sel  12:4"): the file and the line.
@@ -149,7 +190,7 @@ struct HelixHalf: NSViewRepresentable {
     let dir: String
     let colors: CanvasColors
     var moved: (String, Int) -> Void = { _, _ in }
-    let quit: () -> Void
+    let quit: (Int32?) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(quit: quit) }
 
@@ -176,11 +217,11 @@ struct HelixHalf: NSViewRepresentable {
     }
 
     final class Coordinator: NSObject, LocalProcessTerminalViewDelegate {
-        var quit: () -> Void
-        init(quit: @escaping () -> Void) { self.quit = quit }
+        var quit: (Int32?) -> Void
+        init(quit: @escaping (Int32?) -> Void) { self.quit = quit }
 
         func processTerminated(source: TerminalView, exitCode: Int32?) {
-            DispatchQueue.main.async { [quit] in quit() }
+            DispatchQueue.main.async { [quit] in quit(exitCode) }
         }
         func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {}
         func setTerminalTitle(source: LocalProcessTerminalView, title: String) {}

@@ -10,6 +10,7 @@ enum ReviewArea: PageArea {
     static func install(_ app: AppModel) {
         app.addSurface(ReviewSurface())
         DiffCommands.install(app)
+        HelixLanding.install(app)
         ReviewGuide.install(app)
         EvidenceCommands.install(app)
         placeInSheet(app.registry)

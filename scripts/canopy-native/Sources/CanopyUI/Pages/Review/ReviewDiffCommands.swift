@@ -578,6 +578,7 @@ enum DiffCommands {
                            }))
         r.register(Command(id: "line.cancel", title: "Drop the picked end, else back to the diff", scope: .branchLine, verb: .cancel, label: "back",
                            local: { _, _ in
+                               if pg.cancelHelixPreparation() { app.runner.say("Helix opening cancelled"); return }
                                if WordsByName.backOut(app) { return }
                                if pg.lineAnchor != nil { pg.lineAnchor = nil; return }
                                app.focus(pane: reviewDiffPane)
@@ -1037,6 +1038,7 @@ enum DiffCommands {
                            }))
         r.register(Command(id: "review.back", title: "Back out", scope: .review, verb: .cancel, label: "back", quiet: true,
                            local: { _, _ in
+                               if pg.cancelHelixPreparation() { app.runner.say("Helix opening cancelled"); return }
                                if WordsByName.backOut(app) { return }
                                if ReviewGitHubOpening.backOut(app) { return }
                                if BenchOpening.backOut(app) { return }
@@ -1166,7 +1168,7 @@ enum DiffCommands {
 
         r.register(Command(id: "review.open", title: "Open the file in Helix, over the diff — quitting commits what changed", scope: .review,
                            verb: .editor, label: "helix",
-                           available: { _ in pg.integration == nil && pg.helix == nil },
+                           available: { _ in pg.diffCurrent && !pg.scoped && pg.integration == nil && pg.helix == nil },
                            local: { _, _ in if !pg.openHelixWhole(app) { throw Refusal("nothing to open here") } }))
 
         r.register(Command(id: "review.match", title: "The other half of this edit — what replaced the line, or what it replaced",
