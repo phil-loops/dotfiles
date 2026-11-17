@@ -122,7 +122,15 @@ for (const scene of recipe.scenes) {
   if (failed.length) { await browser.close(); fail(`scene ${scene.id}: precondition failed: ${failed.join(", ")}`); }
   const png = await page.locator("#frame").screenshot({ animations: "disabled", caret: "hide" });
   fs.writeFileSync(path.join(out, "scenes", `${scene.id}.png`), png);
-  scenes[scene.id] = { sha: sha(png), checks };
+  // where the picture sat on the page: the tree's global styles can move #frame with the crop unchanged
+  const placed = await page.evaluate(() => {
+    const r = document.querySelector("#frame").getBoundingClientRect();
+    return {
+      crop: [r.left + scrollX, r.top + scrollY, r.width, r.height].map((n) => Math.round(n)),
+      viewport: [innerWidth, innerHeight], scroll: [Math.round(scrollX), Math.round(scrollY)],
+    };
+  });
+  scenes[scene.id] = { sha: sha(png), checks, frame: placed };
   await ctx.close();
 }
 const browserVersion = browser.version();

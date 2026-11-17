@@ -39,6 +39,12 @@ import Testing
         #expect(!c.judgeable(showing: { $0 == "s1" }), "a tile still blank (slow or failed download) isn't something Phil saw")
     }
 
+    @Test func samePixelsInANewPlaceSayTheyMoved() throws {
+        let f = try JSONDecoder().decode(EvidenceCard.Finding.self, from: Data(
+            "{\"scene\":\"s\",\"predicted\":\"same\",\"changed\":false,\"moved\":true,\"departure\":true}".utf8))
+        #expect(f.observedWords == "same pixels, moved on the page")
+    }
+
     @Test func aFieldPredictionSaysWhereTheChangeLanded() throws {
         func f(_ changed: Bool, _ contained: Bool?) throws -> EvidenceCard.Finding {
             let c = contained.map { ",\"contained\":\($0)" } ?? ""

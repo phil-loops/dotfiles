@@ -266,6 +266,16 @@ sh("branch", "-f", "pinned", before)
 pb = E.basis(repo, "pinned", pin={"before": before, "after": bb["afterCommit"]})
 check((pb["beforeCommit"], pb["afterCommit"]) == (before, bb["afterCommit"]) and pb["afterTree"] == sh("rev-parse", bb["afterCommit"] + "^{tree}"),
       "a pinned basis uses the handed commits, not wherever the branch points now")
+# ── placement: a picture that moved on the page is a change, even with identical pixels ──
+fa = {"crop": [0, 0, 400, 200], "viewport": [640, 400], "scroll": [0, 0]}
+fb = {"crop": [0, 24, 400, 200], "viewport": [640, 400], "scroll": [0, 0]}
+check(E.finding("s", "same", "x", "x", [], None, frames=(fa, fb))["departure"],
+      "identical pixels in a new place depart from a 'same' prediction")
+check(not E.finding("s", "changes", "x", "x", [], None, frames=(fa, fb))["departure"]
+      and E.finding("s", "changes", "x", "x", [], None, frames=(fa, fb))["moved"],
+      "a move satisfies 'changes', and says it moved")
+check(not E.finding("s", "same", "x", "x", [], None, frames=(fa, dict(fa)))["departure"], "the same place and pixels hold 'same'")
+check("frames" in E.side_keys(app=False), "a component manifest keeps where each picture sat")
 # ── owned execution: a run never serves a package build an earlier run left behind ──
 side = os.path.join(tmp, "side-co")
 for pkg in ("mail-pg", "prisma"):

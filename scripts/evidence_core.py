@@ -286,7 +286,7 @@ def render(repo, tree, recipe_digest, frozen_recipe, env, contract, donor, fresh
     if have and not fresh:
         log(f"  reused admitted render {render_id[:12]}")
         return {"renderId": render_id, "scenes": adm["scenes"], "identity": identity, "build": adm.get("build"),
-                "reused": True}
+                "frames": adm.get("frames"), "reused": True}
     snap = snapshot(repo, tree)
     runs = [_attempt(snap, frozen_recipe, donor, render_id, n, log) for n in ((1,) if have else (1, 2))]
     results = [r for _, r in runs]
@@ -294,9 +294,12 @@ def render(repo, tree, recipe_digest, frozen_recipe, env, contract, donor, fresh
         if r.get("browser") != contract["browser"]:
             raise Refused(f"rendered with Chrome {r.get('browser')}, pinned {contract['browser']}")
     observed = [{k: v["sha"] for k, v in r["scenes"].items()} for r in results]
+    framed = [{k: v.get("frame") for k, v in r["scenes"].items()} for r in results]
     expected = adm["scenes"] if have else observed[0]
-    if any(o != expected for o in observed):
-        diff = sorted(k for o in observed for k in o if o.get(k) != expected.get(k))
+    expected_frames = adm.get("frames") if have and adm.get("frames") is not None else framed[0]
+    if any(o != expected for o in observed) or any(f != expected_frames for f in framed):
+        diff = sorted(k for o, f in zip(observed, framed) for k in o
+                      if o.get(k) != expected.get(k) or f.get(k) != expected_frames.get(k))
         _write_atomic(_admission_path(render_id), _canon({
             "status": "conflicted", "renderId": render_id, "identity": identity,
             "why": f"independent attempts disagree on {', '.join(sorted(set(diff)))}",
@@ -313,11 +316,12 @@ def render(repo, tree, recipe_digest, frozen_recipe, env, contract, donor, fresh
     if not have:
         _write_atomic(_admission_path(render_id), _canon({
             "status": "admitted", "renderId": render_id, "identity": identity, "scenes": expected,
-            "build": results[0]["build"], "attempts": [d for d, _ in runs],
+            "build": results[0]["build"], "frames": framed[0], "attempts": [d for d, _ in runs],
             "at": time.strftime("%Y-%m-%dT%H:%M:%S%z")}))
         log(f"  admitted render {render_id[:12]} (2 attempts matched)")
     build = adm.get("build") if have else results[0]["build"]
-    return {"renderId": render_id, "scenes": expected, "identity": identity, "build": build, "reused": False}
+    return {"renderId": render_id, "scenes": expected, "identity": identity, "build": build,
+            "frames": expected_frames, "reused": False}
 
 
 # ── app recipes: the real app, served from exactly one commit ─────────────────────────────────
@@ -573,15 +577,22 @@ def predictions(req, scene_ids):
     return out
 
 
-def finding(sid, predicted, b_sha, a_sha, fields, modules):
+def _placement(frame):
+    return frame and (frame.get("crop"), frame.get("viewport"), frame.get("scroll"))
+
+
+def finding(sid, predicted, b_sha, a_sha, fields, modules, frames=None):
+    """One scene's outcome against its prediction. `frames` (before, after) are where each picture sat
+    on the page: identical pixels in a new place moved, and a move is a change."""
     changed = b_sha != a_sha
+    moved = bool(frames and frames[0] and frames[1] and _placement(frames[0]) != _placement(frames[1]))
     m = measure(b_sha, a_sha, modules) if changed else None
     if predicted == "field":
-        ok = changed and bool(m) and not m.get("sizeChanged") and bool(m.get("box")) and inside(m["box"], fields)
+        ok = changed and not moved and bool(m) and not m.get("sizeChanged") and bool(m.get("box")) and inside(m["box"], fields)
         departure = not ok
     else:
-        departure = changed != (predicted == "changes")
-    out = {"scene": sid, "predicted": predicted, "changed": changed, "departure": departure, "measure": m}
+        departure = (changed or moved) != (predicted == "changes")
+    out = {"scene": sid, "predicted": predicted, "changed": changed, "moved": moved, "departure": departure, "measure": m}
     if predicted == "field" and changed:
         out["contained"] = not departure
     return out
@@ -729,7 +740,7 @@ def coverage(repo, b, recipe):
 def side_keys(app):
     """What a manifest keeps of each side's render: identity and attested build travel with it, so the
     ledger can say what produced an accepted picture after the cache lets the admission go."""
-    return ("renderId", "scenes", "identity", "build") + (("fields", "frames", "capturedAt") if app else ())
+    return ("renderId", "scenes", "identity", "build", "frames") + (("fields", "capturedAt") if app else ())
 
 
 def publish(repo, branch, b, req, digest, recipe, sides, donor, captured, amends=None):
@@ -741,7 +752,8 @@ def publish(repo, branch, b, req, digest, recipe, sides, donor, captured, amends
     for sid in scene_ids:
         fields = [sides[s].get("fields", {}).get(sid) for s in ("before", "after")]
         findings.append(finding(sid, predict[sid], sides["before"]["scenes"][sid], sides["after"]["scenes"][sid],
-                                [f for f in fields if f], donor))
+                                [f for f in fields if f], donor,
+                                frames=tuple((sides[s].get("frames") or {}).get(sid) for s in ("before", "after"))))
     keep = side_keys(app)
     manifest = {
         "schema": SCHEMA, "repo": repo_id, "basis": b,
