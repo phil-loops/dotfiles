@@ -140,13 +140,16 @@ def main():
     elif args.cmd == "show":
         print(open(todo.path(args.id)).read(), end="")
     elif args.cmd == "claim":
-        it = todo.read(args.id)
-        owner, session = it.get("owner"), me()
+        session = me()
         if not session:
             sys.exit("canopy-todo claim: not in a Claude session (no CLAUDE_CODE_SESSION_ID) — use set state=doing")
-        if owner and owner != session and it.get("state") == "doing" and alive(owner) and not args.force:
-            sys.exit(f"canopy-todo: {args.id} is owned by live session {owner} — `claude-say {owner} \"…\"` to coordinate, or --force")
-        print(line(todo.update(args.id, state="doing", owner=session)))
+
+        def take(it):   # decided on the item as it is under the lock, so two claimers can't both win
+            owner = it.get("owner")
+            if owner and owner != session and it.get("state") == "doing" and alive(owner) and not args.force:
+                raise ValueError(f"{args.id} is owned by live session {owner} — `claude-say {owner} \"…\"` to coordinate, or --force")
+            return {"state": "doing", "owner": session}
+        print(line(todo.update(args.id, edit=take)))
     elif args.cmd == "set":
         fields = {}
         for pair in args.pairs:
@@ -154,9 +157,10 @@ def main():
             fields[k] = [x for x in v.split(",") if x] if k in LISTS else int(v) if k == "rank" and v else v or None
         print(line(todo.update(args.id, **fields)))
     elif args.cmd in ("done", "drop"):
-        it = todo.read(args.id)
-        body = with_section(it["body"], "Done" if args.cmd == "done" else "Dropped", f"{todo.today()} — {args.note}", False) if args.note else it["body"]
-        print(line(todo.update(args.id, state="done" if args.cmd == "done" else "dropped", owner=None, rank=None, body=body)))
+        def close(it):
+            body = with_section(it["body"], "Done" if args.cmd == "done" else "Dropped", f"{todo.today()} — {args.note}", False) if args.note else it["body"]
+            return {"state": "done" if args.cmd == "done" else "dropped", "owner": None, "rank": None, "body": body}
+        print(line(todo.update(args.id, edit=close)))
     elif args.cmd == "rank":
         project = project_id(args.project)
         for i in args.ids:
@@ -172,8 +176,8 @@ def main():
             if it.get("rank") and in_list(it, project):
                 print(line(it))
     elif args.cmd == "steps":
-        it = todo.read(args.id)
-        print(line(todo.update(args.id, body=with_section(it["body"], "Next steps", sys.stdin.read(), True))))
+        steps = sys.stdin.read()
+        print(line(todo.update(args.id, edit=lambda it: {"body": with_section(it["body"], "Next steps", steps, True)})))
     elif args.cmd == "check":
         bad = [(it["id"], p) for it in todo.all_items() for p in it.get("problems", [])]
         missing = [(it["id"], f"blocked by {b}, which doesn't exist") for it in todo.all_items() for b in it.get("blocked_by", []) if b not in todo.ids()]
