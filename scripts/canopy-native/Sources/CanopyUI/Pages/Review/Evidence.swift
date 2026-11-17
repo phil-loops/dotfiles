@@ -23,6 +23,8 @@ public struct EvidenceCard: Decodable, Equatable, Sendable {
     }
     public struct Finding: Decodable, Equatable, Sendable {
         var scene: String; var predicted: String; var changed: Bool; var departure: Bool; var measure: Measure?
+        /// identical pixels, but the picture sat somewhere else on the page
+        var moved: Bool?
         /// for a "field" prediction that changed: whether every changed pixel sits on the field itself
         var contained: Bool?
 
@@ -34,7 +36,7 @@ public struct EvidenceCard: Decodable, Equatable, Sendable {
             }
         }
         var observedWords: String {
-            guard changed else { return "unchanged" }
+            guard changed else { return moved == true ? "same pixels, moved on the page" : "unchanged" }
             switch contained {
             case true?: return "changed, only the field"
             case false?: return "changed beyond the field"
@@ -111,7 +113,7 @@ public struct EvidenceCard: Decodable, Equatable, Sendable {
     /// anything around it changed too. Never a verdict — Phil's eyes make that.
     func facts(_ scene: String) -> [String] {
         guard let m = manifest, let f = finding(scene) else { return [] }
-        guard f.changed else { return ["unchanged"] }
+        guard f.changed else { return [f.observedWords] }
         var out: [String] = []
         if let b = m.before.fields?[scene], let a = m.after.fields?[scene], b.count == 4, a.count == 4 {
             let dw = (a[2] - b[2]) / 2, dh = (a[3] - b[3]) / 2
@@ -471,7 +473,7 @@ struct EvidencePanel: View {
         let scenes = c.fields.compactMap { $0.scenes[v] }.compactMap { c.finding($0) }
         let itself = scenes.filter { $0.changed && !$0.departure }.count
         let around = scenes.filter { $0.departure }.count
-        let same = scenes.filter { !$0.changed && !$0.departure }.count
+        let same = scenes.filter { !$0.changed && $0.moved != true && !$0.departure }.count
         let gaps = m.gaps ?? []
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 22) {
