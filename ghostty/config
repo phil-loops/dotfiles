@@ -1,0 +1,2 @@
+# Option sends Alt/Meta (not ˙ etc.) so tmux M-h/j/k/l pane nav works
+macos-option-as-alt = true
