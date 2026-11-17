@@ -12,24 +12,52 @@ public struct ReviewFlag: Decodable, Equatable, Sendable {
 /// yet" is asked again each time, since a review can land on a tip after the first look.
 @MainActor
 final class ReviewFlags {
-    private struct Reply: Decodable { var flags: [ReviewFlag]? }
-    private var cache: [String: [ReviewFlag]] = [:]
-
-    static func of(_ app: AppModel) -> ReviewFlags { app.state { ReviewFlags() } }
-
-    /// The findings for the branch's tip when a read already has them — a key's synchronous answer.
-    func cached(_ app: AppModel, _ t: ReviewPageState.Target) -> [ReviewFlag]? {
-        cache["\(t.id)@\(app.store.view(Branch.self, t.id)?.tip ?? "")"]
+    struct Source: Hashable {
+        let id: String
+        let tip: String
+        let generation: Int
     }
 
-    /// nil when no review is recorded for the tree the branch has now.
-    func load(_ app: AppModel, _ t: ReviewPageState.Target) async -> [ReviewFlag]? {
-        let tip = app.store.view(Branch.self, t.id)?.tip ?? ""
-        let key = "\(t.id)@\(tip)"
-        if let got = cache[key] { return got }
-        let path = app.transport.atRepo(t.repo, "/review-flags?branch=\(t.name.uriComponent)")
-        let got = (try? await app.transport.getJSON(path, as: Reply.self))?.flags
-        if let got { cache[key] = got }
+    private struct Reply: Decodable {
+        let flags: [ReviewFlag]?
+        private enum CodingKeys: String, CodingKey { case flags }
+        init(from decoder: Decoder) throws {
+            flags = try decoder.container(keyedBy: CodingKeys.self).decode([ReviewFlag]?.self, forKey: .flags)
+        }
+    }
+    private var cache: [Source: [ReviewFlag]] = [:]
+    private var tracked: [String: Source] = [:]
+    private weak var app: AppModel?
+
+    private init(_ app: AppModel) {
+        self.app = app
+        _ = app.store.onChange { [weak self] in self?.refresh() }
+    }
+
+    static func of(_ app: AppModel) -> ReviewFlags { app.state { ReviewFlags(app) } }
+
+    func source(_ id: String) -> Source {
+        let tip = app?.store.view(Branch.self, id)?.tip ?? app?.store.view(Conv.self, id)?.tip ?? ""
+        if let source = tracked[id], source.tip == tip { return source }
+        let source = Source(id: id, tip: tip, generation: (tracked[id]?.generation ?? 0) + 1)
+        tracked[id] = source
+        cache = cache.filter { $0.key.id != id }
+        return source
+    }
+
+    private func refresh() { for id in Array(tracked.keys) { _ = source(id) } }
+
+    /// The findings for the branch's current source when a read already has them.
+    func cached(_ app: AppModel, _ target: ReviewPageState.Target) -> [ReviewFlag]? { cache[source(target.id)] }
+
+    /// A missing review is asked again; a response cannot cross a source change, including leaving and returning to a tip.
+    func load(_ app: AppModel, _ target: ReviewPageState.Target) async throws -> [ReviewFlag]? {
+        let origin = source(target.id)
+        if let got = cache[origin] { return got }
+        let path = app.transport.atRepo(target.repo, "/review-flags?branch=\(target.name.uriComponent)")
+        let got = try await app.transport.getJSON(path, as: Reply.self).flags
+        guard source(target.id) == origin else { return nil }
+        if let got { cache[origin] = got }
         return got
     }
 }

@@ -930,33 +930,73 @@ enum DiffCommands {
             }
             return out.sorted { ($0.0, $0.1) < ($1.0, $1.1) }
         }
-        var shownFinding: (key: String, n: Int)?
-        func findingStep(_ dir: Int, edge: Bool = false) throws {
-            guard let t = pg.target else { throw Refusal("no branch here") }
-            let at = idx()
+        var shownFinding: (key: String, n: Int, source: ReviewFlags.Source, context: String)?
+        let findingsSourceNote = "findings belong to the branch tip · return to its diff to open them"
+        func findingsCompatible() -> Bool { !pg.scoped || (!pg.tip.isEmpty && pg.scopeEnd == pg.tip) }
+        func findingCurrent(_ request: CodeLookup.Request, _ source: ReviewFlags.Source, _ context: String, _ display: Int, _ mode: KeyMode) -> Bool {
+            let lookup = CodeLookup.of(app)
+            guard lookup.isCurrent(request) else { return false }
+            guard ReviewFlags.of(app).source(source.id) == source, pg.contextKey == context, pg.payloadGen == display, pg.diffCurrent, app.keys.mode == mode else {
+                lookup.dismiss()
+                return false
+            }
+            return true
+        }
+        func withFindings(_ target: ReviewPageState.Target, then: @escaping @MainActor ([ReviewFlag], ReviewFlags.Source) throws -> Void) throws {
+            guard pg.diffCurrent else { throw Refusal("reading the current diff") }
             let flags = ReviewFlags.of(app)
+            let source = flags.source(target.id)
+            let lookup = CodeLookup.of(app)
+            guard let request = lookup.beginRequest(waiting: "reading the findings…") else { return }
+            if let findings = flags.cached(app, target) {
+                lookup.dismiss()
+                return try then(findings, source)
+            }
+            let context = pg.contextKey
+            let display = pg.payloadGen
+            let mode = app.keys.mode
+            app.runner.say("reading the findings…")
             Task { @MainActor in
-                guard let fs = await flags.load(app, t) else {
+                guard findingCurrent(request, source, context, display, mode) else { return }
+                let reply: Result<[ReviewFlag]?, Error>
+                do { reply = .success(try await flags.load(app, target)) }
+                catch { reply = .failure(error) }
+                guard findingCurrent(request, source, context, display, mode) else { return }
+                lookup.dismiss()
+                switch reply {
+                case .failure:
+                    app.runner.say("couldn't read the review findings · try again")
+                case .success(nil):
                     app.runner.say("no findings on this tree — push-ready's review hasn't run since the last edit")
-                    return
+                case .success(.some(let findings)):
+                    do { try then(findings, source) }
+                    catch { app.runner.say(String(describing: error)) }
                 }
-                if fs.isEmpty { app.runner.say("push-ready's review found nothing here"); return }
-                let all = findingStops(fs)
-                let outside = fs.count - all.count
-                let shown = shownFinding.flatMap { s in pg.here?.key == s.key ? s.n : nil }
-                let pick = edge ? (dir > 0 ? all.last : all.first) : dir > 0
-                    ? all.first { f in f.i > at || (f.i == at && f.n > (shown ?? -1)) }   // the one you stand on first
-                    : all.last { f in f.i < at || (f.i == at && shown.map { f.n < $0 } ?? false) }
-                guard let p = pick else {
+            }
+        }
+        func findingStep(_ direction: Int, edge: Bool = false) throws {
+            guard let target = pg.target else { throw Refusal("no branch here") }
+            guard findingsCompatible() else { throw Refusal(findingsSourceNote) }
+            try withFindings(target) { findings, source in
+                let at = idx()
+                guard !findings.isEmpty else { throw Refusal("push-ready's review found nothing here") }
+                let all = findingStops(findings)
+                let outside = findings.count - all.count
+                let shown = shownFinding.flatMap { last in
+                    pg.here?.key == last.key && last.source == source && last.context == pg.contextKey ? last.n : nil
+                }
+                let pick = edge ? (direction > 0 ? all.last : all.first) : direction > 0
+                    ? all.first { $0.i > at || ($0.i == at && $0.n > (shown ?? -1)) }
+                    : all.last { finding in finding.i < at || (finding.i == at && shown.map { finding.n < $0 } == true) }
+                guard let pick else {
                     let rest = outside > 0 ? " · \(outside) more on code this diff doesn't show" : ""
-                    app.runner.say(all.isEmpty ? "\(fs.count) findings, none on this diff's code" : (dir > 0 ? "the last finding" : "the first finding") + rest)
-                    return
+                    throw Refusal(all.isEmpty ? "\(findings.count) findings, none on this diff's code" : (direction > 0 ? "the last finding" : "the first finding") + rest)
                 }
                 if app.keys.mode != .select { pg.mark = nil }
-                goTo(p.i)
-                shownFinding = (pg.here?.key ?? "", p.n)
-                let k = (all.firstIndex { $0.n == p.n } ?? 0) + 1
-                app.runner.say("finding \(k) of \(all.count): \(p.flag.text)")
+                app.jump { goTo(pick.i) }
+                shownFinding = (pg.here?.key ?? "", pick.n, source, pg.contextKey)
+                let index = (all.firstIndex { $0.n == pick.n } ?? 0) + 1
+                app.runner.say("finding \(index) of \(all.count): \(pick.flag.text)")
             }
         }
         r.register(Command(id: "review.finding.next", title: "The next review finding", scope: .review, verb: .nextFinding, modes: motion, quiet: true,
@@ -967,38 +1007,35 @@ enum DiffCommands {
                            available: onDiff, local: { _, _ in try findingStep(1, edge: true) }))
         r.register(Command(id: "review.finding.first", title: "The first review finding", scope: .review, verb: .firstFinding, modes: motion, quiet: true,
                            available: onDiff, local: { _, _ in try findingStep(-1, edge: true) }))
-        // space d: every finding as a list (Helix's diagnostics picker) — ↵ goes to its change; one on code
-        // the diff doesn't show says so instead of landing nowhere
+        func showFindings(_ findings: [ReviewFlag], _ target: ReviewPageState.Target, source: ReviewFlags.Source) throws {
+            guard !findings.isEmpty else { throw Refusal("push-ready's review found nothing here") }
+            let context = pg.contextKey
+            let display = pg.payloadGen
+            let items = findings.map { finding in
+                PickItem(label: [finding.path, finding.line.map(String.init)].compactMap { $0 }.joined(separator: ":"), text: finding.text)
+            }
+            app.nav.pick("review findings · branch tip", items) { index in
+                guard app.router.route.surfaceID == "review", pg.contextKey == context, pg.payloadGen == display, pg.diffCurrent,
+                      ReviewFlags.of(app).source(target.id) == source, findings.indices.contains(index) else {
+                    app.runner.say("the diff changed · open the findings again")
+                    return
+                }
+                guard findingsCompatible() else { app.runner.say(findingsSourceNote); return }
+                guard let stop = findingStops(findings).first(where: { $0.n == index }) else {
+                    app.runner.say("that finding is on code this diff doesn't show")
+                    return
+                }
+                if app.keys.mode != .select { pg.mark = nil }
+                app.jump { goTo(stop.i) }
+                shownFinding = (pg.here?.key ?? "", index, source, context)
+                app.runner.say(findings[index].text)
+            }
+        }
         r.register(Command(id: "review.findings", title: "Pick one of push-ready's review findings on this branch", scope: .review,
                            verb: .findings, label: "findings", available: onDiff,
                            local: { _, _ in
-                               guard let t = pg.target else { throw Refusal("no branch here") }
-                               let flags = ReviewFlags.of(app)
-                               guard let fs = flags.cached(app, t) else {
-                                   Task { @MainActor in
-                                       if await flags.load(app, t) != nil { app.runner.releaseHeld() } else {
-                                           app.runner.dropHeld("review.findings", because: "no findings on this tree — push-ready's review hasn't run since the last edit")
-                                       }
-                                   }
-                                   throw Hold("reading the findings…")
-                               }
-                               if fs.isEmpty { throw Refusal("push-ready's review found nothing here") }
-                               let shown = findingStops(fs)
-                               let items = fs.map { f in
-                                   PickItem(label: [f.path.map { String($0.split(separator: "/").last ?? Substring($0)) }, f.line.map(String.init)]
-                                                .compactMap { $0 }.joined(separator: ":"),
-                                            text: f.text)
-                               }
-                               app.nav.pick("review findings", items) { n in
-                                   guard let s = shown.first(where: { $0.n == n }) else {
-                                       app.runner.say("that finding is on code this diff doesn't show")
-                                       return
-                                   }
-                                   if app.keys.mode != .select { pg.mark = nil }
-                                   goTo(s.i)
-                                   shownFinding = (pg.here?.key ?? "", n)
-                                   app.runner.say(fs[n].text)
-                               }
+                               guard let target = pg.target else { throw Refusal("no branch here") }
+                               try withFindings(target) { findings, source in try showFindings(findings, target, source: source) }
                            }))
 
         r.register(Command(id: "review.conversation", title: "The conversation, in place of the diff (esc brings the diff back)", scope: .review,

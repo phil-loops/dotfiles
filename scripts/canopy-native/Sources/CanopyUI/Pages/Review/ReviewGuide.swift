@@ -20,11 +20,6 @@ enum ReviewGuide {
         var isFlag: Bool { if case .flag = kind { return true }; return false }
     }
 
-    static func diffCurrent(_ pg: ReviewPageState) -> Bool {
-        if let scope = pg.commitScope { return pg.commitFiles?.sha == scope }
-        return pg.payload?.key == pg.keyOf
-    }
-
     static func entries(_ app: AppModel) -> [Entry] {
         let pg = ReviewPageState.of(app)
         guard pg.integration == nil else { return [] }
@@ -35,7 +30,7 @@ enum ReviewGuide {
             flags[flag.key] = Entry(key: prefix + "flag|" + flag.key, kind: .flag(flag.key), path: flag.path,
                                     line: flag.line, detail: flag.text, stop: nil)
         }
-        if !pg.scoped && diffCurrent(pg) {
+        if !pg.scoped && pg.diffCurrent {
             for view in pg.views {
                 for (i, block) in view.blocks.enumerated() where view.marks[i] == .flagged {
                     let place = pg.flagPlace(block.key)
@@ -65,7 +60,7 @@ enum ReviewGuide {
 
     static func progress(_ app: AppModel) -> String {
         let pg = ReviewPageState.of(app)
-        guard diffCurrent(pg) else { return "reading the current diff…" }
+        guard pg.diffCurrent else { return "reading the current diff…" }
         if pg.scoped { return "read marks belong to the branch diff" }
         let marks = pg.views.flatMap(\.marks)
         guard !marks.isEmpty else { return "no change blocks in this diff" }
@@ -74,7 +69,7 @@ enum ReviewGuide {
 
     static func location(_ app: AppModel) -> String? {
         let pg = ReviewPageState.of(app)
-        guard diffCurrent(pg), let here = pg.here else { return nil }
+        guard pg.diffCurrent, let here = pg.here else { return nil }
         guard let row = here.row else { return here.path }
         let line = sideLine(row, prefer: pg.column)
         return "\(here.path):\(line.line)\(line.side == .left ? " · old" : "")"
@@ -105,7 +100,7 @@ enum ReviewGuide {
         guard let entry = entries(app).first(where: { $0.key == key }) else { throw Refusal("that item changed · reopen Return to") }
         switch entry.kind {
         case .flag:
-            guard diffCurrent(pg) else { throw Refusal("reading the current diff · try again when it lands") }
+            guard pg.diffCurrent else { throw Refusal("reading the current diff · try again when it lands") }
             guard let stop = entry.stop, pg.stopIndex[stop] != nil else { throw Refusal("this flagged change is not in this diff · no nearby line was substituted") }
             close(app)
             pg.setCursor(stop)
@@ -121,7 +116,7 @@ enum ReviewGuide {
 
     static func pickFile(_ app: AppModel) throws {
         let pg = ReviewPageState.of(app)
-        guard diffCurrent(pg) else { throw Refusal("reading the current diff") }
+        guard pg.diffCurrent else { throw Refusal("reading the current diff") }
         let files = pg.views
         guard !files.isEmpty else { throw Refusal(pg.payload == nil ? "reading the changed files" : "no changed files in this diff") }
         let context = pg.contextKey
@@ -132,7 +127,7 @@ enum ReviewGuide {
         }
         app.nav.pick("changed files · \(files.count)", items) { i in
             MainActor.assumeIsolated {
-                guard app.router.route.surfaceID == "review", pg.contextKey == context, diffCurrent(pg), paths.indices.contains(i), pg.views.contains(where: { $0.file.path == paths[i] }) else {
+                guard app.router.route.surfaceID == "review", pg.contextKey == context, pg.diffCurrent, paths.indices.contains(i), pg.views.contains(where: { $0.file.path == paths[i] }) else {
                     app.runner.say("the diff changed · open the file picker again")
                     return
                 }
@@ -180,7 +175,7 @@ struct ReviewGuidePanel: View {
                         HStack(alignment: .firstTextBaseline, spacing: 6) {
                             Text(entry.isFlag ? "⚑" : "↳").foregroundStyle(theme.ember)
                             Text(entry.isFlag ? "flagged change" : "open thread").foregroundStyle(theme.inkDim)
-                            if entry.isFlag && entry.stop == nil { Text(ReviewGuide.diffCurrent(ReviewPageState.of(app)) ? "not in this diff" : "reading diff…").foregroundStyle(theme.inkFaint) }
+                            if entry.isFlag && entry.stop == nil { Text(ReviewPageState.of(app).diffCurrent ? "not in this diff" : "reading diff…").foregroundStyle(theme.inkFaint) }
                         }
                         Text(entry.title).foregroundStyle(theme.ink).fixedSize(horizontal: false, vertical: true)
                         if !entry.detail.isEmpty { Text(entry.detail.trimmingCharacters(in: .whitespacesAndNewlines)).foregroundStyle(theme.inkDim).lineLimit(3) }
