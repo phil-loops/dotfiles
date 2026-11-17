@@ -231,10 +231,9 @@ public final class ReviewPageState: ShipHost {
         guard let c = code, let w = c.word, let app, RowKey.id(app.selected, "s").flatMap(Int.init) == w.line else { return nil }
         return w.at
     }
-    /// The repo's GitHub page per repo ("https://github.com/<owner>/<name>"), once origin is read.
-    @ObservationIgnored var githubWebs: [String: String] = [:]
     /// How the GitHub page is found: origin's URL in the branch's checkout (the keytutor and tests stub it).
     @ObservationIgnored public var githubWeb: ((AppModel) async -> String?)?
+    @ObservationIgnored var githubOrigin: (String) async -> String? = ReviewPageState.originWeb
     /// Helix open in the diff, from `i` or `o` until it quits.
     public var helix: HelixOpen?
     /// "<branch>@<tip>" → its Helix checkout, made ahead of the first `i` or `o`
