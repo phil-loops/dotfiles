@@ -37,7 +37,8 @@ import Testing
         parent["tip"] = "c1"
         #expect(app.store.applyPatch(try Patch.make(domain: Domain.git, version: (app.store.versions[Domain.git] ?? 0) + 1,
                                                   upserts: ["branch": ["r:a": .object(parent)]])) == .ok)
-        #expect(pg.lineAnchor == nil && ship.historyRows(branch.id) == nil)
+        #expect(pg.lineAnchor == nil, "the pick bound to rows read before the parent moved")
+        #expect(ship.historyRows(branch.id) != nil && BranchHistory.of(app).isStale(branch.id), "those rows still draw, marked stale")
         ship.putHistory(branch, [HistoryCommit(sha: "c3", subject: "Third"), HistoryCommit(sha: "c2", subject: "Second")])
         #expect(pg.lineAnchor == nil)
         app.setCursor("c|c2")

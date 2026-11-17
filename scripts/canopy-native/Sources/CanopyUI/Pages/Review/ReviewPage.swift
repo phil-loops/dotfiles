@@ -196,6 +196,10 @@ private struct BranchLine: View {
                 }
                 Text(words(pg, l, rows, cursor)).font(Theme.text(12)).foregroundStyle(theme.inkDim)
                     .lineLimit(1).truncationMode(.tail).padding(.leading, 14)
+                if BranchHistory.of(app).isStale(pg.id) {
+                    // read for an older tip: drawn until the read for this one lands, never blanked
+                    Text("· updating").font(Theme.text(11)).foregroundStyle(theme.inkFaint).padding(.leading, 6)
+                }
                 Text(", h").font(Theme.text(11)).foregroundStyle(theme.inkFaint).padding(.leading, 8)
             } else {
                 Text(ship.historyNote(pg.id)).font(Theme.text(11)).foregroundStyle(theme.inkFaint)

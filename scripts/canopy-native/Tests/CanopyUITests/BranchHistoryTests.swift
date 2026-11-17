@@ -4,9 +4,17 @@ import Testing
 @testable import CanopyUI
 
 @MainActor struct BranchHistoryTests {
-    func source(_ name: String = "a", tip: String = "tip", git: Int = 1, epoch: String = "epoch", hydration: Int = 1) -> BranchHistory.Source {
-        .init(repo: "r", name: name, tip: tip, parent: "main", upstream: "origin/\(name)", pushed: "synced", ahead: 0,
-              epoch: epoch, git: git, remote: 1, hydration: hydration)
+    func source(_ name: String = "a", tip: String = "tip", parentTip: String = "p1", git: Int = 1, epoch: String = "epoch", hydration: Int = 1) -> BranchHistory.Source {
+        BranchSource(repo: "r", name: name, tip: tip, parent: "main", upstream: "origin/\(name)", pushed: "synced", ahead: 0,
+                     epoch: epoch, git: git, remote: 1, hydration: hydration).forHistory(parentTip: parentTip)
+    }
+
+    @Test func anotherBranchsCommitLeavesTheHistoryKeyAlone() {
+        // every commit anywhere in the repo bumps the git version; with agents committing across
+        // the repo, keying on it cancelled each slow read before it landed (2026-11-17)
+        #expect(source(git: 1) == source(git: 2))
+        #expect(source(parentTip: "p1") != source(parentTip: "p2"), "the parent moving changes which commits are the branch's own")
+        #expect(source(tip: "a") != source(tip: "b"))
     }
 
     @Test func aReadCoalescesAndAValidEmptyResultIsReady() async {
@@ -34,10 +42,45 @@ import Testing
         history.read = { _ in calls += 1; return [] }
         await history.load(s.id, retry: true)?.value
         #expect(history.state(s.id) == .ready([]) && calls == 2)
-        s = source(git: 2)
-        #expect(history.state(s.id) == .idle)
+        s = source(parentTip: "p2")
+        #expect(history.state(s.id) == .ready([]) && history.isStale(s.id), "a moved key keeps the rows on screen")
         await history.load(s.id)?.value
-        #expect(calls == 3)
+        #expect(calls == 3 && !history.isStale(s.id))
+    }
+
+    @Test func aKeyThatMovesMidReadNeverCancelsIt() async throws {
+        // a reshape rebases the branch or its parent faster than a slow read completes; restarting
+        // on each move starved the page at "reading the commits…" (2026-11-17)
+        var s = source(tip: "t1")
+        var pending: [(source: BranchHistory.Source, k: CheckedContinuation<[HistoryCommit], Error>)] = []
+        let history = BranchHistory(source: { _ in s }, read: { src in try await withCheckedThrowingContinuation { pending.append((src, $0)) } })
+        history.debounceNanos = 0
+        let task = history.load(s.id)
+        for _ in 0..<100 where pending.count < 1 { await Task.yield() }
+        s = source(tip: "t2")
+        #expect(history.load(s.id) == task, "the view's reload joins the read in flight")
+        try #require(pending.count == 1)
+        pending[0].k.resume(returning: [HistoryCommit(sha: "t1", subject: "T1")])
+        for _ in 0..<100 where pending.count < 2 { await Task.yield() }
+        #expect(history.rows(s.id)?.map(\.sha) == ["t1"] && history.isStale(s.id), "the completed read is drawn, marked stale")
+        try #require(pending.count == 2)
+        #expect(pending[1].source.tip == "t2")
+        pending[1].k.resume(returning: [HistoryCommit(sha: "t2", subject: "T2")])
+        await task?.value
+        #expect(history.rows(s.id)?.map(\.sha) == ["t2"] && !history.isStale(s.id))
+    }
+
+    @Test func aBurstOfMovesFoldsIntoOneFollowUpRead() async throws {
+        var s = source(tip: "t1")
+        var reads: [String] = []
+        let history = BranchHistory(source: { _ in s }, read: { src in reads.append(src.tip); return [] })
+        history.debounceNanos = 200_000_000
+        await history.load(s.id)?.value
+        var last: Task<Void, Never>?
+        for tip in ["t2", "t3", "t4"] { s = source(tip: tip); last = history.load(s.id) ?? last }
+        await last?.value
+        #expect(reads == ["t1", "t4"], "three moves within the debounce are one revalidation, at the newest key")
+        #expect(history.rows(s.id) == [] && !history.isStale(s.id))
     }
 
     @Test func outOfOrderBranchesCannotEvictEachOthersResults() async {
@@ -56,28 +99,27 @@ import Testing
         #expect(history.rows(b.id)?.map(\.sha) == ["b1"])
     }
 
-    @Test func retriesAndSourceRoundTripsRevokeOldCompletionsAndAnchors() async throws {
+    @Test func aRetryMidReadFollowsItAndAMovedKeyKeepsTheRowsAndTheirStamp() async throws {
         var s = source()
         var pending: [CheckedContinuation<[HistoryCommit], Error>] = []
         let history = BranchHistory(source: { _ in s }, read: { _ in try await withCheckedThrowingContinuation { pending.append($0) } })
+        history.debounceNanos = 0
         let first = history.load(s.id)
         for _ in 0..<100 where pending.count < 1 { await Task.yield() }
-        let second = history.load(s.id, retry: true)
+        #expect(history.load(s.id, retry: true) == first, "a retry mid-read follows the read in flight, never cancels it")
+        try #require(pending.count == 1)
+        pending[0].resume(returning: [HistoryCommit(sha: "old", subject: "Old")])
         for _ in 0..<100 where pending.count < 2 { await Task.yield() }
         try #require(pending.count == 2)
         pending[1].resume(returning: [HistoryCommit(sha: "new", subject: "New")])
-        await second?.value
-        let stamp = history.stamp(s.id)
-        pending[0].resume(returning: [HistoryCommit(sha: "old", subject: "Old")])
         await first?.value
         #expect(history.rows(s.id)?.first?.sha == "new")
-        #expect(history.stamp(s.id) == stamp)
+        let stamp = history.stamp(s.id)
         s = source(epoch: "new-epoch", hydration: 2)
-        #expect(history.rows(s.id) == nil && history.stamp(s.id) == nil)
-        s = source(hydration: 3)
-        #expect(history.rows(s.id) == nil)
+        #expect(history.rows(s.id)?.first?.sha == "new" && history.isStale(s.id))
+        #expect(history.stamp(s.id) == nil, "stale rows draw, but a pick can't bind to them")
         history.put(s.id, rows: [])
-        #expect(history.stamp(s.id) != stamp)
+        #expect(history.stamp(s.id) != nil && history.stamp(s.id) != stamp && !history.isStale(s.id))
     }
 
     @Test func lateFailureCannotPublishUnderChangedSourceAndRemovedBranch() async {
