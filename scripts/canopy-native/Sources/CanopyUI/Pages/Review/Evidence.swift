@@ -17,7 +17,7 @@ public struct EvidenceCard: Decodable, Equatable, Sendable {
     public struct Side: Decodable, Equatable, Sendable { var scenes: [String: String]; var fields: [String: [Int]]?; var capturedAt: String? }
     public struct Asked: Decodable, Equatable, Sendable { var expectation: String; var predict: [String: String] }
     /// the UI files the change touches, measured from the diff, and which of them a scene looks at
-    public struct Coverage: Decodable, Equatable, Sendable { var changed: [String]; var covered: [String]; var uncovered: [String] }
+    public struct Coverage: Decodable, Equatable, Sendable { var changed: [String]; var covered: [String]; var uncovered: [String]; var unverified: [String]? }
     public struct Measure: Decodable, Equatable, Sendable {
         var changedPixels: Int?; var maxDelta: Int?; var box: [Int]?; var sizeChanged: [Int]?
     }
@@ -487,7 +487,7 @@ struct EvidencePanel: View {
                     .font(Theme.mono(11)).foregroundStyle(theme.inkFaint)
             }
             if let cov = m.coverage {
-                let names = cov.uncovered.map { ($0 as NSString).lastPathComponent }
+                let names = cov.uncovered.map { ($0 as NSString).lastPathComponent + ((cov.unverified ?? []).contains($0) ? " (named by a view, unchecked)" : "") }
                 Text("looks at \(cov.covered.count) of \(cov.changed.count) changed UI files"
                      + (names.isEmpty ? "" : " · accepting also accepts, unseen: " + names.joined(separator: ", ")))
                     .font(Theme.text(11.5)).foregroundStyle(names.isEmpty ? theme.inkFaint : theme.goldLeaf).lineLimit(2)

@@ -23,6 +23,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 import secrets
 import shutil
 import subprocess
@@ -604,19 +605,51 @@ def restate(repo, branch, log=print):
                    captured=m["captured"], amends=mid)
 
 
-UI_ROOTS = ("components/", "pages/", "app/")
+UI_ROOTS = ("components/", "pages/", "app/", "hooks/", "styles/")
+STYLE_EXTS = (".css", ".scss", ".pcss")
+STYLE_CONFIGS = ("tailwind.config.js", "tailwind.config.ts", "postcss.config.js", "postcss.config.mjs")
+
+
+def _ui_file(p):
+    if p.endswith(STYLE_EXTS) or p in STYLE_CONFIGS:
+        return True
+    return p.startswith(UI_ROOTS) and p.endswith((".tsx", ".ts")) and not p.endswith((".test.ts", ".test.tsx"))
+
+
+def _anchors(selector):
+    """The literals a field selector pins (#ids, attribute values) — what must appear in a file's
+    source for a view to be looking at it."""
+    ids = re.findall(r"#([\w-]+)", selector or "")
+    quoted = re.findall(r"=\s*\"([^\"]+)\"|=\s*'([^']+)'", selector or "")
+    return ids + [d or s for d, s in quoted]
 
 
 def coverage(repo, b, recipe):
     """Which UI files the change touches, and which of them a scene looks at — measured from the
-    diff, not declared. What's uncovered is what accepting the evidence accepts without seeing."""
+    diff, not declared. A view covers its named file only when its field's anchors appear in that
+    file's after-side source; one with no anchor to check is unverified. What's uncovered is what
+    accepting the evidence accepts without seeing."""
     changed = {p for p in _git(repo, "diff", "--name-only", b["beforeCommit"], b["afterCommit"]).splitlines()
-               if p.endswith(".tsx") and p.startswith(UI_ROOTS)}
+               if _ui_file(p)}
+    unverified = set()
     if recipe.get("kind") == "app":
-        looked = {v["file"] for v in recipe["views"] if v.get("file")}
+        looked = set()
+        for v in recipe["views"]:
+            f = v.get("file")
+            if not f or f not in changed:
+                continue
+            anchors = _anchors(v.get("field"))
+            if not anchors:
+                unverified.add(f)
+                continue
+            src = _git(repo, "show", f"{b['afterCommit']}:{f}", check=False)
+            if any(a in src for a in anchors):
+                looked.add(f)
+        unverified -= looked
     else:
         looked = {recipe["component"]["file"]}
-    return {"changed": sorted(changed), "covered": sorted(changed & looked), "uncovered": sorted(changed - looked)}
+    return {"changed": sorted(changed), "covered": sorted(changed & looked), "uncovered": sorted(changed - looked),
+            "unverified": sorted(unverified)}
 
 
 def publish(repo, branch, b, req, digest, recipe, sides, donor, captured, amends=None):
