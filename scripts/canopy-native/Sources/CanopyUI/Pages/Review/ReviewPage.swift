@@ -314,7 +314,7 @@ private struct DiffPane: View {
         if let h = pg.helix, !h.whole, let dir = h.dir {
             HelixHalf(open: h, dir: dir, colors: CanvasColors(theme), moved: { pg.helixAt = ($0, $1) }) { pg.landHelix(app) }
                 .id("\(dir)|\(h.path)")
-                .padding(.leading, CGFloat(pg.splitWidth(h.path) + 7) * DocFont.charWidth + 1)
+                .padding(.leading, CGFloat(pg.divider(path: h.path, line: h.line)) * DocFont.charWidth)
         }
     }
 
@@ -324,12 +324,10 @@ private struct DiffPane: View {
         let focused = app.isFocused(reviewDiffPane)
         var marks = CanvasMarks(cursor: here?.key, column: pg.column, focused: focused)
         for (row, hs) in PageSearch.of(app).hitsByRow(app, pane: reviewDiffPane) {
-            let right = pg.splitWidth(pg.stopIndex[row].map { pg.stops[$0].path }) + 13
-            marks.hits[row] = hs.map { h in let o = h.field == 0 ? right : ReviewDocument.codeStart; return (o + h.at.lowerBound)..<(o + h.at.upperBound) }
+            marks.sourceHits[row] = hs.map { DiffSourceMark(side: $0.field == 0 ? .right : .left, at: $0.at) }
         }
         if let w = pg.hereWord, let k = here?.key, let row = here?.row {
-            let start = sideLine(row, prefer: pg.column).side == .left ? 6 : pg.splitWidth(here?.path) + 13
-            marks.word = (k, (start + w.lowerBound)..<(start + w.upperBound))
+            marks.sourceWord = (k, DiffSourceMark(side: sideLine(row, prefer: pg.column).side, at: w))
         }
         // the range x selected, or the lines the selected conversation covers
         if here?.kind == .thread, let t = here?.id.flatMap({ app.store.view(CanopyCore.Thread.self, $0) }), let l = t.local, let s = l.startLine {
@@ -364,7 +362,8 @@ private struct DiffPane: View {
                           onPointer: { info, offset, right in
                               let l: DiffLine? = {
                                   guard let i = pg.stopIndex[info.stop ?? ""], let row = pg.stops[i].row else { return nil }
-                                  return info.splitCol > 0 ? (right ? row.right : row.left) : (row.right ?? row.left)
+                                  return info.layout?.pieces.first { $0.side == (right ? .right : .left) }?.line
+                                      ?? (info.splitCol > 0 ? (right ? row.right : row.left) : (row.right ?? row.left))
                               }()
                               guard let l else { return }
                               let old = l.kind == .del || (info.splitCol > 0 && !right)

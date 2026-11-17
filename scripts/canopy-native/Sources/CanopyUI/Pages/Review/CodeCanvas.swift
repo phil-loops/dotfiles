@@ -43,17 +43,15 @@ final class RowInfo: NSObject {
     /// split: the words that changed between a paired old and new line, UTF-16 ranges from each half's code start
     let leftHot: [NSRange]
     let rightHot: [NSRange]
-    /// split: a removed line longer than its half — the rest of it, one chunk per continuation line, drawn
-    /// under the old column (the row carries line separators after its new half to make the room)
-    let oldMore: [String]
+    let layout: DiffDisplayRow?
 
     init(kind: Kind, stop: String?, stops: [String] = [], path: String = "", hunk: Int = -1, left: LineKind? = nil, right: LineKind? = nil,
          oldLine: Int? = nil, newLine: Int? = nil, threaded: Bool = false, splitCol: Int = 0, codeStart: Int = 0, rightCodeStart: Int = 0,
-         extra: ExtraSpec? = nil, leftHot: [NSRange] = [], rightHot: [NSRange] = [], oldMore: [String] = []) {
+         extra: ExtraSpec? = nil, leftHot: [NSRange] = [], rightHot: [NSRange] = [], layout: DiffDisplayRow? = nil) {
         self.kind = kind; self.stop = stop; self.stops = stops.isEmpty ? (stop.map { [$0] } ?? []) : stops; self.path = path; self.hunk = hunk
         self.left = left; self.right = right; self.oldLine = oldLine; self.newLine = newLine; self.threaded = threaded; self.splitCol = splitCol
         self.codeStart = codeStart; self.rightCodeStart = rightCodeStart; self.extra = extra
-        self.leftHot = leftHot; self.rightHot = rightHot; self.oldMore = oldMore
+        self.leftHot = leftHot; self.rightHot = rightHot; self.layout = layout
     }
 }
 
@@ -95,6 +93,8 @@ struct CanvasMarks: Equatable {
     var word: (stop: String, at: Range<Int>)?
     /// `/`'s matches: per row stop, UTF-16 ranges from the row's start
     var hits: [String: [Range<Int>]] = [:]
+    var sourceHits: [String: [DiffSourceMark]] = [:]
+    var sourceWord: (stop: String, mark: DiffSourceMark)?
     /// the range `x` marked, or the lines the selected conversation covers: path, side, from…to
     var range: (path: String, side: Side, from: Int, to: Int)?
     /// row stops to dim: read changes, and the unchanged lines of a hunk read through
@@ -109,7 +109,7 @@ struct CanvasMarks: Equatable {
     var focused = true
 
     static func == (a: CanvasMarks, b: CanvasMarks) -> Bool {
-        a.cursor == b.cursor && a.column == b.column && a.word?.stop == b.word?.stop && a.word?.at == b.word?.at && a.hits == b.hits && a.range?.path == b.range?.path && a.range?.side == b.range?.side && a.range?.from == b.range?.from &&
+        a.cursor == b.cursor && a.column == b.column && a.word?.stop == b.word?.stop && a.word?.at == b.word?.at && a.sourceWord?.stop == b.sourceWord?.stop && a.sourceWord?.mark == b.sourceWord?.mark && a.sourceHits == b.sourceHits && a.hits == b.hits && a.range?.path == b.range?.path && a.range?.side == b.range?.side && a.range?.from == b.range?.from &&
             a.range?.to == b.range?.to && a.seen == b.seen && a.flagged == b.flagged && a.selection == b.selection && a.lit == b.lit && a.focused == b.focused
     }
 }
@@ -138,6 +138,23 @@ final class CanvasTextView: NSTextView {
         return ts.attribute(.rvRow, at: charIndex, effectiveRange: nil) as? RowInfo
     }
 
+    func codeSource(at point: NSPoint) -> (RowInfo, DiffSourceMark)? {
+        guard let manager = layoutManager, let container = textContainer else { return nil }
+        let location = NSPoint(x: point.x - textContainerOrigin.x, y: point.y - textContainerOrigin.y)
+        let glyph = manager.glyphIndex(for: location, in: container)
+        guard glyph < manager.numberOfGlyphs else { return nil }
+        let index = manager.characterIndexForGlyph(at: glyph)
+        guard let info = info(at: index), info.kind == .line || info.kind == .code, let storage = textStorage else { return nil }
+        let paragraph = (storage.string as NSString).paragraphRange(for: NSRange(location: index, length: 0))
+        let offset = index - paragraph.location
+        if let layout = info.layout { return layout.source(at: offset).map { (info, $0) } }
+        let right = info.splitCol > 0 && offset >= info.rightCodeStart
+        let start = right ? info.rightCodeStart : info.codeStart
+        guard offset >= start else { return nil }
+        let side: Side = right || (info.splitCol == 0 && info.right != nil) ? .right : .left
+        return (info, DiffSourceMark(side: side, at: (offset - start)..<(offset - start + 1)))
+    }
+
     override func mouseDown(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
         let i = characterIndexForInsertion(at: p)
@@ -147,10 +164,8 @@ final class CanvasTextView: NSTextView {
                 return
             }
             onClick?(s, event.modifierFlags.contains(.shift))
-            if inf.kind == .line, !event.modifierFlags.contains(.shift), let ts = textStorage {
-                let off = i - (ts.string as NSString).paragraphRange(for: NSRange(location: i, length: 0)).location
-                if inf.splitCol > 0, off >= inf.rightCodeStart { onClickAt?(s, .right, off - inf.rightCodeStart) }
-                else if off >= inf.codeStart { onClickAt?(s, inf.splitCol > 0 || inf.right == nil ? .left : .right, off - inf.codeStart) }
+            if inf.kind == .line, !event.modifierFlags.contains(.shift), let (_, source) = codeSource(at: p) {
+                onClickAt?(s, source.side, source.at.lowerBound)
             }
         }
         super.mouseDown(with: event)
@@ -164,19 +179,8 @@ final class CanvasTextView: NSTextView {
 
     override func mouseMoved(with event: NSEvent) {
         super.mouseMoved(with: event)
-        guard let lm = layoutManager, let tc = textContainer, let ts = textStorage, ts.length > 0 else { return }
-        let p = convert(event.locationInWindow, from: nil)
-        let tp = NSPoint(x: p.x - textContainerOrigin.x, y: p.y - textContainerOrigin.y)
-        var frac: CGFloat = 0
-        let g = lm.glyphIndex(for: tp, in: tc, fractionOfDistanceThroughGlyph: &frac)
-        let ci = lm.characterIndexForGlyph(at: g)
-        guard let inf = info(at: ci), inf.kind == .line || inf.kind == .code else { return }
-        var pr = NSRange()
-        _ = ts.attribute(.rvRow, at: ci, effectiveRange: &pr)
-        let para = (ts.string as NSString).paragraphRange(for: NSRange(location: ci, length: 0))
-        let off = ci - para.location
-        if inf.splitCol > 0, off >= inf.rightCodeStart { onPointer?(inf, off - inf.rightCodeStart, true) }
-        else if off >= inf.codeStart { onPointer?(inf, off - inf.codeStart, false) }
+        let point = convert(event.locationInWindow, from: nil)
+        if let (info, source) = codeSource(at: point) { onPointer?(info, source.at.lowerBound, source.side == .right) }
     }
 
     /// The rect of a character range, in this view's coordinates.
@@ -206,16 +210,20 @@ final class CanvasTextView: NSTextView {
             self.drawBand(inf, band, x0: x0, colors)
             if inf.kind == .line, !inf.leftHot.isEmpty || !inf.rightHot.isEmpty {
                 let line = (ts.string as NSString).paragraphRange(for: NSRange(location: ci, length: 0))
-                for (hot, start, color) in [(inf.leftHot, inf.codeStart, colors.del), (inf.rightHot, inf.rightCodeStart, colors.add)] {
-                    for h in hot {
-                        let g = lm.glyphRange(forCharacterRange: NSRange(location: line.location + start + h.location, length: h.length), actualCharacterRange: nil)
+                for (hot, start, side, color) in [(inf.leftHot, inf.codeStart, Side.left, colors.del), (inf.rightHot, inf.rightCodeStart, Side.right, colors.add)] {
+                    let ranges = hot.flatMap { h in
+                        inf.layout?.storage(for: DiffSourceMark(side: side, at: h.location..<NSMaxRange(h))) ?? [(start + h.location)..<(start + NSMaxRange(h))]
+                    }
+                    for h in ranges {
+                        let g = lm.glyphRange(forCharacterRange: NSRange(location: line.location + h.lowerBound, length: h.count), actualCharacterRange: nil)
                         guard NSLocationInRange(g.location, gr) else { continue }
                         color.withAlphaComponent(0.24).setFill()
                         lm.boundingRect(forGlyphRange: g, in: tc).offsetBy(dx: origin.x, dy: origin.y).fill()
                     }
                 }
             }
-            if let stop = inf.stop, let hits = self.marks.hits[stop] {
+            if let stop = inf.stop {
+                let hits = (self.marks.hits[stop] ?? []) + (self.marks.sourceHits[stop] ?? []).flatMap { inf.layout?.storage(for: $0) ?? [] }
                 let line = (ts.string as NSString).paragraphRange(for: NSRange(location: ci, length: 0))
                 for hit in hits {
                     let g = lm.glyphRange(forCharacterRange: NSRange(location: line.location + hit.lowerBound, length: hit.count), actualCharacterRange: nil)
@@ -226,7 +234,11 @@ final class CanvasTextView: NSTextView {
                     }
                 }
             }
-            if let word = self.marks.word, inf.stop == word.stop {
+            let sourceWord = self.marks.sourceWord.flatMap { word -> (stop: String, at: Range<Int>)? in
+                guard inf.stop == word.stop, let range = inf.layout?.storage(for: word.mark).first else { return nil }
+                return (word.stop, range)
+            }
+            if let word = sourceWord ?? self.marks.word, inf.stop == word.stop {
                 let row = (ts.string as NSString).paragraphRange(for: NSRange(location: ci, length: 0))
                 let chars = NSRange(location: row.location + word.at.lowerBound, length: word.at.count)
                 let g = lm.glyphRange(forCharacterRange: chars, actualCharacterRange: nil)
@@ -297,7 +309,9 @@ final class CanvasTextView: NSTextView {
         if let s = inf.stop, marks.selection.contains(s) || inf.stops.contains(where: marks.selection.contains) {
             c.ember.withAlphaComponent(0.12).setFill(); band.fill()
         }
-        if let cur = marks.cursor, inf.stops.contains(cur) {
+        let cursorSide = marks.sourceWord?.mark.side ?? marks.column
+        let readsSide = inf.layout.map { layout in !layout.stacked || cursorSide == nil || layout.pieces.contains { $0.side == cursorSide } } ?? true
+        if let cur = marks.cursor, inf.stops.contains(cur), readsSide {
             var lit = band
             if inf.kind == .line, inf.splitCol > 0, let col = marks.column {
                 let mid = x0 + charWidth * CGFloat(inf.splitCol)
@@ -312,7 +326,6 @@ final class CanvasTextView: NSTextView {
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
-        drawOldMore(dirtyRect)
         // read changes dim, so what's left stands out (v2: opacity .5 unless under the cursor); flagged ones
         // carry an ember bar down their left edge
         guard let colors, !marks.seen.isEmpty || !marks.flagged.isEmpty, let lm = layoutManager, let tc = textContainer, let ts = textStorage, ts.length > 0 else { return }
@@ -328,41 +341,6 @@ final class CanvasTextView: NSTextView {
             } else if let stop = inf.stop, stop != self.marks.cursor, self.marks.seen.contains(stop) {
                 colors.bg.withAlphaComponent(0.5).setFill(); band.fill(using: .sourceOver)
             }
-        }
-    }
-}
-
-extension CanvasTextView {
-    /// A removed line longer than its half reads in full: its rest is drawn under the old column on the
-    /// row's continuation lines (the new half's wrapped lines, or the line separators the row carries),
-    /// in the old text's own font and colour. A row that still runs out of lines ends its last chunk "…".
-    func drawOldMore(_ dirtyRect: NSRect) {
-        guard let lm = layoutManager, let tc = textContainer, let ts = textStorage, ts.length > 0 else { return }
-        let origin = textContainerOrigin
-        let glyphs = lm.glyphRange(forBoundingRect: NSRect(x: dirtyRect.minX - origin.x, y: dirtyRect.minY - origin.y, width: dirtyRect.width, height: dirtyRect.height), in: tc)
-        let ns = ts.string as NSString
-        lm.enumerateLineFragments(forGlyphRange: glyphs) { frag, _, _, gr, _ in
-            let ci = lm.characterIndexForGlyph(at: gr.location)
-            guard let inf = ts.attribute(.rvRow, at: ci, effectiveRange: nil) as? RowInfo, inf.kind == .line, !inf.oldMore.isEmpty else { return }
-            let para = ns.paragraphRange(for: NSRange(location: ci, length: 0))
-            let firstGlyph = lm.glyphIndexForCharacter(at: para.location)
-            guard gr.location > firstGlyph else { return }   // the first line shows the first chunk as text
-            let first = lm.lineFragmentRect(forGlyphAt: firstGlyph, effectiveRange: nil)
-            let line = Int(((frag.minY - first.minY) / max(1, frag.height)).rounded())
-            guard line >= 1, line <= inf.oldMore.count else { return }
-            let lastGlyph = lm.glyphIndexForCharacter(at: max(para.location, NSMaxRange(para) - 1))
-            let lines = Int(((lm.lineFragmentRect(forGlyphAt: lastGlyph, effectiveRange: nil).minY - first.minY) / max(1, frag.height)).rounded()) + 1
-            var text = inf.oldMore[line - 1]
-            if line == lines - 1, inf.oldMore.count > lines - 1 { text = String(text.dropLast()) + "…" }
-            let at = para.location + inf.codeStart
-            var attrs = ts.attributes(at: min(at, ts.length - 1), effectiveRange: nil)
-            attrs[.rvRow] = nil
-            attrs[.paragraphStyle] = nil
-            let g = lm.glyphIndexForCharacter(at: min(at, ts.length - 1))
-            let x = lm.boundingRect(forGlyphRange: NSRange(location: g, length: 1), in: tc).minX + origin.x
-            let base = lm.location(forGlyphAt: firstGlyph).y
-            let font = (attrs[.font] as? NSFont) ?? NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
-            NSAttributedString(string: text, attributes: attrs).draw(at: NSPoint(x: x, y: frag.minY + origin.y + base - font.ascender))
         }
     }
 }
@@ -527,6 +505,10 @@ final class Canvas: NSObject {
         let keys = segs.map(\.key)
         let old = segments.map(\.key)
         if keys == old { return }
+        let kept = text.marks.cursor.flatMap { stop -> (stop: String, y: CGFloat)? in
+            guard let rect = visibleRect(of: stop), rect.minY >= 0, rect.maxY <= scroll.contentView.bounds.height else { return nil }
+            return (stop, rect.minY)
+        }
         var head = 0
         while head < min(keys.count, old.count), keys[head] == old[head] { head += 1 }
         var tail = 0
@@ -565,6 +547,15 @@ final class Canvas: NSObject {
         applyHeights()
         scheduleLayoutExtras()
         updatePin()
+        if let kept, let range = cursorRange(kept.stop), let manager = text.layoutManager {
+            manager.ensureLayout(forCharacterRange: range)
+            text.sizeToFit()
+            if let rect = text.rect(for: range) {
+                let y = max(0, min(rect.minY - kept.y, max(0, text.frame.height - scroll.contentView.bounds.height)))
+                scroll.contentView.scroll(to: NSPoint(x: 0, y: y))
+                scroll.reflectScrolledClipView(scroll.contentView)
+            }
+        }
     }
 
     /// Stop key → character range, over the whole text.
@@ -589,7 +580,8 @@ final class Canvas: NSObject {
         let was = text.marks
         text.marks = m
         if was != m { text.needsDisplay = true }
-        if let c = m.cursor, c != lastCursor || scrollTick != lastScrolledTick {
+        let wordMoved = was.sourceWord?.mark != m.sourceWord?.mark || was.sourceWord?.stop != m.sourceWord?.stop || was.word?.at != m.word?.at
+        if let c = m.cursor, c != lastCursor || scrollTick != lastScrolledTick || wordMoved {
             lastCursor = c
             lastScrolledTick = scrollTick
             cursorMovedAt = Date()
@@ -608,7 +600,7 @@ final class Canvas: NSObject {
     /// Scroll so a stop sits `row` lines below the visible top, as near as the document's ends allow.
     @discardableResult
     func settle(_ stop: String, row: Int) -> Bool {
-        guard let r = stopMap[stop], let rect = text.rect(for: NSRange(location: r.location, length: 1)), rect.height > 0 else { return false }
+        guard let r = cursorRange(stop), let rect = text.rect(for: r), rect.height > 0 else { return false }
         let y = Canvas.anchoredTop(stopY: rect.minY, lineHeight: rect.height, row: row,
                                    docHeight: text.frame.height, viewHeight: scroll.contentView.bounds.height)
         if y != scroll.contentView.bounds.minY {
@@ -621,7 +613,7 @@ final class Canvas: NSObject {
     /// z t / z z / z b: scroll so a stop's line sits at `at` (0 the top, 1 the bottom) of the view.
     @discardableResult
     func place(_ stop: String, at: Double) -> Bool {
-        guard let r = stopMap[stop], let rect = text.rect(for: NSRange(location: r.location, length: 1)), rect.height > 0 else { return false }
+        guard let r = cursorRange(stop), let rect = text.rect(for: r), rect.height > 0 else { return false }
         let rows = max(1, Int(scroll.contentView.bounds.height / rect.height))
         return settle(stop, row: Int((Double(rows - 1) * at).rounded()))
     }
@@ -649,7 +641,7 @@ final class Canvas: NSObject {
     func top(_ head: String, keeping stop: String) -> Bool {
         let viewHeight = scroll.contentView.bounds.height
         guard let h = stopMap[head], let hr = text.rect(for: NSRange(location: h.location, length: 1)),
-              let s = stopMap[stop], let sr = text.rect(for: NSRange(location: s.location, length: 1)),
+              let s = cursorRange(stop), let sr = text.rect(for: s),
               let y = Canvas.leadTop(headY: hr.minY, stopMaxY: sr.maxY, viewHeight: viewHeight) else { return false }
         let room = Canvas.roomBelow(top: y, docHeight: text.frame.height, viewHeight: viewHeight)
         if room > scroll.contentInsets.bottom {
@@ -674,9 +666,35 @@ final class Canvas: NSObject {
         max(0, top + viewHeight - docHeight)
     }
 
+    private func cursorRange(_ stop: String) -> NSRange? {
+        guard let row = stopMap[stop] else { return nil }
+        if let word = text.marks.sourceWord, word.stop == stop, let storage = text.textStorage {
+            var found: NSRange?
+            storage.enumerateAttribute(.rvRow, in: row) { value, range, done in
+                guard let info = value as? RowInfo, let at = info.layout?.storage(for: word.mark).first else { return }
+                found = NSRange(location: range.location + at.lowerBound, length: at.count)
+                done.pointee = true
+            }
+            if let found { return found }
+        }
+        if let word = text.marks.word, word.stop == stop {
+            return NSRange(location: row.location + word.at.lowerBound, length: word.at.count)
+        }
+        if let side = text.marks.column, let storage = text.textStorage {
+            var found: NSRange?
+            storage.enumerateAttribute(.rvRow, in: row) { value, range, done in
+                guard let info = value as? RowInfo, let piece = info.layout?.pieces.first(where: { $0.side == side }) else { return }
+                found = NSRange(location: range.location + piece.storage.lowerBound, length: 1)
+                done.pointee = true
+            }
+            if let found { return found }
+        }
+        return NSRange(location: row.location, length: 1)
+    }
+
     /// Keep a stop on screen, moving as little as it takes (v2 scrollIntoView block: nearest).
     func reveal(_ stop: String) {
-        guard let r = stopMap[stop], let rect = text.rect(for: NSRange(location: r.location, length: max(1, min(r.length, 1)))) else { return }
+        guard let r = cursorRange(stop), let rect = text.rect(for: r) else { return }
         let visible = scroll.contentView.bounds
         let margin: CGFloat = min(48, visible.height / 4)
         var y = visible.minY
@@ -691,7 +709,7 @@ final class Canvas: NSObject {
 
     /// Scroll so a 1-based paragraph (a code view's line) sits mid-view, as Helix lands a jump.
     func center(_ stop: String) {
-        guard let r = stopMap[stop], let rect = text.rect(for: NSRange(location: r.location, length: 1)) else { return }
+        guard let r = cursorRange(stop), let rect = text.rect(for: r) else { return }
         let h = scroll.contentView.bounds.height
         scroll.contentView.scroll(to: NSPoint(x: 0, y: max(0, rect.midY - h / 2)))
         scroll.reflectScrolledClipView(scroll.contentView)
@@ -699,7 +717,7 @@ final class Canvas: NSObject {
 
     /// The cursor row's rect relative to the pane's visible top-left (for the types popover).
     func visibleRect(of stop: String) -> CGRect? {
-        guard let r = stopMap[stop], let rect = text.rect(for: NSRange(location: r.location, length: 1)) else { return nil }
+        guard let r = cursorRange(stop), let rect = text.rect(for: r) else { return nil }
         let v = scroll.contentView.bounds
         return CGRect(x: rect.minX, y: rect.minY - v.minY, width: rect.width, height: rect.height)
     }

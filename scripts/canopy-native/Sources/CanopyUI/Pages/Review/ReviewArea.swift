@@ -137,10 +137,9 @@ struct ReviewSurface: SurfaceProvider {
     }
 
     /// In the diff `/` reads code only — a line's new half (field 0), and its old half (field 1) where
-    /// that's a removed line, as far as it's drawn; headers, conversations and gaps aren't searched.
+    /// that's a removed line; headers, conversations and gaps aren't searched.
     /// The open file: each line's text. Elsewhere (the file tree): titles.
-    /// The diff's search reads the payload, its scope and split (the old half is cut to its width), the
-    /// review patches (threads are rows) and the code beside it.
+    /// Source changes invalidate search; wrapping alone leaves its UTF-16 matches valid.
     func searchStamp(_ app: AppModel) -> String {
         let pg = ReviewPageState.of(app)
         let p = PageSearch.of(app).pane
@@ -154,9 +153,7 @@ struct ReviewSurface: SurfaceProvider {
         switch PageSearch.of(app).pane {
         case reviewDiffPane:
             guard let i = pg.stopIndex[row], pg.stops[i].kind == .line, let r = pg.stops[i].row else { return [] }
-            let w = pg.splitWidth(pg.stops[i].path)
-            let old = r.left.flatMap { $0.kind == .del ? $0.text : nil }.map { $0.count > w ? String($0.prefix(max(0, w - 1))) : $0 }
-            return [r.right?.text ?? "", old ?? ""]
+            return [r.right?.text ?? "", r.left.flatMap { $0.kind == .del ? $0.text : nil } ?? ""]
         case let p where pg.window(pane: p)?.doc != nil:
             guard let n = RowKey.id(row, "s").flatMap(Int.init), let t = pg.window(pane: p)?.text else { return [] }
             let lines = pg.lines(of: t)   // split once per text, not once per row (a scan was quadratic)

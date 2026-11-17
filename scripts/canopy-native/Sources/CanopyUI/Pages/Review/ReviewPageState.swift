@@ -195,9 +195,8 @@ public final class ReviewPageState: ShipHost {
 
     /// "conversation" | "commits" | "files" (ShipHost's tab)
     public var tab = "files" { didSet { if tab != oldValue { tabMoved(oldValue) } } }
-    /// Diffs are always side by side.
     public let split = true
-    /// How many characters fit across the diff, so a split line gives each half the same width (0: not measured yet).
+    /// Available monospace columns across the diff (0: not measured yet).
     public var diffColumns = 0
     /// A branch with more than one commit can scope its diff to one of them (the header's chip).
     public var scopesCommits: Bool { integration == nil && (branch?.commits ?? 0) > 1 }
@@ -209,19 +208,11 @@ public final class ReviewPageState: ShipHost {
         let longest = files.map(\.path.count).max() ?? 20
         return min(260, max(180, CGFloat(longest) * 6.6 + 80))
     }
-    /// Characters the old half of a split line gets in this file (see `oldHalfWidth`).
-    public func splitWidth(_ path: String?) -> Int {
-        Self.oldHalfWidth(files.first { $0.path == path }, usable: diffColumns > 0 ? diffColumns - 13 : 120)
+    func divider(path: String, line: Int) -> Int {
+        guard let file = views.first(where: { $0.file.path == path }), let row = file.rows.first(where: { $0.right?.new == line }) else { return 0 }
+        return DiffLayout.rows(row, columns: diffColumns, paired: DiffLayout.pairedHunks(file.rows).contains(row.hunk)).first?.divider ?? 0
     }
 
-    /// The old half gets no width for additions alone and all of it for deleted files.
-    /// Other files keep both columns so new-side context has room to wrap.
-    nonisolated static func oldHalfWidth(_ f: FileDiff?, usable: Int) -> Int {
-        guard let f else { return max(24, usable / 2) }
-        if f.status == .added || f.del == 0 { return 0 }
-        if f.status == .deleted { return usable }
-        return max(24, usable / 2)
-    }
     /// The cursor in the code: its row, half and UTF-16 range in that half's text (one character). It
     /// counts only while the cursor is still on that row and half.
     public var word: (key: String, side: Side, at: Range<Int>)? {
@@ -766,7 +757,7 @@ public final class ReviewPageState: ShipHost {
 
     /// What the diff's search fields are read from (ReviewSurface.searchStamp).
     var searchStamp: String {
-        "\(payloadGen)|\(payload?.key ?? "")|\(commitScope ?? "")|\(split)|\(diffColumns)|\(app?.store.versions[Domain.review] ?? 0)|\(app?.store.ops.count ?? 0)|\(contextGen)"
+        "\(payloadGen)|\(payload?.key ?? "")|\(commitScope ?? "")|\(split)|\(app?.store.versions[Domain.review] ?? 0)|\(app?.store.ops.count ?? 0)|\(contextGen)"
     }
 
     @ObservationIgnored private var linesMemo: (text: String, lines: [String])?
