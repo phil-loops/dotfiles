@@ -25,7 +25,9 @@ The timestamp is when the input was recorded, in ISO 8601 format. Record chat in
 
 When a new instruction changes an item, replace this first section with that instruction and its recording time. Routine progress updates, `canopy-todo steps`, and completion notes preserve it. The reader does not mine prose, old summaries or arbitrary transcript files for purported input. Legacy or malformed bodies remain ordinary notes and say that input has not been recorded.
 
-The existing todo body is the sole storage. This format needs no new server field or separate activity registry. Automatic import from chat hosts remains a separate integration: a host must attach a real message and timestamp to an exact work item, rather than infer its target from a session's current directory or branch.
+The current implementation stores this section only in the existing todo body. It is an agent-maintained convention: it cannot prove complete message capture, safe concurrent updates or delivery of the newest instruction to a worker. It must not be presented as automatic synchronization.
+
+Automatic import from chat hosts remains a separate integration. The proposed contract in [DESIGN.md, round 25](DESIGN.md#round-25-freshness-belongs-to-the-message-and-execution-protocol) captures immutable source messages against explicit work identities, supplies versioned context through the runtime, and checks that completion belongs to the current instruction revision. The latest literal message remains separate from accumulated task instructions. Until that contract is implemented, missing capture and delivery stay unknown.
 
 ## Reading completed context
 
