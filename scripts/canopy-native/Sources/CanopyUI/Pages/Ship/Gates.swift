@@ -12,6 +12,9 @@ public struct GateEvent: Decodable, Equatable, Sendable {
         public var ok: Bool?
         public var ms: Double?
         public var summary: String?
+        public var warn: String?
+        public var skipped: Bool?
+        public var advisory: Bool?
     }
 
     public var event: String
@@ -34,17 +37,18 @@ public struct GateEvent: Decodable, Equatable, Sendable {
     /// "background" = agents'), and this run's own tier
     public var ahead: [String: Int]?
     public var tier: String?
+    public var note: String?
 
-    enum K: String, CodingKey { case event, gate, gates, ok, ms, ts, warn, step, position, behind, ahead, tier }
+    enum K: String, CodingKey { case event, gate, gates, ok, ms, ts, warn, step, position, behind, ahead, tier, note }
 
     public init(event: String, gate: String? = nil, planned: [String]? = nil, verdicts: [Verdict]? = nil,
                 ok: Bool? = nil, ms: Double? = nil, ts: Double? = nil, warn: String? = nil,
                 step: String? = nil, position: Int? = nil, behind: String? = nil,
-                ahead: [String: Int]? = nil, tier: String? = nil) {
+                ahead: [String: Int]? = nil, tier: String? = nil, note: String? = nil) {
         self.event = event; self.gate = gate; self.planned = planned; self.verdicts = verdicts
         self.ok = ok; self.ms = ms; self.ts = ts; self.warn = warn
         self.step = step; self.position = position; self.behind = behind
-        self.ahead = ahead; self.tier = tier
+        self.ahead = ahead; self.tier = tier; self.note = note
     }
 
     public init(from d: Decoder) throws {
@@ -62,6 +66,7 @@ public struct GateEvent: Decodable, Equatable, Sendable {
         behind = try? c.decode(String.self, forKey: .behind)
         ahead = try? c.decode([String: Int].self, forKey: .ahead)
         tier = try? c.decode(String.self, forKey: .tier)
+        note = try? c.decode(String.self, forKey: .note)
     }
 }
 
@@ -88,8 +93,16 @@ public struct GateProgress: Decodable, Equatable, Sendable {
 }
 
 public struct GateRow: Equatable, Sendable {
-    public enum State: String, Sendable { case queued, running, green, waived, red, stopped }
+    public enum State: String, Sendable { case queued, running, green, waived, red, stopped, skipped }
     public var name: String
+    public var label: String {
+        switch state {
+        case .skipped: "\(name) skipped"
+        case .stopped: "\(name) stopped"
+        case .waived: "\(name) waived"
+        default: name
+        }
+    }
     public var state: State
     /// how long it ran, or has been running (ms)
     public var ms: Double?
@@ -102,24 +115,43 @@ public enum GatesRun {
     /// Each planned gate's state; `now` (seconds, like the journal's ts) times a running one.
     public static func rows(_ p: GateProgress?, now: Double) -> [GateRow] {
         let ev = p?.events ?? []
-        let plan = ev.first { $0.event == "plan" }?.planned ?? []
-        let result = ev.first { $0.event == "result" }
-        var summaries: [String: String] = [:]
-        for g in result?.verdicts ?? [] { if let s = g.summary, summaries[g.name] == nil { summaries[g.name] = s } }
-        let running = p?.running ?? false
-        return plan.map { name in
-            if let done = ev.first(where: { $0.event == "done" && $0.gate == name }) {
-                if let w = done.warn, !w.isEmpty { return GateRow(name: name, state: .waived, ms: done.ms, summary: w) }
-                let s = summaries[name].flatMap { $0.isEmpty ? nil : $0 }
-                return GateRow(name: name, state: done.ok == true ? .green : .red, ms: done.ms, summary: s)
+        let result = ev.last { $0.event == "result" }
+        var names = ev.last { $0.event == "plan" }?.planned ?? []
+        for verdict in result?.verdicts ?? [] where !names.contains(verdict.name) { names.append(verdict.name) }
+        let running = isRunning(p)
+        if names.isEmpty, p?.dead == true, result == nil, let step = setup(p)?.step {
+            return [GateRow(name: step, state: .stopped, ms: nil)]
+        }
+        return names.map { name in
+            let done = ev.last { $0.event == "done" && $0.gate == name }
+            if let verdict = result?.verdicts?.last(where: { $0.name == name }) {
+                let warn = nonempty(verdict.warn) ?? nonempty(done?.warn)
+                let state: GateRow.State = verdict.ok == true
+                    ? (warn != nil || verdict.skipped == true || verdict.advisory == true ? .waived : .green)
+                    : verdict.skipped == true ? .skipped : verdict.ok == false ? .red : .stopped
+                return GateRow(name: name, state: state, ms: verdict.ms ?? done?.ms, summary: warn ?? nonempty(verdict.summary))
             }
-            if let start = ev.first(where: { $0.event == "start" && $0.gate == name }) {
+            if let done {
+                let warn = nonempty(done.warn)
+                let state: GateRow.State = done.ok == true ? (warn == nil ? .green : .waived) : done.ok == false ? .red : .stopped
+                return GateRow(name: name, state: state, ms: done.ms, summary: warn)
+            }
+            if let start = ev.last(where: { $0.event == "start" && $0.gate == name }) {
                 let quiet = running && p?.tail?.gate == name ? p?.tail?.age : nil
-                return GateRow(name: name, state: running ? .running : .stopped, ms: start.ts.map { max(0, (now - $0) * 1000) }, quiet: quiet)
+                let end = running ? now : result?.ts
+                return GateRow(name: name, state: running ? .running : .stopped,
+                               ms: start.ts.flatMap { start in end.map { max(0, ($0 - start) * 1000) } }, quiet: quiet)
             }
-            return GateRow(name: name, state: running ? .queued : .stopped, ms: nil)
+            return GateRow(name: name, state: result != nil ? .skipped : running ? .queued : .stopped, ms: nil,
+                           summary: result.flatMap { nonempty($0.note) })
         }
     }
+
+    public static func isRunning(_ p: GateProgress?) -> Bool {
+        p?.running == true && p?.dead != true && !(p?.events ?? []).contains { $0.event == "result" }
+    }
+
+    private static func nonempty(_ s: String?) -> String? { s.flatMap { $0.isEmpty ? nil : $0 } }
 
     /// The running gate that has written nothing for longer than `stuckAfter`: a wedged test
     /// holding the slot reads as stuck, not slow, without asking Claude.
@@ -151,7 +183,7 @@ public enum GatesRun {
     /// The step an in-flight run is on before its first gate, from its latest setup event.
     public static func setup(_ p: GateProgress?) -> GateEvent? {
         let ev = p?.events ?? []
-        guard !ev.contains(where: { $0.event == "plan" }) else { return nil }
+        guard !ev.contains(where: { $0.event == "plan" || $0.event == "result" }) else { return nil }
         return ev.last { $0.event == "setup" }
     }
 
@@ -160,6 +192,7 @@ public enum GatesRun {
 
     /// What the chip says between gates, how long it has said it, and whether that's long enough to be stuck.
     public static func waiting(_ p: GateProgress?, rows: [GateRow], inFlight: Bool, now: Double) -> (text: String, secs: Double?, stuck: Bool)? {
+        guard p?.dead != true, !(p?.events ?? []).contains(where: { $0.event == "result" }) else { return nil }
         let step = setup(p)
         guard let text = between(rows, inFlight: inFlight, setup: step) else { return nil }
         // a time belongs to a live run only: a finished run's elapsed stood still on the chip

@@ -44,7 +44,7 @@ public struct ShipStripView: View {
 
     /// the gates strip shows while a run is live, after a red, or when a gate's output was asked for
     private func stripShown(_ rows: [GateRow], _ progress: GateProgress?, _ shown: String?, _ ship: ShipState) -> Bool {
-        !rows.isEmpty && !ship.gatesHidden.contains(branchID) && (progress?.running == true || rows.contains(where: { $0.state == .red }) || shown != nil)
+        !rows.isEmpty && !ship.gatesHidden.contains(branchID) && (GatesRun.isRunning(progress) || rows.contains(where: { $0.state == .red || $0.state == .stopped }) || shown != nil)
     }
 
     /// dirt and the prep route are read per branch, re-read when the branch moves or a sync ends
@@ -82,7 +82,7 @@ public struct ShipStripView: View {
                     Text(detailed ? (stuck ? "◌ gates · stuck?" : "◌ gates") : "◌ \(g.name) \(GatesRun.secs(g.ms))\(stuck ? " · stuck?" : "")")
                         .foregroundStyle(stuck ? theme.ember : theme.goldLeaf)
                         .explains("ship|gates", "the push gates are running on this tree; p pushes once every one is green")
-                } else if let w = GatesRun.waiting(progress, rows: rows, inFlight: b.gates == .running || progress?.running == true, now: now) {
+                } else if let w = GatesRun.waiting(progress, rows: rows, inFlight: b.gates == .running || GatesRun.isRunning(progress), now: now) {
                     Text("◌ \(w.text)\(w.secs.map { " · " + GatesRun.secs($0 * 1000) } ?? "")").foregroundStyle(w.stuck ? theme.ember : theme.goldLeaf)
                         .explains("ship|gates", w.stuck ? "the gates haven't moved in a while: , g shows what the run is doing" : "the gates are between steps: readying the checkout, or waiting for a slot")
                 } else if !red.isEmpty {
@@ -90,6 +90,8 @@ public struct ShipStripView: View {
                         .explains("ship|gates", "a gate failed on this tree: , g shows its output, skip waives it for this code")
                     ForEach(red, id: \.name) { g in Text(g.name).foregroundStyle(theme.ember) }
                     KeyButton(title: "skip", id: "review.gates.skip", target: branchID)
+                } else if rows.contains(where: { $0.state == .stopped }) {
+                    Text("gates stopped").foregroundStyle(theme.inkDim)
                 } else if b.gates == .green && !waived.isEmpty {
                     let quick = GatesRun.quick(rows)
                     let others = waived.count - quick.count
@@ -277,7 +279,7 @@ struct GatesStrip: View {
     let progress: GateProgress?
     let shown: String?
 
-    static let step: [GateRow.State: StepState] = [.queued: .idle, .running: .run, .green: .ok, .waived: .skip, .red: .fail, .stopped: .fail]
+    static let step: [GateRow.State: StepState] = [.queued: .idle, .running: .run, .green: .ok, .waived: .skip, .red: .fail, .stopped: .idle, .skipped: .skip]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -290,11 +292,14 @@ struct GatesStrip: View {
                 }
                 Spacer(minLength: 0)
                 HStack(spacing: 12) {
-                    if progress?.running == true, let e = progress?.elapsed { Text("\(GatesRun.secs(e * 1000)) in").foregroundStyle(theme.inkFaint) }
+                    if GatesRun.isRunning(progress), let e = progress?.elapsed { Text("\(GatesRun.secs(e * 1000)) in").foregroundStyle(theme.inkFaint) }
                     KeyButton(title: "output", id: "review.gates.show", target: branchID)
                 }
                 .fixedSize()
                 .layoutPriority(1)
+            }
+            if let note = progress?.events?.last(where: { $0.event == "result" })?.note, !note.isEmpty {
+                Text(note).foregroundStyle(theme.inkDim)
             }
             ForEach(rows.filter { $0.state == .red && $0.summary != nil && $0.name != progress?.tail?.gate }, id: \.name) { g in
                 (Text(g.name).bold() + Text(" \(g.summary ?? "")")).foregroundStyle(theme.ember)
@@ -331,7 +336,7 @@ struct GatesStrip: View {
             ForEach(rows, id: \.name) { g in
                 let s = Self.step[g.state] ?? .idle
                 HStack(spacing: 3) {
-                    Text("\(stepIcon[s] ?? "·") \(g.name)").foregroundStyle(stepColor(s, theme))
+                    Text("\(stepIcon[s] ?? "·") \(g.name)\(g.state == .skipped ? " skipped" : g.state == .stopped ? " stopped" : "")").foregroundStyle(stepColor(s, theme))
                     if timings, g.ms != nil { Text(GatesRun.secs(g.ms)).foregroundStyle(theme.inkFaint) }
                     if let q = g.quiet, q > GatesRun.stuckAfter {
                         Text("· no output for \(GatesRun.secs(q * 1000)) — stuck?").foregroundStyle(theme.ember)

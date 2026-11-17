@@ -508,14 +508,14 @@ enum ReviewCommands {
                     return
                 }
                 let shown = ship.gateShown?.hasPrefix("\(id) ") == true
-                let visible = !ship.gatesHidden.contains(id) && (progress?.running == true || rows.contains { $0.state == .red } || shown)
+                let visible = !ship.gatesHidden.contains(id) && (GatesRun.isRunning(progress) || rows.contains { $0.state == .red || $0.state == .stopped } || shown)
                 if visible {
                     ship.gatesHidden.insert(id)
                     if shown { ship.gateShown = nil }
                     return
                 }
                 ship.gatesHidden.remove(id)
-                if progress?.running != true, !rows.contains(where: { $0.state == .red }), let last = rows.last {
+                if !GatesRun.isRunning(progress), !rows.contains(where: { $0.state == .red }), let last = rows.last {
                     ship.gateShown = "\(id) \(last.name)"
                 }
             }))
