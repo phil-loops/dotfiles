@@ -247,6 +247,14 @@ check(E.capture_binding(reused_sides, edited) == (first, "1" * 64),
       "an edited prediction over reused pixels is an amendment of their first capture, not a new prediction")
 half = {"before": {"renderId": "pb", "reused": True}, "after": {"renderId": "pa2", "reused": False}}
 check(E.capture_binding(half, edited) == (edited, None), "new after pixels mean the prediction preceded what it predicts")
+# ── the build a render attested travels with the manifest, not only the cache ──
+ident_args = ("tree-x", "dg", {"node": "v"}, {"browser": "1"})
+rid = E._sha(E._canon({"schema": E.SCHEMA, "tree": "tree-x", "recipe": "dg", "env": {"node": "v"}, "contract": {"browser": "1"}}))
+E._write_atomic(E._admission_path(rid), E._canon({"status": "admitted", "scenes": {"s": blob(7)},
+                                                   "build": {"css": "c1", "js": "j1"}}))
+got = E.render("repo", "tree-x", "dg", "frozen", {"node": "v"}, {"browser": "1"}, None, log=lambda *_: None)
+check(got.get("reused") and got.get("build") == {"css": "c1", "js": "j1"}, "a reused render returns the build its admission attested")
+check("build" in E.side_keys(app=False) and "build" in E.side_keys(app=True), "a manifest side keeps the render's build attestation")
 # ── owned execution: a run never serves a package build an earlier run left behind ──
 side = os.path.join(tmp, "side-co")
 for pkg in ("mail-pg", "prisma"):

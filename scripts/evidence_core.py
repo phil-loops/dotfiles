@@ -270,7 +270,8 @@ def render(repo, tree, recipe_digest, frozen_recipe, env, contract, donor, fresh
     have = adm and adm.get("status") == "admitted" and all(blob_path(s) for s in adm["scenes"].values())
     if have and not fresh:
         log(f"  reused admitted render {render_id[:12]}")
-        return {"renderId": render_id, "scenes": adm["scenes"], "identity": identity, "reused": True}
+        return {"renderId": render_id, "scenes": adm["scenes"], "identity": identity, "build": adm.get("build"),
+                "reused": True}
     snap = snapshot(repo, tree)
     runs = [_attempt(snap, frozen_recipe, donor, render_id, n, log) for n in ((1,) if have else (1, 2))]
     results = [r for _, r in runs]
@@ -300,7 +301,8 @@ def render(repo, tree, recipe_digest, frozen_recipe, env, contract, donor, fresh
             "build": results[0]["build"], "attempts": [d for d, _ in runs],
             "at": time.strftime("%Y-%m-%dT%H:%M:%S%z")}))
         log(f"  admitted render {render_id[:12]} (2 attempts matched)")
-    return {"renderId": render_id, "scenes": expected, "identity": identity, "reused": False}
+    build = adm.get("build") if have else results[0]["build"]
+    return {"renderId": render_id, "scenes": expected, "identity": identity, "build": build, "reused": False}
 
 
 # ── app recipes: the real app, served from exactly one commit ─────────────────────────────────
@@ -709,6 +711,12 @@ def coverage(repo, b, recipe):
             "unverified": sorted(unverified)}
 
 
+def side_keys(app):
+    """What a manifest keeps of each side's render: identity and attested build travel with it, so the
+    ledger can say what produced an accepted picture after the cache lets the admission go."""
+    return ("renderId", "scenes", "identity", "build") + (("fields", "frames", "capturedAt") if app else ())
+
+
 def publish(repo, branch, b, req, digest, recipe, sides, donor, captured, amends=None):
     repo_id = repo_name(repo)
     app = recipe.get("kind") == "app"
@@ -719,7 +727,7 @@ def publish(repo, branch, b, req, digest, recipe, sides, donor, captured, amends
         fields = [sides[s].get("fields", {}).get(sid) for s in ("before", "after")]
         findings.append(finding(sid, predict[sid], sides["before"]["scenes"][sid], sides["after"]["scenes"][sid],
                                 [f for f in fields if f], donor))
-    keep = ("renderId", "scenes", "identity") + (("fields", "frames", "capturedAt") if app else ())
+    keep = side_keys(app)
     manifest = {
         "schema": SCHEMA, "repo": repo_id, "basis": b,
         # what kind of claim this is: a closed, independently admitted render, or captures from live
