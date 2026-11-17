@@ -59,12 +59,13 @@ def cap(j, mid, text, seq=None, conv="c1", source="show", **kw):
 # ---- identities, bindings, exclusion --------------------------------------------------------
 
 j = fresh()
-a1 = j.create_work(repo="loops", branch="feat/x", todo_id="item-a")
+a1 = j.create_work(repo="loops", branch="feat/x", todo_id="item-a", incarnation="i_a1")
 b1 = j.create_work(repo="dotfiles", branch="feat/x")
 check("same branch name in two repositories is two subjects",
       j.works_for_branch("loops", "feat/x") == [a1] and j.works_for_branch("dotfiles", "feat/x") == [b1])
 check("a branch without its repository is refused", raises(wj.JournalError, lambda: j.works_for_branch(None, "feat/x")) is not None)
-check("one live work per tracker item", raises(wj.Conflict, lambda: j.create_work(todo_id="item-a")) is not None)
+check("one live work per tracker item", raises(wj.Conflict, lambda: j.create_work(todo_id="item-a", incarnation="i_a1")) is not None)
+check("a tracker link needs its incarnation", raises(wj.JournalError, lambda: j.create_work(todo_id="item-b")) is not None)
 
 enrolled(j, [a1])
 r = cap(j, "s1", "keep the old API compatible", seq=1)
@@ -72,9 +73,9 @@ j.relink(a1, branch="feat/x-renamed")
 check("a branch rename keeps the work's identity and direction",
       j.works_for_branch("loops", "feat/x-renamed") == [a1] and [m["text"] for m in j.messages(a1)] == ["keep the old API compatible"])
 j.retire_work(a1)
-a2 = j.create_work(repo="loops", branch="feat/x-renamed", todo_id="item-a")
+a2 = j.create_work(repo="loops", branch="feat/x-renamed", todo_id="item-a", incarnation="i_a2")
 check("a recreated branch/item gets a new work id that inherits nothing",
-      a2 != a1 and j.messages(a2) == [] and j.work_for_todo("item-a") == a2 and j.work(a2)["revision"] == 0)
+      a2 != a1 and j.messages(a2) == [] and j.work_for_todo("item-a", "i_a2") == a2 and j.work(a2)["revision"] == 0)
 check("capture into retired work is refused", raises(wj.JournalError, lambda: cap(j, "s2", "more", seq=2, works=[a1])) is not None)
 
 before = j.db.execute("SELECT count(*) FROM message").fetchone()[0]
@@ -88,7 +89,7 @@ check("refused captures store nothing", j.db.execute("SELECT count(*) FROM messa
 # ---- immutability, duplicates, conflicts ----------------------------------------------------
 
 j = fresh()
-w = j.create_work(todo_id="t")
+w = j.create_work(todo_id="t", incarnation="i_t")
 enrolled(j, [w])
 r1 = cap(j, "s1", "first", seq=1, target="session:abc")
 dup = cap(j, "s1", "first", seq=1, target="session:abc")

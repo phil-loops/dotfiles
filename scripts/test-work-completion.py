@@ -59,7 +59,7 @@ def deliver(j, attempt_id, boundary="turn", state="acknowledged"):
 # ---- the happy path, then new direction ----------------------------------------------------
 
 j = fresh()
-w = j.create_work(todo_id="item")
+w = j.create_work(todo_id="item", incarnation="i_1")
 say(j, w, "1", "build the journal", 1)
 a = j.begin_attempt([w], worker="session:1", host="claude-say", managed=True)
 rid, packet = deliver(j, a["attempt_id"], boundary="start")

@@ -22,6 +22,7 @@ import json
 import os
 import re
 import sys
+import uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from srv import todo  # noqa: E402
@@ -124,7 +125,7 @@ def main():
         meta = {"title": args.title, "kind": args.kind, "state": args.state, "area": args.area,
                 "project": project_id(args.project), "size": args.size,
                 "why": args.why, "waiting": args.waiting, "blocked_by": args.blocked_by, "links": args.link,
-                "solved_by": args.solved_by, "created": todo.today(), "updated": todo.today()}
+                "solved_by": args.solved_by, "incarnation": "i_" + uuid.uuid4().hex, "created": todo.today(), "updated": todo.today()}
         todo.write(item_id, {k: v for k, v in meta.items() if v not in (None, "", [])}, body)
         print(item_id)
     elif args.cmd == "ls":

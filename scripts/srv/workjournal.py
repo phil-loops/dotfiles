@@ -3,9 +3,11 @@
 A SQLite journal, every write one `BEGIN IMMEDIATE` transaction, so concurrent writers serialize
 instead of overwriting each other. What it owns:
 
-  work            stable ids ('w_…', never reused). The tracker item, repository, forest and branch
-                  are link metadata: renaming a branch relinks, deleting it retires the work, and a
-                  recreated branch gets a new work id that inherits nothing.
+  work            stable ids ('w_…', never reused). A tracker item is linked by its id together with
+                  the immutable incarnation minted when that record was created: a record deleted
+                  and recreated under the same slug is a new subject, and first use of the new
+                  incarnation retires the old work, so nothing is inherited. Repository, forest and
+                  branch are link metadata: renaming a branch relinks, deleting it retires the work.
   conversation    a source's conversation, collected only once enrolled by an explicit binding.
                   Its binding — the set of work items its messages belong to — has generations;
                   launching or switching work starts a new one. An excluded conversation is never
@@ -51,7 +53,7 @@ import sqlite3
 import time
 import uuid
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 BOUNDARIES = ("start", "resume", "turn", "compaction")
 KINDS = ("progress", "completion")
 AUTHORS = ("user", "agent", "system")
@@ -85,6 +87,7 @@ CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRI
 CREATE TABLE IF NOT EXISTS work (
   work_id    TEXT PRIMARY KEY,
   todo_id    TEXT,
+  todo_incarnation TEXT,
   repo       TEXT,
   project    TEXT,
   branch     TEXT,
@@ -340,6 +343,8 @@ class Journal:
         with self.tx():
             for stmt in _statements(SCHEMA + TRIGGERS):
                 self.db.execute(stmt)
+            if "todo_incarnation" not in {r["name"] for r in self.db.execute("PRAGMA table_info(work)")}:
+                self.db.execute("ALTER TABLE work ADD COLUMN todo_incarnation TEXT")
             row = self.db.execute("SELECT value FROM meta WHERE key = 'schema'").fetchone()
             if row is None:
                 self.db.execute("INSERT INTO meta VALUES ('schema', ?)", (str(SCHEMA_VERSION),))
@@ -379,27 +384,39 @@ class Journal:
 
     # ---- work identities -------------------------------------------------------------------
 
-    def create_work(self, *, todo_id=None, repo=None, project=None, branch=None, title=None):
+    def create_work(self, *, todo_id=None, incarnation=None, repo=None, project=None, branch=None, title=None):
+        if bool(todo_id) != bool(incarnation):
+            raise JournalError("a tracker item is linked by its id and its incarnation together")
         work_id = "w_" + uuid.uuid4().hex
         with self.tx() as db:
             try:
-                db.execute("INSERT INTO work (work_id, todo_id, repo, project, branch, title, created_at) VALUES (?,?,?,?,?,?,?)",
-                           (work_id, todo_id, repo, project, branch, title, self.now()))
+                db.execute("""INSERT INTO work (work_id, todo_id, todo_incarnation, repo, project, branch, title, created_at)
+                              VALUES (?,?,?,?,?,?,?,?)""", (work_id, todo_id, incarnation, repo, project, branch, title, self.now()))
             except sqlite3.IntegrityError:
                 raise Conflict(f"tracker item {todo_id} already has live work") from None
         return work_id
 
-    def work_for_todo(self, todo_id, *, create=False, **links):
-        """The live work linked to a tracker item; with create, makes it on first use."""
-        row = self.db.execute("SELECT work_id FROM work WHERE todo_id = ? AND retired_at IS NULL", (todo_id,)).fetchone()
-        if row:
-            return row["work_id"]
-        if not create:
-            return None
-        try:
-            return self.create_work(todo_id=todo_id, **links)
-        except Conflict:   # a concurrent first use made it
-            return self.work_for_todo(todo_id)
+    def work_for_todo(self, todo_id, incarnation, *, create=False, **links):
+        """The live work linked to this incarnation of a tracker item. With create, makes it on
+        first use, retiring any live work left by an earlier record under the same id — that
+        record is gone, and its direction and results stay its own history."""
+        if not incarnation:
+            raise JournalError(f"tracker item {todo_id} has no incarnation; enroll it before linking work")
+        row = self.db.execute("SELECT work_id FROM work WHERE todo_id = ? AND todo_incarnation = ? AND retired_at IS NULL",
+                              (todo_id, incarnation)).fetchone()
+        if row or not create:
+            return row["work_id"] if row else None
+        work_id = "w_" + uuid.uuid4().hex
+        with self.tx() as db:
+            row = db.execute("SELECT work_id, todo_incarnation FROM work WHERE todo_id = ? AND retired_at IS NULL", (todo_id,)).fetchone()
+            if row and row["todo_incarnation"] == incarnation:
+                return row["work_id"]
+            if row:
+                db.execute("UPDATE work SET retired_at = ? WHERE work_id = ?", (self.now(), row["work_id"]))
+            db.execute("""INSERT INTO work (work_id, todo_id, todo_incarnation, repo, project, branch, title, created_at)
+                          VALUES (?,?,?,?,?,?,?,?)""", (work_id, todo_id, incarnation, links.get("repo"), links.get("project"),
+                                                       links.get("branch"), links.get("title"), self.now()))
+        return work_id
 
     def works_for_branch(self, repo, branch):
         """Live work linked to a branch. Both names are required: equal branch names in two
@@ -411,7 +428,7 @@ class Journal:
 
     def relink(self, work_id, **links):
         """Updates link metadata (a branch rename, a new forest). Identity and history stay."""
-        allowed = {"todo_id", "repo", "project", "branch", "title"}
+        allowed = {"repo", "project", "branch", "title"}
         bad = set(links) - allowed
         if bad:
             raise JournalError(f"not link metadata: {', '.join(sorted(bad))}")

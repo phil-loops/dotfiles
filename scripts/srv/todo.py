@@ -15,6 +15,8 @@ An item is TOML frontmatter between `+++` lines, then a markdown body (context; 
   links      wiki pages, memory files, commits, artifacts
   rank       position in the open queue, set by /next (lower first; unset = unranked)
   solved_by  on a forest's list, the branch that solves the item (a ticket's ask → the PR covering it)
+  incarnation  minted once when the record is created and never changed: the work journal links to an
+             item by id and incarnation, so a deleted item recreated under the same id inherits nothing
   created / updated   dates
 One file per item so concurrent sessions never write the same file; git is the history.
 Every read-modify-write (`update`) holds one lock over the directory, so two writers of the same
@@ -28,11 +30,11 @@ import os
 import re
 import tomllib
 
-DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "canopy", "todo")
+DIR = os.environ.get("CANOPY_TODO_DIR") or os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "canopy", "todo")
 KINDS = ("build", "fix", "decide", "look")
 STATES = ("open", "doing", "waiting", "done", "dropped")
 SIZES = ("S", "M", "L")
-FIELDS = ("title", "kind", "state", "owner", "area", "project", "size", "why", "waiting", "blocked_by", "links", "rank", "solved_by", "created", "updated")
+FIELDS = ("title", "kind", "state", "owner", "area", "project", "size", "why", "waiting", "blocked_by", "links", "rank", "solved_by", "incarnation", "created", "updated")
 
 
 def slug(title):

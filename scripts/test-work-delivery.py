@@ -100,7 +100,7 @@ def say(j, work, mid, text, seq, target="fake:s1", conv="c1", **kw):
 # ---- the envelope carries the direction itself ---------------------------------------------
 
 j, clock = fresh()
-w = j.create_work(title="Show freshness", todo_id="item", repo="dotfiles", branch="feat/x")
+w = j.create_work(title="Show freshness", todo_id="item", incarnation="i_item", repo="dotfiles", branch="feat/x")
 say(j, w, "1", "keep the old route's response shape", 1)
 j.close()
 j = wj.Journal(j.path, clock=clock)
@@ -561,6 +561,7 @@ check("context reads read-only", ctx["work"]["work_id"] == w and j.turns(tg)[0][
 # ---- the command line, end to end ----------------------------------------------------------
 
 env = {**os.environ, "CANOPY_WORK_JOURNAL": os.path.join(TMP, "cli", "journal.sqlite3"), "CANOPY_WORK_CLAUDE": claude_stub,
+       "CANOPY_TODO_DIR": os.path.join(TMP, "cli", "todo"),
        "CANOPY_WORK_CLAUDE_SAY": say_stub, "STUB_MODE": "ok"}
 
 
@@ -570,6 +571,8 @@ def cli(*a, stdin=None):
 
 
 SID2 = "0f0e0d0c-aaaa-bbbb-cccc-444455556666"
+subprocess.run([sys.executable, os.path.join(HERE, "canopy-todo"), "add", "Item one", "--kind", "build", "--area", "test",
+                "--why", "fixture", "--id", "item-1"], env=env, capture_output=True, check=True)
 _, wout, _ = cli("work", "--todo", "item-1", "--repo", "dotfiles", "--branch", "feat/y")
 W = wout["work_id"]
 cli("source", "--source", "show", "--adapter", "show-thread")
