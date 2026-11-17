@@ -24,6 +24,18 @@ instead of overwriting each other. What it owns:
   outbox          pending delivery, written in the same transaction as capture, so a crash after
                   capture leaves a row to retry under the same message id; a duplicate capture
                   adds nothing.
+  attempt         one worker's run at one or more work items, with a per-work generation; a newer
+                  attempt makes an older one's results history.
+  receipt         the runtime's record of handing a context packet to a worker at a start, resume,
+                  turn or compaction boundary, with the revision of each work it carried. Opened
+                  as `sending` before the hand-off and settled after it, so a dispatcher that dies
+                  mid-send leaves an explicit uncertainty rather than a silent re-send. Preparing a
+                  packet is not delivery, and a worker quoting a revision is not a receipt.
+  result          progress and completion reports. The verdict is decided in the transaction that
+                  records the report: current only for a managed attempt's latest generation citing
+                  an acknowledged receipt whose revision is the work's revision now. Anything else
+                  is kept as stale or unverified history; new direction makes a current completion
+                  historical by advancing the revision past it.
 
 The latest literal message and the accumulated direction are separate projections: an earlier
 constraint survives a newer message unless a user message explicitly supersedes it.
@@ -39,7 +51,9 @@ import sqlite3
 import time
 import uuid
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+BOUNDARIES = ("start", "resume", "turn", "compaction")
+KINDS = ("progress", "completion")
 AUTHORS = ("user", "agent", "system")
 ORDERINGS = ("sequence", "none")
 MAX_SEQ = 2 ** 53
@@ -168,10 +182,83 @@ CREATE TABLE IF NOT EXISTS outbox (
   UNIQUE (message_id, target)
 ) STRICT;
 CREATE INDEX IF NOT EXISTS outbox_due ON outbox(state, not_before);
+
+CREATE TABLE IF NOT EXISTS attempt (
+  attempt_id TEXT PRIMARY KEY,
+  worker     TEXT NOT NULL,
+  host       TEXT NOT NULL,
+  managed    INTEGER NOT NULL CHECK (managed IN (0, 1)),
+  started_at TEXT NOT NULL,
+  ended_at   TEXT,
+  end_reason TEXT
+) STRICT;
+CREATE TABLE IF NOT EXISTS attempt_work (
+  attempt_id TEXT NOT NULL REFERENCES attempt(attempt_id),
+  work_id    TEXT NOT NULL REFERENCES work(work_id),
+  generation INTEGER NOT NULL,
+  PRIMARY KEY (attempt_id, work_id),
+  UNIQUE (work_id, generation)
+) STRICT;
+CREATE INDEX IF NOT EXISTS attempt_by_worker ON attempt(worker, ended_at);
+
+CREATE TABLE IF NOT EXISTS packet (
+  packet_id   TEXT PRIMARY KEY,
+  attempt_id  TEXT NOT NULL REFERENCES attempt(attempt_id),
+  body        TEXT NOT NULL,
+  text        TEXT NOT NULL,
+  digest      TEXT NOT NULL,
+  prepared_at TEXT NOT NULL
+) STRICT;
+CREATE TABLE IF NOT EXISTS packet_work (
+  packet_id  TEXT NOT NULL REFERENCES packet(packet_id),
+  work_id    TEXT NOT NULL REFERENCES work(work_id),
+  revision   INTEGER NOT NULL,
+  generation INTEGER NOT NULL,
+  coverage   TEXT NOT NULL,
+  PRIMARY KEY (packet_id, work_id)
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS receipt (
+  receipt_id    TEXT PRIMARY KEY,
+  attempt_id    TEXT NOT NULL REFERENCES attempt(attempt_id),
+  boundary      TEXT NOT NULL CHECK (boundary IN ('start', 'resume', 'turn', 'compaction')),
+  state         TEXT NOT NULL CHECK (state IN ('sending', 'acknowledged', 'uncertain', 'failed')),
+  packet_id     TEXT NOT NULL REFERENCES packet(packet_id),
+  outbox_id     INTEGER REFERENCES outbox(outbox_id),
+  opened_at     TEXT NOT NULL,
+  settled_at    TEXT,
+  detail        TEXT
+) STRICT;
+CREATE TABLE IF NOT EXISTS receipt_work (
+  receipt_id TEXT NOT NULL REFERENCES receipt(receipt_id),
+  work_id    TEXT NOT NULL REFERENCES work(work_id),
+  revision   INTEGER NOT NULL,
+  PRIMARY KEY (receipt_id, work_id)
+) STRICT;
+CREATE INDEX IF NOT EXISTS receipt_work_by_work ON receipt_work(work_id, revision);
+CREATE INDEX IF NOT EXISTS receipt_by_outbox ON receipt(outbox_id);
+CREATE INDEX IF NOT EXISTS receipt_by_packet ON receipt(packet_id);
+
+CREATE TABLE IF NOT EXISTS result (
+  result_id          INTEGER PRIMARY KEY,
+  work_id            TEXT NOT NULL REFERENCES work(work_id),
+  kind               TEXT NOT NULL CHECK (kind IN ('progress', 'completion')),
+  attempt_id         TEXT REFERENCES attempt(attempt_id),
+  generation         INTEGER,
+  receipt_id         TEXT REFERENCES receipt(receipt_id),
+  delivered_revision INTEGER,
+  revision_at_report INTEGER NOT NULL,
+  verdict            TEXT NOT NULL CHECK (verdict IN ('current', 'stale', 'unverified')),
+  reason             TEXT NOT NULL,
+  text               TEXT NOT NULL,
+  via                TEXT NOT NULL,
+  recorded_at        TEXT NOT NULL
+) STRICT;
+CREATE INDEX IF NOT EXISTS result_by_work ON result(work_id, kind, result_id);
 """
 
 # Written history is immutable: the journal appends, it never edits what was said or decided.
-IMMUTABLE = ("message", "message_work", "supersession", "work_revision", "binding", "binding_work")
+IMMUTABLE = ("message", "message_work", "supersession", "work_revision", "binding", "binding_work", "attempt_work", "receipt_work", "result", "packet", "packet_work")
 TRIGGERS = "".join(
     f"""
 CREATE TRIGGER IF NOT EXISTS {t}_no_update BEFORE UPDATE ON {t} BEGIN SELECT RAISE(ABORT, '{t} is immutable'); END;
@@ -212,6 +299,8 @@ class Journal:
                 self.db.execute("INSERT INTO meta VALUES ('schema', ?)", (str(SCHEMA_VERSION),))
             elif int(row["value"]) > SCHEMA_VERSION:
                 raise JournalError(f"journal schema {row['value']} is newer than this code ({SCHEMA_VERSION})")
+            else:
+                self.db.execute("UPDATE meta SET value = ? WHERE key = 'schema'", (str(SCHEMA_VERSION),))
 
     def close(self):
         self.db.close()
@@ -656,6 +745,273 @@ class Journal:
                 db.execute("UPDATE outbox SET state = ?, lease_owner = NULL, lease_token = NULL, lease_until = NULL, last_error = ?, settled_at = ? WHERE outbox_id = ?",
                            (outcome, error, self.now(), outbox_id))
 
+    # ---- attempts, receipts and qualified results ------------------------------------------
+
+    def begin_attempt(self, work_ids, *, worker, host, managed):
+        """Starts a worker's run at these items. Each item's generation advances, so any earlier
+        attempt at it can no longer report current results. `managed` says the host delivers
+        context through this journal's receipts; an unmanaged attempt's results stay unverified."""
+        work_ids = list(dict.fromkeys(work_ids))
+        if not work_ids:
+            raise JournalError("an attempt works on at least one item")
+        attempt_id = "a_" + uuid.uuid4().hex
+        with self.tx() as db:
+            for w in work_ids:
+                self._live_work(db, w)
+            db.execute("INSERT INTO attempt (attempt_id, worker, host, managed, started_at) VALUES (?,?,?,?,?)",
+                       (attempt_id, worker, host, 1 if managed else 0, self.now()))
+            gens = {}
+            for w in work_ids:
+                gens[w] = db.execute("SELECT COALESCE(MAX(generation), 0) + 1 FROM attempt_work WHERE work_id = ?", (w,)).fetchone()[0]
+                db.execute("INSERT INTO attempt_work VALUES (?,?,?)", (attempt_id, w, gens[w]))
+        return {"attempt_id": attempt_id, "generations": gens}
+
+    def end_attempt(self, attempt_id, reason):
+        with self.tx() as db:
+            if db.execute("UPDATE attempt SET ended_at = ?, end_reason = ? WHERE attempt_id = ? AND ended_at IS NULL",
+                          (self.now(), reason, attempt_id)).rowcount == 0:
+                raise JournalError(f"no running attempt {attempt_id}")
+
+    def attempt(self, attempt_id):
+        row = self.db.execute("SELECT * FROM attempt WHERE attempt_id = ?", (attempt_id,)).fetchone()
+        if row is None:
+            return None
+        works = {r["work_id"]: r["generation"] for r in self.db.execute("SELECT * FROM attempt_work WHERE attempt_id = ?", (attempt_id,))}
+        return {**dict(row), "managed": bool(row["managed"]), "generations": works}
+
+    def running_attempts(self, worker):
+        return [r["attempt_id"] for r in self.db.execute(
+            "SELECT attempt_id FROM attempt WHERE worker = ? AND ended_at IS NULL ORDER BY started_at, attempt_id", (worker,))]
+
+    def _current_generation(self, db, work_id):
+        return db.execute("SELECT MAX(generation) FROM attempt_work WHERE work_id = ?", (work_id,)).fetchone()[0]
+
+    def prepare(self, attempt_id):
+        """Builds and stores the packet for a running attempt: each item's accumulated direction,
+        revision, generation and coverage read in one transaction, and the exact text a host
+        must send, pinned by its digest. Packets are immutable; preparing is not delivery."""
+        with self.tx() as db:
+            a = self.attempt(attempt_id)
+            if a is None or a["ended_at"]:
+                raise JournalError(f"no running attempt {attempt_id}")
+            for w, g in a["generations"].items():
+                if g != self._current_generation(db, w):
+                    raise Conflict(f"attempt {attempt_id} is no longer the current attempt at {w}")
+            packet_id = "p_" + uuid.uuid4().hex
+            items = [{**self._context(w), "generation": g} for w, g in sorted(a["generations"].items())]
+            body = {"packet_id": packet_id, "attempt_id": attempt_id, "worker": a["worker"], "items": items}
+            text = render_packet(body)
+            d = digest(text)
+            db.execute("INSERT INTO packet VALUES (?,?,?,?,?,?)",
+                       (packet_id, attempt_id, json.dumps(body, sort_keys=True), text, d, self.now()))
+            for it in items:
+                db.execute("INSERT INTO packet_work VALUES (?,?,?,?,?)",
+                           (packet_id, it["work"]["work_id"], it["revision"], it["generation"], it["coverage"]["state"]))
+        return {**body, "text": text, "digest": d}
+
+    def packet(self, packet_id):
+        """A stored packet: the exact text to send, its digest and its per-work vector."""
+        row = self.db.execute("SELECT * FROM packet WHERE packet_id = ?", (packet_id,)).fetchone()
+        if row is None:
+            return None
+        vec = {r["work_id"]: {"revision": r["revision"], "generation": r["generation"], "coverage": r["coverage"]}
+               for r in self.db.execute("SELECT * FROM packet_work WHERE packet_id = ?", (packet_id,))}
+        return {"packet_id": packet_id, "attempt_id": row["attempt_id"], "text": row["text"], "digest": row["digest"],
+                "prepared_at": row["prepared_at"], "works": vec}
+
+    def open_receipt(self, packet_id, *, boundary, outbox_id=None):
+        """Called by the runtime immediately before it hands the stored packet's exact text to the
+        worker. The receipt's revisions are the packet's own, never the caller's. Refused for an
+        unmanaged, ended or superseded attempt, and for a packet that new direction has
+        outdated (prepare again). It means nothing until `settle_receipt` records the outcome."""
+        if boundary not in BOUNDARIES:
+            raise JournalError(f"boundary {boundary!r} is not one of {', '.join(BOUNDARIES)}")
+        receipt_id = "r_" + uuid.uuid4().hex
+        with self.tx() as db:
+            p = self.packet(packet_id)
+            if p is None:
+                raise JournalError(f"no packet {packet_id}")
+            a = self.attempt(p["attempt_id"])
+            if a["ended_at"]:
+                raise JournalError(f"no running attempt {a['attempt_id']}")
+            if not a["managed"]:
+                raise JournalError(f"attempt {a['attempt_id']} runs on an unmanaged host; it has no receipts")
+            for w, v in p["works"].items():
+                if v["generation"] != self._current_generation(db, w):
+                    raise Conflict(f"attempt {a['attempt_id']} is no longer the current attempt at {w}")
+                now_rev = db.execute("SELECT revision FROM work WHERE work_id = ?", (w,)).fetchone()["revision"]
+                if v["revision"] != now_rev:
+                    raise Conflict(f"packet {packet_id} carries revision {v['revision']} of {w}; direction is at {now_rev}")
+            db.execute("""INSERT INTO receipt (receipt_id, attempt_id, boundary, state, packet_id, outbox_id, opened_at)
+                          VALUES (?,?,?,'sending',?,?,?)""", (receipt_id, a["attempt_id"], boundary, packet_id, outbox_id, self.now()))
+            for w, v in p["works"].items():
+                db.execute("INSERT INTO receipt_work VALUES (?,?,?)", (receipt_id, w, v["revision"]))
+        return receipt_id
+
+    def settle_receipt(self, receipt_id, state, detail=None):
+        """The hand-off's outcome: acknowledged (the host confirmed submission of the turn),
+        uncertain (handed off without confirmation) or failed (provably not delivered).
+        An acknowledged receipt is final; an uncertain one may later be acknowledged."""
+        if state not in ("acknowledged", "uncertain", "failed"):
+            raise JournalError(f"receipt state {state!r}")
+        with self.tx() as db:
+            row = db.execute("SELECT state FROM receipt WHERE receipt_id = ?", (receipt_id,)).fetchone()
+            if row is None:
+                raise JournalError(f"no receipt {receipt_id}")
+            if row["state"] == state:
+                return
+            allowed = {"sending": {"acknowledged", "uncertain", "failed"}, "uncertain": {"acknowledged"}}
+            if state not in allowed.get(row["state"], set()):
+                raise Conflict(f"receipt {receipt_id} is {row['state']}; it can't become {state}")
+            db.execute("UPDATE receipt SET state = ?, settled_at = ?, detail = ? WHERE receipt_id = ?",
+                       (state, self.now(), detail, receipt_id))
+
+    def abandon_open_receipts(self, outbox_id, detail):
+        """A dispatcher found receipts still `sending` for this outbox row: its predecessor died
+        mid-hand-off. Whether the worker got the packet is unknowable, so they become
+        uncertain. Returns how many."""
+        with self.tx() as db:
+            return db.execute("UPDATE receipt SET state = 'uncertain', settled_at = ?, detail = ? WHERE outbox_id = ? AND state = 'sending'",
+                              (self.now(), detail, outbox_id)).rowcount
+
+    def receipts(self, *, attempt_id=None, outbox_id=None):
+        q, args = "SELECT * FROM receipt WHERE 1", []
+        if attempt_id:
+            q, args = q + " AND attempt_id = ?", args + [attempt_id]
+        if outbox_id is not None:
+            q, args = q + " AND outbox_id = ?", args + [outbox_id]
+        out = []
+        for r in self.db.execute(q + " ORDER BY opened_at, receipt_id", args).fetchall():
+            revs = {x["work_id"]: x["revision"] for x in self.db.execute("SELECT * FROM receipt_work WHERE receipt_id = ?", (r["receipt_id"],))}
+            out.append({**dict(r), "revisions": revs})
+        return out
+
+    def report(self, work_id, kind, text, *, via, attempt_id=None, receipt_id=None, packet_id=None):
+        """Records progress or a completion and decides, in the same transaction, whether it
+        answers the work's current direction. The worker cites the packet it was given (or the
+        runtime its receipt); the newest delivery of that packet stands for it. Current requires
+        an acknowledged delivery of the work's revision now, as the attempt's latest delivery,
+        and complete capture coverage now. Returns the result row; never raises for staleness:
+        an obsolete or unverifiable result is kept as history, with the reason.
+
+        A turn finishing is not this call: hosts report completion only when asked to."""
+        if kind not in KINDS:
+            raise JournalError(f"kind {kind!r} is not one of {', '.join(KINDS)}")
+        if not isinstance(text, str):
+            raise JournalError("a report needs text")
+        with self.tx() as db:
+            self._live_work(db, work_id)
+            current = db.execute("SELECT revision FROM work WHERE work_id = ?", (work_id,)).fetchone()["revision"]
+            a = self.attempt(attempt_id) if attempt_id else None
+            if attempt_id and a is None:
+                raise JournalError(f"no attempt {attempt_id}")
+            if a is not None and work_id not in a["generations"]:
+                raise Conflict(f"attempt {attempt_id} does not work on {work_id}")
+            rec = None
+            if packet_id and not receipt_id:
+                if a is None:
+                    raise JournalError("a packet is cited with its attempt")
+                row = db.execute("SELECT receipt_id FROM receipt WHERE packet_id = ? AND attempt_id = ? ORDER BY rowid DESC LIMIT 1",
+                                 (packet_id, attempt_id)).fetchone()
+                if row is None:
+                    if not db.execute("SELECT 1 FROM packet_work WHERE packet_id = ? AND work_id = ?", (packet_id, work_id)).fetchone():
+                        raise Conflict(f"packet {packet_id} was not prepared for attempt {attempt_id} at {work_id}")
+                receipt_id = row["receipt_id"] if row else None
+                cited_undelivered = row is None
+            else:
+                cited_undelivered = False
+            if receipt_id:
+                if a is None:
+                    raise JournalError("a receipt is cited with its attempt")
+                rec = db.execute("""SELECT r.*, rw.revision FROM receipt r JOIN receipt_work rw USING (receipt_id)
+                                    WHERE r.receipt_id = ? AND rw.work_id = ?""", (receipt_id, work_id)).fetchone()
+                if rec is None or rec["attempt_id"] != attempt_id:
+                    raise Conflict(f"receipt {receipt_id} was not issued to attempt {attempt_id} for {work_id}")
+            generation = a["generations"][work_id] if a else None
+            delivered = rec["revision"] if rec else None
+            latest = db.execute("""SELECT r.receipt_id FROM receipt r JOIN receipt_work rw USING (receipt_id)
+                                   WHERE r.attempt_id = ? AND rw.work_id = ? AND r.state != 'failed'
+                                   ORDER BY r.rowid DESC LIMIT 1""", (attempt_id, work_id)).fetchone() if rec else None
+            if a is None:
+                verdict, reason = "unverified", "reported outside any attempt (legacy caller)"
+            elif not a["managed"]:
+                verdict, reason = "unverified", f"host {a['host']} delivers no receipts"
+            elif generation != self._current_generation(db, work_id):
+                verdict, reason = "stale", "a newer attempt has taken this work"
+            elif a["ended_at"]:
+                verdict, reason = "stale", f"the attempt ended ({a['end_reason']})"
+            elif rec is None:
+                verdict, reason = "unverified", "the cited packet was never handed off" if cited_undelivered else "no delivery receipt cited"
+            elif rec["state"] == "failed":
+                verdict, reason = "unverified", "the cited delivery failed"
+            elif latest is None or latest["receipt_id"] != receipt_id:
+                verdict, reason = "stale", "context was delivered again since the cited receipt"
+            elif rec["state"] != "acknowledged":
+                verdict, reason = "unverified", f"delivery {rec['state']}"
+            elif delivered != current:
+                verdict, reason = "stale", f"delivered revision {delivered}, direction is at {current}"
+            else:
+                cov = self._coverage(work_id)["state"]
+                if cov != "complete":
+                    verdict, reason = "unverified", f"capture coverage is {cov}: direction may be missing"
+                else:
+                    verdict, reason = "current", f"answers revision {current}"
+            self.fault("verdict")
+            rid = db.execute("""INSERT INTO result (work_id, kind, attempt_id, generation, receipt_id, delivered_revision,
+                                revision_at_report, verdict, reason, text, via, recorded_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+                                RETURNING result_id""",
+                             (work_id, kind, attempt_id, generation, receipt_id, delivered, current, verdict, reason, text, via,
+                              self.now())).fetchone()[0]
+            return dict(db.execute("SELECT * FROM result WHERE result_id = ?", (rid,)).fetchone())
+
+    def results(self, work_id, *, kind=None, limit=50):
+        q, args = "SELECT * FROM result WHERE work_id = ?", [work_id]
+        if kind:
+            q, args = q + " AND kind = ?", args + [kind]
+        return [dict(r) for r in self.db.execute(q + " ORDER BY result_id DESC LIMIT ?", args + [limit])]
+
+    def status(self, work_id):
+        """Freshness facts for one item, from one snapshot, each kept distinct: the direction's
+        revision, the latest delivery of it to the current attempt, the last progress report, and
+        and the completion: current (answers the revision now), historical (answered an older
+        one), stale (named an obsolete delivery or attempt), unverified (no receipt), or none."""
+        with self.snapshot() as db:
+            w = self.work(work_id)
+            if w is None:
+                raise JournalError(f"no work {work_id}")
+            gen = self._current_generation(db, work_id)
+            att = None
+            if gen is not None:
+                aid = db.execute("SELECT attempt_id FROM attempt_work WHERE work_id = ? AND generation = ?", (work_id, gen)).fetchone()[0]
+                a = self.attempt(aid)
+                last = db.execute("""SELECT r.receipt_id, r.boundary, r.state, r.opened_at, r.settled_at, rw.revision
+                                     FROM receipt r JOIN receipt_work rw USING (receipt_id)
+                                     WHERE r.attempt_id = ? AND rw.work_id = ? ORDER BY r.opened_at DESC, r.rowid DESC LIMIT 1""",
+                                  (aid, work_id)).fetchone()
+                acked = db.execute("""SELECT MAX(rw.revision) FROM receipt r JOIN receipt_work rw USING (receipt_id)
+                                      WHERE r.attempt_id = ? AND rw.work_id = ? AND r.state = 'acknowledged'""", (aid, work_id)).fetchone()[0]
+                att = {"attempt_id": aid, "generation": gen, "worker": a["worker"], "host": a["host"], "managed": a["managed"],
+                       "started_at": a["started_at"], "ended_at": a["ended_at"], "end_reason": a["end_reason"],
+                       "last_delivery": dict(last) if last else None, "acknowledged_revision": acked}
+            completion = db.execute("SELECT * FROM result WHERE work_id = ? AND kind = 'completion' ORDER BY result_id DESC LIMIT 1",
+                                    (work_id,)).fetchone()
+            qualified = db.execute("""SELECT * FROM result WHERE work_id = ? AND kind = 'completion' AND verdict = 'current'
+                                      ORDER BY result_id DESC LIMIT 1""", (work_id,)).fetchone()
+            progress = db.execute("SELECT * FROM result WHERE work_id = ? AND kind = 'progress' ORDER BY result_id DESC LIMIT 1",
+                                  (work_id,)).fetchone()
+            if qualified and qualified["delivered_revision"] == w["revision"]:
+                done = "current"
+            elif completion is None:
+                done = "none"
+            elif completion["verdict"] == "current":
+                done = "historical"
+            else:
+                done = completion["verdict"]
+            return {"work_id": work_id, "revision": w["revision"], "attempt": att, "completion": done,
+                    "last_completion": dict(completion) if completion else None,
+                    "qualified_completion": dict(qualified) if qualified else None,
+                    "last_progress": dict(progress) if progress else None}
+
     def outbox(self, *, states=None):
         q = "SELECT * FROM outbox"
         args = ()
@@ -663,6 +1019,38 @@ class Journal:
             q += f" WHERE state IN ({','.join('?' * len(states))})"
             args = tuple(states)
         return [dict(r) for r in self.db.execute(q + " ORDER BY outbox_id", args)]
+
+
+def render_packet(body):
+    """The exact text a host hands the worker for a packet. Deterministic in the packet body."""
+    lines = [f"Canopy work context · packet {body['packet_id']} · attempt {body['attempt_id']}",
+             "This replaces any earlier work context. Everything listed under Direction is still in force;",
+             "the latest message adds to it unless it says otherwise.",
+             f"Report with: canopy-work report --attempt {body['attempt_id']} --packet {body['packet_id']} --work <work id> "
+             "progress|completion \"<what you did>\" — completion only when the item is actually done."]
+    for it in body["items"]:
+        w = it["work"]
+        name = w.get("title") or w.get("todo_id") or w["work_id"]
+        where = " · ".join(x for x in (w.get("repo"), w.get("project"), w.get("branch")) if x)
+        lines += ["", f"## {name}", f"work {w['work_id']}" + (f" · {where}" if where else "") +
+                  f" · revision {it['revision']} · generation {it['generation']} · capture coverage {it['coverage']['state']}"]
+        if not it["direction"]:
+            lines.append("No captured direction.")
+        else:
+            lines.append("Direction, in source order:")
+            for k, m in enumerate(it["direction"], 1):
+                stamp = m["source_time"] or f"received {m['received_at']}"
+                lines.append(f"{k}. [{m['source']} {m['conversation']} #{m['source_seq'] if m['source_seq'] is not None else '?'} · {stamp}]")
+                lines += ["   > " + ln for ln in m["text"].splitlines() or [""]]
+        if it.get("latest"):
+            lines.append(f"Latest message: {it['latest']['message_id']} (#{it['latest']['source_seq']})")
+        elif it.get("heads"):
+            lines.append("Latest message: no single order across " + ", ".join(f"{h['source']} {h['conversation']}" for h in it["heads"]))
+        if it["superseded"]:
+            lines.append(f"Superseded by later direction (not in force): {len(it['superseded'])} message(s).")
+        if it["unassigned"]:
+            lines.append(f"Unassigned messages awaiting a decision: {len(it['unassigned'])}. Ask; don't assume they apply.")
+    return "\n".join(lines) + "\n"
 
 
 def _statements(script):
