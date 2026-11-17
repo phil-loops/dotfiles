@@ -76,11 +76,11 @@ enum ReviewCommands {
             id: "review.address.claude", title: "Hand the thread to Claude to fix", scope: .review, budget: .slowIO,
             verb: .main, modes: [.address], label: "claude", available: inSheet,
             write: { _, _ in
-                guard let t = addressed() else { return nil }
+                guard let t = addressed(), let id = page() else { return nil }
                 closeAddress()
                 return Write(path: repoPath("/review-address"), body: ["branch": .string(name()), "thread": .string(t.node), "claude": true],
                              settled: { true }, said: "claude window ready — send it there", failed: "couldn't start the Claude session",
-                             inverse: { a in a["key"]?.string.flatMap { k in page().map { Inverse(id: "review.address.cancel", target: $0, arg: k) } } })
+                             inverse: { a in a["key"]?.string.map { Inverse(id: "review.address.cancel", target: id, arg: $0) } })
             }))
         r.register(Command(
             id: "review.address.helix", title: "Fix the thread yourself in Helix", scope: .review, budget: .slowIO,
@@ -133,14 +133,16 @@ enum ReviewCommands {
         r.register(Command(
             id: "review.address.undo", title: "Take back a declared fix", scope: .review, budget: .gitWrite, needsArg: true, quiet: true,
             write: { id, key in
+                guard let subject = ShipRows.splitID(id) else { return nil }
                 let tip = branch(id)?.tip
-                return Write(path: repoPath("/review-address"), body: ["branch": .string(name()), "undo": key.map { .string("\($0)") } ?? .null],
+                return Write(path: tr.atRepo(subject.repo, "/review-address"), body: ["branch": .string(subject.name), "undo": key.map { .string("\($0)") } ?? .null],
                              settled: { store.table(Branch.self)[id]?.tip != tip }, said: "undone", failed: "couldn't take it back")
             }))
         r.register(Command(
             id: "review.address.cancel", title: "Drop a reply that waits for a fix", scope: .review, budget: .configWrite, needsArg: true, quiet: true,
-            write: { _, key in
-                Write(path: repoPath("/review-draft"), body: ["branch": .string(name()), "op": "remove", "key": key.map { .string("\($0)") } ?? .null],
+            write: { id, key in
+                guard let subject = ShipRows.splitID(id) else { return nil }
+                return Write(path: tr.atRepo(subject.repo, "/review-draft"), body: ["branch": .string(subject.name), "op": "remove", "key": key.map { .string("\($0)") } ?? .null],
                       settled: { true }, failed: "couldn't drop the reply")
             }))
 
@@ -239,7 +241,7 @@ enum ReviewCommands {
                 said: !waits.isEmpty ? "kept as a draft until \(waits.map { String($0.prefix(7)) }.joined(separator: ", ")) is on origin — \(undoKey) drops it"
                     : send ? "in your pending review — \(ghKey) opens GitHub to submit it" : "saved as a draft — \(sendKey) sends it",
                 failed: send ? "kept as a draft, not on GitHub" : "the draft didn't save",
-                inverse: send ? nil : { _ in Inverse(id: "review.pending.remove", target: key) },
+                inverse: send ? nil : { _ in Inverse(id: "review.pending.discard", target: id, arg: key) },
                 rollback: restore)
         }
 
@@ -295,22 +297,32 @@ enum ReviewCommands {
 
         let item = { (key: String?) -> DraftItem? in draft()?.items.first { $0.key == key } }
         let unsent = { (i: DraftItem?) -> Bool in i.map { $0.state == .draft || $0.state == .waiting || $0.state == .gone } ?? false }
+        let removeItem = { (id: String, key: String) -> Write? in
+            guard let subject = ShipRows.splitID(id), let it = store.view(Draft.self, id)?.items.first(where: { $0.key == key }), unsent(it) else { return nil }
+            let rest = (store.rawView("draft", id)?["items"]?.array ?? []).filter { $0["key"]?.string != key }
+            return Write(ops: [Op(type: .draft, id: id, fields: ["items": .array(rest)])],
+                         path: tr.atRepo(subject.repo, "/review-draft"), body: ["branch": .string(subject.name), "op": "remove", "key": .string(key)],
+                         settled: { store.table(Draft.self)[id]?.items.contains { $0.key == key } != true },
+                         said: "draft deleted · \(weakApp?.registry.keyOf("undo") ?? "u") undoes", failed: "couldn't delete the draft",
+                         inverse: { _ in Inverse(id: "review.pending.restore", target: id, arg: it) })
+        }
         r.register(Command(
             id: "review.pending.remove", title: "Delete the draft", scope: .pending, budget: .configWrite, verb: .putAway, label: "delete",
             available: { key in unsent(item(key)) },
             write: { key, _ in
-                guard let id = page(), let it = item(key) else { return nil }
-                let rest = (store.rawView("draft", id)?["items"]?.array ?? []).filter { $0["key"]?.string != key }
-                return Write(ops: [Op(type: .draft, id: id, fields: ["items": .array(rest)])],
-                             path: repoPath("/review-draft"), body: ["branch": .string(name()), "op": "remove", "key": .string(key)],
-                             settled: { store.table(Draft.self)[id]?.items.contains { $0.key == key } != true },
-                             said: "draft deleted · \(weakApp?.registry.keyOf("undo") ?? "u") undoes", failed: "couldn't delete the draft",
-                             inverse: { _ in Inverse(id: "review.pending.restore", target: id, arg: it) })
+                guard let id = page() else { return nil }
+                return removeItem(id, key)
+            }))
+        r.register(Command(
+            id: "review.pending.discard", title: "Undo saving a draft on its original branch", scope: .review, budget: .configWrite, needsArg: true, quiet: true,
+            write: { id, arg in
+                guard let key = arg as? String else { return nil }
+                return removeItem(id, key)
             }))
         r.register(Command(
             id: "review.pending.restore", title: "Put a draft back", scope: .review, budget: .configWrite, needsArg: true, quiet: true,
-            write: { _, arg in
-                guard let id = page(), let it = arg as? DraftItem else { return nil }
+            write: { id, arg in
+                guard let subject = ShipRows.splitID(id), let it = arg as? DraftItem else { return nil }
                 var x = it
                 x.state = .draft
                 let back = (try? JSONValue.from(x)) ?? .null
@@ -322,7 +334,7 @@ enum ReviewCommands {
                 if let s = it.startLine { wire["startLine"] = .number(Double(s)) }
                 if let t = it.thread { wire["thread"] = .string(t) }
                 return Write(ops: [Op(type: .draft, id: id, fields: ["items": .array(items)])],
-                             path: repoPath("/review-draft"), body: ["branch": .string(name()), "op": "add", "item": .object(wire)],
+                             path: tr.atRepo(subject.repo, "/review-draft"), body: ["branch": .string(subject.name), "op": "add", "item": .object(wire)],
                              settled: { store.table(Draft.self)[id]?.items.contains { $0.key == it.key } == true },
                              failed: "couldn't put the draft back")
             }))
@@ -409,8 +421,8 @@ enum ReviewCommands {
         r.register(Command(
             id: "review.unapply", title: "Drop the applied suggestion's commit", scope: .review, budget: .gitWrite, needsArg: true, quiet: true,
             write: { id, arg in
-                guard let sha = arg as? String else { return nil }
-                return Write(path: repoPath("/revert-commit"), body: ["branch": .string(name()), "sha": .string(sha)],
+                guard let sha = arg as? String, let subject = ShipRows.splitID(id) else { return nil }
+                return Write(path: tr.atRepo(subject.repo, "/revert-commit"), body: ["branch": .string(subject.name), "sha": .string(sha)],
                              settled: { (store.table(Conv.self)[id]?.tip ?? store.table(Branch.self)[id]?.tip) != sha },
                              said: "dropped \(sha.prefix(7))", failed: "couldn't drop \(sha.prefix(7))")
             }))
