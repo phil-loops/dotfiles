@@ -26,7 +26,11 @@ public final class AppModel: CommandContext {
     public private(set) var bootstrap = Bootstrap()
 
     // ── the focus model: per pane (keyed "<surface>/<pane>"), a cursor row and a select anchor ──
-    public private(set) var focusedPane: [String: String] = [:]
+    public private(set) var focusedPane: [String: String] = [:] {
+        didSet { if focusedPane != oldValue { focusGeneration &+= 1 } }
+    }
+    @ObservationIgnored private(set) var focusGeneration = 0
+    @ObservationIgnored public private(set) var navigationGeneration = 0
     public private(set) var cursors: [String: String] = [:]
     public private(set) var cursorIdxs: [String: Int] = [:]
     public private(set) var anchors: [String: Int] = [:]
@@ -90,6 +94,8 @@ public final class AppModel: CommandContext {
         }
         nav.record = { [weak self] in self?.recordJump() }
         router.onNavigate = { [weak self] from, to in
+            self?.navigationGeneration &+= 1
+            if let self { CodeLookup.of(self).dismiss() }
             self?.keys.reset()
             self?.runner.disarm()
             if let b = to.branchID { self?.frecency.visit(b) }
@@ -105,6 +111,7 @@ public final class AppModel: CommandContext {
         keys.onChange = { [weak self] from, to in self?.modeChanged(from, to) }
         nav.onPickerChange = { [weak self] open in
             guard let self else { return }
+            CodeLookup.of(self).dismiss()
             if open { self.keys.openLayer(.picker) } else if self.keys.layer == .picker { self.keys.closeLayer() }
         }
 

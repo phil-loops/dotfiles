@@ -73,6 +73,7 @@ public final class CodeNav {
     public private(set) var back: [Loc] = []
     public private(set) var fwd: [Loc] = []
     public private(set) var picker: (title: String, items: [PickItem])?
+    public private(set) var pickerGeneration = 0
     public private(set) var filter = ""
     public private(set) var index = 0
     /// What choosing does when the opener said (`pick(_:_:choose:)`): the item's index in `items`.
@@ -160,6 +161,7 @@ public final class CodeNav {
     }
 
     private func open(_ title: String, _ items: [PickItem], filter f: String, chooser c: ((Int) -> Void)?, ranker r: ((String) -> [Int])?) {
+        pickerGeneration &+= 1
         ranker = r
         filter = f
         index = 0
@@ -201,6 +203,7 @@ public final class CodeNav {
         let l = items[s[index]].loc
         remember()
         picker = nil
+        pickerGeneration &+= 1
         onPickerChange?(false)
         record?()
         split(l, below)
@@ -215,6 +218,7 @@ public final class CodeNav {
         let c = chooser
         remember()
         picker = nil
+        pickerGeneration &+= 1
         chooser = nil
         onPickerChange?(false)
         if let c { c(s[n]) } else { go(items[s[n]].loc) }
@@ -225,6 +229,7 @@ public final class CodeNav {
         guard picker != nil else { return }
         remember()
         picker = nil
+        pickerGeneration &+= 1
         chooser = nil
         onPickerChange?(false)
     }

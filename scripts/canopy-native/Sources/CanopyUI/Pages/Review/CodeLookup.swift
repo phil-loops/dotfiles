@@ -138,6 +138,23 @@ public final class CodeLookup {
 
     // ── asking ──
 
+    private struct Request {
+        var number: Int
+        var origin: ReaderContext
+    }
+
+    private func beginRequest() -> Request? {
+        seq &+= 1
+        guard let app else { return nil }
+        return Request(number: seq, origin: ReaderContext(app))
+    }
+
+    private func isCurrent(_ request: Request) -> Bool {
+        guard request.number == seq, let app else { return false }
+        guard request.origin.isCurrent(app) else { dismiss(); return false }
+        return true
+    }
+
     private struct Body: Encodable {
         var path: String
         var line: Int?
@@ -160,19 +177,18 @@ public final class CodeLookup {
     }
 
     /// Ask until the answer settles: nil when a newer ask took over.
-    private func asking<T: Decodable & Settles, B: Encodable>(_ route: String, _ w: Where, _ body: B, _ t: T.Type) async -> T? {
-        seq += 1
-        let mine = seq
+    private func asking<T: Decodable & Settles, B: Encodable>(_ route: String, _ w: Where, _ body: B, _ t: T.Type, request: Request) async -> T? {
         let t0 = Date()
         guard let app else { return nil }
         let path = app.transport.atRepo(w.repo, route)
         while true {
+            guard isCurrent(request) else { return nil }
             let r = await app.transport.ask(path, body, as: T.self)
-            if mine != seq { return nil }
+            guard isCurrent(request) else { return nil }
             guard let r, !r.ok, r.state == "loading", Date().timeIntervalSince(t0) < patience else { return r }
             pop = .wait("types are loading — \(r.message?.isEmpty == false ? r.message! : "starting tsgo")")
             try? await Task.sleep(nanoseconds: UInt64(retry * 1_000_000_000))
-            if mine != seq { return nil }
+            guard isCurrent(request) else { return nil }
         }
     }
 
@@ -184,12 +200,14 @@ public final class CodeLookup {
     }
 
     /// space k: the type at a position, into `pop`.
-    public func hover(_ p: Position?, _ w: Where?) {
-        guard let p, let w else { pop = .note("nothing to type here"); return }
+    @discardableResult
+    public func hover(_ p: Position?, _ w: Where?) -> Task<Void, Never>? {
+        let request = beginRequest()
+        guard let p, let w, let request else { pop = .note("nothing to type here"); return nil }
         pop = .wait("asking tsgo…")
         let b = body(p, path: p.path, side: p.side, w)
-        Task { @MainActor in
-            guard let r = await asking("/lsp/hover", w, b, LSPHover.self) else { return }
+        return Task { @MainActor in
+            guard let r = await asking("/lsp/hover", w, b, LSPHover.self, request: request) else { return }
             if r.ok, let c = r.contents, !c.isEmpty { pop = .hover(c) }
             else { pop = .note(r.ok ? "no type here" : Self.plainNote(r.message).isEmpty ? "types aren't available" : Self.plainNote(r.message)) }
         }
@@ -203,20 +221,22 @@ public final class CodeLookup {
     ]
 
     /// g d / g y / g i / g r: one place goes there, several open the picker.
-    public func goto(_ kind: LSPGoto, _ p: Position?, _ w: Where?) {
-        guard let p, let w else { pop = .note("nothing to look up here"); return }
+    @discardableResult
+    public func goto(_ kind: LSPGoto, _ p: Position?, _ w: Where?) -> Task<Void, Never>? {
+        let request = beginRequest()
+        guard let p, let w, let request else { pop = .note("nothing to look up here"); return nil }
         let words = Self.gotoWords[kind]!
         pop = .wait(words.asking)
         let b = body(p, path: p.path, side: p.side, w)
-        Task { @MainActor in
-            let first = await asking(kind.route, w, b, LSPLocations.self)
+        return Task { @MainActor in
+            let first = await asking(kind.route, w, b, LSPLocations.self, request: request)
             var r = first
             if let f = first, f.isWholeModule, let m = p.member {
                 var mb = b
                 mb.character = m
-                if let mr = await asking(kind.route, w, mb, LSPLocations.self), mr.ok, !(mr.locations ?? []).isEmpty { r = mr }
+                if let mr = await asking(kind.route, w, mb, LSPLocations.self, request: request), mr.ok, !(mr.locations ?? []).isEmpty { r = mr }
             }
-            guard let r else { return }
+            guard let r, isCurrent(request) else { return }
             let locs = r.ok ? (r.locations ?? []) : []
             if locs.isEmpty {
                 pop = .note(r.ok ? words.none : Self.plainNote(r.message).isEmpty ? "types aren't available" : Self.plainNote(r.message))
@@ -232,12 +252,14 @@ public final class CodeLookup {
     }
 
     /// space s: a file's symbols, in the picker.
-    public func symbols(path: String?, side: String = "new", _ w: Where?) {
-        guard let path, let w else { pop = .note("no file to list"); return }
+    @discardableResult
+    public func symbols(path: String?, side: String = "new", _ w: Where?) -> Task<Void, Never>? {
+        let request = beginRequest()
+        guard let path, let w, let request else { pop = .note("no file to list"); return nil }
         pop = .wait("reading the file's symbols…")
         let b = body(nil, path: path, side: side, w)
-        Task { @MainActor in
-            guard let r = await asking("/lsp/symbols", w, b, LSPSymbols.self) else { return }
+        return Task { @MainActor in
+            guard let r = await asking("/lsp/symbols", w, b, LSPSymbols.self, request: request) else { return }
             let syms = r.ok ? (r.symbols ?? []) : []
             if syms.isEmpty {
                 pop = .note(r.ok ? "no symbols in this file" : Self.plainNote(r.message).isEmpty ? "types aren't available" : Self.plainNote(r.message))
@@ -253,16 +275,18 @@ public final class CodeLookup {
 
     /// space S / :symbol: symbols matching `query` across the project the file at `path` belongs to,
     /// as a picker of places (Helix's workspace symbols).
-    public func workspaceSymbols(query: String, path: String?, side: String = "new", _ w: Where?) {
-        guard let path, let w else { pop = .note("no file to load the project from"); return }
+    @discardableResult
+    public func workspaceSymbols(query: String, path: String?, side: String = "new", _ w: Where?) -> Task<Void, Never>? {
+        let request = beginRequest()
+        guard let path, let w, let request else { pop = .note("no file to load the project from"); return nil }
         pop = .wait("finding \(query) across the project…")
         struct WBody: Encodable { var base: Body; var query: String
             func encode(to e: Encoder) throws { try base.encode(to: e); var c = e.container(keyedBy: K.self); try c.encode(query, forKey: .query) }
             enum K: String, CodingKey { case query }
         }
         let b = WBody(base: body(nil, path: path, side: side, w), query: query)
-        Task { @MainActor in
-            guard let r = await asking("/lsp/workspace-symbols", w, b, LSPWorkspaceSymbols.self) else { return }
+        return Task { @MainActor in
+            guard let r = await asking("/lsp/workspace-symbols", w, b, LSPWorkspaceSymbols.self, request: request) else { return }
             let syms = r.ok ? (r.symbols ?? []) : []
             if syms.isEmpty {
                 pop = .note(r.ok ? "no symbol matches \(query)" : Self.plainNote(r.message).isEmpty ? "types aren't available" : Self.plainNote(r.message))
@@ -278,8 +302,9 @@ public final class CodeLookup {
 
     /// ] f / ] t: a file's symbols, quietly (nil when they can't be had: the note says why).
     public func symbolList(path: String, side: String = "new", _ w: Where) async -> [LSPSymbols.Symbol]? {
+        guard let request = beginRequest() else { return nil }
         let b = body(nil, path: path, side: side, w)
-        guard let r = await asking("/lsp/symbols", w, b, LSPSymbols.self) else { return nil }
+        guard let r = await asking("/lsp/symbols", w, b, LSPSymbols.self, request: request) else { return nil }
         if pop?.isWait == true { pop = nil }
         if !r.ok { pop = .note(Self.plainNote(r.message).isEmpty ? "types aren't available" : Self.plainNote(r.message)); return nil }
         return r.symbols ?? []
@@ -288,11 +313,12 @@ public final class CodeLookup {
     /// Each picker row's source line, as its file arrives (nav.ts pick).
     private func fillTexts(_ places: [Loc]) {
         guard let app else { return }
+        let picker = app.nav.pickerGeneration
         let pg = ReviewPageState.of(app)
         for (i, l) in places.enumerated() {
             Task { @MainActor in
                 let lines = await pg.linesOf(l)
-                guard app.nav.picker != nil, app.nav.picker?.items.indices.contains(i) == true, app.nav.picker?.items[i].loc == l else { return }
+                guard app.nav.pickerGeneration == picker, app.nav.picker?.items.indices.contains(i) == true, app.nav.picker?.items[i].loc == l else { return }
                 app.nav.setText(i, (l.line >= 1 && l.line <= lines.count ? lines[l.line - 1] : "").trimmingCharacters(in: .whitespaces))
             }
         }
@@ -322,28 +348,30 @@ public final class CodeLookup {
     }
 
     private func previewRename(_ b: RenameBody, repo: String) {
+        guard let request = beginRequest() else { return }
         pop = .wait("asking tsgo what renaming changes…")
         Task { @MainActor in
-            guard let r = await asking("/lsp/rename", .branch(repo: repo, name: b.branch, base: nil), b, LSPRename.self) else { return }
+            guard let r = await asking("/lsp/rename", .branch(repo: repo, name: b.branch, base: nil), b, LSPRename.self, request: request) else { return }
             guard r.ok, let sha = r.sha, let files = r.files else {
                 pop = .note(Self.plainNote(r.message).isEmpty ? "couldn't rename here" : Self.plainNote(r.message))
                 return
             }
             let edits = files.reduce(0) { $0 + $1.edits }
-            pop = .hover("```diff\n\(r.diff ?? "")\n```")
             var apply = b
             apply.apply = true
             apply.sha = sha
             app?.nav.pick("rename \(r.old ?? "it") to \(b.newName)?", [PickItem(label: "↵ commit it", text: "\(edits) edit\(edits == 1 ? "" : "s") in \(files.count) file\(files.count == 1 ? "" : "s")")]) { [weak self] _ in
                 self?.applyRename(apply, repo: repo)
             }
+            pop = .hover("```diff\n\(r.diff ?? "")\n```")
         }
     }
 
     private func applyRename(_ b: RenameBody, repo: String) {
+        guard let request = beginRequest() else { return }
         pop = .wait("renaming…")
         Task { @MainActor in
-            guard let r = await asking("/lsp/rename", .branch(repo: repo, name: b.branch, base: nil), b, LSPRename.self) else { return }
+            guard let r = await asking("/lsp/rename", .branch(repo: repo, name: b.branch, base: nil), b, LSPRename.self, request: request) else { return }
             pop = .note(r.ok ? "renamed in \(String((r.sha ?? "").prefix(7)))" : Self.plainNote(r.message).isEmpty ? "couldn't rename" : Self.plainNote(r.message))
         }
     }
