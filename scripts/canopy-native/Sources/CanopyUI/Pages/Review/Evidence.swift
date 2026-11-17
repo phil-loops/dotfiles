@@ -53,7 +53,7 @@ public struct EvidenceCard: Decodable, Equatable, Sendable {
         var coverage: Coverage?
     }
     public struct Status: Decodable, Equatable, Sendable {
-        var judged: Bool; var verdict: String?; var at: String?; var note: String?; var carriedFrom: String?
+        var judged: Bool; var verdict: String?; var at: String?; var note: String?; var carriedFrom: String?; var stands: Bool?
     }
     public struct Run: Decodable, Equatable, Sendable { var running: Bool; var exit: Int?; var tail: [String]? }
 
@@ -355,13 +355,13 @@ struct EvidenceChip: View {
         HStack(spacing: 0) {
             Color.clear.frame(width: 0, height: 0)
             if let c = ev.card(target.id), c.request != nil, c.manifest != nil {
-                let judged = c.status?.judged == true
+                let judged = c.status?.judged == true && c.status?.stands != false
                 HStack(spacing: 6) {
                     Text("evidence").foregroundStyle(theme.inkDim)
                     Text("\(c.fields.count) field\(c.fields.count == 1 ? "" : "s")")
                     if let g = c.manifest?.gaps, !g.isEmpty { Text("· \(g.count) not captured").foregroundStyle(theme.inkFaint) }
-                    Text(c.current != true ? "· older code" : judged ? "· \(c.status?.verdict == "accept" ? "accepted" : "rejected")" : "· unjudged")
-                        .foregroundStyle(c.current != true ? theme.ember : judged ? (c.status?.verdict == "accept" ? theme.patina : theme.ember) : theme.goldLeaf)
+                    Text(c.current != true ? "· older code" : c.status?.stands == false ? "· verdict void" : judged ? "· \(c.status?.verdict == "accept" ? "accepted" : "rejected")" : "· unjudged")
+                        .foregroundStyle(c.current != true || c.status?.stands == false ? theme.ember : judged ? (c.status?.verdict == "accept" ? theme.patina : theme.ember) : theme.goldLeaf)
                     Text(",e").foregroundStyle(theme.inkFaint)
                 }
                 .font(Theme.mono(11.5))
@@ -507,9 +507,9 @@ struct EvidencePanel: View {
 
     @ViewBuilder private func verdict(_ c: EvidenceCard) -> some View {
         if let s = c.status, s.judged {
-            let word = s.verdict == "accept" ? "accepted" : "rejected"
+            let word = (s.verdict == "accept" ? "accepted" : "rejected") + (s.stands == false ? " — no longer stands" : "")
             Text(s.carriedFrom != nil ? "\(word) · identical to what you judged \(s.at?.prefix(10) ?? "")" : "\(word) \(s.at?.prefix(10) ?? "")")
-                .font(Theme.text(12)).foregroundStyle(s.verdict == "accept" ? theme.patina : theme.ember)
+                .font(Theme.text(12)).foregroundStyle(s.verdict == "accept" && s.stands != false ? theme.patina : theme.ember)
         } else if c.judgeable {
             Text("accept ,y   reject ,N").font(Theme.mono(12)).foregroundStyle(theme.goldLeaf)
         } else if c.manifest != nil {

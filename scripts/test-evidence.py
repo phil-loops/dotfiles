@@ -64,7 +64,8 @@ except E.Refused:
 
 E.judge(m1, "accept", "looks right", "browser")
 check(E.status(base, m1) == {"judged": True, "verdict": "accept", "at": E.status(base, m1)["at"],
-                             "note": "looks right", "carriedFrom": None}, "Phil's own verdict reads back as his, not carried")
+                             "note": "looks right", "carriedFrom": None, "stands": True, "why": []},
+      "Phil's own verdict reads back as his, not carried")
 entry = json.loads(open(os.environ["EVIDENCE_LEDGER"]).read().splitlines()[-1])
 check(entry["contents"] == base, "the ledger keeps what was judged, not just its id")
 
@@ -121,6 +122,18 @@ E._write_atomic(E._admission_path("ra"), E._canon({"status": "conflicted"}))
 check(any("conflicted" in w for w in E.eligibility(det)), "a deterministic manifest whose render was revoked isn't eligible")
 E._write_atomic(E._admission_path("ra"), E._canon({"status": "admitted"}))
 check(E.eligibility(det) == [], "a deterministic manifest with both renders admitted is eligible")
+dm = publish(det)
+E.judge(dm, "accept", "", "browser")
+det_twin = dict(copy.deepcopy(det), basis=dict(det["basis"], afterCommit="a2"))
+tm = publish(det_twin)
+check(E.status(det_twin, tm).get("carriedFrom") == dm, "an eligible identical observation carries the verdict")
+E._write_atomic(E._admission_path("ra"), E._canon({"status": "conflicted"}))
+s = E.status(det, dm)
+check(s["judged"] and s.get("stands") is False and any("conflicted" in w for w in s.get("why", [])),
+      "a verdict on a render revoked after judging no longer stands, and says why")
+check(not E.status(det_twin, tm)["judged"], "a verdict doesn't carry onto a manifest that isn't eligible")
+E._write_atomic(E._admission_path("ra"), E._canon({"status": "admitted"}))
+check(E.status(det, dm).get("stands") is True, "a verdict on an eligible manifest stands")
 check(E.eligibility(base) == [], "a live manifest doesn't need admissions — its claim is repeatability")
 retro = dict(copy.deepcopy(base), predict={"dark": "same"}, expectation="nothing changes", amends="f" * 64, retrospective=True)
 check(retro["captured"]["predict"] == {"dark": "changes"} and E.observation(retro) != E.observation(base),
