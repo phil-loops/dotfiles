@@ -42,6 +42,15 @@ struct CapturePlanTests {
         #expect(!AppConfig.parse([]).shootRequested)
     }
 
+    @Test func conflictingModesCannotBypassCaptureIsolation() {
+        for args in [["--shoot", "/tmp/x", "--bench"], ["--shoot", "/tmp/x", "--dump"], ["--shoot-fixture", "/tmp/source", "--dump"], ["--shot", "x=/v2"], ["--shoot-fixture", "/tmp/source"], ["--bench", "--dump"], ["--dump", "--shot"], ["--dump", "--shoot-fixture"], ["--bench", "--size", "nonsense"]] {
+            #expect(AppConfig.parse(args).launchError != nil)
+        }
+        #expect(AppConfig.parse(["--shoot", "/tmp/x", "--shoot-fixture", "/tmp/source", "--shot", "x=/v2"]).launchError == nil)
+        #expect(AppConfig.parse(["--bench"]).launchError == nil)
+        #expect(AppConfig.parse(["--dump"]).launchError == nil)
+    }
+
     @Test func namesStayWithinTheArtifactDirectory() {
         for name in ["", ".", "..", "../outside", "a/b", "a\\b", "line\nbreak", "nul\0byte", String(repeating: "x", count: 201)] {
             #expect(throws: (any Error).self) { try CapturePlan.validateName(name) }

@@ -2,95 +2,97 @@ import AppKit
 import CanopyCore
 import SwiftUI
 
-/// `--shoot <dir> <shot>…`: no visible window. Hydrate from the server, then for each shot
-/// (`name=/v2/route[:key key …]`) navigate, press the keys, settle, and draw the window offscreen
-/// into `<dir>/<name>.png` — how the app's looks get checked without anyone's screen. Keys are
-/// pressed through the engine like Phil's, so only pass keys that move or switch tabs, never a write.
-/// Inside a shot: `>text` types into the open Helix terminal (`\\r` is enter, `\\e` escape), `~N` waits N
-/// seconds, `!name` draws a mid-sequence `<name>.png`, `=k` presses k as a key (`=?` the sheet), and `?` prints the review page's cursor and Helix's last place.
+/// Validate a capture plan, hydrate its source, and write completed offscreen PNG artifacts.
+/// Captures refuse server writes, terminal input, external application opens and persistent edits.
 @MainActor
 public enum Shoot {
     public static func run(_ config: AppConfig) -> Never {
+        let plan: CapturePlan
+        let output: CaptureOutput
+        let fixture: CaptureFixture
+        do {
+            plan = try CapturePlan(config)
+            fixture = try CaptureFixture(directory: config.shootFixture)
+            output = try CaptureOutput(config.shootDir)
+        } catch { fail(error, code: 2) }
         Log.quiet = true
+        Log.persists = false
         Fonts.register()
         NSApplication.shared.setActivationPolicy(.prohibited)
-        guard let port = config.resolvedPort() else {
-            print("shoot: no server port")
-            exit(2)
-        }
-        let app = AppModel(config: config, port: port, telemetry: false)
+        CaptureFixtureProtocol.install(fixture, port: 1)
+        let app = AppModel(config: config, port: 1, telemetry: false, protocolClasses: [CaptureFixtureProtocol.self])
+        CaptureSession.configure(app)
         var hello = false
+        var hydrated = false
+        let counted = app.stream.count
+        app.stream.count = { name, ms in
+            counted?(name, ms)
+            if name == "state" { hydrated = true }
+        }
         app.stream.onFrame = { f in if f.event == "hello" { hello = true } }
         app.start()
         let size = NSSize(width: config.shootWidth, height: config.shootHeight)
-        let window = NSWindow(contentRect: NSRect(origin: NSPoint(x: -20000, y: -20000), size: size),
-                              styleMask: [.borderless], backing: .buffered, defer: false)
-        window.appearance = NSAppearance(named: config.appearance == "light" ? .aqua : .darkAqua)
-        let host = NSHostingView(rootView: AnyView(RootView().environment(app)
-                .preferredColorScheme(config.appearance == "light" ? .light : .dark)))
-        host.frame = NSRect(origin: .zero, size: size)
-        host.sizingOptions = []   // a real window is the size its person made it; content never grows it
-        window.contentView = host
-        window.orderBack(nil)
         Task { @MainActor in
-            let t0 = Date()
-            while !hello, Date().timeIntervalSince(t0) < 15 { try? await Task.sleep(nanoseconds: 100_000_000) }
-            try? await Task.sleep(nanoseconds: 1_500_000_000)
-            for spec in config.shots {
-                let (name, rest) = spec.split(separator: "=", maxSplits: 1).map(String.init).pair
-                let parts = rest.split(separator: " ").map(String.init)
-                guard let route = parts.first else { continue }
-                app.router.navigate(route)
-                try? await Task.sleep(nanoseconds: 1_200_000_000)
-                func draw(_ shot: String) {
+            do {
+                let start = Date()
+                while !(hello && hydrated && app.store.ready), Date().timeIntervalSince(start) < 15 {
+                    try await Task.sleep(nanoseconds: 100_000_000)
+                }
+                guard hello, hydrated, app.store.ready else {
+                    app.stream.stop()
+                    fail(Refusal("initial state or stream hello unavailable after 15s; no images written"), code: 1)
+                }
+                let window = NSWindow(contentRect: NSRect(origin: NSPoint(x: -20000, y: -20000), size: size),
+                                      styleMask: [.borderless], backing: .buffered, defer: false)
+                window.appearance = NSAppearance(named: config.appearance == "light" ? .aqua : .darkAqua)
+                app.open(address: plan.shots[0].address)
+                let host = NSHostingView(rootView: AnyView(RootView().environment(app)
+                    .preferredColorScheme(config.appearance == "light" ? .light : .dark)))
+                host.frame = NSRect(origin: .zero, size: size)
+                host.sizingOptions = []
+                window.contentView = host
+                window.orderBack(nil)
+                try await Task.sleep(nanoseconds: 1_500_000_000)
+                func draw(_ name: String) throws {
                     host.layoutSubtreeIfNeeded()
-                    guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return }
-                    host.cacheDisplay(in: host.bounds, to: rep)
-                    let url = URL(fileURLWithPath: config.shootDir).appendingPathComponent("\(shot).png")
-                    try? rep.representation(using: .png, properties: [:])?.write(to: url)
+                    try CaptureFixtureProtocol.requireComplete(port: 1)
+                    guard let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { throw Refusal("capture bitmap allocation failed") }
+                    host.cacheDisplay(in: host.bounds, to: bitmap)
+                    let url = try output.writePNG(bitmap.representation(using: .png, properties: [:]), named: name)
                     print(url.path)
                 }
-                for k in parts.dropFirst() {
-                    if k.hasPrefix(">"), k.count > 1 {
-                        let text = String(k.dropFirst()).replacingOccurrences(of: "\\r", with: "\r").replacingOccurrences(of: "\\e", with: "\u{1b}")
-                        if let t = terminal(in: host) { t.send(txt: text) } else { print("shoot: no terminal to type \(k) into") }
-                    } else if k.hasPrefix("~"), let secs = Double(k.dropFirst()) {
-                        try? await Task.sleep(nanoseconds: UInt64(secs * 1_000_000_000))
-                    } else if k.hasPrefix("!"), k.count > 1 {
-                        draw(String(k.dropFirst()))
-                    } else if k == "#" {
-                        if let t = terminal(in: host) {
-                            let term = t.getTerminal()
-                            print("screen: \(term.cols)x\(term.rows) view=\(NSStringFromSize(t.bounds.size))")
-                            for r in 0..<term.rows { print("  |" + (term.getLine(row: r)?.translateToString(trimRight: true) ?? "")) }
-                        } else { print("screen: no terminal") }
-                    } else if k.hasPrefix("="), k.count > 1 {
-                        _ = app.keys.handle(String(k.dropFirst()))
-                    } else if k == "?" {
-                        let pg = ReviewPageState.of(app)
-                        print("state: cursor=\(pg.here?.key ?? "nil") note=\(app.runner.note ?? "-") pop=\(CodeLookup.of(app).pop?.text ?? "-") pane=\(app.pane?.id ?? "nil") helix=\(pg.helix.map { "\($0.path):\($0.line) whole=\($0.whole)" } ?? "closed") helixAt=\(pg.helixAt.map { "\($0.path):\($0.line)" } ?? "nil") terminalFrame=\(terminal(in: host).map { NSStringFromRect($0.convert($0.bounds, to: nil)) } ?? "none") window=\(NSStringFromSize(size))")
-                    } else {
-                        _ = app.keys.handle(k)
+                for shot in plan.shots {
+                    app.open(address: shot.address)
+                    try await Task.sleep(nanoseconds: 1_200_000_000)
+                    for action in shot.actions {
+                        switch action {
+                        case .key(let key): _ = app.keys.handle(key)
+                        case .wait(let delay): try await Task.sleep(nanoseconds: delay)
+                        case .draw(let name): try draw(name)
+                        case .state:
+                            let pg = ReviewPageState.of(app)
+                            print("state: cursor=\(pg.here?.key ?? "nil") note=\(app.runner.note ?? "-") pop=\(CodeLookup.of(app).pop?.text ?? "-") pane=\(app.pane?.id ?? "nil") window=\(NSStringFromSize(size))")
+                        case .terminalState: print("screen: terminal unavailable during capture")
+                        }
+                        try await Task.sleep(nanoseconds: 250_000_000)
                     }
-                    try? await Task.sleep(nanoseconds: 250_000_000)
+                    try await Task.sleep(nanoseconds: plan.settle)
+                    try draw(shot.name)
+                    _ = app.keys.handle("esc")
                 }
-                try? await Task.sleep(nanoseconds: UInt64(config.dumpWait * 1_000_000_000))
-                draw(name)
-                _ = app.keys.handle("esc")
+                app.stream.stop()
+                exit(0)
+            } catch {
+                app.stream.stop()
+                fail(error, code: 2)
             }
-            exit(hello ? 0 : 1)
         }
         RunLoop.main.run()
-        exit(0)
+        fail(Refusal("capture run loop ended before completion"), code: 2)
     }
-}
 
-@MainActor private func terminal(in view: NSView) -> HelixTerminal? {
-    if let t = view as? HelixTerminal { return t }
-    for v in view.subviews { if let t = terminal(in: v) { return t } }
-    return nil
-}
-
-private extension Array where Element == String {
-    var pair: (String, String) { (first ?? "", count > 1 ? self[1] : "") }
+    private static func fail(_ error: any Error, code: Int32) -> Never {
+        FileHandle.standardError.write(Data("shoot: \(error)\n".utf8))
+        exit(code)
+    }
 }

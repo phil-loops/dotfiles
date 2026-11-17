@@ -85,8 +85,8 @@ swift test                      # all suites; must stay green at every commit
 ./canopy --bench --cold-only --synthetic 300 # local fixture generation, decode, hydrate, fresh root construction/layout; no server
 ./canopy /v2/b/loops/<branch>   # Show's canopy workspace on that route (Show answers canopy:// too)
 ./canopy --dump [--dump-wait 5] # headless: hydrate + listen + exercise keys, JSON on stdout, exit 1 if no hello
-./canopy --build >/dev/null; .build/debug/Canopy --shoot <dir> --shot "name=/v2/b/loops/<b> 2 k" [--size 1280x800]
-                                # headless: draw each shot offscreen into <dir>/name.png (keys after the route; never a write key)
+./canopy --build >/dev/null; .build/debug/Canopy --shoot <dir> --shoot-fixture <fixture-dir> --shot "name=/v2/b/loops/<b> 2 k" [--size 1280x800]
+                                # headless: replay local fixtures into completed PNGs; no live server (see CAPTURE.md)
 tail -f ~/.cache/canopy-native/canopy.log   # what the running app is doing (hydrate, events, nav, key problems)
 ```
 

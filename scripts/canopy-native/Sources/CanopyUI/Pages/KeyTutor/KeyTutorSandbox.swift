@@ -319,6 +319,7 @@ final class MemoryDefaults: UserDefaults, @unchecked Sendable {
 
     convenience init() { self.init(suiteName: "canopy-native.keytutor.memory")! }
 
+    override func dictionaryRepresentation() -> [String: Any] { values }
     override func object(forKey key: String) -> Any? { values[key] }
     override func set(_ value: Any?, forKey key: String) { values[key] = value }
     override func removeObject(forKey key: String) { values[key] = nil }

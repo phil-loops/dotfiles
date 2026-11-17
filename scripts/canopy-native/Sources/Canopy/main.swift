@@ -4,9 +4,13 @@ import Foundation
 
 let config = AppConfig.parse(Array(CommandLine.arguments.dropFirst()))
 MainActor.assumeIsolated {
+    if let error = config.launchError {
+        FileHandle.standardError.write(Data("canopy: \(error)\n".utf8))
+        exit(64)
+    }
     if config.bench {
         Bench.run(config)
-    } else if !config.shootDir.isEmpty {
+    } else if config.shootRequested || !config.shootDir.isEmpty {
         Shoot.run(config)
     } else if config.dump {
         Dump.run(config)

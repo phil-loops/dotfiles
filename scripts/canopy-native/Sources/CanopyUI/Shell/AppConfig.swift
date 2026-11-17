@@ -9,6 +9,7 @@ import Foundation
 ///   --dump                headless: hydrate, hold the event stream, print the world as JSON, exit
 ///   --dump-wait <s>       how long --dump listens for patches (default 4); --shoot settles this long per shot
 ///   --shoot <dir>         headless: draw each --shot offscreen into <dir>/<name>.png (see Shoot)
+///   --shoot-fixture <dir> local state.json and optional responses.json; required for --shoot
 ///   --shot <name>=<route> [keys…]   one shot; repeatable
 ///   --size <w>x<h>        the --shoot / --bench window (default 1280x800)
 ///   --bench               headless: time every key on every page (or each --page); see Bench
@@ -29,6 +30,7 @@ public struct AppConfig: Sendable {
     public var appearance = "dark"
     public var dump = false
     public var dumpWait: Double = 4
+    public var shootFixture: String?
     public var shootRequested = false
     public var captureErrors: [String] = []
     public var shootDir = ""
@@ -43,6 +45,14 @@ public struct AppConfig: Sendable {
     public var shootHeight: Double = 800
 
     public init() {}
+
+    public var launchError: String? {
+        if !captureErrors.isEmpty { return captureErrors.joined(separator: "; ") }
+        let capture = shootRequested || !shootDir.isEmpty
+        if [capture, bench, dump].filter({ $0 }).count > 1 { return "choose only one of --shoot, --bench or --dump" }
+        if !capture, shootFixture != nil || !shots.isEmpty { return "--shoot-fixture and --shot require --shoot" }
+        return nil
+    }
 
     public static func parse(_ args: [String]) -> AppConfig {
         var c = AppConfig()
@@ -62,6 +72,9 @@ public struct AppConfig: Sendable {
                 c.shootRequested = true
                 c.shootDir = next() ?? ""
                 if c.shootDir.isEmpty { c.captureErrors.append("--shoot needs an output directory") }
+            case "--shoot-fixture":
+                c.shootFixture = next()
+                if c.shootFixture?.isEmpty != false { c.captureErrors.append("--shoot-fixture needs a directory") }
             case "--shot":
                 if let s = next() { c.shots.append(s) }
                 else { c.captureErrors.append("--shot needs name=/v2/route") }
@@ -106,6 +119,7 @@ public struct AppConfig: Sendable {
 public enum Log {
     public static let path = NSString(string: "~/.cache/canopy-native/canopy.log").expandingTildeInPath
     nonisolated(unsafe) public static var quiet = false
+    nonisolated(unsafe) static var persists = true
     private static let lock = NSLock()
 
     public static func line(_ s: String) {
@@ -113,6 +127,7 @@ public enum Log {
         let msg = "\(stamp) \(s)\n"
         lock.withLock {
             if !quiet { FileHandle.standardError.write(Data(msg.utf8)) }
+            guard persists else { return }
             let dir = (path as NSString).deletingLastPathComponent
             try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
             if let h = FileHandle(forWritingAtPath: path) {

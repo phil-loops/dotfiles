@@ -5,7 +5,7 @@
 # plain executable, not an app, so nothing can open it as a second window — rebuilt when its sources changed.
 #   canopy --build                 just (re)build; prints the binary's path
 #   canopy --dump [--dump-wait s]  headless: hydrate + listen, print the world as JSON, exit
-#   canopy --shoot <dir> --shot "<name>=/v2/… [keys…]" [--size WxH]   headless: draw pages to <dir>/<name>.png
+#   canopy --shoot <dir> --shoot-fixture <source> --shot "<name>=/v2/… [keys…]" [--size WxH]   headless: draw pages to <dir>/<name>.png
 #   canopy --bench [--page /v2/…]… [--budget ms] [--quick] [--synthetic n]   headless: time every key on every page (on a generated n-branch store with --synthetic); exit 1 if any is over
 #   canopy --appearance light|dark|system
 # For those, the server port is per repo: --port wins, else `stack-review-port` in --repo, else the
@@ -39,7 +39,7 @@ build() {
   echo "$sha" > "$stamp"
 }
 
-port="" repo="" route="" headless=0 focus=()
+port="" repo="" route="" headless=0 capture=0 capture_args=0 bench_mode=0 dump_mode=0 focus=()
 pass=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -48,15 +48,29 @@ while [[ $# -gt 0 ]]; do
     --focus) focus=(--focus); shift ;;
     --port) port="$2"; shift 2 ;;
     --repo) repo="$2"; shift 2 ;;
-    --dump) headless=1; pass+=("--dump"); shift ;;
-    --shoot) headless=1; pass+=("$1" "$2"); shift 2 ;;
-    --bench) headless=1; pass+=("$1"); shift ;;
+    --dump) headless=1; dump_mode=1; pass+=("--dump"); shift ;;
+    --shoot) headless=1; capture=1; pass+=("$1" "$2"); shift 2 ;;
+    --bench) headless=1; bench_mode=1; pass+=("$1"); shift ;;
     --quick) pass+=("$1"); shift ;;
-    --shot|--size|--page|--budget|--dump-wait|--appearance|--synthetic) pass+=("$1" "$2"); shift 2 ;;
+    --shot|--shoot-fixture) capture_args=1; pass+=("$1" "$2"); shift 2 ;;
+    --size|--page|--budget|--dump-wait|--appearance|--synthetic) pass+=("$1" "$2"); shift 2 ;;
     /v2*|canopy:*) route="$1"; shift ;;
     *) echo "canopy: unknown argument $1" >&2; exit 64 ;;
   esac
 done
+
+if (( capture + bench_mode + dump_mode > 1 )); then
+  echo "canopy: choose only one of --shoot, --bench or --dump" >&2
+  exit 64
+fi
+if (( capture_args && ! capture )); then
+  echo "canopy: --shoot-fixture and --shot require --shoot" >&2
+  exit 64
+fi
+if (( capture )); then
+  build
+  exec "$bin" ${route:+"$route"} ${pass[@]+"${pass[@]}"}
+fi
 
 (( headless )) || exec "$here/../show" --canopy ${focus[@]+"${focus[@]}"} "$route"
 
