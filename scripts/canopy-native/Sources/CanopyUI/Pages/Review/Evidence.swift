@@ -9,7 +9,7 @@ import SwiftUI
 public struct EvidenceCard: Decodable, Equatable, Sendable {
     public struct Request: Decodable, Equatable, Sendable { var recipe: String; var expectation: String; var gaps: [String]? }
     public struct Basis: Decodable, Equatable, Sendable { var beforeCommit: String; var afterCommit: String }
-    public struct Recipe: Decodable, Equatable, Sendable { var title: String }
+    public struct Recipe: Decodable, Equatable, Sendable { var title: String; var kind: String? }
     public struct Obligation: Decodable, Equatable, Sendable {
         var id: String; var title: String?
         var view: String?; var viewTitle: String?; var variant: String?; var variantTitle: String?
@@ -21,8 +21,74 @@ public struct EvidenceCard: Decodable, Equatable, Sendable {
     public struct Measure: Decodable, Equatable, Sendable {
         var changedPixels: Int?; var maxDelta: Int?; var box: [Int]?; var sizeChanged: [Int]?
     }
+    /// Any JSON value from an endpoint capture, kept as its compact text.
+    public struct JSONText: Decodable, Equatable, Sendable {
+        var text: String
+        public init(from decoder: Decoder) throws {
+            let v = try decoder.singleValueContainer().decode(JSONValue.self)
+            text = v.text
+        }
+    }
+    indirect enum JSONValue: Decodable, Equatable, Sendable {
+        case null, bool(Bool), number(Double), string(String), array([JSONValue]), object([(String, JSONValue)])
+        static func == (a: JSONValue, b: JSONValue) -> Bool { a.text == b.text }
+        init(from decoder: Decoder) throws {
+            if let c = try? decoder.container(keyedBy: AnyKey.self) {
+                self = .object(try c.allKeys.sorted { $0.stringValue < $1.stringValue }.map { ($0.stringValue, try c.decode(JSONValue.self, forKey: $0)) })
+            } else if var c = try? decoder.unkeyedContainer() {
+                var out: [JSONValue] = []
+                while !c.isAtEnd { out.append(try c.decode(JSONValue.self)) }
+                self = .array(out)
+            } else {
+                let c = try decoder.singleValueContainer()
+                if c.decodeNil() { self = .null }
+                else if let b = try? c.decode(Bool.self) { self = .bool(b) }
+                else if let n = try? c.decode(Double.self) { self = .number(n) }
+                else { self = .string(try c.decode(String.self)) }
+            }
+        }
+        var text: String {
+            switch self {
+            case .null: "null"
+            case .bool(let b): b ? "true" : "false"
+            case .number(let n): n == n.rounded() && abs(n) < 1e15 ? String(Int(n)) : String(n)
+            case .string(let s): "\"\(s)\""
+            case .array(let a): "[" + a.map(\.text).joined(separator: ",") + "]"
+            case .object(let o): "{" + o.map { "\"\($0.0)\":\($0.1.text)" }.joined(separator: ",") + "}"
+            }
+        }
+        struct AnyKey: CodingKey {
+            var stringValue: String; var intValue: Int? { nil }
+            init?(stringValue: String) { self.stringValue = stringValue }
+            init?(intValue: Int) { nil }
+        }
+    }
+    /// One JSON path where an endpoint's response differs between the two sides.
+    public struct PathChange: Decodable, Equatable, Sendable {
+        var path: String; var before: JSONText?; var after: JSONText?; var added: Bool?; var removed: Bool?
+    }
     public struct Finding: Decodable, Equatable, Sendable {
         var scene: String; var predicted: String; var changed: Bool; var departure: Bool; var measure: Measure?
+        /// endpoint captures: status before and after, the path diff (first 50), paths outside the prediction
+        var status: [Int?]?; var diff: [PathChange]?; var diffCount: Int?; var outside: [String]?
+
+        enum CodingKeys: String, CodingKey { case scene, predicted, changed, departure, measure, moved, contained, status, diff, diffCount, outside }
+        struct Paths: Decodable { var paths: [String] }
+        public init(from d: Decoder) throws {
+            let c = try d.container(keyedBy: CodingKeys.self)
+            scene = try c.decode(String.self, forKey: .scene)
+            if let s = try? c.decode(String.self, forKey: .predicted) { predicted = s }
+            else { predicted = "paths:" + (try c.decode(Paths.self, forKey: .predicted)).paths.joined(separator: ", ") }
+            changed = try c.decode(Bool.self, forKey: .changed)
+            departure = try c.decode(Bool.self, forKey: .departure)
+            measure = try c.decodeIfPresent(Measure.self, forKey: .measure)
+            moved = try c.decodeIfPresent(Bool.self, forKey: .moved)
+            contained = try c.decodeIfPresent(Bool.self, forKey: .contained)
+            status = try c.decodeIfPresent([Int?].self, forKey: .status)
+            diff = try c.decodeIfPresent([PathChange].self, forKey: .diff)
+            diffCount = try c.decodeIfPresent(Int.self, forKey: .diffCount)
+            outside = try c.decodeIfPresent([String].self, forKey: .outside)
+        }
         /// identical pixels, but the picture sat somewhere else on the page
         var moved: Bool?
         /// for a "field" prediction that changed: whether every changed pixel sits on the field itself
@@ -32,6 +98,7 @@ public struct EvidenceCard: Decodable, Equatable, Sendable {
             switch predicted {
             case "same": "unchanged"
             case "field": "only the field changes"
+            case let p where p.hasPrefix("paths:"): "only \(p.dropFirst(6)) changes"
             default: "a change"
             }
         }
@@ -126,11 +193,14 @@ public struct EvidenceCard: Decodable, Equatable, Sendable {
         return out
     }
 
+    /// An endpoint recipe: requests and path diffs in place of pictures.
+    var isAPI: Bool { manifest?.recipe.kind == "api" }
+
     /// Phil may judge only a complete manifest of the branch as it is now.
     var judgeable: Bool { id != nil && current == true && available == true && run?.running != true && eligible != false }
     /// Judgeable, and every image of the manifest is on screen — `available` only says the server has them.
     func judgeable(showing has: (String) -> Bool) -> Bool {
-        judgeable && [manifest?.before, manifest?.after].allSatisfy { $0?.scenes.values.allSatisfy(has) ?? false }
+        judgeable && (isAPI || [manifest?.before, manifest?.after].allSatisfy { $0?.scenes.values.allSatisfy(has) ?? false })
     }
 
     /// The claim in words — what accepting this does and doesn't establish.
@@ -195,7 +265,7 @@ final class EvidenceState {
 
     func load(_ app: AppModel, _ t: ReviewPageState.Target) async {
         await loadCard(app, t)
-        guard let c = cards[t.id] else { return }
+        guard let c = cards[t.id], !c.isAPI else { return }
         for side in [c.manifest?.before, c.manifest?.after].compactMap({ $0 }) {
             for sha in side.scenes.values where images[sha] == nil {
                 if let d = try? await app.transport.getData(app.transport.atRepo(t.repo, "/evidence-blob?sha=\(sha)")),
@@ -405,10 +475,14 @@ struct EvidencePanel: View {
                 header(c)
                 if let m = c.manifest {
                     strip(c, m, ev)
-                    if ev.zoomed, let f = selectedField(c) {
-                        enlarged(c, m, f, ev)
+                    if c.isAPI {
+                        requests(c)
+                    } else {
+                        if ev.zoomed, let f = selectedField(c) {
+                            enlarged(c, m, f, ev)
+                        }
+                        sheet(c, m, ev)
                     }
-                    sheet(c, m, ev)
                 }
             } else {
                 Text("reading evidence…").foregroundStyle(theme.inkFaint)
@@ -467,6 +541,42 @@ struct EvidencePanel: View {
         }
     }
 
+    /// An endpoint recipe's sheet: each request's status before → after and its changed JSON paths,
+    /// paths outside the prediction lit. The diff is the manifest's own, so nothing loads after it.
+    @ViewBuilder private func requests(_ c: EvidenceCard) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            ForEach(c.findings, id: \.scene) { f in
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 8) {
+                        Text(f.departure ? "●" : f.changed ? "✓" : "=").foregroundStyle(f.departure ? theme.ember : theme.inkDim)
+                        Text(f.scene).font(Theme.mono(12.5, weight: .semibold)).foregroundStyle(theme.ink)
+                        if let st = f.status, st.count == 2 {
+                            Text(st[0] == st[1] ? "\(st[0].map(String.init) ?? "?")" : "\(st[0].map(String.init) ?? "?") → \(st[1].map(String.init) ?? "?")")
+                                .font(Theme.mono(11.5)).foregroundStyle(st[0] == st[1] ? theme.inkDim : theme.ember)
+                        }
+                        Text("predicted \(f.predictedWords)").font(Theme.text(11.5)).foregroundStyle(theme.inkFaint)
+                    }
+                    ForEach(f.diff ?? [], id: \.path) { d in
+                        let out = (f.outside ?? []).contains(d.path)
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text(d.path).font(Theme.mono(11.5)).foregroundStyle(out ? theme.ember : theme.inkDim)
+                            Text(d.added == true ? "added" : d.removed == true ? "removed" : "")
+                                .font(Theme.text(11)).foregroundStyle(theme.inkFaint)
+                            Text("\(d.before?.text ?? "—") → \(d.after?.text ?? "—")")
+                                .font(Theme.mono(11.5)).foregroundStyle(theme.ink).textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(.leading, 18)
+                    }
+                    if let n = f.diffCount, n > (f.diff?.count ?? 0) {
+                        Text("+\(n - (f.diff?.count ?? 0)) more changed paths not listed").font(Theme.text(11.5)).foregroundStyle(theme.goldLeaf)
+                            .padding(.leading, 18)
+                    }
+                }
+            }
+        }
+    }
+
     /// The counts in words for the variant on screen, what isn't covered, and the outcome.
     @ViewBuilder private func strip(_ c: EvidenceCard, _ m: EvidenceCard.Manifest, _ ev: EvidenceState) -> some View {
         let v = ev.variant(c)
@@ -477,8 +587,8 @@ struct EvidencePanel: View {
         let gaps = m.gaps ?? []
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 22) {
-                count(itself, "changed only themselves", theme.patina)
-                if around > 0 { count(around, "changed something around them", theme.goldLeaf) }
+                count(itself, c.isAPI ? "changed as predicted" : "changed only themselves", theme.patina)
+                if around > 0 { count(around, c.isAPI ? "departed from the prediction" : "changed something around them", theme.goldLeaf) }
                 if same > 0 { count(same, "unchanged", theme.inkDim) }
                 if !gaps.isEmpty { count(gaps.count, "not captured", theme.inkFaint) }
                 Spacer(minLength: 12)
