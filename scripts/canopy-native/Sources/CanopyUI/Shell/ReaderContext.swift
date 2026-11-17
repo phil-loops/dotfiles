@@ -21,6 +21,7 @@ struct ReaderContext {
     let place: Place
     let focus: Int
     let picker: Int
+    private let mode: Int
     private let cursor: Cursor
 
     init(_ app: AppModel) {
@@ -28,10 +29,19 @@ struct ReaderContext {
         place = app.here()
         focus = app.focusGeneration
         picker = app.nav.pickerGeneration
+        mode = app.modeGeneration
         cursor = Cursor(app)
     }
 
     func isCurrent(_ app: AppModel) -> Bool {
-        visit == app.navigationGeneration && focus == app.focusGeneration && picker == app.nav.pickerGeneration && cursor == Cursor(app) && place.sameSpot(app.here())
+        sameReader(app) && picker == app.nav.pickerGeneration && mode == app.modeGeneration
+    }
+
+    func isCurrentAfterPickerChoice(_ app: AppModel) -> Bool {
+        sameReader(app) && app.nav.picker == nil && app.keys.active == .normal && app.nav.pickerGeneration == picker + 1 && app.modeGeneration == mode + 1
+    }
+
+    private func sameReader(_ app: AppModel) -> Bool {
+        visit == app.navigationGeneration && focus == app.focusGeneration && cursor == Cursor(app) && place.sameSpot(app.here())
     }
 }

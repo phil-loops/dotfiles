@@ -30,6 +30,7 @@ public final class AppModel: CommandContext {
         didSet { if focusedPane != oldValue { focusGeneration &+= 1 } }
     }
     @ObservationIgnored private(set) var focusGeneration = 0
+    @ObservationIgnored private(set) var modeGeneration = 0
     @ObservationIgnored public private(set) var navigationGeneration = 0
     public private(set) var cursors: [String: String] = [:]
     public private(set) var cursorIdxs: [String: Int] = [:]
@@ -204,6 +205,7 @@ public final class AppModel: CommandContext {
     }
 
     private func modeChanged(_ from: KeyMode, _ to: KeyMode) {
+        modeGeneration &+= 1
         if from == .insert { insertField = nil }
         if from == .select && keys.mode != .select { anchors[focusedKey] = nil }
         if from == .picker { nav.close() }
