@@ -6,7 +6,7 @@ project: goal-flip-converter
 lede: A contact update only records that a goal target flipped. A batched job turns flips into conversions, and recomputing them is what keeps the answer right.
 ---
 
-**Plan, 2026-11-17. Not built.** This replaces the Postgres-copy forest (`goal-active-windows`, built, not pushed) as the import fix. It also fixes imports that flip a goal target, which that forest doesn't. Background, measurements and the review are on the [checkpoint page](canopy://v2/wiki/goals-clickhouse-hot-path).
+**Built 2026-11-17 as the `goal-flip-converter` forest (14 branches, not pushed, gates not run).** This replaces the Postgres-copy forest (`goal-active-windows`, built, not pushed) as the import fix. It also fixes imports that flip a goal target, which that forest doesn't. Background, measurements and the review are on the [checkpoint page](canopy://v2/wiki/goals-clickhouse-hot-path).
 
 ## The idea
 
@@ -145,3 +145,17 @@ During the overlap, imports stay as slow as today, because the inline path is st
 
   This removes the ~2.6M single-row inserts per big send.
 - **Stage C, batched enrollment:** the one-SQS-job-per-contact model is the 100M ceiling. It needs a product call on when a contact counts as enrolled.
+
+## Measured locally, 2026-11-17
+
+10k-row CSV import where every row flips the goal target, same bench data on both sides:
+
+| | main | forest |
+|---|---|---|
+| import | 443.5s, 23 rows/s | **18.9s, 530 rows/s** |
+| per row p50 / p99 | 107.6 / 189.6 ms | 3.2 / 8.6 ms |
+| ClickHouse calls during the import | 20,000 | **0** |
+| converter after the import | — | 10 batches of 1,000, 1.0s total |
+| catch-up repairs | — | 0 |
+
+**Correctness:** both sides wrote 10,000 conversions, and the sets match exactly on `(attachmentId, contactId, enrolledAt, converted)`. Not yet exercised: windows that open after a flip, deleted attachments, multiple goals per team.
