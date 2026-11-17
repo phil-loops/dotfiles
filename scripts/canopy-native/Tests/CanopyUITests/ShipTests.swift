@@ -506,11 +506,12 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
     @Test func aNamedWordWaitsForTheWordsToBeRead() async throws {
         let (a, port) = try app()
         ShipStub.answer(port, "POST", "/loops/outline", #"{"ok":true,"newTip":"f00","changed":1}"#)
-        ShipStub.answer(port, "GET", "/loops/outline", #"{"ok":true,"branch":"add-hankles-limited-label","head":"e1b98e2a","description":"","commits":[{"sha":"c1","subject":"chore: add a one-shot label","locked":""}],"pr":{"exists":false},"draft":{"title":"chore: add a one-shot label","body":""}}"#)
+        ShipStub.answer(port, "GET", "/loops/outline", #"{"ok":true,"branch":"add-hankles-limited-label","head":"e1b98e2a133f5c4e82b6c74fb31efca5b5c3b233","description":"","commits":[{"sha":"c1","subject":"chore: add a one-shot label","locked":""}],"pr":{"exists":false},"draft":{"title":"chore: add a one-shot label","body":""}}"#)
         #expect(WordsState.of(a).shown[Self.branch] == nil)
         run(a, "title chore: add a label")
         await until("the save") { !ShipStub.posts(port).isEmpty }
-        #expect(ShipStub.posts(port)[0].body["edits"] == [["sha": "c1", "subject": "chore: add a label", "body": ""]])
+        let post = try #require(ShipStub.posts(port).first)
+        #expect(post.body["edits"] == [["sha": "c1", "subject": "chore: add a label", "body": ""]])
     }
 
     /// D t / D w / D d are the same commands as :title / :why / :desc, by key.
