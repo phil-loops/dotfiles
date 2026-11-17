@@ -73,6 +73,8 @@ public struct EvidenceCard: Decodable, Equatable, Sendable {
     var run: Run?
     /// the engine's one eligibility check: false, with reasons, when this can't be judged or carried
     var eligible: Bool?
+    /// stale behind another evidence run on the machine — its re-capture starts when that one ends
+    var waiting: Bool?
     var why: [String]?
 
     /// Scenes in reading order: what departed from the prediction first, then the recipe's order.
@@ -407,8 +409,8 @@ struct EvidencePanel: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .task(id: "\(target.id)|\(app.store.view(Branch.self, target.id)?.tip ?? "")|\(ev.generation)") {
             await ev.load(app, target)
-            while !Task.isCancelled, ev.card(target.id)?.run?.running == true {
-                try? await Task.sleep(for: .seconds(2))
+            while !Task.isCancelled, ev.card(target.id)?.run?.running == true || ev.card(target.id)?.waiting == true {
+                try? await Task.sleep(for: .seconds(ev.card(target.id)?.waiting == true ? 10 : 2))
                 await ev.load(app, target)
             }
         }
@@ -441,6 +443,8 @@ struct EvidencePanel: View {
                 }
                 if let run = c.run, run.running {
                     Text("rendering… \(run.tail?.last ?? "")").font(Theme.mono(11)).foregroundStyle(theme.goldDeep)
+                } else if c.waiting == true {
+                    Text("waiting for another evidence run to finish, then renders this").font(Theme.mono(11)).foregroundStyle(theme.goldDeep)
                 } else if let run = c.run, let code = run.exit, code != 0 {
                     Text("the last render failed: \(run.tail?.last ?? "exit \(code)")").font(Theme.mono(11)).foregroundStyle(theme.ember)
                 } else if c.manifest == nil {

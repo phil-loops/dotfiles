@@ -51,28 +51,32 @@ def _subject(card):
 
 def _refresh(branch, card):
     """Evidence stays current by itself: a card that's stale (no capture, the branch or its base
-    moved, the request changed, or the record predates the current engine) starts a re-capture of
+    moved, the request or recipe changed, or the evidence became unusable) starts a re-capture of
     the current subject — at most one evidence run on the machine at a time, and at most one
-    automatic attempt per subject, so a recipe that fails can't loop. Pull, not push: only cards
-    someone opens. A judgment needs no re-click when the new pixels are identical (it carries)."""
+    automatic attempt per (subject, what the card showed), so a recipe that fails can't loop but
+    evidence that later breaks is repaired. A start the machine refuses uses up nothing: the card
+    says it's waiting and the page keeps asking. Pull, not push: only cards someone opens."""
     if not card.get("request") or (card.get("current") and card.get("eligible") is not False):
         return None
     if any(r.alive() for r in runs.every("evidence")) or E.busy(ctx.repo_cwd()):
+        card["waiting"] = True
         return None
     card["_branch"] = branch
     try:
         subject = _subject(card)
     except E.Refused:
         return None
+    attempt = E._sha(E._canon({"subject": subject, "shown": card.get("id"), "why": card.get("why") or []}))
     mark = os.path.join(AUTO, E._sha(_key(branch).encode()) + ".json")
-    if (E._read_json(mark) or {}).get("subject") == subject:
+    if (E._read_json(mark) or {}).get("attempt") == attempt:
         return None
-    E._write_atomic(mark, E._canon({"branch": branch, "subject": subject}))
     try:
         runs.start("evidence", _key(branch), [os.path.join(ctx.SCRIPTS, "evidence"), "run", branch],
                    cwd=ctx.repo_cwd(), meta={"branch": branch, "by": "auto"})
     except runs.Busy:
+        card["waiting"] = True
         return None
+    E._write_atomic(mark, E._canon({"branch": branch, "subject": subject, "attempt": attempt}))
     runs.prune("evidence", RUNS_KEPT)
     return subject
 
