@@ -17,8 +17,13 @@ An item is TOML frontmatter between `+++` lines, then a markdown body (context; 
   solved_by  on a forest's list, the branch that solves the item (a ticket's ask → the PR covering it)
   created / updated   dates
 One file per item so concurrent sessions never write the same file; git is the history.
+Every read-modify-write (`update`) holds one lock over the directory, so two writers of the same
+item serialize: progress written from an old read can't erase an input recorded in between.
 """
+import contextlib
 import datetime
+import fcntl
+import hashlib
 import os
 import re
 import tomllib
@@ -139,16 +144,47 @@ def today():
     return datetime.date.today().isoformat()
 
 
-def update(item_id, **fields):
-    item = read(item_id)
-    body = fields.pop("body", item.pop("body"))
-    item.pop("id")
-    item.pop("problems", None)
-    item.update({k: v for k, v in fields.items()})
-    item = {k: v for k, v in item.items() if v not in (None, "", [])}
-    item["updated"] = today()
-    write(item_id, item, body)
-    return read(item_id)
+class Stale(ValueError):
+    """The item changed since the version the caller read; nothing was written."""
+
+
+@contextlib.contextmanager
+def _locked():
+    """One writer at a time across processes: flock on the directory itself, so no lock file
+    lands in the tracked tree."""
+    os.makedirs(DIR, exist_ok=True)
+    fd = os.open(DIR, os.O_RDONLY)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(fd)
+
+
+def version(item_id):
+    """A content digest of the item as stored, for `update(..., expect=)`."""
+    with open(path(item_id), "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()[:16]
+
+
+def update(item_id, edit=None, expect=None, **fields):
+    """Read-modify-write under the lock. `edit(item) -> fields` computes the change from the
+    item as it is now (use it whenever the new value depends on the old one, e.g. a body
+    section); `expect` refuses the write if the item's version moved since the caller read it."""
+    with _locked():
+        if expect is not None and version(item_id) != expect:
+            raise Stale(f"{item_id} changed since version {expect} — read it again")
+        item = read(item_id)
+        if edit is not None:
+            fields = {**fields, **(edit(dict(item)) or {})}
+        body = fields.pop("body", item.pop("body"))
+        item.pop("id")
+        item.pop("problems", None)
+        item.update({k: v for k, v in fields.items()})
+        item = {k: v for k, v in item.items() if v not in (None, "", [])}
+        item["updated"] = today()
+        write(item_id, item, body)
+        return read(item_id)
 
 
 def entities():
@@ -160,7 +196,8 @@ PAGE_FIELDS = {"state": STATES, "rank": None}
 
 
 def post(req, raw):
-    """POST /todo-item {id, set: {state?, rank?}} or {ranks: {id: n}} — the tracker page's moves;
+    """POST /todo-item {id, set: {state?, rank?}, expect?} or {ranks: {id: n}} — the tracker page's moves;
+    `expect` (a `version`) answers 409 instead of writing over a change the page hasn't seen;
     anything richer is canopy-todo's (or /next's) job."""
     import json
     from . import state
@@ -182,7 +219,9 @@ def post(req, raw):
                 raise ValueError(f"can't set {k}={v!r} here")
         if fields.get("state") in ("done", "dropped"):
             fields["rank"] = None
-        item = update(d.get("id", ""), **fields)
+        item = update(d.get("id", ""), expect=d.get("expect"), **fields)
+    except Stale as e:
+        return req._send(409, json.dumps({"ok": False, "error": str(e)}))
     except (OSError, ValueError, tomllib.TOMLDecodeError) as e:
         return req._send(400, json.dumps({"ok": False, "error": str(e)}))
     state.poke()
