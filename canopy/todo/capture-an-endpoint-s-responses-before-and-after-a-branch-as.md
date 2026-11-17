@@ -41,3 +41,8 @@ The card shows per request: status before → after, then the path diff (path, b
 2. Canopy: a request-diff view in place of the image grid for `kind: api`.
 3. Coverage for api files (route/router file + anchor), joined with the UI coverage set.
 Later: writes against a throwaway DB; staging as a side (probe items).
+
+## Next steps
+1. End-to-end: start OrbStack, write a recipe + request for a branch that changes a tRPC query (e.g. an admin query), `evidence run <branch>` — first run will say which paths aren't repeatable; mask them by name.
+2. Look at the card in canopy (the request list hasn't been seen on screen yet).
+3. Later: writes against a per-run database; staging as a side (probe items).
