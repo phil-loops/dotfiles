@@ -13,6 +13,11 @@ full, any other code → standard, docs/config only → light. The model reads t
 worktree at the tip and never edits; its findings come back CONFIRMED (verified against the code,
 with evidence) or PLAUSIBLE.
 
+Five lenses: the repo's rules, inherited habits, defects, the reviewer checklist
+(claude/hankles-checklist.md, read each run, with a pre-scan of added lines for an explicit `any` or
+a cast), and scope (the branch's description, its parent's, its commit subjects). The verdict's
+`covered` says which of them had their input, so a review that skipped one shows it.
+
 Bounded like stack-second-reader (shares its machine-wide claude slots and memory floor).
 """
 import argparse
@@ -43,7 +48,12 @@ PROMPT = """You review one branch of a stacked-PR forest before it is pushed. Do
 
 Branch `{branch}`, diffed against `{parent}` (merge base {base}); tip {tip}. You are in a detached checkout
 of the tip. Read files and run read-only git commands (`git show`, `git diff {base} {tip} -- <path>`,
-`git grep`, `git log`) as needed. The diff:
+`git grep`, `git log`) as needed.
+
+What the branch says it does:
+{scope}
+
+The diff:
 
 ```diff
 {diff}
@@ -51,7 +61,7 @@ of the tip. Read files and run read-only git commands (`git show`, `git diff {ba
 
 Depth: {depth}. {depth_note}
 
-Three lenses, in this order.
+Five lenses, in this order.
 
 1. The repository's own rules. Read AGENTS.md at the repository root first (and CLAUDE.md, and the
 skills under .agents/skills/ that the diff's kind of change calls for). Check the diff against every
@@ -70,8 +80,31 @@ handling where it matters, tests that pass for the wrong reason, comments or mes
 the code does not do. For every line the diff REMOVES or rewrites, check that each condition or guard it
 dropped is accounted for (a filter, a null/undefined check, an early return).
 
-Don't report personal style preferences the repository's rules don't state, or what a type checker,
-linter or formatter would catch.
+4. What this repository's PR reviewer gets accepted. These are the findings its reviewer bot raises
+that authors then accept. Check the diff for each item, and tag what you find `rule`, naming the
+item in the evidence.
+
+{checklist}
+
+A scan of the diff's ADDED lines found these untyped holes: an explicit `any` in a parameter, field,
+return type or generic argument, `as any`, or `as unknown as`. Neither tool catches them here: tsc
+accepts an explicit `any`, and this repository's oxlint turns `no-explicit-any` off. Report each one
+under checklist item "Casts", unless the code around it shows the type cannot be named (an untyped
+third-party value at a boundary, say). If so, say why in a PLAUSIBLE finding. A mock takes its real
+signature: `t.mock.fn<DepsType["fnName"]>(…)` or `mock.fn<typeof fn>(…)`, never `(_input: any) => …`.
+
+{prescan}
+
+5. Scope. Every hunk must be explained by the branch's description or by one of its commit subjects
+(both above). A hunk that none of them explains is a finding, tagged `rule`, that quotes the
+description. Look hardest at hunks in tests and shared helpers. {parent_note}
+
+Don't report what tsc or oxlint, as this repository configures them, already fail on. An explicit
+`any`, `as any` and `as unknown as` are NOT among those (lens 4). Don't report personal style
+preferences that neither the repository's rules nor the checklist state. Stay quiet on these, which
+authors decline:
+
+{quiet}
 
 Verify each finding against the code before you report it. Mark it CONFIRMED only when you read the code
 that proves it, and say what you read; otherwise PLAUSIBLE. Write each summary in plain short sentences.
@@ -83,15 +116,74 @@ End your answer with one JSON object and nothing after it:
 An empty list means you found nothing worth a reviewer's time."""
 
 DEPTH_NOTES = {
-    "light": "Docs/config only: check that what they say is true of the code, and nothing else.",
+    "light": "Docs/config only: check that what they say is true of the code, and that each change is in scope (lens 5).",
     "standard": "Review the whole diff carefully.",
     "full": "This touches data access, models, migrations or auth: trace every caller of what changed and "
             "every path into it, and check authorization and data-loss cases explicitly.",
 }
 
 
+CHECKLIST = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "claude", "hankles-checklist.md")
+CODE = re.compile(r"\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$")
+# an explicit any in a parameter/field/return type (`: any`), a generic argument (`<any>`, `<T, any>`,
+# `any[]`), or a cast (`as any`, `as unknown as`)
+UNTYPED = re.compile(r"\bas\s+any\b|\bas\s+unknown\s+as\b|:\s*any\b|<\s*any\b|,\s*any\s*[>,\])]|\bany\s*\[\]")
+PRESCAN_CAP = 60
+
+
 def git(repo, *args):
     return subprocess.run(["git", "-C", repo, *args], capture_output=True, text=True)
+
+
+def checklist():
+    """The reviewer checklist's two halves, read fresh each run: (check for, stay quiet on)."""
+    try:
+        with open(CHECKLIST) as f:
+            text = f.read()
+    except OSError:
+        return None, None
+    check, _, quiet = text.partition("\n## Stay quiet on")
+    check = check.split("\n## Check for", 1)[-1].strip()
+    quiet = quiet.split("\n", 1)[-1].strip() if quiet else ""
+    return check, quiet
+
+
+def prescan(diff):
+    """Added lines of code files holding an untyped hole: [(path, new-side line, text)]."""
+    hits, path, n = [], None, 0
+    for ln in diff.splitlines():
+        if ln.startswith("+++ "):
+            p = ln[4:]
+            path = p[2:] if p.startswith("b/") else None
+        elif ln.startswith("@@"):
+            m = re.search(r"\+(\d+)", ln)
+            n = int(m.group(1)) if m else 0
+        elif path is None or ln.startswith("\\"):
+            continue
+        elif ln.startswith("+"):
+            if CODE.search(path) and UNTYPED.search(ln[1:]):
+                hits.append((path, n, ln[1:].strip()))
+            n += 1
+        elif not ln.startswith("-"):
+            n += 1
+    return hits
+
+
+def scope_of(repo, branch, parent, base, tip):
+    """The branch's own words for the scope lens: its description, its parent's, its commit subjects."""
+    desc = git(repo, "config", f"branch.{branch}.description").stdout.strip()
+    pdesc = git(repo, "config", f"branch.{parent}.description").stdout.strip() if parent != "main" else ""
+    subjects = git(repo, "log", "--reverse", "--format=%h %s", f"{base}..{tip}").stdout.strip()
+    text = [f"- description: {desc}" if desc else "- description: (none: the branch has no description; report that, and judge scope by the commits)",
+            "- commits, oldest first:\n" + "\n".join(f"    {s}" for s in subjects.splitlines()) if subjects else "- commits: (none)"]
+    if parent != "main":
+        text.append(f"- its parent `{parent}` describes itself: {pdesc}" if pdesc else f"- its parent `{parent}` has no description")
+    note = (f"This branch is stacked on `{parent}`: judge it only on what it adds on top. A hunk that does the work "
+            f"the parent's description names belongs in the parent, so report it.") if parent != "main" else ""
+    covered = {"description": bool(desc), "commits": len(subjects.splitlines()) if subjects else 0}
+    if parent != "main":
+        covered["parent_description"] = bool(pdesc)
+    return "\n".join(text), note, covered
 
 
 def depth_for(files):
@@ -135,10 +227,21 @@ def main():
         return emit(a.out, {"ok": True, **head, "findings": [], "note": "empty diff"})
 
     diff = git(repo, "diff", base, tip).stdout
+    hits = prescan(diff)  # the whole diff, before the cap
     if len(diff) > DIFF_CAP:
         diff = diff[:DIFF_CAP] + f"\n… diff truncated at {DIFF_CAP} chars — read the rest with git diff\n"
-    prompt = PROMPT.format(branch=branch, parent=parent, base=base, tip=tip, diff=diff,
-                           depth=depth, depth_note=DEPTH_NOTES[depth])
+    check, quiet = checklist()
+    scope, parent_note, scope_cov = scope_of(repo, branch, parent, base, tip)
+    listed = "\n".join(f"- {p}:{n}: `{t}`" for p, n, t in hits[:PRESCAN_CAP])
+    if len(hits) > PRESCAN_CAP:
+        listed += f"\n- … and {len(hits) - PRESCAN_CAP} more: grep the added lines yourself"
+    prompt = PROMPT.format(branch=branch, parent=parent, base=base, tip=tip, diff=diff, scope=scope,
+                           depth=depth, depth_note=DEPTH_NOTES[depth], parent_note=parent_note,
+                           checklist=check or f"(the checklist at {CHECKLIST} could not be read: say so in a finding)",
+                           prescan=listed or "(the scan found none)",
+                           quiet=quiet or "(the checklist's stay-quiet list could not be read)")
+    covered = {"rules": True, "habits": True, "defects": True, "checklist": check is not None,
+               "scope": scope_cov, "prescan": len(hits)}
 
     wt = tempfile.mkdtemp(prefix="stack-review-run-")
     t0 = time.time()
@@ -170,7 +273,7 @@ def main():
                          "verdict": verdict if verdict in ("CONFIRMED", "PLAUSIBLE") else "PLAUSIBLE", "lens": lens,
                          "summary": summary if lens == "defect" else f"[{lens}] {summary}",
                          "evidence": str(f.get("evidence") or "").strip()})
-    emit(a.out, {"ok": True, **head, "findings": findings, "model": MODELS[depth],
+    emit(a.out, {"ok": True, **head, "findings": findings, "covered": covered, "model": MODELS[depth],
                  "secs": round(time.time() - t0, 1), "cost": usage.get("cost")})
     return 0
 
