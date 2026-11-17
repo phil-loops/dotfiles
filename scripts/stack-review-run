@@ -246,7 +246,10 @@ def main():
     wt = tempfile.mkdtemp(prefix="stack-review-run-")
     t0 = time.time()
     try:
-        r = git(repo, "worktree", "add", "--detach", wt, tip)
+        # hooks off: the repo's post-checkout queues a seed-gen --sync (types, packages) for every new
+        # worktree, which a read-only review never uses and deletes minutes later; under a busy
+        # review day those syncs held every heavy-turn slot (2026-11-17)
+        r = git(repo, "-c", "core.hooksPath=/dev/null", "worktree", "add", "--detach", wt, tip)
         if r.returncode != 0:
             return emit(a.out, {"ok": False, **head, "err": f"worktree: {r.stderr.strip()[:300]}"}) or 1
         try:
