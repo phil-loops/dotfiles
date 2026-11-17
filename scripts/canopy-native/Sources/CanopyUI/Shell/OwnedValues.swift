@@ -15,9 +15,15 @@ final class OwnedValues<Key: Hashable, Value> {
         fileprivate let nodes: [Key: Node]
     }
 
+    struct Snapshot {
+        fileprivate struct Entry { let revision: Identity; let pending: Bool }
+        fileprivate let owner: Identity
+        fileprivate let entries: [Key: Entry]
+    }
+
     @MainActor fileprivate final class Node {
         enum State { case pending, accepted, failed }
-        let value: Value?
+        var value: Value?
         var before: Value?
         var previous: Node?
         var state = State.pending
@@ -31,10 +37,11 @@ final class OwnedValues<Key: Hashable, Value> {
 
     private(set) var values: [Key: Value] = [:]
     @ObservationIgnored private let identity = Identity()
+    @ObservationIgnored private var revisions: [Key: Identity] = [:]
     @ObservationIgnored private var owners: [Key: Node] = [:]
 
     func set(_ key: Key, _ value: Value?) {
-        values[key] = value
+        put(key, value)
         owners[key] = nil
     }
 
@@ -45,14 +52,20 @@ final class OwnedValues<Key: Hashable, Value> {
             let node = Node(value: change.value, before: values[change.key], previous: owners[change.key])
             nodes[change.key] = node
             owners[change.key] = node
-            values[change.key] = change.value
+            put(change.key, change.value)
         }
         return Receipt(owner: identity, nodes: nodes)
     }
 
     func before(_ receipt: Receipt, _ key: Key) -> Value? {
         guard receipt.owner === identity else { return nil }
-        return receipt.nodes[key].flatMap { predecessor($0).value }
+        guard let node = receipt.nodes[key] else { return nil }
+        let prior = predecessor(node)
+        if prior.node?.state != .pending {
+            node.before = prior.value
+            node.previous = nil
+        }
+        return prior.value
     }
 
     func rollback(_ receipt: Receipt, keys: Set<Key>? = nil) {
@@ -61,14 +74,19 @@ final class OwnedValues<Key: Hashable, Value> {
             node.state = .failed
             guard owners[key] === node else { continue }
             let prior = predecessor(node)
-            values[key] = prior.value
+            put(key, prior.value)
             owners[key] = prior.node?.state == .pending ? prior.node : nil
         }
     }
 
-    func accept(_ receipt: Receipt, keys: Set<Key>? = nil) {
+    func accept(_ receipt: Receipt, keys: Set<Key>? = nil, replacing changes: [Change] = []) {
         guard receipt.owner === identity else { return }
+        let replacements = Dictionary(uniqueKeysWithValues: changes.map { ($0.key, $0) })
         for (key, node) in receipt.nodes where keys?.contains(key) != false && node.state == .pending {
+            if let change = replacements[key] {
+                node.value = change.value
+                if owners[key] === node { put(key, change.value) }
+            }
             node.state = .accepted
             let prior = predecessor(node)
             if prior.node?.state != .pending {
@@ -77,6 +95,24 @@ final class OwnedValues<Key: Hashable, Value> {
             }
             if owners[key] === node { owners[key] = nil }
         }
+    }
+
+    func snapshot() -> Snapshot {
+        Snapshot(owner: identity, entries: Dictionary(uniqueKeysWithValues: revisions.map { key, revision in
+            (key, Snapshot.Entry(revision: revision, pending: owners[key] != nil))
+        }))
+    }
+
+    func discardUnchanged(_ snapshot: Snapshot, keys: Set<Key>? = nil) {
+        guard snapshot.owner === identity else { return }
+        for (key, entry) in snapshot.entries where keys?.contains(key) != false && !entry.pending && owners[key] == nil && revisions[key] === entry.revision {
+            set(key, nil)
+        }
+    }
+
+    private func put(_ key: Key, _ value: Value?) {
+        values[key] = value
+        revisions[key] = value == nil ? nil : Identity()
     }
 
     private func predecessor(_ node: Node) -> (value: Value?, node: Node?) {
