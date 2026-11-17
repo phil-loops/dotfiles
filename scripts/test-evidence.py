@@ -135,6 +135,47 @@ except E.Refused:
 cov = dict(copy.deepcopy(base), coverage={"changed": ["a.tsx", "b.tsx"], "covered": ["a.tsx"], "uncovered": ["b.tsx"]})
 cov2 = dict(copy.deepcopy(base), coverage={"changed": ["a.tsx", "b.tsx", "c.tsx"], "covered": ["a.tsx"], "uncovered": ["b.tsx", "c.tsx"]})
 check(E.observation(cov) != E.observation(cov2), "a verdict doesn't carry when the change leaves more files unseen")
+# ── coverage is measured: stylesheets count, and a view covers only a file its field is in ──
+import subprocess  # noqa: E402
+repo = os.path.join(tmp, "repo")
+
+
+def sh(*a):
+    return subprocess.run(["git", "-C", repo, *a], check=True, capture_output=True, text=True).stdout.strip()
+
+
+def put(path, text):
+    os.makedirs(os.path.dirname(os.path.join(repo, path)), exist_ok=True)
+    open(os.path.join(repo, path), "w").write(text)
+
+
+os.makedirs(repo)
+sh("init", "-q")
+sh("config", "user.email", "t@t"), sh("config", "user.name", "t")
+put("components/Detail.tsx", '<input id="parent-team-id" className="a" />')
+put("components/Other.tsx", '<input id="other" />')
+put("styles/components/text-input.css", ".text-input { color: red }")
+put("models/thing.ts", "export const x = 1")
+sh("add", "-A"), sh("commit", "-qm", "before")
+before = sh("rev-parse", "HEAD")
+put("components/Detail.tsx", '<input id="parent-team-id" className="text-input" />')
+put("components/Other.tsx", '<input id="other" className="text-input" />')
+put("styles/components/text-input.css", ".text-input { color: blue }")
+put("models/thing.ts", "export const x = 2")
+sh("add", "-A"), sh("commit", "-qm", "after")
+bb = {"beforeCommit": before, "afterCommit": sh("rev-parse", "HEAD")}
+honest = {"kind": "app", "views": [{"id": "p", "field": "#parent-team-id", "file": "components/Detail.tsx"}]}
+c = E.coverage(repo, bb, honest)
+check("styles/components/text-input.css" in c["changed"] and "styles/components/text-input.css" in c["uncovered"],
+      "a changed stylesheet is part of the change, and unseen unless a scene shows it")
+check("models/thing.ts" not in c["changed"], "a non-UI file isn't part of what the evidence could show")
+check(c["covered"] == ["components/Detail.tsx"], "a view covers the file its field lives in")
+claims = {"kind": "app", "views": [{"id": "p", "field": "#parent-team-id", "file": "components/Other.tsx"}]}
+check("components/Other.tsx" in E.coverage(repo, bb, claims)["uncovered"],
+      "a view naming a file its field isn't in doesn't cover that file")
+vague = E.coverage(repo, bb, {"kind": "app", "views": [{"id": "p", "field": "form input", "file": "components/Detail.tsx"}]})
+check(vague["unverified"] == ["components/Detail.tsx"] and "components/Detail.tsx" in vague["uncovered"],
+      "a view whose field pins nothing checkable leaves its file unverified, not covered")
 # ── predictions + the field rule ──
 ids = ["a-light", "a-dark", "b-light"]
 check(E.predictions({"predict": {"*": "field", "b-light": "same"}}, ids) == {"a-light": "field", "a-dark": "field", "b-light": "same"},
