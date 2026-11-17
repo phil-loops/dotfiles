@@ -121,13 +121,18 @@ def load_request(repo_id, branch):
 
 # ── one captured basis ────────────────────────────────────────────────────────────────────────
 
-def basis(repo, branch):
-    """Every ref resolved exactly once; everything after works from these commits."""
-    tip = _git(repo, "rev-parse", "--verify", f"refs/heads/{branch}^{{commit}}")
+def basis(repo, branch, pin=None):
+    """Every ref resolved exactly once; everything after works from these commits. `pin` ({before,
+    after} commits) hands a worker the subject someone already resolved, so it captures that one."""
     parent = _git(repo, "config", f"branch.{branch}.stack-parent", check=False) or "main"
     base_ref = "refs/remotes/origin/main" if parent in ("main", "origin/main") else f"refs/heads/{parent}"
-    base = _git(repo, "rev-parse", "--verify", f"{base_ref}^{{commit}}")
-    before = _git(repo, "merge-base", base, tip)
+    if pin:
+        tip = _git(repo, "rev-parse", "--verify", f"{pin['after']}^{{commit}}")
+        before = base = _git(repo, "rev-parse", "--verify", f"{pin['before']}^{{commit}}")
+    else:
+        tip = _git(repo, "rev-parse", "--verify", f"refs/heads/{branch}^{{commit}}")
+        base = _git(repo, "rev-parse", "--verify", f"{base_ref}^{{commit}}")
+        before = _git(repo, "merge-base", base, tip)
     return {
         "branch": branch, "parent": parent, "baseRef": base_ref, "baseCommit": base,
         "beforeCommit": before, "beforeTree": _git(repo, "rev-parse", f"{before}^{{tree}}"),
@@ -582,13 +587,13 @@ def finding(sid, predicted, b_sha, a_sha, fields, modules):
     return out
 
 
-def run(repo, branch, fresh=False, log=print):
-    """Render and publish one comparison for <branch>; returns the manifest id."""
+def run(repo, branch, fresh=False, log=print, pin=None):
+    """Render and publish one comparison for <branch> (of the pinned commits when given); returns the manifest id."""
     repo_id = repo_name(repo)
     req = load_request(repo_id, branch)
     if not req:
         raise Refused(f"no evidence request for {branch} ({request_path(repo_id, branch)})")
-    b = basis(repo, branch)
+    b = basis(repo, branch, pin)
     digest, frozen, recipe = freeze_recipe(req["recipe"])
     app = recipe.get("kind") == "app"
     scene_ids = [s["id"] for s in scenes_of(recipe)]
@@ -901,7 +906,9 @@ def card(repo, branch):
         return out
     m = load_manifest(mid)
     try:
-        out["current"] = is_current(m, req, basis(repo, branch))
+        b = basis(repo, branch)
+        out["basis"] = b
+        out["current"] = is_current(m, req, b)
     except Refused:
         pass
     why = eligibility(m)

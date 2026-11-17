@@ -261,6 +261,11 @@ renv = E._render_env("/donor", {"EVIDENCE_LOGIN": "x"})
 check("ACCENT" not in renv, "a variable the identity doesn't name never reaches the renderer (a tailwind config can read env)")
 check(renv["NODE_PATH"] == "/donor" and renv["EVIDENCE_LOGIN"] == "x" and set(renv) <= set(E.RENDER_ENV_KEYS) | {"NODE_PATH", "EVIDENCE_LOGIN"},
       "it gets the donor, the caller's explicit extras, and the named passthroughs only")
+# ── one subject: a worker captures exactly the commits it was handed ──
+sh("branch", "-f", "pinned", before)
+pb = E.basis(repo, "pinned", pin={"before": before, "after": bb["afterCommit"]})
+check((pb["beforeCommit"], pb["afterCommit"]) == (before, bb["afterCommit"]) and pb["afterTree"] == sh("rev-parse", bb["afterCommit"] + "^{tree}"),
+      "a pinned basis uses the handed commits, not wherever the branch points now")
 # ── owned execution: a run never serves a package build an earlier run left behind ──
 side = os.path.join(tmp, "side-co")
 for pkg in ("mail-pg", "prisma"):

@@ -27,7 +27,7 @@ class Runs:
     Busy = Busy
 
     def __init__(self):
-        self.started, self.alive, self.refuse = [], False, False
+        self.started, self.alive, self.refuse, self.cmds = [], False, False, []
 
     def every(self, kind):
         return [type("R", (), {"alive": lambda _s: self.alive})()] if self.alive else []
@@ -36,12 +36,14 @@ class Runs:
         if self.refuse:
             raise Busy()
         self.started.append(key)
+        self.cmds.append(cmd)
 
     def prune(self, kind, kept):
         pass
 
 
 fake = Runs()
+REAL_SUBJECT = S._subject
 S.runs = fake
 S.E.busy = lambda repo: False
 S._key = lambda branch: f"r/{branch}"
@@ -50,7 +52,8 @@ S.ctx.repo_cwd = lambda: tmp
 
 
 def stale(why=()):
-    return {"request": {"recipe": "x"}, "id": "m1", "current": False, "eligible": not why, "why": list(why)}
+    return {"request": {"recipe": "x"}, "id": "m1", "current": False, "eligible": not why, "why": list(why),
+            "basis": {"beforeCommit": "c0", "afterCommit": "c1", "beforeTree": "t0", "afterTree": "t1"}}
 
 
 fake.refuse = True
@@ -72,5 +75,12 @@ check(S._refresh("c", other) is None and other.get("waiting") is True,
 fake.alive = False
 check(S._refresh("c", stale()) == "subject-2", "and starts once the machine is free")
 
+S._subject = REAL_SUBJECT
+S.E.recipe_digest = lambda name: "dg"
+fake.started.clear()
+pinned = dict(stale(), basis={"beforeCommit": "c-before", "afterCommit": "c-after", "beforeTree": "t1", "afterTree": "t2"})
+S._refresh("d", pinned)
+check(fake.cmds and fake.cmds[-1][-4:] == ["--before", "c-before", "--after", "c-after"],
+      "the worker is handed the commits the card resolved, so it captures the subject that was marked")
 print(f"\n{len(failures)} failed" if failures else "\nall passed")
 sys.exit(1 if failures else 0)

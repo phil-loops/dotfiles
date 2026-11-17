@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """evidence — render a branch's before/after evidence and publish it as a comparison manifest.
 
-  evidence run <branch> [--fresh]   render (or reuse admitted renders) and publish; prints the manifest id
+  evidence run <branch> [--fresh] [--before <commit> --after <commit>]
+                                    render (or reuse admitted renders) and publish; prints the manifest id.
+                                    --before/--after pin the subject (the viewer's auto-refresh passes them)
   evidence restate <branch>         re-publish the latest captures under the request as it reads now
   evidence card <branch>            what canopy's branch page shows, as JSON
   evidence show <manifest-id>       one manifest, as JSON
@@ -25,7 +27,15 @@ def main(argv):
     try:
         if cmd in ("run", "restate"):
             log = lambda s: print(s, file=sys.stderr, flush=True)
-            mid = E.run(repo, arg, fresh="--fresh" in argv, log=log) if cmd == "run" else E.restate(repo, arg, log=log)
+            pin = None
+            if "--before" in argv or "--after" in argv:
+                try:
+                    pin = {"before": argv[argv.index("--before") + 1], "after": argv[argv.index("--after") + 1]}
+                except (ValueError, IndexError):
+                    print("--before and --after go together, each with a commit", file=sys.stderr)
+                    return 2
+            mid = (E.run(repo, arg, fresh="--fresh" in argv, log=log, pin=pin) if cmd == "run"
+                   else E.restate(repo, arg, log=log))
             m = E.load_manifest(mid)
             for f in m["findings"]:
                 mark = "!" if f["departure"] else " "

@@ -44,7 +44,9 @@ def _subject(card):
     """The state a capture would be of: both trees and the request as it reads now. A sync that
     replays the same patch onto a newer main is a new subject — its before side really is different."""
     req = card.get("request")
-    b = E.basis(ctx.repo_cwd(), card["_branch"])
+    b = card.get("basis")
+    if not b:
+        raise E.Refused("the card resolved no basis")
     return E._sha(E._canon({"trees": [b["beforeTree"], b["afterTree"]], "request": req,
                             "recipe": E.recipe_digest(req["recipe"])}))
 
@@ -71,7 +73,9 @@ def _refresh(branch, card):
     if (E._read_json(mark) or {}).get("attempt") == attempt:
         return None
     try:
-        runs.start("evidence", _key(branch), [os.path.join(ctx.SCRIPTS, "evidence"), "run", branch],
+        b = card["basis"]
+        runs.start("evidence", _key(branch), [os.path.join(ctx.SCRIPTS, "evidence"), "run", branch,
+                                              "--before", b["beforeCommit"], "--after", b["afterCommit"]],
                    cwd=ctx.repo_cwd(), meta={"branch": branch, "by": "auto"})
     except runs.Busy:
         card["waiting"] = True
