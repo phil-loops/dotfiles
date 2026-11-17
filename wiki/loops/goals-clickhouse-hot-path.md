@@ -6,7 +6,9 @@ project: goal-active-windows
 lede: Imports spent ~40–60% of their time asking ClickHouse one row at a time. Hot-path state moves to Postgres; ClickHouse gets buffered history only.
 ---
 
-**Checkpoint 2026-11-17.** Phase 1 is built as the `goal-active-windows` forest (not pushed, gates not run). The ClickHouse write buffer (phase 2) is designed and under review by Fable 5.2. Nothing is decided past that.
+**Checkpoint 2026-11-17.** Phase 1 is built as the `goal-active-windows` forest (not pushed, gates not run). The ClickHouse write buffer (phase 2) was designed and reviewed by Fable 5.2.
+
+**Superseded later the same day by [Conversions by recomputation](wiki:goals-flip-converter).** Asking whether this design scales to 100M changed the shape. The Postgres copy keeps a row per enrollment in Postgres, which doesn't scale. Exactly-once delivery into ClickHouse turned out to be the shaky foundation. The new plan uses cause-derived ids, at-least-once delivery, and conversions recomputed until they converge. The sections below are kept as the record of how we got there.
 
 ## The problem
 
