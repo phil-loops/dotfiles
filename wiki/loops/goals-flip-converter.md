@@ -86,27 +86,55 @@ main
 │     └─ 6. add goal flip converter          30s pass + hourly catch-up models, fake-deps tests   (requires 2, 4)
 │           └─ 7. run the goal flip converter      croon entries + jobs + retention sweep + metrics (queue depth, oldest unprocessed, repaired)
 │
-├─ 8. queue goal flips in handleConversion    append a flip when goalFlipQueueEnabled; inline path kept behind goalInlineConversionEnabled   (requires 1, 2; ⇢ after 7)
-│     └─ 9. remove the inline conversion path     drops findActiveByContact, hasActiveForTeam, findWithGoalByIds and the inline insert   (⇢ after the cutover)
+├─ 8. return previous values from the contact update    queries/contact: one UPDATE … FROM (SELECT … FOR UPDATE) old RETURNING old + new + test
+│     └─ 9. record goal flips with the contact update  contact update + flip append in one transaction, only when the team has targets;
+│           │                                           inline path kept behind goalInlineConversionEnabled   (requires 1, 2; ⇢ after 7)
+│           └─ 10. remove the inline conversion path   drops findActiveByContact, hasActiveForTeam, findWithGoalByIds and the inline insert   (⇢ after the cutover)
+├─ 11. check every conversion reader tolerates duplicates   fixture with duplicated rows; every reader's answer unchanged
+├─ 12. derive enrollment ids from the delivery       job payload carries emailId + deliveredAt; impressionId = hash(emailId, attachmentId); enrolledAt = deliveredAt
+└─ 13. alert on lost enrollment jobs                  metric/alert on evaluateGoalEnrollment failures and the background queue's dead-letter depth
 ```
 
-Carried over from `goal-active-windows`: the targets query (branch 1 here) and the lookup removal (branch 9). Retired from it: `GoalActiveWindow`, its backfill, its prune, and the window-recording at enrollment.
+Carried over from `goal-active-windows`: the targets query (branch 1 here) and the lookup removal (branch 10). Retired from it: `GoalActiveWindow`, its backfill, its prune, and the window-recording at enrollment.
+
+## Hardening: closing the soft spots
+
+**1. A flip that's never recorded.** Two problems with appending the flip after the contact save:
+- **It isn't atomic.** A crash between the save and the append loses the only evidence of the flip.
+- **It compares against stale values.** `handleUpdatingContact` compares the update against a **preloaded** contact (`preloadedContact`), read before the `UPDATE`. Two concurrent updates to one contact can both see the same "old" value, which means a missed flip-back or a duplicate flip. That's true in prod today too.
+
+**Fix (branches 8 and 9):** one transaction per changed contact, **only on teams that have goal targets** (the cached targets say so; no-goal teams keep today's plain update):
+1. `UPDATE "Contact" … FROM (SELECT … FROM "Contact" WHERE id = $1 FOR UPDATE) old … RETURNING old.*, contact.*`. The row lock serialises concurrent updates, and the old values are exactly the ones this update replaced.
+2. Evaluate the targets on old versus new, in memory, inside the transaction. It's microseconds of work: no reads and nothing external.
+3. Insert the flips into `GoalFlip`.
+4. Commit. The contact change and its flips persist together or not at all.
+
+That makes "correct regardless of timing" true end to end. A flip exists if and only if the contact really changed across a target.
+
+**2. Windows, the other input.** For conversions specifically, duplicate windows are already harmless: they produce the same conversion id, or readers deduplicate by contact. The real risk is a **missing** window.
+- **Branch 12 makes enrollment deterministic.** The SES delivery handler already has the `Email` record and the delivery time when it enqueues the job (`processNotificationWebhook.ts`, `evaluateGoalEnrollment`). Pass both through:
+  - `impressionId = hash(emailId, attachmentId)`;
+  - `enrolledAt = deliveredAt`.
+
+  A retried or duplicate SNS notification then rewrites identical rows instead of minting new ones. **This changes what `enrolledAt` means:** from "when the job ran" (minutes after delivery under load) to "when the email was delivered". That's arguably the correct meaning, but days-to-convert shifts slightly for new enrollments.
+- **Branch 13 makes a lost enrollment visible.** A window only goes missing if the job exhausts its retries. Alert on that. (To verify in terraform: does the background queue have a dead-letter queue, and what is its `maxReceiveCount`?)
+- **Stage B** later makes impression and window *storage* deduplicate (`ReplacingMergeTree`) and moves the writes into the buffer.
+
+**3. Tolerating duplicates was a convention.** **Branch 11** turns it into a test. Load a fixture where every conversion row appears twice, run all six readers, and assert their answers equal the deduplicated fixture's. A future reader using a bare `count()` then fails CI instead of silently overcounting.
+
+**Still assumed, with an alarm on each:**
+- **The 2-day catch-up range.** A flip only matches windows enrolled before it, so a window can only arrive late if enrollment itself is that far behind. Alert on enrollment-job lag and on flip-queue age.
+- **Clock skew between app servers** at a window's edges: milliseconds. With branch 12, `enrolledAt` comes from SES, so the remaining skew is SES's clock against ours.
 
 ## Cutover: overlap, then switch
 
-1. Ship 1–7. The converter runs, the queue is empty.
-2. Ship 8 with both settings on. Contact updates append flips **and** the inline path still writes conversions. Both compute the same derived ids, so nothing double-counts.
+1. Ship 1–8 and 11–13. The converter runs, the queue is empty.
+2. Ship 9 with both settings on. Contact updates append flips **and** the inline path still writes conversions. Both compute the same derived ids, so nothing double-counts.
 3. Watch for a few days. The catch-up's repaired count should read 0 for flips the 30s pass already handled. Compare per-day conversion counts against before the change.
 4. Turn `goalInlineConversionEnabled` off. Imports lose the ClickHouse lookup and the ~75–100ms insert. Turning it back on is instant.
-5. Ship 9.
+5. Ship 10.
 
 During the overlap, imports stay as slow as today, because the inline path is still on. Keep the overlap short.
-
-## What it still can't catch
-
-- **A flip that's never queued:** the contact update fails between saving and appending. Same exposure as today. Closing it means appending inside the contact update's transaction, a deeper change to `ContactModel.save`.
-- **A window that's never written:** enrollment fails after the email went out. Today's behavior; Stage B makes enrollment writes durable.
-- **A window that lands more than 2 days after its flip:** an alert on queue age fires well before then, and the catch-up range is a constant.
 
 ## Later stages
 
