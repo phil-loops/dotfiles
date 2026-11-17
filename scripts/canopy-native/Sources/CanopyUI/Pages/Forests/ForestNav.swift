@@ -42,6 +42,11 @@ enum ForestNav {
         unowned let app = app
         let r = app.registry
         let m = app.forestModel
+        let ancestry = ForestAncestry.of(app)
+        app.addCloser(first: true, isOpen: { ancestry.waiting }, close: {
+            ancestry.cancel()
+            app.runner.say("navigation cancelled")
+        })
 
         let onBranch: (String?) -> Bool = { _ in here(app) != nil }
 
@@ -96,17 +101,7 @@ enum ForestNav {
             scope: .forest, label: "requires", recordsJump: true, available: onBranch,
             local: { _, _ in
                 guard let v = here(app) else { return }
-                let path = app.transport.atRepo(v.b.repo, "/node?branch=\(v.b.name.uriComponent)")
-                let t = app.transport
-                Task { @MainActor in
-                    let reqs = (try? await t.getJSON(path, as: NodePayload.self))?.requires ?? []
-                    let deps = ([v.b.parent] + reqs).compactMap { n in mergeOrder(app).first { $0.b.name == n } }
-                    guard !deps.isEmpty else { return app.runner.say("\(leaf(v.b.name)) builds on \(v.b.parent) alone") }
-                    if deps.count == 1 { return go(deps[0], app) }
-                    app.nav.pick("builds on · \(deps.count)", deps.map { d in
-                        PickItem(label: leaf(d.b.name), text: d.b.name == v.b.parent ? "parent" : "requires")
-                    }) { i in MainActor.assumeIsolated { go(deps[i], app) } }
-                }
+                ancestry.open(v.b)
             }))
 
         // Ancestry by name (NAV.md 2026-11-08: one next — merge order; ancestry is named, not stepped):

@@ -331,6 +331,11 @@ The todo items themselves arrive through the `todo` store domain (`/state`, `/v2
 
 ## Native client notes (canopy-native)
 
+- Native `:requires` needs an explicit dependency list. Current `/node` and `/state` producers omit it;
+  absence is not an empty list. The older `/model` carries node `requires` but does not qualify a stale
+  response with its source revision. Native ancestry reports unavailable dependency data until the
+  server provides it; `:parent` remains the independent parent action.
+
 - `Transport` sends `X-Stack-Actor: browser`, `X-Request-Id: <launch>-<n>`, `User-Agent: canopy-native/0.1`, and
   `X-Stack-Via` on writes. It sends no `Origin`, so the POST origin check passes. `browser` is chosen because the
   actor enum has no native value; see PORTING.md §11.
