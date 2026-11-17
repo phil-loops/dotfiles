@@ -65,10 +65,15 @@ pk = j.prepare(a["attempt_id"])
 j.settle_receipt(j.open_receipt(pk["packet_id"], boundary="start"), "acknowledged")
 j.report(W, "progress", "halfway", via="t", attempt_id=a["attempt_id"], packet_id=pk["packet_id"])
 j.report(W, "completion", "done", via="t", attempt_id=a["attempt_id"], packet_id=pk["packet_id"])
-subprocess.run([sys.executable, os.path.join(HERE, "canopy-todo"), "set", "item", "state=done"], capture_output=True, env=os.environ)
+closed = subprocess.run([sys.executable, os.path.join(HERE, "canopy-todo"), "set", "item", "state=done"], capture_output=True, text=True, env=os.environ)
+completions = j.results(W, kind="completion")
+check("closing the tracker item passes the journal: a legacy, uncited completion is recorded beside the qualified one",
+      closed.returncode == 0 and "completion unverified" in closed.stderr
+      and [(r["verdict"], r["via"]) for r in completions] == [("unverified", "canopy-todo set"), ("current", "t")], (closed.stderr, completions))
 f = wf.attach(items())["item"]["work"]
-check("a qualified completion of the current revision with complete coverage is answered",
-      f["state"] == "answered" and f["answered_revision"] == 2 and f["delivered"]["revision"] == 2 and f["delivered"]["state"] == "acknowledged")
+check("a qualified completion of the current revision with complete coverage is answered, whatever a later uncited report says",
+      f["state"] == "answered" and f["completion"] == "current" and f["answered_revision"] == 2
+      and f["delivered"]["revision"] == 2 and f["delivered"]["state"] == "acknowledged")
 check("the last dated progress is kept separate, with its basis", f["progress"]["text"] == "halfway" and f["progress"]["verdict_at_report"] == "current"
       and f["progress"]["delivered_revision"] == 2 and f["progress"]["basis"] == "current")
 check("a host without a process lifecycle is unknown, not working", f["worker"]["state"] == "unknown" and f["worker"]["host"] == "claude-say")
@@ -76,8 +81,10 @@ check("a host without a process lifecycle is unknown, not working", f["worker"][
 j.capture(source="show", conversation="c1", source_message_id="3", text="one more thing", source_seq=3)
 j.cover("show", "c1", 3)
 it = wf.attach(items())["item"]
-check("new direction after a qualified completion reads pending though the tracker says done",
-      it["state"] == "done" and it["work"]["state"] == "pending" and it["work"]["completion"] == "historical" and it["work"]["answered_revision"] == 2)
+check("new direction after a qualified completion reads pending though the tracker says done; the qualified answer and the newest report both stay",
+      it["state"] == "done" and it["work"]["state"] == "pending" and it["work"]["answered_revision"] == 2
+      and it["work"]["completion"] == "unverified", it["work"])
+check("the journal keeps both completions as written", [r["verdict"] for r in j.results(W, kind="completion")] == ["unverified", "current"])
 check("progress against the older direction reads as older, its recorded verdict unchanged",
       it["work"]["progress"]["basis"] == "older" and it["work"]["progress"]["verdict_at_report"] == "current"
       and it["work"]["progress"]["delivered_revision"] == 2 and it["work"]["revision"] == 3)
