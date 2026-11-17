@@ -1,14 +1,20 @@
 import CanopyCore
+import Foundation
 import SwiftUI
 
 /// The review page (Review.tsx): GitHub's pull-request review, local. The header (the description
 /// as its title, the ship strip, the branch's line), the words of the stretch the line lights, then
-/// the diff (a file tree with viewed boxes, the diff with its conversations folded in at their
+/// the diff (a file column with viewed boxes, the diff with its conversations folded in at their
 /// lines, or a file in its place) or the conversation (Ship). Everything it does is a command.
 struct ReviewPage: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme
     let route: Route
+
+    /// The file column's rows, one per file of the diff ("f|<path>").
+    @MainActor static func treeRows(_ pg: ReviewPageState) -> [String] {
+        pg.views.map { "f|\($0.file.path)" }
+    }
 
     var body: some View {
         let pg = ReviewPageState.of(app)
@@ -25,6 +31,7 @@ struct ReviewPage: View {
                 default:
                     if pg.integration == nil { StretchWords(branchID: pg.id).padding(.horizontal, 16).padding(.bottom, 6) }
                     HStack(alignment: .top, spacing: 0) {
+                        if pg.showsTree { Color.clear.frame(width: pg.treeWidth) }
                         // the windows: columns of C-w v, each a stack of C-w s
                         HStack(alignment: .top, spacing: 0) {
                             ForEach(Array(pg.columns.enumerated()), id: \.offset) { c, col in
@@ -41,7 +48,18 @@ struct ReviewPage: View {
                         // no window shows the diff: it waits, scrolled where it was
                         .background { if pg.diffWindow == nil { DiffWindow().opacity(0).allowsHitTesting(false) } }
                         .frame(minHeight: 0, maxHeight: .infinity, alignment: .top)
-                        .padding(.leading, 12)
+                        .padding(.leading, pg.showsTree ? 0 : 12)
+                    }
+                    .overlay(alignment: .topLeading) {
+                        if pg.showsTree {
+                            FileTree()
+                                .font(Theme.text(12))
+                                .padding(.leading, 6)
+                                .frame(width: pg.treeWidth)
+                                .frame(maxHeight: .infinity, alignment: .top)
+                                .background(theme.vellumNight)
+                                .overlay(alignment: .trailing) { theme.vellumEdge.frame(width: 1) }
+                        }
                     }
                     .overlay(alignment: .topLeading) {
                         if pg.guideOpen {
@@ -206,6 +224,38 @@ private struct BranchLine: View {
         // off the line: a commit this history doesn't hold, or origin's copy after a rewrite
         if let scope = pg.commitScope { return ReviewLine.ends(scope).from == nil ? "one commit" : "a run of commits" }
         return pg.base == .outgoing ? "what the next push sends" : ""
+    }
+}
+
+/// The file column: the diff's files with viewed boxes, the one the cursor is in lit.
+private struct FileTree: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.theme) private var theme
+
+    var body: some View {
+        let pg = ReviewPageState.of(app)
+        let views = Dictionary(pg.views.map { ($0.file.path, $0) }, uniquingKeysWith: { a, _ in a })
+        let current = pg.here?.path
+        PaneList(pane: reviewTreePane, rows: ReviewPage.treeRows(pg)) { key, _ in
+            let path = String(key.dropFirst(2))
+            if let v = views[path] {
+                HStack(spacing: 6) {
+                    Text(v.viewed ? "☑" : v.seen > 0 ? "◪" : "☐").foregroundStyle(v.viewed ? theme.patina : theme.inkFaint)
+                    if v.flagged > 0 { Text("⚑\(v.flagged)").foregroundStyle(theme.ember) }
+                    let tint = current == path ? theme.goldLeaf : v.viewed ? theme.inkFaint : theme.ink
+                    ViewThatFits(in: .horizontal) {
+                        PathText(path: path, tint: tint).fixedSize()
+                        Text((path as NSString).lastPathComponent).foregroundStyle(tint).lineLimit(1).truncationMode(.middle)
+                    }
+                    Spacer(minLength: 4)
+                    if v.open > 0 { Text("\(v.open)").foregroundStyle(theme.ember) }
+                    Text("+\(v.file.add)").foregroundStyle(theme.add)
+                    Text("−\(v.file.del)").foregroundStyle(theme.del)
+                }
+                .font(Theme.text(11.5))
+                .help(path)
+            }
+        }
     }
 }
 
