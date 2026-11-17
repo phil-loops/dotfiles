@@ -91,8 +91,7 @@ main
 │           │                                           inline path kept behind goalInlineConversionEnabled   (requires 1, 2; ⇢ after 7)
 │           └─ 10. remove the inline conversion path   drops findActiveByContact, hasActiveForTeam, findWithGoalByIds and the inline insert   (⇢ after the cutover)
 ├─ 11. check every conversion reader tolerates duplicates   fixture with duplicated rows; every reader's answer unchanged
-├─ 12. derive enrollment ids from the delivery       job payload carries emailId + deliveredAt; impressionId = hash(emailId, attachmentId); enrolledAt = deliveredAt
-└─ 13. alert on lost enrollment jobs                  metric/alert on evaluateGoalEnrollment failures and the background queue's dead-letter depth
+└─ 12. derive enrollment ids from the delivery       job payload carries emailId + deliveredAt; impressionId = hash(emailId, attachmentId); enrolledAt = deliveredAt
 ```
 
 Carried over from `goal-active-windows`: the targets query (branch 1 here) and the lookup removal (branch 10). Retired from it: `GoalActiveWindow`, its backfill, its prune, and the window-recording at enrollment.
@@ -116,8 +115,8 @@ That makes "correct regardless of timing" true end to end. A flip exists if and 
   - `impressionId = hash(emailId, attachmentId)`;
   - `enrolledAt = deliveredAt`.
 
-  A retried or duplicate SNS notification then rewrites identical rows instead of minting new ones. **This changes what `enrolledAt` means:** from "when the job ran" (minutes after delivery under load) to "when the email was delivered". That's arguably the correct meaning, but days-to-convert shifts slightly for new enrollments.
-- **Branch 13 makes a lost enrollment visible.** A window only goes missing if the job exhausts its retries. Alert on that. (To verify in terraform: does the background queue have a dead-letter queue, and what is its `maxReceiveCount`?)
+  A retried or duplicate SNS notification then rewrites identical rows instead of minting new ones. **Decided 2026-11-17 (Phil): `enrolledAt` means delivery time.** It used to mean "when the job ran", which is minutes after delivery under load. Days-to-convert shifts slightly for new enrollments.
+- **A lost enrollment is already visible.** No branch is needed. The `background-jobs` SQS queue (monotoad `production/loops/main.tf`, module `shared/sqs`) has a dead-letter queue after 3 receives, a Slack alert on it (`@slack-monitoring-production-dlq`), and an alert on the oldest message's age at 900s. Once branch 12 ships, **redriving** dead-lettered enrollment jobs is safe: they rewrite identical rows. After a redrive, run the catch-up over a range that reaches back to the redriven deliveries.
 - **Stage B** later makes impression and window *storage* deduplicate (`ReplacingMergeTree`) and moves the writes into the buffer.
 
 **3. Tolerating duplicates was a convention.** **Branch 11** turns it into a test. Load a fixture where every conversion row appears twice, run all six readers, and assert their answers equal the deduplicated fixture's. A future reader using a bare `count()` then fails CI instead of silently overcounting.
@@ -128,7 +127,7 @@ That makes "correct regardless of timing" true end to end. A flip exists if and 
 
 ## Cutover: overlap, then switch
 
-1. Ship 1–8 and 11–13. The converter runs, the queue is empty.
+1. Ship 1–8, 11 and 12. The converter runs, the queue is empty.
 2. Ship 9 with both settings on. Contact updates append flips **and** the inline path still writes conversions. Both compute the same derived ids, so nothing double-counts.
 3. Watch for a few days. The catch-up's repaired count should read 0 for flips the 30s pass already handled. Compare per-day conversion counts against before the change.
 4. Turn `goalInlineConversionEnabled` off. Imports lose the ClickHouse lookup and the ~75–100ms insert. Turning it back on is instant.
