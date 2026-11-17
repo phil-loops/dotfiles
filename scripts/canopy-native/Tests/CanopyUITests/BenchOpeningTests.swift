@@ -119,6 +119,23 @@ import Testing
         #expect(KeyTutorStub.notes(app.config.port!).contains("open bench /fixtures/practice.json"))
     }
 
+    @Test func openingStopsBeingCancellableBeforeTheExternalHandoff() async throws {
+        let (app, _) = try fixture()
+        let opening = BenchOpening.of(app)
+        let entered = AsyncStream<Void>.makeStream(), release = AsyncStream<Void>.makeStream()
+        opening.openDocument = { _ in
+            entered.continuation.yield(())
+            var iterator = release.stream.makeAsyncIterator()
+            await iterator.next()
+        }
+        let task = try begin(app)
+        var iterator = entered.stream.makeAsyncIterator(); await iterator.next()
+        #expect(!opening.waiting)
+        #expect(!BenchOpening.backOut(app))
+        release.continuation.yield(())
+        await task.value
+    }
+
     @Test func totalsKeepEnvironmentsTimesAndBranchScopesDistinct() throws {
         let document = try #require(BenchDocument(URL(fileURLWithPath: "/fixtures/one.json"), BenchLibraryTests().document()))
         let rows = ["topic: 1 of 2 fixed on staging, 2026-11-17T09:10:11Z",
