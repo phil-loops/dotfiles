@@ -1,12 +1,7 @@
 import CanopyCore
 import SwiftUI
 
-/// review/Ship.tsx: where the branch stands on its way to main, as one line under the title on
-/// every tab, offering only the next step: run the gates (and why — the red ones), wait for them,
-/// push (and the push as it happens) — or, diverged from origin, replace origin's copy inside the
-/// force scope, its guards ✓/✗ beneath — or open the PR, and nothing once there's nothing to do.
-/// Beside it ⟲ sync when the branch needs one, and under it the sync's steps while one runs — each
-/// failing step with its reason in full, and the dirt decision inline. Every action shows its key.
+/// Persistent shipping controls with the branch's next action, unavailable reason and live steps.
 public struct ShipStripView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme
@@ -60,18 +55,19 @@ public struct ShipStripView: View {
         let forcing = route == "branch.force.arm" || route == "branch.force.confirm"
         let acts = route == "branch.gates.run" || route == "branch.push.arm" || route == "branch.push.confirm" || forcing
         let waiting = route == "branch.gates.next"
+        let control = ShipControlState.push(b, route: route, contextKnown: app.forestModel.branchView(branchID) != nil)
         let running = rows.first { $0.state == .running }
         let red = rows.filter { $0.state == .red }
         let waived = rows.filter { $0.state == .waived }
         HStack(alignment: .firstTextBaseline, spacing: 10) {
-            // a motion has one face, the steps strip beneath: the line names only the step in progress
+            KeyButton(title: "⟲ sync", id: "review.sync", target: branchID, busy: m?.phase == .running)
+                .disabled(b.tip.isEmpty || m?.phase == .dirt)
+                .explains("ship|sync", "sync: the branch is behind its parent or main, or has dirt — it rebases and tidies")
             if let doing = m.flatMap({ $0.phase == .running ? $0.steps.first { $0.state == .run } : nil }) {
-                Text("⟲ \(doing.label)…").foregroundStyle(theme.goldLeaf)
+                Text("\(doing.label)…").foregroundStyle(theme.goldLeaf)
             } else if m == nil {
                 let needs = Syncing.needs(b, facts: ship.factsOf(branchID), prep: ship.prepOf(branchID))
                 if !needs.isEmpty {
-                    KeyButton(title: "⟲ sync", id: "review.sync", target: branchID)
-                        .explains("ship|sync", "sync: the branch is behind its parent or main, or has dirt — it rebases and tidies")
                     Text(needs.joined(separator: " · ")).foregroundStyle(theme.inkFaint)
                 }
             }
@@ -102,14 +98,18 @@ public struct ShipStripView: View {
                     if others > 0 { Text("\(others) skipped").foregroundStyle(theme.patina) }
                 }
             }
-            if acts || live != nil {
+            Group {
                 // the routine wins settle in (joy page): gates going green turn the label to push,
                 // a clean push turns it to ✓ pushed — a 200 ms settle, not a toast; still under reduced motion
-                let label = pushLabel(b, route: route, live: live, forced: push?.forced ?? false)
+                let label = acts || waiting || live != nil ? pushLabel(b, route: route, live: live, forced: push?.forced ?? false) : "push"
                 KeyButton(title: label, id: "review.push", target: branchID,
-                          gold: true, busy: live == .sending || live == .landing, failed: live == .failed)
+                          gold: control.enabled, busy: live == .sending || live == .landing, failed: live == .failed)
+                    .disabled(!control.enabled)
                     .settles(label, reduced: reduced)
                     .explains("ship|push", "p: this branch's next step — run the gates, then push to origin")
+            }
+            if live != .sending && live != .landing, let reason = control.reason, !waiting {
+                Text(reason).foregroundStyle(theme.inkFaint)
             }
             if route == "branch.gates.run" && live == nil && app.store.view(Pr.self, branchID) != nil {
                 KeyButton(title: "quick", id: "review.gates.quick", target: branchID)
@@ -126,7 +126,7 @@ public struct ShipStripView: View {
                 KeyButton(title: "open the PR ↗", id: "review.finish", target: branchID, gold: true)
             }
         }
-        .fixedSize(horizontal: true, vertical: false)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     /// what the last sync left to say: a hand-off to Claude only until the tip moves
@@ -146,6 +146,7 @@ public struct ShipStripView: View {
         default: break
         }
         switch route {
+        case "branch.gates.next": return "prioritize gates"
         case "branch.gates.run": return b.gates == .red ? "re-run the gates" : "run the gates"
         case "branch.force.confirm":
             let lease: String = {
