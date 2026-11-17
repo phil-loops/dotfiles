@@ -11,7 +11,7 @@ import SwiftUI
 /// lands later). Prints the slowest and exits 1 when anything is over budget. `--quick` runs the
 /// first and third passes only (what `canopy-benchwatch` runs after each commit).
 /// Keys only move and look — never `space o g`, `space o p` or anything that leaves the app. Writes run, but
-/// every request that isn't a GET is answered here (`Blackhole`) and never reaches the server.
+/// every request that isn't a GET, and the verdict-producing gates-progress read, is answered here.
 @MainActor
 public enum Bench {
     /// One step: the key names pressed for it, space-separated (`g g` is one step of two keys).
@@ -264,20 +264,23 @@ public enum Bench {
     }
 }
 
-/// The bench's server for everything but reads: any request that isn't a GET is answered
-/// `{"ok": true}` after a moment, here, so a write the bench presses changes nothing real.
+/// Answers benchmark writes and the gates-progress read that can record a green verdict.
 final class Blackhole: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var answered = 0
 
-    override class func canInit(with request: URLRequest) -> Bool { (request.httpMethod ?? "GET") != "GET" }
+    override class func canInit(with request: URLRequest) -> Bool {
+        (request.httpMethod ?? "GET") != "GET" || request.url?.lastPathComponent == "gates-progress"
+    }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
-        Self.answered += 1
+        let read = (request.httpMethod ?? "GET") == "GET"
+        if !read { Self.answered += 1 }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [self] in
             let resp = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/json"])!
             client?.urlProtocol(self, didReceive: resp, cacheStoragePolicy: .notAllowed)
-            client?.urlProtocol(self, didLoad: Data(#"{"ok": true}"#.utf8))
+            let body = read ? #"{"running":false,"events":[],"err":"benchmark-local"}"# : #"{"ok":true}"#
+            client?.urlProtocol(self, didLoad: Data(body.utf8))
             client?.urlProtocolDidFinishLoading(self)
         }
     }
