@@ -438,9 +438,17 @@ enum DiffCommands {
         }
         /// A fan-out asks which child (Graphite's `up`): the picker, one line per child.
         func pickChild(_ kids: [Branch], then: @escaping @MainActor (Branch) -> Void) {
+            let origin = pg.branch, epoch = app.store.epoch, git = app.store.versions[Domain.git]
+            var reader: ReaderContext?
             app.nav.pick("which child · \(kids.count)", kids.map { PickItem(label: $0.name, text: $0.description) }) { i in
-                MainActor.assumeIsolated { then(kids[i]) }
+                MainActor.assumeIsolated {
+                    guard reader?.isCurrentAfterPickerChoice(app) == true, app.store.epoch == epoch,
+                          app.store.versions[Domain.git] == git, pg.branch == origin, kids.indices.contains(i),
+                          let target = app.store.view(Branch.self, kids[i].id) else { return }
+                    then(target)
+                }
             }
+            reader = ReaderContext(app)
         }
         r.register(Command(id: "review.parent", title: "Review its parent branch", scope: .review, label: "parent",
                            recordsJump: true, available: isBranch, local: { _, _ in try hop(pg.branch?.parentId.flatMap { app.store.view(Branch.self, $0) }) }))
