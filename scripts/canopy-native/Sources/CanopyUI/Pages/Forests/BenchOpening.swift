@@ -1,4 +1,3 @@
-import AppKit
 import CanopyCore
 import Foundation
 import Observation
@@ -18,16 +17,7 @@ final class BenchOpening {
     private var sequence = 0
     private var pending: Request?
     @ObservationIgnored private(set) var task: Task<Void, Never>?
-    @ObservationIgnored var openDocument: (URL) async throws -> Void = { document in
-        guard let show = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.philbrockman.show") else {
-            throw Refusal("Show isn't installed")
-        }
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            NSWorkspace.shared.open([document], withApplicationAt: show, configuration: .init()) { _, error in
-                if let error { continuation.resume(throwing: error) } else { continuation.resume() }
-            }
-        }
-    }
+    @ObservationIgnored var openDocument: (URL) async throws -> Void = ShowDocument.open
 
     private init(_ app: AppModel) { self.app = app }
     static func of(_ app: AppModel) -> BenchOpening { app.state { BenchOpening(app) } }
