@@ -1169,6 +1169,43 @@ class Journal:
         return [dict(r) for r in self.db.execute(q + " ORDER BY outbox_id", args)]
 
 
+def open_existing(path=None):
+    """The journal if one exists; None otherwise. Readers and legacy writers never create it."""
+    path = path or default_path()
+    return Journal(path) if os.path.exists(path) else None
+
+
+def tracker_closed(todo_id, incarnation, state, *, via, note=None, attempt_id=None, packet_id=None, receipt_id=None, path=None):
+    """The coordinator boundary for a tracker item marked done or dropped. Done records a
+    completion for the live work of this incarnation of the item — current only with a cited
+    delivery that qualifies, and unverified for a plain legacy `state=done`. Dropped retires the
+    work identity. Returns the result (or the retired work), or None when the record has no live
+    work (or predates incarnations). Raises before anything is written if a cited attempt can't
+    be checked."""
+    cited = attempt_id or packet_id or receipt_id
+    if not incarnation:
+        if cited:
+            raise JournalError(f"tracker item {todo_id} predates incarnations; enroll it first")
+        return None
+    j = open_existing(path) if not cited else Journal(path)
+    if j is None:
+        return None
+    try:
+        w = j.work_for_todo(todo_id, incarnation)
+        if w is None:
+            if cited:
+                raise JournalError(f"tracker item {todo_id} has no work to complete against")
+            return None
+        if state == "dropped":
+            j.retire_work(w)
+            return j.work(w)
+        if state == "done":
+            return j.report(w, "completion", note or "marked done", via=via, attempt_id=attempt_id, packet_id=packet_id, receipt_id=receipt_id)
+        return None
+    finally:
+        j.close()
+
+
 def render_packet(body):
     """The exact text a host hands the worker for a packet. Deterministic in the packet body."""
     lines = [f"Canopy work context · packet {body['packet_id']} · attempt {body['attempt_id']}",

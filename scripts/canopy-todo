@@ -11,8 +11,11 @@ list, plus a todo list per forest (items with --project <repo>:<stack-project>, 
                                         another live session owns it (--force takes it over)
   canopy-todo set <id> key=value …      e.g. state=doing size=M blocked_by=a,b, or solved_by=<branch> on a
                                         forest's item (the forest page shows that branch's PR beside it)
-  canopy-todo done <id> [note]          a note is appended under "## Done"
-  canopy-todo drop <id> [why]
+  canopy-todo done <id> [note] [--attempt A --packet P]
+                                        a note is appended under "## Done"; the work journal records the completion —
+                                        current only when the cited delivery qualifies, else unverified
+  canopy-todo drop <id> [why]           also retires the item's work identity
+  canopy-todo enroll <id>               give a record made before incarnations its own, so work can link to it
   canopy-todo rank [--project P] <id> …  that list's open queue, best first; the rest of it unranked
   canopy-todo steps <id> < steps.md     replace the item's "## Next steps"
   canopy-todo check                     every item's problems; exit 1 if any
@@ -25,7 +28,7 @@ import sys
 import uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from srv import todo  # noqa: E402
+from srv import todo, workjournal  # noqa: E402
 
 LISTS = ("blocked_by", "links")
 ORDER = {"doing": 0, "open": 1, "waiting": 2, "done": 3, "dropped": 4, "broken": 5}
@@ -78,6 +81,16 @@ def with_section(body, heading, text, replace):
     return (body.strip() + "\n\n" + block).strip()
 
 
+def journal_line(closed):
+    """What the work journal made of a close: a completion's verdict, a retired identity, or
+    nothing (the item has no journal work)."""
+    if closed is None:
+        return "journal: no work recorded for this item"
+    if "verdict" in closed:
+        return f"journal: completion {closed['verdict']} — {closed['reason']}"
+    return f"journal: work {closed['work_id']} retired"
+
+
 def main():
     ap = argparse.ArgumentParser(prog="canopy-todo", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -110,11 +123,15 @@ def main():
         d = sub.add_parser(name)
         d.add_argument("id")
         d.add_argument("note", nargs="?")
+        if name == "done":
+            d.add_argument("--attempt")
+            d.add_argument("--packet")
     r = sub.add_parser("rank")
     r.add_argument("--project")
     r.add_argument("ids", nargs="+")
     sub.add_parser("steps").add_argument("id")
     sub.add_parser("check")
+    sub.add_parser("enroll").add_argument("id")
     args = ap.parse_args()
 
     if args.cmd == "add":
@@ -156,12 +173,20 @@ def main():
         for pair in args.pairs:
             k, _, v = pair.partition("=")
             fields[k] = [x for x in v.split(",") if x] if k in LISTS else int(v) if k == "rank" and v else v or None
+        if fields.get("state") in ("done", "dropped"):
+            closed = workjournal.tracker_closed(args.id, todo.read(args.id).get("incarnation"), fields["state"], via="canopy-todo set")
+            print(journal_line(closed), file=sys.stderr)
         print(line(todo.update(args.id, **fields)))
     elif args.cmd in ("done", "drop"):
+        closed = workjournal.tracker_closed(args.id, todo.read(args.id).get("incarnation"), "done" if args.cmd == "done" else "dropped",
+                                            via="canopy-todo", note=args.note,
+                                            attempt_id=getattr(args, "attempt", None), packet_id=getattr(args, "packet", None))
+
         def close(it):
             body = with_section(it["body"], "Done" if args.cmd == "done" else "Dropped", f"{todo.today()} — {args.note}", False) if args.note else it["body"]
             return {"state": "done" if args.cmd == "done" else "dropped", "owner": None, "rank": None, "body": body}
         print(line(todo.update(args.id, edit=close)))
+        print(journal_line(closed), file=sys.stderr)
     elif args.cmd == "rank":
         project = project_id(args.project)
         for i in args.ids:
@@ -179,6 +204,9 @@ def main():
     elif args.cmd == "steps":
         steps = sys.stdin.read()
         print(line(todo.update(args.id, edit=lambda it: {"body": with_section(it["body"], "Next steps", steps, True)})))
+    elif args.cmd == "enroll":
+        it = todo.update(args.id, edit=lambda it: {} if it.get("incarnation") else {"incarnation": "i_" + uuid.uuid4().hex})
+        print(it["incarnation"])
     elif args.cmd == "check":
         bad = [(it["id"], p) for it in todo.all_items() for p in it.get("problems", [])]
         missing = [(it["id"], f"blocked by {b}, which doesn't exist") for it in todo.all_items() for b in it.get("blocked_by", []) if b not in todo.ids()]
@@ -190,5 +218,5 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except (ValueError, FileNotFoundError) as e:
+    except (ValueError, FileNotFoundError) as e:   # JournalError is a ValueError
         sys.exit(f"canopy-todo: {e}")
