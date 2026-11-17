@@ -40,6 +40,8 @@ final class OwnedValues<Key: Hashable, Value> {
     @ObservationIgnored private var revisions: [Key: Identity] = [:]
     @ObservationIgnored private var owners: [Key: Node] = [:]
 
+    func isPending(_ key: Key) -> Bool { owners[key] != nil }
+
     func set(_ key: Key, _ value: Value?) {
         put(key, value)
         owners[key] = nil
