@@ -70,6 +70,18 @@ public struct TypedTables: Decodable {
 
 public typealias RawTables = [String: [String: JSONValue]]
 
+private struct WireObject<Head: Decodable, Typed: Decodable, Raw: Decodable>: Decodable {
+    var head: Head
+    var typed: Typed
+    var raw: Raw
+
+    init(from decoder: Decoder) throws {
+        head = try Head(from: decoder)
+        typed = try Typed(from: decoder)
+        raw = try Raw(from: decoder)
+    }
+}
+
 /// GET /state: {epoch, versions, asOf, entities, ms}.
 public struct Snapshot {
     public var epoch: String
@@ -89,12 +101,12 @@ public struct Snapshot {
     }
 
     public static func decode(_ data: Data) throws -> Snapshot {
-        let d = JSONDecoder()
-        let head = try d.decode(Head.self, from: data)
+        let body = try JSONDecoder().decode(WireObject<Head, Typed, Raw>.self, from: data)
+        let head = body.head
         return Snapshot(
             epoch: head.epoch, versions: head.versions, asOf: head.asOf ?? [:],
-            entities: try d.decode(Typed.self, from: data).entities ?? .init(),
-            raw: try d.decode(Raw.self, from: data).entities ?? [:], ms: head.ms)
+            entities: body.typed.entities ?? .init(),
+            raw: body.raw.entities ?? [:], ms: head.ms)
     }
 }
 
@@ -117,12 +129,12 @@ public struct Patch {
     }
 
     public static func decode(_ data: Data) throws -> Patch {
-        let d = JSONDecoder()
-        let head = try d.decode(Head.self, from: data)
+        let body = try JSONDecoder().decode(WireObject<Head, Typed, Raw>.self, from: data)
+        let head = body.head
         return Patch(
             domain: head.domain, version: head.version, asOf: head.asOf,
-            upserts: try d.decode(Typed.self, from: data).upserts ?? .init(),
-            rawUpserts: try d.decode(Raw.self, from: data).upserts ?? [:],
+            upserts: body.typed.upserts ?? .init(),
+            rawUpserts: body.raw.upserts ?? [:],
             deletes: head.deletes ?? [:])
     }
 

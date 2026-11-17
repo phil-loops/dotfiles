@@ -33,6 +33,50 @@ func fixture(_ name: String) throws -> Data {
         #expect(s.raw["repo"]?.count == 2)
     }
 
+    @Test func snapshotKeepsUnknownTablesAndOptionalEnvelopeFields() throws {
+        let json = #"{"epoch":"e","versions":{"git":7},"asOf":{"git":12},"ms":23.5,"entities":{"future":{"x":{"nested":[true,null,3]}}}}"#
+        let snapshot = try Snapshot.decode(Data(json.utf8))
+        #expect(snapshot.epoch == "e")
+        #expect(snapshot.versions["git"] == 7)
+        #expect(snapshot.asOf["git"] == 12)
+        #expect(snapshot.ms == 23.5)
+        #expect(snapshot.entities.failures.isEmpty)
+        #expect(snapshot.raw["future"]?["x"]?["nested"] == .array([.bool(true), .null, .number(3)]))
+        for tables in ["", #", "entities":null"#] {
+            let empty = try Snapshot.decode(Data("{\"epoch\":\"e\",\"versions\":{}\(tables)}".utf8))
+            #expect(empty.raw.isEmpty)
+            #expect(empty.entities.failures.isEmpty)
+            #expect(empty.asOf.isEmpty)
+        }
+    }
+
+    @Test func patchKeepsRawFailuresUnknownTablesAndDeletes() throws {
+        let json = #"{"domain":"git","version":8,"asOf":13,"upserts":{"repo":{"bad":{"id":"bad"}},"future":{"x":{"value":5}}},"deletes":{"branch":["gone"],"future":["older"]}}"#
+        let patch = try Patch.decode(Data(json.utf8))
+        #expect(patch.domain == "git")
+        #expect(patch.version == 8)
+        #expect(patch.asOf == 13)
+        #expect(patch.upserts.repo.values.isEmpty)
+        #expect(patch.upserts.repo.failures.keys.sorted() == ["bad"])
+        #expect(patch.rawUpserts["repo"]?["bad"]?["id"] == .string("bad"))
+        #expect(patch.rawUpserts["future"]?["x"]?["value"] == .number(5))
+        #expect(patch.deletes == ["branch": ["gone"], "future": ["older"]])
+        let empty = try Patch.decode(Data(#"{"domain":"review","version":9,"upserts":null}"#.utf8))
+        #expect(empty.rawUpserts.isEmpty)
+        #expect(empty.deletes.isEmpty)
+        #expect(empty.asOf == nil)
+    }
+
+    @Test func malformedEnvelopesStillFailInsteadOfDroppingTheirTables() {
+        for json in [#"{"versions":{},"entities":{}}"#, #"{"epoch":"e","versions":{},"entities":[]}"#] {
+            #expect(throws: (any Error).self) { try Snapshot.decode(Data(json.utf8)) }
+        }
+        for json in [#"{"version":1}"#, #"{"domain":"git","version":1,"upserts":[]}"#,
+                     #"{"domain":"git","version":1,"deletes":{"branch":4}}"#] {
+            #expect(throws: (any Error).self) { try Patch.decode(Data(json.utf8)) }
+        }
+    }
+
     @Test func openStringsKeepUnknownValues() throws {
         let b = try JSONDecoder().decode(Gates.self, from: Data(#""purple""#.utf8))
         #expect(b.rawValue == "purple")
