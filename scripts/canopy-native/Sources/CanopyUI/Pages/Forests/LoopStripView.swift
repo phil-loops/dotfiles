@@ -79,6 +79,6 @@ struct CommitWords: View {
                 Text("reading the commits…").foregroundStyle(theme.inkFaint)
             }
         }
-        .task(id: app.store.view(Branch.self, branchID)?.tip) { words.load(app, branchID) }
+        .task(id: BranchSource.current(app, branchID)) { words.load(app, branchID) }
     }
 }

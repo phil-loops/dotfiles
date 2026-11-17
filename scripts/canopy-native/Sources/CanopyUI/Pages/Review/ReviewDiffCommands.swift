@@ -578,6 +578,7 @@ enum DiffCommands {
                            }))
         r.register(Command(id: "line.cancel", title: "Drop the picked end, else back to the diff", scope: .branchLine, verb: .cancel, label: "back",
                            local: { _, _ in
+                               if WordsByName.backOut(app) { return }
                                if pg.lineAnchor != nil { pg.lineAnchor = nil; return }
                                app.focus(pane: reviewDiffPane)
                            }))
@@ -1036,6 +1037,7 @@ enum DiffCommands {
                            }))
         r.register(Command(id: "review.back", title: "Back out", scope: .review, verb: .cancel, label: "back", quiet: true,
                            local: { _, _ in
+                               if WordsByName.backOut(app) { return }
                                if BenchOpening.backOut(app) { return }
                                if pg.guideOpen { return ReviewGuide.close(app) }
                                if ShipSeam.backOut(app) { return }

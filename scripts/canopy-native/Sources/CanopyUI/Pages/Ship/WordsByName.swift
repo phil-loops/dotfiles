@@ -6,6 +6,28 @@ import Foundation
 /// written and saved in one go; with nothing after it, the page opens on that row, writing.
 @MainActor
 enum WordsByName {
+    @MainActor private final class Intent {
+        var generation = 0
+        var pending: Origin?
+        static func of(_ app: AppModel) -> Intent { app.state { Intent() } }
+    }
+    @MainActor private struct Origin {
+        let source: BranchSource
+        let generation: Int
+        var reader: ReaderContext
+
+        init?(_ app: AppModel, _ id: String) {
+            guard let source = BranchSource.current(app, id) else { return nil }
+            self.source = source
+            generation = Intent.of(app).generation
+            reader = ReaderContext(app)
+        }
+
+        func current(_ app: AppModel, afterPicker: Bool = false) -> Bool {
+            source == BranchSource.current(app, source.id) && generation == Intent.of(app).generation &&
+                (afterPicker ? reader.isCurrentAfterPickerChoice(app) : reader.isCurrent(app))
+        }
+    }
     /// The branch these act on: the review page's, else the branch under the cursor, else the forest page's words face.
     static func branch(_ app: AppModel) -> String? {
         if let id = ShipSeam.branchID(app) { return id }
@@ -16,6 +38,11 @@ enum WordsByName {
     static func install(_ app: AppModel) {
         weak let weakApp = app
         let r = app.registry
+        app.addCloser(first: true, isOpen: { [weak app] in
+            app.map(hasPending) ?? false
+        }, close: { [weak app] in
+            if let app { _ = backOut(app) }
+        })
         let onABranch: (String?) -> Bool = { _ in weakApp.map { branch($0) != nil } ?? false }
 
         r.register(Command(
@@ -23,6 +50,8 @@ enum WordsByName {
             scope: .global, budget: .gitWrite, verb: .wordsTitle, takes: "<text>", label: "title", available: onABranch,
             local: { _, arg in
                 guard let app = weakApp, let id = branch(app) else { return }
+                Intent.of(app).generation &+= 1
+                Intent.of(app).pending = nil
                 try landing(app, id, row: .title, typed: typed(arg).map(oneLine)) { words, text in
                     var v = words.prValue(id)
                     v.subject = text
@@ -35,6 +64,8 @@ enum WordsByName {
             scope: .global, budget: .gitWrite, verb: .wordsWhy, takes: "<text>", label: "why", available: onABranch,
             local: { _, arg in
                 guard let app = weakApp, let id = branch(app) else { return }
+                Intent.of(app).generation &+= 1
+                Intent.of(app).pending = nil
                 try landing(app, id, row: .body, typed: typed(arg)) { words, text in
                     var v = words.prValue(id)
                     v.body = OutlineHints.joinTemplate(text, OutlineHints.splitTemplate(v.body).template)
@@ -47,6 +78,8 @@ enum WordsByName {
             scope: .global, budget: .configWrite, verb: .wordsDescription, takes: "<text>", label: "describe", available: onABranch,
             local: { _, arg in
                 guard let app = weakApp, let id = branch(app) else { return }
+                Intent.of(app).generation &+= 1
+                Intent.of(app).pending = nil
                 guard let text = typed(arg) else { return try open(app, id, .desc) }
                 app.runner.dispatch("branch.describe", via: .palette, target: id, arg: oneLine(text))
             }))
@@ -56,12 +89,14 @@ enum WordsByName {
             scope: .global, budget: .gitWrite, verb: .wordsCommit, takes: "<sha> <subject>", label: "reword", available: onABranch,
             local: { _, arg in
                 guard let app = weakApp, let id = branch(app) else { return }
+                Intent.of(app).generation &+= 1
+                Intent.of(app).pending = nil
                 guard let t = typed(arg) else { return try withWords(app, id) { try pickCommit(app, id) } }
                 let parts = t.split(separator: " ", maxSplits: 1).map(String.init)
                 let sha = parts[0], subject = parts.count > 1 ? oneLine(parts[1]) : nil
                 try withWords(app, id) {
                     let words = WordsState.of(app)
-                    guard let c = commit(words, id, sha) else { throw Refusal("\(sha) isn't one of this branch's commits") }
+                    let c = try commit(words, id, sha)
                     try act(app, id, row: .subject(c.sha), typed: subject) { words, text in
                         words.editTo(id, c, MessageWords(subject: text, body: words.valueOf(id, c).body))
                     }
@@ -75,6 +110,8 @@ enum WordsByName {
             scope: .global, verb: .wordsFold, takes: "<sha>", label: "fold", available: onABranch,
             local: { _, arg in
                 guard let app = weakApp, let id = branch(app) else { return }
+                Intent.of(app).generation &+= 1
+                Intent.of(app).pending = nil
                 guard let t = typed(arg) else { return try withWords(app, id) { try pickFold(app, id) } }
                 try withWords(app, id) { app.runner.dispatch("words.fold", via: .key, target: id, arg: String(t.split(separator: " ")[0])) }
             }))
@@ -85,7 +122,8 @@ enum WordsByName {
                 let words = WordsState.of(app)
                 guard let o = words.shown[id] else { throw Refusal("the words aren't read yet") }
                 let own = o.commits.filter { !$0.carried }
-                guard let c = commit(words, id, sha), let i = own.firstIndex(where: { $0.sha == c.sha }) else { throw Refusal("\(sha) isn't one of this branch's commits") }
+                let c = try commit(words, id, sha)
+                guard let i = own.firstIndex(where: { $0.sha == c.sha }) else { throw Refusal("that commit is gone") }
                 guard i > 0 else { throw Refusal("\(c.short.prefix(7)) is the branch's first commit — nothing below it to fold into") }
                 let below = own[i - 1]
                 for x in [c, below] where !x.locked.isEmpty { throw Refusal("\(x.short.prefix(7)) is \(x.locked)") }
@@ -100,33 +138,54 @@ enum WordsByName {
             }))
     }
 
+    private static func hasPending(_ app: AppModel) -> Bool {
+        guard let pending = Intent.of(app).pending else { return false }
+        return pending.current(app) && WordsState.of(app).hasWaiter(pending.source.id)
+    }
+
+    @discardableResult
+    static func backOut(_ app: AppModel) -> Bool {
+        guard hasPending(app) else { return false }
+        let intent = Intent.of(app)
+        intent.generation &+= 1
+        intent.pending = nil
+        app.runner.say("words action cancelled")
+        return true
+    }
+
     /// The branch's unpushed commits that have one below them, newest first; picking one folds it.
     static func pickFold(_ app: AppModel, _ id: String) throws {
-        let own = (WordsState.of(app).shown[id]?.commits ?? []).filter { !$0.carried }
+        let words = WordsState.of(app)
+        guard let outline = words.shown[id], var origin = Origin(app, id) else { throw Refusal("the branch's words aren't available") }
+        let own = outline.commits.filter { !$0.carried }
         let candidates = Array(own.dropFirst().reversed())
         guard !candidates.isEmpty else { throw Refusal("this branch has one commit — nothing to fold") }
         let items = candidates.map { c in PickItem(label: String(c.short.prefix(7)), text: c.locked.isEmpty ? c.subject : "\(c.subject) · \(c.locked)") }
-        app.nav.pick("fold a commit into the one below it", items) { [weak app] i in
-            guard let app else { return }
-            app.runner.dispatch("words.fold", via: .key, target: id, arg: candidates[i].sha)
+        app.nav.pick("fold a commit into the one below it", items) { [weak app] index in
+            guard let app, candidates.indices.contains(index), origin.current(app, afterPicker: true), words.shown[id] == outline else { return }
+            app.runner.dispatch("words.fold", via: .key, target: id, arg: candidates[index].sha)
         }
+        origin.reader = ReaderContext(app)
     }
 
-    /// The branch's own commits, newest first, by their subjects; picking one opens its subject to write.
+    /// The branch's own commits, newest first, by their subjects; picking opens one to write.
     static func pickCommit(_ app: AppModel, _ id: String) throws {
-        let own = (WordsState.of(app).shown[id]?.commits ?? []).filter { !$0.carried }.reversed().map { $0 }
-        guard !own.isEmpty else { throw Refusal("this branch has no commits of its own") }
-        let items = own.map { c in
+        let words = WordsState.of(app)
+        guard let outline = words.shown[id], var origin = Origin(app, id) else { throw Refusal("the branch's words aren't available") }
+        let candidates = outline.commits.filter { !$0.carried }.reversed().map { $0 }
+        guard !candidates.isEmpty else { throw Refusal("this branch has no commits of its own") }
+        let items = candidates.map { c in
             PickItem(label: String(c.short.prefix(7)), text: c.locked.isEmpty ? c.subject : "\(c.subject) · \(c.locked)")
         }
-        app.nav.pick("reword a commit", items) { [weak app] i in
-            guard let app else { return }
-            let c = own[i]
+        app.nav.pick("reword a commit", items) { [weak app] index in
+            guard let app, candidates.indices.contains(index), origin.current(app, afterPicker: true), words.shown[id] == outline else { return }
+            let candidate = candidates[index]
             do {
-                try refuseIfShared(app, id, .subject(c.sha))
-                try open(app, id, .subject(c.sha))
+                try refuseIfShared(app, id, .subject(candidate.sha))
+                try open(app, id, .subject(candidate.sha))
             } catch { app.runner.say("\(error)") }
         }
+        origin.reader = ReaderContext(app)
     }
 
     /// What was typed after the command's name, or nil when nothing was.
@@ -138,16 +197,22 @@ enum WordsByName {
     static func oneLine(_ s: String) -> String { s.split(whereSeparator: \.isNewline).joined(separator: " ") }
 
     /// The branch's own commit a sha (or its prefix) names.
-    static func commit(_ words: WordsState, _ id: String, _ sha: String) -> OutlineCommit? {
-        words.shown[id]?.commits.first { !$0.carried && ($0.sha.hasPrefix(sha) || $0.short.hasPrefix(sha)) }
+    static func commit(_ words: WordsState, _ id: String, _ sha: String) throws -> OutlineCommit {
+        let matches = (words.shown[id]?.commits ?? []).filter { !$0.carried && ($0.sha.hasPrefix(sha) || $0.short.hasPrefix(sha)) }
+        guard !matches.isEmpty else { throw Refusal("\(sha) isn't one of this branch's commits") }
+        guard matches.count == 1 else { throw Refusal("\(sha) names more than one commit; use a longer prefix") }
+        return matches[0]
     }
 
     /// Run `f` once the branch's words are read; a refusal after the read is said, since nothing awaits it.
     static func withWords(_ app: AppModel, _ id: String, _ f: @escaping @MainActor () throws -> Void) throws {
         let words = WordsState.of(app)
-        if words.shown[id] != nil { return try f() }
-        app.runner.say("reading the branch's words…")
-        words.whenShown(app, id) {
+        if words.hasShown(app, id) { return try f() }
+        guard let origin = Origin(app, id) else { throw Refusal("that branch is gone") }
+        Intent.of(app).pending = origin
+        app.runner.say("reading the branch's words… · esc cancels")
+        words.whenShown(app, id, current: { [weak app] in app.map { origin.current($0) } ?? false }) {
+            Intent.of(app).pending = nil
             do { try f() } catch { app.runner.say("\(error)") }
         }
     }

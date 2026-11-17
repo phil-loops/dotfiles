@@ -20,17 +20,35 @@ public final class WordsState {
     public var savedPr: [String: MessageWords] = [:]
     /// The branch a words command acts on off the review page — the forest page's words face sets it (area A).
     public var focus: String?
-    /// /outline reads in flight or done, by "<repo>|<name>|<tip>"
-    @ObservationIgnored private var reading: [String: String] = [:]
+    @ObservationIgnored private var reading: [String: BranchSource] = [:]
+    @ObservationIgnored private var shownSources: [String: BranchSource] = [:]
+    @ObservationIgnored private var requests: [String: Int] = [:]
+    @ObservationIgnored private var tasks: [String: Task<Void, Never>] = [:]
+    @ObservationIgnored private var sequence = 0
+    @ObservationIgnored var fetch: (AppModel, BranchSource) async throws -> WordsOutline = { app, source in
+        try await app.transport.getJSON(app.transport.atRepo(source.repo, "/outline?branch=\(source.name.uriComponent)"))
+    }
     @ObservationIgnored private var pendingPoll: Set<String> = []
     /// what's waiting for a branch's words to be read (`whenShown`)
-    @ObservationIgnored private var waiting: [String: [@MainActor () -> Void]] = [:]
+    private struct Waiter { let current: @MainActor () -> Bool; let run: @MainActor () -> Void }
+    @ObservationIgnored private var waiting: [String: [Waiter]] = [:]
 
     public init() {}
 
     public static func of(_ app: AppModel) -> WordsState { app.state { WordsState() } }
 
-    public func setShown(_ id: String, _ o: WordsOutline) { shown[id] = o }
+    public func setShown(_ id: String, _ outline: WordsOutline) {
+        tasks.removeValue(forKey: id)?.cancel()
+        requests[id] = nil
+        reading[id] = nil
+        shownSources[id] = nil
+        waiting[id] = nil
+        shown[id] = outline
+    }
+
+    func hasShown(_ app: AppModel, _ id: String) -> Bool {
+        shown[id] != nil && (shownSources[id] == nil || shownSources[id] == BranchSource.current(app, id))
+    }
 
     public func setDraft(_ id: String, _ sha: String, _ w: MessageWords?) {
         var mine = drafts[id] ?? [:]
@@ -175,40 +193,66 @@ public final class WordsState {
 
     // ── reading /outline (Commits.tsx useOutline) ──
 
-    /// Run `f` once the branch's words are read: now if they are, else after the read lands.
-    public func whenShown(_ app: AppModel, _ id: String, _ f: @escaping @MainActor () -> Void) {
-        if shown[id] != nil { return f() }
-        waiting[id, default: []].append(f)
-        load(app, id, force: true)
+    func hasWaiter(_ id: String) -> Bool { (waiting[id] ?? []).contains { $0.current() } }
+
+    /// Run an owned action once a current outline has arrived.
+    func whenShown(_ app: AppModel, _ id: String, current: @escaping @MainActor () -> Bool, _ run: @escaping @MainActor () -> Void) {
+        if hasShown(app, id) { if current() { run() }; return }
+        waiting[id] = (waiting[id] ?? []).filter { $0.current() }
+        waiting[id, default: []].append(Waiter(current: current, run: run))
+        load(app, id)
     }
 
-    /// Read the branch's /outline once per tip (and every 1.5s while the server drafts the PR body).
-    public func load(_ app: AppModel, _ id: String, force: Bool = false) {
-        guard let b = app.store.view(Branch.self, id) else { return }
-        let key = "\(b.repo)|\(b.name)|\(b.tip)"
-        if !force && reading[id] == key { return }
-        reading[id] = key
-        let path = app.transport.atRepo(b.repo, "/outline?branch=\(b.name.uriComponent)")
-        let t = app.transport
-        Task { @MainActor [weak self, weak app] in
-            guard let got = try? await t.getJSON(path, as: WordsOutline.self) else {
-                guard let self, self.reading[id] == key else { return }
-                self.reading[id] = nil
-                if self.waiting.removeValue(forKey: id) != nil { app?.runner.say("couldn't read the branch's words") }
+    /// Read this observed source once, coalescing in-flight requests; force starts a fresh request.
+    @discardableResult
+    public func load(_ app: AppModel, _ id: String, force: Bool = false) -> Task<Void, Never>? {
+        guard let source = BranchSource.current(app, id) else { return nil }
+        if !force && reading[id] == source { return tasks[id] }
+        tasks[id]?.cancel()
+        sequence &+= 1
+        let request = sequence
+        requests[id] = request
+        reading[id] = source
+        let fetch = fetch
+        let task = Task { @MainActor [weak self, weak app] in
+            guard let app, !Task.isCancelled else { return }
+            let result: Result<WordsOutline, Error>
+            do {
+                let outline = try await fetch(app, source)
+                guard outline.branch == source.name, !source.tip.isEmpty, outline.head == source.tip else {
+                    throw Refusal("the branch's words named another source")
+                }
+                result = .success(outline)
+            } catch { result = .failure(error) }
+            guard let self, !Task.isCancelled, requests[id] == request else { return }
+            tasks[id] = nil
+            guard BranchSource.current(app, id) == source else {
+                reading[id] = nil
+                waiting[id] = (waiting[id] ?? []).filter { $0.current() }
                 return
             }
-            guard let self, self.reading[id] == key else { return }
-            self.shown[id] = got
-            self.waiting.removeValue(forKey: id)?.forEach { $0() }
-            if got.draft?.bodyPending == true, !self.pendingPoll.contains(id) {
-                self.pendingPoll.insert(id)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self, weak app] in
-                    guard let self, let app else { return }
-                    self.pendingPoll.remove(id)
-                    if self.reading[id] == key { self.load(app, id, force: true) }
+            switch result {
+            case .failure:
+                reading[id] = nil
+                let owned = waiting.removeValue(forKey: id) ?? []
+                if owned.contains(where: { $0.current() }) { app.runner.say("couldn't read the branch's words") }
+            case .success(let outline):
+                shown[id] = outline
+                shownSources[id] = source
+                let owned = waiting.removeValue(forKey: id) ?? []
+                for waiter in owned where waiter.current() { waiter.run() }
+                if outline.draft?.bodyPending == true, !pendingPoll.contains(id) {
+                    pendingPoll.insert(id)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self, weak app] in
+                        guard let self, let app else { return }
+                        self.pendingPoll.remove(id)
+                        if self.reading[id] == source { self.load(app, id, force: true) }
+                    }
                 }
             }
         }
+        tasks[id] = task
+        return task
     }
 
     private func trim(_ s: String) -> String { s.trimmingCharacters(in: .whitespacesAndNewlines) }

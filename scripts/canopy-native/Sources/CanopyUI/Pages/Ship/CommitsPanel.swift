@@ -32,7 +32,7 @@ struct StretchWords: View {
         }
         .font(Theme.text(12))
         .fixedSize(horizontal: false, vertical: true)
-        .task(id: app.store.view(Branch.self, branchID)?.tip) { WordsState.of(app).load(app, branchID) }
+        .task(id: BranchSource.current(app, branchID)) { WordsState.of(app).load(app, branchID) }
     }
 }
 
@@ -139,7 +139,7 @@ public struct WordsEditor: View {
                 }
             }
         }
-        .task(id: app.store.view(Branch.self, branchID)?.tip) { w.load(app, branchID) }
+        .task(id: BranchSource.current(app, branchID)) { w.load(app, branchID) }
     }
 
     /// The description as the server stores it: one line, runs of space folded (srv/outline.py).
