@@ -12,6 +12,7 @@ enum ForestsArea: PageArea {
         ProjectCommands.install(app)
         BranchCommands.install(app)
         ForestNav.install(app)
+        BenchOpening.install(app)
     }
 }
 

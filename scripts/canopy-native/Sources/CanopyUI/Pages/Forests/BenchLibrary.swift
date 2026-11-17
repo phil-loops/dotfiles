@@ -20,7 +20,7 @@ enum BenchSubject: Hashable, Sendable {
 struct BenchDocument: Equatable, Sendable {
     struct Head: Decodable {
         struct Scenario: Decodable {
-            struct Group: Decodable { let branch: String? }
+            struct Group: Decodable { let id: String?; let branch: String? }
             let repo: String
             let project: String?
             let groups: [Group]?
@@ -35,6 +35,7 @@ struct BenchDocument: Equatable, Sendable {
     let repo: String
     let project: String?
     let branches: Set<String>
+    let ambiguousBranches: Set<String>
     let revision: String
 
     init?(_ url: URL, _ data: Data) {
@@ -45,6 +46,7 @@ struct BenchDocument: Equatable, Sendable {
         repo = bench.repo
         project = bench.project
         branches = Set((bench.groups ?? []).compactMap(\.branch))
+        ambiguousBranches = Set((bench.groups ?? []).filter { $0.branch == nil }.map { $0.id ?? "undefined" }).intersection(branches)
         revision = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
@@ -99,6 +101,22 @@ struct BenchEntry: Equatable, Sendable {
         if case .branch(_, let name) = subject { return rows.filter { $0.group == name } }
         return rows
     }
+
+    func totals(for subject: BenchSubject) -> [BenchObservation]? {
+        var totals: [BenchObservation] = []
+        for row in observations(for: subject) {
+            guard let index = totals.firstIndex(where: { $0.environment == row.environment && $0.recordedAt == row.recordedAt }) else {
+                totals.append(row)
+                continue
+            }
+            let prior = totals[index]
+            let fixed = prior.fixed.addingReportingOverflow(row.fixed), total = prior.total.addingReportingOverflow(row.total)
+            guard !fixed.overflow, !total.overflow else { return nil }
+            totals[index] = BenchObservation(group: "", fixed: fixed.partialValue, total: total.partialValue,
+                                             environment: row.environment, recordedAt: row.recordedAt)
+        }
+        return totals
+    }
 }
 
 struct BenchIO: Sendable {
@@ -146,19 +164,34 @@ struct BenchIO: Sendable {
         return String(decoding: data, as: UTF8.self)
     }
 
-    func load(_ subject: BenchSubject) throws -> [BenchEntry] {
-        var documents: [URL: BenchDocument] = [:]
-        var contents: [URL: Data] = [:]
+    private func inventory() throws -> [URL: (document: BenchDocument, data: Data)] {
+        var files: [URL: (document: BenchDocument, data: Data)] = [:]
         for url in try list(directory) where url.pathExtension == "json" {
             try Task.checkCancellation()
             guard let data = try? read(url), data.count <= 8_388_608, let document = BenchDocument(url, data) else { continue }
-            documents[document.url] = document
-            contents[document.url] = data
+            files[document.url] = (document, data)
         }
-        let names = Dictionary(grouping: documents.values, by: { $0.url.deletingPathExtension().lastPathComponent })
-        return try documents.values.filter { $0.matches(subject) }.sorted { ($0.title, $0.url.path) < ($1.title, $1.url.path) }.map { document in
+        return files
+    }
+
+    private func matching(_ documents: [BenchDocument], _ subject: BenchSubject) -> [BenchDocument] {
+        let active = directory.standardizedFileURL.resolvingSymlinksInPath()
+        return documents.filter { $0.url.deletingLastPathComponent().path == active.path && $0.matches(subject) }
+            .sorted { ($0.title, $0.url.path) < ($1.title, $1.url.path) }
+    }
+
+    func documents(for subject: BenchSubject) throws -> [BenchDocument] {
+        try matching(inventory().values.map(\.document), subject)
+    }
+
+    func load(_ subject: BenchSubject) throws -> [BenchEntry] {
+        let files = try inventory()
+        let names = Dictionary(grouping: files.values.map(\.document), by: { $0.url.deletingPathExtension().lastPathComponent })
+        return try matching(files.values.map(\.document), subject).map { document in
             try Task.checkCancellation()
-            let output = names[document.url.deletingPathExtension().lastPathComponent]?.count == 1 ? try? status(document.url, contents[document.url]!) : nil
+            let ambiguous: Bool
+            if case .branch(_, let name) = subject { ambiguous = document.ambiguousBranches.contains(name) } else { ambiguous = false }
+            let output = !ambiguous && names[document.url.deletingPathExtension().lastPathComponent]?.count == 1 ? try? status(document.url, files[document.url]!.data) : nil
             try Task.checkCancellation()
             let current = (try? read(document.url)).flatMap { BenchDocument(document.url, $0) }
             let status = current == document ? output.map(BenchStatus.decode) ?? .unavailable : .unavailable

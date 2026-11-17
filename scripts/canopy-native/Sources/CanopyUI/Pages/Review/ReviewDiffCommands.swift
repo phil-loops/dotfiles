@@ -1065,6 +1065,7 @@ enum DiffCommands {
                            }))
         r.register(Command(id: "review.back", title: "Back out", scope: .review, verb: .cancel, label: "back", quiet: true,
                            local: { _, _ in
+                               if BenchOpening.backOut(app) { return }
                                if pg.guideOpen { return ReviewGuide.close(app) }
                                if ShipSeam.backOut(app) { return }
                                let look = CodeLookup.of(app)
