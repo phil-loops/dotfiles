@@ -506,6 +506,24 @@ private func showRows(_ a: AppModel) {
         for id in ["forest.parent", "forest.child", "forest.requires"] { #expect(a.registry.command(id)?.recordsJump == true, "\(id)") }
     }
 
+    @Test func aChildLabelCannotSelectABranchReparentedWhileItWasOpen() throws {
+        let app = page()
+        app.setCursor("b:r:a")
+        showRows(app)
+        app.runner.dispatch("child", via: .palette)
+        let label = try #require(app.labeling?.label("main", "b:r:c"))
+        let jumps = app.jumps.back.count
+        var child = try #require(app.store.raw["branch"]?["r:c"]?.object)
+        child["parentId"] = "r:b"; child["parent"] = "b"
+        let version = try #require(app.store.versions[Domain.git])
+        #expect(app.store.applyPatch(try Patch.make(domain: Domain.git, version: version + 1, upserts: ["branch": ["r:c": .object(child)]])) == .ok)
+        #expect(app.rows.contains("b:r:c"))
+        for key in label { app.keys.handle(String(key)) }
+        #expect(app.selected == "b:r:a")
+        #expect(app.jumps.back.count == jumps)
+        #expect(app.runner.note == "that destination changed; ask again")
+    }
+
     /// The rule, on a fan-in forest: ] b from every branch reaches the next in merge order, and [ b the one before —
     /// even where ancestry has nowhere to go (2 and 3 sit on main; 5 converges 4, 2 and 3).
     @Test func bracketBReachesTheNextInMergeOrderFromEveryBranchOfAFanIn() {

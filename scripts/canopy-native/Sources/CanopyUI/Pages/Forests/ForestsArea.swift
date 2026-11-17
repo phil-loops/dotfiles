@@ -89,13 +89,21 @@ struct ForestSurface: SurfaceProvider {
         return [Crumb(app.store.view(Project.self, id)?.name ?? id)]
     }
 
-    /// What's on screen — except while `g j` asks which child at a fork: then only those children,
-    /// and picking one only moves the cursor there.
+    /// Visible targets, restricted to the original branch's children during a child choice.
     func targets(_ app: AppModel) -> [LabelTarget] {
         let all = app.visibleTargets()
         guard let kids = app.forestModel.childChoice else { return all }
+        guard let origin = ForestNav.here(app)?.b else { return [] }
+        let reader = ReaderContext(app), epoch = app.store.epoch, git = app.store.versions[Domain.git]
         return all.filter { $0.pane == "main" && kids.contains($0.key) }.map { t in
             var t = t
+            let child = RowKey.id(t.key, "b")
+            t.acceptsPick = { [weak app] in
+                guard let app, reader.isCurrentAfterLabelChoice(app), app.store.epoch == epoch,
+                      app.store.versions[Domain.git] == git, ForestNav.here(app)?.b == origin,
+                      let child, app.store.view(Branch.self, child)?.parentId == origin.id else { return false }
+                return true
+            }
             t.run = RouteTo("cursor.set", target: t.key)
             return t
         }
