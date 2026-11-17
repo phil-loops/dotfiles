@@ -84,7 +84,6 @@ public final class ShipState {
     public var addressPicking = false
 
     // ── the branch's history: the line's commits ──
-    public private(set) var history: (key: String, rows: [HistoryCommit])?
     /// the one commit whose diff shows (nil: the whole branch, "lands on main") — the host's, read through
     public var commitScope: String? { host.commitScope }
 
@@ -276,31 +275,28 @@ public final class ShipState {
 
     // ── the history list (GET /commits) ──
 
-    /// The history's freshness: the tip, and what origin has — a push changes the second, not the first.
-    static func historyKey(_ b: Branch) -> String { "\(b.repo)|\(b.name)|\(b.tip)|\(b.pushed.rawValue)|\(b.ahead)" }
+    public func loadHistory(_ app: AppModel, _ id: String) { BranchHistory.of(app).load(id) }
 
-    public func loadHistory(_ app: AppModel, _ id: String) {
-        guard let b = app.store.view(Branch.self, id) else { return }
-        let key = Self.historyKey(b)
-        if history?.key == key { return }
-        let t = app.transport
-        let path = t.atRepo(b.repo, "/commits?branch=\(b.name.uriComponent)")
-        Task { @MainActor [weak self, weak app] in
-            guard let rows = try? await t.getJSON(path, as: [HistoryCommit].self) else { return }
-            guard let self, let app, let now = app.store.view(Branch.self, id), Self.historyKey(now) == key else { return }
-            self.history = (key, rows.filter(\.own))
+    public func historyRows(_ id: String) -> [HistoryCommit]? {
+        guard let app else { return nil }
+        return BranchHistory.of(app).rows(id)
+    }
+
+    func historyNote(_ id: String) -> String {
+        guard let app else { return "commit history unavailable" }
+        switch BranchHistory.of(app).state(id) {
+        case .idle: return "commits not loaded"
+        case .loading: return "reading the commits…"
+        case .failed: return "couldn't read the commits · :review.commits.retry"
+        case .ready: return "no commits to step"
         }
     }
 
-    public func historyRows(_ id: String) -> [HistoryCommit]? { history?.key.hasPrefix(Self.branchKey(id)) == true ? history?.rows : nil }
-
-    static func branchKey(_ id: String) -> String {
-        guard let cut = id.firstIndex(of: ":") else { return id }
-        return "\(id[..<cut])|\(id[id.index(after: cut)...])|"
+    /// Install a history read only while its branch metadata still matches.
+    public func putHistory(_ branch: Branch, _ rows: [HistoryCommit]) {
+        guard let app, app.store.view(Branch.self, branch.id) == branch else { return }
+        BranchHistory.of(app).put(branch.id, rows: rows)
     }
-
-    /// For tests and the forest page: a history read put in place.
-    public func putHistory(_ b: Branch, _ rows: [HistoryCommit]) { history = (Self.historyKey(b), rows.filter(\.own)) }
 
     /// The one commit the diff covers, when it covers just one and that isn't all that lands: its words sit above the diff.
     public static func wordsCommit(_ app: AppModel) -> String? { of(app).host.loneCommit }
