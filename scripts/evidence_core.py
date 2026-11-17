@@ -801,6 +801,17 @@ def judge(mid, verdict, note, actor):
     return entry
 
 
+def judge_current(repo, branch, mid, verdict, note, actor):
+    """Judge `mid` only while it is the evidence `branch` shows for its current subject: the click
+    names what Phil saw, and a sync or request edit since then makes it a different question."""
+    shown = card(repo, branch)
+    if shown.get("id") != mid:
+        raise Refused(f"{branch} no longer shows {mid[:12]} — look again")
+    if not shown.get("current"):
+        raise Refused(f"{mid[:12]} is of older code or an older request than {branch} has now — look again")
+    return judge(mid, verdict, note, actor)
+
+
 def status(m, mid):
     """Phil's judgment of this manifest: his own on it, else one carried from an identical observation.
     Eligibility is checked now, not only at judging: a verdict on a manifest that has since become

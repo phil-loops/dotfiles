@@ -218,6 +218,23 @@ open(os.path.join(E.RECIPES, "r1", "recipe.json"), "w").write('{"kind": "app", "
 check(not E.is_current(fresh_m, rq, bs), "editing the recipe in place makes its old evidence stale")
 check(not E.is_current(fresh_m, dict(rq, expectation="f"), bs), "a changed expectation makes it stale")
 check(not E.is_current(fresh_m, rq, dict(bs, afterTree="at2")), "a moved branch makes it stale")
+# ── a verdict lands only on the evidence the branch shows right now ──
+cur = publish(dict(copy.deepcopy(base), basis=dict(base["basis"], afterCommit="a9")))
+orig_card = E.card
+try:
+    for shown, what in (({"id": cur, "current": False}, "a manifest gone stale since it was shown"),
+                        ({"id": "e" * 64, "current": True}, "a manifest the branch no longer shows")):
+        E.card = lambda repo, branch, s=shown: s
+        try:
+            E.judge_current("r", "b", cur, "accept", "", "browser")
+            check(False, f"{what} can't be judged")
+        except E.Refused:
+            check(True, f"{what} can't be judged")
+    E.card = lambda repo, branch: {"id": cur, "current": True}
+    check(E.judge_current("r", "b", cur, "accept", "", "browser")["manifest"] == cur,
+          "the branch's current manifest can be judged")
+finally:
+    E.card = orig_card
 # ── owned execution: a run never serves a package build an earlier run left behind ──
 side = os.path.join(tmp, "side-co")
 for pkg in ("mail-pg", "prisma"):
