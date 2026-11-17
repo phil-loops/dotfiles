@@ -27,6 +27,7 @@ struct ForestsPage: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         VStack(alignment: .leading, spacing: 0) {
+                            WorkInProgressView()
                             WindowLine(fs: fs, now: m.now)
                             if !m.readyOnly, let next = p.focus.compactMap({ fs[$0.id] }).first(where: { !$0.ready.isEmpty }) {
                                 NextMove(f: next)
@@ -66,7 +67,9 @@ struct ForestsPage: View {
                         .glides(rows, reduced: reduced)
                     }
                     .labelPane("main")
+                    .labelPane("work")
                     .onChange(of: cursor) { _, k in if let k { proxy.scrollTo(k) } }
+                    .onChange(of: app.selected) { _, k in if let k, app.isFocused("work") { proxy.scrollTo(k) } }
                 }
             }
         }
@@ -101,6 +104,7 @@ struct ForestsPage: View {
                 }
                 ForEach(views, id: \.p.id) { f in
                     ForestRowView(f: f, nameWidth: nameWidth, cursor: cursor == RowKey.project(f.p.id), selected: selection.contains(RowKey.project(f.p.id)))
+                    WorkContextView(subject: .forest(f.p.id), compact: true).padding(.leading, 44).padding(.trailing, 16)
                     if m.launching == f.p.id { LaunchLine(f: f) }
                     let ids = m.readyOnly ? f.ready : m.expanded.contains(f.p.id) ? f.branches : []
                     ForEach(ids, id: \.b.id) { v in

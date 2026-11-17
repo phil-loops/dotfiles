@@ -96,6 +96,8 @@ server is listening there, or in `~/coding/loops` (62497 today). Deep links: `ca
 
 ## 2½. The look
 
+Work status, update dates and literal user input follow [WORK-CONTEXT.md](WORK-CONTEXT.md). When working on a tracked item, preserve its latest recorded input through progress and completion updates; record a new instruction with its real recording time and explicit source.
+
 Calm ledger, not a control panel. Check a change by `--shoot`ing it, never by guessing.
 - **No boxes.** Panes, pages and chips carry no stroked border; focus shows as the lit cursor row (PaneList) or a 1pt
   goldDeep hairline on the focused pane's leading edge. Floating layers (picker, menu, sheet, which-key) keep their edge.

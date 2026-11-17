@@ -8,7 +8,12 @@ import Observation
 @Observable
 final class TrackerUI {
     var open: Set<String> = []
+    var revealed: Set<String> = []
     var list: String?
+
+    func sections(_ store: Store) -> [(section: Tracker.Section, items: [TodoItem])] {
+        Tracker.displayed(store.trackerItems(on: list), revealing: revealed)
+    }
 }
 
 /// What `todo.state` puts back (the inverse of start/done/drop).
@@ -68,6 +73,7 @@ enum TodoCommands {
                            local: { [weak app, weak ui] _, arg in
                                guard let app, let ui, let id = arg as? String, let t = app.store.trackerItem(id) else { throw Refusal("no such item") }
                                ui.list = t.project
+                               ui.revealed = t.state == .done || t.state == .dropped ? [id] : []
                                ui.open.insert(id)
                                app.go(.todo)
                                app.setCursor(RowKey.todo(id))

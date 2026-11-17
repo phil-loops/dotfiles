@@ -4,9 +4,9 @@ import Foundation
 /// The tracker page's order (tracker.ts): what needs Phil, what's under way, the ranked queue, what
 /// waits on something else. Pure, so the page, the cursor and reordering agree.
 enum Tracker {
-    enum Section: String, CaseIterable { case broken, decide, doing, next, waiting }
+    enum Section: String, CaseIterable { case broken, decide, doing, next, waiting, recorded }
 
-    static let titles: [Section: String] = [.broken: "Can't read", .decide: "Needs you", .doing: "Doing", .next: "Next", .waiting: "Waiting"]
+    static let titles: [Section: String] = [.broken: "Can't read", .decide: "Needs you", .doing: "In progress", .next: "Next", .waiting: "Waiting", .recorded: "Opened records"]
 
     static func sectionOf(_ t: TodoItem) -> Section? {
         if t.state == "broken" { return .broken }
@@ -38,6 +38,11 @@ enum Tracker {
     /// Open items by section, each in rank order (unranked after, oldest first); empty sections left out.
     static func queue(_ items: [TodoItem]) -> [(section: Section, items: [TodoItem])] {
         Section.allCases.map { s in (s, items.filter { sectionOf($0) == s }.sorted(by: byQueue)) }.filter { !$0.1.isEmpty }
+    }
+
+    static func displayed(_ items: [TodoItem], revealing: Set<String>) -> [(section: Section, items: [TodoItem])] {
+        let records = items.filter { revealing.contains($0.id) && ($0.state == .done || $0.state == .dropped) }.sorted(by: byQueue)
+        return queue(items) + (records.isEmpty ? [] : [(.recorded, records)])
     }
 
     /// New ranks for moving `id` to position `to` within its section. The section keeps the rank

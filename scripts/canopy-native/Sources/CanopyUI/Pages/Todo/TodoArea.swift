@@ -19,8 +19,7 @@ struct TodoSurface: SurfaceProvider {
 
     /// model.ts rows on the tracker: its items, section by section.
     func rows(_ app: AppModel) -> [String] {
-        let list = app.state { TrackerUI() }.list
-        return Tracker.queue(app.store.trackerItems(on: list)).flatMap { $0.items.map { RowKey.todo($0.id) } }
+        app.state { TrackerUI() }.sections(app.store).flatMap { $0.items.map { RowKey.todo($0.id) } }
     }
 
     func panes(_ app: AppModel) -> [Pane] { [Pane(id: "main", title: "tracker", rows: rows(app))] }
@@ -49,15 +48,17 @@ struct TodoPage: View {
     @Environment(\.theme) private var theme
 
     var body: some View {
-        let list = app.state { TrackerUI() }.list
-        let sections = Tracker.queue(app.store.trackerItems(on: list))
-        let open = sections.reduce(0) { $0 + $1.items.count }
+        let ui = app.state { TrackerUI() }, list = ui.list
+        let sections = ui.sections(app.store)
+        let open = app.store.trackerItems(on: list).filter { Tracker.sectionOf($0) != nil }.count
         if !app.store.ready {
             Text("reading the tracker…").foregroundStyle(theme.inkFaint).padding(.horizontal, 44)
         } else {
             FollowScroll(panes: ["main"]) {
                 VStack(alignment: .leading, spacing: 0) {
                     heading(list, open).foregroundStyle(theme.inkDim).padding(.leading, 44).padding(.bottom, 20)
+                    WorkContextView(subject: list.map(WorkContext.Subject.forest) ?? .viewer, showsMissing: true)
+                        .padding(.leading, 44).padding(.trailing, 16).padding(.bottom, 20)
                     if sections.isEmpty { Text("nothing tracked").foregroundStyle(theme.inkFaint).padding(.leading, 44) }
                     ForEach(sections, id: \.section) { s in
                         VStack(alignment: .leading, spacing: 0) {
@@ -103,24 +104,33 @@ struct TodoRow: View {
                 }
                 .frame(minHeight: 34)
                 .padding(.leading, 28).padding(.trailing, 16)
+                Text([WorkContext.status(t), WorkContext.owner(t, app.store), WorkContext.updateLabel(t.updated)]
+                    .compactMap { $0 }.joined(separator: " · "))
+                    .font(Theme.text(11)).foregroundStyle(t.state == .doing ? theme.goldLeaf : theme.inkFaint)
+                    .padding(.leading, 68).padding(.trailing, 16).padding(.bottom, 6)
                 if on && !open {
                     let line = t.state == "waiting" ? "⏳ \(t.waiting ?? "")" : !(t.problems ?? []).isEmpty ? t.problems!.joined(separator: " · ") : t.why
                     if !line.isEmpty {
                         Text(line).font(Theme.text(12.5)).foregroundStyle(t.state == "broken" ? theme.ember : theme.inkDim)
                             .padding(.leading, 68).padding(.trailing, 16).padding(.bottom, 8)
                     }
+                    WorkInputView(input: RecordedWorkInput.chat(in: t.body))
+                        .padding(.leading, 68).padding(.trailing, 16).padding(.bottom, 10)
                 }
             }
         }
+        .labelTarget(pane: "main", key: RowKey.todo(t.id), title: t.title)
         if open { notes }
     }
 
     private var notes: some View {
         VStack(alignment: .leading, spacing: 8) {
+            WorkInputView(input: RecordedWorkInput.chat(in: t.body), lines: nil)
             if !t.why.isEmpty { Text(t.why).foregroundStyle(theme.ink) }
             if let p = t.problems, !p.isEmpty { Text(p.joined(separator: " · ")).foregroundStyle(theme.ember) }
             if let b = t.blocked_by, !b.isEmpty { Text("after: \(b.joined(separator: ", "))") }
-            if !t.body.isEmpty { MarkdownView(t.body, size: 13) }
+            let body = RecordedWorkInput.chat(in: t.body)?.notes ?? t.body
+            if !body.isEmpty { MarkdownView(body, size: 13) }
             if let l = t.links, !l.isEmpty { Text(l.joined(separator: " · ")).foregroundStyle(theme.inkFaint) }
             Text("\(t.id) · since \(t.created ?? "?") · /next \(t.id)").font(Theme.text(11)).foregroundStyle(theme.inkFaint)
         }
