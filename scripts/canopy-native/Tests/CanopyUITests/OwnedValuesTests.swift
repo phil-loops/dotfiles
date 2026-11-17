@@ -124,4 +124,18 @@ import Testing
         #expect(values.values["b"] == "new" && values.before(newer, "b") == nil)
     }
 
+
+    @Test func pendingOwnershipIncludesANilValuedHeadUntilItIsAnsweredOrReplaced() {
+        let values = OwnedValues<String, String>()
+        let receipt = values.stage([.init(key: "a", value: nil)])
+        #expect(values.isPending("a"))
+        values.accept(receipt)
+        #expect(!values.isPending("a"))
+        let newer = values.stage([.init(key: "a", value: nil)])
+        values.set("a", nil)
+        #expect(!values.isPending("a"))
+        values.rollback(newer)
+        #expect(!values.isPending("a") && values.values["a"] == nil)
+    }
+
 }
