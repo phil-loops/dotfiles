@@ -29,6 +29,8 @@ final class Ctx: CommandContext {
     func target(for scope: Scope) -> String? { targets[scope] }
     func liveScopes() -> [Scope] { scopes }
     func closeMenu() {}
+    var jumps = 0
+    func willJump(_ id: String) { jumps += 1 }
     var at = Place(route: .forests, pane: "main", cursorKey: "a")
     func placeNow() -> Place? { at }
     func returnTo(_ p: Place) { at = p }
@@ -45,6 +47,29 @@ final class Ctx: CommandContext {
         let ctx = Ctx()
         runner.context = ctx
         return (runner, store, ctx)
+    }
+
+    @Test func aSessionRefusalPrecedesRoutingAndEveryKindOfEffect() throws {
+        let (runner, _, ctx) = try setup()
+        var effects = 0
+        var counted = 0
+        runner.onRun = { _ in counted += 1 }
+        runner.registry.register(Command(id: "local", title: "Local", scope: .global, recordsJump: true, local: { _, _ in effects += 1 }))
+        runner.registry.register(Command(id: "route", title: "Route", scope: .global, route: { _ in effects += 1; return RouteTo("local") }))
+        runner.registry.register(Command(id: "task", title: "Task", scope: .global, task: { _, _ in effects += 1; return nil }))
+        runner.registry.register(Command(id: "write", title: "Write", scope: .row, write: { _, _ in effects += 1; return nil }))
+        ctx.targets[.row] = "row"
+        runner.refusal = { _ in "read-only session" }
+        for id in ["local", "route", "task", "write"] {
+            try runner.arm("pending")
+            runner.dispatch(id, via: .key)
+            #expect(effects == 0 && counted == 0 && ctx.jumps == 0)
+            #expect(runner.note == "read-only session" && runner.fired?.ok == false)
+            #expect(runner.armed == nil && runner.runOf(id, nil) == nil)
+        }
+        runner.refusal = nil
+        runner.dispatch("route", via: .key)
+        #expect(effects == 2 && counted == 1)
     }
 
     @Test func aConfirmLastsOneCommandAndRetNeverArmsOrSends() throws {

@@ -58,6 +58,8 @@ public final class Runner {
     @ObservationIgnored public let transport: Transport
     /// Each command as it runs (after its availability check): the `?` sheet ranks keys by it.
     @ObservationIgnored public var onRun: ((String) -> Void)?
+    /// A session can refuse a command before routing, jump recording or any effect.
+    @ObservationIgnored public var refusal: ((Command) -> String?)?
     @ObservationIgnored public let telemetry: Telemetry
     @ObservationIgnored public weak var context: CommandContext?
     /// Refetch the whole store (the event stream's resync): what a write the server never shows waits on.
@@ -139,6 +141,11 @@ public final class Runner {
         held = nil   // the next key drops a hold, whatever kind of command it is; a Hold below re-takes it
         if via == .menu || via == .palette { context?.closeMenu() }
         let named = from ?? id
+        if let why = refusal?(cmd) {
+            armed = nil
+            say(why)
+            return echo(named, via, false, explained: true)
+        }
         let opens = opening || cmd.verbs.contains(.main)
         if let route = cmd.route {
             let next = route(explicit ?? context?.target(for: cmd.scope))
