@@ -45,7 +45,8 @@ def _subject(card):
     replays the same patch onto a newer main is a new subject — its before side really is different."""
     req = card.get("request")
     b = E.basis(ctx.repo_cwd(), card["_branch"])
-    return E._sha(E._canon({"trees": [b["beforeTree"], b["afterTree"]], "request": req}))
+    return E._sha(E._canon({"trees": [b["beforeTree"], b["afterTree"]], "request": req,
+                            "recipe": E.recipe_digest(req["recipe"])}))
 
 
 def _refresh(branch, card):

@@ -205,6 +205,19 @@ check("components/Other.tsx" in E.coverage(repo, bb, claims)["uncovered"],
 vague = E.coverage(repo, bb, {"kind": "app", "views": [{"id": "p", "field": "form input", "file": "components/Detail.tsx"}]})
 check(vague["unverified"] == ["components/Detail.tsx"] and "components/Detail.tsx" in vague["uncovered"],
       "a view whose field pins nothing checkable leaves its file unverified, not covered")
+# ── one subject: an edited recipe makes old evidence stale ──
+E.RECIPES = os.path.join(tmp, "recipes")
+os.makedirs(os.path.join(E.RECIPES, "r1"))
+open(os.path.join(E.RECIPES, "r1", "recipe.json"), "w").write('{"kind": "app", "views": [{"field": "#a"}]}')
+rq = {"recipe": "r1", "expectation": "e", "predict": {"*": "field"}}
+bs = {"beforeTree": "bt", "afterTree": "at"}
+fresh_m = {"basis": dict(bs), "recipe": {"name": "r1", "digest": E.recipe_digest("r1")}, "expectation": "e",
+           "predict": {"*": "field"}}
+check(E.is_current(fresh_m, rq, bs), "a manifest of these trees under this recipe and request is current")
+open(os.path.join(E.RECIPES, "r1", "recipe.json"), "w").write('{"kind": "app", "views": [{"field": "#b"}]}')
+check(not E.is_current(fresh_m, rq, bs), "editing the recipe in place makes its old evidence stale")
+check(not E.is_current(fresh_m, dict(rq, expectation="f"), bs), "a changed expectation makes it stale")
+check(not E.is_current(fresh_m, rq, dict(bs, afterTree="at2")), "a moved branch makes it stale")
 # ── owned execution: a run never serves a package build an earlier run left behind ──
 side = os.path.join(tmp, "side-co")
 for pkg in ("mail-pg", "prisma"):
