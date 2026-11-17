@@ -8,14 +8,16 @@ enum MachineArea: PageArea {
 
     static func install(_ app: AppModel) {
         app.addSurface(MachineSurface())
-        app.registry.addScopes([.queue], to: "machine")
+        app.registry.addScopes([.queue, .reportedRun], to: "machine")
         app.addSurface(DashboardSurface())
         MachineCommands.install(app)
+        MachineRunCommands.install(app)
         DashboardCommands.install(app)
     }
 }
 
 extension Scope { static let queue: Scope = "queue" }
+extension Scope { static let reportedRun: Scope = "reported-run" }
 
 struct MachineSurface: SurfaceProvider {
     let surfaceID = "machine"
@@ -28,7 +30,7 @@ struct MachineSurface: SurfaceProvider {
         let m = app.state { Workstation(app: app) }
         var out = [Pane(id: "servers", title: "serving", rows: m.servers.map { RowKey.server($0.sid) })]
         if m.logFor != nil { out.append(Pane(id: "log", title: "log", rows: m.logLines.indices.map { "log:\($0)" }, row: 1, pageSize: 20)) }
-        let qrows = Workstation.queueRows(m.queue)
+        let qrows = Workstation.queueRows(m.queue) + MachineRuns.of(app).runs.map(\.key)
         if !qrows.isEmpty { out.append(Pane(id: "queue", title: "queue", rows: qrows, row: 1)) }
         return out
     }
@@ -37,16 +39,21 @@ struct MachineSurface: SurfaceProvider {
     func primary(for row: String, _ app: AppModel) -> RouteTo? {
         if let id = RowKey.id(row, "m") { return RouteTo("machine.open", target: id) }
         if let id = RowKey.id(row, "q") { return RouteTo("machine.queue.open", target: id) }
+        if let path = RowKey.id(row, "run") { return RouteTo("machine.run.open", target: path) }
         return nil
     }
 
     func scopes(_ app: AppModel) -> [Scope] {
-        (target(for: .server, app) != nil ? [.server] : []) + (target(for: .queue, app) != nil ? [.queue] : [])
+        (target(for: .server, app) != nil ? [.server] : []) + (target(for: .queue, app) != nil ? [.queue] : []) + (target(for: .reportedRun, app) != nil ? [.reportedRun] : [])
     }
 
     /// The server under the cursor (in the log pane, the server whose log it is); the queue row under it.
     func target(for scope: Scope, _ app: AppModel) -> String? {
         let m = app.state { Workstation(app: app) }
+        if scope == .reportedRun {
+            guard let path = RowKey.id(app.selected, "run"), MachineRuns.of(app).run(path) != nil else { return nil }
+            return path
+        }
         if scope == .queue {
             guard let id = RowKey.id(app.selected, "q"), m.queueRow(id) != nil else { return nil }
             return id
@@ -87,26 +94,25 @@ struct MachinePage: View {
 
     var body: some View {
         let m = app.state { Workstation(app: app) }
-        Group {
-            if m.substrate == nil {
-                Text("taking stock…").foregroundStyle(theme.inkFaint).padding(.horizontal, 44)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            } else {
-                FollowScroll(panes: ["servers", "log"]) {
-                    VStack(alignment: .leading, spacing: 32) {
-                        Servers()
-                        StackSection()
-                        QueueSection()
-                        FootprintSection()
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, 8)
-                }
+        FollowScroll(panes: ["servers", "log", "queue"]) {
+            VStack(alignment: .leading, spacing: 32) {
+                Servers()
+                StackSection()
+                QueueSection()
+                FootprintSection()
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 8)
         }
         .padding(.horizontal, 16).padding(.bottom, 8)
         .onAppear { stop = m.watch() }
         .onDisappear { stop?(); stop = nil }
+        .task {
+            while !Task.isCancelled {
+                await MachineRuns.of(app).refresh()
+                do { try await Task.sleep(nanoseconds: 3_000_000_000) } catch { break }
+            }
+        }
     }
 }
 
@@ -130,12 +136,12 @@ private struct Servers: View {
                 if app.runner.armed == "kill all" { Lever(id: "machine.killall", word: "again kills \(n) · esc", danger: true) }
             }
             .padding(.leading, 28).padding(.trailing, 16).padding(.bottom, 4)
-            if n == 0 { Text("nothing serving").foregroundStyle(theme.inkFaint).padding(.leading, 28) }
+            if n == 0 { Text(m.previewsFailed ? "servers unavailable" : m.previewsLoaded ? "nothing serving" : "reading servers…").foregroundStyle(theme.inkFaint).padding(.leading, 28) }
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(m.servers, id: \.sid) { s in ServerRow(s: s) }
             }
             .paneRing("servers")
-            mainLine(m).padding(.leading, 28).padding(.top, 8)
+            if m.previewsLoaded, !m.previewsFailed { mainLine(m).padding(.leading, 28).padding(.top, 8) }
         }
     }
 
@@ -313,7 +319,7 @@ private struct StackSection: View {
                 }
                 .font(Theme.text(12))
             } else {
-                HStack { SectionHead(text: "stack"); Text("…").foregroundStyle(theme.inkFaint) }
+                HStack { SectionHead(text: "stack"); Text(m.previewsFailed ? "unavailable" : "…").foregroundStyle(theme.inkFaint) }
             }
         }
         .font(Theme.text(12))
@@ -353,12 +359,14 @@ private struct QueueSection: View {
                         }
                     }
                 }
-                .paneRing("queue")
                 ForEach(q.warnings, id: \.self) { w in Text("⚠ \(w)").foregroundStyle(theme.ember) }
             } else {
-                SectionHead(text: "queue · …")
+                SectionHead(text: "queue")
+                Text("slot report unavailable").foregroundStyle(theme.inkFaint)
             }
+            MachineRunsRows()
         }
+        .paneRing("queue")
         .font(Theme.text(12))
         .padding(.leading, 28).padding(.trailing, 16)
     }

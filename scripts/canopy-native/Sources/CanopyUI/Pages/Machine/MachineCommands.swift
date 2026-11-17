@@ -132,7 +132,7 @@ enum MachineCommands {
 
         r.register(Command(id: "machine.main", title: "Run main (on the port beside it, else a free one)", scope: .machine, budget: .slowIO,
                            leader: LocalKey(",m"), label: "main", v1: ["click:▷ run main"],
-                           available: { [weak m] _ in m != nil && m!.main == nil },
+                           available: { [weak m] _ in m?.previewsLoaded == true && m?.previewsFailed == false && m?.main == nil },
                            write: { [weak m] _, _ in
                                guard let m else { return nil }
                                return Write(path: "/preview-main", body: ["port": .string(m.mainPort.trimmingCharacters(in: .whitespacesAndNewlines))],

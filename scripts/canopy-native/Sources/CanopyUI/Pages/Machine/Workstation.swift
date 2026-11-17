@@ -13,6 +13,8 @@ final class Workstation {
     enum LogSource: String { case web, jobs }
 
     private(set) var servers: [Server] = []
+    private(set) var previewsLoaded = false
+    private(set) var previewsFailed = false
     private(set) var substrate: Substrate?
     private(set) var footprint: Footprint?
     private(set) var queue: Queue?
@@ -40,6 +42,8 @@ final class Workstation {
 
     /// Take a read the page didn't fetch (tests; a future push of the same shape).
     func take(_ p: Previews) {
+        previewsLoaded = true
+        previewsFailed = false
         servers = p.previews ?? []
         substrate = p.substrate
         app?.store.nudge()
@@ -71,7 +75,8 @@ final class Workstation {
         guard let t = app?.transport else { return }
         reading = true
         Task { @MainActor [weak self] in
-            if let r = try? await t.getJSON("/previews", as: Previews.self) { self?.take(r) }
+            do { self?.take(try await t.getJSON("/previews", as: Previews.self)) }
+            catch { self?.previewsFailed = true }
             guard let self else { return }
             self.reading = false
             if self.again { self.again = false; self.refresh() }
