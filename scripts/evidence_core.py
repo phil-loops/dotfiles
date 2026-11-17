@@ -42,6 +42,8 @@ CACHE = os.environ.get("EVIDENCE_CACHE") or os.path.join(HOME, ".cache", "canopy
 LEDGER = os.environ.get("EVIDENCE_LEDGER") or os.path.join(HOME, ".local", "share", "canopy", "evidence", "ledger.jsonl")
 RENDERER = os.path.join(DOT, "scripts", "evidence-render.mjs")
 APP_RENDERER = os.path.join(DOT, "scripts", "evidence-app-render.mjs")
+API_CAPTURE = os.path.join(DOT, "scripts", "evidence-api-capture.mjs")
+LIVE_KINDS = ("app", "api")
 PREVIEW = os.path.join(DOT, "scripts", "loops-preview")
 PROVENANCE = os.path.join(DOT, "scripts", "loops-provenance")
 APP_LOGIN = "user-1@example.com"
@@ -227,6 +229,9 @@ def environment(repo, commit, donor):
 def renderer_contract(renderer=RENDERER):
     with open(renderer, "rb") as f:
         code = _sha(f.read())
+    if renderer == API_CAPTURE:
+        with open(os.path.join(os.path.dirname(API_CAPTURE), "evidence-json.mjs"), "rb") as f:
+            return {"renderer": code, "json": _sha(f.read())}
     chrome = subprocess.run([CHROME, "--version"], capture_output=True, text=True).stdout.strip()
     if not chrome:
         raise Refused("Google Chrome isn't installed where the renderer expects it")
@@ -333,8 +338,23 @@ def app_scenes(recipe):
             for v in recipe["views"] for x in recipe["variants"]]
 
 
+def api_scenes(recipe):
+    """Every request in every variant — the same expansion the capture script makes; no variants, one each."""
+    variants = recipe.get("variants") or [None]
+    return [{**r, **(x or {}), "id": f"{r['id']}-{x['id']}" if x else r["id"], "request": r["id"]}
+            for r in recipe["requests"] for x in variants]
+
+
+def check_api_recipe(recipe):
+    """Reads only: a write changes the shared dev database that the other side and the repeat attempt read."""
+    writes = [r["id"] for r in recipe.get("requests", []) if (r.get("method") or "GET").upper() != "GET"]
+    if writes:
+        raise Refused(f"api recipes capture GET requests only; {', '.join(writes)} would write to the dev database")
+
+
 def scenes_of(recipe):
-    return app_scenes(recipe) if recipe.get("kind") == "app" else recipe["scenes"]
+    kind = recipe.get("kind")
+    return app_scenes(recipe) if kind == "app" else api_scenes(recipe) if kind == "api" else recipe["scenes"]
 
 
 def _checkout(repo, side, commit, log):
@@ -465,7 +485,8 @@ def _login_token(d):
     return json.dumps({"email": APP_LOGIN, "token": token})
 
 
-def app_render(repo, side, commit, tree, recipe_digest, frozen_recipe, contract, donor, nonce, log=print):
+def app_render(repo, side, commit, tree, recipe_digest, frozen_recipe, contract, donor, nonce, log=print,
+               renderer=APP_RENDERER, kind="app"):
     """Both attempts against one server for this commit, then the server goes away. Never reused by a
     later run: the database isn't part of the identity, so only captures from one run share their data."""
     lock = subprocess.run(["git", "-C", repo, "show", f"{commit}:package-lock.json"], capture_output=True).stdout
@@ -476,7 +497,7 @@ def app_render(repo, side, commit, tree, recipe_digest, frozen_recipe, contract,
            # loops-preview borrows main's built workspace packages unless this tree's differ (then it rebuilds)
            "packages": "rebuilt from this tree" if own_packages else "borrowed: main's build, unverified against main's sources",
            "db": "local dev database", "user": APP_LOGIN}
-    identity = {"schema": SCHEMA, "kind": "app", "tree": tree, "recipe": recipe_digest, "env": env,
+    identity = {"schema": SCHEMA, "kind": kind, "tree": tree, "recipe": recipe_digest, "env": env,
                 "contract": contract, "run": nonce}
     render_id = _sha(_canon(identity))
     d = os.path.join(HOME, "coding", f"{repo_name(repo)}-evidence-{side}")
@@ -487,13 +508,13 @@ def app_render(repo, side, commit, tree, recipe_digest, frozen_recipe, contract,
             served = _git(d, "rev-parse", "HEAD")
             if served != commit:
                 raise Refused(f"{d} served {served[:10]}, not {commit[:10]}")
-            runs = [_attempt(base, frozen_recipe, donor, render_id, n, log, APP_RENDERER, {"EVIDENCE_LOGIN": _login_token(d)})
+            runs = [_attempt(base, frozen_recipe, donor, render_id, n, log, renderer, {"EVIDENCE_LOGIN": _login_token(d)})
                     for n in (1, 2)]
         finally:
             _stop(d)
     results = [r for _, r in runs]
     for r in results:
-        if r.get("browser") != contract["browser"]:
+        if contract.get("browser") and r.get("browser") != contract["browser"]:
             raise Refused(f"rendered with Chrome {r.get('browser')}, pinned {contract['browser']}")
     observed = [{k: v["sha"] for k, v in r["scenes"].items()} for r in results]
     framed = [{k: v.get("frame") for k, v in r["scenes"].items()} for r in results]
@@ -509,9 +530,9 @@ def app_render(repo, side, commit, tree, recipe_digest, frozen_recipe, contract,
             if not os.path.exists(dest):
                 os.makedirs(os.path.dirname(dest), exist_ok=True)
                 tmp = f"{dest}.{os.getpid()}.tmp"
-                shutil.copyfile(os.path.join(dd, "scenes", f"{scene}.png"), tmp)
+                shutil.copyfile(os.path.join(dd, "scenes", s.get("file") or f"{scene}.png"), tmp)
                 os.replace(tmp, dest)
-    fields = {k: v["field"] for k, v in results[0]["scenes"].items()}
+    fields = {k: v.get("field") for k, v in results[0]["scenes"].items()}
     at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
     _write_atomic(_admission_path(render_id), _canon({
         "status": "repeatable", "renderId": render_id, "identity": identity, "scenes": observed[0], "fields": fields,
@@ -554,6 +575,8 @@ def measure(before_sha, after_sha, modules):
 
 
 def obligations(recipe):
+    if recipe.get("kind") == "api":
+        return api_scenes(recipe)
     if recipe.get("kind") == "app":
         return [{k: v for k, v in sc.items()} | {"viewport": recipe.get("viewport")} for sc in app_scenes(recipe)]
     shared = {k: recipe.get(k) for k in ("component", "props", "callbacks", "valueSelector", "frame", "viewport")}
@@ -571,10 +594,72 @@ def predictions(req, scene_ids):
     if missing:
         raise Refused(f"no prediction for {', '.join(missing)} (name each, or give \"*\")")
     out = {s: p.get(s, default) for s in scene_ids}
-    bad = {k: v for k, v in out.items() if v not in PREDICTIONS}
+    bad = {k: v for k, v in out.items() if not (v in PREDICTIONS or _paths_prediction(v))}
     if bad:
-        raise Refused(f"predict values are {', '.join(PREDICTIONS)}: {bad}")
+        raise Refused(f"predict values are {', '.join(PREDICTIONS)} or {{\"paths\": [\"$.…\"]}}: {bad}")
     return out
+
+
+def _paths_prediction(v):
+    return (isinstance(v, dict) and set(v) == {"paths"} and isinstance(v["paths"], list) and v["paths"]
+            and all(isinstance(p, str) and p.startswith("$") for p in v["paths"]))
+
+
+def json_diff(a, b, path="$"):
+    """Every path where `a` and `b` differ, leaf by leaf: changed, added (absent before) or removed."""
+    if isinstance(a, dict) and isinstance(b, dict):
+        out = []
+        for k in sorted(set(a) | set(b)):
+            p = f"{path}.{k}"
+            if k not in a:
+                out.append({"path": p, "before": None, "after": b[k], "added": True})
+            elif k not in b:
+                out.append({"path": p, "before": a[k], "after": None, "removed": True})
+            else:
+                out += json_diff(a[k], b[k], p)
+        return out
+    if isinstance(a, list) and isinstance(b, list):
+        out = []
+        for i in range(max(len(a), len(b))):
+            p = f"{path}[{i}]"
+            if i >= len(a):
+                out.append({"path": p, "before": None, "after": b[i], "added": True})
+            elif i >= len(b):
+                out.append({"path": p, "before": a[i], "after": None, "removed": True})
+            else:
+                out += json_diff(a[i], b[i], p)
+        return out
+    return [] if a == b else [{"path": path, "before": a, "after": b}]
+
+
+def _under(path, declared):
+    """Whether `path` is `declared` or inside it; `[*]` in `declared` matches any index."""
+    pattern = re.escape(declared).replace(re.escape("[*]"), r"\[\d+\]")
+    return re.fullmatch(pattern + r"(?:[.\[].*)?", path) is not None
+
+
+def _clip(v, n=200):
+    text = json.dumps(v)
+    return v if len(text) <= n else text[:n] + "…"
+
+
+def api_finding(sid, predicted, b_sha, a_sha):
+    """One request's outcome against its prediction, from the two captured artifacts. A paths prediction
+    holds when the status is unchanged and every difference lies inside a declared body path."""
+    before, after = _read_json(_blob(b_sha)), _read_json(_blob(a_sha))
+    diff = [] if b_sha == a_sha else json_diff(before, after)
+    changed = bool(diff)
+    if _paths_prediction(predicted):
+        declared = ["$.body" + p[1:] for p in predicted["paths"]]
+        outside = [d["path"] for d in diff if not any(_under(d["path"], p) for p in declared)]
+        departure = not changed or bool(outside)
+    else:
+        outside = []
+        departure = changed != (predicted == "changes")
+    return {"scene": sid, "predicted": predicted, "changed": changed, "departure": departure,
+            "status": [before.get("status"), after.get("status")], "outside": outside,
+            "diff": [{**d, "before": _clip(d["before"]), "after": _clip(d["after"])} for d in diff[:50]],
+            "diffCount": len(diff)}
 
 
 def _placement(frame):
@@ -606,20 +691,24 @@ def run(repo, branch, fresh=False, log=print, pin=None):
         raise Refused(f"no evidence request for {branch} ({request_path(repo_id, branch)})")
     b = basis(repo, branch, pin)
     digest, frozen, recipe = freeze_recipe(req["recipe"])
-    app = recipe.get("kind") == "app"
+    kind = recipe.get("kind")
+    app = kind in LIVE_KINDS
+    if kind == "api":
+        check_api_recipe(recipe)
     scene_ids = [s["id"] for s in scenes_of(recipe)]
     if len(set(scene_ids)) != len(scene_ids):
         raise Refused("recipe declares a scene twice")
     predict = predictions(req, scene_ids)
     donor = donor_modules(repo)
-    contract = renderer_contract(APP_RENDERER if app else RENDERER)
+    renderer = API_CAPTURE if kind == "api" else APP_RENDERER if app else RENDERER
+    contract = renderer_contract(renderer)
     nonce = secrets.token_hex(8)
     sides = {}
     for side in ("before", "after"):
         log(f"{side}: {b[side + 'Commit'][:10]}")
         if app:
             sides[side] = app_render(repo, side, b[side + "Commit"], b[side + "Tree"], digest, frozen, contract,
-                                     donor, nonce, log)
+                                     donor, nonce, log, renderer=renderer, kind=kind)
         else:
             env, modules = environment(repo, b[side + "Commit"], donor)
             sides[side] = render(repo, b[side + "Tree"], digest, frozen, env, contract, modules, fresh, log)
@@ -695,6 +784,13 @@ STYLE_EXTS = (".css", ".scss", ".pcss")
 STYLE_CONFIGS = ("tailwind.config.js", "tailwind.config.ts", "postcss.config.js", "postcss.config.mjs")
 
 
+API_ROOTS = ("pages/api/", "app/api/", "trpc/", "models/", "queries/")
+
+
+def _api_file(p):
+    return p.startswith(API_ROOTS) and p.endswith((".ts", ".tsx")) and not p.endswith((".test.ts", ".test.tsx"))
+
+
 def _ui_file(p):
     if p.endswith(STYLE_EXTS) or p in STYLE_CONFIGS:
         return True
@@ -714,16 +810,18 @@ def coverage(repo, b, recipe):
     diff, not declared. A view covers its named file only when its field's anchors appear in that
     file's after-side source; one with no anchor to check is unverified. What's uncovered is what
     accepting the evidence accepts without seeing."""
+    kind = recipe.get("kind")
+    shows = _api_file if kind == "api" else _ui_file
     changed = {p for p in _git(repo, "diff", "--name-only", b["beforeCommit"], b["afterCommit"]).splitlines()
-               if _ui_file(p)}
+               if shows(p)}
     unverified = set()
-    if recipe.get("kind") == "app":
+    if kind in LIVE_KINDS:
         looked = set()
-        for v in recipe["views"]:
+        for v in recipe["requests" if kind == "api" else "views"]:
             f = v.get("file")
             if not f or f not in changed:
                 continue
-            anchors = _anchors(v.get("field"))
+            anchors = [v["anchor"]] if v.get("anchor") else _anchors(v.get("field"))
             if not anchors:
                 unverified.add(f)
                 continue
@@ -745,11 +843,14 @@ def side_keys(app):
 
 def publish(repo, branch, b, req, digest, recipe, sides, donor, captured, amends=None):
     repo_id = repo_name(repo)
-    app = recipe.get("kind") == "app"
+    app = recipe.get("kind") in LIVE_KINDS
     scene_ids = [s["id"] for s in scenes_of(recipe)]
     predict = predictions(req, scene_ids)
     findings = []
     for sid in scene_ids:
+        if recipe.get("kind") == "api":
+            findings.append(api_finding(sid, predict[sid], sides["before"]["scenes"][sid], sides["after"]["scenes"][sid]))
+            continue
         fields = [sides[s].get("fields", {}).get(sid) for s in ("before", "after")]
         findings.append(finding(sid, predict[sid], sides["before"]["scenes"][sid], sides["after"]["scenes"][sid],
                                 [f for f in fields if f], donor,
