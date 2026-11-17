@@ -6,7 +6,7 @@ project: goal-flip-converter
 lede: A contact update only records that a goal target flipped. A batched job turns flips into conversions, and recomputing them is what keeps the answer right.
 ---
 
-**Plan, 2026-11-17. Not built.** This replaces the Postgres-copy forest (`goal-active-windows`, built, not pushed) as the import fix. It also fixes imports that flip a goal target, which that forest doesn't. Background, measurements and the review are on the [checkpoint page](wiki:goals-clickhouse-hot-path).
+**Plan, 2026-11-17. Not built.** This replaces the Postgres-copy forest (`goal-active-windows`, built, not pushed) as the import fix. It also fixes imports that flip a goal target, which that forest doesn't. Background, measurements and the review are on the [checkpoint page](canopy://v2/wiki/goals-clickhouse-hot-path).
 
 ## The idea
 
