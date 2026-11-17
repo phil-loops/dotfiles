@@ -14,6 +14,11 @@ public enum ShipComposer: Equatable, Sendable {
     }
     /// a note for Claude on a commit's line, not a GitHub comment
     public var noteSha: String? { if case .line(_, _, _, _, _, let sha) = self { return sha }; return nil }
+
+    var legacyKey: String? {
+        guard case .line(_, let path, let side, let line, let start, let sha) = self else { return nil }
+        return "\(sha.map { "n|\($0)" } ?? "c")|\(path)|\(side.rawValue)|\(line)|\(start.map(String.init) ?? "")"
+    }
 }
 
 /// One sync motion (commands/sync.ts Motion).
@@ -60,7 +65,17 @@ public final class ShipState {
     public var gatesHidden: Set<String> = []
 
     // ── the review ledger ──
-    public var composer: ShipComposer?
+    private var composers: [String: ShipComposer] = [:]
+    private var composerVersions: [String: Int] = [:]
+    private var textVersions: [String: Int] = [:]
+    @ObservationIgnored private weak var app: AppModel?
+    public var composer: ShipComposer? {
+        get { app.flatMap(ShipSeam.branchID).flatMap { composers[$0] } }
+        set {
+            guard let id = app.flatMap(ShipSeam.branchID) else { return }
+            setComposer(newValue, for: id)
+        }
+    }
     public private(set) var texts: [String: String] = [:]
     /// a thread's fold (by thread id) and its second-reader note's ("note:<id>")
     public var unfold: [String: Bool] = [:]
@@ -82,17 +97,59 @@ public final class ShipState {
     /// Puts text on the clipboard (`y`). The keytutor's practice app swaps it.
     @ObservationIgnored public var copyText: (String) -> Void = { Clipboard.copy($0) }
 
-    public init() {}
+    public init(app: AppModel? = nil) { self.app = app }
 
-    public static func of(_ app: AppModel) -> ShipState { app.state { ShipState() } }
+    public static func of(_ app: AppModel) -> ShipState { app.state { ShipState(app: app) } }
 
     // ── composer text, kept across launches like v2's localStorage ──
 
     public func text(_ key: String) -> String { texts[key] ?? defaults.string(forKey: "canopy.ship.text.\(key)") ?? "" }
 
     public func setText(_ key: String, _ v: String) {
+        textVersions[key, default: 0] &+= 1
         texts[key] = v
         if v.isEmpty { defaults.removeObject(forKey: "canopy.ship.text.\(key)") } else { defaults.set(v, forKey: "canopy.ship.text.\(key)") }
+    }
+
+    var olderComposerText: String? {
+        guard let composer, let key = composer.legacyKey, key != composer.key else { return nil }
+        let saved = text(key)
+        return saved.isEmpty ? nil : saved
+    }
+
+    func recoverOlderComposerText() {
+        guard let composer, let key = composer.legacyKey, let saved = olderComposerText, text(composer.key).isEmpty else { return }
+        setText(composer.key, saved)
+        setText(key, "")
+    }
+
+    private func setComposer(_ composer: ShipComposer?, for id: String) {
+        composers[id] = composer
+        composerVersions[id, default: 0] &+= 1
+    }
+
+    struct ComposerRecovery {
+        var branchID: String
+        var composer: ShipComposer
+        var text: String
+        var textVersion: Int
+        var composerVersion: Int
+    }
+
+    func clearComposer(_ composer: ShipComposer, on id: String) -> ComposerRecovery {
+        let saved = text(composer.key)
+        setText(composer.key, "")
+        setComposer(nil, for: id)
+        return ComposerRecovery(branchID: id, composer: composer, text: saved,
+                                textVersion: textVersions[composer.key] ?? 0, composerVersion: composerVersions[id] ?? 0)
+    }
+
+    func restoreComposer(_ recovery: ComposerRecovery) {
+        guard textVersions[recovery.composer.key] == recovery.textVersion else { return }
+        setText(recovery.composer.key, recovery.text)
+        if composerVersions[recovery.branchID] == recovery.composerVersion {
+            setComposer(recovery.composer, for: recovery.branchID)
+        }
     }
 
     /// A thread is open unless folded — resolved and outdated ones start folded.

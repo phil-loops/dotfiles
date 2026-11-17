@@ -149,10 +149,10 @@ enum ReviewCommands {
         // ── writing: comments, the pending review, replies ──
 
         let lineComposer = { () -> ShipComposer? in
-            guard let app = weakApp, let r = ship.host.lineRange(app) else { return nil }
+            guard let app = weakApp, let id = page(), let r = ship.host.lineRange(app) else { return nil }
             // on one commit's diff the box is a note for Claude about that commit, not a GitHub comment
             let sha = ship.commitScope.map { ReviewLine.ends($0).to }
-            let key = "\(sha.map { "n|\($0)" } ?? "c")|\(r.path)|\(r.side.rawValue)|\(r.line)|\(r.startLine.map(String.init) ?? "")"
+            let key = "\(id)|\(sha.map { "n|\($0)" } ?? "c")|\(r.path)|\(r.side.rawValue)|\(r.line)|\(r.startLine.map(String.init) ?? "")"
             return .line(key: key, path: r.path, side: r.side, line: r.line, startLine: r.startLine, sha: sha)
         }
         let compose = { (c: ShipComposer?) in
@@ -179,18 +179,16 @@ enum ReviewCommands {
 
         /// The composer's note on a commit's line, handed to a fresh Claude in the branch's worktree.
         let handNote = { () throws -> Write? in
-            guard case .line(let key, let path, let side, let line, let startLine, let sha?) = ship.composer else { return nil }
+            guard let id = page(), let c = ship.composer, case .line(let key, let path, let side, let line, let startLine, let sha?) = c else { return nil }
             let body = ship.text(key).trimmingCharacters(in: .whitespacesAndNewlines)
             if body.isEmpty { throw Refusal("write something first") }
-            let c = ship.composer
-            ship.setText(key, "")
-            ship.composer = nil
+            let recovery = ship.clearComposer(c, on: id)
             ship.host.clearMark()
             return Write(path: repoPath("/review-note"),
                          body: ["branch": .string(name()), "sha": .string(sha), "path": .string(path), "side": .string(side.rawValue),
                                 "line": .number(Double(line)), "startLine": startLine.map { .number(Double($0)) } ?? .null, "body": .string(body)],
                          settled: { true }, said: "claude window ready — send it there", failed: "couldn't start the Claude session",
-                         rollback: { ship.setText(key, body); ship.composer = c })
+                         rollback: { ship.restoreComposer(recovery) })
         }
 
         /// The composer's words as a new ledger item; send: on to the pending review, else a draft.
@@ -215,15 +213,13 @@ enum ReviewCommands {
                 item.merge(["kind": "reply", "thread": node.map(JSONValue.string) ?? .null, "threadId": .string(threadID)]) { $1 }
                 wire.merge(["kind": "reply", "thread": node.map(JSONValue.string) ?? .null]) { $1 }
             }
-            ship.setText(c.key, "")
-            ship.composer = nil
+            let recovery = ship.clearComposer(c, on: id)
             ship.host.clearMark()
             let existing = (store.rawView("draft", id)?["items"]?.array) ?? []
             let restore = {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                     if store.table(Draft.self)[id]?.items.contains(where: { $0.key == key }) == true { return }
-                    ship.setText(c.key, body)
-                    ship.composer = c
+                    ship.restoreComposer(recovery)
                 }
             }
             let undoKey = weakApp?.registry.keyOf("review.pending.remove") ?? "X"
@@ -262,6 +258,13 @@ enum ReviewCommands {
                 let w = try addItem(false)
                 weakApp?.keys.setMode(.normal)
                 return w
+            }))
+        r.register(Command(
+            id: "review.compose.recover", title: "Recover older unsent words on this branch", scope: .review, leader: LocalKey(",U"), label: "recover words", group: .branch,
+            available: { _ in ship.olderComposerText != nil && ship.composer.map { ship.text($0.key).isEmpty } == true },
+            local: { _, _ in
+                ship.recoverOlderComposerText()
+                weakApp?.beginInsert(composeField, lines: .multi)
             }))
         r.register(Command(
             id: "review.compose.cancel", title: "Cancel the comment", scope: .review, quiet: true, available: composing,

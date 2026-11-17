@@ -227,6 +227,13 @@ public struct ComposerView: View {
                 if case .line(_, _, let side, let line, let start, _) = c {
                     Text("\(side == .left ? "old " : "")line\(start.map { "s \($0)–\(line)" } ?? " \(line)")").foregroundStyle(theme.inkFaint)
                 }
+                if ship.olderComposerText != nil {
+                    HStack(spacing: 10) {
+                        Text("Older unsent words at this line").foregroundStyle(theme.inkFaint)
+                        KeyButton(title: "Recover here", id: "review.compose.recover")
+                    }
+                    .font(Theme.text(11))
+                }
                 ShipTextEditor(ReviewCommands.composeField,
                                placeholder: { if case .reply = c { return "Reply…" }; return note.map { "A note for Claude — it fixes \($0.prefix(7))" } ?? "Leave a comment" }(),
                                text: Binding(get: { ship.text(c.key) }, set: { ship.setText(c.key, $0) }))
