@@ -6,12 +6,14 @@ struct ReaderContext {
         let row: Int
         let source: Int
         let word: Int?
+        let pane: Int
 
         @MainActor init(_ app: AppModel) {
             let page = ReviewPageState.of(app)
             row = page.cursorMoved
             source = page.sourceGeneration
             word = page.code?.cursorGeneration
+            pane = app.cursorGeneration(in: app.pane?.id ?? "main")
         }
     }
 
