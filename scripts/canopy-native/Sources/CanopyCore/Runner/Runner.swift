@@ -254,6 +254,9 @@ public final class Runner {
         let prev = w.alone ? nil : tail
         let sent = Task { @MainActor () -> Sent in
             _ = await prev?.value
+            if let why = w.refuseBeforeSend?() {
+                return Sent(ok: false, outcome: .refused, err: why, rid: t.nextRid(), body: ["err": .string(why)])
+            }
             return await t.post(w.path, w.body, via: via)
         }
         if !w.alone { tail = sent }

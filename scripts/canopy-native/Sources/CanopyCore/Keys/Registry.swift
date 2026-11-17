@@ -113,6 +113,8 @@ public struct Write {
     public var silent = false
     /// post at once, beside the FIFO queue (a long run mustn't hold up every write behind it)
     public var alone = false
+    /// Refuse immediately before posting, after any queued predecessor finishes.
+    public var refuseBeforeSend: (() -> String?)? = nil
 
     public init(ops: [Op] = [], path: String, body: JSONValue, settled: @escaping () -> Bool, said: String? = nil, failed: String,
                 inverse: ((JSONObject) -> Inverse?)? = nil, rollback: (() -> Void)? = nil,
