@@ -70,6 +70,7 @@ struct ForestPage: View {
                 if let t = p.ticket { Text(t).font(Theme.text(12)).foregroundStyle(theme.inkFaint) }
             }
             if !p.summary.isEmpty { Text(p.summary).foregroundStyle(theme.inkDim) }
+            WorkContextView(subject: .forest(p.id), showsMissing: true)
             BenchSummaryView(subject: .forest(repo: p.repo, project: p.name))
             HStack(spacing: 0) {
                 if m.integratable(p.id), let v = m.verdict(p.id) {
@@ -147,6 +148,8 @@ private struct ForestBranchView: View {
     var body: some View {
         @Bindable var m = app.forestModel
         let b = v.b
+        let work = WorkContext(app.store.trackerItems(), subject: .branch(project: b.project, name: b.name))
+        let forestWork = WorkContext(app.store.trackerItems(), subject: .forest(b.project))
         VStack(alignment: .leading, spacing: 3) {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 Text(b.order < 999 ? "\(b.order)" : "").font(Theme.text(11)).foregroundStyle(theme.inkFaint).frame(width: 20, alignment: .trailing)
@@ -175,6 +178,9 @@ private struct ForestBranchView: View {
                 }
                 if m.wordsOpen.contains(b.id) {
                     CommitWords(branchID: b.id).font(Theme.text(12))
+                }
+                if work.items != forestWork.items {
+                    WorkContextView(subject: .branch(project: b.project, name: b.name), compact: true)
                 }
             }
             .padding(.leading, 32)

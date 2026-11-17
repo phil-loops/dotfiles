@@ -25,9 +25,20 @@ struct ForestsSurface: SurfaceProvider {
     /// of each open forest — or, filtered, only what's ready.
     func rows(_ app: AppModel) -> [String] { app.forestModel.homeRows() }
 
-    func primary(for row: String, _ app: AppModel) -> RouteTo? { ForestNav.primary(for: row, app) }
+    func panes(_ app: AppModel) -> [Pane] {
+        var panes = [Pane(id: "main", rows: rows(app), row: 1)]
+        let work = WorkInProgressView.items(app).map { RowKey.todo($0.id) }
+        if WorkInProgressView.visible(app) { panes.append(Pane(id: "work", title: "in progress", rows: work, row: 0)) }
+        return panes
+    }
+
+    func primary(for row: String, _ app: AppModel) -> RouteTo? {
+        if let id = RowKey.id(row, "t") { return RouteTo("todo.show", arg: id) }
+        return ForestNav.primary(for: row, app)
+    }
 
     func scopes(_ app: AppModel) -> [Scope] {
+        if app.isFocused("work") { return [] }
         var out: [Scope] = []
         if RowKey.id(app.selected, "b") != nil { out.append(.branch) }
         if target(for: .project, app) != nil { out.append(.project) }
@@ -42,6 +53,7 @@ struct ForestsSurface: SurfaceProvider {
     }
 
     func title(for row: String, _ app: AppModel) -> String? {
+        if let id = RowKey.id(row, "t"), let t = app.store.trackerItem(id) { return "\(t.title) \(WorkContext.status(t))" }
         if let id = RowKey.id(row, "b"), let b = app.store.view(Branch.self, id) { return "\(leaf(b.name)) \(b.description)" }
         if let r = app.forestModel.reviewRequest(row) { return "#\(r.number) \(r.title)" }
         return app.guessTitle(row)
