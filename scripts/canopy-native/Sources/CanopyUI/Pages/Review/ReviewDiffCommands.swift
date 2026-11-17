@@ -64,12 +64,11 @@ enum DiffCommands {
             throw Refusal(dir > 0 ? "nothing further down" : "nothing further up")
         }
 
-        /// A line stop's text on one half: the old half only where it differs, and only as far as it's drawn.
+        /// A line stop's full source on one side; unchanged text belongs to the new side.
         func halfText(_ s: Stop, _ side: Side) -> String? {
             guard s.kind == .line, let row = s.row else { return nil }
             if side == .right { return row.right?.new != nil ? row.right?.text : nil }
-            guard row.left?.kind == .del, let t = row.left?.text as NSString? else { return nil }
-            return t.substring(to: min(t.length, max(0, pg.splitWidth(s.path) - 1)))
+            return row.left?.kind == .del ? row.left?.text : nil
         }
         func firstNonBlank(_ t: String) -> Int {
             let u = Array(t.utf16)
@@ -678,13 +677,12 @@ enum DiffCommands {
                            local: { _, _ in try horizontal(1) }))
         // ── w / b: the cursor to the next name's first character, across lines — g d and space k ask about that name ──
 
-        /// The names on a line stop's current half (the old half only as far as it's drawn).
+        /// Names in the source of the current side.
         func names(_ s: Stop, _ tokens: (String) -> [Range<Int>] = CodeLookup.names) -> (side: Side, names: [Range<Int>])? {
             guard s.kind == .line, let row = s.row else { return nil }
             let side = sideLine(row, prefer: pg.column).side
             guard let text = (side == .left ? row.left : row.right)?.text else { return nil }
-            let all = tokens(text)
-            return (side, side == .left ? all.filter { $0.upperBound < pg.splitWidth(s.path) } : all)
+            return (side, tokens(text))
         }
         /// The open file: name to name across its lines.
         func sideStep(_ d: Int, _ tokens: (String) -> [Range<Int>] = CodeLookup.names, end: Bool = false) throws {

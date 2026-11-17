@@ -15,6 +15,8 @@ final class DocBuilder {
 
     var length: Int { s.length }
 
+    func style(_ range: NSRange, _ attributes: [NSAttributedString.Key: Any]) { runs.append((range, attributes)) }
+
     func put(_ t: String, _ a: [NSAttributedString.Key: Any] = [:]) {
         let loc = s.length
         s.append(t)
@@ -27,6 +29,22 @@ final class DocBuilder {
             var a: [NSAttributedString.Key: Any] = [.foregroundColor: colors.color(t.kind).withAlphaComponent(alpha)]
             if t.kind == .comment { a[.obliqueness] = 0.12 }
             runs.append((NSRange(location: at + t.location, length: t.length), a))
+        }
+    }
+
+    func tokens(_ piece: DiffPiece, _ source: [Token], at: Int, _ colors: CodeColors) {
+        guard let bounds = piece.sourceRange else { return }
+        var low = 0, high = source.count
+        while low < high {
+            let middle = (low + high) / 2
+            if source[middle].location + source[middle].length <= bounds.lowerBound { low = middle + 1 } else { high = middle }
+        }
+        for token in source[low...] {
+            if token.location >= bounds.upperBound { break }
+            guard let range = piece.storage(for: token.location..<token.location + token.length) else { continue }
+            var attributes: [NSAttributedString.Key: Any] = [.foregroundColor: colors.color(token.kind)]
+            if token.kind == .comment { attributes[.obliqueness] = 0.12 }
+            runs.append((NSRange(location: at + range.lowerBound, length: range.count), attributes))
         }
     }
 
@@ -63,6 +81,17 @@ enum Para {
         cache[k] = p
         return p
     }
+    static func diff(_ row: DiffDisplayRow) -> NSParagraphStyle {
+        let k = "diff|\(row.tabs)|\(DocFont.charWidth)"
+        if let p = cache[k] { return p }
+        let p = NSMutableParagraphStyle()
+        p.lineSpacing = 2
+        p.lineBreakMode = .byClipping
+        p.tabStops = row.tabs.map { NSTextTab(textAlignment: .left, location: CGFloat($0) * DocFont.charWidth, options: [:]) }
+        cache[k] = p
+        return p
+    }
+
 }
 
 /// Word, space and punctuation tokens — compiled once: compiling it per changed line was a tenth of a
@@ -103,29 +132,6 @@ func changedWords(_ old: String, _ new: String) -> ([NSRange], [NSRange]) {
 private func pad(_ n: Int?, _ w: Int) -> String {
     let s = n.map(String.init) ?? ""
     return s.count >= w ? s : String(repeating: " ", count: w - s.count) + s
-}
-
-/// A removed line cut into its half's width: each chunk at most `w` characters, broken after the last
-/// space in a chunk's back half when there is one (a word isn't split mid-name), else hard at `w`.
-func oldChunks(_ s: String, _ w: Int) -> [String] {
-    guard w > 1, s.count > w else { return [s] }
-    var out: [String] = [], rest = Substring(s)
-    while rest.count > w {
-        let head = rest.prefix(w)
-        let cut = head.lastIndex(of: " ").flatMap { i in head.distance(from: head.startIndex, to: i) >= w / 2 ? head.index(after: i) : nil } ?? head.endIndex
-        out.append(String(rest[rest.startIndex..<cut]))
-        rest = rest[cut...]
-    }
-    if !rest.isEmpty { out.append(String(rest)) }
-    return out
-}
-
-private func fit(_ s: String, _ w: Int) -> String {
-    guard w > 0 else { return "" }
-    let c = s.count
-    if c == w { return s }
-    if c < w { return s + String(repeating: " ", count: w - c) }
-    return String(s.prefix(w - 1)) + "…"
 }
 
 @MainActor
@@ -201,40 +207,36 @@ enum ReviewDocument {
             }
         }
         let gapAt = Dictionary(fv.gaps.map { ($0.at, $0) }, uniquingKeysWith: { a, _ in a })
-        let W = split ? pg.splitWidth(path) : 0
         let unified = Para.row(indent: gutter + 2)
-        let splitPara = Para.row(indent: W + 13)
+        let paired = DiffLayout.pairedHunks(fv.rows)
         var composed = false
         for (i, r) in fv.rows.enumerated() {
             if i == 0 || fv.rows[i - 1].hunk != r.hunk, let g = gapAt[r.hunk] { gapRow(b, path, g, c) }
             let key = "l|\(path)|\(r.key)"
             let at = fv.at(r)
             let threaded = !at.threads.isEmpty
+            let layout = DiffLayout.rows(r, columns: pg.diffColumns, paired: paired.contains(r.hunk))
             if split {
-                b.put(pad(r.left?.old, 5) + " ", [.foregroundColor: c.inkFaint, .font: DocFont.small])
-                let lstart = b.length
-                // a removed line is the text under review: it wraps under its own column instead of being
-                // cut off (a context line's old half repeats the new half, which shows it whole)
-                let chunks = r.left?.kind == .del && W > 0 ? oldChunks(r.left!.text, W) : []
-                let ltext = chunks.first.map { fit($0, W) } ?? r.left.map { fit($0.text, W) } ?? String(repeating: " ", count: W)
-                b.put(ltext)
-                if r.left != nil { b.tokens(ltext, lang, at: lstart, c.code) }
-                b.put(" " + pad(r.right?.new, 5) + " ", [.foregroundColor: c.inkFaint, .font: DocFont.small])
-                let rstart = b.length
-                if let rt = r.right { b.put(rt.text); b.tokens(rt.text, lang, at: rstart, c.code) }
-                let more = Array(chunks.dropFirst())
-                if !more.isEmpty {
-                    // room for the rest: the new half's own wrapped lines count, line separators make up the difference
-                    let newCols = max(1, (pg.diffColumns > 0 ? pg.diffColumns : 240) - (W + 13))
-                    let newLines = max(1, Int((Double(r.right?.text.count ?? 0) / Double(newCols)).rounded(.up)))
-                    let extra = max(0, 1 + more.count - newLines)
-                    if extra > 0 { b.put(String(repeating: "\u{2028}", count: extra)) }
-                }
                 let (lh, rh) = r.left?.kind == .del && r.right?.kind == .add ? changedWords(r.left!.text, r.right!.text) : ([], [])
-                b.endRow(RowInfo(kind: .line, stop: key, path: path, hunk: r.hunk, left: r.left?.kind, right: r.right?.kind,
-                                 oldLine: r.left?.old, newLine: r.right?.new, threaded: threaded, splitCol: W + 7,
-                                 codeStart: 6, rightCodeStart: W + 13, leftHot: lh.filter { NSMaxRange($0) < W }, rightHot: rh,
-                                 oldMore: more), splitPara)
+                let leftTokens = r.left.map { CanopyUI.tokens($0.text, lang) } ?? []
+                let rightTokens = r.right.map { CanopyUI.tokens($0.text, lang) } ?? []
+                for display in layout {
+                    let start = b.length
+                    b.put(display.text)
+                    for piece in display.pieces { b.tokens(piece, piece.side == .left ? leftTokens : rightTokens, at: start, c.code) }
+                    let left = display.pieces.first { $0.side == .left }
+                    let right = display.pieces.first { $0.side == .right }
+                    for piece in display.pieces {
+                        let gutterEnd = piece.storage.lowerBound
+                        let gutterStart = max(0, gutterEnd - DiffLayout.gutter)
+                        b.style(NSRange(location: start + gutterStart, length: gutterEnd - gutterStart), [.foregroundColor: c.inkFaint, .font: DocFont.small])
+                    }
+                    b.endRow(RowInfo(kind: .line, stop: key, path: path, hunk: r.hunk, left: left?.line.kind, right: right?.line.kind,
+                                     oldLine: left?.line.old ?? (right?.line.kind == .ctx ? right?.line.old : nil),
+                                     newLine: right?.line.new ?? (left?.line.kind == .ctx ? left?.line.new : nil), threaded: threaded, splitCol: display.divider,
+                                     codeStart: left?.storage.lowerBound ?? right?.storage.lowerBound ?? 6,
+                                     rightCodeStart: right?.storage.lowerBound ?? 0, leftHot: lh, rightHot: rh, layout: display), Para.diff(display))
+                }
             } else {
                 let line = (r.right ?? r.left)!
                 let kind: LineKind = r.left != nil && r.right != nil ? .ctx : r.right != nil ? .add : .del
@@ -259,8 +261,9 @@ enum ReviewDocument {
                 let pending = at.pending
                 // in a split, a note sits under the half it's about: the new side's column, or the old side's
                 let sides = Set(at.threads.map(\.side) + at.pending.map(\.side) + (compHere ? [composer!.side] : []))
-                let column: Int? = split && sides.count == 1 ? (sides.first == .left ? 6 : W + 13) : nil
-                extras(b, id: "x|\(path)|\(r.key)", stops: stops, path: path, column: column, splitCol: split ? W + 7 : 0) { [weak app] in
+                let divider = layout.first?.divider ?? 0
+                let column: Int? = split && divider > 0 && sides.count == 1 ? (sides.first == .left ? DiffLayout.gutter : divider + DiffLayout.gutter) : nil
+                extras(b, id: "x|\(path)|\(r.key)", stops: stops, path: path, column: column, splitCol: split ? divider : 0) { [weak app] in
                     guard let app else { return AnyView(EmptyView()) }
                     return ReviewExtrasView.row(app, threads: tids, pending: pending, composing: compHere)
                 }
