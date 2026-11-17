@@ -81,12 +81,12 @@ import Testing
         let (app, port) = try app()
         let task = try await begin(app, port)
         app.keys.handle("esc")
+        #expect(app.runner.note == "navigation cancelled")
         HeldLookupStub.release(port, path, reply)
         await task.value
         #expect(!ForestAncestry.of(app).waiting)
         #expect(app.nav.picker == nil)
         #expect(app.selected == "b:r:f5")
-        #expect(app.runner.note == "navigation cancelled")
     }
 
     @Test func aGraphChangeAndReturnCannotReviveTheRead() async throws {
@@ -224,5 +224,40 @@ import Testing
         await task.value
         #expect(app.selected == "b:r:f5")
         #expect(app.runner.note == "missing isn't shown in this forest")
+    }
+
+    @Test func anUnchangedChildChoiceStillOpensItsBranch() {
+        let app = world(.review(repo: "r", branch: "a"))
+        app.runner.dispatch("child", via: .palette)
+        #expect(app.nav.picker?.items.map(\.label) == ["b", "c"])
+        #expect(app.nav.choose(1))
+        #expect(app.router.route.branchID == "r:c")
+    }
+
+    @Test func anOldChildPickerCannotNavigateFromAnotherReader() {
+        let app = world(.review(repo: "r", branch: "a"))
+        app.runner.dispatch("child", via: .palette)
+        app.nav.close()
+        app.router.navigate(.review(repo: "r", branch: "b"))
+        #expect(app.nav.reopen())
+        #expect(app.nav.choose(1))
+        #expect(app.router.route.branchID == "r:b")
+    }
+
+    @Test func changingTheGraphInvalidatesTheChildChoices() throws {
+        let app = world(.review(repo: "r", branch: "a"))
+        app.runner.dispatch("child", via: .palette)
+        let version = try #require(app.store.versions[Domain.git])
+        #expect(app.store.applyPatch(try Patch.make(domain: Domain.git, version: version + 1, deletes: ["branch": ["r:c"]])) == .ok)
+        #expect(app.nav.choose(1))
+        #expect(app.router.route.branchID == "r:a")
+    }
+
+    @Test func theSameChoiceGuardAllowsTipTraversalPastTheFork() {
+        let app = world(.review(repo: "r", branch: "a"))
+        app.runner.dispatch("review.tip", via: .palette)
+        #expect(app.nav.picker?.items.map(\.label) == ["b", "c"])
+        #expect(app.nav.choose(1))
+        #expect(app.router.route.branchID == "r:d")
     }
 }

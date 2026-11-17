@@ -159,3 +159,9 @@ Reported documents join the existing queue pane with full-path `run:` identities
 Machine's reports remain available while preview/substrate reads fail. Until preview discovery succeeds, the page neither claims that nothing is serving nor offers to start main based on that absence. Offscreen wide and narrow fixtures exercise this state, paused/unknown/stale reports and keyboard movement. The full suite passes 663 tests.
 
 The producer exposes no immutable job identity, PID, process-start token or hosted/local field. Canonical path identifies the document only. Native therefore makes no process-liveness, slot-ownership or hosting claim. Joining heavy-turn slots and moving the activity tint to Machine require explicit producer and Show changes outside this lane; the larger tracker item remains open for those contracts.
+
+## Round 10: ancestry choices keep the graph that offered them
+
+The follow-up scan found that the review child chooser still retained unfenced callbacks, even though dependency choices were already guarded. The child helper also serves recursive tip traversal. It now captures the original branch, server epoch, git-domain version and reader after each picker opens, accepts only that picker's next close, and re-resolves the chosen identity. Valid tip traversal through a fork remains covered. A replay from another branch or a graph change cannot move the reader. Cancellation feedback is asserted at the cancel action, before the quiet line's intentional expiry; delayed response assertions still verify no navigation.
+
+The independent scan found the corresponding Forest child-label path needs an earlier boundary: the label layer moves the cursor before dispatching its target command. A source check inside the command is therefore too late. The next additive seam will validate a captured target before any jump, focus or cursor effect, preserving the existing on-screen label chooser.
