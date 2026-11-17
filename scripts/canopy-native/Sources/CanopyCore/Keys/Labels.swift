@@ -73,6 +73,8 @@ public struct LabelTarget {
     /// what `/` (search on page) matches against
     public var title: String
     public var run: RouteTo?
+    /// Checked before selecting a captured target moves the cursor or records a jump.
+    public var acceptsPick: (@MainActor () -> Bool)? = nil
 
     public init(pane: String, key: String, rect: CGRect, title: String = "", run: RouteTo? = nil) {
         self.pane = pane; self.key = key; self.rect = rect; self.title = title; self.run = run

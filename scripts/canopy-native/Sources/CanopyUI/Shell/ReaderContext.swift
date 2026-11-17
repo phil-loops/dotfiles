@@ -41,6 +41,10 @@ struct ReaderContext {
         sameReader(app) && app.nav.picker == nil && app.keys.active == .normal && app.nav.pickerGeneration == picker + 1 && app.modeGeneration == mode + 1
     }
 
+    func isCurrentAfterLabelChoice(_ app: AppModel) -> Bool {
+        sameReader(app) && app.nav.picker == nil && app.keys.active == .normal && app.nav.pickerGeneration == picker && app.modeGeneration == mode + 2
+    }
+
     private func sameReader(_ app: AppModel) -> Bool {
         visit == app.navigationGeneration && focus == app.focusGeneration && cursor == Cursor(app) && place.sameSpot(app.here())
     }
