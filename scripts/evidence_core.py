@@ -597,7 +597,36 @@ def run(repo, branch, fresh=False, log=print):
             sides[side] = render(repo, b[side + "Tree"], digest, frozen, env, contract, modules, fresh, log)
         if set(sides[side]["scenes"]) != set(scene_ids):
             raise Refused(f"{side} render is missing scenes")
-    return publish(repo, branch, b, req, digest, recipe, sides, donor, captured=_asked(req))
+    captured, amends = capture_binding(sides, _asked(req))
+    if amends:
+        log(f"  both renders reused from {amends[:12]}, first captured under another prediction — publishing an amendment")
+    mid = publish(repo, branch, b, req, digest, recipe, sides, donor, captured=captured, amends=amends)
+    bind_capture(sides, captured, mid)
+    return mid
+
+
+def _binding_path(sides):
+    pair = sides["before"]["renderId"] + ":" + sides["after"]["renderId"]
+    return os.path.join(CACHE, "bindings", _sha(pair) + ".json")
+
+
+def bind_capture(sides, captured, mid):
+    """Remember the prediction a render pair was first published under; later binds never replace it."""
+    path = _binding_path(sides)
+    if not os.path.exists(path):
+        _write_atomic(path, _canon({"captured": captured, "manifest": mid}))
+
+
+def capture_binding(sides, asked):
+    """(prediction the capture is held to, manifest it amends or None). When both sides reuse pixels
+    already published, Phil may have seen them: a prediction that differs from the one they were first
+    captured under is a retrospective amendment of that capture, never a new prediction."""
+    if not all(sides[s].get("reused") for s in ("before", "after")):
+        return asked, None
+    first = _read_json(_binding_path(sides))
+    if not first or first["captured"] == asked:
+        return asked, None
+    return first["captured"], first["manifest"]
 
 
 def _asked(req):

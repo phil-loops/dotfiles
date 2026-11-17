@@ -235,6 +235,18 @@ try:
           "the branch's current manifest can be judged")
 finally:
     E.card = orig_card
+# ── reused pixels keep the prediction they were first captured under ──
+first = {"expectation": "same", "predict": {"*": "same"}, "gaps": []}
+edited = {"expectation": "it changes", "predict": {"*": "changes"}, "gaps": []}
+fresh_sides = {"before": {"renderId": "pb", "reused": False}, "after": {"renderId": "pa", "reused": False}}
+reused_sides = {"before": {"renderId": "pb", "reused": True}, "after": {"renderId": "pa", "reused": True}}
+check(E.capture_binding(fresh_sides, first) == (first, None), "a fresh capture is held to the request as asked")
+E.bind_capture(fresh_sides, first, "1" * 64)
+check(E.capture_binding(reused_sides, first) == (first, None), "reusing pixels under the same prediction is just a capture")
+check(E.capture_binding(reused_sides, edited) == (first, "1" * 64),
+      "an edited prediction over reused pixels is an amendment of their first capture, not a new prediction")
+half = {"before": {"renderId": "pb", "reused": True}, "after": {"renderId": "pa2", "reused": False}}
+check(E.capture_binding(half, edited) == (edited, None), "new after pixels mean the prediction preceded what it predicts")
 # ── owned execution: a run never serves a package build an earlier run left behind ──
 side = os.path.join(tmp, "side-co")
 for pkg in ("mail-pg", "prisma"):
