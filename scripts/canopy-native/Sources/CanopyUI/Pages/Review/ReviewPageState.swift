@@ -298,6 +298,10 @@ public final class ReviewPageState: ShipHost {
     @ObservationIgnored private var shownID = ""
     /// This branch's diff is here (not the last page's, still showing while this one comes).
     var diffHere: Bool { payload != nil && shownID == id }
+    var diffCurrent: Bool {
+        if let scope = commitScope { return commitFiles?.sha == scope }
+        return payload?.key == keyOf
+    }
 
     // ── the windows (ReviewWindows.swift): each shows the diff or one file at one commit (Helix's views) ──
 

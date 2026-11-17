@@ -138,18 +138,19 @@ public final class CodeLookup {
 
     // ── asking ──
 
-    private struct Request {
+    struct Request {
         var number: Int
         var origin: ReaderContext
     }
 
-    private func beginRequest() -> Request? {
+    func beginRequest(waiting: String? = nil) -> Request? {
         seq &+= 1
+        pop = waiting.map(Pop.wait)
         guard let app else { return nil }
         return Request(number: seq, origin: ReaderContext(app))
     }
 
-    private func isCurrent(_ request: Request) -> Bool {
+    func isCurrent(_ request: Request) -> Bool {
         guard request.number == seq, let app else { return false }
         guard request.origin.isCurrent(app) else { dismiss(); return false }
         return true
