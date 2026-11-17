@@ -345,12 +345,11 @@ public final class CodeLookup {
         var line: Int
         var character: Int
         var newName: String
-        var apply: Bool
+        let apply = false
         var sha: String?
     }
 
-    /// space r: the new name (typed into the picker), the edits as a diff in `pop`, and on ↵ one
-    /// commit on the branch — the server refuses anything that reaches past the repo or a moved tip.
+    /// Preview a program-wide rename at the observed branch head; editing stays in Helix.
     public func rename(_ p: Position?, branch: String?, repo: String) {
         guard let app else { return }
         renameIntent &+= 1
@@ -360,12 +359,12 @@ public final class CodeLookup {
         }
         guard ReviewPageState.of(app).diffCurrent else { pop = .note("reading the current diff before renaming"); return }
         var origin = RenameReader(source: source, intent: renameIntent, reader: ReaderContext(app))
-        app.nav.pick("rename to…", [PickItem(label: "type the new name · ↵ shows what changes")], rank: { _ in [0] }) { [weak self, weak app] index in
+        app.nav.pick("rename to…", [PickItem(label: "type the new name")], rank: { _ in [0] }) { [weak self, weak app] index in
             guard let self, let app, index == 0, origin.current(app, intent: renameIntent, afterPicker: true) else { return }
             let name = app.nav.filter.trimmingCharacters(in: .whitespaces)
             guard !name.isEmpty else { return }
             self.previewRename(RenameBody(branch: branch, path: p.path, line: p.line, character: p.character,
-                                          newName: name, apply: false, sha: source.tip), source: source)
+                                          newName: name, sha: source.tip), source: source)
         }
         origin.reader = ReaderContext(app)
     }
@@ -401,27 +400,7 @@ public final class CodeLookup {
                 pop = .note(Self.plainNote(r.message).isEmpty ? "couldn't validate that rename preview · try again" : Self.plainNote(r.message))
                 return
             }
-            guard let app else { return }
-            var apply = b
-            apply.apply = true
-            var origin = RenameReader(source: source, intent: renameIntent, reader: ReaderContext(app))
-            app.nav.pick("rename \(r.old ?? "it") to \(b.newName)?", [PickItem(label: "↵ commit it", text: "\(edits) edit\(edits == 1 ? "" : "s") in \(files.count) file\(files.count == 1 ? "" : "s")")]) { [weak self, weak app] index in
-                guard let self, let app, index == 0, origin.current(app, intent: renameIntent, afterPicker: true) else { return }
-                self.applyRename(apply, source: source)
-            }
-            origin.reader = ReaderContext(app)
-            pop = .hover("```diff\n\(diff)\n```")
-        }
-    }
-
-    private func applyRename(_ b: RenameBody, source: BranchSource) {
-        guard let request = beginRequest() else { return }
-        pop = .wait("renaming…")
-        renameTask = Task { @MainActor in
-            guard renameCurrent(request, source: source) else { return }
-            guard let r = await asking("/lsp/rename", .branch(repo: source.repo, name: b.branch, base: nil), b, LSPRename.self, request: request),
-                  renameCurrent(request, source: source) else { return }
-            pop = .note(r.ok ? "renamed in \(String((r.sha ?? "").prefix(7)))" : Self.plainNote(r.message).isEmpty ? "couldn't rename" : Self.plainNote(r.message))
+            pop = .hover("Rename preview · \(source.repo)/\(source.name) @ \(source.tip.prefix(7))\n\n\(edits) edit\(edits == 1 ? "" : "s") in \(files.count) file\(files.count == 1 ? "" : "s") · preview only · edit in Helix\n\n```diff\n\(diff)\n```")
         }
     }
 

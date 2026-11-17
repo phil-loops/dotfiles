@@ -371,7 +371,7 @@ enum KeyLessons {
             KeyStep("{references} once more.", [.references], check: { $0.nav.picker != nil }),
             KeyStep("{pick-below}: under this one.", [.pickBelow], check: { ReviewPageState.of($0).windows.count == 2 }),
             KeyStep("{close-window}.", [.closeWindow], check: { ReviewPageState.of($0).windows.count == 1 }),
-            KeyStep("{rename} renames the name everywhere: type the new name, see the diff, ↵ commits it.", [.rename], check: { $0.nav.picker != nil }),
+            KeyStep("{rename} previews a rename everywhere: type the new name, then open the diff. Make code edits in Helix.", [.rename], check: { $0.nav.picker != nil }),
             KeyStep("{cancel} — not today.", [.cancel], check: { $0.nav.picker == nil }),
             KeyStep("{symbols}: the file's symbols.", [.symbols], check: { $0.nav.picker != nil }),
             KeyStep("{cancel}.", [.cancel], check: { $0.nav.picker == nil }),

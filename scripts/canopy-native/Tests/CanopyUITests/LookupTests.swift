@@ -203,7 +203,7 @@ final class HeldLookupStub: URLProtocol, @unchecked Sendable {
         #expect(!file.isCurrent(a))
     }
 
-    @Test func renamePreviewSurvivesItsOwnConfirmationPicker() async throws {
+    @Test func aRenamePreviewSettlesWithoutAConfirmationPicker() async throws {
         let (a, port) = try await app()
         HeldLookupStub.hold(port, "/loops/lsp/rename")
         let lookup = CodeLookup.of(a)
@@ -212,7 +212,8 @@ final class HeldLookupStub: URLProtocol, @unchecked Sendable {
         #expect(a.nav.choose())
         await until("the rename preview request") { HeldLookupStub.waiting(port, "/loops/lsp/rename") }
         HeldLookupStub.release(port, "/loops/lsp/rename", try RenameOwnershipTests().preview(a))
-        await until("the rename confirmation") { a.nav.picker?.title == "rename before to renamed?" }
-        #expect(lookup.pop == .hover("```diff\n-before\n+renamed\n```"))
+        await lookup.renameTask?.value
+        #expect(a.nav.picker == nil)
+        #expect(lookup.pop?.text.contains("```diff\n-before\n+renamed\n```") == true)
     }
 }

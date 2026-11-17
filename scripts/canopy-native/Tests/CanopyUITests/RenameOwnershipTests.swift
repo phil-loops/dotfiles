@@ -67,31 +67,36 @@ import Testing
         #expect(app.runner.note == "newer feedback")
     }
 
-    @Test func aConfirmationPickerCannotBeReplayedIntoAMutation() async throws {
-        for change in ["replay", "visit", "source"] {
-            let (app, port) = try await LookupTests().app()
-            ShipStub.answer(port, "POST", "/loops/lsp/rename", try preview(app))
-            begin(app); #expect(app.nav.choose())
-            await CodeLookup.of(app).renameTask?.value
-            #expect(app.nav.picker?.title == "rename before to renamed?")
-            switch change {
-            case "replay": app.nav.close(); #expect(app.nav.reopen())
-            case "visit":
-                app.nav.close()
-                app.router.navigate(.machine)
-                app.router.navigate(.review(repo: "loops", branch: branch))
-                #expect(app.nav.reopen())
-            default:
-                #expect(app.store.applyPatch(try Patch.make(domain: Domain.remote, version: (app.store.versions[Domain.remote] ?? 0) + 1)) == .ok)
-            }
-            #expect(app.nav.choose())
-            await CodeLookup.of(app).renameTask?.value
-            #expect(ShipStub.posts(port).filter { $0.path == "/loops/lsp/rename" }.count == 1)
-            #expect(!ShipStub.posts(port).contains { $0.body["apply"] == true })
-        }
+    @Test func enterOnlyOpensAPreviewAndCannotCommitIt() async throws {
+        let (app, port) = try await LookupTests().app()
+        ShipStub.answer(port, "POST", "/loops/lsp/rename", try preview(app))
+        let page = ReviewPageState.of(app)
+        app.focus(pane: reviewDiffPane)
+        page.goTo(file: "a.ts")
+        app.keys.handle("space"); app.keys.handle("r")
+        #expect(app.nav.picker?.title == "rename to…")
+        app.nav.typed("renamed")
+        app.keys.handle("ret")
+        await CodeLookup.of(app).renameTask?.value
+        let requests = ShipStub.posts(port).filter { $0.path == "/loops/lsp/rename" }
+        #expect(requests.count == 1)
+        #expect(requests.first?.body["apply"] == false)
+        #expect(requests.first?.body["sha"] == .string(app.store.view(Branch.self, id)!.tip))
+        #expect(app.nav.picker == nil && app.runner.armed == nil)
+        let text = CodeLookup.of(app).pop?.text ?? ""
+        #expect(text.contains("Rename preview · loops/\(branch) @"))
+        #expect(text.contains("2 edits in 1 file · preview only · edit in Helix"))
+        #expect(text.contains("```diff\n-before\n+renamed\n```"))
+        app.keys.handle("ret")
+        #expect(app.runner.armed == nil)
+        #expect(app.nav.reopen())
+        app.keys.handle("ret")
+        await CodeLookup.of(app).renameTask?.value
+        #expect(ShipStub.posts(port).filter { $0.path == "/loops/lsp/rename" }.count == 1)
+        #expect(!ShipStub.posts(port).contains { $0.body["apply"] == true })
     }
 
-    @Test func malformedPreviewFilesCannotBecomeAConfirmation() async throws {
+    @Test func malformedPreviewFilesCannotBecomeAPreview() async throws {
         let cases: [[JSONValue]] = [[], [["path": "../outside.ts", "edits": 1]], [["path": "/outside.ts", "edits": 1]],
             [["path": "a.ts", "edits": 0]], [["path": "a.ts", "edits": 1], ["path": "a.ts", "edits": 1]],
             [["path": "a.ts", "edits": .number(9_000_000_000_000_000_000)], ["path": "b.ts", "edits": .number(9_000_000_000_000_000_000)]]]
@@ -103,6 +108,7 @@ import Testing
             begin(app); #expect(app.nav.choose())
             await CodeLookup.of(app).renameTask?.value
             #expect(app.nav.picker == nil)
+            #expect(CodeLookup.of(app).pop?.text.contains("couldn't validate") == true)
             #expect(!ShipStub.posts(port).contains { $0.body["apply"] == true })
         }
     }

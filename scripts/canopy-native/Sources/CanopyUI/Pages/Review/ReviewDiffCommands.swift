@@ -1076,7 +1076,7 @@ enum DiffCommands {
             return (pos, w)
         }
         let codeOK: (String?) -> Bool = { _ in onFiles(nil) || pg.code != nil || pg.scoped }
-        r.register(Command(id: "review.rename", title: "Rename the name under the cursor (a commit you see first)", scope: .review, verb: .rename, label: "rename",
+        r.register(Command(id: "review.rename", title: "Preview a symbol rename", scope: .review, verb: .rename, label: "rename",
                            available: { _ in onFiles(nil) && pg.diffCurrent && !pg.scoped && pg.integration == nil && app.pane?.id == reviewDiffPane },
                            local: { _, _ in
                                guard let t = pg.target else { return }
