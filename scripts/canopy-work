@@ -1,0 +1,204 @@
+#!/usr/bin/env python3
+"""canopy-work — the work journal's command line (scripts/srv/workjournal.py; DESIGN.md round 25).
+Every command prints JSON. The journal is $CANOPY_WORK_JOURNAL, else
+~/.local/state/canopy/work-journal.sqlite3.
+
+Identities and bindings
+  canopy-work work --todo <id> [--repo R --project P --branch B --title T]   the item's live work id (made on first use)
+  canopy-work work --repo R --branch B                 live work linked to that branch
+  canopy-work relink --work W [--branch B …]           a rename; identity and history stay
+  canopy-work retire --work W                          the branch or item is gone; the id is never reused
+  canopy-work source --source S --adapter A [--ordering sequence|none]
+  canopy-work bind --source S --conversation C [--work W …] --by WHO   launch/switch work (no --work: unbind)
+  canopy-work exclude --source S --conversation C      private/unrelated: never collected
+
+Capture and coverage (an owned ingress calls these before it accepts a message for delivery)
+  canopy-work capture --source S --conversation C --message-id M [--seq N] [--source-time T]
+      [--work W …] [--accepted-generation G] [--supersedes M …] [--target claude-say:<sid>] [--note TEXT] < text
+  canopy-work cover --source S --conversation C --through N [--start N]
+
+Delivery (managed hosts only; never part of a test run)
+  canopy-work host --session UUID --cwd DIR --allowed-tools LIST [--boot-prompt-file F]
+                                                        register an owned headless worker; its target is claude-headless:UUID
+  canopy-work worker --session UUID                     none | running | unknown | ended (with outcome), observed read-only
+  canopy-work dispatch [--message M]                    deliver due outbox rows (--message: retry its pending rows now)
+  canopy-work requeue --outbox N                        deliberately resend an uncertain/abandoned delivery
+  canopy-work begin --work W … --worker X --host H [--unmanaged]
+  canopy-work boundary --attempt A --boundary start|resume|compaction    print the packet (hook stdout)
+
+Reading and reporting
+  canopy-work context --work W | --todo ID
+  canopy-work status --work W | --todo ID
+  canopy-work report --work W progress|completion "<text>" [--attempt A (--packet P | --receipt R)]
+      completion only when the item is done — a finished turn is not a finished item
+"""
+import argparse
+import json
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from srv import workdelivery, workjournal as wj  # noqa: E402
+
+
+READS = ("worker", "context", "status")
+
+
+def out(obj):
+    print(json.dumps(obj, indent=1, sort_keys=True, default=str))
+
+
+def work_id(j, args):
+    if getattr(args, "work", None):
+        return args.work[0] if isinstance(args.work, list) else args.work
+    if getattr(args, "todo", None):
+        w = j.work_for_todo(args.todo)
+        if w is None:
+            raise wj.JournalError(f"tracker item {args.todo} has no work yet")
+        return w
+    raise wj.JournalError("say --work or --todo")
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="canopy-work", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    p = sub.add_parser("work")
+    for k in ("todo", "repo", "project", "branch", "title"):
+        p.add_argument(f"--{k}")
+    p = sub.add_parser("relink")
+    p.add_argument("--work", required=True)
+    for k in ("todo", "repo", "project", "branch", "title"):
+        p.add_argument(f"--{k}")
+    sub.add_parser("retire").add_argument("--work", required=True)
+    p = sub.add_parser("source")
+    p.add_argument("--source", required=True)
+    p.add_argument("--adapter", required=True)
+    p.add_argument("--ordering", default="sequence", choices=wj.ORDERINGS)
+    p = sub.add_parser("bind")
+    p.add_argument("--source", required=True)
+    p.add_argument("--conversation", required=True)
+    p.add_argument("--work", action="append", default=[])
+    p.add_argument("--by", required=True)
+    p = sub.add_parser("exclude")
+    p.add_argument("--source", required=True)
+    p.add_argument("--conversation", required=True)
+    p = sub.add_parser("capture")
+    p.add_argument("--source", required=True)
+    p.add_argument("--conversation", required=True)
+    p.add_argument("--message-id", required=True)
+    p.add_argument("--seq", type=int)
+    p.add_argument("--source-time")
+    p.add_argument("--author", default="user", choices=wj.AUTHORS)
+    p.add_argument("--work", action="append")
+    p.add_argument("--accepted-generation", type=int)
+    p.add_argument("--supersedes", action="append", default=[])
+    p.add_argument("--target")
+    p.add_argument("--note")
+    p = sub.add_parser("cover")
+    p.add_argument("--source", required=True)
+    p.add_argument("--conversation", required=True)
+    p.add_argument("--through", type=int, required=True)
+    p.add_argument("--start", type=int, default=1)
+    p = sub.add_parser("host")
+    p.add_argument("--session", required=True)
+    p.add_argument("--cwd", required=True)
+    p.add_argument("--allowed-tools", required=True)
+    p.add_argument("--boot-prompt-file")
+    sub.add_parser("worker").add_argument("--session", required=True)
+    p = sub.add_parser("dispatch")
+    p.add_argument("--message")
+    sub.add_parser("requeue").add_argument("--outbox", type=int, required=True)
+    p = sub.add_parser("begin")
+    p.add_argument("--work", action="append", required=True)
+    p.add_argument("--worker", required=True)
+    p.add_argument("--host", required=True)
+    p.add_argument("--unmanaged", action="store_true")
+    p = sub.add_parser("boundary")
+    p.add_argument("--attempt", required=True)
+    p.add_argument("--boundary", required=True, choices=("start", "resume", "compaction"))
+    for name in ("context", "status"):
+        p = sub.add_parser(name)
+        p.add_argument("--work")
+        p.add_argument("--todo")
+    p = sub.add_parser("report")
+    p.add_argument("--work")
+    p.add_argument("--todo")
+    p.add_argument("kind", choices=wj.KINDS)
+    p.add_argument("text")
+    p.add_argument("--attempt")
+    p.add_argument("--packet")
+    p.add_argument("--receipt")
+    p.add_argument("--via", default="canopy-work")
+    args = ap.parse_args()
+
+    c = args.cmd
+    if c in READS:
+        try:
+            j = wj.Journal(readonly=True)
+        except wj.Absent:
+            out({"journal": "absent", "state": "none"})
+            return
+    else:
+        j = wj.Journal()
+    if c == "work":
+        links = {k: getattr(args, k) for k in ("repo", "project", "branch", "title") if getattr(args, k)}
+        if args.todo:
+            out({"work_id": j.work_for_todo(args.todo, create=True, **links)})
+        else:
+            out({"work_ids": j.works_for_branch(args.repo, args.branch)})
+    elif c == "relink":
+        links = {("todo_id" if k == "todo" else k): getattr(args, k) for k in ("todo", "repo", "project", "branch", "title") if getattr(args, k)}
+        j.relink(args.work, **links)
+        out(j.work(args.work))
+    elif c == "retire":
+        j.retire_work(args.work)
+        out(j.work(args.work))
+    elif c == "source":
+        j.register_source(args.source, adapter=args.adapter, ordering=args.ordering)
+        out({"source": args.source})
+    elif c == "bind":
+        out({"generation": j.bind(args.source, args.conversation, args.work, by=args.by)})
+    elif c == "exclude":
+        j.exclude(args.source, args.conversation)
+        out({"excluded": True})
+    elif c == "capture":
+        text = sys.stdin.read()
+        out(j.capture(source=args.source, conversation=args.conversation, source_message_id=args.message_id, text=text,
+                      author=args.author, source_seq=args.seq, source_time=args.source_time, works=args.work,
+                      supersedes=args.supersedes, target=args.target, accepted_generation=args.accepted_generation, note=args.note))
+    elif c == "cover":
+        j.cover(args.source, args.conversation, args.through, start=args.start)
+        out({"covered_through": args.through})
+    elif c == "dispatch":
+        if args.message:
+            j.hurry(args.message)
+        out(workdelivery.dispatch(j, workdelivery.transports()))
+    elif c == "host":
+        boot = open(args.boot_prompt_file).read() if args.boot_prompt_file else ""
+        out({"target": workdelivery.HeadlessClaudeTransport.register(j, args.session, cwd=args.cwd,
+                                                                     allowed_tools=args.allowed_tools, boot_prompt=boot)})
+    elif c == "worker":
+        out(workdelivery.HeadlessClaudeTransport.worker_state(j, workdelivery.HeadlessClaudeTransport.prefix + args.session))
+    elif c == "requeue":
+        j.requeue(args.outbox, by=os.environ.get("USER", "cli"))
+        out({"requeued": args.outbox})
+    elif c == "begin":
+        out(j.begin_attempt(args.work, worker=args.worker, host=args.host, managed=not args.unmanaged))
+    elif c == "boundary":
+        r = workdelivery.deliver_boundary(j, args.attempt, args.boundary, emit=lambda t: sys.stdout.write(t))
+        print(json.dumps(r), file=sys.stderr)
+    elif c == "context":
+        out(j.context(work_id(j, args)))
+    elif c == "status":
+        out(j.status(work_id(j, args)))
+    elif c == "report":
+        out(j.report(work_id(j, args), args.kind, args.text, via=args.via, attempt_id=args.attempt,
+                     receipt_id=args.receipt, packet_id=args.packet))
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except wj.JournalError as e:
+        print(json.dumps({"ok": False, "error": str(e), "kind": type(e).__name__}), file=sys.stderr)
+        sys.exit(2 if isinstance(e, wj.NotCollected) else 1)

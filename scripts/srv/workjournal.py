@@ -71,6 +71,10 @@ class NotCollected(JournalError):
     """The conversation was never enrolled, or is excluded: its messages are not ours to keep."""
 
 
+class Absent(JournalError):
+    """A read-only open found no journal; readers report that rather than create one."""
+
+
 class Conflict(JournalError):
     """An identity already names different content (immutable messages, unique sequence numbers)."""
 
@@ -182,6 +186,36 @@ CREATE TABLE IF NOT EXISTS outbox (
   UNIQUE (message_id, target)
 ) STRICT;
 CREATE INDEX IF NOT EXISTS outbox_due ON outbox(state, not_before);
+CREATE TABLE IF NOT EXISTS outbox_requeue (
+  outbox_id     INTEGER NOT NULL REFERENCES outbox(outbox_id),
+  requeued_at   TEXT NOT NULL,
+  requeued_by   TEXT NOT NULL,
+  receipt_floor INTEGER NOT NULL
+) STRICT;
+CREATE TABLE IF NOT EXISTS receipt_payload (
+  receipt_id TEXT PRIMARY KEY REFERENCES receipt(receipt_id),
+  transport  TEXT NOT NULL,
+  digest     TEXT NOT NULL,
+  bytes      INTEGER NOT NULL
+) STRICT;
+CREATE TABLE IF NOT EXISTS turn (
+  receipt_id  TEXT PRIMARY KEY REFERENCES receipt(receipt_id),
+  worker      TEXT NOT NULL,
+  pid         INTEGER,
+  start_token TEXT,
+  input_uuid  TEXT NOT NULL,
+  log         TEXT NOT NULL,
+  started_at  TEXT NOT NULL,
+  ended_at    TEXT,
+  outcome     TEXT NOT NULL CHECK (outcome IN ('running', 'succeeded', 'failed', 'lost')),
+  exit_code   INTEGER,
+  detail      TEXT
+) STRICT;
+CREATE INDEX IF NOT EXISTS turn_by_worker ON turn(worker, outcome);
+CREATE TABLE IF NOT EXISTS outbox_note (
+  outbox_id INTEGER PRIMARY KEY REFERENCES outbox(outbox_id),
+  note      TEXT NOT NULL
+) STRICT;
 
 CREATE TABLE IF NOT EXISTS attempt (
   attempt_id TEXT PRIMARY KEY,
@@ -258,7 +292,7 @@ CREATE INDEX IF NOT EXISTS result_by_work ON result(work_id, kind, result_id);
 """
 
 # Written history is immutable: the journal appends, it never edits what was said or decided.
-IMMUTABLE = ("message", "message_work", "supersession", "work_revision", "binding", "binding_work", "attempt_work", "receipt_work", "result", "packet", "packet_work")
+IMMUTABLE = ("message", "message_work", "supersession", "work_revision", "binding", "binding_work", "attempt_work", "receipt_work", "result", "packet", "packet_work", "outbox_requeue", "receipt_payload")
 TRIGGERS = "".join(
     f"""
 CREATE TRIGGER IF NOT EXISTS {t}_no_update BEFORE UPDATE ON {t} BEGIN SELECT RAISE(ABORT, '{t} is immutable'); END;
@@ -278,12 +312,24 @@ class Journal:
     """One connection to the journal. `clock` returns epoch seconds; tests pass a fake one.
     `fault` is a test hook called with a stage name inside write transactions."""
 
-    def __init__(self, path=None, clock=time.time, fault=None):
+    def __init__(self, path=None, clock=time.time, fault=None, readonly=False):
         self.path = path or default_path()
-        if self.path != ":memory:":
-            os.makedirs(os.path.dirname(os.path.abspath(self.path)), exist_ok=True)
         self.clock = clock
         self.fault = fault or (lambda stage: None)
+        if readonly:
+            if not os.path.exists(self.path):
+                raise Absent(f"no journal at {self.path}")
+            self.db = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True, timeout=30, isolation_level=None)
+            self.db.row_factory = sqlite3.Row
+            self.db.execute("PRAGMA busy_timeout = 30000")
+            row = self.db.execute("SELECT value FROM meta WHERE key = 'schema'").fetchone()
+            if row is None or int(row["value"]) != SCHEMA_VERSION:
+                raise JournalError(f"journal schema {row['value'] if row else 'none'} isn't {SCHEMA_VERSION}; a writer must migrate it first")
+            return
+        if self.path != ":memory:":
+            os.makedirs(os.path.dirname(os.path.abspath(self.path)), mode=0o700, exist_ok=True)
+            if not os.path.exists(self.path):
+                os.close(os.open(self.path, os.O_CREAT | os.O_WRONLY, 0o600))
         self.db = sqlite3.connect(self.path, timeout=30, isolation_level=None)
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA foreign_keys = ON")
@@ -467,7 +513,7 @@ class Journal:
     # ---- capture ---------------------------------------------------------------------------
 
     def capture(self, *, source, conversation, source_message_id, text, author="user", source_seq=None,
-                source_time=None, works=None, supersedes=(), target=None, accepted_generation=None):
+                source_time=None, works=None, supersedes=(), target=None, accepted_generation=None, note=None):
         """Durably records one message, before anything accepts it for delivery.
 
         `works` names the target explicitly; otherwise the binding generation the source accepted
@@ -526,8 +572,10 @@ class Journal:
                     self._advance(db, w, "message", message_id, now)
             self.fault("revision")
             if target:
-                db.execute("INSERT INTO outbox (message_id, target, state, created_at) VALUES (?,?,'pending',?)",
-                           (message_id, target, now))
+                ob = db.execute("INSERT INTO outbox (message_id, target, state, created_at) VALUES (?,?,'pending',?) RETURNING outbox_id",
+                                (message_id, target, now)).fetchone()[0]
+                if note:
+                    db.execute("INSERT INTO outbox_note VALUES (?, ?)", (ob, note))
             self.fault("outbox")
             return self._captured(db, message_id, duplicate=False, target=target)
 
@@ -708,28 +756,29 @@ class Journal:
 
     # ---- outbox ----------------------------------------------------------------------------
 
-    def lease(self, owner, *, ttl=60.0, limit=10):
-        """Claims due outbox rows for one dispatcher: pending ones, and leased ones whose
-        dispatcher died (lease expired). Each claim counts as an attempt."""
+    def lease(self, owner, *, ttl=60.0, limit=10, target=None):
+        """Claims due outbox rows for one dispatcher (optionally only one target's): pending ones,
+        and leased ones whose dispatcher died (lease expired). Each claim counts as an attempt."""
         now = self.clock()
         with self.tx() as db:
-            rows = db.execute("""SELECT outbox_id FROM outbox WHERE (state = 'pending' AND not_before <= :now)
-                                 OR (state = 'leased' AND lease_until <= :now) ORDER BY outbox_id LIMIT :n""",
-                              {"now": now, "n": limit}).fetchall()
+            rows = db.execute("""SELECT outbox_id FROM outbox WHERE ((state = 'pending' AND not_before <= :now)
+                                 OR (state = 'leased' AND lease_until <= :now)) AND (:t IS NULL OR target = :t)
+                                 ORDER BY outbox_id LIMIT :n""", {"now": now, "n": limit, "t": target}).fetchall()
             ids = [r["outbox_id"] for r in rows]
             for i in ids:
                 db.execute("""UPDATE outbox SET state = 'leased', lease_owner = ?, lease_token = ?, lease_until = ?,
                               attempts = attempts + 1 WHERE outbox_id = ?""", (owner, uuid.uuid4().hex, now + ttl, i))
             return [dict(r) for r in db.execute(
-                f"SELECT o.*, m.text, m.source_message_id FROM outbox o JOIN message m USING (message_id) WHERE outbox_id IN ({','.join('?' * len(ids))}) ORDER BY outbox_id", ids)] if ids else []
+                f"SELECT o.*, m.text, m.source_message_id, n.note FROM outbox o JOIN message m USING (message_id) LEFT JOIN outbox_note n USING (outbox_id) WHERE outbox_id IN ({','.join('?' * len(ids))}) ORDER BY outbox_id", ids)] if ids else []
 
     def settle(self, outbox_id, lease_token, outcome, *, error=None, retry_in=30.0, max_attempts=8):
         """A dispatcher reports one leased row by the token `lease` issued it: delivered,
-        uncertain (handed off, no acknowledgement — never silently retried as if unsent), or
-        failed (retried later, abandoned after max_attempts). A report from an expired lease is
+        uncertain (handed off, no acknowledgement — never silently retried as if unsent), failed
+        (retried later, abandoned after max_attempts), or deferred (the worker is busy with a
+        turn: nothing was sent and no attempt is spent; the turn's end dispatches it). A report from an expired lease is
         refused even when the same dispatcher reclaimed the row since: the token, not the
         dispatcher's name, identifies the lease."""
-        if outcome not in ("delivered", "uncertain", "failed"):
+        if outcome not in ("delivered", "uncertain", "failed", "deferred"):
             raise JournalError(f"outcome {outcome!r}")
         with self.tx() as db:
             row = db.execute("SELECT * FROM outbox WHERE outbox_id = ?", (outbox_id,)).fetchone()
@@ -737,7 +786,11 @@ class Journal:
                 raise JournalError(f"no outbox row {outbox_id}")
             if row["state"] != "leased" or not lease_token or row["lease_token"] != lease_token:
                 raise Conflict(f"outbox row {outbox_id} is not held by that lease")
-            if outcome == "failed":
+            if outcome == "deferred":
+                db.execute("""UPDATE outbox SET state = 'pending', lease_owner = NULL, lease_token = NULL, lease_until = NULL,
+                              attempts = attempts - 1, not_before = ?, last_error = ? WHERE outbox_id = ?""",
+                           (0, error, outbox_id))
+            elif outcome == "failed":
                 state = "abandoned" if row["attempts"] >= max_attempts else "pending"
                 db.execute("UPDATE outbox SET state = ?, lease_owner = NULL, lease_token = NULL, lease_until = NULL, not_before = ?, last_error = ?, settled_at = ? WHERE outbox_id = ?",
                            (state, self.clock() + retry_in, error, self.now() if state == "abandoned" else None, outbox_id))
@@ -874,6 +927,38 @@ class Journal:
             return db.execute("UPDATE receipt SET state = 'uncertain', settled_at = ?, detail = ? WHERE outbox_id = ? AND state = 'sending'",
                               (self.now(), detail, outbox_id)).rowcount
 
+    def record_turn(self, receipt_id, *, worker, pid, start_token, input_uuid, log):
+        """An owned host launched a worker turn for this receipt: the process identity to observe."""
+        with self.tx() as db:
+            db.execute("INSERT INTO turn (receipt_id, worker, pid, start_token, input_uuid, log, started_at, outcome) VALUES (?,?,?,?,?,?,?,'running')",
+                       (receipt_id, worker, pid, start_token, input_uuid, log, self.now()))
+
+    def end_turn(self, receipt_id, outcome, *, exit_code=None, detail=None):
+        """The turn's process ended (succeeded or failed by its own record) or vanished without
+        one (lost). Only a running turn ends; the first record wins."""
+        if outcome not in ("succeeded", "failed", "lost"):
+            raise JournalError(f"turn outcome {outcome!r}")
+        with self.tx() as db:
+            return db.execute("UPDATE turn SET outcome = ?, exit_code = ?, detail = ?, ended_at = ? WHERE receipt_id = ? AND outcome = 'running'",
+                              (outcome, exit_code, detail, self.now(), receipt_id)).rowcount == 1
+
+    def turns(self, worker, *, running=False, limit=20):
+        q = "SELECT * FROM turn WHERE worker = ?" + (" AND outcome = 'running'" if running else "")
+        return [dict(r) for r in self.db.execute(q + " ORDER BY rowid DESC LIMIT ?", (worker, limit))]
+
+    def acknowledged_turn(self, worker):
+        """Whether an owned host ever had a turn of this worker's acknowledged: its session exists."""
+        return self.db.execute("""SELECT 1 FROM turn t JOIN receipt r USING (receipt_id)
+                                  WHERE t.worker = ? AND r.state = 'acknowledged' LIMIT 1""", (worker,)).fetchone() is not None
+
+    def receipt(self, receipt_id):
+        row = self.db.execute("SELECT * FROM receipt WHERE receipt_id = ?", (receipt_id,)).fetchone()
+        return dict(row) if row else None
+
+    def receipt_payload(self, receipt_id):
+        row = self.db.execute("SELECT * FROM receipt_payload WHERE receipt_id = ?", (receipt_id,)).fetchone()
+        return dict(row) if row else None
+
     def receipts(self, *, attempt_id=None, outbox_id=None):
         q, args = "SELECT * FROM receipt WHERE 1", []
         if attempt_id:
@@ -881,7 +966,7 @@ class Journal:
         if outbox_id is not None:
             q, args = q + " AND outbox_id = ?", args + [outbox_id]
         out = []
-        for r in self.db.execute(q + " ORDER BY opened_at, receipt_id", args).fetchall():
+        for r in self.db.execute(q + " ORDER BY rowid", args).fetchall():
             revs = {x["work_id"]: x["revision"] for x in self.db.execute("SELECT * FROM receipt_work WHERE receipt_id = ?", (r["receipt_id"],))}
             out.append({**dict(r), "revisions": revs})
         return out
@@ -1011,6 +1096,52 @@ class Journal:
                     "last_completion": dict(completion) if completion else None,
                     "qualified_completion": dict(qualified) if qualified else None,
                     "last_progress": dict(progress) if progress else None}
+
+    def requeue(self, outbox_id, *, by):
+        """A deliberate retry of an uncertain or abandoned delivery (the worker may get it twice;
+        whoever asks accepts that). Never automatic."""
+        with self.tx() as db:
+            row = db.execute("SELECT state FROM outbox WHERE outbox_id = ?", (outbox_id,)).fetchone()
+            if row is None:
+                raise JournalError(f"no outbox row {outbox_id}")
+            if row["state"] not in ("uncertain", "abandoned"):
+                raise Conflict(f"outbox row {outbox_id} is {row['state']}; only uncertain or abandoned rows are requeued")
+            floor = db.execute("SELECT COALESCE(MAX(rowid), 0) FROM receipt WHERE outbox_id = ?", (outbox_id,)).fetchone()[0]
+            db.execute("INSERT INTO outbox_requeue VALUES (?,?,?,?)", (outbox_id, self.now(), by, floor))
+            db.execute("UPDATE outbox SET state = 'pending', not_before = 0, settled_at = NULL, last_error = ? WHERE outbox_id = ?",
+                       (f"requeued by {by} after {row['state']}", outbox_id))
+
+    def handoffs(self, outbox_id):
+        """Receipt states of this row's hand-offs since its last deliberate requeue: what a
+        dispatcher must reconcile before it may send again."""
+        floor = self.db.execute("SELECT COALESCE(MAX(receipt_floor), 0) FROM outbox_requeue WHERE outbox_id = ?", (outbox_id,)).fetchone()[0]
+        return [r["state"] for r in self.db.execute("SELECT state FROM receipt WHERE outbox_id = ? AND rowid > ? ORDER BY rowid",
+                                                     (outbox_id, floor))]
+
+    def record_payload(self, receipt_id, transport, payload):
+        """The digest and size of the exact bytes a transport is about to hand over."""
+        data = payload.encode("utf-8")
+        with self.tx() as db:
+            db.execute("INSERT INTO receipt_payload VALUES (?,?,?,?)", (receipt_id, transport, hashlib.sha256(data).hexdigest(), len(data)))
+
+    def hurry(self, message_id):
+        """Makes a message's pending deliveries due now (an explicit Retry), without touching
+        uncertain or settled ones."""
+        with self.tx() as db:
+            return db.execute("UPDATE outbox SET not_before = 0 WHERE message_id = ? AND state = 'pending'", (message_id,)).rowcount
+
+    def message_works(self, message_id):
+        return [r["work_id"] for r in self.db.execute("SELECT work_id FROM message_work WHERE message_id = ? ORDER BY work_id", (message_id,))]
+
+    def attempt_for(self, worker, work_ids):
+        """The running managed attempt of `worker` that is current for every one of `work_ids`."""
+        want = set(work_ids)
+        for aid in reversed(self.running_attempts(worker)):
+            a = self.attempt(aid)
+            if a["managed"] and want <= set(a["generations"]) and all(
+                    a["generations"][w] == self._current_generation(self.db, w) for w in want):
+                return aid
+        return None
 
     def outbox(self, *, states=None):
         q = "SELECT * FROM outbox"
