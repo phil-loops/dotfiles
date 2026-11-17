@@ -137,7 +137,8 @@ def basis(repo, branch):
 
 # ── frozen inputs ─────────────────────────────────────────────────────────────────────────────
 
-def freeze_recipe(name):
+def recipe_digest(name):
+    """The recipe bundle as it reads now, as one digest over every file in it."""
     src = os.path.join(RECIPES, name)
     if not os.path.isfile(os.path.join(src, "recipe.json")):
         raise Refused(f"no recipe {name} in {RECIPES}")
@@ -146,7 +147,12 @@ def freeze_recipe(name):
     for rel in files:
         with open(os.path.join(src, rel), "rb") as f:
             h.update(rel.encode() + b"\0" + f.read() + b"\0")
-    digest = h.hexdigest()
+    return h.hexdigest()
+
+
+def freeze_recipe(name):
+    src = os.path.join(RECIPES, name)
+    digest = recipe_digest(name)
     frozen = os.path.join(CACHE, "recipes", digest)
     if not os.path.isdir(frozen):
         tmp = f"{frozen}.{os.getpid()}.tmp"
@@ -815,6 +821,15 @@ def status(m, mid):
             "carriedFrom": None if j is exact else j["manifest"], "stands": not why, "why": why}
 
 
+def is_current(m, req, b):
+    """Whether manifest `m` is evidence of this subject: the same trees, the request as it reads now,
+    and the recipe bundle as it reads now (an edited recipe is a different question)."""
+    same_trees = (b["afterTree"], b["beforeTree"]) == (m["basis"]["afterTree"], m["basis"]["beforeTree"])
+    same_ask = ((req["recipe"], req["expectation"], req["predict"], req.get("gaps", []))
+                == (m["recipe"]["name"], m["expectation"], m["predict"], m.get("gaps", [])))
+    return same_trees and same_ask and m["recipe"].get("digest") == recipe_digest(req["recipe"])
+
+
 def card(repo, branch):
     """Everything the branch page shows, from the current basis outward."""
     repo_id = repo_name(repo)
@@ -828,11 +843,7 @@ def card(repo, branch):
         return out
     m = load_manifest(mid)
     try:
-        b = basis(repo, branch)
-        same_trees = (b["afterTree"], b["beforeTree"]) == (m["basis"]["afterTree"], m["basis"]["beforeTree"])
-        same_ask = ((req["recipe"], req["expectation"], req["predict"], req.get("gaps", []))
-                    == (m["recipe"]["name"], m["expectation"], m["predict"], m.get("gaps", [])))
-        out["current"] = same_trees and same_ask
+        out["current"] = is_current(m, req, basis(repo, branch))
     except Refused:
         pass
     why = eligibility(m)
