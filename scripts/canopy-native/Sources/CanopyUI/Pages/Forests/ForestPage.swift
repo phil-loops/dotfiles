@@ -70,6 +70,7 @@ struct ForestPage: View {
                 if let t = p.ticket { Text(t).font(Theme.text(12)).foregroundStyle(theme.inkFaint) }
             }
             if !p.summary.isEmpty { Text(p.summary).foregroundStyle(theme.inkDim) }
+            BenchSummaryView(subject: .forest(repo: p.repo, project: p.name))
             HStack(spacing: 0) {
                 if m.integratable(p.id), let v = m.verdict(p.id) {
                     Button(Self.merge[v.state]!) { app.runner.dispatch("forest.integrate", via: .click, target: p.id) }

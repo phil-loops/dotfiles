@@ -110,6 +110,7 @@ private struct ReviewHeader: View {
                 if pg.integration == nil { ShipStripView(branchID: pg.id) }
             }
             if pg.tab == "files", pg.integration == nil { BranchLine().padding(.top, 4) }
+            if pg.integration == nil, let b { BenchSummaryView(subject: .branch(repo: b.repo, name: b.name)) }
             if let c, !waiting(c, pg).isEmpty {
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
                     ForEach(waiting(c, pg), id: \.self) { Text($0) }

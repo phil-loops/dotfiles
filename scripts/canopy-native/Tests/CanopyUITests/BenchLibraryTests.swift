@@ -79,6 +79,14 @@ final class BenchFiles: @unchecked Sendable {
         #expect(try io.load(branch).isEmpty)
     }
 
+    @Test func sharedGroupsCannotMasqueradeAsBranchOwnedClaims() throws {
+        let files = BenchFiles()
+        let data = Data(#"{"mode":"bench","bench":{"repo":"loops","project":"forest","groups":[{"id":"topic"},{"id":"owned","branch":"topic"}]}}"#.utf8)
+        files.set("/fixtures/bench.json", data, status: status)
+        #expect(try files.io.load(branch).first?.status == .unavailable)
+        #expect(try files.io.load(.forest(repo: "loops", project: "forest")).first?.status == BenchStatus.decode(status))
+    }
+
     @Test func changedAndDeletedDocumentsLoseTheirOpeningAuthority() throws {
         let files = BenchFiles()
         let url = URL(fileURLWithPath: "/fixtures/bench.json")
@@ -109,8 +117,8 @@ final class BenchFiles: @unchecked Sendable {
 
     @Test func collidingRecordNamesDoNotBorrowEachOthersResults() throws {
         let files = BenchFiles()
-        files.set("/fixtures/one/bench.json", try document(), status: status)
-        files.set("/fixtures/two/bench.json", try document(repo: "other"), status: status)
+        files.set("/fixtures/bench.json", try document(), status: status)
+        files.set("/fixtures/archive/bench.json", try document(repo: "other"), status: status)
         #expect(try files.io.load(branch).first?.status == .unavailable)
     }
 
@@ -124,6 +132,8 @@ final class BenchFiles: @unchecked Sendable {
         var io = BenchIO(directory: root)
         io.status = { _, _ in Issue.record("colliding recording must not be read"); return "no runs yet" }
         #expect(try io.load(branch).first?.status == .unavailable)
+        #expect(try io.documents(for: branch).map(\.url.lastPathComponent) == ["bench.json"])
+        #expect(try io.documents(for: .branch(repo: "other", name: "topic")).isEmpty)
     }
 
     @Test func aNewerSubjectOwnsTheLibraryAfterAnOlderReadFinishes() async throws {
@@ -180,7 +190,7 @@ final class BenchFiles: @unchecked Sendable {
         #expect(!library.failed)
     }
 
-    @Test func theRealStatusCommandOnlyReadsIsolatedRecordedRuns() throws {
+    @Test nonisolated func theRealStatusCommandOnlyReadsIsolatedRecordedRuns() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
