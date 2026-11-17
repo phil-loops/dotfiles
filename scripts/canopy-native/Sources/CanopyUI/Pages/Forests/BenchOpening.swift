@@ -80,6 +80,7 @@ final class BenchOpening {
         let valid = await Task.detached(priority: .utility) { io.validate(document, for: request.subject) }.value
         guard current(request), !Task.isCancelled else { return }
         guard valid else { return app.runner.say("bench changed; open it again to choose its current definition") }
+        pending = nil
         do {
             try await openDocument(document.url)
             if current(request) { app.runner.say("opened \(document.title) in Show") }
