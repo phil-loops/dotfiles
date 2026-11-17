@@ -134,6 +134,22 @@ check(s["judged"] and s.get("stands") is False and any("conflicted" in w for w i
 check(not E.status(det_twin, tm)["judged"], "a verdict doesn't carry onto a manifest that isn't eligible")
 E._write_atomic(E._admission_path("ra"), E._canon({"status": "admitted"}))
 check(E.status(det, dm).get("stands") is True, "a verdict on an eligible manifest stands")
+src = dict(copy.deepcopy(det), basis=dict(det["basis"], afterCommit="a3"))
+src["before"]["renderId"], src["after"]["renderId"] = "sb", "sa"
+dst = dict(copy.deepcopy(src), basis=dict(det["basis"], afterCommit="a4"))
+dst["before"]["renderId"], dst["after"]["renderId"] = "db", "da"
+for r in ("sb", "sa", "db", "da"):
+    E._write_atomic(E._admission_path(r), E._canon({"status": "admitted"}))
+sm, xm = publish(src), publish(dst)
+ledger_before = open(os.environ["EVIDENCE_LEDGER"]).read()
+open(os.environ["EVIDENCE_LEDGER"], "w").close()
+E.judge(sm, "accept", "", "browser")
+E._write_atomic(E._admission_path("sa"), E._canon({"status": "conflicted"}))
+check(not E.status(dst, xm)["judged"], "a verdict doesn't carry from a manifest whose render was revoked after judging")
+E._write_atomic(E._admission_path("sa"), E._canon({"status": "admitted"}))
+check(E.status(dst, xm).get("carriedFrom") == sm, "a verdict carries again once its source stands")
+ours = open(os.environ["EVIDENCE_LEDGER"]).read()
+open(os.environ["EVIDENCE_LEDGER"], "w").write(ledger_before + ours)
 check(E.eligibility(base) == [], "a live manifest doesn't need admissions — its claim is repeatability")
 retro = dict(copy.deepcopy(base), predict={"dark": "same"}, expectation="nothing changes", amends="f" * 64, retrospective=True)
 check(retro["captured"]["predict"] == {"dark": "changes"} and E.observation(retro) != E.observation(base),
