@@ -82,6 +82,7 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
         live.owner = self
         _ = Self.forestKeys
         delivery.onChange = { [weak self] in self?.refreshThread(stickToBottom: true) }
+        delivery.onCaptured = { [weak self] submission, seq in self?.captured(submission, seq: seq) }
         freshness.onChange = { [weak self] in self?.freshnessChanged() }
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             guard let self else { return }
@@ -98,6 +99,9 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
         threadStamp = fileStamp(threadURL(path).path)
         apply(deck, keepingSelection: prefs.string(forKey: selectionKey))
         freshness.refresh(deck)
+        if !deck.isLive {
+            delivery.open(sections: deck.sections.compactMap { s in (s.work ?? deck.work).map { (s.key, $0, s.replyTo ?? deck.replyTo) } })
+        }
     }
 
     var window: NSWindow? { viewController.view.window }
@@ -535,6 +539,9 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
     /// Keeps the reply being typed as the section's draft, so a reload, a section switch or a relaunch never loses it.
     @objc func saveNote() {
         guard !deck.isLive, let key = composerKey else { return }
+        if prefs.string(forKey: draftKey(key)) != composer.string {
+            prefs.set(draftRevision(key) + 1, forKey: "thread.draftrev.\(path).\(key)")
+        }
         prefs.set(composer.string, forKey: draftKey(key))
     }
 
@@ -558,6 +565,26 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
             NSSound.beep()
             return
         }
+        if (section.work ?? deck.work) != nil {
+            if let refusal = delivery.refusal(section.key) {
+                let alert = NSAlert()
+                alert.messageText = "Couldn't send your reply"
+                alert.informativeText = refusal + " Your reply is still in the field."
+                presentAlert(alert, in: window)
+                return
+            }
+            let binding = delivery.bindings[section.key]!
+            let revision = draftRevision(section.key)
+            if delivery.pendingSubmissions().values.contains(where: { $0.section == section.key && $0.draftRevision == revision }) {
+                return
+            }
+            delivery.submit(ThreadDelivery.Submission(id: UUID().uuidString.lowercased(), section: section.key, text: value,
+                                                      workId: binding.workId, generation: binding.generation,
+                                                      sentAt: ISO8601DateFormatter().string(from: Date()), draftRevision: revision),
+                            replyTo: section.replyTo ?? deck.replyTo)
+            refreshThread(stickToBottom: true)
+            return
+        }
         do {
             try appendThreadMessage(ThreadMessage(at: ISO8601DateFormatter().string(from: Date()), from: "phil", text: value), section: section.key, deckPath: path)
         } catch {
@@ -577,6 +604,33 @@ final class DeckController: NSObject, WKNavigationDelegate, NSTableViewDataSourc
         reloadSelectedRow()
         delivery.send(delivery.threadLine(section: section.key), key: section.key, replyTo: section.replyTo ?? deck.replyTo)
         refreshThread(stickToBottom: true)
+    }
+
+    /// Each edit of a section's reply field advances its draft revision, kept with the draft, so a submission can tell
+    /// whether the field still holds the very draft it came from (an A→B→A edit is a newer draft with the same words).
+    private func draftRevision(_ section: String) -> Int { prefs.integer(forKey: "thread.draftrev.\(path).\(section)") }
+
+    /// The work journal holds a reply: project it into the thread for Claude to read, keep it as the section's note, and
+    /// clear the draft it came from — only if that section's draft is still the revision that was sent, so a newer draft
+    /// or another selected section is never wiped by a late callback.
+    private func captured(_ submission: ThreadDelivery.Submission, seq: Int) {
+        let section = submission.section
+        var message = ThreadMessage(at: submission.sentAt, from: "phil", text: submission.text)
+        message.id = submission.id
+        message.seq = seq
+        message.work = delivery.bindings[section]?.todo
+        try? appendThreadMessage(message, section: section, deckPath: path)
+        store.update(section) { $0.note = submission.text }
+        if draftRevision(section) == submission.draftRevision {
+            prefs.removeObject(forKey: draftKey(section))
+            if composerKey == section {
+                composer.string = ""
+                fitComposer()
+            }
+        }
+        thread = loadThread(path)
+        threadStamp = fileStamp(threadURL(path).path)
+        reloadSelectedRow()
     }
 
     @objc private func submitReview() {

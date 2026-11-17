@@ -4,6 +4,9 @@ struct Deck: Decodable {
     let title: String
     let subtitle: String?
     let replyTo: String?
+    /// The tracker item (`canopy-todo` id) this deck's replies direct; a section's own `work` overrides it.
+    /// Replies to a deck with work are captured by the work journal before they are delivered.
+    let work: String?
     let mode: String?
     /// Read by routing (`App.route`) before the deck is decoded; named here so the deck's keys are all in one place.
     let workspace: String?
@@ -57,6 +60,8 @@ struct Section: Decodable {
     let replyTo: String?
     /// The choice key suggested for this section in a labelling deck.
     let proposed: String?
+    /// The tracker item this section's replies direct, overriding the deck's `work`.
+    let work: String?
 
     var key: String { id ?? title }
     static let views: Set<String> = ["plan"]

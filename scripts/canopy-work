@@ -26,6 +26,14 @@ Delivery (managed hosts only; never part of a test run)
   canopy-work begin --work W … --worker X --host H [--unmanaged]
   canopy-work boundary --attempt A --boundary start|resume|compaction    print the packet (hook stdout)
 
+Show's owned ingress (Show runs these; see srv/showingest.py)
+  canopy-work show-bind --deck D --section S --todo ID [--rebind]   open a work-bound section: its frozen work binding
+  canopy-work show-submit --target T [--note TEXT] [--host-session UUID --host-cwd DIR --allowed-tools LIST --boot-prompt-file F]
+      < {message_id, text, deck, section, work_id, generation, sent_at}            capture one reply (fast)
+  canopy-work show-deliver --outbox N [--retry]          deliver it (may wait on the worker's host)
+  canopy-work show-recover --deck D --section S …        on opening a deck: resume safe pending deliveries, report each section's
+  canopy-work turn --receipt R                          the worker turn a delivery started: running|succeeded|failed|lost|unknown|none
+
 Reading and reporting
   canopy-work context --work W | --todo ID
   canopy-work status --work W | --todo ID
@@ -38,10 +46,10 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from srv import todo, workdelivery, workjournal as wj  # noqa: E402
+from srv import showingest, todo, workdelivery, workjournal as wj  # noqa: E402
 
 
-READS = ("worker", "context", "status")
+READS = ("worker", "context", "status", "turn")
 
 
 def out(obj):
@@ -116,6 +124,25 @@ def main():
     p.add_argument("--allowed-tools", required=True)
     p.add_argument("--boot-prompt-file")
     sub.add_parser("worker").add_argument("--session", required=True)
+    p = sub.add_parser("show-bind")
+    p.add_argument("--deck", required=True)
+    p.add_argument("--section", required=True)
+    p.add_argument("--todo", required=True)
+    p.add_argument("--rebind", action="store_true")
+    p = sub.add_parser("show-recover")
+    p.add_argument("--deck", required=True)
+    p.add_argument("--section", action="append", required=True)
+    p = sub.add_parser("show-deliver")
+    p.add_argument("--outbox", type=int, required=True)
+    p.add_argument("--retry", action="store_true")
+    p = sub.add_parser("show-submit")
+    p.add_argument("--target", required=True)
+    p.add_argument("--note")
+    p.add_argument("--host-session")
+    p.add_argument("--host-cwd")
+    p.add_argument("--allowed-tools")
+    p.add_argument("--boot-prompt-file")
+    sub.add_parser("turn").add_argument("--receipt", required=True)
     p = sub.add_parser("dispatch")
     p.add_argument("--message")
     sub.add_parser("requeue").add_argument("--outbox", type=int, required=True)
@@ -184,6 +211,24 @@ def main():
         if args.message:
             j.hurry(args.message)
         out(workdelivery.dispatch(j, workdelivery.transports()))
+    elif c == "show-submit":
+        host = None
+        if args.host_session:
+            host = {"session": args.host_session, "cwd": args.host_cwd, "allowed_tools": args.allowed_tools,
+                    "boot_prompt": open(args.boot_prompt_file).read() if args.boot_prompt_file else ""}
+        try:
+            envelope = json.loads(sys.stdin.read())
+        except ValueError as e:
+            raise wj.JournalError(f"the submission isn't JSON: {e}") from None
+        out(showingest.submit(j, envelope, target=args.target, note=args.note, host=host))
+    elif c == "show-bind":
+        out(showingest.bind(j, deck=args.deck, section=args.section, todo_id=args.todo, rebind=args.rebind))
+    elif c == "show-recover":
+        out(showingest.recover(j, deck=args.deck, sections=args.section))
+    elif c == "show-deliver":
+        out(showingest.deliver(j, args.outbox, retry=args.retry))
+    elif c == "turn":
+        out(showingest.turn_state(j, args.receipt))
     elif c == "host":
         boot = open(args.boot_prompt_file).read() if args.boot_prompt_file else ""
         out({"target": workdelivery.HeadlessClaudeTransport.register(j, args.session, cwd=args.cwd,

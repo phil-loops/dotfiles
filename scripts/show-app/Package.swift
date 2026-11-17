@@ -10,9 +10,10 @@ let package = Package(
             name: "Show",
             dependencies: [.product(name: "CanopyUI", package: "canopy-native")],
             path: ".",
-            exclude: ["Package.swift"],
+            exclude: ["Package.swift", "Tests"],
             linkerSettings: [.linkedFramework("WebKit")]
         ),
+        .testTarget(name: "ShowTests", dependencies: ["Show"], path: "Tests/ShowTests"),
     ],
     swiftLanguageModes: [.v5]
 )
