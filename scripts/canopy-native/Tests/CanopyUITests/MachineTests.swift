@@ -227,7 +227,7 @@ import Testing
 
     @Test func dashboardText() {
         #expect(DashText.ms(nil) == "—" && DashText.ms(16.7) == "17ms" && DashText.ms(8531.3) == "8.5s")
-        #expect(DashText.pct(0) == "—" && DashText.pct(0.125) == "13%")
+        #expect(DashText.pct(0) == "0%" && DashText.pct(0.125) == "13%")
         #expect(DashText.ratio(30, 16.7).map(DashText.verdict) == "✕ 1.8×")
         #expect(DashText.ratio(10, 16.7).map(DashText.verdict) == "✓ in")
         #expect(DashText.ratio(10, nil) == nil)
