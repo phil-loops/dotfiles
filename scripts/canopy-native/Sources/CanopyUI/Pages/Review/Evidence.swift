@@ -501,10 +501,10 @@ struct EvidencePanel: View {
                 let names = cov.uncovered.map { ($0 as NSString).lastPathComponent + ((cov.unverified ?? []).contains($0) ? " (named by a view, unchecked)" : "") }
                 Text("looks at \(cov.covered.count) of \(cov.changed.count) changed UI files"
                      + (names.isEmpty ? "" : " · accepting also accepts, unseen: " + names.joined(separator: ", ")))
-                    .font(Theme.text(11.5)).foregroundStyle(names.isEmpty ? theme.inkFaint : theme.goldLeaf).lineLimit(2)
+                    .font(Theme.text(11.5)).foregroundStyle(names.isEmpty ? theme.inkFaint : theme.goldLeaf).fixedSize(horizontal: false, vertical: true)
             }
             if !gaps.isEmpty {
-                Text("why: " + gaps.joined(separator: " · ")).font(Theme.text(11.5)).foregroundStyle(theme.inkFaint).lineLimit(2)
+                Text("why: " + gaps.joined(separator: " · ")).font(Theme.text(11.5)).foregroundStyle(theme.inkFaint).fixedSize(horizontal: false, vertical: true)
             }
         }
     }
