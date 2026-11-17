@@ -33,10 +33,25 @@ struct SyntaxSpan: Decodable, Equatable {
 
 struct SyntaxUnits: Decodable {
     var ok: Bool
+    var sha: String?
     var units: [SyntaxUnit]?
     var functions: [SyntaxSpan]?
     var classes: [SyntaxSpan]?
     var message: String?
+
+    private enum CodingKeys: String, CodingKey { case ok, sha, units, functions, classes, message }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        ok = try c.decode(Bool.self, forKey: .ok)
+        sha = try c.decodeIfPresent(String.self, forKey: .sha)
+        message = try c.decodeIfPresent(String.self, forKey: .message)
+        if ok {
+            units = try c.decode([SyntaxUnit]?.self, forKey: .units)
+            functions = try c.decode([SyntaxSpan]?.self, forKey: .functions)
+            classes = try c.decode([SyntaxSpan]?.self, forKey: .classes)
+        }
+    }
 }
 
 /// What the review page knows of one file's syntax at this tip.
@@ -46,6 +61,7 @@ struct FileSyntax {
     var classes: [SyntaxSpan]
     /// new-side lines the change touches (a removal counts as the line now standing where it was)
     var changed: Set<Int>
+    var unavailable: String?
 
     /// The functions (or classes) the change touches, in file order — ]f's (]t's) stops.
     func touched(_ spans: [SyntaxSpan]) -> [SyntaxSpan] {
@@ -141,53 +157,95 @@ enum ReviewUnitRule {
 final class ReviewUnits {
     static func of(_ app: AppModel) -> ReviewUnits { app.state { ReviewUnits(app) } }
 
+    struct Source: Hashable {
+        let repo: String
+        let sha: String
+        let path: String
+
+        static func objectName(_ value: String) -> Bool {
+            (7...64).contains(value.count) && value.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) }
+        }
+
+        func accepts(_ returned: String?) -> Bool {
+            guard let returned = returned?.lowercased(), [40, 64].contains(returned.count), Self.objectName(returned) else { return false }
+            return returned.hasPrefix(sha)
+        }
+    }
+
+    private struct Key: Hashable {
+        let source: Source
+        let context: String
+        let display: Int
+    }
+
     private weak var app: AppModel?
-    private var byKey: [String: FileSyntax] = [:]
-    /// The read in flight per file: a second caller waits for it instead of getting nothing — before,
-    /// it returned at once and syntax() answered nil, as if the server couldn't be reached (and a test
-    /// raced the page's own read under load, 2026-11-12).
-    private var reading: [String: Task<Void, Never>] = [:]
+    private var byKey: [Key: FileSyntax] = [:]
+    private var raw: [Source: SyntaxUnits] = [:]
+    private var reading: [Source: Task<SyntaxUnits?, Never>] = [:]
 
     init(_ app: AppModel) { self.app = app }
 
-    private func key(_ pg: ReviewPageState, _ path: String) -> String { "\(pg.id)@\(pg.tip)|\(pg.baseSha)|\(path)" }
+    func source(_ pg: ReviewPageState, path: String) -> Source? {
+        guard pg.diffCurrent, let target = pg.target else { return nil }
+        let sha = (pg.scopeEnd ?? pg.tip).lowercased()
+        guard Source.objectName(sha) else { return nil }
+        return Source(repo: target.repo, sha: sha, path: path)
+    }
+
+    private func key(_ pg: ReviewPageState, _ path: String) -> Key? {
+        source(pg, path: path).map { Key(source: $0, context: pg.contextKey, display: pg.payloadGen) }
+    }
 
     /// The unit a changed row's line sits in, once the file's syntax is in.
     func unit(_ pg: ReviewPageState, path: String, row: DiffRow, block: Int) -> ReviewUnit? {
-        guard let fs = byKey[key(pg, path)], let fv = pg.fileOf(path), fv.lineKeys.indices.contains(block) else { return nil }
+        guard let key = key(pg, path), let fs = byKey[key], let fv = pg.fileOf(path), fv.lineKeys.indices.contains(block) else { return nil }
         for k in fv.rowLines[row.key] ?? [] {
             if let i = fv.lineKeys[block].firstIndex(of: k), let u = fs.units[LineID(block: block, index: i)] { return u }
         }
         return nil
     }
 
-    /// The file's syntax, read first if it isn't yet; nil when the server can't be reached.
+    /// Syntax belongs to the immutable new side; unsupported files retain an explicit unavailable reason.
     func syntax(_ pg: ReviewPageState, path: String) async -> FileSyntax? {
-        await load(pg, path: path)
-        return byKey[key(pg, path)]
-    }
-
-    private struct Ask: Encodable { var branch: String; var path: String }
-
-    func load(_ pg: ReviewPageState, path: String) async {
-        let k = key(pg, path)
-        if byKey[k] != nil { return }
-        if let inFlight = reading[k] { return await inFlight.value }
-        guard let app, let t = pg.target, let fv = pg.fileOf(path), !fv.blocks.isEmpty else { return }
-        let task = Task { @MainActor [weak self] in _ = await self?.read(pg, path: path, k: k, app: app, t: t) }
-        reading[k] = task
-        await task.value
-        reading[k] = nil
-    }
-
-    private func read(_ pg: ReviewPageState, path: String, k: String, app: AppModel, t: ReviewPageState.Target) async {
-        let r = await app.transport.ask(app.transport.atRepo(t.repo, "/syntax/units"), Ask(branch: t.name, path: path), as: SyntaxUnits.self)
-        // a server that never answered is asked again next time; one that read no declarations is believed
-        guard let r else { return }
-        let got = r.ok ? r : nil
-        guard let fv = pg.fileOf(path), key(pg, path) == k else { return }
+        guard let key = key(pg, path) else { return nil }
+        if let cached = byKey[key] { return cached }
+        guard let reply = await read(key.source), self.key(pg, path) == key, let fv = pg.fileOf(path) else { return nil }
         let lines = lineAnchors(fv.file).map { ($0.block, $0.index, $0.at, $0.anchor.hasPrefix("R:")) }
-        byKey[k] = FileSyntax(units: ReviewUnitRule.units(lines: lines, status: fv.file.status, decls: got?.units),
-                              functions: got?.functions ?? [], classes: got?.classes ?? [], changed: Set(lines.map(\.2)))
+        let result = FileSyntax(units: ReviewUnitRule.units(lines: lines, status: fv.file.status, decls: reply.units),
+                                functions: reply.functions ?? [], classes: reply.classes ?? [], changed: Set(lines.map(\.2)),
+                                unavailable: !reply.ok || reply.units == nil ? reply.message ?? "syntax isn't available for this file · try again" : nil)
+        if result.unavailable == nil {
+            if byKey.count >= 512 { byKey.removeAll(keepingCapacity: true) }
+            byKey[key] = result
+        }
+        return result
+    }
+
+    func load(_ pg: ReviewPageState, path: String) async { _ = await syntax(pg, path: path) }
+
+    private struct Ask: Encodable { var sha: String; var path: String }
+
+    private func read(_ source: Source) async -> SyntaxUnits? {
+        if let cached = raw[source] { return cached }
+        if let inFlight = reading[source] { return await inFlight.value }
+        guard let app else { return nil }
+        let transport = app.transport
+        let task = Task { @MainActor () -> SyntaxUnits? in
+            guard let reply = await transport.ask(transport.atRepo(source.repo, "/syntax/units"), Ask(sha: source.sha, path: source.path), as: SyntaxUnits.self) else { return nil }
+            if !reply.ok { return reply }
+            if reply.units == nil && reply.functions == nil && reply.classes == nil { return reply }
+            guard let units = reply.units, let functions = reply.functions, let classes = reply.classes,
+                  source.accepts(reply.sha), units.allSatisfy({ $0.line > 0 && $0.endLine >= $0.line }),
+                  (functions + classes).allSatisfy({ $0.line > 0 && $0.endLine >= $0.line }) else { return nil }
+            return reply
+        }
+        reading[source] = task
+        let reply = await task.value
+        reading[source] = nil
+        if let reply, reply.ok, reply.units != nil {
+            if raw.count >= 512 { raw.removeAll(keepingCapacity: true) }
+            raw[source] = reply
+        }
+        return reply
     }
 }
