@@ -82,6 +82,7 @@ swift build                     # debug
 swift test                      # all suites; must stay green at every commit
 ./canopy --build                # release build (if sources changed) → ~/.cache/canopy-native/canopy, for --dump/--shoot
 ./canopy --bench [--page /v2/…]  # keys, typing, keys under a patch storm, and every write (POSTs answered locally) on every page, live data, against a 33ms budget (key + layout); exit 1 if over
+./canopy --bench --cold-only --synthetic 300 # local fixture generation, decode, hydrate, fresh root construction/layout; no server
 ./canopy /v2/b/loops/<branch>   # Show's canopy workspace on that route (Show answers canopy:// too)
 ./canopy --dump [--dump-wait 5] # headless: hydrate + listen + exercise keys, JSON on stdout, exit 1 if no hello
 ./canopy --build >/dev/null; .build/debug/Canopy --shoot <dir> --shot "name=/v2/b/loops/<b> 2 k" [--size 1280x800]

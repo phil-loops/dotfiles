@@ -40,15 +40,32 @@ public enum Bench {
             exit(2)
         }
         SyntheticServer.size = config.synthetic
-        let app = AppModel(config: config, port: port, telemetry: false, protocolClasses: [synthetic ? SyntheticServer.self : Blackhole.self])
-        var hello = false
         let launched = Date()
+        let app = AppModel(config: config, port: port, telemetry: false, protocolClasses: [synthetic ? SyntheticServer.self : Blackhole.self])
+        let modelMs = Date().timeIntervalSince(launched) * 1000
+        var hello = false
         var helloAt: Date?
+        var stateReadyAt: Date?
+        var statePhases: [String: Double] = [:]
+        let counted = app.stream.count
+        app.stream.count = { name, ms in
+            counted?(name, ms)
+            if name.hasPrefix("state"), let ms { statePhases[name] = ms }
+            if name == "state" { stateReadyAt = Date() }
+        }
         if synthetic {
-            // a generated store at size n, hydrated as /state would hydrate it — no stream, no server
             app.transport.repos = [Synthetic.repo]
-            app.store.hydrate(try! Snapshot.decode(Synthetic.snapshot(config.synthetic)))
-            hello = true; helloAt = Date()
+            let t0 = Date()
+            let data = Synthetic.snapshot(config.synthetic)
+            let t1 = Date()
+            let snapshot = try! Snapshot.decode(data)
+            let t2 = Date()
+            app.store.hydrate(snapshot)
+            let t3 = Date()
+            statePhases = ["generation": t1.timeIntervalSince(t0) * 1000,
+                           "state-decode": t2.timeIntervalSince(t1) * 1000,
+                           "state-hydrate": t3.timeIntervalSince(t2) * 1000]
+            hello = true; stateReadyAt = t3
             print("bench: synthetic store — \(config.synthetic) branches, \(max(1, config.synthetic / 25)) forests, a \(max(1, config.synthetic / 10) * 60)-line review")
         } else {
             app.stream.onFrame = { f in if f.event == "hello" { hello = true; helloAt = helloAt ?? Date() } }
@@ -58,11 +75,7 @@ public enum Bench {
         let window = NSWindow(contentRect: NSRect(origin: NSPoint(x: -20000, y: -20000), size: size),
                               styleMask: [.borderless], backing: .buffered, defer: false)
         window.appearance = NSAppearance(named: .darkAqua)
-        let host = NSHostingView(rootView: AnyView(RootView().environment(app).preferredColorScheme(.dark)))
-        host.frame = NSRect(origin: .zero, size: size)
-        host.sizingOptions = []
-        window.contentView = host
-        window.orderBack(nil)
+        var host: NSHostingView<AnyView>!
 
         func paint() {
             if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) { host.cacheDisplay(in: host.bounds, to: rep) }
@@ -169,18 +182,36 @@ public enum Bench {
         Task { @MainActor in
             let t0 = Date()
             while !hello, Date().timeIntervalSince(t0) < 15 { try? await Task.sleep(nanoseconds: 100_000_000) }
-            // cold: launch → the server's hello, then the first page's layout — budgeted like a key. The
-            // offscreen raster is printed apart and never budgeted (header: it is CPU work a real window
-            // hands to the GPU) — on 2026-11-12 it was the whole of a 320 ms "first paint", warm or cold.
-            let helloMs = (helloAt ?? Date()).timeIntervalSince(launched) * 1000
+            guard hello, app.store.ready, let stateReadyAt else {
+                print("bench: initial state or stream hello unavailable after 15s; no cold content sample")
+                app.stream.stop()
+                exit(2)
+            }
+            let readyMs = stateReadyAt.timeIntervalSince(launched) * 1000
+            let origin = synthetic ? "local fixture generation" : "state fetch"
+            let fetchMs = statePhases[synthetic ? "generation" : "state-fetch"] ?? 0
+            print(String(format: "cold: model init %.1fms · %@ %.1fms · decode %.1fms · hydrate %.1fms · latest snapshot ready %.1fms after model start",
+                         modelMs, origin as NSString, fetchMs, statePhases["state-decode"] ?? 0, statePhases["state-hydrate"] ?? 0, readyMs))
+            if let helloAt {
+                print(String(format: "cold: first stream hello %.1fms after model start (includes initial state readiness)", helloAt.timeIntervalSince(launched) * 1000))
+            }
             let c0 = Date()
+            host = NSHostingView(rootView: AnyView(RootView().environment(app).preferredColorScheme(.dark)))
+            host.frame = NSRect(origin: .zero, size: size)
+            host.sizingOptions = []
+            window.contentView = host
+            window.orderBack(nil)
             host.layoutSubtreeIfNeeded()
             let c1 = Date()
             paint()
             let firstLayout = c1.timeIntervalSince(c0) * 1000, raster = Date().timeIntervalSince(c1) * 1000
-            print(String(format: "cold: hello %.0fms after launch · first layout %.0fms · offscreen raster %.0fms, not budgeted (%@)",
-                         helloMs, firstLayout, raster, app.router.route.path as NSString))
-            if firstLayout > config.budget { hits.append(Hit(page: app.router.route.path, pass: "cold", step: "first layout", ms: firstLayout, what: "launch → first layout")) }
+            print(String(format: "cold: fresh root construction + layout %.1fms · offscreen CPU raster %.1fms, not budgeted (%@)",
+                         firstLayout, raster, app.router.route.path as NSString))
+            if firstLayout > config.budget { hits.append(Hit(page: app.router.route.path, pass: "cold", step: "first layout", ms: firstLayout, what: "fresh root construction + layout")) }
+            if config.coldOnly {
+                app.stream.stop()
+                exit(firstLayout <= config.budget ? 0 : 1)
+            }
             try? await Task.sleep(nanoseconds: 1_500_000_000)
             let pages = config.pages.isEmpty ? defaultPages(app) : config.pages
             for route in pages {
