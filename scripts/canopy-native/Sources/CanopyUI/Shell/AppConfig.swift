@@ -29,6 +29,8 @@ public struct AppConfig: Sendable {
     public var appearance = "dark"
     public var dump = false
     public var dumpWait: Double = 4
+    public var shootRequested = false
+    public var captureErrors: [String] = []
     public var shootDir = ""
     public var shots: [String] = []
     public var bench = false
@@ -53,9 +55,16 @@ public struct AppConfig: Sendable {
             case "--repo": c.repo = next()
             case "--appearance": c.appearance = next() ?? c.appearance
             case "--dump": c.dump = true
-            case "--dump-wait": c.dumpWait = next().flatMap(Double.init) ?? c.dumpWait
-            case "--shoot": c.shootDir = next() ?? ""
-            case "--shot": if let s = next() { c.shots.append(s) }
+            case "--dump-wait":
+                if let value = next().flatMap(Double.init) { c.dumpWait = value }
+                else { c.captureErrors.append("--dump-wait needs a number") }
+            case "--shoot":
+                c.shootRequested = true
+                c.shootDir = next() ?? ""
+                if c.shootDir.isEmpty { c.captureErrors.append("--shoot needs an output directory") }
+            case "--shot":
+                if let s = next() { c.shots.append(s) }
+                else { c.captureErrors.append("--shot needs name=/v2/route") }
             case "--bench": c.bench = true
             case "--page": if let p = next() { c.pages.append(p) }
             case "--budget": c.budget = next().flatMap(Double.init) ?? c.budget
@@ -63,8 +72,9 @@ public struct AppConfig: Sendable {
             case "--cold-only": c.coldOnly = true
             case "--synthetic": c.synthetic = next().flatMap(Int.init) ?? 300
             case "--size":
-                let wh = (next() ?? "").split(separator: "x").compactMap { Double($0) }
-                if wh.count == 2 { c.shootWidth = wh[0]; c.shootHeight = wh[1] }
+                let wh = (next() ?? "").split(separator: "x", omittingEmptySubsequences: false)
+                if wh.count == 2, let width = Double(wh[0]), let height = Double(wh[1]) { c.shootWidth = width; c.shootHeight = height }
+                else { c.captureErrors.append("--size needs widthxheight") }
             default:
                 if a.hasPrefix("/v2") || a.hasPrefix("canopy:") { c.route = Route(a); c.query = Route.query(a); c.address = a }
                 // AppKit's own launch args (-NSDocumentRevisionsDebugMode YES, -psn_…) pass through
