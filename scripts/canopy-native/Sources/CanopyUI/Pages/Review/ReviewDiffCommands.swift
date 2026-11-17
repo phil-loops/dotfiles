@@ -455,15 +455,32 @@ enum DiffCommands {
                            scope: .review, label: "requires", recordsJump: true, available: isBranch,
                            local: { _, _ in
                                guard let me = pg.branch else { return }
-                               let reqs = pg.payload?.data.requires ?? []
+                               guard pg.payload?.key == pg.keyOf else { throw Refusal("reading the current branch") }
+                               guard let reqs = pg.payload?.data.requires else { throw Refusal("dependency edges aren't available from this server") }
+                               let branches = app.store.list(Branch.self).filter { $0.repo == me.repo }
+                               if let missing = reqs.first(where: { name in !branches.contains { $0.name == name } }) {
+                                   throw Refusal("\(missing) isn't in this repository")
+                               }
+                               var seen = Set<String>()
                                let deps = ([me.parent] + reqs).compactMap { n in
-                                   app.store.list(Branch.self).first { $0.repo == me.repo && $0.name == n }
+                                   seen.insert(n).inserted ? branches.first { $0.name == n } : nil
                                }
                                guard !deps.isEmpty else { throw Refusal("\(me.name) builds on \(me.parent) alone") }
                                if deps.count == 1 { return try hop(deps[0]) }
+                               let epoch = app.store.epoch, git = app.store.versions[Domain.git], payload = pg.payloadGen
+                               var reader: ReaderContext?
                                app.nav.pick("builds on · \(deps.count)", deps.map { d in
                                    PickItem(label: d.name, text: (d.name == me.parent ? "parent" : "requires") + (d.description.isEmpty ? "" : " · \(d.description)"))
-                               }) { i in MainActor.assumeIsolated { _ = try? hop(deps[i]) } }
+                               }) { i in
+                                   MainActor.assumeIsolated {
+                                       guard reader?.isCurrentAfterPickerChoice(app) == true, app.store.epoch == epoch,
+                                             app.store.versions[Domain.git] == git, pg.branch == me, pg.payloadGen == payload,
+                                             pg.payload?.key == pg.keyOf, deps.indices.contains(i),
+                                             let target = app.store.view(Branch.self, deps[i].id) else { return }
+                                       _ = try? hop(target)
+                                   }
+                               }
+                               reader = ReaderContext(app)
                            }))
         r.register(Command(id: "review.root", title: "Review the stack's root", scope: .review, verb: .root, label: "root",
                            available: isBranch,
