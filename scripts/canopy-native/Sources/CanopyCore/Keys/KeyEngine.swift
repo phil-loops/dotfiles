@@ -308,11 +308,13 @@ public final class KeyEngine {
         let want = typed.trimmingCharacters(in: .whitespaces)
         // "<id> <argument>": the command named exactly, with what follows as its argument
         if let sp = want.firstIndex(of: " "), let named = cmds.first(where: { $0.id == want[..<sp] }) { return [named] }
-        if let exact = cmds.first(where: { $0.id == want }) { return [exact] + cmds.filter { $0.id != want && ranked([$0], want, Self.text).count == 1 } }
-        return ranked(cmds, want, Self.text)
+        if let exact = cmds.first(where: { $0.id == want }), exact.aliasFor != nil { return [exact] }
+        let choices = CommandDiscovery.entries(cmds)
+        if let exact = cmds.first(where: { $0.id == want }) {
+            return [exact] + choices.filter { $0.command.id != want && ranked([$0], want, { $0.searchText }).count == 1 }.map(\.command)
+        }
+        return ranked(choices, want, { $0.searchText }).map(\.command)
     }
-
-    private static func text(_ c: Command) -> String { "\(c.id) \(c.title)" }
 
     /// Each live scope's target, once: working one out can cost the page's whole row list, and a
     /// listing asks for hundreds of commands.

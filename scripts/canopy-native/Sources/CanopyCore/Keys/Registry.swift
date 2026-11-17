@@ -214,6 +214,8 @@ public struct Command {
     /// runs as a jump (NAV.md §4.4): the jumplist remembers where you were before it runs.
     /// Page changes record on their own; a command implementing a jump verb gets this set on register.
     public var recordsJump: Bool
+    /// A compatibility name represented by its eligible canonical command in discovery.
+    public var aliasFor: String? = nil
     public var available: ((String?) -> Bool)?
     /// a key that means "the right thing here": names the command that actually runs
     public var route: ((String?) -> RouteTo?)?
@@ -267,6 +269,7 @@ public final class CommandRegistry {
 
     /// Sheet groups a page assigns by id (`place`), for commands registered before or after.
     private var placed: [String: KeyGroup] = [:]
+    private var aliases: [String: String] = [:]
 
     public init() {}
 
@@ -278,10 +281,18 @@ public final class CommandRegistry {
         }
     }
 
+    public func alias(_ ids: [String], to canonical: String) {
+        for id in ids {
+            aliases[id] = canonical
+            byID[id]?.aliasFor = canonical
+        }
+    }
+
     public func register(_ c: Command) {
         precondition(byID[c.id] == nil, "command \(c.id) registered twice")
         var c = c
         if let g = placed[c.id] { c.group = g }
+        if let canonical = aliases[c.id] { c.aliasFor = canonical }
         if c.verbs.contains(where: { $0.spec.jump }) { c.recordsJump = true }
         resolve(&c)
         byID[c.id] = c
