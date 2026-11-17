@@ -189,6 +189,21 @@ check("components/Other.tsx" in E.coverage(repo, bb, claims)["uncovered"],
 vague = E.coverage(repo, bb, {"kind": "app", "views": [{"id": "p", "field": "form input", "file": "components/Detail.tsx"}]})
 check(vague["unverified"] == ["components/Detail.tsx"] and "components/Detail.tsx" in vague["uncovered"],
       "a view whose field pins nothing checkable leaves its file unverified, not covered")
+# ── owned execution: a run never serves a package build an earlier run left behind ──
+side = os.path.join(tmp, "side-co")
+for pkg in ("mail-pg", "prisma"):
+    os.makedirs(os.path.join(side, "packages", pkg, "dist"))
+    open(os.path.join(side, "packages", pkg, "dist", "index.js"), "w").write("// built for another branch")
+os.makedirs(os.path.join(side, "packages", "prisma", "src"))
+E._drop_builds(side)
+check(not any(os.path.exists(os.path.join(side, "packages", p, "dist")) for p in ("mail-pg", "prisma"))
+      and os.path.isdir(os.path.join(side, "packages", "prisma", "src")),
+      "a reused checkout's package builds are dropped before serving; sources stay")
+check(E._preview_failure("✓ ok\n✗ workspace package rebuild failed — this branch's packages/** changes are NOT compiled"),
+      "a preview that couldn't build this tree's packages is a failure, not a warning")
+check(E._preview_failure("✗ workspace package build failed — pages importing them will 500"),
+      "a preview with an unbuilt package is a failure")
+check(not E._preview_failure("✓ serving on 3101\n✗ pool donor is on lock abc"), "an unrelated preview warning isn't a build failure")
 # ── predictions + the field rule ──
 ids = ["a-light", "a-dark", "b-light"]
 check(E.predictions({"predict": {"*": "field", "b-light": "same"}}, ids) == {"a-light": "field", "a-dark": "field", "b-light": "same"},
