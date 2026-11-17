@@ -149,7 +149,6 @@ import Testing
             #expect(app.store.applyPatch(try Patch.make(domain: Domain.git, version: (app.store.versions[Domain.git] ?? 0) + 1,
                 upserts: ["repo": ["other": .object(repo)], "branch": ["other:\(self.branch)": .object(branch)]])) == .ok)
             let source = try #require(BranchSource.current(app, "other:\(self.branch)"))
-            page.helixDirs["\(source.name)@\(source.tip)"] = "/wrong-repository"
             var visited: [String] = []
             page.githubOrigin = { dir in visited.append(dir); return "https://github.com/right/repo" }
             var response: JSONObject = ["ok": true, "dir": "/right-repository"]

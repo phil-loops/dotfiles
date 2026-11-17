@@ -59,7 +59,6 @@ struct ReviewPage: View {
         .overlay { if app.keys.layer == .map { MapOverlay() } }
         .overlay { if let h = pg.helix, h.whole, let dir = h.dir { HelixCover(open: h, dir: dir) } }
         .onAppear { pg.sync() }
-        .task(id: "\(pg.id)@\(pg.tip)") { pg.warmHelix(app) }
         .task(id: "\(pg.contextKey)|\(pg.payloadGen)|\(pg.diffCurrent)|\(pg.here?.path ?? "")") { if let p = pg.here?.path { await ReviewUnits.of(app).load(pg, path: p) } }
     }
 }
@@ -233,9 +232,19 @@ private struct HelixCover: View {
 
     var body: some View {
         let pg = ReviewPageState.of(app)
-        HelixHalf(open: open, dir: dir, colors: CanvasColors(theme), moved: { pg.helixAt = ($0, $1) }) { pg.landHelix(app) }
-            .id("\(dir)|\(open.path)")
-            .background(theme.vellumNight)
+        VStack(spacing: 0) {
+            Text("Helix · \(open.source.repo)/\(open.source.name) @ \(open.source.tip.prefix(7))")
+                .font(Theme.text(11)).foregroundStyle(theme.inkDim)
+                .lineLimit(1).truncationMode(.middle)
+                .padding(.horizontal, 10).padding(.vertical, 4)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(theme.vellumRaise)
+            HelixHalf(open: open, dir: dir, colors: CanvasColors(theme), moved: { pg.moveHelix(session: open.session, path: $0, line: $1) }) {
+                pg.finishHelix(app, session: open.session, exitCode: $0)
+            }
+            .id(open.session)
+        }
+        .background(theme.vellumNight)
     }
 }
 
@@ -268,8 +277,8 @@ private struct DiffPane: View {
     /// old half stays to read against.
     @ViewBuilder private func helix(_ pg: ReviewPageState) -> some View {
         if let h = pg.helix, !h.whole, let dir = h.dir {
-            HelixHalf(open: h, dir: dir, colors: CanvasColors(theme), moved: { pg.helixAt = ($0, $1) }) { pg.landHelix(app) }
-                .id("\(dir)|\(h.path)")
+            HelixCover(open: h, dir: dir)
+                .id(h.session)
                 .padding(.leading, CGFloat(pg.divider(path: h.path, line: h.line)) * DocFont.charWidth)
         }
     }

@@ -194,7 +194,8 @@ public final class ReviewPageState: ShipHost {
     // ── the page's own state ──
 
     /// "conversation" | "commits" | "files" (ShipHost's tab)
-    public var tab = "files" { didSet { if tab != oldValue { tabMoved(oldValue) } } }
+    public var tab = "files" { didSet { if tab != oldValue { tabGeneration &+= 1; tabMoved(oldValue) } } }
+    @ObservationIgnored private(set) var tabGeneration = 0
     public let split = true
     /// Available monospace columns across the diff (0: not measured yet).
     public var diffColumns = 0
@@ -236,8 +237,9 @@ public final class ReviewPageState: ShipHost {
     @ObservationIgnored var githubOrigin: (String) async -> String? = ReviewPageState.originWeb
     /// Helix open in the diff, from `i` or `o` until it quits.
     public var helix: HelixOpen?
-    /// "<branch>@<tip>" → its Helix checkout, made ahead of the first `i` or `o`
-    var helixDirs: [String: String] = [:]
+    @ObservationIgnored var helixTask: Task<Void, Never>?
+    @ObservationIgnored var helixSession: UUID?
+    @ObservationIgnored var helixLandingPermits: Set<UUID> = []
     /// The half of the split the cursor reads, kept as it moves up and down; `h` / `l` switch it.
     public var column: Side = .right {
         didSet { if column != oldValue { sourceGeneration &+= 1 } }
@@ -289,8 +291,7 @@ public final class ReviewPageState: ShipHost {
     @ObservationIgnored var pendingLoc: (id: String, loc: Loc)?
     /// A restored place's viewport row, for whichever of those lands the cursor.
     @ObservationIgnored var pendingRow: (id: String, row: Int)?
-    /// Where Helix's cursor was when it quit, to put the diff's cursor on once the diff (perhaps with Helix's commit) is here.
-    @ObservationIgnored var pendingNear: (id: String, path: String, line: Int)?
+    @ObservationIgnored var pendingHelixReturn: HelixReturn?
     @ObservationIgnored var pendingFlag: (id: String, flag: Flag)?
     /// Helix's cursor as its status line last showed it, while it's open.
     @ObservationIgnored var helixAt: (path: String, line: Int)?
@@ -474,6 +475,8 @@ public final class ReviewPageState: ShipHost {
     }
 
     private func resetForNewBranch(_ newID: String) {
+        cancelHelixPreparation()
+        pendingHelixReturn = nil
         pickedLine = nil
         payload = nil
         loadErr = nil
@@ -497,10 +500,7 @@ public final class ReviewPageState: ShipHost {
         // a restored commit's place waits for that commit's diff, not the branch's
         if let c = commitScope, commitFiles?.sha != c, pendingCursor?.id == id || pendingLoc?.id == id { return }
         let s = stops
-        if let n = pendingNear, n.id == id, let k = stopNear(path: n.path, line: n.line) {
-            pendingNear = nil
-            return setCursor(k)
-        }
+        if let app, takeHelixReturn(app) { return }
         if let p = pendingFlag, p.id == id, let k = stopOf(block: p.flag.key, in: p.flag.path) ?? stopNear(path: p.flag.path, line: p.flag.line) {
             pendingFlag = nil
             return setCursor(k)
@@ -1228,7 +1228,7 @@ public extension ReviewPageState {
     func clearMark() { mark = nil }
 
     func beginEdit(_ app: AppModel) -> Bool {
-        guard helix == nil, app.pane?.id == reviewDiffPane, !scoped, integration == nil, let t = target,
+        guard helix == nil, diffCurrent, app.pane?.id == reviewDiffPane, !scoped, integration == nil, let t = target,
               let h = here, h.kind == .line, let row = h.row else { return false }
         let at = sideLine(row, prefer: column)
         guard at.side == .right else { return false }
@@ -1238,8 +1238,9 @@ public extension ReviewPageState {
 
     /// `o`: Helix over the whole page, on the file and line under the cursor.
     func openHelixWhole(_ app: AppModel) -> Bool {
-        guard helix == nil, integration == nil, let t = target else { return false }
+        guard helix == nil, diffCurrent, !scoped, integration == nil, let t = target else { return false }
         if let s = code?.doc {
+            guard s.repo == t.repo, s.sha == tip, code?.text != nil else { return false }
             let line = RowKey.id(app.selected, "s").flatMap(Int.init) ?? s.line
             openHelix(app, branch: t.name, path: s.path, line: line, col: (sideHereWord?.lowerBound ?? 0) + 1, whole: true, fromSide: true)
             return true

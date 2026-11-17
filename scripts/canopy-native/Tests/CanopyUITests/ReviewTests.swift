@@ -983,18 +983,18 @@ import Testing
     @Test func iOpensHelixOnTheNewHalfAndQuittingCommits() async throws {
         let (a, p) = try await app()
         let pg = ReviewPageState.of(a)
-        ShipStub.answer(p, "POST", "/loops/review-helix", #"{"ok":true,"dir":"/tmp/x.diffbase","sha":"abc1234","message":"fixup! feat: x"}"#)
+        ShipStub.answer(p, "POST", "/loops/review-helix", #"{"ok":true,"dir":"/tmp/x.diffbase","sha":"\#(pg.tip)","message":"fixup! feat: x"}"#)
         keys(a, "i")
         await until("the checkout") { pg.helix?.dir != nil }
         let h = try #require(pg.helix)
-        #expect(h.path == "a.ts" && h.line == 2 && h.dir == "/tmp/x.diffbase" && h.sha == "abc1234")
+        #expect(h.path == "a.ts" && h.line == 2 && h.dir == "/tmp/x.diffbase" && h.sha == pg.tip)
         let asked = try #require(ShipStub.posts(p).last { $0.path == "/loops/review-helix" })
         #expect(asked.body["op"] == .string("where"))
         pg.landHelix(a)
         #expect(pg.helix == nil, "the diff is back at once")
         await until("the land") { ShipStub.posts(p).contains { $0.body["op"] == .string("land") } }
         let land = try #require(ShipStub.posts(p).last { $0.body["op"] == .string("land") })
-        #expect(land.body["dir"] == .string("/tmp/x.diffbase") && land.body["sha"] == .string("abc1234"))
+        #expect(land.body["dir"] == .string("/tmp/x.diffbase") && land.body["sha"] == .string(h.sha))
     }
 
     /// o from the code beside the diff opens Helix at that file, line and name — not the diff's
