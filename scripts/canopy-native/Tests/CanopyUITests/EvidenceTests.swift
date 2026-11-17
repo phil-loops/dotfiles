@@ -31,6 +31,14 @@ import Testing
         #expect(try !judgeable(Self.card(running: true)), "a render in flight may replace what's on screen")
     }
 
+    @Test func aVerdictWaitsForEveryImageToBeOnScreen() throws {
+        let s = Self.card().replacingOccurrences(of: "\"before\":{\"scenes\":{}},\"after\":{\"scenes\":{}}",
+                                                 with: "\"before\":{\"scenes\":{\"light\":\"s1\"}},\"after\":{\"scenes\":{\"light\":\"s2\"}}")
+        let c = try JSONDecoder().decode(EvidenceCard.self, from: Data(s.utf8))
+        #expect(c.judgeable(showing: { ["s1", "s2"].contains($0) }))
+        #expect(!c.judgeable(showing: { $0 == "s1" }), "a tile still blank (slow or failed download) isn't something Phil saw")
+    }
+
     @Test func aFieldPredictionSaysWhereTheChangeLanded() throws {
         func f(_ changed: Bool, _ contained: Bool?) throws -> EvidenceCard.Finding {
             let c = contained.map { ",\"contained\":\($0)" } ?? ""
