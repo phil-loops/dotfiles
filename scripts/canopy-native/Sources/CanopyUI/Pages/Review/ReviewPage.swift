@@ -180,10 +180,10 @@ private struct BranchLine: View {
                     .lineLimit(1).truncationMode(.tail).padding(.leading, 14)
                 Text(", h").font(Theme.text(11)).foregroundStyle(theme.inkFaint).padding(.leading, 8)
             } else {
-                Text("reading the commits…").font(Theme.text(11)).foregroundStyle(theme.inkFaint)
+                Text(ship.historyNote(pg.id)).font(Theme.text(11)).foregroundStyle(theme.inkFaint)
             }
         }
-        .task(id: app.store.view(Branch.self, pg.id).map(ShipState.historyKey)) { ShipState.of(app).loadHistory(app, pg.id) }
+        .task(id: BranchHistory.of(app).source(pg.id)) { ShipState.of(app).loadHistory(app, pg.id) }
     }
 
     private func label(_ p: ReviewLine.Point, _ pg: ReviewPageState) -> String {

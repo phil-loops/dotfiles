@@ -381,7 +381,18 @@ public final class ReviewPageState: ShipHost {
     /// Where what's shown sits against what lands: nil before the history is read, or off the line.
     public var cover: ReviewLine.Cover? { lit.flatMap { l in line?.cover(l) } }
     /// the point ↵ picked first on the line, waiting for the other end
-    public var lineAnchor: Int?
+    private var pickedLine: (stamp: BranchHistory.Stamp, key: String)?
+    public var lineAnchor: Int? {
+        get {
+            guard let app, let pickedLine, BranchHistory.of(app).stamp(id) == pickedLine.stamp else { return nil }
+            return line?.index(key: pickedLine.key)
+        }
+        set {
+            guard let app, let index = newValue, let line, line.points.indices.contains(index),
+                  let stamp = BranchHistory.of(app).stamp(id) else { pickedLine = nil; return }
+            pickedLine = (stamp, line.points[index].key)
+        }
+    }
 
     /// Make the diff cover what was chosen on the line; a refusal says why and changes nothing.
     public func apply(_ c: ReviewLine.Choice) throws {
@@ -464,6 +475,7 @@ public final class ReviewPageState: ShipHost {
     }
 
     private func resetForNewBranch(_ newID: String) {
+        pickedLine = nil
         payload = nil
         loadErr = nil
         mark = nil

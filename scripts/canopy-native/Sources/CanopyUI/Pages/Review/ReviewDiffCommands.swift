@@ -535,13 +535,16 @@ enum DiffCommands {
         }
         // ── the branch's line: what the diff covers (ReviewLine) ──
 
+        r.register(Command(id: "review.commits.retry", title: "Retry reading this branch's commits", scope: .review, label: "retry commits", group: .show,
+                           available: { _ in pg.integration == nil && BranchHistory.of(app).state(pg.id) == .failed },
+                           local: { _, _ in BranchHistory.of(app).load(pg.id, retry: true) }))
         let lineDrawn = { (_: String?) -> Bool in pg.line != nil }
         r.register(Command(id: "review.line", title: "Pick what the diff covers on the branch's line: h / l move, ↵ ↵ picks the two ends",
                            scope: .review, leader: LocalKey(",h"), label: "line",
                            available: { _ in pg.integration == nil },
                            local: { _, _ in
                                ShipState.of(app).loadHistory(app, pg.id)
-                               guard let l = pg.line else { throw Refusal("the commits are still loading") }
+                               guard let l = pg.line else { throw Refusal(ShipState.of(app).historyNote(pg.id)) }
                                pg.tab = "files"
                                pg.lineAnchor = nil
                                app.focus(pane: reviewLinePane)
@@ -580,7 +583,7 @@ enum DiffCommands {
                            }))
         let stepCommit = { (by: Int) in
             ShipState.of(app).loadHistory(app, pg.id)
-            guard let l = pg.line else { throw Refusal(pg.integration != nil ? "a forest's whole diff has no commits to step" : "the commits are still loading") }
+            guard let l = pg.line else { throw Refusal(pg.integration != nil ? "a forest's whole diff has no commits to step" : ShipState.of(app).historyNote(pg.id)) }
             try pg.apply(l.step(from: pg.lit, by: by))
         }
         r.register(Command(id: "review.commit.next", title: "The diff covers the next commit alone", scope: .review, verb: .nextCommit,
