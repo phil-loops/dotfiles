@@ -34,6 +34,7 @@ public final class AppModel: CommandContext {
     public private(set) var cursors: [String: String] = [:]
     public private(set) var cursorIdxs: [String: Int] = [:]
     public private(set) var anchors: [String: Int] = [:]
+    @ObservationIgnored private var cursorGenerations: [String: Int] = [:]
 
     /// The label layer while it's up: what's labelled, and what's been typed of a label.
     public internal(set) var labeling: LabelSession?
@@ -237,6 +238,8 @@ public final class AppModel: CommandContext {
 
     public func cursorIdx(in pane: String) -> Int { cursorIdxs[paneKey(pane)] ?? 0 }
 
+    func cursorGeneration(in pane: String) -> Int { cursorGenerations[paneKey(pane)] ?? 0 }
+
     private var focusedKey: String { paneKey(pane?.id ?? "main") }
 
     public var rows: [String] { pane?.rows ?? [] }
@@ -244,12 +247,20 @@ public final class AppModel: CommandContext {
     /// The focused pane's cursor row.
     public var cursor: String? {
         get { cursors[focusedKey] }
-        set { cursors[focusedKey] = newValue }
+        set {
+            let key = focusedKey
+            if cursors[key] != newValue { cursorGenerations[key, default: 0] &+= 1 }
+            cursors[key] = newValue
+        }
     }
 
     public var cursorIdx: Int {
         get { cursorIdxs[focusedKey] ?? 0 }
-        set { cursorIdxs[focusedKey] = newValue }
+        set {
+            let key = focusedKey
+            if cursorIdxs[key] != newValue { cursorGenerations[key, default: 0] &+= 1 }
+            cursorIdxs[key] = newValue
+        }
     }
 
     /// The cursor's row while it's visible, else whatever now sits in its place — so removing a
@@ -287,8 +298,10 @@ public final class AppModel: CommandContext {
     /// Put a pane's cursor without focusing it: a window that isn't on screen keeps its place.
     public func setCursor(_ key: String?, pane id: String) {
         let k = paneKey(id)
+        let index = max(0, panes.first { $0.id == id }?.rows.firstIndex(of: key ?? "") ?? 0)
+        if cursors[k] != key || cursorIdxs[k] != index { cursorGenerations[k, default: 0] &+= 1 }
         cursors[k] = key
-        cursorIdxs[k] = max(0, panes.first { $0.id == id }?.rows.firstIndex(of: key ?? "") ?? 0)
+        cursorIdxs[k] = index
     }
 
     public func cursorTo(_ i: Int) {
