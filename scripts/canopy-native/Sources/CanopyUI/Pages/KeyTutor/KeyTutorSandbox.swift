@@ -44,6 +44,8 @@ enum KeyTutorSandbox {
         app.state { Workstation(app: app) }.openURL = { u in KeyTutorStub.note(port, "open \(u.absoluteString)") }
         BenchLibrary.of(app).io.list = { _ in [] }
         BenchOpening.of(app).openDocument = { u in KeyTutorStub.note(port, "open bench \(u.path)") }
+        MachineRuns.of(app).io.read = { _ in LocalDocumentFile(data: Data("[]".utf8), modified: nil) }
+        MachineRuns.of(app).openDocument = { u in KeyTutorStub.note(port, "open run \(u.path)") }
         ReviewPageState.of(app).githubWeb = { _ in "https://github.com/practice/canopy" }
         let tutor = TutorArea.state(app)
         tutor.sessionsFile = nil
