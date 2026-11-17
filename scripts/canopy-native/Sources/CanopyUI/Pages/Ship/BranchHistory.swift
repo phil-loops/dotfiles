@@ -5,20 +5,7 @@ import Observation
 @MainActor
 @Observable
 final class BranchHistory {
-    struct Source: Hashable {
-        let repo: String
-        let name: String
-        let tip: String
-        let parent: String
-        let upstream: String
-        let pushed: String
-        let ahead: Int
-        let epoch: String
-        let git: Int?
-        let remote: Int?
-        let hydration: Int
-        var id: String { "\(repo):\(name)" }
-    }
+    typealias Source = BranchSource
     struct Stamp: Equatable { let source: Source; let request: Int }
     enum State: Equatable {
         case idle, loading, failed
@@ -41,11 +28,8 @@ final class BranchHistory {
         app.state {
             let transport = app.transport
             return BranchHistory(source: { [weak app] id in
-                guard let app, let branch = app.store.view(Branch.self, id) else { return nil }
-                return Source(repo: branch.repo, name: branch.name, tip: branch.tip, parent: branch.parent,
-                              upstream: branch.upstream, pushed: branch.pushed.rawValue, ahead: branch.ahead,
-                              epoch: app.store.epoch, git: app.store.versions[Domain.git], remote: app.store.versions[Domain.remote],
-                              hydration: app.store.hydrations)
+                guard let app else { return nil }
+                return BranchSource.current(app, id)
             }, read: { source in
                 try await transport.getJSON(transport.atRepo(source.repo, "/commits?branch=\(source.name.uriComponent)"))
             })
