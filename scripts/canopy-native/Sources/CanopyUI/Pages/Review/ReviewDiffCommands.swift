@@ -369,11 +369,11 @@ enum DiffCommands {
                                pg.tab = "files"
                                if let path = arg as? String { pg.goTo(file: path) }
                            }))
-        r.register(Command(id: "review.in", title: "Into the diff at the file", scope: .review, verb: .main, label: "in",
-                           available: { _ in app.pane?.id == reviewTreePane && onFiles(nil) },
+        r.register(Command(id: "review.in", title: "Open the selected return item", scope: .review, verb: .main, label: "in",
+                           available: { _ in app.pane?.id == reviewGuidePane && pg.guideOpen && onFiles(nil) },
                            route: { _ in
-                               guard let row = app.selected, row.hasPrefix("f|") else { return nil }
-                               return RouteTo("review.file.go", arg: String(row.dropFirst(2)))
+                               guard let row = app.selected else { return nil }
+                               return RouteTo("review.guide.go", arg: row)
                            }))
         r.register(Command(id: "review.extend", title: "Extend the selection a line (comment on a range)", scope: .line, verb: .extend, label: "range",
                            local: { _, _ in
@@ -571,24 +571,10 @@ enum DiffCommands {
                                let at = ok.firstIndex(of: pg.base) ?? -1
                                try pg.apply(.base(ok[(at + 1) % ok.count]))
                            }))
-        r.register(Command(id: "review.filter", title: "Find a file (filter the tree)", scope: .review, verb: .find, label: "find",
-                           local: { _, _ in
-                               pg.tab = "files"
-                               app.focus(pane: reviewTreePane)
-                               app.beginInsert(ReviewPage.filterField)
-                           }))
-        r.register(Command(id: "review.files", title: "The files this branch changes: j k to one, ↵ goes there", scope: .review, verb: .changedFiles, label: "files",
-                           local: { _, _ in
-                               pg.tab = "files"
-                               app.focus(pane: reviewTreePane)
-                           }))
-        r.register(Command(id: "review.filter.accept", title: "Go to the first file the filter finds", scope: .filter, verb: .send, modes: [.insert], quiet: true,
-                           available: { _ in app.insertField == ReviewPage.filterField },
-                           local: { _, _ in
-                               app.keys.setMode(.normal)
-                               guard let first = ReviewPage.treeRows(pg).first else { throw Refusal("no file matches") }
-                               app.runner.dispatch("review.file.go", via: .key, arg: String(first.dropFirst(2)))
-                           }))
+        r.register(Command(id: "review.filter", title: "Find a changed file", scope: .review, verb: .find, label: "find",
+                           local: { _, _ in try ReviewGuide.pickFile(app) }))
+        r.register(Command(id: "review.files", title: "Pick a changed file", scope: .review, verb: .changedFiles, label: "files",
+                           local: { _, _ in try ReviewGuide.pickFile(app) }))
 
         // ── the map (space m): a layer; its keys are the verbs' ──
 
@@ -1025,13 +1011,13 @@ enum DiffCommands {
                            }))
         r.register(Command(id: "review.back", title: "Back out", scope: .review, verb: .cancel, label: "back", quiet: true,
                            local: { _, _ in
+                               if pg.guideOpen { return ReviewGuide.close(app) }
                                if ShipSeam.backOut(app) { return }
                                let look = CodeLookup.of(app)
                                if look.pop != nil { return look.dismiss() }
                                if app.nav.picker != nil { return app.nav.close() }
                                if PageSearch.of(app).active { return PageSearch.of(app).clear() }
                                if pg.tab != "files" { pg.tab = "files"; return app.focus(pane: reviewDiffPane) }
-                               if !pg.filter.isEmpty { pg.filter = ""; return }
                                if pg.mark != nil { pg.mark = nil; return }
                                throw Refusal(KeyEngine.nothingToCancel)
                            }))

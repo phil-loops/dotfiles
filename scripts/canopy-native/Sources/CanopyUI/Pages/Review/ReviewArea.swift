@@ -9,8 +9,8 @@ enum ReviewArea: PageArea {
 
     static func install(_ app: AppModel) {
         app.addSurface(ReviewSurface())
-        app.registry.addScopes([.filter], to: "review")
         DiffCommands.install(app)
+        ReviewGuide.install(app)
         EvidenceCommands.install(app)
         placeInSheet(app.registry)
         let pg = ReviewPageState.of(app)
@@ -40,7 +40,7 @@ enum ReviewArea: PageArea {
     /// The page's own keys that no verb places in the `?` sheet (`KeyGroup.of` places the rest).
     private static func placeInSheet(_ r: CommandRegistry) {
         r.place(.show, ["review.in", "review.back", "review.outdated", "review.base.parent", "review.base.main",
-                        "review.base.outgoing", "review.line", "review.commit.next", "review.commit.prev", "review.gates.show", "review.viewed", "review.unviewed", "review.flag"])
+                        "review.base.outgoing", "review.line", "review.commit.next", "review.commit.prev", "review.guide", "review.gates.show", "review.viewed", "review.unviewed", "review.flag"])
         r.place(.branch, ["review.compose.edit", "review.compose.send", "review.compose.draft", "review.compose.suggest", "review.send.all",
                           "review.address.claude", "review.address.pick.list", "review.gates.quick"])
         r.place(.others, ["review.map.open"])
@@ -67,11 +67,6 @@ public extension KeyMode {
     static let map: KeyMode = "map"
 }
 
-public extension Scope {
-    /// typing into the file filter: ⌃↵ / ↵ goes to the first file it finds
-    static let filter: Scope = "filter"
-}
-
 struct ReviewSurface: SurfaceProvider {
     let surfaceID = "review"
 
@@ -88,7 +83,7 @@ struct ReviewSurface: SurfaceProvider {
         default:
             var out: [Pane] = []
             if let l = pg.line { out.append(Pane(id: reviewLinePane, title: "line", rows: l.points.map(\.key), column: 1, row: -2, pageSize: 4)) }
-            if pg.showsTree { out.append(Pane(id: reviewTreePane, title: "files", rows: ReviewPage.treeRows(pg), column: 0, row: 0, pageSize: 12)) }
+            if pg.guideOpen { out.append(Pane(id: reviewGuidePane, title: "return to", rows: ReviewGuide.rows(app), column: 0, row: 0, pageSize: 8)) }
             for (c, col) in pg.columns.enumerated() {
                 for (r, w) in col.enumerated() {
                     out.append(Pane(id: w.pane, title: w.doc.map { shortPath($0.path) } ?? "diff",
@@ -104,7 +99,6 @@ struct ReviewSurface: SurfaceProvider {
     func scopes(_ app: AppModel) -> [Scope] {
         let pg = ReviewPageState.of(app)
         guard app.keys.layer != .map else { return [] }
-        if app.insertField == ReviewPage.filterField { return [.filter] }
         var out = ShipSeam.scopes(app)
         if pg.tab == "evidence" { out.insert(.evidence, at: 0) }
         if app.pane?.id == reviewLinePane { out.insert(.branchLine, at: 0) }
@@ -120,7 +114,7 @@ struct ReviewSurface: SurfaceProvider {
         let pg = ReviewPageState.of(app)
         if let t = ShipSeam.target(for: scope, app) { return t }
         switch scope {
-        case .review, .filter, .evidence: return pg.id.isEmpty ? nil : pg.id
+        case .review, .evidence: return pg.id.isEmpty ? nil : pg.id
         case .line, .gap, .thread, .pending:
             guard app.pane?.id == reviewDiffPane, let h = pg.here, h.kind.rawValue == scope.rawValue else { return nil }
             return h.kind == .line || h.kind == .gap ? h.key : h.id
@@ -131,7 +125,7 @@ struct ReviewSurface: SurfaceProvider {
     func primary(for row: String, _ app: AppModel) -> RouteTo? {
         let pg = ReviewPageState.of(app)
         if let r = ShipSeam.primary(for: row, app) { return r }
-        if app.pane?.id == reviewTreePane, row.hasPrefix("f|") { return RouteTo("review.file.go", arg: String(row.dropFirst(2))) }
+        if app.pane?.id == reviewGuidePane { return RouteTo("review.guide.go", arg: row) }
         if row.hasPrefix("g|") { return RouteTo("review.expand", target: row) }
         return nil
     }
@@ -202,6 +196,7 @@ struct ReviewSurface: SurfaceProvider {
 
     func title(for row: String, _ app: AppModel) -> String? {
         let pg = ReviewPageState.of(app)
+        if row.hasPrefix("guide|"), let entry = ReviewGuide.entries(app).first(where: { $0.key == row }) { return "\(entry.title) \(entry.detail)" }
         if row.hasPrefix("f|") { return String(row.dropFirst(2)) }
         if row.hasPrefix("s:"), let n = Int(row.dropFirst(2)), let t = pg.sideText {
             let lines = t.components(separatedBy: "\n")

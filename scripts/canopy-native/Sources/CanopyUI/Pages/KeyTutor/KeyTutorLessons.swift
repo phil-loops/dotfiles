@@ -83,7 +83,8 @@ enum Practice {
             if let stop {
                 // a fresh look at the diff: what earlier steps marked viewed (and folded) unfolds
                 if !p.viewedOverride.isEmpty { p.viewedOverride = [:] }
-                if !p.filter.isEmpty { p.filter = "" }
+                if p.guideOpen { ReviewGuide.close(a) }
+                if a.nav.picker != nil { a.nav.close() }
                 guard p.stops.contains(where: { $0.key == stop }) else { return false }
                 if a.pane?.id != reviewDiffPane { a.focus(pane: reviewDiffPane) }
                 if p.here?.key != stop { p.setCursor(stop) }
@@ -327,8 +328,8 @@ enum KeyLessons {
         ], recap: "{next-file} {previous-file} · {next-hunk} {previous-hunk} · {next-conversation} {previous-conversation} · {match} the other half; {mark} marks viewed and moves on, {unmark} unmarks, {next-unviewed} {previous-unviewed} find what's left, {flags} what you flagged; {select} ranges, {extend} lines, {comment} comments; {next-commit} {previous-commit} one commit at a time."),
 
         KeyLesson(id: "code", title: "Finding things and reading code", steps: [
-            KeyStep("{find} finds a file on this page by name.", [.find], setup: P.review(at: "l|greet.ts|R:2"), check: { $0.keys.mode == .insert }),
-            KeyStep("Type head, then {send}.", [.send], check: { P.pg($0).here?.path == "header.ts" }, hint: "type head into the filter, then {send}"),
+            KeyStep("{find} picks a changed file by its full path.", [.find], setup: P.review(at: "l|greet.ts|R:2"), check: { $0.nav.picker != nil }),
+            KeyStep("Type head, then {send}.", [.send], check: { P.pg($0).here?.path == "header.ts" }, hint: "type head into the picker, then {send}"),
             KeyStep("{search} searches the page in place: the cursor follows as you type.", [.search], check: { PageSearch.of($0).typing }),
             KeyStep("Type wave, then {send} keeps the search.", [.send], check: { !PageSearch.of($0).typing && PageSearch.of($0).active },
                     hint: "type a word you can see, then {send}"),
@@ -345,7 +346,7 @@ enum KeyLessons {
             KeyStep("{conversation} puts the conversation where the diff was; {cancel} brings the diff back.", [.conversation],
                     check: { P.pg($0).tab == "conversation" }),
             KeyStep("{changed-files} lists just the files this branch changes, as Helix's changed-file picker does.", [.changedFiles],
-                    setup: P.review(at: "l|greet.ts|R:2"), check: { P.pg($0).tab == "files" }),
+                    setup: P.review(at: "l|greet.ts|R:2"), check: { $0.nav.picker != nil }),
             KeyStep("{next-word} puts the cursor on the next name, line after line.", [.nextWord], setup: P.review(at: "l|greet.ts|R:2"),
                     check: { P.pg($0).hereWord != nil }),
             KeyStep("{previous-word} the name before it.", [.previousWord]),

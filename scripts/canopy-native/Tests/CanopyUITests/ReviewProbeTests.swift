@@ -46,7 +46,7 @@ import Testing
         keys(a, "g", "p")
         #expect(pg.here?.path == "a.ts")
         keys(a, "space", "g")
-        #expect(pg.tab == "files" && a.pane?.id == reviewTreePane)
+        #expect(pg.tab == "files" && a.nav.picker?.items.map(\.label) == ["a.ts", "b.ts"])
     }
 
     @Test func movedKeysSayWhereTheyWent() async throws {
@@ -137,8 +137,8 @@ import Testing
     @Test func wFromAListPaneGoesIntoTheDiff() async throws {
         let (a, _) = try await base.app()
         let pg = ReviewPageState.of(a)
-        a.keys.handle("C-h")
-        #expect(a.pane?.id != reviewDiffPane)
+        a.runner.dispatch("review.guide", via: .key)
+        #expect(a.pane?.id == reviewGuidePane)
         a.keys.handle("w")
         #expect(a.pane?.id == reviewDiffPane && pg.hereWord != nil, "w goes into the diff and onto a name")
     }
