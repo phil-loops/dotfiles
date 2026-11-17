@@ -79,8 +79,40 @@ The remaining single-row ClickHouse writes are all in goals: impression and wind
 
 Open questions are in the design doc: Postgres churn (~2.6M rows per big send), purge racing the drainer, the recovery wait versus the client timeout, batch size, and how Dates serialize through jsonb.
 
-## Not yet done
+### Fable 5.2 review, 2026-11-17: sound with fixes
 
-- The Fable review of the buffer design.
+The shape holds: a durable Postgres outbox, `SKIP LOCKED` claim then delete, and recovery by row identity. Requirement 3 (exactly once without ClickHouse dedup) does **not** hold as written.
+
+**Critical:**
+1. **Recovery must re-claim with a compare-and-swap:** a new `batchId` and `claimedAt`, committed before each attempt. Otherwise a run that crashes during recovery double-inserts.
+2. **The advisory lock doesn't work on Prisma's pool.** Session locks land on arbitrary connections; transaction locks time out. The compare-and-swap makes recovery single-owner without it.
+3. **Exactly-once rests on a bounded-delay assumption.** A drainer that stalls for more than 5 min can insert after recovery has run. Mitigations:
+   - an explicit `request_timeout` and `max_execution_time`;
+   - a check that the claim is still fresh before each insert;
+   - optionally, self-checking `INSERT … SELECT … WHERE id NOT IN (…)`;
+   - or accept the dedup token as what covers this residual case.
+
+**High:**
+- **The window recovery lookup can't use `contact_lookup`:** the projection has no `impressionId`. Use the base key `(teamId, goalId, attachmentId)` plus a `windowEnd` range instead.
+- **Chunk recovery reads to 500–1000 ids:** 10k literal ids is about 1 MB, over `max_query_size`.
+- **Team purge races in several ways:**
+  - `hasAnyForTeam` skips the delete;
+  - the purge runs before the contact deletes;
+  - recovery re-inserts purged rows.
+
+  Fix: purge after the Postgres deletes, run `deleteByTeam` unconditionally, and repeat it after one tick.
+- **Upstream retries still mint new ids** (a fresh `cuid()` and `now` per evaluation). Impression and window `count()` readers then see duplicates. Fix: key the impression id by its cause (the send).
+
+**Medium / low:**
+- The dedup token is harmful during recovery, since it would drop the missing subset. Drop it, or derive it from the exact row ids.
+- The filter-edit locks read ClickHouse impressions, so they lag the buffer.
+- Callers must be gated on the drain setting, or rows strand.
+- Index `(id) WHERE batchId IS NULL`; tune autovacuum; consider one buffer row per job.
+- Add poison-batch quarantine after N attempts.
+- Only loop while claims come back full.
+- Recovery reads should be sequentially consistent.
+- Neither call site has a transaction to join. Enrollment is per SES Delivery notification, so there is no sub-email batch.
+
+## Not yet done
 - The push gates on phase 1.
 - Confirming with Alan that "open windows in Postgres" is the shape he wants.
