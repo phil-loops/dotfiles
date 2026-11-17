@@ -126,6 +126,10 @@ public struct EvidenceCard: Decodable, Equatable, Sendable {
 
     /// Phil may judge only a complete manifest of the branch as it is now.
     var judgeable: Bool { id != nil && current == true && available == true && run?.running != true && eligible != false }
+    /// Judgeable, and every image of the manifest is on screen — `available` only says the server has them.
+    func judgeable(showing has: (String) -> Bool) -> Bool {
+        judgeable && [manifest?.before, manifest?.after].allSatisfy { $0?.scenes.values.allSatisfy(has) ?? false }
+    }
 
     /// The claim in words — what accepting this does and doesn't establish.
     var claimWords: String? {
@@ -177,6 +181,9 @@ final class EvidenceState {
         if let v = variant, vs.contains(v) { return v }
         return vs.first { $0 == "dark" } ?? vs.first ?? ""
     }
+
+    /// Whether `c` can be judged as it stands on screen now.
+    func shown(_ c: EvidenceCard) -> Bool { c.judgeable(showing: { images[$0] != nil }) }
 
     func loadCard(_ app: AppModel, _ t: ReviewPageState.Target) async {
         let path = app.transport.atRepo(t.repo, "/evidence?branch=\(t.name.uriComponent)")
@@ -307,7 +314,7 @@ enum EvidenceCommands {
                            local: { _, _ in ev.changes.toggle(); if ev.changes { ev.zoomed = true } }))
         func judged(_ verdict: String) -> (String, Any?) throws -> Write? {
             { _, _ in
-                guard let tg = pg.target, let c = ev.card(tg.id), c.judgeable, let mid = c.id else { return nil }
+                guard let tg = pg.target, let c = ev.card(tg.id), ev.shown(c), let mid = c.id else { return nil }
                 return Write(path: t.atRepo(tg.repo, "/evidence-judge"),
                              body: ["branch": .string(tg.name), "manifest": .string(mid), "verdict": .string(verdict)],
                              settled: { true },
@@ -317,7 +324,7 @@ enum EvidenceCommands {
                              alone: true)
             }
         }
-        let canJudge: (String?) -> Bool = { _ in card()?.judgeable ?? false }
+        let canJudge: (String?) -> Bool = { _ in card().map(ev.shown) ?? false }
         r.register(Command(id: "evidence.accept", title: "Accept this evidence — every field looks the way you expected",
                            scope: .evidence, leader: LocalKey(",y"), label: "accept", quiet: true,
                            available: canJudge, write: judged("accept")))
@@ -514,7 +521,7 @@ struct EvidencePanel: View {
             let word = (s.verdict == "accept" ? "accepted" : "rejected") + (s.stands == false ? " — no longer stands" : "")
             Text(s.carriedFrom != nil ? "\(word) · identical to what you judged \(s.at?.prefix(10) ?? "")" : "\(word) \(s.at?.prefix(10) ?? "")")
                 .font(Theme.text(12)).foregroundStyle(s.verdict == "accept" && s.stands != false ? theme.patina : theme.ember)
-        } else if c.judgeable {
+        } else if EvidenceState.of(app).shown(c) {
             Text("accept ,y   reject ,N").font(Theme.mono(12)).foregroundStyle(theme.goldLeaf)
         } else if c.manifest != nil {
             Text("not judged").font(Theme.text(12)).foregroundStyle(theme.inkFaint)
