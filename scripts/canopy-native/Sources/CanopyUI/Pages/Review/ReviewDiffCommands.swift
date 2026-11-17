@@ -403,11 +403,13 @@ enum DiffCommands {
         /// refuses at once; without it the key is held while the stack is read, then runs (or says why not).
         func foreignHop(_ n: Int, _ d: Int) throws {
             guard let t = pg.target else { return }
+            let origin = ReaderContext(app)
             let stacks = ForeignStacks.of(app)
             let id = d > 0 ? "review.branch.next" : "review.branch.prev"
             guard let nodes = stacks.cached(n) else {
                 Task { @MainActor in
                     let (nodes, err) = await stacks.load(app, repo: t.repo, n)
+                    guard origin.isCurrent(app) else { return }
                     if nodes != nil { app.runner.releaseHeld() } else { app.runner.dropHeld(id, because: "no stack for #\(n): \(err ?? "")") }
                 }
                 throw Hold("reading #\(n)'s stack…")
@@ -416,8 +418,10 @@ enum DiffCommands {
                 throw Refusal(d > 0 ? "#\(n) is the last PR in this stack" : "#\(n) is the first PR in this stack")
             }
             Task { @MainActor in
+                guard origin.isCurrent(app) else { return }
                 app.runner.say("opening #\(next.number)…")
                 let got = await app.transport.ask(app.transport.atRepo(t.repo, "/open-url"), ["url": next.url, "open": "viewer"], as: Opened.self)
+                guard origin.isCurrent(app) else { return }
                 guard let path = got?.path, got?.ok == true else { return app.runner.say("couldn't open #\(next.number): \(got?.err ?? "the server didn't answer")") }
                 app.open(address: path)
                 let at = (nodes.firstIndex { $0.number == next.number } ?? 0) + 1

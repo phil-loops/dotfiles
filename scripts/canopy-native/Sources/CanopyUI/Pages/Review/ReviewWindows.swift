@@ -13,7 +13,12 @@ public final class ReviewWindow {
     public internal(set) var doc: Loc?
     public internal(set) var text: String?
     /// The name `w` / `b` put the cursor on: its line and UTF-16 range.
-    public var word: (line: Int, at: Range<Int>)?
+    public var word: (line: Int, at: Range<Int>)? {
+        didSet {
+            if word?.line != oldValue?.line || word?.at != oldValue?.at { cursorGeneration &+= 1 }
+        }
+    }
+    @ObservationIgnored private(set) var cursorGeneration = 0
     /// Its column among the vertical splits, left to right; windows sharing one stack top to bottom.
     var column: Int
     @ObservationIgnored let canvas = CanvasHandle()

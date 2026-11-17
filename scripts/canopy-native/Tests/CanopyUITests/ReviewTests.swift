@@ -249,13 +249,13 @@ import Testing
 
     /// The review page on the fixture's branch, its diff answered by the stub, a second branch after
     /// it in merge order, an open thread on a.ts's new line 3.
-    func app(_ payload: String? = nil) async throws -> (AppModel, Int) {
+    func app(_ payload: String? = nil, protocolClasses: [AnyClass] = [ShipStub.self]) async throws -> (AppModel, Int) {
         Self.nextPort += 1
         let p = Self.nextPort
         ShipStub.answer(p, "GET", "/loops/node", payload ?? Self.payload)
         var c = AppConfig()
         c.route = .review(repo: "loops", branch: "add-hankles-limited-label")
-        let a = AppModel(config: c, port: p, telemetry: false, protocolClasses: [ShipStub.self])
+        let a = AppModel(config: c, port: p, telemetry: false, protocolClasses: protocolClasses)
         let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../CanopyCoreTests/Fixtures/state.json")
         var state = try JSONDecoder().decode(JSONValue.self, from: Data(contentsOf: url)).object!
         var ents = state["entities"]!.object!

@@ -224,7 +224,12 @@ public final class ReviewPageState: ShipHost {
     }
     /// The cursor in the code: its row, half and UTF-16 range in that half's text (one character). It
     /// counts only while the cursor is still on that row and half.
-    public var word: (key: String, side: Side, at: Range<Int>)?
+    public var word: (key: String, side: Side, at: Range<Int>)? {
+        didSet {
+            if word?.key != oldValue?.key || word?.side != oldValue?.side || word?.at != oldValue?.at { sourceGeneration &+= 1 }
+        }
+    }
+    @ObservationIgnored private(set) var sourceGeneration = 0
     /// The selected name, when it's still under the cursor.
     public var hereWord: Range<Int>? {
         guard let w = word, let h = here, h.key == w.key, let row = h.row, sideLine(row, prefer: column).side == w.side else { return nil }
@@ -249,7 +254,9 @@ public final class ReviewPageState: ShipHost {
     /// "<branch>@<tip>" → its Helix checkout, made ahead of the first `i` or `o`
     var helixDirs: [String: String] = [:]
     /// The half of the split the cursor reads, kept as it moves up and down; `h` / `l` switch it.
-    public var column: Side = .right
+    public var column: Side = .right {
+        didSet { if column != oldValue { sourceGeneration &+= 1 } }
+    }
     public var showOutdated = false
     /// where `x` dropped its mark (the other end of a range comment)
     public var mark: String?
@@ -1089,7 +1096,11 @@ public final class ReviewPageState: ShipHost {
 
     /// The word under the pointer over the diff, and the cursor move it came after: the pointer
     /// counts for K / g d only while nothing has moved the cursor since (whichever was used last wins).
-    @ObservationIgnored public var pointer: (pos: CodeLookup.Position, seq: Int, key: String?)?
+    @ObservationIgnored public var pointer: (pos: CodeLookup.Position, seq: Int, key: String?)? {
+        didSet {
+            if pointer?.pos != oldValue?.pos || pointer?.key != oldValue?.key || pointer?.seq != oldValue?.seq { sourceGeneration &+= 1 }
+        }
+    }
 
     /// Bumped on every cursor move made here (the canvas scrolls to it; the pointer yields to it).
     public var cursorMoved = 0
