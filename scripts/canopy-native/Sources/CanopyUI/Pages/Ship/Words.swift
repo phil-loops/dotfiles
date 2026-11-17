@@ -13,11 +13,30 @@ public final class WordsState {
 
     /// the latest /outline read per branch id, so a save acts on exactly what was shown
     public private(set) var shown: [String: WordsOutline] = [:]
-    /// unsaved message edits: branch id → commit sha (or `pr`) → words. They outlive the view.
-    public var drafts: [String: [String: MessageWords]] = [:]
-    /// The landing text a save just wrote, shown in place of /outline's (read again only when the
-    /// tip moves, and a PR-text save doesn't move it). Undo puts the previous one back.
-    public var savedPr: [String: MessageWords] = [:]
+    fileprivate struct CommitKey: Hashable { let branch: String; let sha: String }
+    enum PRPart: String, CaseIterable { case title = "prTitle", body = "prBody" }
+    fileprivate struct PRKey: Hashable { let branch: String; let part: PRPart }
+    struct PRChange { let part: PRPart; let value: String? }
+    struct Receipt {
+        fileprivate let commits: OwnedValues<CommitKey, MessageWords>.Receipt
+        fileprivate let draft: OwnedValues<PRKey, String>.Receipt
+        fileprivate let saved: OwnedValues<PRKey, String>.Receipt
+        fileprivate let savedKeys: [PRKey]
+    }
+    private let commitDrafts = OwnedValues<CommitKey, MessageWords>()
+    private let prDrafts = OwnedValues<PRKey, String>()
+    private let prSaved = OwnedValues<PRKey, String>()
+
+    public var drafts: [String: [String: MessageWords]] {
+        var result: [String: [String: MessageWords]] = [:]
+        for (key, value) in commitDrafts.values { result[key.branch, default: [:]][key.sha] = value }
+        for key in prDrafts.values.keys { result[key.branch, default: [:]][Self.pr] = prValue(key.branch) }
+        return result
+    }
+
+    public var savedPr: [String: MessageWords] {
+        Dictionary(uniqueKeysWithValues: Set(prSaved.values.keys.map(\.branch)).map { ($0, prOnFile($0)) })
+    }
     /// The branch a words command acts on off the review page — the forest page's words face sets it (area A).
     public var focus: String?
     @ObservationIgnored private var reading: [String: BranchSource] = [:]
@@ -51,16 +70,44 @@ public final class WordsState {
     }
 
     public func setDraft(_ id: String, _ sha: String, _ w: MessageWords?) {
-        var mine = drafts[id] ?? [:]
-        mine[sha] = w
-        drafts[id] = mine
+        if sha == Self.pr {
+            prDrafts.set(PRKey(branch: id, part: .title), w?.subject)
+            prDrafts.set(PRKey(branch: id, part: .body), w?.body)
+        } else { commitDrafts.set(CommitKey(branch: id, sha: sha), w) }
+    }
+
+    func stageSave(_ id: String, commits: Set<String>, pr: [PRChange]) -> Receipt {
+        let keys = pr.map { PRKey(branch: id, part: $0.part) }
+        return Receipt(
+            commits: commitDrafts.stage(commits.map { .init(key: CommitKey(branch: id, sha: $0), value: nil) }),
+            draft: prDrafts.stage(keys.map { .init(key: $0, value: nil) }),
+            saved: prSaved.stage(pr.map { .init(key: PRKey(branch: id, part: $0.part), value: $0.value) }),
+            savedKeys: keys)
+    }
+
+    func stageUndo(_ id: String, fields: Set<PRPart>) -> Receipt {
+        let keys = fields.map { PRKey(branch: id, part: $0) }
+        return Receipt(commits: commitDrafts.stage([]), draft: prDrafts.stage([]),
+                       saved: prSaved.stage(keys.map { .init(key: $0, value: prSaved.values[$0]) }), savedKeys: keys)
+    }
+
+    func accept(_ receipt: Receipt, undo: Bool = false) {
+        commitDrafts.accept(receipt.commits)
+        prDrafts.accept(receipt.draft)
+        prSaved.accept(receipt.saved, replacing: undo ? receipt.savedKeys.map { .init(key: $0, value: nil) } : [])
+    }
+
+    func rollback(_ receipt: Receipt) {
+        commitDrafts.rollback(receipt.commits)
+        prDrafts.rollback(receipt.draft)
+        prSaved.rollback(receipt.saved)
     }
 
     /// The edits that would change a commit as it stands now — a draft back to the original isn't one.
     public func changed(_ id: String) -> [(sha: String, subject: String, body: String)] {
-        guard let o = shown[id], let mine = drafts[id] else { return [] }
+        guard let o = shown[id] else { return [] }
         return o.commits.compactMap { c in
-            guard c.locked.isEmpty, let w = mine[c.sha] else { return nil }
+            guard c.locked.isEmpty, let w = commitDrafts.values[CommitKey(branch: id, sha: c.sha)] else { return nil }
             let s = trim(w.subject), b = trim(w.body)
             return s != c.subject || b != c.body ? (c.sha, s, b) : nil
         }
@@ -68,7 +115,7 @@ public final class WordsState {
 
     /// A commit's words as they stand: the draft if there is one, else what git has.
     public func valueOf(_ id: String, _ c: OutlineCommit) -> MessageWords {
-        drafts[id]?[c.sha] ?? MessageWords(subject: c.subject, body: c.body)
+        commitDrafts.values[CommitKey(branch: id, sha: c.sha)] ?? MessageWords(subject: c.subject, body: c.body)
     }
 
     /// v1's live hints for an unpushed commit — the opening commit wants the ticket's scope, follow-ups read bare.
@@ -108,9 +155,9 @@ public final class WordsState {
 
     /// The landing title and body on file: the last save's, else /outline's.
     public func prOnFile(_ id: String) -> MessageWords {
-        if let s = savedPr[id] { return s }
         let d = shown[id]?.draft
-        return MessageWords(subject: d?.title ?? "", body: d?.body ?? "")
+        return MessageWords(subject: prSaved.values[PRKey(branch: id, part: .title)] ?? d?.title ?? "",
+                            body: prSaved.values[PRKey(branch: id, part: .body)] ?? d?.body ?? "")
     }
 
     /// The landing title and body as they stand: the draft edit if there is one, else what's on file.
@@ -119,7 +166,9 @@ public final class WordsState {
             let v = valueOf(id, c)
             return MessageWords(subject: v.subject, body: OutlineHints.joinTemplate(v.body, OutlineHints.splitTemplate(prOnFile(id).body).template))
         }
-        return drafts[id]?[Self.pr] ?? prOnFile(id)
+        let saved = prOnFile(id)
+        return MessageWords(subject: prDrafts.values[PRKey(branch: id, part: .title)] ?? saved.subject,
+                            body: prDrafts.values[PRKey(branch: id, part: .body)] ?? saved.body)
     }
 
     /// PR text saved in config that the owning commit would silently lose to: what it says, when it
@@ -142,7 +191,8 @@ public final class WordsState {
             guard let d = shown[id]?.draft, d.titleSaved || d.bodySaved, changed(id).contains(where: { $0.sha == c.sha }) else { return nil }
             return (d.titleSaved ? "" : nil, d.bodySaved ? "" : nil)
         }
-        guard let o = shown[id], o.draft != nil, let w = drafts[id]?[Self.pr], !Self.githubOwns(o.pr) else { return nil }
+        guard let o = shown[id], o.draft != nil, !Self.githubOwns(o.pr) else { return nil }
+        let w = prValue(id)
         let was = prOnFile(id)
         let t = trim(w.subject) != trim(was.subject) ? trim(w.subject) : nil
         let b = trim(w.body) != trim(was.body) ? trim(w.body) : nil
@@ -178,8 +228,11 @@ public final class WordsState {
         if let c = owningCommit(id) {
             return editTo(id, c, MessageWords(subject: w.subject, body: OutlineHints.splitTemplate(w.body).own))
         }
-        let was = prOnFile(id)
-        setDraft(id, Self.pr, w.subject == was.subject && w.body == was.body ? nil : w)
+        let current = prValue(id)
+        for (part, value, before) in [(PRPart.title, w.subject, current.subject), (.body, w.body, current.body)] {
+            let key = PRKey(branch: id, part: part)
+            if value != before || prDrafts.values[key] != nil { prDrafts.set(key, value) }
+        }
     }
 
     /// Edits waiting for one save: changed commits, plus the PR text.
@@ -188,7 +241,7 @@ public final class WordsState {
     /// Edits for commits the branch no longer has (it moved under them).
     public func orphans(_ id: String) -> Int {
         guard let o = shown[id] else { return 0 }
-        return (drafts[id] ?? [:]).keys.filter { $0 != Self.pr && !o.commits.map(\.sha).contains($0) }.count
+        return commitDrafts.values.keys.filter { $0.branch == id && !o.commits.map(\.sha).contains($0.sha) }.count
     }
 
     // ── reading /outline (Commits.tsx useOutline) ──
@@ -214,6 +267,8 @@ public final class WordsState {
         requests[id] = request
         reading[id] = source
         let fetch = fetch
+        let savedSnapshot = prSaved.snapshot()
+        let draftSnapshot = prDrafts.snapshot()
         let task = Task { @MainActor [weak self, weak app] in
             guard let app, !Task.isCancelled else { return }
             let result: Result<WordsOutline, Error>
@@ -237,6 +292,14 @@ public final class WordsState {
                 let owned = waiting.removeValue(forKey: id) ?? []
                 if owned.contains(where: { $0.current() }) { app.runner.say("couldn't read the branch's words") }
             case .success(let outline):
+                prSaved.discardUnchanged(savedSnapshot, keys: Set(prSaved.values.keys.filter { $0.branch == id }))
+                let satisfied = Set(prDrafts.values.compactMap { key, value -> PRKey? in
+                    guard key.branch == id, !prSaved.isPending(key), let draft = outline.draft else { return nil }
+                    let returned = key.part == .title ? draft.title : draft.body
+                    let onFile = prSaved.values[key] ?? returned
+                    return trim(value) == trim(returned) && trim(value) == trim(onFile) ? key : nil
+                })
+                prDrafts.discardUnchanged(draftSnapshot, keys: satisfied)
                 shown[id] = outline
                 shownSources[id] = source
                 let owned = waiting.removeValue(forKey: id) ?? []
