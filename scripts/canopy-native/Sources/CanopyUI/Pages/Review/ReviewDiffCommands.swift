@@ -1195,7 +1195,7 @@ enum DiffCommands {
         r.register(Command(id: "review.viewed.set", title: "Put marks back", scope: .review, budget: .configWrite, needsArg: true, quiet: true,
                            write: { _, arg in
                                guard let a = arg as? MarkArg else { return nil }
-                               return markSet(app, pg, (a.marks, a.before))
+                               return markSet(app, pg, (a.marks, a.before), subject: a.subject, places: a.places)
                            }))
 
         // ── a commit's inline diffs (InlineDiff.tsx, inline.ts) ──
@@ -1216,27 +1216,39 @@ enum DiffCommands {
     }
 
 
-    struct MarkArg { var marks: [String: Mark]; var before: [String: Mark] }
+    struct MarkPlace { let path: String; let line: Int; let text: String }
+    struct MarkArg {
+        let subject: ReviewPageState.Target
+        let marks: [String: Mark]
+        let before: [String: Mark]
+        let places: [String: MarkPlace]
+    }
 
     /// Set blocks' marks (POST /viewed): shown at once, rolled back if refused; undo puts each one's mark back.
-    static func markSet(_ app: AppModel, _ pg: ReviewPageState, _ change: (marks: [String: Mark], before: [String: Mark]), said: String? = nil) -> Write? {
+    static func markSet(_ app: AppModel, _ pg: ReviewPageState, _ change: (marks: [String: Mark], before: [String: Mark]), said: String? = nil,
+                        subject: ReviewPageState.Target? = nil, places: [String: MarkPlace]? = nil) -> Write? {
         let marks = change.marks
-        guard !marks.isEmpty, let t = pg.target else { return nil }
-        let was = pg.viewedOverride
-        for (k, m) in marks { pg.viewedOverride[k] = m }
-        var body: [String: JSONValue] = ["branch": .string(t.name), "keys": .array(marks.keys.sorted().map(JSONValue.string)),
+        guard !marks.isEmpty, let target = subject ?? pg.target else { return nil }
+        let state = ReviewMarks.of(app)
+        let receipt = state.apply(target.repo, marks)
+        let places = places ?? Dictionary(uniqueKeysWithValues: Set(marks.keys).union(change.before.keys).compactMap { key in
+            pg.flagPlace(key).map { (key, MarkPlace(path: $0.path, line: $0.line, text: $0.text)) }
+        })
+        var body: [String: JSONValue] = ["branch": .string(target.name), "keys": .array(marks.keys.sorted().map(JSONValue.string)),
                                          "marks": .object(marks.mapValues { .string($0.rawValue) })]
-        let places = marks.filter { $0.value == .flagged }.compactMap { k, _ in pg.flagPlace(k).map { (k, $0) } }
-        if !places.isEmpty {
-            body["where"] = .object(Dictionary(uniqueKeysWithValues: places.map { k, p in
-                (k, JSONValue.object(["path": .string(p.path), "line": .number(Double(p.line)), "text": .string(p.text)]))
-            }))
+        let flagged = places.filter { marks[$0.key] == .flagged }
+        if !flagged.isEmpty {
+            body["where"] = .object(flagged.mapValues { place in
+                .object(["path": .string(place.path), "line": .number(Double(place.line)), "text": .string(place.text)])
+            })
         }
-        return Write(path: pg.repoPath("/viewed"), body: .object(body),
-                     settled: { marks.allSatisfy { pg.serverMark($0.key) == $0.value } },
+        return Write(path: app.transport.atRepo(target.repo, "/viewed"), body: .object(body),
+                     settled: { marks.allSatisfy { state.serverMark(target.repo, $0.key) == $0.value } },
                      said: said, failed: "couldn't change the marks",
-                     inverse: { _ in Inverse(id: "review.viewed.set", target: pg.id, arg: MarkArg(marks: change.before, before: marks)) },
-                     rollback: { pg.viewedOverride = was })
+                     inverse: { _ in Inverse(id: "review.viewed.set", target: target.id,
+                                            arg: MarkArg(subject: target, marks: change.before, before: marks, places: places)) },
+                     rollback: { state.rollback(receipt) },
+                     answered: { ok, _ in if ok { state.accept(receipt) } })
     }
 
     /// The keys to send for giving `blocks` of a file `want`, and each one's mark now (for undo). A block

@@ -188,7 +188,6 @@ public final class ReviewPageState: ShipHost {
 
     init(_ app: AppModel) {
         self.app = app
-        _ = app.store.onChange { [weak self] in self?.storeMoved() }
     }
 
     // ── the page's own state ──
@@ -247,7 +246,10 @@ public final class ReviewPageState: ShipHost {
     /// where `x` dropped its mark (the other end of a range comment)
     public var mark: String?
     /// block key → its mark, ahead of the server's copy while a write is in flight
-    public var viewedOverride: [String: Mark] = [:]
+    public var viewedOverride: [String: Mark] {
+        get { guard let app, let repo = target?.repo else { return [:] }; return ReviewMarks.of(app).overrides(repo) }
+        set { guard let app, let repo = target?.repo else { return }; ReviewMarks.of(app).replace(repo, with: newValue) }
+    }
     /// The page search (/).
     public var search = ""
     /// the forest map overlay is up (space m) — its layer's cursor
@@ -460,7 +462,6 @@ public final class ReviewPageState: ShipHost {
         payload = nil
         loadErr = nil
         mark = nil
-        viewedOverride = [:]
         guideContext = nil
         guideReturnPane = nil
         shownStretch = ""
@@ -649,12 +650,7 @@ public final class ReviewPageState: ShipHost {
     /// it shows — a child carrying it, the cumulative view (decided 2026-11-05; per branch before then).
     public var serverMarks: (viewed: Set<String>, flagged: Set<String>) {
         guard let app, let repo = target?.repo else { return ([], []) }
-        var viewed = Set<String>(), flagged = Set<String>()
-        for e in app.store.table(Viewed.self).values where e.repo == repo {
-            viewed.formUnion(e.keys)
-            flagged.formUnion(e.flagged ?? [])
-        }
-        return (viewed, flagged)
+        return ReviewMarks.of(app).serverMarks(repo)
     }
 
     public func serverMark(_ key: String) -> Mark {
@@ -680,13 +676,6 @@ public final class ReviewPageState: ShipHost {
     }
 
     public func isSeen(_ b: Block) -> Bool { mark(b) == .viewed }
-
-    /// An override the server now agrees with has done its job; dropping it lets later changes through.
-    private func storeMoved() {
-        guard !viewedOverride.isEmpty else { return }
-        let keep = viewedOverride.filter { serverMark($0.key) != $0.value }
-        if keep.count != viewedOverride.count { viewedOverride = keep }
-    }
 
     public func isOpen(_ t: CanopyCore.Thread) -> Bool {
         guard let app else { return !t.resolved && !t.outdated }
