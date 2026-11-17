@@ -63,22 +63,26 @@ struct Summary: Decodable, Equatable {
 
 enum DashText {
     static func ms(_ v: Double?) -> String {
-        guard let v else { return "—" }
+        guard let v, v.isFinite, v >= 0 else { return "—" }
         return v >= 1000 ? String(format: "%.1fs", v / 1000) : "\(Int(v.rounded()))ms"
     }
 
     static func pct(_ v: Double?) -> String {
-        guard let v, v != 0 else { return "—" }
+        guard let v, v.isFinite, (0...1).contains(v) else { return "—" }
         return "\(Int((v * 100).rounded()))%"
     }
 
     /// p95 against its budget: nil when either is missing.
     static func ratio(_ value: Double?, _ budget: Double?) -> Double? {
-        guard let value, let budget, budget != 0 else { return nil }
-        return value / budget
+        guard let value, let budget, value.isFinite, value >= 0, budget.isFinite, budget > 0 else { return nil }
+        let result = value / budget
+        return result.isFinite ? result : nil
     }
 
-    static func verdict(_ r: Double) -> String { r > 1 ? String(format: "✕ %.1f×", r) : "✓ in" }
+    static func verdict(_ r: Double) -> String {
+        guard r.isFinite, r >= 0 else { return "—" }
+        return r > 1 ? String(format: "✕ %.1f×", r) : "✓ in"
+    }
 }
 
 /// The dashboard's window and what the server answered for it (ui.ts dashDays + the resource).
