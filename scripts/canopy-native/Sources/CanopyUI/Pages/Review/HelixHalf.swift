@@ -48,21 +48,19 @@ extension ReviewPageState {
         Task { @MainActor in _ = await askHelixDir(app, branch: t.name) }
     }
 
-    /// The repo's GitHub page, read from origin in the branch's checkout (gh-open's rule) and kept per repo.
-    func githubPage(_ app: AppModel) async -> String? {
-        guard let t = target else { return nil }
-        if let w = githubWebs[t.repo] { return w }
-        let web: String?
+    /// Resolve origin from an explicitly targeted checkout at the observed head.
+    func githubPage(_ app: AppModel, source: BranchSource) async -> String? {
+        func current() -> Bool { !Task.isCancelled && BranchSource.current(app, source.id) == source }
+        guard current() else { return nil }
         if let stub = githubWeb {
-            web = await stub(app)
-        } else {
-            var dir = helixDirs["\(t.name)@\(tip)"]
-            if dir == nil { dir = await askHelixDir(app, branch: t.name)?.dir }
-            guard let dir else { return nil }
-            web = await Self.originWeb(dir)
+            let web = await stub(app)
+            return current() ? web : nil
         }
-        if let web { githubWebs[t.repo] = web }
-        return web
+        let body = ["branch": source.name, "op": "where"]
+        let answer = await app.transport.ask(app.transport.atRepo(source.repo, "/review-helix"), body, as: HelixWhere.self)
+        guard current(), let answer, answer.ok, answer.sha == source.tip, let dir = answer.dir, !dir.isEmpty else { return nil }
+        let web = await githubOrigin(dir)
+        return current() ? web : nil
     }
 
     /// origin's URL as a github.com page: `git@github.com:o/r.git` and `https://github.com/o/r.git` → `https://github.com/o/r`.

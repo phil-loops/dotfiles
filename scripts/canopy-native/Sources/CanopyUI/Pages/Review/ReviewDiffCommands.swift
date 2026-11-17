@@ -1038,6 +1038,7 @@ enum DiffCommands {
         r.register(Command(id: "review.back", title: "Back out", scope: .review, verb: .cancel, label: "back", quiet: true,
                            local: { _, _ in
                                if WordsByName.backOut(app) { return }
+                               if ReviewGitHubOpening.backOut(app) { return }
                                if BenchOpening.backOut(app) { return }
                                if pg.guideOpen { return ReviewGuide.close(app) }
                                if ShipSeam.backOut(app) { return }
@@ -1135,6 +1136,7 @@ enum DiffCommands {
 
         /// The lines under the cursor or selection: the open file's at its commit, else the diff's at the tip.
         func githubLines() -> (path: String, lines: ClosedRange<Int>, sha: String?)? {
+            guard pg.diffCurrent, pg.integration == nil else { return nil }
             if let s = pg.code?.doc {
                 let ns = app.selection.compactMap { RowKey.id($0, "s").flatMap(Int.init) }
                 guard let lo = ns.min(), let hi = ns.max() else { return nil }
@@ -1143,21 +1145,17 @@ enum DiffCommands {
             guard app.pane?.id == reviewDiffPane, let h = pg.here, h.kind == .line || h.kind == .file else { return nil }
             if app.keys.mode == .select {
                 let ns = app.selection.compactMap { pg.stopIndex[$0].map { pg.stops[$0] } }.filter { $0.path == h.path }.compactMap { $0.row?.right?.new }
-                if let lo = ns.min(), let hi = ns.max() { return (h.path, lo...hi, nil) }
+                if let lo = ns.min(), let hi = ns.max() { return (h.path, lo...hi, pg.scopeEnd) }
             }
-            if let r = pg.range, r.path == h.path, r.side == .right { return (h.path, (r.startLine ?? r.line)...r.line, nil) }
-            return pg.tipLineNear(h).map { (h.path, $0...$0, nil) }
+            if let r = pg.range, r.path == h.path, r.side == .right { return (h.path, (r.startLine ?? r.line)...r.line, pg.scopeEnd) }
+            return pg.tipLineNear(h).map { (h.path, $0...$0, pg.scopeEnd) }
         }
         func openOnGitHub(main: Bool) throws {
-            guard let t = pg.target, let at = githubLines() else { throw Refusal("no lines here to open") }
-            let ref = main ? "main" : at.sha ?? t.name
-            let frag = at.lines.count > 1 ? "#L\(at.lines.lowerBound)-L\(at.lines.upperBound)" : "#L\(at.lines.lowerBound)"
-            let ship = ShipState.of(app)
-            Task { @MainActor in
-                guard let web = await pg.githubPage(app) else { return app.runner.say("couldn't read origin's GitHub address for \(t.repo)") }
-                let path = at.path.split(separator: "/").map { String($0).uriComponent }.joined(separator: "/")
-                if let u = URL(string: "\(web)/blob/\(ref.uriComponent)/\(path)\(frag)") { ship.openURL(u) }
-            }
+            guard let t = pg.target, let at = githubLines(), let source = BranchSource.current(app, t.id),
+                  let repo = app.store.view(Repo.self, t.repo), !repo.main.isEmpty else { throw Refusal("no lines here to open") }
+            let ref = main ? repo.main : at.sha ?? t.name
+            guard !ref.isEmpty else { throw Refusal("no source here to open") }
+            ReviewGitHubOpening.of(app).open(.init(ref: ref, path: at.path, lines: at.lines), source: source, trunk: repo.main)
         }
         r.register(Command(id: "review.github.main", title: "Open these lines on GitHub, on main", scope: .review, verb: .githubMain,
                            modes: [.normal, .select], label: "gh main", available: { _ in githubLines() != nil },
