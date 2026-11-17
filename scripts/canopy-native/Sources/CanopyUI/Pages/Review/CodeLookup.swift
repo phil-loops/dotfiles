@@ -143,19 +143,21 @@ public final class CodeLookup {
     struct Request {
         var number: Int
         var origin: ReaderContext
+        var source: BranchSource?
     }
 
-    func beginRequest(waiting: String? = nil) -> Request? {
+    func beginRequest(waiting: String? = nil, source: BranchSource? = nil) -> Request? {
         renameIntent &+= 1
         seq &+= 1
         pop = waiting.map(Pop.wait)
         guard let app else { return nil }
-        return Request(number: seq, origin: ReaderContext(app))
+        return Request(number: seq, origin: ReaderContext(app), source: source)
     }
 
     func isCurrent(_ request: Request) -> Bool {
         guard request.number == seq, let app else { return false }
-        guard request.origin.isCurrent(app) else { dismiss(); return false }
+        let sourceCurrent = request.source.map { BranchSource.current(app, $0.id) == $0 && ReviewPageState.of(app).diffCurrent } ?? true
+        guard !Task.isCancelled, request.origin.isCurrent(app), sourceCurrent else { dismiss(); return false }
         return true
     }
 
@@ -180,7 +182,7 @@ public final class CodeLookup {
         return b
     }
 
-    /// Ask until the answer settles: nil when a newer ask took over.
+    /// Retry loading answers, settle current failures and discard obsolete or canceled work.
     private func asking<T: Decodable & Settles, B: Encodable>(_ route: String, _ w: Where, _ body: B, _ t: T.Type, request: Request) async -> T? {
         let t0 = Date()
         guard let app else { return nil }
@@ -189,7 +191,8 @@ public final class CodeLookup {
             guard isCurrent(request) else { return nil }
             let r = await app.transport.ask(path, body, as: T.self)
             guard isCurrent(request) else { return nil }
-            guard let r, !r.ok, r.state == "loading", Date().timeIntervalSince(t0) < patience else { return r }
+            guard let r else { pop = .note("code lookup failed · try again"); return nil }
+            guard !r.ok, r.state == "loading", Date().timeIntervalSince(t0) < patience else { return r }
             pop = .wait("types are loading — \(r.message?.isEmpty == false ? r.message! : "starting tsgo")")
             try? await Task.sleep(nanoseconds: UInt64(retry * 1_000_000_000))
             guard isCurrent(request) else { return nil }
@@ -238,7 +241,8 @@ public final class CodeLookup {
             if let f = first, f.isWholeModule, let m = p.member {
                 var mb = b
                 mb.character = m
-                if let mr = await asking(kind.route, w, mb, LSPLocations.self, request: request), mr.ok, !(mr.locations ?? []).isEmpty { r = mr }
+                guard let member = await asking(kind.route, w, mb, LSPLocations.self, request: request) else { return }
+                r = member
             }
             guard let r, isCurrent(request) else { return }
             let locs = r.ok ? (r.locations ?? []) : []
@@ -306,6 +310,7 @@ public final class CodeLookup {
 
     /// ] f / ] t: a file's symbols, quietly (nil when they can't be had: the note says why).
     public func symbolList(path: String, side: String = "new", _ w: Where) async -> [LSPSymbols.Symbol]? {
+        guard !Task.isCancelled else { return nil }
         guard let request = beginRequest() else { return nil }
         let b = body(nil, path: path, side: side, w)
         guard let r = await asking("/lsp/symbols", w, b, LSPSymbols.self, request: request) else { return nil }
@@ -369,12 +374,6 @@ public final class CodeLookup {
         origin.reader = ReaderContext(app)
     }
 
-    private func renameCurrent(_ request: Request, source: BranchSource) -> Bool {
-        guard isCurrent(request), let app else { return false }
-        guard ReviewPageState.of(app).diffCurrent, BranchSource.current(app, source.id) == source else { dismiss(); return false }
-        return true
-    }
-
     private static func renameEdits(_ files: [LSPRename.File]) -> Int? {
         guard !files.isEmpty, Set(files.map(\.path)).count == files.count else { return nil }
         var total = 0
@@ -389,12 +388,12 @@ public final class CodeLookup {
     }
 
     private func previewRename(_ b: RenameBody, source: BranchSource) {
-        guard let request = beginRequest() else { return }
+        guard let request = beginRequest(source: source) else { return }
         pop = .wait("asking tsgo what renaming changes…")
         renameTask = Task { @MainActor in
-            guard renameCurrent(request, source: source) else { return }
+            guard isCurrent(request) else { return }
             guard let r = await asking("/lsp/rename", .branch(repo: source.repo, name: b.branch, base: nil), b, LSPRename.self, request: request),
-                  renameCurrent(request, source: source) else { return }
+                  isCurrent(request) else { return }
             guard r.ok, r.sha == source.tip, let files = r.files, let edits = Self.renameEdits(files),
                   let diff = r.diff, !diff.isEmpty else {
                 pop = .note(Self.plainNote(r.message).isEmpty ? "couldn't validate that rename preview · try again" : Self.plainNote(r.message))
