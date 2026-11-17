@@ -304,7 +304,7 @@ public enum Verbs {
         v(.wordsCommit, .nav, ["D c"], "pick one of the branch's commits and reword it (:reword <sha> <subject>)"),
         v(.wordsFold, .nav, ["D j"], "pick one of the branch's unpushed commits and fold it into the one below (:fold <sha>); u puts it back"),
         v(.editor, .shared, ["o"], "open it in Helix"),
-        v(.rename, .shared, ["space r"], "rename the name under the cursor across the program: a commit you see first"),
+        v(.rename, .shared, ["space r"], "preview a rename of the name under the cursor across the program"),
         v(.comment, .shared, ["c"], "comment on it"),
         v(.reply, .shared, ["r"], "reply to it"),
         v(.extend, .shared, ["x"], "extend the selection a line"),
