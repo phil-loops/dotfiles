@@ -169,7 +169,7 @@ public func blockAnchors(_ f: FileDiff) -> [String: Int] {
 }
 
 public let reviewDiffPane = "diff"
-public let reviewTreePane = "files"
+public let reviewGuidePane = "review-guide"
 /// the branch's line in the header: its points, the cursor `, h` puts there
 public let reviewLinePane = "line"
 public let reviewCodePane = "code"
@@ -200,14 +200,9 @@ public final class ReviewPageState: ShipHost {
     public var diffColumns = 0
     /// A branch with more than one commit can scope its diff to one of them (the header's chip).
     public var scopesCommits: Bool { integration == nil && (branch?.commits ?? 0) > 1 }
-    /// The left margin is the files, when there's more than one to move between (or a filter typed
-    /// into it). Its width never follows focus: what the diff covers is the header's, not the margin's.
-    public var showsTree: Bool { views.count > 1 || !filter.isEmpty }
-    /// As wide as the longest path needs, within reason; a long folder gives way from its start.
-    public var treeWidth: CGFloat {
-        let longest = files.map(\.path.count).max() ?? 20
-        return min(260, max(180, CGFloat(longest) * 6.6 + 80))
-    }
+    var guideContext: String?
+    var guideReturnPane: String?
+    var guideOpen: Bool { tab == "files" && guideContext == contextKey }
     func divider(path: String, line: Int) -> Int {
         guard let file = views.first(where: { $0.file.path == path }), let row = file.rows.first(where: { $0.right?.new == line }) else { return 0 }
         return DiffLayout.rows(row, columns: diffColumns, paired: DiffLayout.pairedHunks(file.rows).contains(row.hunk)).first?.divider ?? 0
@@ -253,8 +248,7 @@ public final class ReviewPageState: ShipHost {
     public var mark: String?
     /// block key → its mark, ahead of the server's copy while a write is in flight
     public var viewedOverride: [String: Mark] = [:]
-    /// the file tree's filter (space f), and the page search (/)
-    public var filter = ""
+    /// The page search (/).
     public var search = ""
     /// the forest map overlay is up (space m) — its layer's cursor
     public var mapIndex = 0
@@ -403,6 +397,7 @@ public final class ReviewPageState: ShipHost {
     public func sync() {
         guard let t = target else { return }
         arrive()
+        if let guideContext, guideContext != contextKey, let app { ReviewGuide.close(app) }
         if stretchKey != shownStretch {
             shownStretch = stretchKey
             stretchMoved()
@@ -466,6 +461,8 @@ public final class ReviewPageState: ShipHost {
         loadErr = nil
         mark = nil
         viewedOverride = [:]
+        guideContext = nil
+        guideReturnPane = nil
         shownStretch = ""
         commitFiles = nil
         windows = [ReviewWindow(id: 1, column: 0)]
@@ -473,10 +470,8 @@ public final class ReviewPageState: ShipHost {
         guard let app else { return }
         // a jumplist entry being restored already put its cursor
         if pendingCursor?.id == newID || pendingLoc?.id == newID || pendingFlag?.id == newID { return }
-        let was = app.pane?.id
         app.focus(pane: reviewDiffPane)
         app.setCursor(nil)
-        if let was, was == reviewTreePane { app.focus(pane: was) }
     }
 
     /// Once a diff is here: put the cursor where a J/K hop or a jumplist entry wants it, or on the
@@ -590,6 +585,7 @@ public final class ReviewPageState: ShipHost {
 
     private func tabMoved(_ from: String) {
         guard let app, case .review = app.router.route else { return }
+        if tab != "files" { guideContext = nil; guideReturnPane = nil }
         if tab == "files" { app.focus(pane: reviewDiffPane) }
     }
 

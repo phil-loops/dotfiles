@@ -67,3 +67,21 @@ The shared plan gives each hunk only the sides its changes need. Addition-only a
 The independent re-scan found two holdouts: z-positioning still aimed at the first paragraph of a wrapped source row, and a queued resize callback could override a newer scroll. Cursor placement now resolves the selected source piece. Reflow preserves a visible source cursor synchronously; no deferred effect can reclaim the viewport. Tests cover a name deep in an old continuation, Unicode and tab round trips, actual TextKit columns, narrow stacking, source hit testing, zt/zz/zb, and reflow followed by a newer positioning request.
 
 The 6,061-stop fixture builds the mapped document in roughly 0.7 seconds and moves by key in roughly 0.9 ms on the development machine. The executable regression limits remain 3 seconds and 20 ms. Token lookup begins at a binary-searched source boundary so a long wrapped line does not repeatedly scan all its syntax tokens. Offscreen renders at 800 and 1460 points verify mixed hunk modes against an isolated read-only fixture server.
+
+
+## Round 3: return to work without moving the reader
+
+The margin had accumulated proposals for description, history, gates, and a file list. Those already have owners in the page header, branch line, shipping strip, and changed-file picker. The guide now has one responsibility: return to a flagged change or an unresolved, non-outdated thread. It opens on demand over the document. Its allocation is independent of focus and selection; the reading document never reflows to accommodate it.
+
+| Principle | Enforcer | Verification |
+| --- | --- | --- |
+| Selecting work does not navigate | Guide pane selection is separate from activation through the registry | Keyboard guide tests and offscreen wide/narrow renders |
+| A destination names the displayed source | Exact current payload/commit readiness plus branch/tip/stretch entry keys | Held tip, base, and scope reload tests; loading is distinct from loaded empty |
+| An entry opens its named subject | Activation re-resolves block/thread identity; flags have no nearest-line fallback | Disappearing flag, stale selection and scope-change tests |
+| Read state is not a presentation workaround | Threads open the existing conversation rather than a folded inline stop | A thread on fully marked-read code opens without changing any mark |
+| A file is reachable regardless of file count | Shared complete file picker with full path labels and current-context validation | One-file keys, matching basenames and replaying an older picker |
+| Progress says what was observed | Explicit marked-read counts; flags remain actionable in the queue | `Mark.flagged` means read and set aside; empty queue makes no completion claim |
+
+The independent pass found that `diffHere` only proves branch identity: the previous payload deliberately remains visible during a same-branch tip/base reload. The guide's shared readiness predicate requires the exact current payload key before minting destinations. An immutable commit scope requires its loaded commit list. A picker created before a scope change cannot act after it.
+
+A further ownership scan found that the viewed/flag write path still captures the ambient page for inverses and rollback. This is queued as the next separate capability: marks must retain the originating repository and branch and must not restore an old dictionary over newer marks on another page.

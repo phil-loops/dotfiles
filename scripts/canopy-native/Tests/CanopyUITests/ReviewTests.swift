@@ -285,7 +285,7 @@ import Testing
         #expect(pg.stops.first?.key == "f|a.ts")
         #expect(pg.stops.contains { $0.key == "t|\(Self.branch)#T1" })
         #expect(pg.stops.contains { $0.key == "g|a.ts|1" })
-        #expect(ReviewPage.treeRows(pg) == ["f|a.ts", "f|b.ts"])
+        #expect(!pg.guideOpen && !a.panes.contains { $0.id == reviewGuidePane })
         #expect(a.liveScopes().first == .line)
     }
 
@@ -465,6 +465,8 @@ import Testing
         #expect(pg.tab == "files", "the same key brings the diff back")
         keys(a, "space", "c")
         keys(a, "space", "g")
+        #expect(a.nav.picker?.items.map(\.label) == ["a.ts", "b.ts"])
+        keys(a, "ret")
         #expect(pg.tab == "files")
     }
 
@@ -781,14 +783,15 @@ import Testing
         #expect(pg.column == .right && pg.range?.side == .right, "and l crosses back")
         keys(a, "j")
         #expect(pg.hereWord?.count == 1 && pg.here?.key != "l|a.ts|R:2", "j keeps the character cursor on the next line")
-        keys(a, "C-h")
-        #expect(a.pane?.id == reviewTreePane, "⌃h, the pane to the left")
+        a.runner.dispatch("review.guide", via: .key)
+        keys(a, "C-l", "C-h")
+        #expect(a.pane?.id == reviewGuidePane, "⌃h, the open guide to the left")
         keys(a, "C-l")
         #expect(a.pane?.id == reviewDiffPane)
         pg.open(Loc(repo: "loops", sha: "zzz", path: "other.ts", line: 4))
         #expect(a.pane?.id == reviewCodePane && !a.panes.contains { $0.id == reviewDiffPane }, "the file is in the diff's place")
         keys(a, "C-h")
-        #expect(a.pane?.id == reviewTreePane, "⌃h, the pane to the left of it")
+        #expect(a.pane?.id == reviewGuidePane, "⌃h, the pane to the left of it")
         keys(a, "C-l")
         #expect(a.pane?.id == reviewCodePane)
     }
@@ -809,7 +812,7 @@ import Testing
             ("the diff's last row", { _, pg in pg.setCursor(pg.stops.last?.key) }),
             ("a conversation", { _, pg in pg.setCursor("t|\(Self.branch)#T1") }),
             ("the old half of a removed line", { _, pg in pg.column = .left }),
-            ("the file list", { a, _ in a.focus(pane: reviewTreePane) }),
+            ("the return guide", { a, _ in a.runner.dispatch("review.guide", via: .key) }),
         ]
         let (probe, _) = try await app()
         let ids = probe.registry.commands.filter { $0.scope == .review && !motions.isDisjoint(with: $0.verbs) }.map(\.id)
@@ -841,16 +844,18 @@ import Testing
         #expect(a.pane?.id == reviewDiffPane)
     }
 
-    /// The margin is the files alone, the same width wherever the keyboard is; the commits are the
-    /// header line's, never a pane beside the diff.
-    @Test func theMarginIsTheFilesAtOneWidth() async throws {
+    @Test func theGuideDoesNotChangeTheDiffGeometryOrCursor() async throws {
         let (a, _) = try await app()
         let pg = ReviewPageState.of(a)
-        #expect(pg.scopesCommits)
-        #expect(a.panes.map(\.id).first == reviewTreePane && !a.panes.contains { $0.column == 0 && $0.id != reviewTreePane })
-        let width = pg.treeWidth
-        keys(a, "C-h")
-        #expect(a.pane?.id == reviewTreePane && pg.treeWidth == width)
+        pg.diffColumns = 120
+        let cursor = pg.here?.key
+        a.runner.dispatch("review.guide", via: .key)
+        #expect(pg.guideOpen && a.pane?.id == reviewGuidePane)
+        #expect(pg.diffColumns == 120 && pg.here?.key == cursor)
+        keys(a, "j", "C-l", "C-h")
+        #expect(pg.diffColumns == 120 && pg.here?.key == cursor)
+        keys(a, "esc")
+        #expect(!pg.guideOpen && a.pane?.id == reviewDiffPane && pg.here?.key == cursor)
     }
 
     /// , h puts a cursor on the branch's line; ↵ ↵ picks two ends. The same commit twice is that

@@ -563,7 +563,7 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
         let starts: [(String, @MainActor (AppModel) -> Void)] = [
             ("the diff", { _ in }),
             ("one commit's diff", { ShipState.of($0).showCommit("c3") }),
-            ("the file list", { $0.focus(pane: reviewTreePane) }),
+            ("the return guide", { $0.runner.dispatch("review.guide", via: .key) }),
             ("the words, on the description", { a in a.focus(pane: ShipSeam.wordsPane); a.setCursor("w|desc") }),
             ("the branch's line", { a in a.keys.handle(","); a.keys.handle("h") }),
         ]

@@ -10,14 +10,6 @@ struct ReviewPage: View {
     @Environment(\.theme) private var theme
     let route: Route
 
-    static let filterField = "review.filter"
-
-    /// The file tree's rows: every file of the diff the filter keeps ("f|<path>").
-    @MainActor static func treeRows(_ pg: ReviewPageState) -> [String] {
-        let q = pg.filter.lowercased()
-        return pg.views.map(\.file.path).filter { q.isEmpty || $0.lowercased().contains(q) }.map { "f|\($0)" }
-    }
-
     var body: some View {
         let pg = ReviewPageState.of(app)
         VStack(alignment: .leading, spacing: 0) {
@@ -33,7 +25,6 @@ struct ReviewPage: View {
                 default:
                     if pg.integration == nil { StretchWords(branchID: pg.id).padding(.horizontal, 16).padding(.bottom, 6) }
                     HStack(alignment: .top, spacing: 0) {
-                        if pg.showsTree { Color.clear.frame(width: pg.treeWidth) }
                         // the windows: columns of C-w v, each a stack of C-w s
                         HStack(alignment: .top, spacing: 0) {
                             ForEach(Array(pg.columns.enumerated()), id: \.offset) { c, col in
@@ -50,17 +41,16 @@ struct ReviewPage: View {
                         // no window shows the diff: it waits, scrolled where it was
                         .background { if pg.diffWindow == nil { DiffWindow().opacity(0).allowsHitTesting(false) } }
                         .frame(minHeight: 0, maxHeight: .infinity, alignment: .top)
-                        .padding(.leading, pg.showsTree ? 0 : 12)
+                        .padding(.leading, 12)
                     }
                     .overlay(alignment: .topLeading) {
-                        if pg.showsTree {
-                            FileTree()
-                                .font(Theme.text(12))
-                                .padding(.leading, 6)
-                                .frame(width: pg.treeWidth)
+                        if pg.guideOpen {
+                            ReviewGuidePanel()
+                                .frame(maxWidth: 360)
                                 .frame(maxHeight: .infinity, alignment: .top)
                                 .background(theme.vellumNight)
                                 .overlay(alignment: .trailing) { theme.vellumEdge.frame(width: 1) }
+                                .shadow(color: .black.opacity(0.25), radius: 12, x: 6)
                         }
                     }
                 }
@@ -112,6 +102,10 @@ private struct ReviewHeader: View {
                 .background(RoundedRectangle(cornerRadius: 3).fill(onTitle(pg, c) ? theme.goldLeaf.opacity(0.14) : .clear))
                 .padding(.horizontal, -4)
                 Spacer(minLength: 16)
+                if pg.tab == "files", pg.integration == nil {
+                    KeyButton(title: ReviewGuide.summary(app), id: "review.guide", target: pg.id)
+                        .labelTarget(pane: "review-guide-toggle", key: "return", title: "return to", run: RouteTo("review.guide"))
+                }
                 if pg.integration == nil, let t = pg.target { EvidenceChip(target: t) }
                 if pg.integration == nil { ShipStripView(branchID: pg.id) }
             }
@@ -212,44 +206,6 @@ private struct BranchLine: View {
         // off the line: a commit this history doesn't hold, or origin's copy after a rewrite
         if let scope = pg.commitScope { return ReviewLine.ends(scope).from == nil ? "one commit" : "a run of commits" }
         return pg.base == .outgoing ? "what the next push sends" : ""
-    }
-}
-
-/// The file tree: a pane of the diff's files with viewed boxes, its filter on top while finding.
-private struct FileTree: View {
-    @Environment(AppModel.self) private var app
-    @Environment(\.theme) private var theme
-
-    var body: some View {
-        @Bindable var pg = ReviewPageState.of(app)
-        let views = Dictionary(pg.views.map { ($0.file.path, $0) }, uniquingKeysWith: { a, _ in a })
-        let current = pg.here?.path
-        VStack(alignment: .leading, spacing: 0) {
-            if app.insertField == ReviewPage.filterField || !pg.filter.isEmpty {
-                HStack(spacing: 4) {
-                    Text("find").foregroundStyle(theme.goldLeaf)
-                    ModalTextField(ReviewPage.filterField, prompt: "filter files…", text: $pg.filter)
-                }
-                .font(Theme.text(12)).padding(6).background(theme.vellumRaise)
-            }
-            PaneList(pane: reviewTreePane, rows: ReviewPage.treeRows(pg)) { key, _ in
-                let path = String(key.dropFirst(2))
-                if let v = views[path] {
-                    HStack(spacing: 6) {
-                        Text(v.viewed ? "☑" : v.seen > 0 ? "◪" : "☐").foregroundStyle(v.viewed ? theme.patina : theme.inkFaint)
-                        if v.flagged > 0 { Text("⚑\(v.flagged)").foregroundStyle(theme.ember) }
-                        let tint = current == path ? theme.goldLeaf : v.viewed ? theme.inkFaint : theme.ink
-                        PathText(path: path, tint: tint)
-                        Spacer(minLength: 4)
-                        if v.open > 0 { Text("\(v.open)").foregroundStyle(theme.ember) }
-                        Text("+\(v.file.add)").foregroundStyle(theme.add)
-                        Text("−\(v.file.del)").foregroundStyle(theme.del)
-                    }
-                    .font(Theme.text(11.5))
-                    .help(path)
-                }
-            }
-        }
     }
 }
 

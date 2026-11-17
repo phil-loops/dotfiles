@@ -16,15 +16,15 @@ final class HeldLookupStub: URLProtocol, @unchecked Sendable {
         lock.withLock { _ = enabled.insert(key(port, path)) }
     }
 
-    static func waiting(_ port: Int, _ path: String) -> Bool {
-        lock.withLock { !(pending[key(port, path)] ?? []).isEmpty }
+    static func waiting(_ port: Int, _ path: String, query: String? = nil) -> Bool {
+        lock.withLock { (pending[key(port, path)] ?? []).contains { request in query.map { request.request.url?.query?.contains($0) == true } ?? true } }
     }
 
-    static func release(_ port: Int, _ path: String, _ body: String) {
+    static func release(_ port: Int, _ path: String, _ body: String, query: String? = nil) {
         let request = lock.withLock { () -> HeldLookupStub? in
             let k = key(port, path)
-            guard pending[k]?.isEmpty == false else { return nil }
-            return pending[k]?.removeFirst()
+            guard let i = pending[k]?.firstIndex(where: { request in query.map { request.request.url?.query?.contains($0) == true } ?? true }) else { return nil }
+            return pending[k]?.remove(at: i)
         }
         request?.respond(body)
     }
@@ -132,7 +132,7 @@ final class HeldLookupStub: URLProtocol, @unchecked Sendable {
         let lookup = CodeLookup.of(a)
         let task = try #require(lookup.hover(position, location))
         await until("the hover request") { HeldLookupStub.waiting(port, "/loops/lsp/hover") }
-        a.focus(pane: reviewTreePane)
+        a.focus(pane: ShipSeam.wordsPane)
         HeldLookupStub.release(port, "/loops/lsp/hover", #"{"ok":true,"contents":"old hover"}"#)
         await task.value
         #expect(lookup.pop == nil)
@@ -144,7 +144,7 @@ final class HeldLookupStub: URLProtocol, @unchecked Sendable {
         let lookup = CodeLookup.of(a)
         let task = try #require(lookup.hover(position, location))
         await until("the hover request") { HeldLookupStub.waiting(port, "/loops/lsp/hover") }
-        a.focus(pane: reviewTreePane)
+        a.focus(pane: ShipSeam.wordsPane)
         a.focus(pane: reviewDiffPane)
         HeldLookupStub.release(port, "/loops/lsp/hover", #"{"ok":true,"contents":"old hover"}"#)
         await task.value
