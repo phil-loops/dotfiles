@@ -518,6 +518,10 @@ class Journal:
             return {"generation": conv["binding_generation"], "excluded": bool(conv["excluded"]),
                     "works": self._generation_works(db, conv["conv_pk"], conv["binding_generation"])}
 
+    def generation_works(self, source_id, conversation_id, generation):
+        conv = self._conversation(self.db, source_id, conversation_id)
+        return self._generation_works(self.db, conv["conv_pk"], generation) if conv else []
+
     def bound_works(self, source_id, conversation_id):
         b = self.binding(source_id, conversation_id)
         return b["works"] if b else []
@@ -535,7 +539,9 @@ class Journal:
 
         `works` names the target explicitly; otherwise the binding generation the source accepted
         the message under (`accepted_generation`, from `binding()`; default: the one in force
-        now) is frozen with it. Returns {message_id, duplicate, works: {work_id: revision}, outbox_id}.
+        now) is frozen with it. `source_seq="next"` numbers it after the conversation's last
+        message, for an owned ingress whose capture is its acceptance boundary.
+        Returns {message_id, duplicate, works: {work_id: revision}, outbox_id}.
         A repeated capture of the same identity and text is a duplicate: it returns the original
         row (original binding, original revisions) and writes nothing. Raises NotCollected for
         an unenrolled or excluded conversation and Conflict for an identity that names other text."""
@@ -543,7 +549,7 @@ class Journal:
             raise JournalError(f"author {author!r} is not one of {', '.join(AUTHORS)}")
         if not isinstance(text, str) or not text.strip():
             raise JournalError("a message needs text")
-        if source_seq is not None and (not isinstance(source_seq, int) or isinstance(source_seq, bool) or not 1 <= source_seq < MAX_SEQ):
+        if source_seq not in (None, "next") and (not isinstance(source_seq, int) or isinstance(source_seq, bool) or not 1 <= source_seq < MAX_SEQ):
             raise JournalError(f"source_seq is an integer from 1 below {MAX_SEQ}")
         d = digest(text)
         with self.tx() as db:
@@ -555,10 +561,12 @@ class Journal:
             old = db.execute("SELECT * FROM message WHERE conv_pk = ? AND source_message_id = ?",
                              (conv["conv_pk"], source_message_id)).fetchone()
             if old is not None:
-                if old["digest"] != d or old["author"] != author or (source_seq is not None and old["source_seq"] != source_seq):
+                if old["digest"] != d or old["author"] != author or (source_seq not in (None, "next") and old["source_seq"] != source_seq):
                     raise Conflict(f"message {source_message_id} was already captured with different content")
                 return self._captured(db, old["message_id"], duplicate=True, target=target)
-            if source_seq is not None and db.execute("SELECT 1 FROM message WHERE conv_pk = ? AND source_seq = ?",
+            if source_seq == "next":
+                source_seq = db.execute("SELECT COALESCE(MAX(source_seq), 0) + 1 FROM message WHERE conv_pk = ?", (conv["conv_pk"],)).fetchone()[0]
+            elif source_seq is not None and db.execute("SELECT 1 FROM message WHERE conv_pk = ? AND source_seq = ?",
                                                      (conv["conv_pk"], source_seq)).fetchone():
                 raise Conflict(f"sequence {source_seq} in {source}/{conversation} already names another message")
             generation = conv["binding_generation"] if accepted_generation is None else accepted_generation
@@ -1140,6 +1148,35 @@ class Journal:
         data = payload.encode("utf-8")
         with self.tx() as db:
             db.execute("INSERT INTO receipt_payload VALUES (?,?,?,?)", (receipt_id, transport, hashlib.sha256(data).hexdigest(), len(data)))
+
+    def route(self, message_id, target, note=None):
+        """Adds delivery of an already-captured message to a target it wasn't routed to (the
+        worker changed before a retry). Returns the row id; an existing route is returned as is."""
+        with self.tx() as db:
+            if not db.execute("SELECT 1 FROM message WHERE message_id = ?", (message_id,)).fetchone():
+                raise JournalError(f"no message {message_id}")
+            row = db.execute("SELECT outbox_id FROM outbox WHERE message_id = ? AND target = ?", (message_id, target)).fetchone()
+            if row:
+                return row["outbox_id"]
+            ob = db.execute("INSERT INTO outbox (message_id, target, state, created_at) VALUES (?,?,'pending',?) RETURNING outbox_id",
+                            (message_id, target, self.now())).fetchone()[0]
+            if note:
+                db.execute("INSERT INTO outbox_note VALUES (?, ?)", (ob, note))
+            return ob
+
+    def conversation_outbox(self, source_id, conversation_id):
+        """Delivery rows of a conversation's messages, oldest first."""
+        return [dict(r) for r in self.db.execute("""
+            SELECT o.* FROM outbox o JOIN message m USING (message_id) JOIN conversation c USING (conv_pk)
+            WHERE c.source_id = ? AND c.conversation_id = ? ORDER BY o.outbox_id""", (source_id, conversation_id))]
+
+    def message(self, message_id):
+        row = self.db.execute("SELECT * FROM message WHERE message_id = ?", (message_id,)).fetchone()
+        return dict(row) if row else None
+
+    def turn(self, receipt_id):
+        row = self.db.execute("SELECT * FROM turn WHERE receipt_id = ?", (receipt_id,)).fetchone()
+        return dict(row) if row else None
 
     def hurry(self, message_id):
         """Makes a message's pending deliveries due now (an explicit Retry), without touching
