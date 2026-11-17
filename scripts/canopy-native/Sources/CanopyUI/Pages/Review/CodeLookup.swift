@@ -59,6 +59,8 @@ public final class CodeLookup {
     public private(set) var pop: Pop?
     @ObservationIgnored weak var app: AppModel?
     @ObservationIgnored private var seq = 0
+    @ObservationIgnored private var renameIntent = 0
+    @ObservationIgnored private(set) var renameTask: Task<Void, Never>?
     /// How long a "loading" answer is asked again for, and how often (tests shorten them).
     @ObservationIgnored var patience: TimeInterval = 90
     @ObservationIgnored var retry: TimeInterval = 0.5
@@ -144,6 +146,7 @@ public final class CodeLookup {
     }
 
     func beginRequest(waiting: String? = nil) -> Request? {
+        renameIntent &+= 1
         seq &+= 1
         pop = waiting.map(Pop.wait)
         guard let app else { return nil }
@@ -325,6 +328,17 @@ public final class CodeLookup {
         }
     }
 
+    @MainActor private struct RenameReader {
+        let source: BranchSource
+        let intent: Int
+        var reader: ReaderContext
+
+        func current(_ app: AppModel, intent: Int, afterPicker: Bool = false) -> Bool {
+            source == BranchSource.current(app, source.id) && self.intent == intent && ReviewPageState.of(app).diffCurrent &&
+                (afterPicker ? reader.isCurrentAfterPickerChoice(app) : reader.isCurrent(app))
+        }
+    }
+
     private struct RenameBody: Encodable {
         var branch: String
         var path: String
@@ -339,40 +353,74 @@ public final class CodeLookup {
     /// commit on the branch — the server refuses anything that reaches past the repo or a moved tip.
     public func rename(_ p: Position?, branch: String?, repo: String) {
         guard let app else { return }
-        guard let p, p.side == "new", let branch else { pop = .note("rename works on the branch's own code, at a name"); return }
-        app.nav.pick("rename to…", [PickItem(label: "type the new name · ↵ shows what changes")], rank: { _ in [0] }) { [weak self, weak app] _ in
-            guard let self, let app else { return }
+        renameIntent &+= 1
+        guard let p, p.side == "new", let branch,
+              let source = BranchSource.current(app, "\(repo):\(branch)"), !source.tip.isEmpty else {
+            pop = .note("rename works on the branch's own code, at a name"); return
+        }
+        guard ReviewPageState.of(app).diffCurrent else { pop = .note("reading the current diff before renaming"); return }
+        var origin = RenameReader(source: source, intent: renameIntent, reader: ReaderContext(app))
+        app.nav.pick("rename to…", [PickItem(label: "type the new name · ↵ shows what changes")], rank: { _ in [0] }) { [weak self, weak app] index in
+            guard let self, let app, index == 0, origin.current(app, intent: renameIntent, afterPicker: true) else { return }
             let name = app.nav.filter.trimmingCharacters(in: .whitespaces)
             guard !name.isEmpty else { return }
-            self.previewRename(RenameBody(branch: branch, path: p.path, line: p.line, character: p.character, newName: name, apply: false), repo: repo)
+            self.previewRename(RenameBody(branch: branch, path: p.path, line: p.line, character: p.character,
+                                          newName: name, apply: false, sha: source.tip), source: source)
         }
+        origin.reader = ReaderContext(app)
     }
 
-    private func previewRename(_ b: RenameBody, repo: String) {
+    private func renameCurrent(_ request: Request, source: BranchSource) -> Bool {
+        guard isCurrent(request), let app else { return false }
+        guard ReviewPageState.of(app).diffCurrent, BranchSource.current(app, source.id) == source else { dismiss(); return false }
+        return true
+    }
+
+    private static func renameEdits(_ files: [LSPRename.File]) -> Int? {
+        guard !files.isEmpty, Set(files.map(\.path)).count == files.count else { return nil }
+        var total = 0
+        for file in files {
+            let components = file.path.split(separator: "/", omittingEmptySubsequences: false)
+            guard !file.path.hasPrefix("/"), !components.contains(where: { $0.isEmpty || $0 == "." || $0 == ".." }), file.edits > 0 else { return nil }
+            let next = total.addingReportingOverflow(file.edits)
+            guard !next.overflow else { return nil }
+            total = next.partialValue
+        }
+        return total
+    }
+
+    private func previewRename(_ b: RenameBody, source: BranchSource) {
         guard let request = beginRequest() else { return }
         pop = .wait("asking tsgo what renaming changes…")
-        Task { @MainActor in
-            guard let r = await asking("/lsp/rename", .branch(repo: repo, name: b.branch, base: nil), b, LSPRename.self, request: request) else { return }
-            guard r.ok, let sha = r.sha, let files = r.files else {
-                pop = .note(Self.plainNote(r.message).isEmpty ? "couldn't rename here" : Self.plainNote(r.message))
+        renameTask = Task { @MainActor in
+            guard renameCurrent(request, source: source) else { return }
+            guard let r = await asking("/lsp/rename", .branch(repo: source.repo, name: b.branch, base: nil), b, LSPRename.self, request: request),
+                  renameCurrent(request, source: source) else { return }
+            guard r.ok, r.sha == source.tip, let files = r.files, let edits = Self.renameEdits(files),
+                  let diff = r.diff, !diff.isEmpty else {
+                pop = .note(Self.plainNote(r.message).isEmpty ? "couldn't validate that rename preview · try again" : Self.plainNote(r.message))
                 return
             }
-            let edits = files.reduce(0) { $0 + $1.edits }
+            guard let app else { return }
             var apply = b
             apply.apply = true
-            apply.sha = sha
-            app?.nav.pick("rename \(r.old ?? "it") to \(b.newName)?", [PickItem(label: "↵ commit it", text: "\(edits) edit\(edits == 1 ? "" : "s") in \(files.count) file\(files.count == 1 ? "" : "s")")]) { [weak self] _ in
-                self?.applyRename(apply, repo: repo)
+            var origin = RenameReader(source: source, intent: renameIntent, reader: ReaderContext(app))
+            app.nav.pick("rename \(r.old ?? "it") to \(b.newName)?", [PickItem(label: "↵ commit it", text: "\(edits) edit\(edits == 1 ? "" : "s") in \(files.count) file\(files.count == 1 ? "" : "s")")]) { [weak self, weak app] index in
+                guard let self, let app, index == 0, origin.current(app, intent: renameIntent, afterPicker: true) else { return }
+                self.applyRename(apply, source: source)
             }
-            pop = .hover("```diff\n\(r.diff ?? "")\n```")
+            origin.reader = ReaderContext(app)
+            pop = .hover("```diff\n\(diff)\n```")
         }
     }
 
-    private func applyRename(_ b: RenameBody, repo: String) {
+    private func applyRename(_ b: RenameBody, source: BranchSource) {
         guard let request = beginRequest() else { return }
         pop = .wait("renaming…")
-        Task { @MainActor in
-            guard let r = await asking("/lsp/rename", .branch(repo: repo, name: b.branch, base: nil), b, LSPRename.self, request: request) else { return }
+        renameTask = Task { @MainActor in
+            guard renameCurrent(request, source: source) else { return }
+            guard let r = await asking("/lsp/rename", .branch(repo: source.repo, name: b.branch, base: nil), b, LSPRename.self, request: request),
+                  renameCurrent(request, source: source) else { return }
             pop = .note(r.ok ? "renamed in \(String((r.sha ?? "").prefix(7)))" : Self.plainNote(r.message).isEmpty ? "couldn't rename" : Self.plainNote(r.message))
         }
     }
