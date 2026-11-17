@@ -140,7 +140,8 @@ public func lineAnchors(_ f: FileDiff) -> [(anchor: String, block: Int, index: I
         var inRun = false
         var next = [Int?](repeating: nil, count: h.lines.count + 1)
         let lastNew = h.lines.compactMap(\.new).last
-        next[h.lines.count] = lastNew.map { $0 + 1 }
+        let header = HunkHeader(h.header)
+        next[h.lines.count] = lastNew.map { $0 + 1 } ?? header.map { $0.nl == 0 ? $0.ns + 1 : $0.ns }
         for k in stride(from: h.lines.count - 1, through: 0, by: -1) { next[k] = h.lines[k].new ?? next[k + 1] }
         for (k, l) in h.lines.enumerated() {
             if l.kind == .ctx { inRun = false; continue }
@@ -609,6 +610,34 @@ public final class ReviewPageState: ShipHost {
     /// A gap that runs to the end of a file not read yet has no size: revealing this many shows all of it.
     static let wholeRest = 1_000_000
 
+    struct PreparedContext {
+        fileprivate let key: String
+        fileprivate let path: String
+        fileprivate let lines: [String]
+    }
+
+    func prepareContext(_ path: String) async -> PreparedContext? {
+        guard let target else { return nil }
+        let key = contextKey
+        let ref = scopeEnd ?? (integration != nil ? target.name : tip)
+        if let lines = contextOf(path)?.lines { return PreparedContext(key: key, path: path, lines: lines) }
+        guard !ref.isEmpty, let app else { return nil }
+        let text = await app.transport.getText(repoPath("/file?branch=\(ref.uriComponent)&path=\(path.uriComponent)"))
+        guard let text, contextKey == key else { return nil }
+        return PreparedContext(key: key, path: path, lines: text.components(separatedBy: "\n"))
+    }
+
+    @discardableResult
+    func reveal(_ prepared: PreparedContext, at: Int, n: Int) -> Bool {
+        guard prepared.key == contextKey else { return false }
+        var reveal = contextOf(prepared.path)?.reveal ?? [:]
+        let count = prepared.lines.count
+        let before = min(count, max(0, reveal[at] ?? 0))
+        reveal[at] = before + min(count - before, max(0, n))
+        putContext(prepared.key, prepared.path, Context(lines: prepared.lines, reveal: reveal))
+        return true
+    }
+
     /// Show `n` more hidden lines at a gap; returns once the file's text is here.
     public func reveal(_ path: String, at: Int, n: Int = 20) async {
         let key = contextKey
@@ -616,12 +645,8 @@ public final class ReviewPageState: ShipHost {
         var r = was.reveal
         r[at, default: 0] += n
         putContext(key, path, Context(lines: was.lines, reveal: r))
-        guard was.lines == nil, let t = target, let app else { return }
-        let rev = commitScope ?? (integration != nil ? t.name : tip)
-        guard !rev.isEmpty else { return }
-        let text = await app.transport.getText(repoPath("/file?branch=\(rev.uriComponent)&path=\(path.uriComponent)"))
-        guard let text, contextKey == key else { return }
-        putContext(key, path, Context(lines: text.components(separatedBy: "\n"), reveal: contextOf(path)?.reveal ?? r))
+        guard was.lines == nil, let prepared = await prepareContext(path), prepared.key == key else { return }
+        reveal(prepared, at: at, n: 0)
     }
 
     /// Tests set a file's text without the server.

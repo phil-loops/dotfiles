@@ -888,56 +888,16 @@ enum DiffCommands {
         r.register(Command(id: "review.scroll.up", title: "Scroll the diff up a line", scope: .review, verb: .scrollUp, modes: motion, quiet: true,
                            local: { _, _ in try scrollLine(-1) }))
 
-        // ── ]f / ]t: the next function or type this change touches, as Helix's textobjects find them ──
-
-        /// The new-side line the cursor stands on: a removed line sits just before the line after it, a
-        /// fold just before what it hides, a file's header before its first line.
-        func cursorLine(_ s: Stop) -> Int {
-            guard let fv = pg.fileOf(s.path) else { return 0 }
-            if s.kind == .gap, let at = s.at { return (fv.gaps.first { $0.at == at }?.first ?? 1) - 1 }
-            guard let row = s.row else { return 0 }
-            if let n = row.right?.new { return n }
-            let i = fv.rows.firstIndex { $0.key == row.key } ?? fv.rows.count
-            return (fv.rows[min(i + 1, fv.rows.count)...].first { $0.right?.new != nil }?.right?.new ?? 1) - 1
-        }
-        /// The stop for a line of `path`, unfolding the gap it hides in first.
-        func show(_ line: Int, in path: String) async -> Int? {
-            func stop() -> Int? { pg.stops.firstIndex { $0.path == path && $0.kind == .line && $0.row?.right?.new == line } }
-            if let i = stop() { return i }
-            guard let fv = pg.fileOf(path), let g = fv.gaps.first(where: { $0.first <= line && line <= ($0.last ?? .max) }) else { return nil }
-            let below = g.at >= fv.file.hunks.count
-            await pg.reveal(path, at: g.at, n: below ? line - g.first + 1 : (g.last ?? line) + 1 - line)
-            return stop()
-        }
-        func spanStep(_ dir: Int, types: Bool) throws {
-            let noun = types ? "type" : "function"
-            guard app.pane?.id == reviewDiffPane, let here = pg.here, !here.path.isEmpty else { throw Refusal("] f / ] t walk the diff's code") }
-            let path = here.path, at = cursorLine(here)
-            let units = ReviewUnits.of(app)
-            Task { @MainActor in
-                guard let fs = await units.syntax(pg, path: path) else { return app.runner.say("the server didn't answer") }
-                guard pg.here?.key == here.key else { return }   // the cursor moved on while it asked
-                let stops = fs.touched(types ? fs.classes : fs.functions)
-                guard let s = dir > 0 ? stops.first(where: { $0.line > at }) : stops.last(where: { $0.line < at }) else {
-                    return app.runner.say(stops.isEmpty ? "no \(noun) this change touches in \(shortPath(path))"
-                        : "the \(dir > 0 ? "last" : "first") \(noun) this change touches in \(shortPath(path))")
-                }
-                guard let i = await show(s.line, in: path), pg.here?.key == here.key else { return }
-                if app.keys.mode != .select { pg.mark = nil }
-                goTo(i)
-                app.runner.say(s.name)
-            }
-        }
         r.register(Command(id: "review.function.next", title: "The next function this change touches — its first line, unfolded if the diff hides it",
                            scope: .review, verb: .nextFunction, modes: motion, quiet: true,
-                           available: onDiff, local: { _, _ in try spanStep(1, types: false) }))
+                           available: onDiff, local: { _, _ in try ReviewSyntax.of(app).step(1, types: false) }))
         r.register(Command(id: "review.function.prev", title: "The previous function this change touches", scope: .review, verb: .previousFunction, modes: motion, quiet: true,
-                           available: onDiff, local: { _, _ in try spanStep(-1, types: false) }))
+                           available: onDiff, local: { _, _ in try ReviewSyntax.of(app).step(-1, types: false) }))
         r.register(Command(id: "review.type.next", title: "The next class, interface or type this change touches — its first line, unfolded if hidden",
                            scope: .review, verb: .nextType, modes: motion, quiet: true,
-                           available: onDiff, local: { _, _ in try spanStep(1, types: true) }))
+                           available: onDiff, local: { _, _ in try ReviewSyntax.of(app).step(1, types: true) }))
         r.register(Command(id: "review.type.prev", title: "The previous class, interface or type this change touches", scope: .review, verb: .previousType, modes: motion, quiet: true,
-                           available: onDiff, local: { _, _ in try spanStep(-1, types: true) }))
+                           available: onDiff, local: { _, _ in try ReviewSyntax.of(app).step(-1, types: true) }))
 
         // ── ]d / [d: push-ready's findings, as Helix walks diagnostics ──
 

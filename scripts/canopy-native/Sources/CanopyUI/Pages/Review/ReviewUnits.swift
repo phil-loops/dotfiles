@@ -54,7 +54,7 @@ struct SyntaxUnits: Decodable {
     }
 }
 
-/// What the review page knows of one file's syntax at this tip.
+/// Syntax and changed-line membership for one displayed file.
 struct FileSyntax {
     var units: [LineID: ReviewUnit]
     var functions: [SyntaxSpan]
