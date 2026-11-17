@@ -217,7 +217,8 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
         ship.setText(key, "")
     }
 
-    @Test func pendingDraftsDeleteAndComeBack() async throws {
+    @Test(arguments: [false, true])
+    func pendingDraftsDeleteAndComeBack(_ navigateAway: Bool) async throws {
         let (a, port) = try app { s in
             self.entity(&s, "draft", Self.branch) { d in
                 d["items"] = [["key": "k1", "kind": "comment", "path": "a.ts", "side": "RIGHT", "line": 3, "body": "hm", "state": "draft",
@@ -232,10 +233,50 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
         // the server agrees (the patch), then u puts it back
         a.store.applyPatch(try Patch.decode(Data(#"{"domain":"review","version":\#((a.store.versions["review"] ?? 0) + 1),"upserts":{"draft":{"\#(Self.branch)":{"id":"\#(Self.branch)","repo":"loops","branch":"add-hankles-limited-label","items":[]}}}}"#.utf8)))
         await until("the undo to be ready") { a.runner.runOf("review.pending.remove", "k1")?.state == .done }
+        if navigateAway {
+            a.transport.repos.append("elsewhere")
+            a.router.navigate(.review(repo: "elsewhere", branch: "another-branch"))
+        }
         #expect(a.runner.undoLast())
         await until("the restore") { ShipStub.posts(port).count == 2 }
         let back = ShipStub.posts(port)[1].body
         #expect(back["op"] == "add" && back["item"]?["key"] == "k1" && back["item"]?["path"] == "a.ts")
+        #expect(ShipStub.posts(port)[1].path == "/loops/review-draft")
+        #expect(back["branch"] == "add-hankles-limited-label")
+    }
+
+    @Test(arguments: [("review.address.undo", "/review-address", "undo"),
+                      ("review.address.cancel", "/review-draft", "key"),
+                      ("review.unapply", "/revert-commit", "sha")])
+    func reviewInversesUseTheirOriginalBranch(_ command: String, _ path: String, _ field: String) async throws {
+        let (a, port) = try app()
+        ShipStub.answer(port, "POST", "/loops" + path, #"{"ok":true}"#)
+        a.transport.repos.append("elsewhere")
+        a.router.navigate(.review(repo: "elsewhere", branch: "another-branch"))
+        a.runner.dispatch(command, via: .key, target: Self.branch, arg: "original-key")
+        await until("the inverse") { !ShipStub.posts(port).isEmpty }
+        let sent = try #require(ShipStub.posts(port).first)
+        #expect(sent.path == "/loops" + path)
+        #expect(sent.body["branch"] == "add-hankles-limited-label")
+        #expect(sent.body[field] == "original-key")
+    }
+
+    @Test func undoSavingADraftUsesItsOriginalBranch() async throws {
+        let (a, port) = try app()
+        ShipStub.answer(port, "POST", "/loops/review-draft", #"{"ok":true}"#)
+        let ship = ShipState.of(a)
+        a.runner.dispatch("review.reply", via: .key, target: Self.thread)
+        ship.setText("r|\(Self.thread)", "original draft")
+        a.keys.handle("esc")
+        a.runner.dispatch("review.compose.draft", via: .key, target: Self.branch)
+        await until("the saved draft") { a.runner.runOf("review.compose.draft", Self.branch)?.state == .landing }
+        a.transport.repos.append("elsewhere")
+        a.router.navigate(.review(repo: "elsewhere", branch: "another-branch"))
+        #expect(a.runner.undoLast())
+        await until("the saved draft removed") { ShipStub.posts(port).count >= 2 }
+        let sent = try #require(ShipStub.posts(port).last)
+        #expect(sent.path == "/loops/review-draft")
+        #expect(sent.body["branch"] == "add-hankles-limited-label" && sent.body["op"] == "remove")
     }
 
     // ── address: the layer's own keys ──
