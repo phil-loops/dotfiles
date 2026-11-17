@@ -81,7 +81,7 @@ public final class Transport: @unchecked Sendable {
 
     /// A repo-pinned server path: the server reads the repo from the leading segment (model.ts atRepo).
     public func atRepo(_ repo: String, _ path: String) -> String {
-        guard repos.contains(repo) else { return path }
+        guard !repo.isEmpty else { return path }
         return "/\(repo.uriComponent)\(path)"
     }
 

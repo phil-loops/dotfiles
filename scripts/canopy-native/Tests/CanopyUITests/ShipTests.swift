@@ -251,7 +251,7 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
     func reviewInversesUseTheirOriginalBranch(_ command: String, _ path: String, _ field: String) async throws {
         let (a, port) = try app()
         ShipStub.answer(port, "POST", "/loops" + path, #"{"ok":true}"#)
-        a.transport.repos.append("elsewhere")
+        a.transport.repos = ["elsewhere"]
         a.router.navigate(.review(repo: "elsewhere", branch: "another-branch"))
         a.runner.dispatch(command, via: .key, target: Self.branch, arg: "original-key")
         await until("the inverse") { !ShipStub.posts(port).isEmpty }
