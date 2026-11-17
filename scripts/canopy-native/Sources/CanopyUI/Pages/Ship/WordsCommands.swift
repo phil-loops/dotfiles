@@ -10,7 +10,7 @@ import Foundation
 /// What `words.undo` puts back.
 struct WordsUndo {
     var moves: Bool
-    var pr: MessageWords?
+    var fields: Set<WordsState.PRPart> = []
 }
 
 /// A words row, decoded: "w|desc", "w|title", "w|body", "w|s|<sha>", "w|b|<sha>".
@@ -77,53 +77,59 @@ enum WordsCommands {
                 let pr = words.prChange(id)
                 if edits.isEmpty && pr == nil { return nil }
                 if edits.contains(where: { $0.subject.isEmpty }) { throw Refusal("a commit needs a subject") }
-                let was = words.drafts
-                var mine = was[id] ?? [:]
-                // a commit-owned save only retires the PR text on file; there's no landing text of its own to remember
                 let prText = words.owningCommit(id) == nil
-                let prBefore = words.prOnFile(id)
-                let prAfter = pr == nil || !prText ? nil : words.prValue(id)
-                for e in edits { mine[e.sha] = nil }
-                if pr != nil { mine[WordsState.pr] = nil }
-                words.drafts[id] = mine
-                let savedWas = words.savedPr
-                if let a = prAfter {
-                    words.savedPr[id] = MessageWords(subject: a.subject.trimmingCharacters(in: .whitespacesAndNewlines),
-                                                     body: a.body.trimmingCharacters(in: .whitespacesAndNewlines))
-                }
+                let parts: [WordsState.PRChange] = prText ? [
+                    pr?.prTitle.map { .init(part: .title, value: $0) },
+                    pr?.prBody.map { .init(part: .body, value: $0) }
+                ].compactMap { $0 } : []
+                let receipt = words.stageSave(id, commits: Set(edits.map(\.sha)), pr: parts)
                 let n = edits.count
                 let what = [n > 0 ? "reworded \(n) commit\(n == 1 ? "" : "s")" : "", pr != nil && prText ? "saved the PR text" : ""].filter { !$0.isEmpty }.joined(separator: ", ")
                 var body: JSONObject = ["branch": .string(b.name), "head": .string(o.head),
                                         "edits": .array(edits.map { .object(["sha": .string($0.sha), "subject": .string($0.subject), "body": .string($0.body)]) })]
                 if let t = pr?.prTitle { body["prTitle"] = .string(t) }
                 if let x = pr?.prBody { body["prBody"] = .string(x) }
-                let undo = WordsUndo(moves: n > 0, pr: pr == nil || !prText ? nil : prBefore)
                 return Write(
                     path: tr.atRepo(b.repo, "/outline"), body: .object(body),
                     // rewording moves the tip; a PR-text-only save lands in config, done when the server answers
                     settled: { n == 0 || store.table(Branch.self)[id]?.tip != o.head },
-                    said: "\(what) · \(app.registry.keyOf("undo")) undoes",
                     failed: "couldn't save — the branch may have moved; your edits are kept",
-                    inverse: { _ in Inverse(id: "words.undo", target: id, arg: undo) },
-                    rollback: {
-                        words.drafts = was
-                        words.savedPr = savedWas
+                    inverse: { response in
+                        guard let undo = acknowledgedUndo(response) else { return nil }
+                        return Inverse(id: "words.undo", target: id, arg: undo)
+                    },
+                    rollback: { words.rollback(receipt) },
+                    answered: { ok, response in
+                        guard ok else { return }
+                        words.accept(receipt)
+                        app.runner.say(acknowledgedUndo(response) == nil ? "words already on file" : "\(what) · \(app.registry.keyOf("undo")) undoes")
+                        words.load(app, id, force: true)
                     })
             }))
 
         r.register(Command(
             id: "words.undo", title: "Put the commit messages back as they were", scope: .global, budget: .gitWrite, needsArg: true, quiet: true,
-            write: { id, arg in
+            write: { [weak app] id, arg in
                 guard let b = store.view(Branch.self, id) else { return nil }
                 let tip = b.tip
-                let u = arg as? WordsUndo ?? WordsUndo(moves: true, pr: nil)
-                let savedWas = words.savedPr
-                if let pr = u.pr { words.savedPr[id] = pr }
+                let u = arg as? WordsUndo ?? WordsUndo(moves: true)
+                let receipt = words.stageUndo(id, fields: u.fields)
                 return Write(
                     path: tr.atRepo(b.repo, "/outline-undo"), body: ["branch": .string(b.name)],
                     settled: { !u.moves || store.table(Branch.self)[id]?.tip != tip },
-                    said: "undone", failed: "couldn't put the messages back",
-                    rollback: { words.savedPr = savedWas })
+                    failed: "couldn't put the messages back",
+                    rollback: { words.rollback(receipt) },
+                    answered: { [weak app] ok, response in
+                        guard ok else { return }
+                        words.accept(receipt, undo: true)
+                        if let app {
+                            let moved = (response["commits"]?.int ?? 0) > 0
+                            let restored = response["restored"]?.array
+                            app.runner.say(moved || restored?.isEmpty == false ? "undone" :
+                                restored == nil ? "undo accepted · rereading the branch" : "undo kept newer words · rereading the branch")
+                            words.load(app, id, force: true)
+                        }
+                    })
             }))
 
         r.register(Command(
@@ -162,6 +168,12 @@ enum WordsCommands {
                 app.setCursor(row)
                 app.beginInsert(w.field(id), lines: w.lines)
             }))
+    }
+
+    static func acknowledgedUndo(_ response: JSONObject) -> WordsUndo? {
+        let moves = (response["changed"]?.int ?? 0) > 0
+        let fields = Set((response["fields"]?.array ?? []).compactMap { $0.string.flatMap(WordsState.PRPart.init(rawValue:)) })
+        return moves || !fields.isEmpty ? WordsUndo(moves: moves, fields: fields) : nil
     }
 
     /// Whether a words row can be written here: the PR's text until GitHub owns it, a commit until it's locked.

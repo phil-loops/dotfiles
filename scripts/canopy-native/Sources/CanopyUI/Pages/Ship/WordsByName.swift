@@ -134,7 +134,7 @@ enum WordsByName {
                     settled: { app.store.table(Branch.self)[id]?.tip != tip },
                     said: "folded \(c.short.prefix(7)) into \(below.short.prefix(7)) — \(app.registry.keyOf("undo")) puts it back",
                     failed: "couldn't fold \(c.short.prefix(7))",
-                    inverse: { _ in Inverse(id: "words.undo", target: id, arg: WordsUndo(moves: true, pr: nil)) })
+                    inverse: { _ in Inverse(id: "words.undo", target: id, arg: WordsUndo(moves: true)) })
             }))
     }
 
