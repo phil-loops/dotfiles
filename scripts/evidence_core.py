@@ -774,19 +774,22 @@ def judge(mid, verdict, note, actor):
 
 
 def status(m, mid):
-    """Phil's judgment of this manifest: his own on it, else one carried from an identical observation."""
+    """Phil's judgment of this manifest: his own on it, else one carried from an identical observation.
+    Eligibility is checked now, not only at judging: a verdict on a manifest that has since become
+    ineligible (a revoked render, lost images) is reported but doesn't stand, and nothing carries onto one."""
+    why = eligibility(m)
     obs = observation(m)
     exact = carried = None
     for j in _judgments():
         if j.get("manifest") == mid:
             exact = j
-        elif j.get("observation") == obs:
+        elif j.get("observation") == obs and not why:
             carried = j
     j = exact or carried
     if not j:
         return {"judged": False}
     return {"judged": True, "verdict": j["verdict"], "at": j["at"], "note": j.get("note", ""),
-            "carriedFrom": None if j is exact else j["manifest"]}
+            "carriedFrom": None if j is exact else j["manifest"], "stands": not why, "why": why}
 
 
 def card(repo, branch):
