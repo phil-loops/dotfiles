@@ -80,9 +80,15 @@ public final class EventStream {
     private func load() async throws {
         let t0 = Date()
         let data = try await transport.getData("/state?archived=1")
+        let t1 = Date()
         let snap = try Snapshot.decode(data)
+        let t2 = Date()
         store.hydrate(snap)
-        bump("state", Date().timeIntervalSince(t0) * 1000)
+        let t3 = Date()
+        bump("state-fetch", t1.timeIntervalSince(t0) * 1000)
+        bump("state-decode", t2.timeIntervalSince(t1) * 1000)
+        bump("state-hydrate", t3.timeIntervalSince(t2) * 1000)
+        bump("state", t3.timeIntervalSince(t0) * 1000)
     }
 
     private func path() -> String {
