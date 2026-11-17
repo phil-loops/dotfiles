@@ -6,7 +6,7 @@
 #                                                    Reading a stale card starts its re-capture (see _refresh)
 #   GET  /evidence-blob   ?sha=                   → one captured PNG, by content hash
 #   POST /evidence-run    {branch, fresh?}        → a run (kind "evidence"); any caller
-#   POST /evidence-judge  {manifest, verdict, note?} → Phil's verdict on the manifest he was SHOWN.
+#   POST /evidence-judge  {branch, manifest, verdict, note?} → Phil's verdict on the manifest he was SHOWN, while still current.
 #                                                    It names the manifest; nothing is resolved at click time.
 import json
 import os
@@ -120,9 +120,11 @@ def run(req, raw):
 
 def judge(req, raw):
     d = json.loads(raw or "{}")
+    if not d.get("branch"):
+        return req._send(400, json.dumps({"ok": False, "err": "branch is required"}))
     try:
-        entry = E.judge(d.get("manifest", ""), d.get("verdict", ""), d.get("note", ""),
-                        actor=getattr(req, "_actor", "") or "phil")
+        entry = E.judge_current(ctx.repo_cwd(), d["branch"], d.get("manifest", ""), d.get("verdict", ""),
+                                d.get("note", ""), actor=getattr(req, "_actor", "") or "phil")
     except E.Refused as e:
         return req._send(400, json.dumps({"ok": False, "err": str(e)}))
     req._send(200, json.dumps({"ok": True, "at": entry["at"], "verdict": entry["verdict"]}))

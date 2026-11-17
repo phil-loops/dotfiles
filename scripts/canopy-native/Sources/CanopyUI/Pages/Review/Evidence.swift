@@ -307,7 +307,7 @@ enum EvidenceCommands {
             { _, _ in
                 guard let tg = pg.target, let c = ev.card(tg.id), c.judgeable, let mid = c.id else { return nil }
                 return Write(path: t.atRepo(tg.repo, "/evidence-judge"),
-                             body: ["manifest": .string(mid), "verdict": .string(verdict)],
+                             body: ["branch": .string(tg.name), "manifest": .string(mid), "verdict": .string(verdict)],
                              settled: { true },
                              said: verdict == "accept" ? "accepted every field as shown" : "rejected what's on screen",
                              failed: "the verdict didn't take",
