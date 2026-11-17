@@ -105,3 +105,21 @@ Review diagnostics now claim the same revocable request sequence as type and def
 A picker holds finding identity and source context, never an executable row index. Activation recomputes stops after folding. A motion also computes its starting ordinal after the validated reply. Full-path labels keep matching basenames distinct. Branch-tip line coordinates can navigate an unscoped diff or a scope proven to end at the exact branch tip; older scopes can show the list but cannot reinterpret those coordinates as their own code.
 
 The independent pass found and verified the older-scope coordinate mismatch, uncancellable pending work, stale hover presentation, index drift after folding, and the missing-key/null ambiguity. Each has an executable regression beside the existing navigation tests.
+
+## Round 6: startup measurements name the work they time
+
+`EventStream` reports snapshot fetch, decode and hydration separately while preserving its existing aggregate. All phase boundaries are captured before observer callbacks. A failed decode emits no completed-load sample. The benchmark preserves that callback and pairs the latest completed phase batch with its own readiness time.
+
+The old cold benchmark created and attached its root before waiting for the stream, then timed an already warm layout. `--bench --cold-only` now constructs and lays out a fresh root inside the timer. Offscreen CPU raster is separate. Synthetic generation is labeled as local work; it supplies neither a network-fetch sample nor a stream-hello duration. A missing hello exits 2 without a content sample. Model timing begins after font registration and port discovery, so it is not process-launch latency. Page-specific asynchronous content on routes other than Forests may still be loading.
+
+Sequential debug runs on 2026-11-17 used three samples per case. These medians validate phase attribution and scaling, not a latency percentile:
+
+| Fixture | Fetch or local generation | Decode | Fresh root construction/layout | CPU raster |
+| --- | --- | --- | --- | --- |
+| Synthetic, 300 branches | 4.3 ms local | 24.0 ms | 55.2 ms | 17.6 ms |
+| Synthetic, 1,000 branches | 14.5 ms local | 78.0 ms | 102.1 ms | 24.0 ms |
+| Synthetic, 10,000 branches | 151.0 ms local | 786.5 ms | 921.9 ms | 61.1 ms |
+| Captured 771 KB snapshot, 495 branches | 17.9 ms fixture fetch | 54.2 ms | 54.3 ms | 18.4 ms |
+| Same snapshot, 250 ms server delay | 262.4 ms fixture fetch | 53.6 ms | 58.8 ms | 16.8 ms |
+
+Hydration was 0.2–0.3 ms. A separate warm local `/state` read took 182 ms, with 52 ms reported by the server. Neither that observation nor offline replay explains the two historical 2.6-second v2 samples; a genuinely cold server capture remains missing. The current measurements identify snapshot decoding as measurable client work before any cache or server-lifecycle policy is changed. Benchmark review pages also answer `/gates-progress` locally because that GET can record a verdict.
