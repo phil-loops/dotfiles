@@ -53,6 +53,9 @@ answer to "how would we know it's ready".
    shows the coverage.
 6. Style/comment nits: one line each, marked as team-convention-dependent. Never lead
    with them.
+7. **Check `~/.dotfiles/claude/hankles-checklist.md`, read fresh**: the findings the real
+   `john-hankles[bot]` raises that authors accept. Check the diff for each one, and stay quiet
+   on what its last section says authors decline.
 
 ## Surfacing the findings — durable and local
 

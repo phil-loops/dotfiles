@@ -32,11 +32,11 @@ gate bounce.
 **Which passes run follows from what the diff touches** — one band per branch (forests.md
 *ladder*) makes this clean. Derive it, state it with the reason, never store it:
 
-| the `parent...branch` diff touches | mode | `code-review` | hankles-prompt pass | reuse pass |
-|---|---|---|---|---|
-| `queries/`, `models/`, a migration, auth/permission paths | `full` | high | ✓ | ✓ |
-| wiring, endpoints, jobs, UI | `standard` | medium | ✓ | ✓ |
-| docs/config only, or a pure move (per-file tree parity) | `light` | low | — | — |
+| the `parent...branch` diff touches | mode | `code-review` | reuse pass |
+|---|---|---|---|
+| `queries/`, `models/`, a migration, auth/permission paths | `full` | high | ✓ |
+| wiring, endpoints, jobs, UI | `standard` | medium | ✓ |
+| docs/config only, or a pure move (per-file tree parity) | `light` | low | — |
 
 `review=<full|standard|light|off>` overrides for one run only ("no review" = `off`) — nothing
 persists. Overriding the same way repeatedly means the table is wrong: fix the table. Report the
@@ -49,20 +49,22 @@ writing them by hand forges "reviewed" (spine hard rule; a hook refuses it). `of
 and the viewer then shows the branch as unreviewed — honest, never "reviewed, nothing flagged".
 
 Your own passes find and fix; the run records. Run the `code-review` skill on the
-`parent...branch` diff, plus the two lenses below. Findings split by verdict:
+`parent...branch` diff, plus the reuse pass below. Findings split by verdict:
 
 - **CONFIRMED** → apply the fix as a NEW commit on the branch (never amend). A fix to code an
   outline commit introduced is `git commit --fixup=<that sha>` (folded in §4); a fix that is its
   own idea gets its own voiced subject and joins the outline.
 - **PLAUSIBLE / unapplied** → never auto-apply; a line in the §6 report.
 
-**Hankles-prompt pass**: a second lens, run as a subagent against `<parent>...<branch>`, using
-the review prompt the repo's `john-hankles` bot runs — read fresh from
-`git show origin/main:.github/workflows/code-review.yml` (the `pi --print` argument) each time,
-never copied here. Keep its review rules and STE voice; **replace its OUTPUT, RESOLVING and
-REVIEW STATE sections with this section's** — nothing goes to GitHub.
+**What the `john-hankles` bot catches rides in the recorded run** (below), not in a pass of
+yours. Each `POST /review` run of `stack-review-run` reads `~/.dotfiles/claude/hankles-checklist.md`
+fresh: what the bot flags that authors accept, and what they decline. It also judges scope against
+the branch's description, its parent's and its commit subjects. And it scans the diff's added lines
+for an explicit `any` or a cast. The bot's own prompt holds no review rules beyond "don't nit-pick",
+so a separate subagent on it found nothing the run doesn't. It could also be skipped without a
+trace (#11627, 2026-11-17), where the run records what it covered.
 
-**Reuse pass**: the other two passes read only the diff, and duplication is only visible against
+**Reuse pass**: `code-review` and the recorded run read only the diff, and duplication is only visible against
 the whole repo. For each function the branch adds, list its callees; grep the repo for existing
 functions that call two or more of the same callees. Each overlap is a finding `possible existing
 composition: <path:fn>` (CONFIRMED → reuse it as a new commit; PLAUSIBLE → the report).
@@ -143,7 +145,11 @@ restack reads as lapsed (2026-11-15: two branches re-gated for nothing). Unless 
 same delta seal; written by the run, never by you). Any commit landed after green invalidates
 the verdict; re-run. Point canopy at it (`stack-review-serve <project>` reuses the live server and opens canopy;
 or `canopy /v2/b/<repo>/<branch>`) and report in a few lines: branch, tip SHA,
-per-gate results, review flags (count + one line each), the `canopy /v2/…` route, push button unlocked.
+per-gate results, review flags (count + one line each), what the recorded review covered, the
+`canopy /v2/…` route, push button unlocked. **Coverage comes from the run's `.result.covered`**
+(`/review-progress`): `rules`/`habits`/`defects`, `checklist` (read or not), `scope` (description,
+parent description, how many commits) and `prescan` (untyped holes found on added lines). Say each
+one. Say a `false`, a missing field or a missing description outright: that is how a skipped step shows.
 
 ## Guardrails
 
