@@ -48,6 +48,14 @@ struct DashboardReportTests {
         #expect(empty.support == "no samples" && empty.p95 == nil && empty.ratio == nil)
     }
 
+    @Test func visibleTimingPrecisionExplainsThresholdVerdicts() {
+        #expect(DashText.ms(16.8) == "16.8ms" && DashText.ms(16.7) == "16.7ms")
+        #expect(DashText.ratio(16.8, 16.7).map(DashText.verdict) == "✕ >1×")
+        #expect(DashText.ms(3000.1) == "3.0001s" && DashText.ms(3000) == "3s")
+        #expect(DashText.ms(.greatestFiniteMagnitude).count < 20)
+        #expect(DashText.verdict(.greatestFiniteMagnitude).count < 20)
+    }
+
     @Test func invalidOrMissingSupportCannotBecomeAWithinBudgetMeasurement() {
         for n in [-1, 0] {
             let phase = DashboardTiming(Stats(n: n, p50: 0, p95: 0), budget: 16.7)
