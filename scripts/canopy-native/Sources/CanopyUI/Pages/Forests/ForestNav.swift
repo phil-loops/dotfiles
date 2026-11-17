@@ -110,7 +110,11 @@ enum ForestNav {
                               ("requires", "Go to a branch this one builds on: its parent or a requires dep")] {
             r.register(Command(
                 id: name, title: title, scope: .global, label: name,
-                available: { _ in ["review", "forest"].contains(app.router.surface.id) },
+                available: { _ in
+                    let surface = app.router.surface.id
+                    guard ["review", "forest"].contains(surface), let command = r.command("\(surface).\(name)") else { return false }
+                    return command.available?(app.target(for: command.scope)) ?? true
+                },
                 route: { _ in
                     switch app.router.surface.id {
                     case "review": RouteTo("review.\(name)")
@@ -118,6 +122,7 @@ enum ForestNav {
                     default: nil
                     }
                 }))
+            r.alias(["forest.\(name)", "review.\(name)"], to: name)
         }
         r.register(Command(
             id: "forest.root", title: "Go to the root of the branch's stack", scope: .forest, verb: .root, label: "root", pair: "forest.tip",

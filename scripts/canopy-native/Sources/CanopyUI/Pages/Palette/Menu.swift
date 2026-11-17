@@ -62,16 +62,16 @@ final class MenuState {
         let scopes = app.liveScopes()
         let q = query.lowercased()
         let group = Dictionary(uniqueKeysWithValues: MenuGroups.order.enumerated().map { ($1, $0) })
-        return app.registry.commands.enumerated().filter { _, c in
+        let eligible = app.registry.commands.filter { c in
             !c.quiet && !c.needsArg && c.modes.contains(.normal) && scopes.contains(c.scope) && (c.available?(app.target(for: c.scope)) ?? true)
-                && (q.isEmpty || "\(c.title) \(c.id)".lowercased().contains(q))
         }
+        return CommandDiscovery.entries(eligible).enumerated().filter { q.isEmpty || $0.element.searchText.lowercased().contains(q) }
         .sorted { a, b in
-            let ga = group[MenuGroups.of(a.element.id)] ?? 0, gb = group[MenuGroups.of(b.element.id)] ?? 0
-            let sa = scopes.firstIndex(of: a.element.scope) ?? 0, sb = scopes.firstIndex(of: b.element.scope) ?? 0
+            let ga = group[MenuGroups.of(a.element.command.id)] ?? 0, gb = group[MenuGroups.of(b.element.command.id)] ?? 0
+            let sa = scopes.firstIndex(of: a.element.command.scope) ?? 0, sb = scopes.firstIndex(of: b.element.command.scope) ?? 0
             return (ga, sa, a.offset) < (gb, sb, b.offset)
         }
-        .map(\.element)
+        .map(\.element.command)
     }
 
     func world(_ app: AppModel) -> FindWorld {
@@ -86,7 +86,7 @@ final class MenuState {
 
     func rows(_ app: AppModel) -> [MenuRow] {
         let cmds = commands(app).map { c in
-            MenuRow(id: c.id, title: c.title, side: c.keys.map(glyph).joined(separator: " · "), group: MenuGroups.of(c.id))
+            MenuRow(id: c.id, title: c.title, side: c.keys.isEmpty ? app.registry.keyOf(c.id) : c.keys.map(glyph).joined(separator: " · "), group: MenuGroups.of(c.id))
         }
         let found = Finder.finds(query, world(app))
             .filter { app.registry.command($0.cmd) != nil }
