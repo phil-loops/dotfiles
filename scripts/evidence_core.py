@@ -216,7 +216,7 @@ def environment(repo, commit, donor):
             raise Refused(f"{pkg}: {commit[:10]} locks {want or 'nothing'}, {modules} has {have or 'nothing'}")
         versions[pkg] = have
     node = subprocess.run(["node", "--version"], capture_output=True, text=True).stdout.strip()
-    return {"packages": versions, "node": node}, modules
+    return {"packages": versions, "node": node, "inherits": list(RENDER_ENV_KEYS)}, modules
 
 
 def renderer_contract(renderer=RENDERER):
@@ -246,10 +246,20 @@ def _admission_path(render_id):
     return os.path.join(CACHE, "admissions", render_id + ".json")
 
 
+RENDER_ENV_KEYS = ("PATH", "HOME", "TMPDIR")
+
+
+def _render_env(donor, extra=None):
+    """The renderer's whole environment: the named passthroughs (node and Chrome need them), the donor,
+    and the caller's explicit extras. Recipes run the tree's own tailwind config in-process, so anything
+    else in os.environ could change pixels without changing the render's identity."""
+    return {**{k: os.environ[k] for k in RENDER_ENV_KEYS if k in os.environ}, "NODE_PATH": donor, **(extra or {})}
+
+
 def _attempt(snap, frozen_recipe, donor, render_id, n, log, renderer=RENDERER, extra_env=None):
     d = os.path.join(CACHE, "attempts", render_id, f"{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}-{n}")
     os.makedirs(d)
-    env = {**os.environ, "NODE_PATH": donor, **(extra_env or {})}
+    env = _render_env(donor, extra_env)
     r = subprocess.run(["node", renderer, snap, frozen_recipe, d], env=env, capture_output=True, text=True)
     result = _read_json(os.path.join(d, "result.json"))
     if r.returncode or not result:
