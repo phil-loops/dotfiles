@@ -121,7 +121,7 @@ struct BenchEntry: Equatable, Sendable {
 
 struct BenchIO: Sendable {
     var directory: URL
-    var read: @Sendable (URL) throws -> Data = { try Data(contentsOf: $0) }
+    var read: @Sendable (URL) throws -> Data = { try LocalDocumentFile.read($0).data }
     var list: @Sendable (URL) throws -> [URL] = {
         guard FileManager.default.fileExists(atPath: $0.path) else { return [] }
         var failure: Error?
