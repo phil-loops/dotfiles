@@ -305,7 +305,7 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = f
         #expect(a.registry.command("branch.push.confirm")!.available!("r:s") == false, "an unarmed confirm sends nothing")
         try! a.runner.arm("push r:s")
         let sent = try! a.registry.command("branch.push.confirm")!.write!("r:s", nil)!
-        #expect(sent.path == "/push-origin" && sent.body == ["branch": "s", "stay": true])
+        #expect(sent.path == "/r/push-origin" && sent.body == ["branch": "s", "stay": true])
         // a branch with only the gates in the way: p runs them
         #expect(BranchCommands.pushRoute("r:c", a) == "branch.gates.run")
     }
@@ -359,7 +359,7 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = f
         ship.putForceScope(a, "r:s", ForceScope(eligible: true, guards: [], lease: "aaaaaaa", prNumber: nil, prUrl: nil))
         try a.runner.arm("force r:s")
         let w = try #require(try a.registry.command("branch.force.confirm")!.write!("r:s", nil))
-        #expect(w.path == "/force-origin" && w.body == ["branch": "s", "lease": "aaaaaaa"])
+        #expect(w.path == "/r/force-origin" && w.body == ["branch": "s", "lease": "aaaaaaa"])
         w.answered?(false, ["forceScope": ["eligible": false, "guards": [["k": "pr", "label": "PR merged", "ok": false]], "lease": "bbbbbbb"]])
         #expect(ship.forceScopeOf(a, "r:s") == .some(ForceScope(eligible: false, guards: [.init(k: "pr", label: "PR merged", ok: false)], lease: "bbbbbbb", prNumber: nil, prUrl: nil)))
     }
@@ -382,13 +382,13 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = f
         #expect(a.insertField == line && LineEdit.of(a).text(line, saved: ProjectCommands.ownLine(a.store.view(Project.self, "r:bench")!)) == "",
                 "a borrowed line isn't yours to edit: start empty")
         let w = try #require(try a.registry.command("project.describe")!.write!("r:bench", "  my  words "))
-        #expect(w.path == "/project-describe" && w.body == ["repo": "r", "project": "bench", "description": "my words"])
+        #expect(w.path == "/r/project-describe" && w.body == ["repo": "r", "project": "bench", "description": "my words"])
         #expect(w.ops.first?.fields == ["summary": "my words", "summaryBy": "phil"])
         #expect(w.inverse?([:])?.arg as? String == "", "undo clears it back to the borrowed line")
         a.runner.dispatch("project.rename.edit", via: .key, target: "r:bench")
         #expect(a.insertField == ProjectCommands.renameField("r:bench") && LineEdit.of(a).text(ProjectCommands.renameField("r:bench"), saved: "bench") == "bench")
         let n = try #require(try a.registry.command("project.rename")!.write!("r:bench", "bench-two"))
-        #expect(n.path == "/project-rename" && n.body == ["repo": "r", "project": "bench", "to": "bench-two"])
+        #expect(n.path == "/r/project-rename" && n.body == ["repo": "r", "project": "bench", "to": "bench-two"])
         #expect(n.inverse?([:])?.target == "r:bench-two" && n.inverse?([:])?.arg as? String == "bench")
         #expect(try a.registry.command("project.rename")!.write!("r:bench", "bench") == nil, "the same name is no rename")
         #expect(a.registry.command("project.describe.edit")!.keys == ["i"], "the write verb: the field under the cursor")
@@ -407,7 +407,7 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = f
     @Test func aHoldCoversTheRowsUnopenedBranches() throws {
         let a = world()
         let w = try a.registry.command("hold.morning")!.write!("p:r:tree", nil)!
-        #expect(w.path == "/outbox-hold")
+        #expect(w.path == "/r/outbox-hold")
         // a has a PR, so the hold covers b, c, d
         #expect(w.body["branches"] == ["b", "c", "d"])
         #expect(w.body["until"] == "2026-10-23T16:00:00.000Z", "Thursday 11am PT holds for Friday 9am")

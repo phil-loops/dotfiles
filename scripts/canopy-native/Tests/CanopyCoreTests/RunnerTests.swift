@@ -147,10 +147,13 @@ final class Ctx: CommandContext {
         #expect(sent?.value(forHTTPHeaderField: "X-Request-Id")?.hasPrefix(transport.pageLoad + "-") == true)
     }
 
-    @Test func atRepoPinsOnlyKnownRepos() {
+    @Test func atRepoNeverDropsANamedRepo() {
         transport.repos = ["loops"]
         #expect(transport.atRepo("loops", "/node?branch=x") == "/loops/node?branch=x")
-        #expect(transport.atRepo("other", "/node") == "/node")
+        #expect(transport.atRepo("other", "/node") == "/other/node")
+        #expect(transport.atRepo("", "/node") == "/node")
+        transport.repos = []
+        #expect(transport.atRepo("loops", "/review-draft") == "/loops/review-draft")
     }
 
     @Test func localCommandAndRefusal() throws {
