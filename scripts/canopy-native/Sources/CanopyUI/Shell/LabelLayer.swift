@@ -61,6 +61,7 @@ extension AppModel {
     /// Do what `ret` on that target does — a jump. In select mode it only moves the cursor, so the
     /// range extends to it.
     public func pickTarget(_ t: LabelTarget) {
+        guard t.acceptsPick?() != false else { return runner.say("that destination changed; ask again") }
         let extending = keys.mode == .select
         jump {
             if let p = panes.first(where: { $0.id == t.pane }), p.rows.contains(t.key) {
