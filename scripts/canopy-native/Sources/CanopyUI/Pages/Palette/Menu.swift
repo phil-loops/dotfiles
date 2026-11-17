@@ -16,7 +16,7 @@ enum MenuGroups {
         if Rx.test("^tutor\\.", id) { return "tutor" }
         if Rx.test("^(nav|place)\\.|^help\\.|^branch\\.(pr|open)$|^forest\\.page$|^review\\.(definition|open|finish)$", id) { return "go" }
         if Rx.test("^(cursor|focus|history|commit)\\.|^review\\.(down|up|top|bottom|thread\\.(next|prev)|file\\.(next|prev)|leave|back)$|^forest\\.(expand|collapse|leave)$|^todo\\.(up|down)$", id) { return "move" }
-        if Rx.test("^review\\.(tab|split|outdated|map|filter|types|history)|^(forest\\.face|ready\\.toggle|archive\\.toggle|dashboard\\.range|todo\\.open)$", id) { return "view" }
+        if Rx.test("^review\\.(tab|split|outdated|map|filter|types|history)|^(forest\\.face|ready\\.toggle|archive\\.toggle|dashboard\\.(range|client)|todo\\.open)$", id) { return "view" }
         if Rx.test("words|^story\\.|push|^forest\\.launch$|^project\\.|^hold\\.|^todo\\.|^undo$", id) { return "words & push" }
         return "review"
     }

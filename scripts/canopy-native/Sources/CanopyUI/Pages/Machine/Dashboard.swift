@@ -2,9 +2,6 @@ import CanopyCore
 import Observation
 import SwiftUI
 
-// Dashboard.tsx: where to focus next — every command and surface against its budget, most used and
-// never used, refusals, the weekly trend, and v1 beside v2, all from GET /telemetry/summary.
-
 struct Stats: Decodable, Equatable { var n: Int; var p50: Double?; var p95: Double? }
 
 struct BudgetMs: Decodable, Equatable { var feedbackMs: Double; var settledMs: Double? }
@@ -64,7 +61,7 @@ struct Summary: Decodable, Equatable {
 enum DashText {
     static func ms(_ v: Double?) -> String {
         guard let v, v.isFinite, v >= 0 else { return "—" }
-        return v >= 1000 ? String(format: "%.1fs", v / 1000) : "\(Int(v.rounded()))ms"
+        return v >= 1000 ? String(format: "%.6gs", v / 1000) : String(format: "%.6gms", v)
     }
 
     static func pct(_ v: Double?) -> String {
@@ -81,7 +78,9 @@ enum DashText {
 
     static func verdict(_ r: Double) -> String {
         guard r.isFinite, r >= 0 else { return "—" }
-        return r > 1 ? String(format: "✕ %.1f×", r) : "✓ in"
+        if r <= 1 { return "✓ in" }
+        if r < 1.05 { return "✕ >1×" }
+        return r >= 1000 ? String(format: "✕ %.2g×", r) : String(format: "✕ %.1f×", r)
     }
 }
 
@@ -90,41 +89,60 @@ enum DashText {
 @Observable
 final class DashboardState {
     static let ranges = [7, 30, 90]
-    var days = 30
+    private(set) var days = 30
+    private(set) var windowRevision = 0
     private(set) var summary: Summary?
     private(set) var failed = false
-    @ObservationIgnored private weak var app: AppModel?
+    private(set) var client: DashboardClient = .app("native")
+    private(set) var report = DashboardReport([])
+    @ObservationIgnored var read: (Int) async throws -> Summary
     @ObservationIgnored private var asked = 0
 
-    init(app: AppModel) { self.app = app }
+    init(app: AppModel) {
+        let transport = app.transport
+        read = { days in try await transport.getJSON("/telemetry/summary?days=\(days)", as: Summary.self) }
+    }
 
-    func cycle() { days = Self.ranges[((Self.ranges.firstIndex(of: days) ?? 0) + 1) % Self.ranges.count] }
+    func cycle() {
+        windowRevision += 1
+        asked += 1
+        days = Self.ranges[((Self.ranges.firstIndex(of: days) ?? 0) + 1) % Self.ranges.count]
+        summary = nil
+        failed = false
+    }
 
-    func take(_ s: Summary) { summary = s; failed = false }
+    func cycleClient() {
+        let clients = report.clients
+        client = clients[((clients.firstIndex(of: client) ?? -1) + 1) % clients.count]
+    }
+
+    var commands: [DashboardCommand] { Array(report.rows(for: client).prefix(25)) }
+
+    func take(_ s: Summary) { summary = s; report = DashboardReport(s.commands); failed = false }
 
     /// Read the window `days` names; a newer ask wins over an older answer.
     func load() async {
-        guard let t = app?.transport else { return }
+        guard !Task.isCancelled else { return }
         asked += 1
         let mine = asked, d = days
         summary = nil
         failed = false
         do {
-            let s = try await t.getJSON("/telemetry/summary?days=\(d)", as: Summary.self)
-            if mine == asked { summary = s }
+            let s = try await read(d)
+            guard !Task.isCancelled, mine == asked, days == d else { return }
+            guard s.days == d else { failed = true; return }
+            take(s)
         } catch {
-            if mine == asked { failed = true }
+            if !Task.isCancelled, mine == asked, days == d { failed = true }
         }
     }
-
-    // ── the panes: each table's rows, so j/k walk them and C-w j/k step between tables ──
 
     struct Panel { var id: String; var title: String; var rows: [String]; var column = 0; var row: Int }
 
     var panels: [Panel] {
-        guard let s = summary else { return [] }
+        guard summary != nil else { return [] }
         return [
-            Panel(id: "commands", title: "commands", rows: s.commands.prefix(25).indices.map { "cmd:\($0)" }, row: 0),
+            Panel(id: "commands", title: "commands", rows: commands.map(\.id), row: 0),
         ].filter { !$0.rows.isEmpty }
     }
 }
@@ -135,6 +153,8 @@ enum DashboardCommands {
         let d = app.state { DashboardState(app: app) }
         app.registry.register(Command(id: "dashboard.range", title: "Change the dashboard's window", scope: .dashboard, leader: LocalKey(",r"), label: "range",
                                       local: { [weak d] _, _ in d?.cycle() }))
+        app.registry.register(Command(id: "dashboard.client", title: "Change the dashboard client", scope: .dashboard, leader: LocalKey(",c"), label: "client",
+                                      local: { [weak d] _, _ in d?.cycleClient() }))
     }
 }
 
@@ -150,8 +170,6 @@ struct DashboardSurface: SurfaceProvider {
     }
 }
 
-private let TH: (String) -> Text = { Text($0.uppercased()).font(Theme.text(10.5)).tracking(1) }
-
 struct DashboardPage: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme
@@ -161,16 +179,15 @@ struct DashboardPage: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline, spacing: 16) {
                 Text("Where to focus").font(Theme.display(26)).foregroundStyle(theme.ink)
-                Button { app.runner.dispatch("dashboard.range", via: .click) } label: {
-                    Text("last \(d.days) days · \(app.registry.keyOf("dashboard.range")) to change").foregroundStyle(theme.inkFaint)
-                }
-                .buttonStyle(.plain)
+                Spacer(minLength: 8)
+                Lever(id: "dashboard.client", word: d.client.title)
+                Lever(id: "dashboard.range", word: "\(d.days) days")
             }
             .padding(.bottom, 20)
-            if let s = d.summary {
+            if d.summary != nil {
                 FollowScroll(panes: d.panels.map(\.id)) {
                     VStack(alignment: .leading, spacing: 36) {
-                        commands(s)
+                        commands(d)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.bottom, 16)
@@ -181,53 +198,92 @@ struct DashboardPage: View {
         }
         .padding(.horizontal, 16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .task(id: d.days) { await d.load() }
+        .task(id: d.windowRevision) { await d.load() }
     }
 
-    private func commands(_ s: Summary) -> some View {
-        Panel(title: "Commands over budget, worst first", pane: "commands") {
-            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 20, verticalSpacing: 0) {
-                GridRow {
-                    TH("command"); TH("runs"); TH("p95"); TH("vs one frame")
+    private func commands(_ d: DashboardState) -> some View {
+        let total = d.report.rows(for: d.client).count
+        let note = "Ranked by usage and budget overrun" + (total > 25 ? " · showing 25 of \(total)" : "")
+        return Panel(title: "Command timings", note: note, pane: "commands") {
+            VStack(alignment: .leading, spacing: 14) {
+                if d.commands.isEmpty {
+                    Text("No command timings for \(d.client.title) in this window").foregroundStyle(theme.inkFaint)
                 }
-                .foregroundStyle(theme.inkFaint)
-                ForEach(Array(s.commands.prefix(25).enumerated()), id: \.offset) { i, c in
-                    let key = "cmd:\(i)"
-                    let on = app.isFocused("commands") && app.selected == key
-                    GridRow {
-                        Text(c.id ?? "").foregroundStyle(on ? theme.goldLeaf : theme.ink)
-                        Text("\(c.n)")
-                        Text(DashText.ms(c.feedback?.p95))
-                        Meter(value: c.feedback?.p95, budget: c.budgetMs?.feedbackMs)
-                    }
-                    .background(on ? theme.goldWash : .clear)
-                    .id(key)
-                    // what v2 kept in hover titles: the budget and the top refusal, on the cursor row
-                    if on {
-                        GridRow {
-                            Text(cmdDetail(c)).foregroundStyle(theme.inkDim).gridCellColumns(4)
+                if d.report.withheld > 0 {
+                    Text("\(d.report.withheld) unnamed or duplicate rows unavailable").foregroundStyle(theme.ember)
+                }
+                ForEach(d.commands) { command in
+                    CursorRow(pane: "commands", key: command.id) { on in
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                                Text(command.name).foregroundStyle(on ? theme.goldLeaf : theme.ink)
+                                Text(command.client.title).foregroundStyle(theme.inkFaint)
+                                Spacer(minLength: 8)
+                                Text(command.source.n >= 0 ? "\(command.source.n) executions" : "executions unavailable")
+                                    .foregroundStyle(theme.inkDim).fixedSize(horizontal: true, vertical: false)
+                            }
+                            ViewThatFits(in: .horizontal) {
+                                Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 16, verticalSpacing: 4) {
+                                    timing("feedback p95", command.feedback)
+                                    timing("settled p95", command.settled)
+                                }
+                                .fixedSize(horizontal: true, vertical: false)
+                                VStack(alignment: .leading, spacing: 8) {
+                                    narrowTiming("feedback p95", command.feedback)
+                                    narrowTiming("settled p95", command.settled)
+                                }
+                            }
+                            if on { Text(cmdDetail(command.source)).foregroundStyle(theme.inkDim).fixedSize(horizontal: false, vertical: true) }
                         }
+                        .padding(.horizontal, 8).padding(.vertical, 6)
                     }
                 }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .cursorMarks("commands")
+        }
+    }
+
+    private func timing(_ name: String, _ phase: DashboardTiming) -> some View {
+        GridRow {
+            Text(name).foregroundStyle(theme.inkDim)
+            Text(DashText.ms(phase.p95))
+            Text(phase.support).foregroundStyle(theme.inkFaint)
+            Text("budget \(DashText.ms(phase.budget))").foregroundStyle(theme.inkFaint)
+            Meter(value: phase.p95, budget: phase.budget).fixedSize(horizontal: true, vertical: false)
+        }
+    }
+
+    private func narrowTiming(_ name: String, _ phase: DashboardTiming) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(name).foregroundStyle(theme.inkDim)
+                Text(DashText.ms(phase.p95))
+                Spacer(minLength: 4)
+                Text("budget \(DashText.ms(phase.budget))").foregroundStyle(theme.inkFaint)
+            }
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(phase.support).foregroundStyle(theme.inkFaint)
+                Spacer(minLength: 4)
+                Meter(value: phase.p95, budget: phase.budget).fixedSize(horizontal: true, vertical: false)
             }
         }
     }
 
     private func cmdDetail(_ c: TelemetryRow) -> String {
-        var bits = ["budget: feedback \(DashText.ms(c.budgetMs?.feedbackMs)) · settled \(DashText.ms(c.budgetMs?.settledMs))"]
-        if (c.settled?.n ?? 0) > 0 { bits.append("settled p95 \(DashText.ms(c.settled?.p95))") }
+        var bits: [String] = []
         if let cold = c.cold, cold.n > 0, let warm = c.warm, warm.n > 0 {
-            bits.append("cold p95 \(DashText.ms(cold.p95)) (\(cold.n)) · warm p95 \(DashText.ms(warm.p95)) (\(warm.n))")
+            bits.append("cold feedback p95 \(DashText.ms(DashboardTiming(cold, budget: nil).p95)) (\(cold.n)) · warm \(DashText.ms(DashboardTiming(warm, budget: nil).p95)) (\(warm.n))")
         }
         if let s = c.surfaces, s.count > 1 {
             bits.append(s.sorted { ($0.value.p95 ?? 0) > ($1.value.p95 ?? 0) }.prefix(3)
-                .map { "\($0.key) \(DashText.ms($0.value.p95))" }.joined(separator: ", "))
+                .map { "\($0.key) \(DashText.ms(DashboardTiming($0.value, budget: nil).p95)) (n=\($0.value.n))" }.joined(separator: ", "))
         }
         if let r = c.refusedRate, r > 0 { bits.append("refused \(DashText.pct(r))") }
         if let f = c.failedRate, f > 0 { bits.append("failed \(DashText.pct(f))") }
         if let via = c.via, !via.isEmpty { bits.append("via " + via.sorted { $0.key < $1.key }.map { "\($0.key) \($0.value)" }.joined(separator: ", ")) }
         if let e = c.topErr { bits.append("top refusal: \(e)") }
-        return "↳ " + bits.joined(separator: " · ")
+        return bits.joined(separator: " · ")
     }
 
 }
@@ -248,10 +304,10 @@ private struct Panel<Content: View>: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title).font(Theme.display(19)).foregroundStyle(theme.ink)
             if let note { Text(note).foregroundStyle(theme.inkFaint).padding(.bottom, 8) }
-            ScrollView(.horizontal, showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 0) { content() }.padding(4)
-            }
-            .paneRing(pane)
+            VStack(alignment: .leading, spacing: 0) { content() }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(4)
+                .paneRing(pane)
         }
         .font(Theme.text(12))
     }

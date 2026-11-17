@@ -210,7 +210,10 @@ import Testing
         let s = try JSONDecoder().decode(Summary.self, from: Data(MachineFixtures.summary.utf8))
         d.take(s)
         #expect(a.panes.map(\.id) == ["commands"])
-        #expect(a.rows == ["cmd:0", "cmd:1", "cmd:2"])
+        #expect(a.rows.isEmpty, "the saved fixture has v2 history, not native timing evidence")
+        a.keys.handle(","); a.keys.handle("c")
+        #expect(d.client == .app("v2"))
+        #expect(a.rows == DashboardReport(s.commands).commands.map(\.id))
     }
 
     @Test func dashboardRangeCycles() throws {
@@ -226,7 +229,7 @@ import Testing
     }
 
     @Test func dashboardText() {
-        #expect(DashText.ms(nil) == "—" && DashText.ms(16.7) == "17ms" && DashText.ms(8531.3) == "8.5s")
+        #expect(DashText.ms(nil) == "—" && DashText.ms(16.7) == "16.7ms" && DashText.ms(8531.3) == "8.5313s")
         #expect(DashText.pct(0) == "0%" && DashText.pct(0.125) == "13%")
         #expect(DashText.ratio(30, 16.7).map(DashText.verdict) == "✕ 1.8×")
         #expect(DashText.ratio(10, 16.7).map(DashText.verdict) == "✓ in")
