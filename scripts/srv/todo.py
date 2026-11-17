@@ -226,5 +226,14 @@ def post(req, raw):
         return req._send(409, json.dumps({"ok": False, "error": str(e)}))
     except (OSError, ValueError, tomllib.TOMLDecodeError) as e:
         return req._send(400, json.dumps({"ok": False, "error": str(e)}))
+    journal = None
+    if fields.get("state") in ("done", "dropped"):
+        import sqlite3
+        from . import workjournal
+        try:
+            closed = workjournal.tracker_closed(item["id"], item.get("incarnation"), fields["state"], via="tracker-page")
+            journal = closed and {k: closed.get(k) for k in ("verdict", "reason", "work_id", "retired_at") if k in closed}
+        except (ValueError, sqlite3.Error) as e:
+            journal = {"error": str(e)}
     state.poke()
-    req._send(200, json.dumps({"ok": True, "item": item}))
+    req._send(200, json.dumps({"ok": True, "item": item, "journal": journal}))
