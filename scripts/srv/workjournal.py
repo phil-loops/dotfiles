@@ -426,6 +426,18 @@ class Journal:
         return [r["work_id"] for r in self.db.execute(
             "SELECT work_id FROM work WHERE repo = ? AND branch = ? AND retired_at IS NULL ORDER BY created_at, work_id", (repo, branch))]
 
+    def mint_branch_work(self, repo, branch, *, project=None, title=None):
+        """A new work identity for one branch's lifetime. The branch keeps the id in its own
+        config (`branch.<n>.stack-work`), so a rename carries it and a recreated name gets
+        another; `branch` here is a label to show, never a key to join on."""
+        if not repo or not branch:
+            raise JournalError("a branch is only a subject with its repository")
+        work_id = "w_" + uuid.uuid4().hex
+        with self.tx() as db:
+            db.execute("""INSERT INTO work (work_id, repo, project, branch, title, created_at)
+                          VALUES (?,?,?,?,?,?)""", (work_id, repo, project, branch, title, self.now()))
+        return work_id
+
     def relink(self, work_id, **links):
         """Updates link metadata (a branch rename, a new forest). Identity and history stay."""
         allowed = {"repo", "project", "branch", "title"}
