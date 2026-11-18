@@ -179,3 +179,158 @@ import Testing
         #expect(app.store.trackerItem("closed")?.state == .done)
     }
 }
+
+@Suite struct WorkFreshnessViewTests {
+    static func decoded(_ json: String) throws -> TodoItem {
+        try JSONDecoder().decode(TodoItem.self, from: Data(json.utf8))
+    }
+
+    static let pendingAfterDone = """
+    {"id": "item", "title": "Item", "kind": "build", "state": "done", "area": "native", "size": "M", "why": "w", "body": "",
+     "work": {"work_id": "w_1", "revision": 3, "order": "source", "in_force": 3, "superseded": 0, "unassigned": 0, "coverage": "complete",
+              "latest": {"message_id": "m_3", "text": "also show last touch", "truncated": false, "source": "show", "conversation": "d#s",
+                         "seq": 3, "source_time": "2026-11-17T18:05:00Z", "received_at": "2026-11-17T18:05:01.000Z"},
+              "delivered": {"revision": 2, "boundary": "turn", "state": "acknowledged", "at": "2026-11-17T18:01:00Z", "acknowledged_revision": 2},
+              "worker": {"host": "claude-headless", "managed": true, "generation": 1, "state": "ended", "outcome": "succeeded"},
+              "progress": {"text": "halfway", "truncated": false, "at": "2026-11-17T18:02:00.000Z", "verdict_at_report": "current",
+                           "delivered_revision": 2, "generation": 1, "basis": "older"},
+              "completion": "historical", "answered_revision": 2, "state": "pending"}}
+    """
+
+    @Test func newDirectionAfterADoneItemReopensItEverywhere() throws {
+        let item = try Self.decoded(Self.pendingAfterDone)
+        let w = try #require(item.work)
+        #expect(w.revision == 3 && w.answeredRevision == 2 && w.progress?.basis == "older" && w.latest?.seq == 3)
+        #expect(WorkContext.reopened(item) && Tracker.sectionOf(item) == .doing)
+        let context = WorkContext([item], subject: .viewer)
+        #expect(context.reopened.map(\.id) == ["item"] && context.summary.contains("1 with new direction"))
+        #expect(WorkContext.status(item) == "marked done · new direction since")
+        let line = WorkContext.freshness(w)
+        #expect(line.contains("direction r3") && line.contains("delivered r2 confirmed") && line.contains("worker ended (succeeded)"))
+        #expect(line.contains("done for r2 · newer direction pending") && !line.contains("done for r3"))
+        let progress = try #require(w.progress)
+        #expect(WorkContext.progress(progress) == "progress 2026-11-17 18:02 UTC · on older direction")
+    }
+
+    @Test func unknownCoverageKeepsKnownNewDirectionOpenButNeverAnswered() throws {
+        var item = try Self.decoded(Self.pendingAfterDone)
+        item.work?.state = "unknown"
+        item.work?.coverage = "unknown"
+        #expect(WorkContext.reopened(item) && Tracker.sectionOf(item) == .doing)
+        let unknown = try #require(item.work)
+        let line = WorkContext.freshness(unknown)
+        #expect(line.contains("freshness unknown") && line.contains("newer direction pending") && !line.contains("done for r"))
+
+        item.work?.revision = 2
+        item.work?.completion = "current"
+        #expect(!WorkContext.reopened(item) && Tracker.sectionOf(item) == nil)
+        let same = try #require(item.work)
+        let disconnected = WorkContext.freshness(same)
+        #expect(disconnected.contains("capture unknown · freshness unknown · done recorded for r2") && !disconnected.contains("pending"))
+    }
+
+    @Test func answeredWorkIsDoneAndUnreadableWorkClaimsNothing() throws {
+        var item = try Self.decoded(Self.pendingAfterDone)
+        item.work?.revision = 2
+        item.work?.state = "answered"
+        item.work?.completion = "current"
+        let answered = try #require(item.work)
+        #expect(!WorkContext.reopened(item) && WorkContext.freshness(answered).hasSuffix("done for r2"))
+        let unreadable = try Self.decoded(#"{"id": "u", "state": "done", "work": {"state": "unavailable", "reason": "work journal unreadable: DatabaseError"}}"#)
+        #expect(unreadable.work?.state == "unavailable" && unreadable.work?.revision == nil && !WorkContext.reopened(unreadable))
+        let unreadableWork = try #require(unreadable.work)
+        #expect(WorkContext.freshness(unreadableWork) == "work journal unreadable · freshness unknown")
+        #expect(WorkContext.direction(unreadable) == nil)
+        #expect(WorkInputView.label(nil, unreadable.work) == "Work journal unreadable · latest instruction unknown")
+    }
+
+    @Test func aLaterUncitedReportKeepsTheQualifiedAnswerInView() throws {
+        var item = try Self.decoded(Self.pendingAfterDone)
+        item.work?.completion = "unverified"
+        let unverified = try #require(item.work)
+        #expect(WorkContext.reopened(item) && Tracker.sectionOf(item) == .doing)
+        let line = WorkContext.freshness(unverified)
+        #expect(line.hasSuffix("done for r2 · newer direction pending · last report unverified"), "\(line)")
+        item.work?.completion = "stale"
+        let stale = try #require(item.work)
+        #expect(WorkContext.freshness(stale).hasSuffix("done for r2 · newer direction pending · last report stale"))
+        item.work?.answeredRevision = nil
+        item.work?.completion = "unverified"
+        let never = try #require(item.work)
+        #expect(WorkContext.freshness(never).hasSuffix("completion unverified") && !WorkContext.freshness(never).contains("done for"))
+    }
+
+    @Test func staleAndUnconfirmedDeliveriesAreSaidPlainly() throws {
+        var w = try #require(Self.decoded(Self.pendingAfterDone).work)
+        w.completion = "stale"
+        w.answeredRevision = nil
+        w.delivered?.state = "uncertain"
+        w.worker = .init(host: "claude-say", state: "unknown")
+        let line = WorkContext.freshness(w)
+        #expect(line.contains("last completion stale") && !line.contains("answered older"))
+        #expect(line.contains("delivered r2 unconfirmed") && line.contains("worker state unknown"))
+        w.delivered = nil
+        w.worker = nil
+        #expect(WorkContext.freshness(w).contains("not delivered") && !WorkContext.freshness(w).contains("worker"))
+    }
+
+    @Test func theJournalsLiteralMessageOutranksTheRecordedSection() throws {
+        var item = try Self.decoded(Self.pendingAfterDone)
+        item.body = WorkContextTests.body("An older recorded convention", at: "2026-11-30T18:00:00Z")
+        guard case .journal(let latest) = WorkContext.direction(item) else { Issue.record("journal direction expected"); return }
+        #expect(latest.text == "also show last touch")
+        #expect(WorkInputView.label(WorkContext.direction(item), item.work).hasPrefix("Your latest instruction · sent 2026-11-17 18:05 UTC"))
+        let legacy = TodoItem(id: "legacy", body: WorkContextTests.body("Recorded by hand"))
+        #expect(WorkInputView.label(WorkContext.direction(legacy), nil).hasSuffix("not captured by the work journal"))
+        var ambiguous = item
+        ambiguous.work?.latest = nil
+        ambiguous.work?.order = "ambiguous"
+        #expect(WorkContext.direction(ambiguous) == nil)
+        #expect(WorkInputView.label(nil, ambiguous.work) == "Instructions from more than one conversation · no single latest")
+        let scope = WorkContext([legacy, item], subject: .viewer)
+        #expect(scope.latestDirection?.item.id == "item")
+    }
+
+    @Test func workBackedItemsStayVisibleWithoutASingleLatestMessage() throws {
+        var ambiguous = try Self.decoded(Self.pendingAfterDone)
+        ambiguous.work?.latest = nil
+        ambiguous.work?.order = "ambiguous"
+        var shown = try #require(WorkContext([ambiguous], subject: .viewer).presentation)
+        #expect(shown.item.id == "item" && shown.direction == nil)
+        #expect(WorkInputView.label(shown.direction, shown.item.work) == "Instructions from more than one conversation · no single latest")
+        #expect(WorkContext.freshness(try #require(shown.item.work)).contains("direction r3"))
+
+        let unreadable = try Self.decoded(#"{"id": "u", "state": "doing", "work": {"state": "unavailable", "reason": "r"}}"#)
+        shown = try #require(WorkContext([unreadable], subject: .viewer).presentation)
+        #expect(shown.item.id == "u" && WorkInputView.label(shown.direction, shown.item.work) == "Work journal unreadable · latest instruction unknown")
+
+        let empty = TodoItem(id: "e", state: .doing, work: WorkFreshness(state: "unknown", revision: 0, order: "none", coverage: "unknown"))
+        shown = try #require(WorkContext([empty], subject: .viewer).presentation)
+        #expect(shown.item.id == "e" && WorkInputView.label(shown.direction, shown.item.work) == "No instruction captured")
+
+        let legacy = TodoItem(id: "legacy", state: .doing)
+        #expect(WorkContext([legacy], subject: .viewer).presentation == nil)
+        #expect(WorkInputView.label(nil, nil) == "No chat instruction recorded")
+
+        let queued = TodoItem(id: "a-queued", work: WorkFreshness(state: "unknown", revision: 0, order: "none"))
+        #expect(WorkContext([queued, empty, ambiguous, legacy], subject: .viewer).presentation?.item.id == "item",
+                "reopened work comes first, then work in progress, never a guessed latest across items")
+    }
+
+    @Test func theLastProgressStatementIsReadableWhereTheRecordIsReadInFull() throws {
+        let item = try Self.decoded(Self.pendingAfterDone)
+        #expect(WorkInputView.progressText(item.work, expanded: true) == "halfway")
+        #expect(WorkInputView.progressText(item.work, expanded: false) == nil)
+        #expect(WorkInputView.progressText(nil, expanded: true) == nil)
+    }
+
+    @Test func sourceTimesAreShownInUTCWhateverTheirOffset() throws {
+        var item = try Self.decoded(Self.pendingAfterDone)
+        item.work?.latest?.sourceTime = "2026-11-17T14:00:00-08:00"
+        #expect(WorkInputView.label(WorkContext.direction(item), item.work) == "Your latest instruction · sent 2026-11-17 22:00 UTC")
+        item.work?.latest?.sourceTime = nil
+        #expect(WorkInputView.label(WorkContext.direction(item), item.work) == "Your latest instruction · received 2026-11-17 18:05 UTC")
+        item.work?.latest?.sourceTime = "yesterday afternoon"
+        #expect(WorkInputView.label(WorkContext.direction(item), item.work) == "Your latest instruction · sent at \"yesterday afternoon\" (time not understood)")
+    }
+}

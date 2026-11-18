@@ -25,9 +25,20 @@ The timestamp is when the input was recorded, in ISO 8601 format. Record chat in
 
 When a new instruction changes an item, replace this first section with that instruction and its recording time. Routine progress updates, `canopy-todo steps`, and completion notes preserve it. The reader does not mine prose, old summaries or arbitrary transcript files for purported input. Legacy or malformed bodies remain ordinary notes and say that input has not been recorded.
 
-The current implementation stores this section only in the existing todo body. It is an agent-maintained convention: it cannot prove complete message capture, safe concurrent updates or delivery of the newest instruction to a worker. It must not be presented as automatic synchronization.
+This recorded section is the legacy convention. It cannot prove complete message capture, safe concurrent updates or delivery of the newest instruction, and the UI labels it "not captured by the work journal".
 
-Automatic import from chat hosts remains a separate integration. The proposed contract in [DESIGN.md, round 25](DESIGN.md#round-25-freshness-belongs-to-the-message-and-execution-protocol) captures immutable source messages against explicit work identities, supplies versioned context through the runtime, and checks that completion belongs to the current instruction revision. The latest literal message remains separate from accumulated task instructions. Until that contract is implemented, missing capture and delivery stay unknown.
+## The work journal
+
+Replies Phil sends in a Show deck section that declares `work` (a tracker id) are captured by the work journal (`scripts/srv/workjournal.py`) before anything is delivered, and reach the worker as the whole accumulated direction (see [DESIGN.md, round 26](DESIGN.md#round-26-the-freshness-contract-built)). An item whose record the journal knows shows, in place of the recorded section:
+
+- the latest literal message, by source order, with when it was sent (or received) in UTC; with direction from more than one conversation there is no single latest, and the UI says so
+- the direction revision and how many instructions are in force
+- the newest delivery's revision and whether the host confirmed it; delivery means the host received it, not that it was followed
+- the worker as observed: running, ended (and how), or unknown; an open attempt is never "working"
+- the last dated progress and what it answers now (current, older direction, an earlier attempt, unverified); the full statement appears where the record is read in full
+- whether a completion qualified for the current revision. New direction after it reopens the item, even if the tracker says done. Unknown or gapped capture coverage reads "freshness unknown", never answered
+
+Other chat hosts are not captured; their direction stays unknown.
 
 ## Reading completed context
 

@@ -10,6 +10,7 @@ enum Tracker {
 
     static func sectionOf(_ t: TodoItem) -> Section? {
         if t.state == "broken" { return .broken }
+        if WorkContext.reopened(t) { return .doing }
         if t.state == "done" || t.state == "dropped" { return nil }
         if t.state == "waiting" { return .waiting }
         if t.kind == "decide" { return .decide }
