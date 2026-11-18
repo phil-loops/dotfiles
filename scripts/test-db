@@ -1,0 +1,175 @@
+#!/usr/bin/env python3
+"""test-db — the Postgres database a loops checkout's query tests run against, built from that
+checkout's own migrations and seed.
+
+  test-db url [<tree>]     print its URL, building it first if no database has these migrations yet
+  test-db ls               the test databases, most recently used first
+  test-db gc               drop all but the KEEP most recently used
+
+Every checkout used to share one local database, migrated by whichever checkout ran last, so a
+query test failed on someone else's schema (2026-11-17: main's tests red on a NOT NULL column a
+branch had added). Here a database is named by the digest of the migrations and seed it was built from, so
+a checkout can only ever reach a schema its own migrations produce. A build runs under a temporary
+name and is renamed into place once every migration applied: a half-built database is never
+visible under a real name. Concurrent callers for one digest wait on one lock and share the build.
+
+The tree's testing/query-env.ts reads QUERY_TEST_DATABASE_URL; stack-gates sets it for the tests
+gate, and a focused run is `QUERY_TEST_DATABASE_URL=$(test-db url) npx tsx … --test <file>`.
+"""
+import fcntl
+import hashlib
+import os
+import subprocess
+import sys
+import time
+
+ADMIN = os.environ.get("TEST_DB_ADMIN_URL", "postgres://postgres:password@localhost:5432/postgres")
+PREFIX = "loops_test_"
+KEEP = int(os.environ.get("TEST_DB_KEEP", "6"))
+STATE = os.path.expanduser("~/.cache/test-db")
+MIGRATIONS = os.path.join("packages", "prisma", "migrations")
+SCHEMA = os.path.join("packages", "prisma", "schema.prisma")
+# What a test database is made of, all of it named by the digest: the migrations, and the seed CI runs
+# after them (tasks/ci/tasks.yml test-prepare: migrate reset, then db seed).
+INPUTS = (MIGRATIONS, "seed-prisma")
+SEED_ENV = {"DEV_EMAIL": "dev-ci@loops.so", "PRISMA_SCHEMA": '["native"]'}
+
+
+def url_for(name):
+    return ADMIN.rsplit("/", 1)[0] + "/" + name
+
+
+def psql(sql, db=None):
+    r = subprocess.run(["psql", url_for(db) if db else ADMIN, "-XAtq", "-v", "ON_ERROR_STOP=1", "-c", sql],
+                       capture_output=True, text=True)
+    if r.returncode:
+        raise RuntimeError(r.stderr.strip() or f"psql failed: {sql}")
+    return r.stdout.strip()
+
+
+def digest(tree):
+    d = hashlib.sha256()
+    for part in INPUTS:
+        for dp, dns, fns in os.walk(os.path.join(tree, part)):
+            dns.sort()
+            for f in sorted(fns):
+                p = os.path.join(dp, f)
+                d.update(os.path.relpath(p, tree).encode() + b"\0" + open(p, "rb").read() + b"\0")
+    return d.hexdigest()[:16]
+
+
+def exists(name):
+    return psql(f"SELECT 1 FROM pg_database WHERE datname = '{name}'") == "1"
+
+
+def used(name):
+    os.makedirs(STATE, exist_ok=True)
+    p = os.path.join(STATE, f"{name}.used")
+    open(p, "a").close()
+    os.utime(p)
+
+
+# The seed uploads campaign images; CI starts these before it (tasks/ci/tasks.yml test-prepare).
+SEED_NEEDS = {"MinIO": 9000}
+
+
+def port_open(port):
+    import socket
+    with socket.socket() as s:
+        s.settimeout(1)
+        return s.connect_ex(("127.0.0.1", port)) == 0
+
+
+def build(tree, name):
+    down = [svc for svc, port in SEED_NEEDS.items() if not port_open(port)]
+    if down:
+        raise RuntimeError(f"the seed needs {', '.join(down)}, which is down — "
+                           "start it with `docker compose up -d minio minio_create_buckets` in the loops checkout")
+    tmp = f"{name}_b{os.getpid()}"
+    psql(f'DROP DATABASE IF EXISTS "{tmp}"')
+    psql(f'CREATE DATABASE "{tmp}"')
+    t0 = time.time()
+    env = dict(os.environ, DATABASE_URL=url_for(tmp), **SEED_ENV)
+    for what, cmd in (("migrations did not apply", ["npx", "prisma", "migrate", "deploy", "--schema", SCHEMA]),
+                      ("the seed failed", ["npx", "prisma", "db", "seed"])):
+        r = subprocess.run(cmd, cwd=tree, capture_output=True, text=True, env=env)
+        if r.returncode:
+            psql(f'DROP DATABASE IF EXISTS "{tmp}" WITH (FORCE)')
+            tail = "\n".join((r.stdout + r.stderr).strip().splitlines()[-8:])
+            raise RuntimeError(f"{what} on a fresh database:\n{tail}")
+    psql(f'ALTER DATABASE "{tmp}" RENAME TO "{name}"')
+    print(f"test-db: built {name} from {tree}'s migrations and seed in {time.time() - t0:.0f}s", file=sys.stderr)
+
+
+def ensure(tree):
+    tree = os.path.realpath(tree)
+    if not os.path.isdir(os.path.join(tree, MIGRATIONS)):
+        raise RuntimeError(f"{tree} has no {MIGRATIONS}")
+    name = PREFIX + digest(tree)
+    if not exists(name):
+        os.makedirs(STATE, exist_ok=True)
+        with open(os.path.join(STATE, f"{name}.lock"), "w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)          # a concurrent build of this digest: wait, then re-check
+            if not exists(name):
+                build(tree, name)
+    used(name)
+    gc(keep_also=name)
+    return url_for(name)
+
+
+def databases():
+    names = psql(f"SELECT datname FROM pg_database WHERE datname LIKE '{PREFIX}%'").split()
+
+    def last(n):
+        try:
+            return os.path.getmtime(os.path.join(STATE, f"{n}.used"))
+        except OSError:
+            return 0.0
+    return sorted(names, key=last, reverse=True), last
+
+
+def gc(keep_also=None):
+    names, last = databases()
+    built = [n for n in names if "_b" not in n[len(PREFIX):]]
+    stale_tmp = [n for n in names if "_b" in n[len(PREFIX):] and not pid_alive(n.rsplit("_b", 1)[1])]
+    for n in [n for n in built[KEEP:] if n != keep_also] + stale_tmp:
+        psql(f'DROP DATABASE IF EXISTS "{n}" WITH (FORCE)')
+        try:
+            os.unlink(os.path.join(STATE, f"{n}.used"))
+        except OSError:
+            pass
+
+
+def pid_alive(pid):
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except (ValueError, ProcessLookupError):
+        return False
+    except PermissionError:
+        return True
+
+
+def main(argv):
+    try:
+        if argv[:1] == ["url"] and len(argv) <= 2:
+            print(ensure(argv[1] if len(argv) == 2 else os.getcwd()))
+            return 0
+        if argv == ["ls"]:
+            names, last = databases()
+            for n in names:
+                t = last(n)
+                print(f"{n}  {time.strftime('%Y-%m-%d %H:%M', time.localtime(t)) if t else 'never used'}")
+            return 0
+        if argv == ["gc"]:
+            gc()
+            return 0
+    except RuntimeError as e:
+        print(f"test-db: {e}", file=sys.stderr)
+        return 1
+    print(__doc__.split("\n\n")[1], file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
