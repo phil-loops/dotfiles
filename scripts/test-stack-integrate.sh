@@ -65,6 +65,48 @@ else
     || bad "overlap message" "$out"
 fi
 
+# A published member is never rebased: once its base lands on main as a squash, its own
+# history still holds the base's commits, which no patch-id matches. It lands as its PR's
+# three-dot diff, so that is what must replay (cite-what-ses-saw, 2026-11-18).
+git checkout -q main; git checkout -qb s
+echo s1 > s-file; git add s-file; git commit -qm "s: add s-file"
+echo s2 >> s-file; git commit -qam "s: grow s-file"
+git checkout -qb t
+echo t > t-file; git add t-file; git commit -qm "t: build on s"
+git checkout -q main
+git merge -q --squash s && git commit -qm "s (#1)"
+echo m > main-moved; git add main-moved; git commit -qm "main moves on"
+git checkout -q t
+git merge -q --no-edit main
+git update-ref refs/remotes/origin/t t
+echo t2 >> t-file; git commit -qam "t: follow-up"
+git checkout -q main
+git config --add stack-project.r.branch t; git config branch.t.stack-parent main
+if out=$("$INTEGRATE" r 2>&1); then
+  ok "a published member whose base main squashed integrates as its PR diff"
+  [[ "$(git show refs/stack/r-integration:t-file)" == $'t\nt2' && "$(git show refs/stack/r-integration:s-file)" == $'s1\ns2' ]] \
+    && ok "its PR diff lands on top of main's squash: t-file with its follow-up, s-file once" \
+    || bad "published integration content" "$(git ls-tree -r --name-only refs/stack/r-integration | tr '\n' ' ')"
+else
+  bad "published member" "$out"
+fi
+
+git checkout -q main; git checkout -qb u
+echo u > f; git commit -qam "u: rewrite f"
+git update-ref refs/remotes/origin/u u
+git checkout -q main; git checkout -qb v
+echo v > f; git commit -qam "v: rewrite f differently"
+git update-ref refs/remotes/origin/v v
+git checkout -q main
+for m in u v; do git config --add stack-project.w.branch "$m"; git config branch.$m.stack-parent main; done
+if out=$("$INTEGRATE" w 2>&1); then
+  bad "a real overlap between published members" "integrated though u and v both rewrite f"
+else
+  [[ "$out" == *"v doesn't apply in merge order — its PR diff"* && "$out" == *"  f"* ]] \
+    && ok "a real overlap between published members still fails, naming the member and file" \
+    || bad "published overlap message" "$out"
+fi
+
 # git failing without a conflict (the 2026-11-16 flake: a lock held by a concurrent process)
 # says nothing about whether the forest merges — exit 2, "couldn't check", never "doesn't apply".
 REAL_GIT=$(command -v git)
