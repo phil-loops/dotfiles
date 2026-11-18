@@ -128,6 +128,7 @@ public final class ForestModel {
         for b in store.list(Branch.self) { groups[b.project, default: []].append(b) }
         let prs = store.table(Pr.self)
         let agents = WorkContext.onBranches(store.trackerItems().filter { $0.state == .doing }, store.list(Branch.self))
+        let chats = chatsOn(agents)
         var out: [String: ForestView] = [:]
         for p in store.list(Project.self) {
             let bs = (groups[p.id] ?? []).sorted { $0.order != $1.order ? $0.order < $1.order : $0.name < $1.name }
@@ -139,7 +140,7 @@ public final class ForestModel {
                 let pv = pb.map { viewOf($0, depth + 1) }
                 let parent = pv.map { ParentStand(ship: $0.st.ship, pr: $0.pr, name: $0.b.name) }
                 let pr = prs[b.id]
-                let v = BranchView(b: b, pr: pr, st: ShipRules.stand(b, pr, parent, now: now, reads: readsOf(b, agents[b.id]?.first)), base: ShipRules.baseFor(b, parent, trunk: trunk))
+                let v = BranchView(b: b, pr: pr, st: ShipRules.stand(b, pr, parent, now: now, reads: readsOf(b, agents[b.id]?.first, chats[b.id] ?? [])), base: ShipRules.baseFor(b, parent, trunk: trunk))
                 seen[b.id] = v
                 return v
             }
@@ -156,13 +157,26 @@ public final class ForestModel {
 
     public func forest(_ pid: String?) -> ForestView? { pid.flatMap { forests()[$0] } }
 
-    /// Everything a branch's situation reads beyond the store: the tip's reads, and the agent working on it — running,
-    /// or done with its turn and so waiting on you.
-    private func readsOf(_ b: Branch, _ item: TodoItem?) -> SituationReads {
+    /// Everything a branch's situation reads beyond the store: the tip's reads, and who is on it — an item's agent or a
+    /// chat bound to it or acting on it (rounds 27–28). Running if its turn runs or a chat on it is live; done with its
+    /// turn, and so waiting on you, once every chat on it has gone idle or the turn ended; unobserved otherwise.
+    private func readsOf(_ b: Branch, _ item: TodoItem?, _ chats: [WorkContext.Chat]) -> SituationReads {
         var r = reads?(b) ?? SituationReads()
-        r.agent = item?.id
-        r.agentRunning = item?.work?.worker.flatMap { $0.state == "running" ? true : $0.state == "ended" ? false : nil }
+        let worker = item?.work?.worker?.state
+        let live = chats.contains { WorkContext.live($0, now: now.timeIntervalSince1970) }
+        r.agent = item?.id ?? chats.first.map { "chat \($0.id.prefix(8))" }
+        r.agentRunning = worker == "running" || live ? true : worker == "ended" || !chats.isEmpty ? false : nil
         return r
+    }
+
+    /// The chats on each branch, by their binding or their own recent action there (WorkContext.chatsOnBranches).
+    private func chatsOn(_ placed: [String: [TodoItem]]) -> [String: [WorkContext.Chat]] {
+        let chats = store.rawAll("chat").values.compactMap { try? JSONValue.object($0).decode(WorkContext.Chat.self) }
+        guard !chats.isEmpty else { return [:] }
+        let branches = store.list(Branch.self)
+        var work: [String: String] = [:]
+        for b in branches { if let w = store.rawView("branch", b.id)?["work"]?.string { work[b.id] = w } }
+        return WorkContext.chatsOnBranches(chats, branches: branches.map(\.id), branchWork: work, placed: placed)
     }
 
     /// The standing of a branch's parent, as its derivation reads it.
