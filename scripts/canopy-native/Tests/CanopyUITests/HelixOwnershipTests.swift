@@ -9,7 +9,8 @@ import Testing
 @MainActor @Suite(.serialized) struct HelixOwnershipTests {
     let branch = "add-hankles-limited-label"
     let id = ReviewPageTests.branch
-    let path = "/loops/review-helix"
+    let path = "/loops/edit-session"
+    let commitPath = "/loops/edit-commit"
 
     func app() async throws -> (AppModel, Int) {
         let (app, port) = try await LookupTests().app()
@@ -19,7 +20,25 @@ import Testing
     }
 
     func answer(_ page: ReviewPageState, sha: String? = nil, dir: String = "/tmp/owned.diffbase") throws -> String {
-        let body: JSONObject = ["ok": true, "sha": .string(sha ?? page.tip), "dir": .string(dir)]
+        let body: JSONObject = ["ok": true, "sha": .string(sha ?? page.tip), "dir": .string(dir),
+                                "session": "11111111-2222-3333-4444-555555555555", "baseSha": .string(page.baseSha), "epoch": .string(page.app!.store.epoch)]
+        return String(decoding: try JSONEncoder().encode(body), as: UTF8.self)
+    }
+
+
+    func receipt(_ open: HelixOpen, _ page: ReviewPageState, sha: String, files: [NodeFile]? = nil) throws -> String {
+        let files = files ?? page.payload?.data.files ?? []
+        let encoded = try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(files))
+        let body: JSONObject = ["ok": true, "epoch": .string(open.source.epoch), "session": .string(open.lease!), "operation": .string(open.session.uuidString.lowercased()),
+            "repo": .string(open.source.repo), "branch": .string(open.source.name), "expectedTip": .string(open.source.tip),
+            "baseSha": .string(open.editBase!), "sha": .string(sha), "tree": .string(String(repeating: "3", count: 40)),
+            "paths": .array(files.map { .string($0.path) }), "files": encoded, "history": ["sha": .string(sha), "subject": "edit a.ts", "own": true], "wrote": 1]
+        return String(decoding: try JSONEncoder().encode(body), as: UTF8.self)
+    }
+
+    func nothing(_ open: HelixOpen) throws -> String {
+        let body: JSONObject = ["ok": true, "nothing": true, "epoch": .string(open.source.epoch),
+            "session": .string(open.lease!), "operation": .string(open.session.uuidString.lowercased())]
         return String(decoding: try JSONEncoder().encode(body), as: UTF8.self)
     }
 
@@ -207,11 +226,11 @@ import Testing
     @Test func quittingShowsTheCommitInProgressUntilTheAnswerArrives() async throws {
         let (app, port) = try await app(), page = ReviewPageState.of(app)
         let open = try await ready(app, port)
-        HeldLookupStub.hold(port, path)
+        HeldLookupStub.hold(port, commitPath)
         page.finishHelix(app, session: open.session, exitCode: 0)
         #expect(page.helix == nil && app.runner.note == "committing the Helix edit to loops/\(branch)…")
-        await until("the editor commit") { HeldLookupStub.waiting(port, path) }
-        HeldLookupStub.release(port, path, #"{"ok":true,"nothing":true}"#)
+        await until("the editor commit") { HeldLookupStub.waiting(port, commitPath) }
+        HeldLookupStub.release(port, commitPath, try nothing(open))
         await until("the commit answer") { app.runner.runOf("review.helix.land", id)?.state == .done }
         #expect(app.runner.note == "nothing changed")
     }
@@ -229,41 +248,41 @@ import Testing
         app.router.navigate(.review(repo: "other", branch: self.branch))
         await until("the other repository at the same head") { page.id == "other:\(self.branch)" && page.diffCurrent }
         let cursor = app.selected, focus = app.pane?.id
-        HeldLookupStub.hold(port, path)
+        HeldLookupStub.hold(port, commitPath)
         page.landHelix(app, session: open.session)
         page.landHelix(app, session: open.session)
         let replay = HelixLanding(open: open, dir: open.dir!, reader: nil)
         app.runner.dispatch("review.helix.land", via: .palette, target: id, arg: replay)
-        await until("the owned editor write") { HeldLookupStub.waiting(port, path) }
-        let request = try #require(HeldLookupStub.lock.withLock { HeldLookupStub.pending[HeldLookupStub.key(port, path)]?.first?.request })
+        await until("the owned editor write") { HeldLookupStub.waiting(port, commitPath) }
+        let request = try #require(HeldLookupStub.lock.withLock { HeldLookupStub.pending[HeldLookupStub.key(port, commitPath)]?.first?.request })
         let body = try requestBody(request)
-        #expect(body["branch"] == .string(self.branch) && body["sha"] == .string(open.source.tip) && body["dir"] == .string(open.dir!))
+        #expect(body["branch"] == .string(self.branch) && body["expectedTip"] == .string(open.source.tip) && body["session"] == .string(open.lease!) && body["dir"] == nil)
         #expect(request.value(forHTTPHeaderField: "X-Stack-Write") == "1")
         #expect(request.value(forHTTPHeaderField: "X-Stack-Via") == "key")
-        #expect(HeldLookupStub.lock.withLock { HeldLookupStub.pending[HeldLookupStub.key(port, path)]?.count } == 1)
+        #expect(HeldLookupStub.lock.withLock { HeldLookupStub.pending[HeldLookupStub.key(port, commitPath)]?.count } == 1)
         #expect(app.selected == cursor && app.pane?.id == focus && page.pendingHelixReturn == nil)
-        ShipStub.answer(port, "POST", "/other/review-helix", try answer(page, dir: "/tmp/other.diffbase"))
+        ShipStub.answer(port, "POST", "/other/edit-session", try answer(page, dir: "/tmp/other.diffbase"))
         app.keys.handle("i")
         await page.helixTask?.value
         let newer = try #require(page.helix)
         #expect(newer.source.repo == "other" && newer.dir == "/tmp/other.diffbase")
-        HeldLookupStub.hold(port, "/other/review-helix")
+        HeldLookupStub.hold(port, "/other/edit-commit")
         page.landHelix(app, session: newer.session)
         #expect(page.pendingHelixReturn?.source.id == "other:\(self.branch)" && page.pendingHelixReturn?.session == newer.session)
         app.runner.say("newer feedback")
-        HeldLookupStub.release(port, path, #"{"ok":false,"err":"held refusal"}"#)
+        HeldLookupStub.release(port, commitPath, #"{"ok":false,"err":"held refusal"}"#)
         await until("the refused original editor write") { app.runner.runOf("review.helix.land", id)?.state == .failed }
         #expect(app.runner.note == "newer feedback" && app.selected == cursor && page.helix == nil)
         #expect(page.pendingHelixReturn?.source.id == "other:\(self.branch)" && page.pendingHelixReturn?.session == newer.session)
-        await until("the queued other-repo landing") { HeldLookupStub.waiting(port, "/other/review-helix") }
-        HeldLookupStub.release(port, "/other/review-helix", #"{"ok":true,"nothing":true}"#)
+        await until("the queued other-repo landing") { HeldLookupStub.waiting(port, "/other/edit-commit") }
+        HeldLookupStub.release(port, "/other/edit-commit", try nothing(newer))
         await until("the newer editor landing") { app.runner.runOf("review.helix.land", "other:\(self.branch)")?.state == .done }
     }
 
     @Test func oldTerminalCallbacksCannotMoveOrQuitANewerSession() async throws {
         let (app, port) = try await app(), page = ReviewPageState.of(app)
         let old = try await ready(app, port)
-        ShipStub.answer(port, "POST", path, #"{"ok":true,"nothing":true}"#)
+        ShipStub.answer(port, "POST", commitPath, try nothing(old))
         page.landHelix(app, session: old.session)
         await until("the first landing") { app.runner.runOf("review.helix.land", id)?.state == .done }
         let new = try await ready(app, port)
@@ -271,7 +290,7 @@ import Testing
         page.moveHelix(session: old.session, path: "wrong.ts", line: 80)
         page.finishHelix(app, session: old.session, exitCode: 0)
         #expect(page.helix?.session == new.session && page.helixAt?.path == "a.ts" && page.helixAt?.line == 3)
-        #expect(ShipStub.posts(port).filter { $0.body["op"] == "land" }.count == 1)
+        #expect(ShipStub.posts(port).filter { $0.path == commitPath }.count == 1)
     }
 
     @Test func aNonzeroExitKeepsEditsAndNeverCommits() async throws {
@@ -279,7 +298,7 @@ import Testing
         let open = try await ready(app, port)
         page.finishHelix(app, session: open.session, exitCode: 1)
         #expect(page.helix == nil && app.runner.note?.contains("edits are saved in") == true)
-        #expect(!ShipStub.posts(port).contains { $0.body["op"] == "land" })
+        #expect(!ShipStub.posts(port).contains { $0.path == commitPath })
     }
 
     @Test func anUnreadyDiffCannotPrepareAnEditor() async throws {
@@ -297,9 +316,9 @@ import Testing
             for movement in ["cursor", "word"] {
                 let (app, port) = try await app(), page = ReviewPageState.of(app)
                 let open = try await ready(app, port)
-                HeldLookupStub.hold(port, path)
+                HeldLookupStub.hold(port, commitPath)
                 page.landHelix(app, session: open.session)
-                await until("the held editor landing") { HeldLookupStub.waiting(port, path) }
+                await until("the held editor landing") { HeldLookupStub.waiting(port, commitPath) }
                 if movement == "cursor" {
                     page.setCursor("l|a.ts|R:3"); page.setCursor("l|a.ts|R:2"); page.setCursor("l|a.ts|R:3")
                 } else {
@@ -310,8 +329,8 @@ import Testing
                 let cursor = app.selected
                 app.runner.say("newer feedback")
                 let response = outcome == "failed" ? #"{"ok":false,"err":"refused"}"# : outcome == "nothing"
-                    ? #"{"ok":true,"nothing":true}"# : #"{"ok":true,"sha":"2222222222222222222222222222222222222222"}"#
-                HeldLookupStub.release(port, path, response)
+                    ? try nothing(open) : try receipt(open, page, sha: String(repeating: "2", count: 40))
+                HeldLookupStub.release(port, commitPath, response)
                 await until("the editor answer") { [.done, .failed].contains(app.runner.runOf("review.helix.land", id)?.state) }
                 #expect(page.pendingHelixReturn == nil && app.runner.note == "newer feedback")
                 let payload = try #require(page.payload)
@@ -336,27 +355,40 @@ import Testing
         case "invalid": response = #"{"ok":true,"sha":"zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"}"#
         default: response = #"{"ok":false,"nothing":true,"err":"refused"}"#
         }
-        ShipStub.answer(port, "POST", path, response)
+        ShipStub.answer(port, "POST", commitPath, response)
         page.landHelix(app, session: open.session)
         await until("the unverified landing") { [.done, .failed].contains(app.runner.runOf("review.helix.land", id)?.state) }
         #expect(page.pendingHelixReturn == nil)
         #expect(app.runner.note?.contains("saved in /tmp/owned.diffbase") == true)
         #expect(app.runner.note?.contains("committed") != true && app.runner.note != "nothing changed")
-        #expect(ShipStub.posts(port).filter { $0.body["op"] == "land" }.count == 1)
+        #expect(ShipStub.posts(port).filter { $0.path == commitPath }.count == 1)
+    }
+
+    @Test(arguments: ["epoch", "session", "operation", "repo", "branch", "expectedTip", "baseSha", "tree", "history"])
+    func aReceiptMustBelongToItsExactTransaction(_ field: String) async throws {
+        let (app, port) = try await app(), page = ReviewPageState.of(app)
+        let open = try await ready(app, port)
+        var body = try JSONDecoder().decode(JSONValue.self, from: Data(receipt(open, page, sha: String(repeating: "2", count: 40)).utf8)).object!
+        body[field] = "another-transaction"
+        ShipStub.answer(port, "POST", commitPath, String(decoding: try JSONEncoder().encode(body), as: UTF8.self))
+        page.landHelix(app, session: open.session)
+        await until("the rejected receipt") { app.runner.runOf("review.helix.land", id)?.state == .done }
+        #expect(page.tip == open.source.tip && page.pendingHelixReturn == nil)
+        #expect(app.runner.note?.contains("couldn't verify the edit") == true)
     }
 
     @Test func aCurrentReturnFollowsOnlyTheAcknowledgedCommit() async throws {
         let (app, port) = try await app(), page = ReviewPageState.of(app)
         let open = try await ready(app, port)
         page.moveHelix(session: open.session, path: "a.ts", line: 20)
-        HeldLookupStub.hold(port, path)
+        HeldLookupStub.hold(port, commitPath)
         page.landHelix(app, session: open.session)
-        await until("the held editor landing") { HeldLookupStub.waiting(port, path) }
+        await until("the held editor landing") { HeldLookupStub.waiting(port, commitPath) }
         let sha = String(repeating: "2", count: 40)
-        HeldLookupStub.release(port, path, #"{"ok":true,"sha":"\#(sha)","message":"edit a.ts"}"#)
-        await until("the acknowledged editor commit") { app.runner.runOf("review.helix.land", id)?.state == .done }
-        #expect(page.pendingHelixReturn?.commit == sha)
         let patch = "@@ -1,3 +1,30 @@\n-one\n-two\n-three\n" + (1...30).map { "+line \($0)" }.joined(separator: "\n")
+        HeldLookupStub.release(port, commitPath, try receipt(open, page, sha: sha, files: [NodeFile(path: "a.ts", add: 30, del: 3, patch: patch)]))
+        await until("the acknowledged editor commit") { app.runner.runOf("review.helix.land", id)?.state == .done }
+        #expect(page.tip == sha && page.pendingHelixReturn == nil)
         ShipStub.answer(port, "GET", "/loops/node", ReviewProbeTests().payload([("a.ts", patch)]))
         var branch = try #require(app.store.rawView("branch", id))
         branch["tip"] = .string(sha)
@@ -378,12 +410,12 @@ import Testing
         await page.helixTask?.value
         let open = try #require(page.helix)
         page.moveHelix(session: open.session, path: "lib/z.ts", line: 3)
-        HeldLookupStub.hold(port, path)
+        HeldLookupStub.hold(port, commitPath)
         page.landHelix(app, session: open.session)
-        await until("the file edit landing") { HeldLookupStub.waiting(port, path) }
+        await until("the file edit landing") { HeldLookupStub.waiting(port, commitPath) }
         if move { app.keys.handle("j") }
         ShipStub.answer(port, "GET", "/loops/lsp/src", #"{"path":"lib/z.ts","sha":"\#(sha)","text":"one\ntwo\nnew three\nfour"}"#)
-        HeldLookupStub.release(port, path, #"{"ok":true,"sha":"\#(sha)","message":"edit z.ts"}"#)
+        HeldLookupStub.release(port, commitPath, try receipt(open, page, sha: sha))
         await until("the file edit answer") { app.runner.runOf("review.helix.land", id)?.state == .done }
         if move {
             #expect(window.doc?.sha == tip && app.selected == "s:4")
@@ -406,12 +438,12 @@ import Testing
         await page.helixTask?.value
         let open = try #require(page.helix)
         page.moveHelix(session: open.session, path: "lib/other.ts", line: 20)
-        HeldLookupStub.hold(port, path)
+        HeldLookupStub.hold(port, commitPath)
         HeldLookupStub.hold(port, "/loops/lsp/src")
         page.landHelix(app, session: open.session)
-        await until("the switched-file landing") { HeldLookupStub.waiting(port, path) }
+        await until("the switched-file landing") { HeldLookupStub.waiting(port, commitPath) }
         #expect(window.doc?.path == "lib/original.ts" && !HeldLookupStub.waiting(port, "/loops/lsp/src"))
-        HeldLookupStub.release(port, path, #"{"ok":true,"sha":"\#(sha)","message":"edit other.ts"}"#)
+        HeldLookupStub.release(port, commitPath, try receipt(open, page, sha: sha))
         await until("the acknowledged switched file") { HeldLookupStub.waiting(port, "/loops/lsp/src") }
         let text = (1...25).map { "line \($0)" }.joined(separator: "\n")
         let response: JSONObject = ["path": "lib/other.ts", "sha": .string(sha), "text": .string(text)]
@@ -430,7 +462,7 @@ import Testing
         }))
         app.runner.dispatch("held-editor-predecessor", via: .key, target: id)
         await until("the held predecessor") { HeldLookupStub.waiting(port, "/blocked-write") }
-        HeldLookupStub.hold(port, path)
+        HeldLookupStub.hold(port, commitPath)
         page.landHelix(app, session: open.session)
         if change == "epoch" {
             let fixture = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../CanopyCoreTests/Fixtures/state.json")
@@ -446,9 +478,9 @@ import Testing
         app.runner.say("newer feedback")
         HeldLookupStub.release(port, "/blocked-write", #"{"ok":true}"#)
         await until("the local editor refusal") { app.runner.runOf("review.helix.land", id)?.state == .failed }
-        #expect(!HeldLookupStub.waiting(port, path) && page.pendingHelixReturn == nil)
+        #expect(!HeldLookupStub.waiting(port, commitPath) && page.pendingHelixReturn == nil)
         #expect(app.runner.note == "newer feedback")
-        #expect(ShipStub.posts(port).filter { $0.body["op"] == "land" }.isEmpty)
+        #expect(ShipStub.posts(port).filter { $0.path == commitPath }.isEmpty)
     }
 
     @Test func historicalCoordinatesCannotOpenTheCurrentCheckout() async throws {

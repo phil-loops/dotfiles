@@ -89,4 +89,66 @@ let branchJSON: JSONObject = [
         #expect(s.applyPatch(p) == .ok)
         #expect(s.raw["gizmo"]?["g1"]?["n"]?.int == 3)
     }
+
+    func receipted() throws -> Store {
+        let s = try hydrated()
+        #expect(s.applyPatch(try Patch.make(domain: Domain.git, version: 20, upserts: ["branch": ["loops:x": .object(branchJSON)]])) == .ok)
+        #expect(s.acceptBranchReceipt("loops:x", epoch: s.epoch, expectedTip: "t", fields: ["tip": "saved", "tree": "saved-tree"], wrote: 3))
+        return s
+    }
+
+    @Test func aCommitReceiptCoversStaleReadsWithoutForgingStreamVersions() throws {
+        let s = try receipted()
+        #expect(s.versions[Domain.git] == 20 && s.asOf[Domain.git] == nil)
+        #expect(s.branch["loops:x"]?.tip == "t")
+        #expect(s.view(Branch.self, "loops:x")?.tip == "saved")
+        s.addOps([Op(seq: 8, type: .branch, id: "loops:x", fields: ["description": "optimistic"] )])
+        #expect(s.applyPatch(try Patch.make(domain: Domain.git, version: 21, asOf: 2,
+            upserts: ["branch": ["loops:x": .object(branchJSON)]])) == .ok)
+        #expect(s.rawView("branch", "loops:x")?["tip"] == "saved")
+        #expect(s.view(Branch.self, "loops:x")?.description == "optimistic")
+        s.dropOps(seq: 8)
+        #expect(s.view(Branch.self, "loops:x")?.tip == "saved")
+        var fresh = branchJSON
+        fresh["tip"] = "saved"; fresh["tree"] = "saved-tree"
+        #expect(s.applyPatch(try Patch.make(domain: Domain.git, version: 22, asOf: 3,
+            upserts: ["branch": ["loops:x": .object(fresh)]])) == .ok)
+        #expect(s.view(Branch.self, "loops:x") == s.branch["loops:x"])
+    }
+
+    @Test func aNewerBranchRevisionSupersedesAReceiptEvenBeforeItsAcknowledgement() throws {
+        let s = try receipted()
+        var newer = branchJSON
+        newer["tip"] = "newer"
+        #expect(s.applyPatch(try Patch.make(domain: Domain.git, version: 21, asOf: 2,
+            upserts: ["branch": ["loops:x": .object(newer)]])) == .ok)
+        #expect(s.view(Branch.self, "loops:x")?.tip == "newer")
+        #expect(!s.acceptBranchReceipt("loops:x", epoch: s.epoch, expectedTip: "t", fields: ["tip": "saved"], wrote: 3))
+    }
+
+    @Test func receiptsSurviveStaleHydrationAndDisappearOnAnEpochChangeOrDeletion() throws {
+        let s = try receipted()
+        let raw = s.raw
+        let snapshot: JSONValue = ["epoch": .string(s.epoch), "versions": ["git": 20],
+            "entities": .object(raw.mapValues { .object($0) })]
+        s.hydrate(try Snapshot.decode(JSONEncoder().encode(snapshot)))
+        #expect(s.view(Branch.self, "loops:x")?.tip == "saved")
+        #expect(s.applyPatch(try Patch.make(domain: Domain.git, version: 21, deletes: ["branch": ["loops:x"]])) == .ok)
+        #expect(s.view(Branch.self, "loops:x") == nil)
+        var replacement = try Snapshot.decode(JSONEncoder().encode(snapshot))
+        replacement.epoch = "replacement"
+        s.hydrate(replacement)
+        #expect(s.view(Branch.self, "loops:x")?.tip == "t")
+        #expect(!s.acceptBranchReceipt("loops:x", epoch: "old", expectedTip: "t", fields: ["tip": "saved"], wrote: 3))
+    }
+
+    @Test func consecutiveReceiptsKeepTheirOrderAcrossIntermediateReads() throws {
+        let s = try receipted()
+        #expect(s.acceptBranchReceipt("loops:x", epoch: s.epoch, expectedTip: "saved", fields: ["tip": "second"], wrote: 4))
+        var intermediate = branchJSON
+        intermediate["tip"] = "saved"
+        #expect(s.applyPatch(try Patch.make(domain: Domain.git, version: 21, asOf: 3,
+            upserts: ["branch": ["loops:x": .object(intermediate)]])) == .ok)
+        #expect(s.view(Branch.self, "loops:x")?.tip == "second")
+    }
 }

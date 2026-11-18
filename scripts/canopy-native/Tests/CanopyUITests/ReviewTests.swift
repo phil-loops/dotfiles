@@ -227,7 +227,7 @@ import Testing
             ["path": "a.ts", "add": 3, "del": 2, "patch": .string(patchA)],
             ["path": "b.ts", "add": 1, "del": 1, "patch": .string(patchB)],
         ])
-        let o: JSONValue = ["branch": "add-hankles-limited-label", "baseSha": "base123", "files": files]
+        let o: JSONValue = ["branch": "add-hankles-limited-label", "baseSha": .string(String(repeating: "1", count: 40)), "files": files]
         return String(decoding: try! JSONEncoder().encode(o), as: UTF8.self)
     }
 
@@ -983,18 +983,18 @@ import Testing
     @Test func iOpensHelixOnTheNewHalfAndQuittingCommits() async throws {
         let (a, p) = try await app()
         let pg = ReviewPageState.of(a)
-        ShipStub.answer(p, "POST", "/loops/review-helix", #"{"ok":true,"dir":"/tmp/x.diffbase","sha":"\#(pg.tip)","message":"fixup! feat: x"}"#)
+        ShipStub.answer(p, "POST", "/loops/edit-session", try HelixOwnershipTests().answer(pg, dir: "/tmp/x.diffbase"))
         keys(a, "i")
         await until("the checkout") { pg.helix?.dir != nil }
         let h = try #require(pg.helix)
         #expect(h.path == "a.ts" && h.line == 2 && h.dir == "/tmp/x.diffbase" && h.sha == pg.tip)
-        let asked = try #require(ShipStub.posts(p).last { $0.path == "/loops/review-helix" })
-        #expect(asked.body["op"] == .string("where"))
+        let asked = try #require(ShipStub.posts(p).last { $0.path == "/loops/edit-session" })
+        #expect(asked.body["expectedTip"] == .string(pg.tip) && asked.body["baseSha"] == .string(pg.baseSha))
         pg.landHelix(a)
         #expect(pg.helix == nil, "the diff is back at once")
-        await until("the land") { ShipStub.posts(p).contains { $0.body["op"] == .string("land") } }
-        let land = try #require(ShipStub.posts(p).last { $0.body["op"] == .string("land") })
-        #expect(land.body["dir"] == .string("/tmp/x.diffbase") && land.body["sha"] == .string(h.sha))
+        await until("the land") { ShipStub.posts(p).contains { $0.path == "/loops/edit-commit" } }
+        let land = try #require(ShipStub.posts(p).last { $0.path == "/loops/edit-commit" })
+        #expect(land.body["session"] == .string(h.lease!) && land.body["expectedTip"] == .string(h.sha))
     }
 
     /// o from the code beside the diff opens Helix at that file, line and name — not the diff's
@@ -1003,7 +1003,7 @@ import Testing
         let (a, p) = try await app()
         let pg = ReviewPageState.of(a)
         let tip = pg.tip
-        ShipStub.answer(p, "POST", "/loops/review-helix", #"{"ok":true,"dir":"/tmp/x.diffbase","sha":"\#(tip)"}"#)
+        ShipStub.answer(p, "POST", "/loops/edit-session", try HelixOwnershipTests().answer(pg, dir: "/tmp/x.diffbase"))
         ShipStub.answer(p, "POST", "/loops/lsp/definition", #"{"ok":true,"sha":"\#(tip)","locations":[{"path":"lib/z.ts","line":2,"character":0}]}"#)
         ShipStub.answer(p, "GET", "/loops/lsp/src", #"{"path":"lib/z.ts","sha":"x","text":"one\nconst two = three\n\nfour"}"#)
         keys(a, "g", "d")

@@ -23,17 +23,20 @@ struct HelixLanding {
                 let page = ReviewPageState.of(app)
                 guard page.helixLandingPermits.remove(landing.open.session) != nil else { return nil }
                 let source = landing.open.source
-                guard app.store.epoch == source.epoch else { return nil }
-                var write = Write(path: app.transport.atRepo(source.repo, "/review-helix"),
-                    body: ["branch": .string(source.name), "op": "land", "dir": .string(landing.dir), "sha": .string(source.tip)],
+                guard app.store.epoch == source.epoch, let lease = landing.open.lease else { return nil }
+                var write = Write(path: app.transport.atRepo(source.repo, "/edit-commit"),
+                    body: ["branch": .string(source.name), "session": .string(lease), "expectedTip": .string(source.tip),
+                           "operation": .string(landing.open.session.uuidString.lowercased()), "epoch": .string(source.epoch)],
                     settled: { true }, failed: "the edit didn't commit · saved in \(landing.dir)",
                     answered: { ok, body in
                         landing.open.log(ok ? "commit answered" : "commit refused or failed")
                         let speaks = landing.presents(app)
                         let page = ReviewPageState.of(app)
-                        let unchanged = ok && body["ok"] == true && body["nothing"] == true
-                        let commit = ok && body["ok"] == true && !unchanged
-                            ? body["sha"]?.string.flatMap { fullObject($0) && $0 != source.tip ? $0 : nil } : nil
+                        let unchanged = ok && body["ok"] == true && body["nothing"] == true && body["epoch"]?.string == source.epoch
+                            && body["session"]?.string == lease && body["operation"]?.string == landing.open.session.uuidString.lowercased()
+                        let receipt = try? JSONValue.object(body).decode(EditReceipt.self)
+                        let commit = ok && body["ok"] == true && !unchanged && receipt?.apply(app, open: landing.open, wrote: body["wrote"]?.int ?? 0) == true
+                            ? receipt?.sha : nil
                         if var pending = page.pendingHelixReturn, pending.session == landing.open.session {
                             if let commit {
                                 pending.commit = commit

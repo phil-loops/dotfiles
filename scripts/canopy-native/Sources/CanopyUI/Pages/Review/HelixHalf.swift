@@ -12,6 +12,8 @@ public struct HelixOpen: Equatable {
     public var col: Int
     /// the checkout, once the server has made it
     public var dir: String?
+    var lease: String?
+    var editBase: String?
     /// the tip Helix opened at; the commit is refused if the branch moved since
     public var sha: String
     /// over the whole diff (`o`), not just its new half (`i`)
@@ -26,17 +28,19 @@ public struct HelixOpen: Equatable {
 
     public static func == (lhs: HelixOpen, rhs: HelixOpen) -> Bool {
         lhs.session == rhs.session && lhs.path == rhs.path && lhs.line == rhs.line && lhs.col == rhs.col &&
-            lhs.dir == rhs.dir && lhs.sha == rhs.sha && lhs.whole == rhs.whole && lhs.fromSide == rhs.fromSide && lhs.source == rhs.source
+            lhs.dir == rhs.dir && lhs.lease == rhs.lease && lhs.sha == rhs.sha && lhs.whole == rhs.whole && lhs.fromSide == rhs.fromSide && lhs.source == rhs.source
     }
 }
 
-private struct HelixWhere: Decodable { var ok: Bool; var dir: String?; var sha: String?; var err: String? }
+private struct HelixWhere: Decodable { var ok: Bool; var dir: String?; var sha: String?; var session: String?; var baseSha: String?; var epoch: String?; var err: String? }
 
 extension ReviewPageState {
     func openHelix(_ app: AppModel, branch: String, path: String, line: Int, col: Int, whole: Bool = false, fromSide: Bool = false) {
         guard helix == nil, diffCurrent, !scoped, integration == nil, let t = target, t.name == branch,
               let source = BranchSource.current(app, t.id), HelixLanding.fullObject(source.tip) else { return }
         let reader = ReaderContext(app)
+        let editBase = baseSha
+        guard HelixLanding.fullObject(editBase) else { return }
         let open = HelixOpen(path: path, line: line, col: col, sha: source.tip, whole: whole, fromSide: fromSide, source: source, reader: reader)
         helixTask?.cancel()
         helixSession = open.session
@@ -59,13 +63,16 @@ extension ReviewPageState {
                 }
             }
             guard current() else { return }
-            let body = ["branch": source.name, "op": "where"]
-            let answer = await app.transport.ask(app.transport.atRepo(source.repo, "/review-helix"), body, as: HelixWhere.self)
+            let body = ["branch": source.name, "session": open.session.uuidString.lowercased(), "expectedTip": source.tip, "baseSha": editBase, "epoch": source.epoch]
+            let answer = await app.transport.ask(app.transport.atRepo(source.repo, "/edit-session"), body, as: HelixWhere.self)
             guard current() else { return }
-            guard let answer, answer.ok, answer.sha == source.tip, let dir = answer.dir, dir.hasPrefix("/") else {
+            guard let answer, answer.ok, answer.epoch == source.epoch, answer.sha == source.tip, let lease = answer.session, UUID(uuidString: lease) != nil,
+                  answer.baseSha == editBase, let dir = answer.dir, dir.hasPrefix("/") else {
                 return app.runner.say(answer?.err ?? "couldn't prepare Helix at the shown commit · try again")
             }
             helix?.dir = dir
+            helix?.lease = lease
+            helix?.editBase = editBase
             open.log("checkout ready")
             app.runner.say("Helix on \(source.repo)/\(branch) · :w saves · quitting commits it")
         }

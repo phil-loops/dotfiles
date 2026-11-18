@@ -5,6 +5,38 @@ What canopy-native expects of `scripts/stack-review-server.py`. Sources read 202
 code (file:function given). The store entities' Swift types are in `Sources/CanopyCore`; the retired
 SolidJS app's `viewer-solid/src/v2/types.ts` (git history, before 37e9eca) was the original reference.
 
+## Editor transactions
+
+The native editor uses two repo-prefixed POSTs (`srv/edits.py`):
+
+| Route | Request | Response |
+| --- | --- | --- |
+| `/edit-session` | `{epoch, session: UUID, branch, expectedTip, baseSha}` | `{ok, epoch, session, dir, sha, baseSha}` |
+| `/edit-commit` | `{epoch, session, operation: UUID, branch, expectedTip}` | `{ok, epoch, session, operation, repo, branch, expectedTip, baseSha, sha, tree, paths, files, history, incremental}` or `{ok, nothing: true, …}` |
+
+The server checks the request's epoch before accepting work and stamps its own epoch on the reply;
+after restart an explicit retry must name the new epoch. `expectedTip` and `baseSha` are full immutable commit IDs. Each session owns a private locked
+worktree under the common Git directory. HEAD is the comparison base for Helix's gutter; files
+and index initially hold the expected tip. Preparation never resets another editor's checkout.
+
+Commit takes the forest lock, validates the checkout's repository and index, scans its files with
+Git, and freezes a tree and commit before moving the branch. Binary data, symlinks, executable
+modes, and deletions use Git's staging rules. A ref transaction checks the expected tip; an attached
+worktree's unsaved changes must survive its two-tree update or the save is refused.
+
+The operation and receipt are durable before the branch moves. Repeating the same operation returns
+the same frozen save, including after a lost response or server restart. A different operation
+cannot recapture that session. Failed saves retain the checkout and frozen commit; successful saves
+remove the checkout only when Git considers it clean and it contains no additional ignored files.
+
+The receipt's `files` replace its `paths` in the diff pinned to `expectedTip` and `baseSha`; absent
+files remove old diff cards. Rename sources and destinations are included. `history` is the new
+commit's row. Fan-in branches currently return `incremental: false` and use the normal node reader
+to preserve its carried-file filtering. Other branches can paint immediately without another node
+or history fetch. The store keeps this committed revision over stale reads until the Git stream's
+`asOf` reaches the response's `wrote`, or a different branch revision supersedes it. Receipt handling
+never advances domain versions. File capture currently uses a full Git scan.
+
 ## Basics
 
 - **Bind**: `127.0.0.1`, one server per repo registry. Port: `stack-review-port [repo]` (derived from the

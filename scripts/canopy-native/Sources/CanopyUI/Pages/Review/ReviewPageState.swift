@@ -443,8 +443,8 @@ public final class ReviewPageState: ShipHost {
             defer { self.loading.remove(key) }
             do {
                 let data = try await app.transport.getJSON(path, as: NodePayload.self)
-                self.cache[key] = data
-                if self.keyOf == key { self.land(key, data) }
+                if self.cache[key] == nil { self.cache[key] = data }
+                if self.keyOf == key, let current = self.cache[key] { self.land(key, current) }
             } catch {
                 if self.keyOf == key { self.loadErr = String(describing: error) }
             }
@@ -468,14 +468,32 @@ public final class ReviewPageState: ShipHost {
     }
 
     /// Take a diff as read (tests hand one in directly).
-    public func land(_ key: String, _ data: NodePayload) {
+    public func land(_ key: String, _ data: NodePayload, preservingFiles: Bool = false) {
         arrive()
+        let previous = payload
+        let oldParsed = parsed
+        let oldFiles = Dictionary((previous?.data.files ?? []).map { ($0.path, $0) }, uniquingKeysWith: { _, last in last })
+        let unchanged = preservingFiles ? Set(data.files.filter { oldFiles[$0.path] == $0 }.map(\.path)) : []
+        var rows: [String: [DiffRow]] = [:]
+        var blocks: [String: [Block]] = [:]
+        if let previous {
+            for path in unchanged {
+                for split in [false, true] { rows["\(key)|\(split)|\(path)"] = rowCache["\(previous.key)|\(split)|\(path)"] }
+                blocks["\(key)|\(path)"] = blockCache["\(previous.key)|\(path)"]
+            }
+        }
         cache[key] = data
         payload = (key, data)
         payloadGen &+= 1
-        parsed = nil
-        rowCache = [:]
-        blockCache = [:]
+        if let oldParsed, oldParsed.key == previous?.key, preservingFiles {
+            let byPath = Dictionary(oldParsed.files.map { ($0.path, $0) }, uniquingKeysWith: { _, last in last })
+            parsed = (key, data.files.map { file in
+                if unchanged.contains(file.path), let cached = byPath[file.path] { return cached }
+                return Self.parse([file])[0]
+            })
+        } else { parsed = nil }
+        rowCache = rows
+        blockCache = blocks
         loadErr = nil
         prepareTypes()
         settleCursor()
