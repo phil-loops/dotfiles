@@ -33,15 +33,23 @@ public struct HelixOpen: Equatable {
     }
 }
 
-private struct HelixWhere: Decodable { var ok: Bool; var dir: String?; var sha: String?; var session: String?; var baseSha: String?; var epoch: String?; var attachment: EditorAttachment?; var err: String? }
+struct HelixWhere: Decodable { var ok: Bool; var dir: String?; var sha: String?; var session: String?; var baseSha: String?; var epoch: String?; var attachment: EditorAttachment?; var viewOwner: String?; var err: String? }
 
 extension ReviewPageState {
     func openHelix(_ app: AppModel, branch: String, path: String, line: Int, col: Int, whole: Bool = false, fromSide: Bool = false, workspace: String? = nil) {
         guard helix == nil, diffCurrent, !scoped, integration == nil, let t = target, t.name == branch,
               let source = BranchSource.current(app, t.id), HelixLanding.fullObject(source.tip) else { return }
+        guard let command = app.registry.command("review.helix.land"), app.runner.refusal?(command) == nil else {
+            releaseEditorPreparation(app)
+            return
+        }
         let reader = ReaderContext(app)
         let editBase = baseSha
         guard HelixLanding.fullObject(editBase) else { return }
+        let preparation = workspace == nil && editorPreparation?.matches(source, base: editBase) == true ? editorPreparation : nil
+        if preparation != nil { editorPreparation = nil }
+        else { releaseEditorPreparation(app) }
+        helixPreparation = preparation
         let open = HelixOpen(path: path, line: line, col: col, sha: source.tip, whole: whole, fromSide: fromSide, source: source, reader: reader)
         helixTask?.cancel()
         helixSession = open.session
@@ -54,20 +62,28 @@ extension ReviewPageState {
         helixTask = Task { @MainActor in
             @MainActor func current() -> Bool {
                 helix?.session == open.session && !Task.isCancelled && reader.isCurrent(app) && diffCurrent
+                    && baseSha == editBase
                     && BranchSource.current(app, source.id)?.sameBranch(as: source) == true
             }
             defer {
+                if helixPreparation === preparation { helixPreparation = nil }
                 if helix?.session == open.session && helix?.dir == nil {
                     helix = nil
                     // never leave "checking…" standing for an opening that ended; newer feedback stays
                     if app.runner.note == checking { app.runner.say("Helix didn't open — the view or the branch moved while it checked out · o opens it again") }
                 }
+                if helix?.session != open.session || helix?.dir == nil { preparation?.release(app) }
             }
             guard current() else { return }
             let body: JSONObject = ["branch": .string(source.name), "session": .string(workspace ?? open.session.uuidString.lowercased()),
                 "expectedTip": .string(source.tip), "baseSha": .string(editBase), "epoch": .string(source.epoch), "leaseProtocol": 1,
                 "entry": ["path": .string(path), "line": .number(Double(line)), "col": .number(Double(col))]]
-            let answer = await app.transport.ask(app.transport.atRepo(source.repo, "/edit-session"), body, as: HelixWhere.self)
+            let answer: HelixWhere?
+            if let preparation {
+                answer = await preparation.task.value
+            } else {
+                answer = await app.transport.ask(app.transport.atRepo(source.repo, "/edit-session"), body, as: HelixWhere.self)
+            }
             guard current() else { return }
             guard let answer, answer.ok, answer.epoch == source.epoch, answer.sha == source.tip, let lease = answer.session, UUID(uuidString: lease) != nil,
                   answer.baseSha == editBase, let dir = answer.dir, dir.hasPrefix("/") else {
@@ -75,6 +91,9 @@ extension ReviewPageState {
             }
             guard let attachment = answer.attachment, attachment.belongs(to: lease), workspace == nil || workspace == lease else {
                 return app.runner.say("couldn't verify the editor attachment · its workspace is preserved")
+            }
+            if let preparation, answer.session != preparation.session || answer.viewOwner != preparation.owner {
+                return app.runner.say("couldn't verify the review workspace · its files are preserved")
             }
             helix?.dir = dir
             helix?.lease = lease
@@ -88,6 +107,8 @@ extension ReviewPageState {
     @discardableResult func cancelHelixPreparation(session: UUID? = nil) -> Bool {
         guard let open = helix, open.dir == nil, session == nil || session == open.session else { return false }
         helixTask?.cancel()
+        if let app { helixPreparation?.release(app) }
+        helixPreparation = nil
         helixTask = nil
         helix = nil
         helixAt = nil

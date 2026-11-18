@@ -94,11 +94,17 @@ def main():
 
     subprocess.run = measured
 
-    def index_artifact_bytes():
+    def index_artifact_bytes(completed=False):
         total = 0
         for directory in (repo / ".git/canopy-edits").glob("*"):
             if not directory.is_dir():
                 continue
+            if completed:
+                try:
+                    if edits._load(directory).get("state") != "committed":
+                        continue
+                except edits.ghreview.Refused:
+                    continue
             for file in directory.iterdir():
                 if file.name in editartifacts.FILES or file.name.startswith(editartifacts.PREFIX):
                     try:
@@ -200,6 +206,7 @@ def main():
                     return self._send(200, json.dumps({"tip": git("rev-parse", branch), "initial": initial,
                                                         "count": int(git("rev-list", "--count", "main.." + branch)),
                                                         "indexArtifactBytes": index_artifact_bytes(),
+                                                        "completedIndexArtifactBytes": index_artifact_bytes(completed=True),
                                                         "text": git("show", f"{branch}:a.txt"), "requests": requests,
                                                         "parkedTip": json.loads((repo / ".git/canopy-edits/ready.json").read_text()).get("tip") if (repo / ".git/canopy-edits/ready.json").exists() else None}))
                 if u.path == "/test/workspace":
@@ -230,7 +237,7 @@ def main():
                             acknowledged = writes
                         condition.notify_all()
                     return self._send(200, '{"ok":true}')
-                if path in ("/loops/review-helix", "/loops/edit-session", "/loops/edit-commit", "/loops/edit-warm",
+                if path in ("/loops/review-helix", "/loops/edit-session", "/loops/edit-release", "/loops/edit-commit", "/loops/edit-warm",
                             "/loops/edit-workspaces", "/loops/edit-recover"):
                     return routes.post(self, path.removeprefix("/loops"), raw)
                 if path == "/test/recover-last":
