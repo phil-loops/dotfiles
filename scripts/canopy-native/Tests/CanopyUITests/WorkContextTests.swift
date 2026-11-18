@@ -371,6 +371,20 @@ import Testing
         #expect(WorkContext.chatsLine([byBranch, byItem], now: 1100) == "chat aaaaaaaa live · chat bbbbbbbb idle")
     }
 
+    @Test func focusingAChatRunsClaudeJumpWithItsFullId() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("chat-jump-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let script = dir.appendingPathComponent("jump"), out = dir.appendingPathComponent("args")
+        try "#!/bin/sh\necho \"$@\" > \(out.path)\n".write(to: script, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
+        setenv("SHOW_CLAUDE_JUMP", script.path, 1)
+        defer { unsetenv("SHOW_CLAUDE_JUMP") }
+        #expect(ChatJump.run("aaaaaaaa-0000-4000-8000-000000000001") == nil)
+        #expect((try? String(contentsOf: out, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines) == "aaaaaaaa-0000-4000-8000-000000000001")
+        try "#!/bin/sh\necho 'claude-jump: 0 sessions match' >&2\nexit 1\n".write(to: script, atomically: true, encoding: .utf8)
+        #expect(ChatJump.run("gone") == "claude-jump: 0 sessions match", "a failure comes back in claude-jump's words")
+    }
+
     @Test func aChatOnNoWorkSaysWhereItStandsAndNothingMore() {
         typealias C = WorkContext.Chat
         let bound = C(id: "aaaaaaaa-1", works: [.init(work: "w_a", todo: nil)], generation: 1, pane: nil, activeAt: 900, at: .init(repo: "loops-wt-1", branch: "wt-1"))
