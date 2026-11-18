@@ -260,6 +260,8 @@ struct WorkContext {
     struct Chat: Decodable, Equatable {
         struct Work: Decodable, Equatable { var work: String; var todo: String? }
         struct At: Decodable, Equatable { var repo: String; var branch: String }
+        /// a branch it acted on lately (round 28): "edit" or "commit", at when
+        struct Acted: Decodable, Equatable { var branch: String; var how: String; var at: Double }
         var id: String
         /// nil when the journal couldn't be read: unknown, never unbound
         var works: [Work]?
@@ -268,6 +270,7 @@ struct WorkContext {
         var activeAt: Double
         /// where it stands (its checkout), said only for a chat on no work — never read as what it works on
         var at: At?
+        var acted: [Acted]?
     }
 
     /// A chat reads idle after this long without a tool call; an ended chat isn't served at all.
@@ -275,23 +278,36 @@ struct WorkContext {
 
     static func live(_ c: Chat, now: Double) -> Bool { now - c.activeAt < idleAfter }
 
-    /// The bound chats on each branch, keyed by branch id: a chat whose binding names the branch's own
-    /// work (`branchWork`, from branch.<n>.stack-work), or an item the home placed on that branch.
-    /// Never a chat's cwd or name: an unbound chat is on no branch (P1).
-    static func chatsOnBranches(_ chats: [Chat], branchWork: [String: String], placed: [String: [TodoItem]]) -> [String: [Chat]] {
+    /// The chats on each branch, keyed by branch id: one that acted on it lately (round 28), or whose
+    /// binding names the branch's own work (`branchWork`, branch.<n>.stack-work) or an item the home
+    /// placed on it (round 27). Never a chat's cwd: a chat that did neither is on no branch.
+    static func chatsOnBranches(_ chats: [Chat], branches: [String], branchWork: [String: String], placed: [String: [TodoItem]]) -> [String: [Chat]] {
         var out: [String: [Chat]] = [:]
-        let branches = Set(branchWork.keys).union(placed.keys)
-        for b in branches.sorted() {
+        for b in branches {
             let items = Set((placed[b] ?? []).map(\.id))
-            let on = chats.filter { c in (c.works ?? []).contains { $0.work == branchWork[b] || $0.todo.map(items.contains) == true } }
+            let on = chats.filter { c in
+                (c.acted ?? []).contains { $0.branch == b }
+                    || (c.works ?? []).contains { $0.work == branchWork[b] || $0.todo.map(items.contains) == true }
+            }
             if !on.isEmpty { out[b] = on.sorted { $0.id < $1.id } }
         }
         return out
     }
 
-    /// Live chats whose binding names no work, or whose binding can't be read: none of them is on a dot.
-    static func onNoWork(_ chats: [Chat]) -> [Chat] {
-        chats.filter { ($0.works ?? []).isEmpty }.sorted { $0.activeAt == $1.activeAt ? $0.id < $1.id : $0.activeAt > $1.activeAt }
+    /// Live chats no dot shows: they acted on no listed branch lately and aren't bound to one.
+    static func onNoWork(_ chats: [Chat], onDots: Set<String>) -> [Chat] {
+        chats.filter { !onDots.contains($0.id) }
+            .sorted { $0.activeAt == $1.activeAt ? $0.id < $1.id : $0.activeAt > $1.activeAt }
+    }
+
+    /// What puts a chat on a branch, in words: its latest action there, else its binding (round 28, P2).
+    static func evidence(_ c: Chat, on branch: String, now: Double) -> String {
+        guard let a = (c.acted ?? []).filter({ $0.branch == branch }).max(by: { $0.at < $1.at }) else { return "bound" }
+        return "\(a.how == "commit" ? "committed" : "edited") \(ago(now - a.at))"
+    }
+
+    static func ago(_ secs: Double) -> String {
+        secs < 60 ? "just now" : secs < 3600 ? "\(Int(secs / 60))m ago" : "\(Int(secs / 3600))h ago"
     }
 
     static func whereItStands(_ c: Chat, now: Double) -> String {
@@ -299,11 +315,13 @@ struct WorkContext {
         return "chat \(c.id.prefix(8)) \(live(c, now: now) ? "live" : "idle") · in \(place)\(c.works == nil ? " · binding unreadable" : "")"
     }
 
-    static func chatsLine(_ chats: [Chat], now: Double) -> String {
-        chats.map { chatLabel($0, now: now) }.joined(separator: " · ")
+    static func chatsLine(_ chats: [Chat], on branch: String, now: Double) -> String {
+        chats.map { chatLabel($0, on: branch, now: now) }.joined(separator: " · ")
     }
 
-    static func chatLabel(_ c: Chat, now: Double) -> String { "chat \(c.id.prefix(8)) \(live(c, now: now) ? "live" : "idle")" }
+    static func chatLabel(_ c: Chat, on branch: String, now: Double) -> String {
+        "chat \(c.id.prefix(8)) \(live(c, now: now) ? "live" : "idle") · \(evidence(c, on: branch, now: now))"
+    }
 
     /// The owner's short session id and the tracker's day, the facts a working line can state.
     @MainActor static func workedBy(_ item: TodoItem, _ store: Store) -> String {

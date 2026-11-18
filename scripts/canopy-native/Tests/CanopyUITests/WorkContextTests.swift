@@ -357,18 +357,25 @@ import Testing
         #expect(placed.count == 2)
     }
 
-    @Test func aChatIsOnABranchOnlyThroughItsBinding() {
+    @Test func aChatIsOnTheBranchesItActedOnOrIsBoundTo() {
         typealias C = WorkContext.Chat
         let byBranch = C(id: "aaaaaaaa-1", works: [.init(work: "w_a", todo: nil)], generation: 1, pane: "%1", activeAt: 1000)
         let byItem = C(id: "bbbbbbbb-2", works: [.init(work: "w_item", todo: "item")], generation: 2, pane: nil, activeAt: 0)
+        let acting = C(id: "eeeeeeee-5", works: [], generation: 0, pane: "%5", activeAt: 1000,
+                       acted: [.init(branch: "r:c", how: "commit", at: 880), .init(branch: "r:c", how: "edit", at: 940), .init(branch: "r:unlisted", how: "edit", at: 990)])
         let loose = C(id: "cccccccc-3", works: [], generation: 0, pane: "%3", activeAt: 1000)
         let unknown = C(id: "dddddddd-4", works: nil, generation: 0, pane: nil, activeAt: 1000)
-        let on = WorkContext.chatsOnBranches([byBranch, byItem, loose, unknown], branchWork: ["r:a": "w_a", "r:b": "w_b"],
+        let on = WorkContext.chatsOnBranches([byBranch, byItem, acting, loose, unknown], branches: ["r:a", "r:b", "r:c"],
+                                             branchWork: ["r:a": "w_a", "r:b": "w_b"],
                                              placed: ["r:b": [TodoItem(id: "item", state: .doing, solved_by: "b")]])
         #expect(on["r:a"] == [byBranch], "the branch's own work names it")
         #expect(on["r:b"] == [byItem], "an item placed on the branch brings its chats")
-        #expect(on.count == 2, "an unbound chat, or one whose journal can't be read, is on no branch")
-        #expect(WorkContext.chatsLine([byBranch, byItem], now: 1100) == "chat aaaaaaaa live · chat bbbbbbbb idle")
+        #expect(on["r:c"] == [acting], "a chat that acted on a branch is on it, unbound")
+        #expect(on.count == 3, "a chat that neither acted on nor is bound to a listed branch is on none")
+        #expect(WorkContext.chatsLine([acting], on: "r:c", now: 1000) == "chat eeeeeeee live · edited 1m ago", "its latest action there, in words")
+        #expect(WorkContext.chatLabel(byItem, on: "r:b", now: 1100) == "chat bbbbbbbb idle · bound")
+        let onDots = Set(on.values.flatMap { $0.map(\.id) })
+        #expect(WorkContext.onNoWork([byBranch, byItem, acting, loose, unknown], onDots: onDots).map(\.id) == ["cccccccc-3", "dddddddd-4"])
     }
 
     @Test func focusingAChatRunsClaudeJumpWithItsFullId() throws {
@@ -385,13 +392,11 @@ import Testing
         #expect(ChatJump.run("gone") == "claude-jump: 0 sessions match", "a failure comes back in claude-jump's words")
     }
 
-    @Test func aChatOnNoWorkSaysWhereItStandsAndNothingMore() {
+    @Test func aChatOnNoBranchSaysWhereItStandsAndNothingMore() {
         typealias C = WorkContext.Chat
-        let bound = C(id: "aaaaaaaa-1", works: [.init(work: "w_a", todo: nil)], generation: 1, pane: nil, activeAt: 900, at: .init(repo: "loops-wt-1", branch: "wt-1"))
         let loose = C(id: "bbbbbbbb-2", works: [], generation: 0, pane: nil, activeAt: 1000, at: .init(repo: "loops-wt-2", branch: "feat/x"))
         let unread = C(id: "cccccccc-3", works: nil, generation: 0, pane: nil, activeAt: 0, at: .init(repo: ".dotfiles", branch: ""))
-        let none = WorkContext.onNoWork([bound, unread, loose])
-        #expect(none == [loose, unread], "the bound chat is on its dot; the rest list most recent first")
+        #expect(WorkContext.onNoWork([unread, loose], onDots: []) == [loose, unread], "most recent first")
         #expect(WorkContext.whereItStands(loose, now: 1100) == "chat bbbbbbbb live · in loops-wt-2 · feat/x")
         #expect(WorkContext.whereItStands(unread, now: 1100) == "chat cccccccc idle · in .dotfiles · binding unreadable")
     }

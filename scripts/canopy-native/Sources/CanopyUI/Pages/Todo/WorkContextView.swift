@@ -121,15 +121,22 @@ struct WorkInProgressView: View {
     @MainActor static func chatsPlaced(_ app: AppModel, _ placed: [String: [TodoItem]]) -> [String: [WorkContext.Chat]] {
         let chats = chats(app)
         guard !chats.isEmpty else { return [:] }
+        let listed = listedBranches(app)
         var work: [String: String] = [:]
-        for b in listedBranches(app) {
+        for b in listed {
             if let w = app.store.rawView("branch", b.id)?["work"]?.string { work[b.id] = w }
         }
-        return WorkContext.chatsOnBranches(chats, branchWork: work, placed: placed)
+        return WorkContext.chatsOnBranches(chats, branches: listed.map(\.id), branchWork: work, placed: placed)
     }
 
     @MainActor static func chats(_ app: AppModel) -> [WorkContext.Chat] {
         app.store.rawAll("chat").values.compactMap { try? JSONValue.object($0).decode(WorkContext.Chat.self) }
+    }
+
+    /// Live chats no dot shows.
+    @MainActor static func noDot(_ app: AppModel) -> [WorkContext.Chat] {
+        let onDots = Set(chatsPlaced(app, placed(app)).values.flatMap { $0.map(\.id) })
+        return WorkContext.onNoWork(chats(app), onDots: onDots)
     }
 
     /// The rest: work no listed branch carries, so it keeps its own line at the top.
@@ -139,7 +146,7 @@ struct WorkInProgressView: View {
     }
 
     @MainActor static func visible(_ app: AppModel) -> Bool {
-        !items(app).isEmpty || !WorkContext.onNoWork(chats(app)).isEmpty || app.focusedPane["forests"] == "work"
+        !items(app).isEmpty || !noDot(app).isEmpty || app.focusedPane["forests"] == "work"
     }
 
     var body: some View {
@@ -169,14 +176,14 @@ struct WorkInProgressView: View {
                     }
                     .labelTarget(pane: "work", key: RowKey.todo(item.id), title: item.title)
                 }
-                UnboundChatsList(chats: WorkContext.onNoWork(Self.chats(app)))
+                UnboundChatsList(chats: Self.noDot(app))
             }
             .cursorMarks("work").paneRing("work").padding(.bottom, 22)
         }
     }
 }
 
-/// Live chats bound to no work: where each stands, never a guess at what it's doing (round 27, P1).
+/// Live chats on no branch: where each stands, never a guess at what it's doing (rounds 27–28).
 struct UnboundChatsList: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme
@@ -186,7 +193,7 @@ struct UnboundChatsList: View {
         if !chats.isEmpty {
             TimelineView(.periodic(from: .now, by: 30)) { ctx in
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("On no work · \(chats.count)").font(Theme.text(11)).foregroundStyle(theme.inkFaint)
+                    Text("On no branch · \(chats.count)").font(Theme.text(11)).foregroundStyle(theme.inkFaint)
                     ForEach(chats, id: \.id) { c in
                         HStack(spacing: 10) {
                             ChatButton(chat: c) {
@@ -198,7 +205,7 @@ struct UnboundChatsList: View {
                         }
                     }
                 }
-                .help("live Claude Code chats whose binding names no work: claim an item or start a branch from one to bind it")
+                .help("live Claude Code chats that edited or committed on no listed branch in the last two hours")
                 .padding(.leading, 44).padding(.trailing, 16).padding(.top, 10)
             }
         }
@@ -231,13 +238,13 @@ struct BranchChatsLine: View {
                 Text("◌").foregroundStyle(theme.goldLeaf)
                 Text(leaf(branch.name)).foregroundStyle(theme.ink).fixedSize()
                 ForEach(chats, id: \.id) { c in
-                    ChatButton(chat: c) { Text(WorkContext.chatLabel(c, now: ctx.date.timeIntervalSince1970)).foregroundStyle(theme.inkDim) }
+                    ChatButton(chat: c) { Text(WorkContext.chatLabel(c, on: branch.id, now: ctx.date.timeIntervalSince1970)).foregroundStyle(theme.inkDim) }
                 }
                 Spacer(minLength: 0)
             }
             .font(Theme.text(12))
         }
-        .help("the Claude Code chats bound to this branch's work")
+        .help("the Claude Code chats on this branch: each one edited or committed here lately, or is bound to its work")
         .padding(.leading, 44).padding(.trailing, 16).padding(.vertical, 2)
     }
 }
