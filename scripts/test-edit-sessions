@@ -134,6 +134,40 @@ while True: time.sleep(1)
         self.assertTrue(self.commit(data)["ok"])
         self.assertEqual(self.git("show", "feature:a.txt"), "unsaved editor files")
 
+    def test_ready_workspaces_are_published_with_the_complete_attachment_in_one_record(self):
+        records = []
+        original = edits._save
+        def capture(path, value, **kw):
+            records.append(json.loads(json.dumps(value)))
+            original(path, value, **kw)
+        with mock.patch.object(edits, "_save", side_effect=capture):
+            data, checkout, attachment = self.leased()
+        self.assertEqual([record["state"] for record in records], ["preparing", "editing"])
+        preparing, ready = records
+        self.assertIn("identity", preparing["attachment"])
+        self.assertNotIn("token", preparing["attachment"])
+        self.assertEqual(ready["attachment"]["token"], attachment["token"])
+        self.assertEqual(ready["attachment"]["identity"], preparing["attachment"]["identity"])
+        self.assertIn("checkoutIdentity", ready)
+        self.assertEqual(ready["expectedTip"], self.tip)
+
+    def test_a_failed_readiness_publication_never_leaves_an_editable_partial_workspace(self):
+        original = edits._save
+        def fail(path, value, **kw):
+            if value.get("state") == "editing":
+                raise ghreview.Refused("fixture failed the readiness publication")
+            original(path, value, **kw)
+        data = {"branch": "feature", "expectedTip": self.tip, "baseSha": self.base, "session": str(uuid.uuid4()),
+                "epoch": state.EPOCH, "leaseProtocol": 1, "entry": {"path": "a.txt", "line": 1, "col": 1}}
+        with mock.patch.object(edits, "_save", side_effect=fail):
+            self.assertFalse(self.call(edits.prepare, data)["ok"])
+        root = edits._root(data["session"])[1]
+        saved = edits._load(root)
+        self.assertEqual(saved["state"], "preparing")
+        self.assertNotIn("token", saved["attachment"])
+        self.assertEqual((root / "checkout/a.txt").read_text(), "before\n")
+        self.assertFalse(self.call(edits.prepare, data)["ok"])
+
     def test_live_editor_leases_survive_a_server_epoch_change(self):
         data, checkout, attachment = self.leased()
         process = self.launcher(attachment, checkout)

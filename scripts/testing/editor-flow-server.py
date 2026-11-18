@@ -19,6 +19,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("root")
     parser.add_argument("--refresh-delay", type=float, default=0)
+    parser.add_argument("--hold-refresh", action="store_true")
     parser.add_argument("--source-repo")
     args = parser.parse_args()
     root = Path(args.root).resolve()
@@ -71,6 +72,9 @@ def main():
     epoch = "editor-flow-" + root.name
     state.EPOCH = epoch
     condition = threading.Condition()
+    held = args.hold_refresh
+    acknowledged = 0
+    published = 0
     updates = []
     writes = 0
     requests = []
@@ -103,8 +107,8 @@ def main():
                         pass
         return total
 
-    def branch_entity():
-        tip = git("rev-parse", branch)
+    def branch_entity(tip=None):
+        tip = tip or git("rev-parse", branch)
         outline = git("log", "--reverse", "--format=%s", f"main..{tip}").splitlines()
         return {"id": f"loops:{branch}", "repo": "loops", "name": branch, "project": f"loops:{branch}",
                 "parent": "main", "description": "Edit transaction", "subject": outline[-1], "commits": len(outline),
@@ -112,12 +116,17 @@ def main():
                 "pushed": "local", "ahead": 0, "gates": "none", "redGates": [], "order": 1,
                 "behind": 0, "drifted": False, "upstream": "", "upstreamBad": False, "diverged": False}
 
-    def publish():
-        nonlocal writes
+    def publish(number, sha):
+        nonlocal published
         time.sleep(args.refresh_delay)
-        entity = branch_entity()
         with condition:
-            updates.append({"domain": "git", "version": len(updates) + 2, "asOf": writes,
+            condition.wait_for(lambda: not held or number <= acknowledged)
+        entity = branch_entity(sha)
+        with condition:
+            if number < published:
+                return
+            published = number
+            updates.append({"domain": "git", "version": len(updates) + 2, "asOf": number,
                             "upserts": {"branch": {entity["id"]: entity}}, "deletes": {}})
             condition.notify_all()
 
@@ -139,8 +148,9 @@ def main():
                     with condition:
                         writes += 1
                         data["wrote"] = writes
+                        number = writes
                     body = json.dumps(data).encode()
-                    threading.Thread(target=publish, daemon=True).start()
+                    threading.Thread(target=publish, args=(number, data.get("sha")), daemon=True).start()
             self.send_response(code)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(body)))
@@ -205,6 +215,7 @@ def main():
                 ctx.clear_repo()
 
         def do_POST(self):
+            nonlocal held, acknowledged
             ctx.set_repo(str(repo))
             path = urlparse(self.path).path
             raw = self.rfile.read(int(self.headers.get("Content-Length", "0"))).decode()
@@ -212,6 +223,13 @@ def main():
             self._actor = "browser"
             phase.stage = path
             try:
+                if path == "/test/refresh":
+                    with condition:
+                        held = json.loads(raw)["held"]
+                        if not held:
+                            acknowledged = writes
+                        condition.notify_all()
+                    return self._send(200, '{"ok":true}')
                 if path in ("/loops/review-helix", "/loops/edit-session", "/loops/edit-commit", "/loops/edit-warm",
                             "/loops/edit-workspaces", "/loops/edit-recover"):
                     return routes.post(self, path.removeprefix("/loops"), raw)

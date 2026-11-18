@@ -104,9 +104,10 @@ def available(root, session):
         os.close(fd)
 
 
-def issue(root, session, *, save):
+def initialize(root, session):
+    """Bind a new attachment lock before publishing workspace preparation."""
     if session.get("leaseProtocol") != 1:
-        return None
+        return
     if "attachment" not in session:
         path = root / "editor.lock"
         try:
@@ -117,9 +118,14 @@ def issue(root, session, *, save):
             os.fsync(fd)
             value = os.fstat(fd)
             session["attachment"] = {"identity": [value.st_dev, value.st_ino]}
-            save(root / "session.json", session)
         finally:
             os.close(fd)
+
+
+def issue(root, session, *, save):
+    if session.get("leaseProtocol") != 1:
+        return None
+    initialize(root, session)
     with available(root, session):
         session["attachment"].update(token=str(uuid.uuid4()), process=None)
         save(root / "session.json", session)
