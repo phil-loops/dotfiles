@@ -149,6 +149,40 @@ git("update-ref", "refs/remotes/origin/main", "main")
 rc, out, err = reshape("contract", "sq")
 check("contract: a squash-merged branch is contracted as merged", rc == 0 and out.get("why") == "merged", (rc, out, err))
 
+# contract: GitHub's MERGED verdict at the local tip is the ground truth once main has moved past
+# a squash (its lines rewritten since), where no content check can see the branch as merged
+reshape("new", "gm", "--parent", "main", "--project", "f", "--description", "merged on github")
+git("checkout", "-q", "gm"); commit("gm.txt", "one\n", "gm1")
+git("checkout", "-q", "main"); git("merge", "-q", "--squash", "gm"); git("commit", "-q", "-m", "squash gm (#2)")
+commit("gm.txt", "one, then more\n", "main moves past gm")
+git("update-ref", "refs/remotes/origin/main", "main")
+shim = os.path.join(os.path.dirname(repo), "shim")
+os.makedirs(shim, exist_ok=True)
+pr_json = os.path.join(os.path.dirname(repo), "prs.json")
+with open(os.path.join(shim, "gh"), "w") as f:
+    f.write(f"#!/bin/sh\ncat {pr_json}\n")
+os.chmod(os.path.join(shim, "gh"), 0o755)
+
+
+def github_says(branch, head, state="MERGED"):
+    with open(pr_json, "w") as f:
+        json.dump([{"headRefName": branch, "headRefOid": head, "number": 2, "state": state, "isDraft": False,
+                    "url": "", "reviewDecision": ""}], f)
+
+
+real_path = env["PATH"]
+env["PATH"] = shim + os.pathsep + real_path
+git("checkout", "-q", "gm"); commit("gm.txt", "one, locally\n", "after the merge")
+github_says("gm", git("rev-parse", "gm~1"))
+rc, out, _ = reshape("contract", "gm")
+check("contract: a branch with a commit GitHub never merged is refused", rc == 1, out)
+git("checkout", "-q", "main"); git("branch", "-f", "gm", "gm~1")
+github_says("gm", git("rev-parse", "gm"))
+rc, out, err = reshape("contract", "gm")
+check("contract: GitHub's MERGED at the local tip contracts it, though main moved past its lines",
+      rc == 0 and out.get("why") == "merged", (rc, out, err))
+env["PATH"] = real_path
+
 # catch-up: a moves (as if a follow-up landed), its child chain catches up
 git("checkout", "-q", "a"); commit("a2.txt", "a2\n", "a2"); git("checkout", "-q", "main")
 reshape("new", "d", "--parent", "a", "--project", "f", "--description", "add d")
