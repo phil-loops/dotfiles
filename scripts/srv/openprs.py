@@ -21,7 +21,7 @@ from concurrent.futures import ThreadPoolExecutor
 from . import ctx
 
 FIELDS = "number,title,headRefName,baseRefName,author,isDraft,url,isCrossRepository"
-DETAIL_FIELDS = "number,headRefName,mergeStateStatus,mergeable,baseRefName,createdAt,latestReviews"
+DETAIL_FIELDS = "number,headRefName,headRefOid,mergeStateStatus,mergeable,baseRefName,createdAt,latestReviews,reviews"
 TTL, FRESH_TTL, DETAIL_TTL = 30.0, 5.0, 90.0
 REMOTES = ("origin", "phil-loops")
 
@@ -122,6 +122,9 @@ def _fetch_detail(slug):
     out = {}
     for p in rows:
         approvals = [rv for rv in p.get("latestReviews") or [] if rv.get("state") == "APPROVED"]
+        # the commit the newest approval saw: an approval counts only for that code (latestReviews omits it)
+        approved = max((rv for rv in p.get("reviews") or [] if rv.get("state") == "APPROVED"),
+                       key=lambda rv: rv.get("submittedAt") or "", default=None)
         out[p.get("headRefName")] = {
             "number": p.get("number"),
             "mergeState": p.get("mergeStateStatus") or "",
@@ -130,6 +133,8 @@ def _fetch_detail(slug):
             "createdAt": p.get("createdAt") or "",
             "approvals": len(approvals),
             "approvedAt": max((rv.get("submittedAt") or "" for rv in approvals), default=""),
+            "headSha": p.get("headRefOid") or "",
+            "approvedSha": ((approved or {}).get("commit") or {}).get("oid") or "",
         }
     return out
 

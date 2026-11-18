@@ -24,7 +24,11 @@ def check(name, ok, detail=""):
 GH = {"Loops-so/loops": [{"number": 1, "headRefName": "feat", "isCrossRepository": False},
                          {"number": 2, "headRefName": "dan/x", "isCrossRepository": False}],
       "phil-loops/loops": [{"number": 7, "headRefName": "bench/y", "isCrossRepository": False}]}
-DETAIL = [{"number": 1, "headRefName": "feat", "mergeStateStatus": "CLEAN", "mergeable": "MERGEABLE", "latestReviews": []},
+DETAIL = [{"number": 1, "headRefName": "feat", "headRefOid": "b" * 40, "mergeStateStatus": "CLEAN", "mergeable": "MERGEABLE",
+           "latestReviews": [{"state": "APPROVED", "submittedAt": "2026-11-18T10:00:00Z"}],
+           "reviews": [{"state": "APPROVED", "submittedAt": "2026-11-17T10:00:00Z", "commit": {"oid": "0" * 40}},
+                       {"state": "COMMENTED", "submittedAt": "2026-11-18T11:00:00Z", "commit": {"oid": "b" * 40}},
+                       {"state": "APPROVED", "submittedAt": "2026-11-18T10:00:00Z", "commit": {"oid": "a" * 40}}]},
           {"number": 99, "headRefName": "closed-since", "mergeStateStatus": "CLEAN", "mergeable": "MERGEABLE", "latestReviews": []}]
 calls, down = [], set()
 
@@ -82,6 +86,8 @@ for _ in range(50):
 d = openprs.detail()
 check("detail decorates a listed PR", d.get("feat", {}).get("mergeState") == "CLEAN", d)
 check("…and never adds one the listing doesn't have", "closed-since" not in d, d)
+check("detail carries the PR's head and the commit its newest approval saw",
+      d["feat"].get("headSha") == "b" * 40 and d["feat"].get("approvedSha") == "a" * 40, d["feat"])
 
 openprs.seed("/repo", ["only"])
 check("a test seeds the listing", openprs.heads() == {"only"} and not openprs.failed())

@@ -306,6 +306,8 @@ def _remote_entities(name, git_ents):
             "base": pr.get("baseRef") or None, "approvals": pr.get("approvals"),
             "mergeState": pr.get("mergeState") or None, "mergeable": pr.get("mergeable") or None,
             "approvedAt": pr.get("approvedAt") or None, "title": pr.get("title") or None,
+            # the PR's head and the commit its newest approval saw: an approval counts only while they're the tip
+            "headSha": pr.get("headSha") or None, "approvedSha": pr.get("approvedSha") or None,
         }
     try:
         with open(os.path.join(watch.common_dir(), "stack-project-merges.json")) as f:
