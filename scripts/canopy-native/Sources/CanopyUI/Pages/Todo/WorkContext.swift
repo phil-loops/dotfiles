@@ -307,6 +307,9 @@ struct WorkContext {
         return "\(a.how == "commit" ? "committed" : "edited") \(ago(now - a.at))"
     }
 
+    /// Whether only evidence puts the chat on the branch — what a dismiss can hide; a binding is Phil's own.
+    static func inferred(_ c: Chat, on branch: String) -> Bool { (c.acted ?? []).contains { $0.branch == branch } }
+
     static func ago(_ secs: Double) -> String {
         secs < 60 ? "just now" : secs < 3600 ? "\(Int(secs / 60))m ago" : "\(Int(secs / 3600))h ago"
     }

@@ -22,6 +22,7 @@ import glob
 import json
 import os
 import re
+import fcntl
 import subprocess
 import time
 
@@ -31,6 +32,19 @@ SOURCE = wj.CLAUDE_CODE_SOURCE
 ACTED_WITHIN = 2 * 3600
 USAGE_TAIL = 512 * 1024
 _COMMON = {}   # repo path -> its git common dir
+
+
+def dismissals_path():
+    return os.environ.get("CANOPY_CHAT_DISMISSALS") or os.path.expanduser("~/.local/state/canopy/chat-dismissals.json")
+
+
+def _dismissals(now):
+    """[{session, branch, at}] Phil dismissed within ACTED_WITHIN: older ones can't outrank any evidence still served."""
+    try:
+        with open(dismissals_path()) as f:
+            return [d for d in json.load(f) if d.get("at", 0) >= now - ACTED_WITHIN]
+    except (OSError, ValueError):
+        return []
 
 
 def _usage_logs():
@@ -68,7 +82,7 @@ def _commits(since):
     return out
 
 
-def _acted(r, commits, now):
+def _acted(r, commits, now, dismissed=()):
     since = now - ACTED_WITHIN
     best = {}
     for branch, ev in (r.get("acted") or {}).items():
@@ -79,7 +93,9 @@ def _acted(r, commits, now):
         # a full id matches exactly; an older row's eight-character prefix is the best it recorded
         if (r["session_id"] == who if len(who) > 8 else r["session_id"].startswith(who)) and at >= best.get(branch, {}).get("at", 0):
             best[branch] = {"branch": branch, "how": "commit", "at": at}
-    return sorted(best.values(), key=lambda a: -a["at"])
+    # a dismissal hides what evidence drew until the chat acts there again (round 28, P6)
+    gone = {d["branch"]: d["at"] for d in dismissed if d.get("session") == r["session_id"]}
+    return sorted((a for a in best.values() if a["at"] > gone.get(a["branch"], -1)), key=lambda a: -a["at"])
 
 
 def presence_dir():
@@ -118,7 +134,7 @@ def fingerprint():
             continue
         out.append((os.path.basename(f), st.st_mtime_ns))
     logs = []
-    for log in _usage_logs().values():
+    for log in [*_usage_logs().values(), dismissals_path()]:
         try:
             st = os.stat(log)
             logs.append((st.st_size, st.st_mtime_ns))
@@ -155,6 +171,31 @@ def bind(req, raw):
     return req._send(200, json.dumps({"ok": True, "work": work, "generation": gen}))
 
 
+def dismiss(req, raw):
+    """POST /chat-dismiss {session, branch: "<repo>:<name>"} — Phil's click: the chat isn't on that branch,
+    whatever its evidence says, until it acts there again."""
+    from . import state
+    try:
+        d = json.loads(raw or "{}")
+        session, branch = d.get("session") or "", d.get("branch") or ""
+        if not wj.SESSION_ID.fullmatch(session) or not re.fullmatch(r"[\w.-]+:[\w./-]+", branch):
+            raise ValueError("chat-dismiss takes {session: a full session id, branch: <repo>:<name>}")
+    except ValueError as e:
+        return req._send(400, json.dumps({"ok": False, "err": str(e)}))
+    path = dismissals_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path + ".lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        now = time.time()
+        kept = [x for x in _dismissals(now) if (x.get("session"), x.get("branch")) != (session, branch)]
+        tmp = f"{path}.{os.getpid()}.tmp"
+        with open(tmp, "w") as f:
+            json.dump(kept + [{"session": session, "branch": branch, "at": now}], f)
+        os.replace(tmp, path)
+    state.poke()
+    return req._send(200, json.dumps({"ok": True}))
+
+
 def entities():
     live = [r for r in _records() if r.get("session_id") and _running(r.get("pid"))
             and agents._lstart(r["pid"]) == " ".join(str(r.get("start_time", "")).split())]
@@ -180,6 +221,7 @@ def entities():
             j.close()
     now = time.time()
     commits = _commits(now - ACTED_WITHIN)
+    dismissed = _dismissals(now)
     chats = {}
     for r in live:
         sid = r["session_id"]
@@ -187,6 +229,6 @@ def entities():
         chats[sid] = {"id": sid, "works": None if error else b["works"], "generation": b["generation"],
                       "at": {"repo": r.get("repo_name") or "", "branch": r.get("branch") or ""},
                       "pane": r.get("tmux_pane") or None, "activeAt": r.get("last_active") or 0,
-                      "acted": _acted(r, commits, now),
+                      "acted": _acted(r, commits, now, dismissed),
                       **({"bindingError": f"work journal unreadable: {type(error).__name__}"} if error else {})}
     return {"chat": chats}

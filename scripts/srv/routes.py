@@ -63,6 +63,7 @@ POST = {
     "/viewed": _r(viewed.post, "repo"),
     "/todo-item": _r(todo.post, "repo"),
     "/chat-bind": _r(chats.bind, "repo", phil=True),     # Phil binds a chat to a branch's work
+    "/chat-dismiss": _r(chats.dismiss, "repo", phil=True),  # Phil: this chat isn't on that branch
     "/outbox-hold": _r(outbox.hold, "repo"),
     "/fix-upstream": _r(sync.fix_upstream, "repo"),      # unset a footgun tracking ref
     "/diverged-additive": _r(sync.diverged_additive, "repo"),   # drafts a push-vehicle branch; never pushes

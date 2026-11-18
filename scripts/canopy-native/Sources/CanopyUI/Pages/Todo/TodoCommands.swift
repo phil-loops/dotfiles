@@ -100,6 +100,15 @@ enum TodoCommands {
                                             settled: { true }, said: "chat \(a.session.prefix(8)) is on \(leaf(b.name))",
                                             failed: "chat \(a.session.prefix(8)) wasn't bound — its binding changed since you looked, or the branch is gone")
                            }))
+        r.register(Command(id: "chat.dismiss", title: "This chat isn't on this branch — hide it until it acts here again", scope: .branch,
+                           budget: .configWrite, needsArg: true, quiet: true,
+                           write: { [weak app] id, arg in
+                               guard let app, let session = arg as? String, let b = app.store.view(Branch.self, id) else { return nil }
+                               return Write(path: app.transport.atRepo(b.repo, "/chat-dismiss"),
+                                            body: ["session": .string(session), "branch": .string(b.id)],
+                                            settled: { true }, said: "chat \(session.prefix(8)) hidden on \(leaf(b.name))",
+                                            failed: "chat \(session.prefix(8)) couldn't be hidden")
+                           }))
         r.register(Command(id: "todo.show", title: "Show an item on its list", scope: .global, needsArg: true, quiet: true,
                            local: { [weak app, weak ui] _, arg in
                                guard let app, let ui, let id = arg as? String, let t = app.store.trackerItem(id) else { throw Refusal("no such item") }
