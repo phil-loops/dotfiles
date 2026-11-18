@@ -429,3 +429,9 @@ An own pass and an independent pass, briefed with the principles and not these c
 5. `reshape-new-binds-session`: `stack-reshape new` adds the creating session's binding to the branch's work.
 6. `serve-bound-sessions`: a branch's chats are bindings to its `stack-work` plus to items it solves, each with liveness from presence.
 7. `draw-bound-sessions`: assignment and chats drawn apart; the unbound list; bind by click with the generation seen; focus the pane.
+
+### Built
+
+Each encoding landed with its tests. Presence already held per conversation (`test-session-presence.py`). `stack-reshape new` mints a branch's work into `branch.<n>.stack-work`, a rename relabels it, and `stack-doctor --prune` retires work whose branch is gone, never an item's or another repo's (`test-stack-reshape.py`, `test-stack-doctor-work.sh`). `bind --add` takes its union in the write and `--expect-generation` refuses a stale decision with the binding now (`test-work-journal.py`). `claim` assigns, then binds the full session id; `stack-reshape new` binds its creator (`test-todo-claim.py`). The server serves a `chat` per live session with the work its binding names, and branches their `work` (`test-chats.py`). Canopy rings a branch for its bound chats apart from who is assigned, lists chats on no work by where they stand, focuses a chat's pane through `claude-jump`, and binds a chat to a branch by Phil's click through `/chat-bind`, refused from a stale generation (`WorkContextTests`, `ChatBindTests`).
+
+Still open: binding a chat whose work is a tracker item, not a branch, by click; and round 25's question of capturing Claude Code messages through `UserPromptSubmit`.
