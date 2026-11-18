@@ -27,15 +27,13 @@ sess="cw-pool-$repo"
 state_dir="$HOME/.cache/cw-pool"; mkdir -p "$state_dir"
 state="$state_dir/$repo"
 
-lock="$state_dir/$repo.lock"
-# a warm takes seconds; a lock older than 10 min is a leak from a SIGKILL/reboot mid-run
-# (~/.cache survives reboots) — steal it or warming is silently dead forever
-if ! mkdir "$lock" 2>/dev/null; then
-  [[ -n "$(find "$lock" -maxdepth 0 -mmin +10 2>/dev/null)" ]] || exit 0
-  rmdir "$lock" 2>/dev/null || true
-  mkdir "$lock" 2>/dev/null || exit 0
-fi
-trap 'rmdir "$lock" 2>/dev/null' EXIT
+# single-flight on a kernel lock (fdlock): it dies with this process however it dies, so a
+# SIGKILL or reboot mid-warm can't strand it (the mkdir lock it replaced needed a 10-min steal).
+# Everything spawned below closes fd 9, or a long-lived child (tmux's server, cw's background
+# sync) would hold the lock for its own lifetime.
+rmdir "$state_dir/$repo.lock" 2>/dev/null || true   # the mkdir lock this replaced
+exec 9>>"$state_dir/$repo.flock"
+"$HOME/.dotfiles/scripts/fdlock" 9 --wait 0 || exit 0
 
 tmux has-session -t "=$sess" 2>/dev/null && exit 0
 
@@ -56,11 +54,11 @@ if [[ -f "$state" ]]; then
 fi
 
 # cw -n's stdout mixes in git's "HEAD is now at …" line; the worktree path is the only line starting with /
-wt=$(cd "$main_top" && "$HOME/.dotfiles/scripts/cw" -n "wt-$(date +%H%M%S)" | grep -m1 '^/')
+wt=$(cd "$main_top" && "$HOME/.dotfiles/scripts/cw" -n "wt-$(date +%H%M%S)" 9>&- | grep -m1 '^/')
 [[ -d "${wt:-}" ]] || { echo "cw-warm: worktree prep failed" >&2; exit 1; }
 echo "$wt" > "$state"
 
 # `exec zsh` after claude so a post-claim exit leaves a shell, and a pool pane
 # whose current command is zsh unambiguously means "claude died here"
 tmux new-session -d -s "$sess" -c "$wt" \
-  "$HOME/.local/bin/claude --dangerously-skip-permissions; exec /bin/zsh -l"
+  "$HOME/.local/bin/claude --dangerously-skip-permissions; exec /bin/zsh -l" 9>&-

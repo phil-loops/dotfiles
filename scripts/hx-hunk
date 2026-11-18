@@ -25,6 +25,7 @@
 # The painted pane runs nothing but `tail -f /dev/null`; each call writes a finished frame to its tty.
 # No daemon, no state beyond the pane id stored on the Helix pane as @hx-hunk-pane.
 import difflib
+import fcntl
 import os
 import re
 import subprocess
@@ -217,19 +218,17 @@ def follow(hx_pane, pane, path, line):
     stamp = f"{os.getpid()}-{time.time()}"
     with open(state + ".want", "w") as out:
         out.write(stamp)
-    lock = state + ".lock"
+    # a kernel lock (flock): it dies with this process, so a killed jump never strands it (the
+    # mkdir lock it replaced was stolen after 5s, which a slow but live jump could lose to)
+    lock = os.open(state + ".flock", os.O_RDWR | os.O_CREAT, 0o644)
     for _ in range(60):
         try:
-            os.mkdir(lock)
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             break
-        except FileExistsError:
-            try:
-                if time.time() - os.path.getmtime(lock) > 5:
-                    os.rmdir(lock)
-            except OSError:
-                pass
+        except BlockingIOError:
             time.sleep(0.05)
     else:
+        os.close(lock)
         return
     try:
         if open(state + ".want").read() != stamp:
@@ -240,10 +239,7 @@ def follow(hx_pane, pane, path, line):
             time.sleep(0.08)
             level(hx_pane, pane, line, offset, old)
     finally:
-        try:
-            os.rmdir(lock)
-        except OSError:
-            pass
+        os.close(lock)   # releases the flock
 
 
 def parse_hunks(diff):

@@ -312,13 +312,11 @@ strip_quarantine() {   # $1 = a cloned node_modules
 if [ "$ACTION" = "warm" ]; then
   [ -d "$MAIN/node_modules" ] && [ ! -L "$MAIN/node_modules" ] || { err "MAIN's node_modules is missing or a symlink"; exit 1; }
   mkdir -p "$POOL"
-  lock="$POOL/.lock"
-  # single-flight; a lock older than 20 min is a leak from a killed clone — steal it
-  if ! mkdir "$lock" 2>/dev/null; then
-    [ -n "$(find "$lock" -maxdepth 0 -mmin +20 2>/dev/null)" ] || exit 0
-    rmdir "$lock" 2>/dev/null; mkdir "$lock" 2>/dev/null || exit 0
-  fi
-  trap 'rmdir "$lock" 2>/dev/null' EXIT
+  # single-flight on a kernel lock (fdlock): it dies with this process, so a killed clone can't
+  # strand it (the mkdir lock it replaced needed a 20-min steal). Nothing below outlives us.
+  rmdir "$POOL/.lock" 2>/dev/null || true   # the mkdir lock this replaced
+  exec 9>>"$POOL/.flock"
+  "$HOME/.dotfiles/scripts/fdlock" 9 --wait 0 || exit 0
   stamp="$(lock_stamp)"
   for e in "$POOL"/*/; do
     [ -d "$e" ] || continue
