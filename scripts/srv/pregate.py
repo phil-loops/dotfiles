@@ -9,6 +9,9 @@
 # "already tried this tree" memo: a failing root costs ONE typecheck per tree, not one
 # per tick, and its verdict is waiting the moment the branch is opened.
 #
+# An open PR's follow-up (local ahead of origin's head) gets the QUICK set the same way: its
+# push door only advises (tooling-doctor P5), so the advice is ready before p, not after it.
+#
 # The currency filter is what keeps this cheap: stale roots (the archived/parked
 # hundreds) are behind origin/main and never qualify; a root becomes a candidate exactly
 # when a restack brings it current — which is exactly when its old verdict died.
@@ -45,26 +48,43 @@ def _current_set():
 
 
 
+def _followups(snap):
+    """Open-PR branches with commits origin doesn't have yet: their push door only advises
+    (tooling-doctor P5), so the quick set runs ahead of p and the door has its advice ready."""
+    for b in sorted(snap.pr_heads()):
+        local, origin = snap.local(b), snap.remote(b)
+        if local and origin and local != origin and snap.is_ancestor(origin, b):
+            yield b
+
+
+def _unmet(snap, b):
+    """Whether b's tree still wants a run: no verdict, and no run for this tree (a finished
+    one's green is harvested here; a red stands as the "already tried this tree" memo)."""
+    tree = snap.tree(b)
+    if not tree or push.verdict_stands(b, snap):
+        return False
+    run = push.gate_run(b)
+    if run and run.meta.get("tree") == tree:
+        if not run.alive():
+            result = push.gate_result(run)
+            if result and result.get("ok"):
+                push._record_green(b, tree, result.get("gates", []))
+        return False
+    return True
+
+
 def _candidate():
+    """(branch, quick) for the next ambient run, or None: current roots get the full set, as a
+    first push needs it; open PRs' follow-ups get the quick set CI's re-run complements."""
     from . import repostate
     snap = repostate.snapshot()
     current = _current_set()
     for b in _roots():
-        if b not in current or not snap.exists(b) or _archived(snap, b):
-            continue
-        tree = snap.tree(b)
-        if not tree or push.verdict_stands(b, snap):
-            continue
-        run = push.gate_run(b)
-        if run and run.meta.get("tree") == tree:
-            if run.alive():
-                continue
-            # finished for this exact tree — harvest a green, let a red stand as the memo
-            result = push.gate_result(run)
-            if result and result.get("ok"):
-                push._record_green(b, tree, result.get("gates", []))
-            continue
-        return b
+        if b in current and snap.exists(b) and not _archived(snap, b) and _unmet(snap, b):
+            return b, False
+    for b in _followups(snap):
+        if snap.exists(b) and not _archived(snap, b) and _unmet(snap, b):
+            return b, True
     return None
 
 
@@ -78,8 +98,8 @@ def pregate_forever():
                 continue   # trees about to move — gate after the restack, not before
             if any(r.alive() for r in push.gate_runs().values()):
                 continue   # one gates run machine-wide: never stack a tsc under Phil's click
-            b = _candidate()
-            if b:
-                push._spawn_gates(b, fix=False, background=True)
+            got = _candidate()
+            if got:
+                push._spawn_gates(got[0], fix=False, background=True, quick=got[1])
         except Exception:
             pass   # an ambient nicety must never take the server down
