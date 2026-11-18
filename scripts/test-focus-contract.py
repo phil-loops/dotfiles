@@ -121,5 +121,23 @@ check("kid and par go once kid lands", not exists("kid") and not exists("par"))
 check("the shipped forest leaves no keys", subprocess.run(["git", "-C", repo, "config", "--get-regexp", r"^stack-project\.proj\."],
                                                           capture_output=True, text=True, env=env).stdout == "")
 
+# a landed root with a PUBLISHED child: the child can't be rebased and contract-only won't drop a
+# parent under it, so the forest used to sit (disable-evidence, #11659). Now the child catches up
+# on main by a merge against the tip it was built on, its quick gates queue, and the root goes
+from srv import push  # noqa: E402
+mk("pr2", "main", "pub"); mk("pk", "pr2", "pub")
+git("push", "-q", "origin", "pk")
+land("pr2")
+pk_old, pr2_tip = git("rev-parse", "pk"), git("rev-parse", "pr2")
+sync._pr_state_map = lambda: {"pr2": {"state": "MERGED", "head": pr2_tip}}
+spawned = []
+push._spawn_gates = lambda b, **k: spawned.append((b, k.get("quick")))
+st2 = {"contracted": {}}
+focus._contract_project("pub", {"pr2": pr2_tip}, st2, set())
+check("the published child caught up on main by a merge (child, origin/main)",
+      git("rev-list", "--parents", "-n1", "pk").split()[1:] == [pk_old, git("rev-parse", "origin/main")])
+check("…points at main, and the landed root is gone", focus._parent("pk") == "main" and not exists("pr2"))
+check("…and its quick gates are queued", spawned == [("pk", True)], spawned)
+
 print(f"\n{'OK' if not failures else 'FAIL'} — {failures} failure(s)")
 sys.exit(1 if failures else 0)

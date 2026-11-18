@@ -4,6 +4,7 @@
   stack-reshape new <branch> --parent <p|main> --project <proj> --description "<one line>"
   stack-reshape reparent <branch> <new-parent> [--description "<one line>"]
   stack-reshape contract <branch>
+  stack-reshape land <parent>
   stack-reshape rename <old> <new>
   stack-reshape catch-up <branch>
 
@@ -64,6 +65,7 @@ def main(argv):
         "new": (1, lambda: reshape.new(pos[0], opt.get("parent", "main"), opt.get("project", ""), opt.get("description", ""))),
         "reparent": (2, lambda: reshape.reparent(pos[0], pos[1], opt.get("description", ""))),
         "contract": (1, lambda: reshape.contract(pos[0])),
+        "land": (1, lambda: reshape.land(pos[0])),
         "rename": (2, lambda: reshape.rename(pos[0], pos[1])),
         "catch-up": (1, lambda: reshape.catch_up(pos[0])),
     }

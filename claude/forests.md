@@ -33,7 +33,7 @@ A forest's structure moves through `stack-reshape` verbs — `new`, `reparent` (
 
 1. `git fetch origin main && git branch -f main origin/main` — refresh main BEFORE diagnosing or diffing anything.
 2. Snapshot every branch's SHA first — descendants need the pre-rebase parent SHA as the cut point.
-3. Bottom-up, for an unpublished branch: `git rebase --onto <new-parent> <old-parent-sha> <branch>` — always name the branch; run each rebase in the worktree that has the branch checked out (throwaway worktree for unchecked-out branches). Verify diffstat parity after each move. A published PR branch is append-only (CLAUDE.md *History*): it catches up by a catch-up merge of its new parent, plain-pushed, never a rebase.
+3. Bottom-up, for an unpublished branch: `git rebase --onto <new-parent> <old-parent-sha> <branch>` — always name the branch; run each rebase in the worktree that has the branch checked out (throwaway worktree for unchecked-out branches). Verify diffstat parity after each move. A published PR branch is append-only (CLAUDE.md *History*): it catches up by a catch-up merge of its new parent, plain-pushed, never a rebase — and when its parent squash-merged, `stack-reshape contract <parent>` (or `land`) merges main against the tip it was built on, since git's own merge base is pre-squash and conflicts (focus-sync does this by itself).
 4. **Contract as part of the walk**: a branch whose `parent...child` diff is empty, or whose content main already carries (merged or squash-merged), is done — `stack-reshape contract <b>` drops it, re-points its children and cleans its config. Never report "the branch is empty" and stop.
 5. A rebase is a comment-review checkpoint: re-read the diff against the comment gate and trim.
 
