@@ -47,6 +47,12 @@ public final class Store {
     public private(set) var raw: RawTables = [:]
 
     public private(set) var ops: [Op] = []
+    private struct BranchReceipt {
+        var tips: Set<String>
+        var fields: JSONObject
+        var wrote: Int
+    }
+    private var branchReceipts: [String: BranchReceipt] = [:]
     /// Entities the last hydrate or patch couldn't decode ("type/id: error"). Empty when healthy.
     public private(set) var decodeFailures: [String] = []
 
@@ -77,6 +83,7 @@ public final class Store {
     // ── hydrate / patch ──
 
     public func hydrate(_ s: Snapshot) {
+        if s.epoch != epoch { branchReceipts = [:] }
         let e = s.entities
         repo = e.repo.values; project = e.project.values; branch = e.branch.values; pr = e.pr.values
         landed = e.landed.values; conv = e.conv.values; thread = e.thread.values; draft = e.draft.values
@@ -86,6 +93,7 @@ public final class Store {
         epoch = s.epoch
         versions = s.versions
         asOf = s.asOf
+        reconcileReceipts()
         hydrations += 1
         ready = true
         revision += 1
@@ -120,6 +128,7 @@ public final class Store {
         if !failed.isEmpty { decodeFailures = Array((decodeFailures + failed).suffix(50)) }
         versions[p.domain] = p.version
         if let a = p.asOf { asOf[p.domain] = max(asOf[p.domain] ?? 0, a) }
+        reconcileReceipts()
         revision += 1
         changed()
         return .ok
@@ -137,6 +146,30 @@ public final class Store {
 
     public func addOps(_ new: [Op]) { ops.append(contentsOf: new); revision += 1 }
     public func dropOps(seq: Int) { ops.removeAll { $0.seq == seq }; revision += 1 }
+
+    /// Install a committed revision without inventing a stream version. Older reads stay covered
+    /// until a causal acknowledgement or a different branch revision supersedes the receipt.
+    @discardableResult public func acceptBranchReceipt(_ id: String, epoch: String, expectedTip: String,
+                                                       fields: JSONObject, wrote: Int) -> Bool {
+        guard self.epoch == epoch, wrote > 0, let tip = fields["tip"]?.string,
+              let current = view(Branch.self, id)?.tip, current == expectedTip || current == tip else { return false }
+        if (asOf[Domain.git] ?? 0) >= wrote { return current == tip }
+        var receipt = branchReceipts[id] ?? BranchReceipt(tips: [], fields: [:], wrote: 0)
+        receipt.tips.formUnion([expectedTip, tip])
+        receipt.fields.merge(fields) { $1 }
+        receipt.wrote = max(receipt.wrote, wrote)
+        branchReceipts[id] = receipt
+        revision += 1
+        changed()
+        return true
+    }
+
+    private func reconcileReceipts() {
+        branchReceipts = branchReceipts.filter { id, receipt in
+            guard let tip = branch[id]?.tip, receipt.tips.contains(tip) else { return false }
+            return (asOf[Domain.git] ?? 0) < receipt.wrote
+        }
+    }
 
     // ── reads ──
 
@@ -178,8 +211,10 @@ public final class Store {
     public func view<T: Entity>(_ t: T.Type, _ id: String) -> T? {
         guard let base = row(t, id) else { return nil }
         let mine = ops.filter { $0.type == T.kind && $0.id == id }
-        if mine.isEmpty { return base }
+        let receipt = T.kind == .branch ? branchReceipts[id] : nil
+        if mine.isEmpty && receipt == nil { return base }
         guard var obj = raw[T.kind.rawValue]?[id]?.object else { return base }
+        if let receipt { obj.merge(receipt.fields) { $1 } }
         for op in mine { obj.merge(op.fields) { $1 } }
         return (try? JSONValue.object(obj).decode(T.self)) ?? base
     }
@@ -197,6 +232,7 @@ public final class Store {
     /// An entity's raw JSON object with the overlay applied — for fields the shared models lack.
     public func rawView(_ type: String, _ id: String) -> JSONObject? {
         guard var obj = raw[type]?[id]?.object else { return nil }
+        if type == "branch", let receipt = branchReceipts[id] { obj.merge(receipt.fields) { $1 } }
         for op in ops where op.type.rawValue == type && op.id == id { obj.merge(op.fields) { $1 } }
         return obj
     }

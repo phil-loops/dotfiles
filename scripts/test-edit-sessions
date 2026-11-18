@@ -1,0 +1,286 @@
+#!/usr/bin/env python3
+"""Exercise editor transactions against disposable repositories, without remotes."""
+import json
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import unittest
+import uuid
+from unittest import mock
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from srv import ctx, edits, state
+
+
+class Request:
+    def _send(self, code, body, *args):
+        self.code, self.data = code, json.loads(body)
+
+
+class EditSessions(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix="canopy-edit-test-")
+        self.root = Path(self.temporary.name)
+        self.repo = self.root / "repo"
+        self.repo.mkdir()
+        self.git("init", "-q", "-b", "main")
+        for key, value in {"user.name": "Editor", "user.email": "editor@example.invalid", "commit.gpgsign": "false",
+                           "core.hooksPath": str(self.root / "hooks")}.items():
+            self.git("config", key, value)
+        (self.repo / "a.txt").write_text("base\n")
+        (self.repo / "untouched.txt").write_text("keep\n")
+        self.git("add", ".")
+        self.git("commit", "-qm", "base")
+        self.base = self.git("rev-parse", "HEAD")
+        self.git("checkout", "-qb", "feature")
+        (self.repo / "a.txt").write_text("before\n")
+        self.git("commit", "-qam", "feat: change a")
+        self.tip = self.git("rev-parse", "HEAD")
+        self.git("config", "branch.feature.stack-parent", "main")
+        self.old = ctx.CWD, ctx.MAIN_WT, ctx.REPOS, ctx.run
+        self.cleanup_patch = mock.patch.object(edits, "_cleanup_later")
+        self.cleanup_patch.start()
+        ctx.CWD = ctx.MAIN_WT = str(self.repo)
+        ctx.REPOS = {"fixture": str(self.repo)}
+        ctx.run = lambda args, timeout=None: subprocess.run(args, cwd=ctx.repo_cwd(), capture_output=True, text=True)
+
+    def tearDown(self):
+        self.cleanup_patch.stop()
+        ctx.CWD, ctx.MAIN_WT, ctx.REPOS, ctx.run = self.old
+        ctx.clear_repo()
+        self.temporary.cleanup()
+
+    def git(self, *args):
+        return subprocess.run(["git", "-C", str(self.repo), *args], capture_output=True, text=True, check=True).stdout.strip()
+
+    def call(self, handler, data):
+        req = Request()
+        handler(req, json.dumps(data))
+        self.assertEqual(req.code, 200)
+        return req.data
+
+    def prepare(self):
+        session = str(uuid.uuid4())
+        data = {"branch": "feature", "expectedTip": self.tip, "baseSha": self.base, "session": session, "epoch": state.EPOCH}
+        answer = self.call(edits.prepare, data)
+        self.assertTrue(answer["ok"], answer)
+        return data, Path(answer["dir"])
+
+    def commit(self, data):
+        return self.call(edits.commit, {**data, "operation": data["session"]})
+
+    def test_each_editor_owns_its_checkout_and_gutter_base(self):
+        first, a = self.prepare()
+        (a / "a.txt").write_text("private\n")
+        second, b = self.prepare()
+        self.assertNotEqual(a, b)
+        self.assertEqual((a / "a.txt").read_text(), "private\n")
+        self.assertEqual((b / "a.txt").read_text(), "before\n")
+        self.assertEqual(subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=a, text=True).strip(), self.base)
+        again = self.call(edits.prepare, first)
+        self.assertEqual(again["dir"], str(a))
+        self.assertEqual((a / "a.txt").read_text(), "private\n")
+
+    def test_save_receipt_names_exact_git_objects_and_updates_attached_checkout(self):
+        data, checkout = self.prepare()
+        (checkout / "a.txt").write_text("after\n")
+        receipt = self.commit(data)
+        self.assertTrue(receipt["ok"], receipt)
+        self.assertEqual(self.git("show", "feature:a.txt"), "after")
+        self.assertEqual((self.repo / "a.txt").read_text(), "after\n")
+        self.assertEqual(self.git("status", "--porcelain"), "")
+        self.assertEqual(receipt["expectedTip"], self.tip)
+        self.assertEqual(receipt["baseSha"], self.base)
+        self.assertEqual(receipt["sha"], self.git("rev-parse", "HEAD"))
+        self.assertEqual(receipt["tree"], self.git("rev-parse", "HEAD^{tree}"))
+        self.assertEqual(receipt["history"]["sha"], receipt["sha"])
+        self.assertIn("-base\n+after", receipt["files"][0]["patch"])
+
+    def test_lost_response_replays_the_same_frozen_commit_after_checkout_changes(self):
+        data, checkout = self.prepare()
+        (checkout / "a.txt").write_text("frozen\n")
+        with mock.patch.object(edits, "_retire"):
+            first = self.commit(data)
+        self.assertTrue(first["ok"], first)
+        (checkout / "a.txt").write_text("later\n")
+        second = self.commit(data)
+        self.assertEqual(first, second)
+        self.assertEqual(self.git("show", "feature:a.txt"), "frozen")
+        self.assertEqual(self.git("rev-list", "--count", "main..feature"), "2")
+
+    def test_success_retires_the_checkout_but_keeps_the_replay_receipt(self):
+        data, checkout = self.prepare()
+        (checkout / "a.txt").write_text("saved\n")
+        receipt = self.commit(data)
+        self.assertTrue(receipt["ok"], receipt)
+        edits._cleanup(str(self.repo), checkout.parent)
+        self.assertFalse(checkout.exists())
+        self.assertEqual(self.commit(data), {**receipt, "epoch": state.EPOCH})
+
+    def test_uncommitted_ignored_files_keep_the_checkout(self):
+        data, checkout = self.prepare()
+        (checkout / "a.txt").write_text("saved\n")
+        exclude = self.repo / ".git/info/exclude"
+        with exclude.open("a") as out:
+            out.write("\nprivate-note\n")
+        (checkout / "private-note").write_text("keep me\n")
+        receipt = self.commit(data)
+        self.assertTrue(receipt["ok"], receipt)
+        edits._cleanup(str(self.repo), checkout.parent)
+        self.assertEqual((checkout / "private-note").read_text(), "keep me\n")
+
+    def test_restart_after_ref_advance_recovers_the_prepared_receipt(self):
+        data, checkout = self.prepare()
+        (checkout / "a.txt").write_text("frozen\n")
+        common, root = edits._root(data["session"])
+        session = edits._load(root)
+        receipt = edits._freeze(root, session, data["session"])
+        edits._advance(session)
+        self.assertEqual(self.commit(data), {**receipt, "epoch": state.EPOCH})
+        self.assertEqual(edits._load(root)["state"], "committed")
+
+    def test_an_old_epoch_cannot_commit_after_restart_but_an_explicit_retry_can(self):
+        data, checkout = self.prepare()
+        (checkout / "a.txt").write_text("saved\n")
+        with mock.patch.object(state, "EPOCH", "restarted"):
+            self.assertFalse(self.commit(data)["ok"])
+            self.assertEqual(self.git("rev-parse", "feature"), self.tip)
+            answer = self.commit({**data, "epoch": "restarted"})
+            self.assertTrue(answer["ok"], answer)
+            self.assertEqual(answer["epoch"], "restarted")
+
+    def test_a_different_operation_cannot_recapture_a_saved_session(self):
+        data, checkout = self.prepare()
+        (checkout / "a.txt").write_text("frozen\n")
+        self.assertTrue(self.commit(data)["ok"])
+        answer = self.call(edits.commit, {**data, "operation": str(uuid.uuid4())})
+        self.assertFalse(answer["ok"])
+
+    def test_two_clients_from_the_same_tip_cannot_overwrite_each_other(self):
+        a, first = self.prepare()
+        b, second = self.prepare()
+        (first / "a.txt").write_text("first\n")
+        (second / "a.txt").write_text("second\n")
+        self.assertTrue(self.commit(a)["ok"])
+        refusal = self.commit(b)
+        self.assertFalse(refusal["ok"])
+        self.assertEqual(self.git("show", "feature:a.txt"), "first")
+        self.assertEqual((second / "a.txt").read_text(), "second\n")
+        self.assertEqual(edits._load(second.parent)["state"], "prepared")
+
+    def test_attached_worktree_edits_to_the_same_path_are_preserved(self):
+        data, checkout = self.prepare()
+        (checkout / "a.txt").write_text("editor\n")
+        (self.repo / "a.txt").write_text("local unsaved\n")
+        answer = self.commit(data)
+        self.assertFalse(answer["ok"])
+        self.assertEqual(self.git("rev-parse", "feature"), self.tip)
+        self.assertEqual((self.repo / "a.txt").read_text(), "local unsaved\n")
+        self.assertFalse((self.repo / ".git/refs/heads/feature.lock").exists())
+
+    def test_unrelated_worktree_edits_and_staged_files_survive(self):
+        data, checkout = self.prepare()
+        (checkout / "a.txt").write_text("editor\n")
+        (self.repo / "untouched.txt").write_text("local staged\n")
+        self.git("add", "untouched.txt")
+        answer = self.commit(data)
+        self.assertTrue(answer["ok"], answer)
+        self.assertEqual(self.git("diff", "--cached", "--name-only"), "untouched.txt")
+        self.assertEqual((self.repo / "untouched.txt").read_text(), "local staged\n")
+
+    def test_binary_symlink_executable_rename_and_delete_are_frozen(self):
+        data, checkout = self.prepare()
+        (checkout / "a.txt").rename(checkout / "renamed.txt")
+        (checkout / "untouched.txt").unlink()
+        (checkout / "binary").write_bytes(b"\0\xff\x01")
+        (checkout / "link").symlink_to("renamed.txt")
+        (checkout / "executable").write_text("#!/bin/sh\nexit 0\n")
+        (checkout / "executable").chmod(0o755)
+        answer = self.commit(data)
+        self.assertTrue(answer["ok"], answer)
+        self.assertEqual(subprocess.check_output(["git", "show", "feature:binary"], cwd=self.repo), b"\0\xff\x01")
+        tree = self.git("ls-tree", "feature")
+        self.assertIn("120000 blob", tree)
+        self.assertIn("100755 blob", tree)
+        self.assertNotIn("\tuntouched.txt", tree)
+        self.assertNotIn("\ta.txt", tree)
+        self.assertIn("renamed.txt", answer["paths"])
+
+    def test_reverting_a_file_to_the_comparison_base_removes_its_diff(self):
+        data, checkout = self.prepare()
+        (checkout / "a.txt").write_text("base\n")
+        answer = self.commit(data)
+        self.assertTrue(answer["ok"], answer)
+        self.assertEqual(answer["paths"], ["a.txt"])
+        self.assertEqual(answer["files"], [])
+
+    def test_a_second_rename_replaces_the_original_diff_source_as_well(self):
+        self.git("mv", "untouched.txt", "middle.txt")
+        self.git("commit", "-qm", "rename")
+        self.tip = self.git("rev-parse", "HEAD")
+        data, checkout = self.prepare()
+        (checkout / "middle.txt").rename(checkout / "final.txt")
+        answer = self.commit(data)
+        self.assertTrue(answer["ok"], answer)
+        self.assertEqual(set(answer["paths"]), {"untouched.txt", "middle.txt", "final.txt"})
+        self.assertEqual({file["path"] for file in answer["files"]}, {"untouched.txt", "final.txt"})
+
+    def test_another_repository_cannot_supply_the_checkout(self):
+        data, checkout = self.prepare()
+        replacement = checkout.with_name("old")
+        checkout.rename(replacement)
+        checkout.mkdir()
+        self.assertFalse(self.commit(data)["ok"])
+        self.assertEqual((replacement / "a.txt").read_text(), "before\n")
+
+    def test_matching_heads_in_another_repository_do_not_transfer_a_lease(self):
+        data, checkout = self.prepare()
+        (checkout / "a.txt").write_text("original session\n")
+        other = self.root / "other"
+        subprocess.run(["git", "clone", "-q", "--shared", "--no-checkout", str(self.repo), str(other)], check=True)
+        ctx.set_repo(str(other))
+        try:
+            answer = self.commit(data)
+            self.assertFalse(answer["ok"])
+            self.assertEqual(subprocess.check_output(["git", "rev-parse", "feature"], cwd=other, text=True).strip(), self.tip)
+        finally:
+            ctx.clear_repo()
+        self.assertEqual((checkout / "a.txt").read_text(), "original session\n")
+
+    def test_manual_index_changes_are_preserved_and_refused(self):
+        data, checkout = self.prepare()
+        (checkout / "a.txt").write_text("staged separately\n")
+        subprocess.run(["git", "add", "a.txt"], cwd=checkout, check=True)
+        (checkout / "a.txt").write_text("unstaged separately\n")
+        answer = self.commit(data)
+        self.assertFalse(answer["ok"])
+        self.assertEqual(self.git("rev-parse", "feature"), self.tip)
+        self.assertEqual(subprocess.check_output(["git", "show", ":a.txt"], cwd=checkout, text=True), "staged separately\n")
+
+    def test_detached_branch_commits_with_compare_and_swap(self):
+        data, checkout = self.prepare()
+        self.git("checkout", "-q", "main")
+        (checkout / "a.txt").write_text("detached\n")
+        answer = self.commit(data)
+        self.assertTrue(answer["ok"], answer)
+        self.assertEqual(self.git("show", "feature:a.txt"), "detached")
+        self.assertEqual(self.git("symbolic-ref", "--short", "HEAD"), "main")
+
+    def test_ref_movement_between_validation_and_prepare_is_refused(self):
+        data, checkout = self.prepare()
+        (checkout / "a.txt").write_text("editor\n")
+        other = self.git("commit-tree", "HEAD^{tree}", "-p", self.tip, "-m", "concurrent")
+        original = edits._attached
+        def move(branch):
+            self.git("update-ref", "refs/heads/feature", other, self.tip)
+            return original(branch)
+        with mock.patch.object(edits, "_attached", side_effect=move):
+            answer = self.commit(data)
+        self.assertFalse(answer["ok"])
+        self.assertEqual(self.git("rev-parse", "feature"), other)
+        self.assertEqual((self.repo / "a.txt").read_text(), "before\n")
+
+
+if __name__ == "__main__":
+    unittest.main()

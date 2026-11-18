@@ -17,7 +17,7 @@ import json
 from collections import namedtuple
 
 from . import evidence   # own line: the big import below is contested across sessions
-from . import catchup, ctx, forestlock
+from . import catchup, ctx, edits, forestlock
 from . import (actor, chat, integrate, lsp, outbox, outline, packet, picker, preview, push, queue, restack,
                review, reviewdesk, reviews, sync, syntax, todo, tutor, usage, verdicts, viewed)
 
@@ -50,6 +50,7 @@ POST = {
     "/lsp/prepare": _r(lsp.prepare),                     # moves the type trees (its own scratch checkouts)
     "/syntax/units": _r(syntax.units),
     "/integrate": _r(integrate.check),                   # does the whole forest land on main (scratch worktree)
+    "/edit-session": _r(edits.prepare, "machine"),
 
     # ── this repo's state ──
     "/open-url": _r(reviews.open_url, "repo"),           # a GitHub URL → its page (imports a PR as review/pr-N)
@@ -91,6 +92,7 @@ POST = {
     "/review-apply": _r(reviewdesk.apply, "history"),    # a suggestion as a local commit
     "/review-address": _r(reviewdesk.address, "history"),
     "/review-helix": _r(reviewdesk.helix, "history", "machine"),   # opens Helix, then lands its edits
+    "/edit-commit": _r(edits.commit, "history", "machine"),
 
     # ── the machine ──
     "/open": _r(picker.open_file, "machine"),            # a file in the warm review-nvim
