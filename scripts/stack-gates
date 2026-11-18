@@ -14,7 +14,7 @@ Each entry is "<label>::<shell command>"; a non-zero exit fails that gate. With 
 config, falls back to auto-detected defaults (repo-local tsc if a tsconfig exists,
 oxfmt --check on changed *.ts/*.tsx if oxfmt is present).
 
-  stack-gates [<branch> | --branch <b>] [--fix] [--skip <gate>]… [--quick] [--progress <file>]
+  stack-gates [<branch> | --branch <b>] [--fix] [--skip <gate>]… [--quick] [--full] [--progress <file>]
                                        run in the worktree of <b>; if none exists, materialize
                                        its stack-open scratch checkout (detached at the tip) —
                                        never gates an unrelated tree. Unrecognized arguments
@@ -240,6 +240,86 @@ def default_gates(cwd, branch=""):
     return gates
 
 
+CODE_EXT = (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts")
+ENV_GATES = ("typecheck", "lint", "format", "tests")   # the ones that read node_modules / .gen
+
+
+def diff_files(cwd, branch):
+    """The branch's own changed files: against its stack parent when it has one, else
+    origin/main — the same base the review and the PR diff use. None when no base resolves."""
+    parent = gconf(f"branch.{branch}.stack-parent", cwd) if branch else ""
+    ref = parent if parent and parent not in ("main", "master") and \
+        run(["git", "rev-parse", "--verify", "-q", parent], cwd).returncode == 0 else "origin/main"
+    base = run(["git", "merge-base", ref, "HEAD"], cwd).stdout.strip()
+    if not base:
+        return None, ""
+    return [f for f in run(["git", "diff", "--name-only", base, "HEAD"], cwd).stdout.splitlines() if f], base
+
+
+def kind_of(path):
+    name = os.path.basename(path)
+    if re.search(r"(^|/)migrations/.+\.sql$", path):
+        return "migration"
+    if name == "schema.prisma":
+        return "schema"
+    if name in ("package.json", "package-lock.json"):
+        return "deps"
+    if re.search(r"\.test\.(ts|tsx|js|jsx|mjs|cjs|mts|cts)$", name):
+        return "test"
+    if name.endswith(CODE_EXT):
+        return "code"
+    if name.endswith((".md", ".mdx", ".txt")) or path.startswith("docs/"):
+        return "doc"
+    return "unmapped"   # config, workflows, assets: the full set, said out loud
+
+
+def schema_readers(cwd, base):
+    """Whether TS code names a model, field or enum the schema diff touched — a schema change
+    nothing reads can't break a typecheck (a new column only a migration knows about)."""
+    diff = run(["git", "diff", base, "HEAD", "--", "*schema.prisma"], cwd).stdout
+    names = set()
+    for ln in diff.splitlines():
+        if not ln[:1] in "+-" or ln.startswith(("+++", "---")):
+            continue
+        m = re.match(r"[+-]\s*(?:model|enum|type)\s+(\w+)", ln) or re.match(r"[+-]\s+(\w+)\s+\w", ln)
+        if m and m.group(1) not in ("@@index", "@@unique", "@@map", "@@id"):
+            names.add(m.group(1))
+    for n in sorted(names):
+        if run(["git", "grep", "-q", "-w", n, "--", "*.ts", "*.tsx"], cwd).returncode == 0:
+            return n
+    return ""
+
+
+def pick_gates(cwd, branch, gates):
+    """Gates follow what the diff touches (tooling-doctor P5, Phil 2026-11-17: "a migration-only
+    branch shouldn't run lint or tests at all"). Returns (gates, skips, note); code, dependencies
+    or any file kind not mapped here keeps the full set."""
+    files, base = diff_files(cwd, branch)
+    if not files:
+        return gates, {}, ""
+    kinds = {kind_of(f) for f in files}
+    names = {n for n, _ in gates}
+    out = list(gates)
+    if "migration" in kinds:
+        new = [f for f in files if kind_of(f) == "migration"]
+        out.append(("squawk", "npx -y squawk-cli " + " ".join(shlex.quote(f) for f in new)))
+    if kinds & {"code", "deps", "unmapped"}:
+        return out, {}, ""
+    skips = {}
+    touched = ", ".join(sorted(kinds))
+    reader = schema_readers(cwd, base) if "schema" in kinds else ""
+    if "typecheck" in names and not reader:
+        skips["typecheck"] = f"skipped — the diff ({touched}) changes no code anything types against; CI checks it"
+    if "lint" in names:
+        skips["lint"] = f"skipped — the diff ({touched}) changes no code to lint; CI checks it"
+    if "tests" in names and "test" not in kinds:
+        skips["tests"] = f"skipped — the diff ({touched}) has no tests to run"
+    if "format" in names and "test" not in kinds:
+        skips["format"] = f"skipped — the diff ({touched}) has no TS to format"
+    note = f"diff touches {touched}" + (f"; typecheck kept, code names `{reader}`" if reader else "")
+    return out, skips, note
+
+
 def gconf(key, cwd):
     return run(["git", "config", "--get", key], cwd).stdout.strip()
 
@@ -414,6 +494,7 @@ def main():
     do_fix = False
     skips = {}
     quick = False
+    full = False   # every gate, whatever the diff touches (on demand; the default follows the diff)
     positional = []
     unknown = []
     argv = sys.argv[1:]
@@ -435,6 +516,9 @@ def main():
         elif a == "--quick":
             quick = True
             i += 1
+        elif a == "--full":
+            full = True
+            i += 1
         elif a.startswith("-"):
             unknown.append(a)
             i += 1
@@ -451,7 +535,7 @@ def main():
         verdict = {"ok": False, "gates": [
             {"name": "usage", "ok": False, "ms": 0,
              "summary": f"unrecognized argument(s): {bad}\n"
-                        "usage: stack-gates [<branch> | --branch <b>] [--fix] [--skip <gate>]… [--quick] [--progress <file>]"}]}
+                        "usage: stack-gates [<branch> | --branch <b>] [--fix] [--skip <gate>]… [--quick] [--full] [--progress <file>]"}]}
         print(json.dumps(verdict))
         return 0
 
@@ -478,11 +562,20 @@ def main():
                 print(json.dumps(verdict))
                 return 0
         cwd = wt
-    t0 = time.time()
-    emit({"event": "setup", "step": "env", "ts": t0})
-    env_notes, env_ok = env_repair(cwd)
-    env_ms = int((time.time() - t0) * 1000)
     gates = configured_gates(cwd) or default_gates(cwd, branch)
+    picked_note, not_needed = "", set()
+    if not full:
+        gates, picked, picked_note = pick_gates(cwd, branch, gates)
+        not_needed = {g for g in picked if g not in skips}
+        for g, why in picked.items():
+            skips.setdefault(g, why)
+    t0 = time.time()
+    if any(n in ENV_GATES and n not in skips for n, _ in gates):
+        emit({"event": "setup", "step": "env", "ts": t0})
+        env_notes, env_ok = env_repair(cwd)
+    else:
+        env_notes, env_ok = [], True   # nothing selected reads node_modules or .gen
+    env_ms = int((time.time() - t0) * 1000)
     fixes = (configured_fixes(cwd) or default_fixes(cwd, branch, borrowed)) if do_fix else {}
     # fresh is unsatisfiable — not merely unmet — for a branch pinned under an open PR.
     pinned_by = pinning_ancestor(cwd, branch)
@@ -495,7 +588,7 @@ def main():
         return 0
 
     plan = (["env"] if env_notes else []) + [name for name, _ in gates]
-    emit({"event": "plan", "gates": plan})
+    emit({"event": "plan", "gates": plan, **({"why": picked_note} if picked_note else {})})
     results = []
     all_ok = True
     if env_notes:
@@ -514,7 +607,10 @@ def main():
         return 0
     for name, cmd in gates:
         if name in skips:
-            entry = {"name": name, "ok": True, "ms": 0, "summary": "", "advisory": True, "skipped": True,
+            # a gate the diff can't affect is not a waiver: the verdict is complete for this
+            # tree, so it is "notNeeded", never "skipped" (the server re-runs a green that skipped)
+            entry = {"name": name, "ok": True, "ms": 0, "summary": "", "advisory": True,
+                     **({"notNeeded": True} if name in not_needed else {"skipped": True}),
                      "warn": f"{name} {skips[name]}"}
             results.append(entry)
             emit({"event": "done", "gate": name, "ok": True, "ms": 0, "warn": entry["warn"]})
