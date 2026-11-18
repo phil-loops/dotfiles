@@ -33,6 +33,7 @@ and every probe answers the same — so it would read the very same files, and e
 Design, the counterexample per key part, and measurements: git -C ~/.dotfiles show f3432ad6^:wiki/loops/canopy-v2-gen-cache.md
 """
 import ctypes
+import functools
 import hashlib
 import json
 import os
@@ -176,6 +177,23 @@ def anchor(w, name):
     return ("abs", p)
 
 
+@functools.lru_cache(maxsize=None)
+def _real_dir(d):
+    return os.path.realpath(d)
+
+
+def realpath(p):
+    """os.path.realpath with each directory resolved once per process: a key resolves ~12k files
+    under a few hundred directories, and the stock call lstats every component of every path
+    (248k lstats, 1.6 s warm and 6.5 s on a busy disk). The same answer: the parent's realpath,
+    then the last component resolved if it is itself a link."""
+    d, b = os.path.split(p)
+    if b in ("", ".", ".."):
+        return os.path.realpath(p)
+    q = os.path.join(_real_dir(d), b)
+    return os.path.realpath(q) if os.path.islink(q) else q
+
+
 def locate(w, kind, rel, real=True):
     """The path an anchor names in this tree, or None when the tree can't hold it on that side.
     `real`: the compiler recorded the file's realpath (anything it read) rather than the path it
@@ -187,7 +205,7 @@ def locate(w, kind, rel, real=True):
     if kind == "hnm":
         return os.path.join(w.home, rel) if w.home else None
     p = os.path.join(w.root, "node_modules", rel)
-    if real and not os.path.realpath(p).lower().startswith(w.root.lower() + "/"):
+    if real and not realpath(p).lower().startswith(w.root.lower() + "/"):
         return None
     return p
 
@@ -199,7 +217,7 @@ def spell(w, kind, rel, lower, real):
     p = locate(w, kind, rel, real)
     if p is None:
         return None
-    s = os.path.relpath(os.path.realpath(p) if real else p, w.gen)
+    s = os.path.relpath(realpath(p) if real else p, w.gen)
     return s.lower() if lower else s
 
 
