@@ -3,42 +3,60 @@ import Foundation
 import Testing
 @testable import CanopyUI
 
-/// Regression tests for canopy-todo `keep-the-gates-strip-on-screen-from-p-until-the-run-ends`:
-/// after `p` the branch says its gates are running before the server has started the run, so the
-/// first progress read answers the PREVIOUS, finished run. Both tests reproduce that bug today and
-/// sit in `withKnownIssue`; the fix makes them pass, and then the wrappers must come off.
-@Suite struct GatesStripStaleProgressTests {
-    let plan = GateEvent(event: "plan", planned: ["env", "typecheck", "tests"])
+/// canopy-todo `keep-the-gates-strip-on-screen-from-p-until-the-run-ends`, fixed by pushing the run
+/// (srv/state.py `gaterun`): the strip, the forest row and the door read one copy of a branch's
+/// gates run, and no view polls for it. Before, the strip polled once after `p`, read the previous
+/// run's finished journal, stopped polling and went blank; the door never flipped to "push".
+@MainActor @Suite struct GatesStripRegressionTests {
+    let id = ShipTests.branch
 
-    @Test func aRunPressedOverAFinishedOneStillSaysGatesStarting() {
-        let previous = GateProgress(running: false, elapsed: 300, events: [plan,
-            GateEvent(event: "done", gate: "env", ok: true, ms: 900),
-            GateEvent(event: "done", gate: "typecheck", ok: true, ms: 900),
-            GateEvent(event: "done", gate: "tests", ok: true, ms: 900),
-            GateEvent(event: "result", ok: true)])
-        let w = GatesRun.waiting(previous, rows: GatesRun.rows(previous, now: 400), inFlight: true, now: 400)
-        withKnownIssue("GatesRun.waiting returns nil on the previous run's result event, so the strip goes blank") {
-            #expect(w?.text == "gates starting", "a branch whose gates are in flight always says what they're doing")
-            #expect(w?.secs == nil, "the finished run's time doesn't stand on the new run")
+    func run(tree: String, running: Bool, events: [JSONValue]) -> JSONValue {
+        .object(["id": .string(id), "branch": .string(id), "tree": .string(tree), "running": .bool(running),
+                 "started": .number(Date().timeIntervalSince1970 - 12), "events": .array(events)])
+    }
+
+    let plan: JSONValue = .object(["event": "plan", "gates": .array(["env", "tests"])])
+
+    func app(gates: String, gaterun: (String) -> JSONValue) throws -> (AppModel, Int) {
+        let ship = ShipTests()
+        return try ship.app { s in
+            ship.entity(&s, "branch", ShipTests.branch) { $0["gates"] = .string(gates) }
+            let tree = s["entities"]?.object?["branch"]?.object?[ShipTests.branch]?.object?["tree"]?.string ?? ""
+            var ents = s["entities"]!.object!
+            ents["gaterun"] = .object([ShipTests.branch: gaterun(tree)])
+            s["entities"] = .object(ents)
         }
     }
-}
 
-@MainActor @Suite struct GatesProgressPollingTests {
-    @Test func progressIsReadAgainWhileTheBranchSaysRunning() async throws {
-        let ship = ShipTests()
-        let (a, port) = try ship.app { s in ship.entity(&s, "branch", ShipTests.branch) { $0["gates"] = "running" } }
-        ShipStub.answer(port, "GET", "/loops/gates-progress", #"{"running": false, "events": [{"event": "result", "ok": true}]}"#)
-        let b = try #require(a.store.view(Branch.self, ShipTests.branch))
-        func reads() -> Int {
-            ShipStub.lock.withLock { (ShipStub.seen["\(port)"] ?? []).filter { $0.method == "GET" && $0.path.hasSuffix("/gates-progress") }.count }
+    @Test func aFinishedRunForAnOlderTreeIsNotThisBranchsProgress() throws {
+        // p over a new commit: the store still holds the last run, for the old tree, finished
+        let (a, _) = try app(gates: "running") { _ in
+            run(tree: "an-older-tree", running: false, events: [plan, .object(["event": "result", "ok": true])])
         }
-        ShipState.of(a).readProgress(a, b, key: "\(b.tip)|running|", gate: nil)
-        let t0 = Date()
-        while reads() < 2, Date().timeIntervalSince(t0) < 6 { try await Task.sleep(nanoseconds: 50_000_000) }
-        #expect(reads() >= 1, "the first read went out")
-        withKnownIssue("readProgress re-polls only while the last answer said running, so a stale finished answer ends the polling") {
-            #expect(reads() >= 2, "while the branch says its gates are running, progress is read again")
+        #expect(ShipState.of(a).progressOf(id) == nil, "another tree's run is history, not this branch's progress")
+        #expect(GatesRun.waiting(ShipState.of(a).progressOf(id), rows: [], inFlight: true, now: 0)?.text == "gates starting",
+                "so the strip says the run is starting instead of going blank")
+    }
+
+    @Test func theStripReadsThePushedRunWithoutPollingAndTheDoorFlipsOnTheVerdict() throws {
+        let (a, port) = try app(gates: "running") { tree in
+            run(tree: tree, running: true, events: [plan, .object(["event": "start", "gate": "env", "ts": .number(Date().timeIntervalSince1970 - 3)])])
         }
+        let live = ShipState.of(a).progressOf(id)
+        #expect(live?.running == true && live?.elapsed != nil)
+        #expect(GatesRun.rows(live, now: Date().timeIntervalSince1970).first?.state == .running)
+        let reads = ShipStub.lock.withLock { (ShipStub.seen["\(port)"] ?? []).filter { $0.path.hasSuffix("/gates-progress") }.count }
+        #expect(reads == 0, "the run came pushed; nothing polled for it")
+
+        // the verdict lands as one git-domain patch: the branch's gates and its run, together
+        let tree = try #require(a.store.view(Branch.self, id)?.tree)
+        var branch = try #require(a.store.rawView("branch", id))
+        branch["gates"] = "green"
+        #expect(a.store.applyPatch(try Patch.make(domain: Domain.git, version: (a.store.versions[Domain.git] ?? 0) + 1, upserts: [
+            "branch": [id: .object(branch)],
+            "gaterun": [id: run(tree: tree, running: false, events: [plan, .object(["event": "result", "ok": true])])],
+        ])) == .ok)
+        #expect(ShipState.of(a).progressOf(id)?.running == false)
+        #expect(a.store.view(Branch.self, id)?.gates == .green, "the door reads green the moment the verdict is pushed")
     }
 }
