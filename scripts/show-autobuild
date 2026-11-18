@@ -5,8 +5,9 @@
   show-autobuild --status   the recent builds, their times, and whether builds are dragging
 
 Watches the same files `show --build` fingerprints (show-app/*.swift, its Package.swift, and
-canopy-native's Package.swift + Sources, since Show links canopy). Canopy builds as last committed, so
-an uncommitted canopy edit wakes it but builds nothing (an `unchanged` row). A change waits until
+canopy-native's Package.swift + Sources, since Show links canopy) plus canopy-native's committed tree. Canopy
+builds as last committed, so an uncommitted canopy edit wakes it but builds nothing (an `unchanged` row), and
+the commit that lands it is what builds. A change waits until
 nothing has moved for QUIET seconds — other sessions save files in bursts — then runs `show --build`
 under a heavy-turn slot; the running Show sees the new build stamp and lights Update, and Phil
 chooses when to relaunch into it. Launches (`show`, `show <deck>`) never build, so this agent is
@@ -54,6 +55,9 @@ def watched():
             out[p] = (st.st_mtime_ns, st.st_size)
         except OSError:
             out[p] = None
+    # Show builds canopy as committed: a commit of files saved earlier moves no mtime, only this tree
+    head = subprocess.run(["git", "-C", DOTFILES, "rev-parse", "HEAD:scripts/canopy-native"], capture_output=True, text=True).stdout.strip()
+    out[os.path.join(SCRIPTS, "canopy-native@HEAD")] = head or None
     return out
 
 
