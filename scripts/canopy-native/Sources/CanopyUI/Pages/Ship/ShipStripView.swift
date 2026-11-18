@@ -7,8 +7,9 @@ public struct ShipStripView: View {
     @Environment(\.theme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduced
     let branchID: String
+    let sidebar: Bool
 
-    public init(branchID: String) { self.branchID = branchID }
+    public init(branchID: String, sidebar: Bool = false) { self.branchID = branchID; self.sidebar = sidebar }
 
     public var body: some View {
         let ship = ShipState.of(app)
@@ -20,11 +21,11 @@ public struct ShipStripView: View {
                 let rows = GatesRun.rows(progress, now: ctx.date.timeIntervalSince1970)
                 VStack(alignment: .leading, spacing: 4) {
                     line(b, m, rows, progress, now: ctx.date.timeIntervalSince1970, detailed: m == nil && stripShown(rows, progress, shown, ship))
-                    if let m { StepsStrip(branchID: branchID, motion: m) }
-                    else if stripShown(rows, progress, shown, ship) {
-                        GatesStrip(branchID: branchID, rows: rows, progress: progress, shown: shown)
+                    if let m { StepsStrip(branchID: branchID, motion: m, vertical: sidebar) }
+                    else if stripShown(rows, progress, shown, ship) || sidebar && b.gates == .running {
+                        GatesStrip(branchID: branchID, rows: rows, progress: progress, shown: shown, vertical: sidebar)
                     }
-                    if m == nil, b.diverged, case .some(.some(let s)) = ship.forceScopeOf(app, branchID) { GuardStrip(guards: s.guards) }
+                    if m == nil, b.diverged, case .some(.some(let s)) = ship.forceScopeOf(app, branchID) { GuardStrip(guards: s.guards, vertical: sidebar) }
                     if ship.inspecting == branchID { DivergenceView(branch: b) }
                     if app.keys.layer == .address, ship.addressing != nil { AddressSheet(branchID: branchID) }
                 }
@@ -59,10 +60,23 @@ public struct ShipStripView: View {
         let running = rows.first { $0.state == .running }
         let red = rows.filter { $0.state == .red }
         let waived = rows.filter { $0.state == .waived }
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
-            KeyButton(title: "⟲ sync", id: "review.sync", target: branchID, busy: m?.phase == .running)
-                .disabled(b.tip.isEmpty || m?.phase == .dirt)
-                .explains("ship|sync", "sync: the branch is behind its parent or main, or has dirt — it rebases and tidies")
+        let syncButton = KeyButton(title: "⟲ sync", id: "review.sync", target: branchID, busy: m?.phase == .running)
+            .disabled(b.tip.isEmpty || m?.phase == .dirt)
+            .explains("ship|sync", "sync: the branch is behind its parent or main, or has dirt — it rebases and tidies")
+        let label = acts || waiting || live != nil ? pushLabel(b, route: route, live: live, forced: push?.forced ?? false) : "push"
+        let pushButton = KeyButton(title: label, id: "review.push", target: branchID,
+                                   gold: control.enabled, busy: live == .sending || live == .landing, failed: live == .failed)
+            .disabled(!control.enabled)
+            .settles(label, reduced: reduced)
+            .explains("ship|push", "p: this branch's next step — run the gates, then push to origin")
+        let layout = sidebar ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6)) : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 10))
+        layout {
+            if sidebar {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 6) { pushButton; syncButton }.fixedSize()
+                    VStack(alignment: .leading, spacing: 6) { pushButton; syncButton }
+                }
+            } else { syncButton }
             if let doing = m.flatMap({ $0.phase == .running ? $0.steps.first { $0.state == .run } : nil }) {
                 Text("\(doing.label)…").foregroundStyle(theme.goldLeaf)
             } else if m == nil {
@@ -71,7 +85,7 @@ public struct ShipStripView: View {
                     Text(needs.joined(separator: " · ")).foregroundStyle(theme.inkFaint)
                 }
             }
-            if (acts || waiting) && live == nil {
+            if (acts || waiting) && live == nil && !sidebar {
                 if let g = running {
                     // the strip beneath names the running step and its time; the line then says only the stage
                     let stuck = GatesRun.stuck(rows) != nil
@@ -98,16 +112,8 @@ public struct ShipStripView: View {
                     if others > 0 { Text("\(others) skipped").foregroundStyle(theme.patina) }
                 }
             }
-            Group {
-                // the routine wins settle in (joy page): gates going green turn the label to push,
-                // a clean push turns it to ✓ pushed — a 200 ms settle, not a toast; still under reduced motion
-                let label = acts || waiting || live != nil ? pushLabel(b, route: route, live: live, forced: push?.forced ?? false) : "push"
-                KeyButton(title: label, id: "review.push", target: branchID,
-                          gold: control.enabled, busy: live == .sending || live == .landing, failed: live == .failed)
-                    .disabled(!control.enabled)
-                    .settles(label, reduced: reduced)
-                    .explains("ship|push", "p: this branch's next step — run the gates, then push to origin")
-            }
+            if !sidebar { pushButton }
+            if sidebar && !red.isEmpty { KeyButton(title: "skip failed gates", id: "review.gates.skip", target: branchID) }
             if live != .sending && live != .landing, let reason = control.reason, !waiting {
                 Text(reason).foregroundStyle(theme.inkFaint)
             }
@@ -212,15 +218,17 @@ struct StepsStrip: View {
     @Environment(\.theme) private var theme
     let branchID: String
     let motion: SyncMotion
+    var vertical = false
 
     var body: some View {
         let ship = ShipState.of(app)
         VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 12) {
+            let layout = vertical ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6)) : AnyLayout(HStackLayout(spacing: 12))
+            layout {
                 ForEach(motion.steps, id: \.id) { s in
                     Text("\(stepIcon[s.state] ?? "·") \(s.label)").foregroundStyle(stepColor(s.state, theme))
                 }
-                Spacer(minLength: 0)
+                if !vertical { Spacer(minLength: 0) }
                 if motion.phase != .running && motion.phase != .dirt { KeyButton(title: "put away", id: "review.sync.dismiss", target: branchID) }
             }
             ForEach(motion.steps.filter { $0.note != nil }, id: \.id) { s in
@@ -279,25 +287,58 @@ struct GatesStrip: View {
     let rows: [GateRow]
     let progress: GateProgress?
     let shown: String?
+    var vertical = false
 
     static let step: [GateRow.State: StepState] = [.queued: .idle, .running: .run, .green: .ok, .waived: .skip, .red: .fail, .stopped: .idle, .skipped: .skip]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
-            // a label never breaks mid-word: the timings give way first, then the elapsed total
-            HStack(spacing: 12) {
-                Text("gates").foregroundStyle(theme.inkFaint)
-                ViewThatFits(in: .horizontal) {
-                    gateRow(timings: true)
-                    gateRow(timings: false)
-                }
-                Spacer(minLength: 0)
-                HStack(spacing: 12) {
-                    if GatesRun.isRunning(progress), let e = progress?.elapsed { Text("\(GatesRun.secs(e * 1000)) in").foregroundStyle(theme.inkFaint) }
+            if vertical {
+                HStack {
+                    Text("checks").foregroundStyle(theme.inkFaint)
+                    Spacer(minLength: 0)
+                    if GatesRun.isRunning(progress), let elapsed = progress?.elapsed {
+                        Text(GatesRun.secs(elapsed * 1000)).foregroundStyle(theme.inkFaint).monospacedDigit()
+                    }
                     KeyButton(title: "output", id: "review.gates.show", target: branchID)
                 }
-                .fixedSize()
-                .layoutPriority(1)
+                .padding(.bottom, 5)
+                ForEach(rows, id: \.name) { gate in
+                    let step = Self.step[gate.state] ?? .idle
+                    HStack(spacing: 6) {
+                        Text(stepIcon[step] ?? "·").foregroundStyle(stepColor(step, theme)).frame(width: 12)
+                        Text(gate.label).foregroundStyle(stepColor(step, theme))
+                        Spacer(minLength: 0)
+                        if let ms = gate.ms { Text(GatesRun.secs(ms)).foregroundStyle(theme.inkFaint).monospacedDigit() }
+                    }
+                    .padding(.vertical, 2)
+                    .help(gate.summary ?? gate.label)
+                    if let quiet = gate.quiet, quiet > GatesRun.stuckAfter {
+                        Text("no output for \(GatesRun.secs(quiet * 1000)) — stuck?").foregroundStyle(theme.ember)
+                    }
+                }
+                let quick = GatesRun.quick(rows)
+                if !quick.isEmpty {
+                    Text("quick gates · CI checks \(quick.joined(separator: ", "))").foregroundStyle(theme.goldLeaf)
+                }
+                if rows.isEmpty, let waiting = GatesRun.waiting(progress, rows: rows, inFlight: true, now: Date().timeIntervalSince1970) {
+                    Text(waiting.text).foregroundStyle(waiting.stuck ? theme.ember : theme.inkDim)
+                }
+            } else {
+                HStack(spacing: 12) {
+                    Text("gates").foregroundStyle(theme.inkFaint)
+                    ViewThatFits(in: .horizontal) {
+                        gateRow(timings: true)
+                        gateRow(timings: false)
+                    }
+                    Spacer(minLength: 0)
+                    HStack(spacing: 12) {
+                        if GatesRun.isRunning(progress), let e = progress?.elapsed { Text("\(GatesRun.secs(e * 1000)) in").foregroundStyle(theme.inkFaint) }
+                        KeyButton(title: "output", id: "review.gates.show", target: branchID)
+                    }
+                    .fixedSize()
+                    .layoutPriority(1)
+                }
             }
             if let note = progress?.events?.last(where: { $0.event == "result" })?.note, !note.isEmpty {
                 Text(note).foregroundStyle(theme.inkDim)
@@ -328,8 +369,8 @@ struct GatesStrip: View {
                 }
             }
         }
-        .padding(6)
-        .overlay(Rectangle().stroke(theme.rule, lineWidth: 1))
+        .padding(vertical ? 0 : 6)
+        .overlay(Rectangle().stroke(vertical ? .clear : theme.rule, lineWidth: 1))
     }
 
     @ViewBuilder private func gateRow(timings: Bool) -> some View {
@@ -356,11 +397,13 @@ struct GatesStrip: View {
 struct GuardStrip: View {
     @Environment(\.theme) private var theme
     let guards: [ForceScope.Guard]
+    var vertical = false
     var body: some View {
-        HStack(spacing: 12) {
+        let layout = vertical ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6)) : AnyLayout(HStackLayout(spacing: 12))
+        layout {
             Text("replace origin").foregroundStyle(theme.inkFaint)
             ForEach(guards, id: \.k) { g in Text("\(g.ok ? "✓" : "✗") \(g.label)").foregroundStyle(g.ok ? theme.patina : theme.ember) }
-            Spacer(minLength: 0)
+            if !vertical { Spacer(minLength: 0) }
         }
         .padding(6)
         .overlay(Rectangle().stroke(theme.rule, lineWidth: 1))
