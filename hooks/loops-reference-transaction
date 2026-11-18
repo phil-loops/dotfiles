@@ -1,0 +1,40 @@
+#!/bin/sh
+# reference-transaction — never rewrite a published branch, whoever moves the ref.
+# The rule used to live in individual tools (stack-reword refused, stack-restack skipped open PRs)
+# and a raw rebase script rewrote cite-what-ses-saw (#11659) on 2026-11-18. Here it holds for every
+# tool, session and raw git command: in the prepared phase, a move of refs/heads/<b> is refused
+# when origin/<b> exists and the move drops a commit the old tip shared with it — a rebase, amend,
+# reset or `branch -f` across the publish boundary. Fast-forwards, catch-up merges, creation,
+# deletion (contract) and a reset onto origin's copy all pass.
+#
+# Override, for a caller that has decided the rewrite is right — stack-restack's pushed-but-no-PR
+# drafts, an explicit replace of an unreviewed draft: STACK_REWRITE_PUBLISHED="<b> [<b>…]" (or "*").
+# Installed: ln -s ~/.dotfiles/hooks/loops-reference-transaction <repo>/.git/hooks/reference-transaction
+[ "$1" = prepared ] || exit 0
+zero=0000000000000000000000000000000000000000
+refused=""
+while read -r old new ref; do
+  case "$ref" in refs/heads/*) ;; *) continue ;; esac
+  case "$old$new" in *ref:*) continue ;; esac
+  [ "$new" = "$zero" ] && continue
+  # an update with no expected old value (git branch -f, update-ref without <old>) reports a zero
+  # old; the ref isn't moved until committed, so its current value is the real old one
+  [ "$old" = "$zero" ] && { old=$(git rev-parse -q --verify "$ref" 2>/dev/null) || continue; }
+  b=${ref#refs/heads/}
+  git merge-base --is-ancestor "$old" "$new" 2>/dev/null && continue
+  origin=$(git rev-parse -q --verify "refs/remotes/origin/$b^{commit}" 2>/dev/null) || continue
+  case " $STACK_REWRITE_PUBLISHED " in *" $b "*|*" * "*) continue ;; esac
+  for mb in $(git merge-base --all "$old" "$origin" 2>/dev/null); do
+    if ! git merge-base --is-ancestor "$mb" "$new" 2>/dev/null; then
+      refused="$refused $b"
+      break
+    fi
+  done
+done
+[ -z "$refused" ] && exit 0
+for b in $refused; do
+  echo "refused: $b is published (origin/$b) and this move drops commits origin already has — a published" >&2
+  echo "  branch is append-only: catch it up with a merge, add commits on top. Replacing an unreviewed draft" >&2
+  echo "  on purpose: STACK_REWRITE_PUBLISHED=$b <command>" >&2
+done
+exit 1
