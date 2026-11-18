@@ -315,25 +315,27 @@ diffstat = git(["diff", "--stat", f"{base}...{branch}"]).stdout.strip()
 patch = git(["diff", f"{base}...{branch}"]).stdout
 patch_clip = "\n".join(patch.splitlines()[:300])   # keep the prompt bounded
 
-# scope comes from the forest project — or its Linear ticket when one is tied — not the code
-# area the voice corpus (main) teaches. The branch's OWN ticket
-# (branch.<b>.stack-ticket) beats the project's (stack-project.<p>.ticket): a forest whose
-# nodes each answer a sub-issue scopes each commit to the sub-issue it actually fixes.
+# scope is the Linear ticket or nothing — the loops convention (AGENTS.md: "the scope is the
+# Linear ticket when there is one, otherwise omit it"), never the forest's name and never the
+# code area the voice corpus (main) teaches. The branch's OWN ticket (branch.<b>.stack-ticket)
+# beats the project's (stack-project.<p>.ticket): a forest whose nodes each answer a sub-issue
+# scopes each commit to the sub-issue it actually fixes.
 project = (git(["config", f"branch.{branch}.stack-project"]).stdout.strip())
 ticket = (git(["config", f"branch.{branch}.stack-ticket"]).stdout.strip()
           or (git(["config", f"stack-project.{project}.ticket"]).stdout.strip()
               if project else "")).lower()
-scope = ticket or project
+scope = ticket
 
 _SUBJECT_RE = re.compile(r"^(?P<type>[a-z]+)(?:\((?P<scope>[^)]*)\))?(?P<bang>!?):\s*(?P<rest>.+)$")
 
 
 def force_scope(msg):
-    """Pin the subject's conventional-commit scope to the stack project (or its Linear
-    ticket). Saying it in the prompt isn't enough: the drafter studies main, where scope
-    IS a code area, and drifts."""
-    if not (scope and msg):
+    """Pin the subject's conventional-commit scope to the Linear ticket, or strip it when there
+    is none. Saying it in the prompt isn't enough: the drafter studies main, where scope IS a
+    code area, and drifts."""
+    if not msg:
         return msg
+    prefix = lambda t, bang="": f"{t}({scope}){bang}: " if scope else f"{t}{bang}: "
     lines = msg.splitlines()
     m = _SUBJECT_RE.match(lines[0].strip())
     if not m:
@@ -346,19 +348,19 @@ def force_scope(msg):
                   if cm), "")
         if not t:
             return msg
-        lines[0] = f"{t}({scope}): {lines[0].strip()}"
+        lines[0] = prefix(t) + lines[0].strip()
         return "\n".join(lines)
-    lines[0] = f"{m['type']}({scope}){m['bang']}: {m['rest'].strip()}"
+    lines[0] = prefix(m["type"], m["bang"]) + m["rest"].strip()
     return "\n".join(lines)
 
 
 scope_instr = (
-    f"\nThe conventional-commit scope MUST be exactly `{scope}`: this branch belongs to the\n"
-    f"`{project}` stack project" + (f" (Linear ticket `{ticket}`)" if ticket else "")
-    + ", and every branch in a forest carries the same scope so\n"
-    f"the forest is legible from `git log` alone. The code-area scopes in the voice examples are\n"
-    f"main's convention, NOT this forest's — do not copy them.\n"
-) if project else ""
+    f"\nThe conventional-commit scope MUST be exactly `{scope}`, this branch's Linear ticket.\n"
+    if scope else
+    "\nThe subject takes NO conventional-commit scope (`type: subject`): this branch has no Linear\n"
+    "ticket, and the convention is the ticket or nothing.\n"
+) + ("The code-area scopes in the voice examples are main's convention, NOT this forest's — do not "
+     "copy them.\n")
 
 if subject_only:
     write_instr = (
