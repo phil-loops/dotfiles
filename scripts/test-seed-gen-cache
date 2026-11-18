@@ -355,8 +355,8 @@ def run_parts(tree, store, only):
         check(f"part:{part} reverted → restored from the cache", "restored" in out and gen_canon(tree) == base_canon, out.splitlines()[-1] if out else "")
     for part in ("compiler", "tool", "lock"):
         if not only or f"part:{part}" in only:
-            print(f"\n part:{part} — covered by its own case below or argued in the wiki" if part != "lock"
-                  else "\n part:lock — no constructible pair (same files ⇒ same npm identity here); argued in the wiki")
+            print(f"\n part:{part} — covered by its own case below or argued in the design notes (seed-gen-cache header)" if part != "lock"
+                  else "\n part:lock — no constructible pair (same files ⇒ same npm identity here); argued in the design notes (seed-gen-cache header)")
 
 
 # ── adversarial ───────────────────────────────────────────────────────────────────────────────
