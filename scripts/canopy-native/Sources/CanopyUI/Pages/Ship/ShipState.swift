@@ -263,6 +263,13 @@ public final class ShipState {
         (facts[id]?.value, prep[id]?.value, facts[id].map { $0.read != currentKey(id) } ?? false)
     }
 
+    /// Why ⟲ sync is worth a press, read for the branch as it stands now; nil until both reads are in for this tree.
+    public func syncNeeds(_ b: Branch) -> [String]? {
+        let last = lastReads(b.id)
+        guard let f = last.facts, !last.stale, prepFresh(b.id) else { return nil }
+        return Syncing.needs(b, facts: f, prep: last.prep)
+    }
+
     static func scopeKey(_ b: Branch) -> String { "\(b.tip)|\(b.ahead)|\(b.gates.rawValue)" }
 
     /// The force scope read for this tip — nil until read, .some(nil) when it couldn't be.

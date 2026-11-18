@@ -776,6 +776,20 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
         #expect(posts[0].body["action"] == "stash" && posts[2].body["action"] == "pop")
     }
 
+    @Test func aBranchInShapeHasNothingToSync() async throws {
+        let (a, port) = try app()
+        ShipStub.answer(port, "GET", "/loops/sync", #"{"behind":0,"syncable":false,"dirty":[]}"#)
+        ShipStub.answer(port, "GET", "/loops/prep-route", #"{"route":"push","why":""}"#)
+        let ship = ShipState.of(a)
+        let b = try #require(a.store.view(Branch.self, Self.branch))
+        ship.readFacts(a, b, key: ShipState.factsKey(b, nil))
+        await until("the reads") { ship.syncNeeds(b) != nil }
+        #expect(ship.syncNeeds(b) == [])
+        a.runner.dispatch("branch.sync", via: .key, target: Self.branch)
+        #expect(a.runner.note?.hasPrefix("nothing to sync") == true, "\(a.runner.note ?? "nil")")
+        #expect(ship.motionOf(Self.branch) == nil && ShipStub.posts(port).isEmpty)
+    }
+
     @Test func aFailedStepKeepsTheMotionInView() async throws {
         let (a, port) = try app()
         ShipStub.answer(port, "GET", "/loops/sync", #"{"behind":0,"dirty":[]}"#)
@@ -793,7 +807,7 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
     @Test func aCleanMotionSaysWhatItDidInOneLine() {
         let step = { (id: StepID, state: StepState, note: String?) in SyncStep(id: id, label: id.rawValue, state: state, note: note) }
         #expect(Syncing.doneLine("b", [step(.dirt, .ok, nil), step(.prep, .ok, "nothing to push — origin already has this"),
-                                       step(.gates, .skip, nil), step(.tests, .skip, nil)]) == "b is already in sync — nothing to push")
+                                       step(.gates, .skip, nil), step(.tests, .skip, nil)]) == "synced b · nothing to push — origin already has this")
         #expect(Syncing.doneLine("b", [step(.dirt, .ok, nil), step(.rebase, .ok, "replayed 2 commits"), step(.prep, .ok, nil),
                                        step(.gates, .ok, nil), step(.tests, .ok, "no changed tests")]) == "synced b · replayed 2 commits · tests no changed tests")
     }
@@ -818,3 +832,27 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
     }
 }
 
+
+@Suite struct ShipSlotTests {
+    typealias F = ShipSlot.Facts
+
+    @Test func aDecisionOutranksEverything() {
+        #expect(ShipSlot.pick(F(motion: .dirt, gatesAsked: true, gatesFailed: true, guards: true)) == .motion)
+    }
+
+    @Test func gatesYouAskedForOutrankAMotion() {
+        #expect(ShipSlot.pick(F(motion: .running, gatesAsked: true)) == .gates)
+        #expect(ShipSlot.pick(F(motion: .stopped, gatesFailed: true)) == .motion)
+    }
+
+    @Test func failuresComeBeforeWorkInFlightAndHistoryLast() {
+        #expect(ShipSlot.pick(F(gatesFailed: true, guards: true)) == .gates)
+        #expect(ShipSlot.pick(F(gatesRunning: true, guards: true)) == .guards)
+        #expect(ShipSlot.pick(F(gatesRunning: true, previousGates: true)) == .gates)
+        #expect(ShipSlot.pick(F(previousGates: true)) == .previousGates)
+    }
+
+    @Test func atRestTheSlotIsEmpty() {
+        #expect(ShipSlot.pick(F()) == .none)
+    }
+}

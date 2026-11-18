@@ -73,6 +73,7 @@ enum SyncCommands {
             available: { id in branch(id).map { !$0.tip.isEmpty } == true && !running(id) && !deciding(id) },
             local: { [weak app] id, _ in
                 guard let app, let id else { return }
+                if let b = branch(id), ship.syncNeeds(b)?.isEmpty == true { throw Refusal("nothing to sync — it's on its parent and main, clean and in shape") }
                 let via: Via = .key
                 Task { @MainActor in await SyncMotionDriver(app: app).start(id, via: via) }
             }))
