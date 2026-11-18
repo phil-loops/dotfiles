@@ -71,6 +71,120 @@ struct WorkContext {
 
     var doing: [TodoItem] { items.filter { $0.state == .doing }.sorted(by: Tracker.byQueue) }
 
+    /// Items the tracker calls done whose work journal holds direction no qualified completion answered: they need work
+    /// again, whatever the tracker file says, so they sit with the work in progress. Unknown capture coverage doesn't
+    /// erase a known unanswered instruction; an unreadable journal claims nothing.
+    var reopened: [TodoItem] { items.filter(Self.reopened).sorted(by: Tracker.byQueue) }
+
+    static func reopened(_ item: TodoItem) -> Bool {
+        guard item.state == .done, let w = item.work, w.state != "unavailable", let revision = w.revision else { return false }
+        return w.state == "pending" || revision > (w.answeredRevision ?? 0)
+    }
+
+    /// What an item's latest direction is: the journal's literal message when the journal records the item, otherwise the
+    /// older recorded `## Your input` section, which stays a legacy convention with no capture guarantee.
+    enum Direction: Equatable {
+        case journal(WorkFreshness.Latest)
+        case recorded(RecordedWorkInput)
+
+        var text: String {
+            switch self {
+            case .journal(let l): l.text
+            case .recorded(let r): r.text
+            }
+        }
+
+        var date: Date? {
+            switch self {
+            case .journal(let l): (l.sourceTime.flatMap(parseISO)) ?? parseISO(l.receivedAt)
+            case .recorded(let r): r.at
+            }
+        }
+    }
+
+    static func direction(_ item: TodoItem) -> Direction? {
+        if let work = item.work, work.state != "unavailable" { return work.latest.map(Direction.journal) }
+        return RecordedWorkInput.chat(in: item.body).map(Direction.recorded)
+    }
+
+    /// The scope's most recently given direction, one item's; each item's own latest is by its source order.
+    var latestDirection: (item: TodoItem, direction: Direction)? {
+        items.compactMap { item in Self.direction(item).map { (item: item, direction: $0) } }
+            .sorted { a, b in
+                let x = a.direction.date ?? .distantPast, y = b.direction.date ?? .distantPast
+                return x != y ? x > y : a.item.id < b.item.id
+            }.first
+    }
+
+    /// What the scope's work context presents: the latest direction's item, or — when no single latest message exists
+    /// (direction across conversations, an unreadable journal, nothing captured yet) — one work-backed item with its own
+    /// facts and no message: reopened work first, then work in progress, then the queue. Nil only when no item has
+    /// either, the legacy case of no recorded work.
+    var presentation: (item: TodoItem, direction: Direction?)? {
+        if let latest = latestDirection { return (latest.item, latest.direction) }
+        let backed = items.filter { $0.work != nil }.sorted { a, b in
+            let rank = { (t: TodoItem) in Self.reopened(t) ? 0 : t.state == .doing ? 1 : 2 }
+            return rank(a) != rank(b) ? rank(a) < rank(b) : Tracker.byQueue(a, b)
+        }
+        return backed.first.map { ($0, nil) }
+    }
+
+    /// One line of an item's work freshness, every fact from its own source: direction revision, delivery, the worker
+    /// as observed, and what a completion answers. Delivery means the host received the direction, not that it was followed.
+    static func freshness(_ w: WorkFreshness) -> String {
+        if w.state == "unavailable" { return "work journal unreadable · freshness unknown" }
+        var parts: [String] = []
+        if let rev = w.revision { parts.append("direction r\(rev)" + ((w.inForce ?? 0) > 1 ? " · \(w.inForce!) instructions in force" : "")) }
+        if let d = w.delivered {
+            let how = ["acknowledged": "confirmed", "uncertain": "unconfirmed", "failed": "failed", "sending": "sending"][d.state] ?? d.state
+            parts.append("delivered r\(d.revision) \(how)")
+        } else {
+            parts.append("not delivered")
+        }
+        if let worker = w.worker {
+            switch worker.state {
+            case "running": parts.append("worker running")
+            case "ended": parts.append("worker ended" + (worker.outcome.map { " (\($0))" } ?? ""))
+            case "none": parts.append("no turn yet")
+            default: parts.append("worker state unknown")
+            }
+        }
+        let answered = w.answeredRevision.map { "r\($0)" } ?? "an earlier revision"
+        switch w.state {
+        case "answered":
+            parts.append("done for r\(w.revision ?? 0)")
+        case "pending":
+            if w.answeredRevision != nil { parts.append("done for \(answered) · newer direction pending") }
+            switch w.completion {
+            case "historical": break
+            case "stale": parts.append(w.answeredRevision != nil ? "last report stale" : "last completion stale")
+            case "unverified": parts.append(w.answeredRevision != nil ? "last report unverified" : "completion unverified")
+            default: if w.answeredRevision == nil { parts.append("not completed") }
+            }
+        default:
+            let unanswered = (w.revision ?? 0) > (w.answeredRevision ?? 0)
+            parts.append("capture \(w.coverage ?? "unknown") · freshness unknown"
+                         + (w.answeredRevision != nil ? " · done recorded for \(answered)" : "") + (unanswered ? " · newer direction pending" : ""))
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    static func progress(_ p: WorkFreshness.Progress) -> String {
+        let basis = ["current": "on the current direction", "older": "on older direction", "earlier-attempt": "from an earlier attempt",
+                     "unverified": "unverified"][p.basis] ?? p.basis
+        return "progress \(instant(p.at)) · \(basis)"
+    }
+
+    /// An ISO-8601 timestamp as a UTC minute, whatever offset it was written with; a string that isn't one is shown as given.
+    static func instant(_ iso: String) -> String {
+        guard let date = parseISO(iso) else { return "at \"\(iso)\" (time not understood)" }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd HH:mm 'UTC'"
+        return formatter.string(from: date)
+    }
+
     var latestInput: (item: TodoItem, input: RecordedWorkInput)? {
         items.compactMap { item in RecordedWorkInput.chat(in: item.body).map { (item: item, input: $0) } }
             .sorted { $0.input.at != $1.input.at ? $0.input.at > $1.input.at : $0.item.id < $1.item.id }.first
@@ -81,6 +195,7 @@ struct WorkContext {
     var summary: String {
         var parts: [String] = []
         if !doing.isEmpty { parts.append("\(doing.count) in progress") }
+        if !reopened.isEmpty { parts.append("\(reopened.count) with new direction") }
         let waiting = items.filter { $0.state == .waiting }.count
         let decisions = items.filter { Tracker.sectionOf($0) == .decide }.count
         if decisions > 0 { parts.append("\(decisions) need you") }
@@ -104,7 +219,7 @@ struct WorkContext {
         switch item.state {
         case .doing: "marked in progress"
         case .waiting: "waiting" + (item.waiting?.isEmpty == false ? " on \(item.waiting!)" : "")
-        case .done: "done"
+        case .done: reopened(item) ? "marked done · new direction since" : "done"
         case .dropped: "dropped"
         case .broken: "can't read"
         case .open: item.kind == "decide" ? "needs you" : "queued"

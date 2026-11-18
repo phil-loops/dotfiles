@@ -114,7 +114,7 @@ struct TodoRow: View {
                         Text(line).font(Theme.text(12.5)).foregroundStyle(t.state == "broken" ? theme.ember : theme.inkDim)
                             .padding(.leading, 68).padding(.trailing, 16).padding(.bottom, 8)
                     }
-                    WorkInputView(input: RecordedWorkInput.chat(in: t.body))
+                    WorkInputView(item: t)
                         .padding(.leading, 68).padding(.trailing, 16).padding(.bottom, 10)
                 }
             }
@@ -125,7 +125,7 @@ struct TodoRow: View {
 
     private var notes: some View {
         VStack(alignment: .leading, spacing: 8) {
-            WorkInputView(input: RecordedWorkInput.chat(in: t.body), lines: nil)
+            WorkInputView(item: t, lines: nil)
             if !t.why.isEmpty { Text(t.why).foregroundStyle(theme.ink) }
             if let p = t.problems, !p.isEmpty { Text(p.joined(separator: " · ")).foregroundStyle(theme.ember) }
             if let b = t.blocked_by, !b.isEmpty { Text("after: \(b.joined(separator: ", "))") }

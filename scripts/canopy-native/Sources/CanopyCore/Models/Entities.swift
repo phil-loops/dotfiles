@@ -346,16 +346,19 @@ public struct TodoItem: Entity {
     public var updated: String?
     public var body: String
     public var problems: [String]?
+    /// The work journal's freshness for this record (srv/workfresh.py); nil when its capture isn't recorded.
+    public var work: WorkFreshness?
 
     public init(id: String, title: String? = nil, kind: String = "build", state: TodoState = .open, area: String = "x", project: String? = nil,
                 size: String = "S", why: String = "", waiting: String? = nil, blocked_by: [String]? = nil, links: [String]? = nil, rank: Int? = nil,
-                solved_by: String? = nil, created: String? = nil, updated: String? = nil, body: String = "", problems: [String]? = nil) {
+                solved_by: String? = nil, created: String? = nil, updated: String? = nil, body: String = "", problems: [String]? = nil,
+                work: WorkFreshness? = nil) {
         self.id = id; self.title = title ?? id; self.kind = kind; self.state = state; self.area = area; self.project = project; self.size = size
         self.why = why; self.waiting = waiting; self.blocked_by = blocked_by; self.links = links; self.rank = rank; self.solved_by = solved_by
-        self.created = created; self.updated = updated; self.body = body; self.problems = problems
+        self.created = created; self.updated = updated; self.body = body; self.problems = problems; self.work = work
     }
 
-    enum K: String, CodingKey { case id, title, kind, state, area, project, size, why, waiting, blocked_by, links, rank, solved_by, created, updated, body, problems }
+    enum K: String, CodingKey { case id, title, kind, state, area, project, size, why, waiting, blocked_by, links, rank, solved_by, created, updated, body, problems, work }
 
     /// A file srv/todo.py can't parse arrives as `{id, title, state: "broken", problems, body}`
     /// with no kind/area/size/why; it still decodes, so the tracker's "Can't read" section shows it.
@@ -378,6 +381,97 @@ public struct TodoItem: Entity {
         updated = try? c.decode(String.self, forKey: .updated)
         body = (try? c.decode(String.self, forKey: .body)) ?? ""
         problems = try? c.decode([String].self, forKey: .problems)
+        work = try? c.decode(WorkFreshness.self, forKey: .work)
+    }
+}
+
+/// A record's work freshness, as the server projects it from the work journal (srv/workfresh.py): bounded facts, each from
+/// its own source. `state` is "answered" only when a qualified completion answers the current direction revision and
+/// capture coverage is complete now; "pending" when direction it didn't answer exists; "unknown" when coverage isn't
+/// complete; "unavailable" when the journal couldn't be read (`reason` says why, and no other fact is claimed).
+public struct WorkFreshness: Codable, Sendable, Equatable {
+    public struct Latest: Codable, Sendable, Equatable {
+        public var text: String
+        public var truncated: Bool
+        public var source: String
+        public var seq: Int?
+        public var sourceTime: String?
+        public var receivedAt: String
+        public init(text: String, truncated: Bool = false, source: String = "show", seq: Int? = nil, sourceTime: String? = nil, receivedAt: String) {
+            self.text = text; self.truncated = truncated; self.source = source; self.seq = seq; self.sourceTime = sourceTime; self.receivedAt = receivedAt
+        }
+        enum CodingKeys: String, CodingKey { case text, truncated, source, seq, sourceTime = "source_time", receivedAt = "received_at" }
+    }
+    public struct Delivered: Codable, Sendable, Equatable {
+        public var revision: Int
+        public var boundary: String
+        public var state: String
+        public var at: String?
+        public init(revision: Int, boundary: String = "turn", state: String = "acknowledged", at: String? = nil) {
+            self.revision = revision; self.boundary = boundary; self.state = state; self.at = at
+        }
+    }
+    public struct Worker: Codable, Sendable, Equatable {
+        public var host: String
+        /// "running" | "ended" | "unknown" | "none": observed, never inferred from an open attempt
+        public var state: String
+        public var outcome: String?
+        public init(host: String, state: String, outcome: String? = nil) { self.host = host; self.state = state; self.outcome = outcome }
+    }
+    public struct Progress: Codable, Sendable, Equatable {
+        public var text: String
+        public var at: String
+        public var deliveredRevision: Int?
+        /// "current" | "older" | "earlier-attempt" | "unverified" | a recorded verdict: what this report answers now
+        public var basis: String
+        public init(text: String, at: String, deliveredRevision: Int? = nil, basis: String) {
+            self.text = text; self.at = at; self.deliveredRevision = deliveredRevision; self.basis = basis
+        }
+        enum CodingKeys: String, CodingKey { case text, at, deliveredRevision = "delivered_revision", basis }
+    }
+
+    public var state: String
+    public var reason: String?
+    public var revision: Int?
+    public var latest: Latest?
+    /// "source" | "ambiguous" | "none"
+    public var order: String?
+    public var inForce: Int?
+    public var coverage: String?
+    public var delivered: Delivered?
+    public var worker: Worker?
+    public var progress: Progress?
+    /// "current" | "historical" | "stale" | "unverified" | "none"
+    public var completion: String?
+    public var answeredRevision: Int?
+
+    public init(state: String, reason: String? = nil, revision: Int? = nil, latest: Latest? = nil, order: String? = "source", inForce: Int? = nil,
+                coverage: String? = "complete", delivered: Delivered? = nil, worker: Worker? = nil, progress: Progress? = nil,
+                completion: String? = "none", answeredRevision: Int? = nil) {
+        self.state = state; self.reason = reason; self.revision = revision; self.latest = latest; self.order = order; self.inForce = inForce
+        self.coverage = coverage; self.delivered = delivered; self.worker = worker; self.progress = progress; self.completion = completion
+        self.answeredRevision = answeredRevision
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case state, reason, revision, latest, order, inForce = "in_force", coverage, delivered, worker, progress, completion
+        case answeredRevision = "answered_revision"
+    }
+
+    public init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        state = try c.decode(String.self, forKey: .state)
+        reason = try? c.decode(String.self, forKey: .reason)
+        revision = try? c.decode(Int.self, forKey: .revision)
+        latest = try? c.decode(Latest.self, forKey: .latest)
+        order = try? c.decode(String.self, forKey: .order)
+        inForce = try? c.decode(Int.self, forKey: .inForce)
+        coverage = try? c.decode(String.self, forKey: .coverage)
+        delivered = try? c.decode(Delivered.self, forKey: .delivered)
+        worker = try? c.decode(Worker.self, forKey: .worker)
+        progress = try? c.decode(Progress.self, forKey: .progress)
+        completion = try? c.decode(String.self, forKey: .completion)
+        answeredRevision = try? c.decode(Int.self, forKey: .answeredRevision)
     }
 }
 
