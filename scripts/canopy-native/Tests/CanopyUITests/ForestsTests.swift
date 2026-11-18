@@ -358,6 +358,17 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = f
         #expect(ShipControlState.push(now, route: nil, contextKnown: true, checking: true).reason == "checking origin's copy…")
     }
 
+    @Test func aPushSaysTheChildrenItCarried() {
+        #expect(BranchCommands.carriedLine(["ok": true]) == nil)
+        #expect(BranchCommands.carriedLine(["carried": .array([])]) == nil)
+        let body: JSONObject = ["carried": .array([
+            .object(["branch": "c", "how": "merged", "pushed": true]),
+            .object(["branch": "g", "how": "rebased"]),
+            .object(["branch": "s", "how": "merged", "pushed": false, "err": "caught up locally; gates not green"]),
+        ])]
+        #expect(BranchCommands.carriedLine(body) == "carried c, g along · s stayed — caught up locally; gates not green")
+    }
+
     @Test func eachForestKeepsItsOwnCursor() {
         let a = world()
         a.go(.forest(repo: "r", project: "tree"))
