@@ -119,6 +119,9 @@ public struct Pr: Entity {
     public var mergeable: String?
     public var approvedAt: String?
     public var title: String?
+    /// the PR's head commit, and the commit its newest approval saw (nil from a server that doesn't send them)
+    public var headSha: String?
+    public var approvedSha: String?
 }
 
 public struct Landed: Entity {
