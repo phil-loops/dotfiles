@@ -204,16 +204,7 @@ public final class WordsState {
         let w = prValue(id)
         let split = OutlineHints.splitTemplate(w.body)
         return OutlineHints.hintsFor(MessageWords(subject: w.subject, body: ""), opening: true, ticket: o.ticket.flatMap { $0.isEmpty ? nil : $0 }, kind: .title)
-            + OutlineHints.bodyHints(split.own) + overrideHints(id) + droppedWhyHints(id, split.own)
-    }
-
-    /// A commit-owned why the server won't carry into the PR body (packet.casual_why: over 280
-    /// chars or 3 lines), so the PR would open with the template alone.
-    private func droppedWhyHints(_ id: String, _ why: String) -> [WordsHint] {
-        guard owningCommit(id) != nil else { return [] }
-        let lines = why.split(separator: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }.count
-        guard OutlineHints.len(trim(why)) > 280 || lines > 3 else { return [] }
-        return [WordsHint(id: "dropped", tone: .warn, text: "too long to open the PR — it starts with the template alone (3 lines, 280 chars)")]
+            + OutlineHints.bodyHints(split.own) + overrideHints(id)
     }
 
     /// PR text on file that disagrees with the owning commit: say what it says, and offer to take it in.
