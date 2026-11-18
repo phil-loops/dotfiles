@@ -16,6 +16,7 @@ struct ForestsPage: View {
         let fs = m.forests()
         let rows = m.homeRows()
         let working = WorkInProgressView.placed(app)
+        let chatting = WorkInProgressView.chatsPlaced(app, working)
         let focused = app.isFocused("main")
         let cursor = focused ? app.selected : nil
         let selection = focused ? Set(app.selection) : []
@@ -45,12 +46,12 @@ struct ForestsPage: View {
                                 }
                                 .padding(.leading, 44).padding(.bottom, 20)
                             }
-                            section(.focus, p.focus, fs, working, nameWidth: nameWidth, cursor: cursor, selection: selection)
+                            section(.focus, p.focus, fs, working, chatting, nameWidth: nameWidth, cursor: cursor, selection: selection)
                             if !m.readyOnly { ReviewQueue(nameWidth: nameWidth, cursor: cursor, selection: selection) }
-                            section(.workbench, p.workbench, fs, working, nameWidth: nameWidth, cursor: cursor, selection: selection)
+                            section(.workbench, p.workbench, fs, working, chatting, nameWidth: nameWidth, cursor: cursor, selection: selection)
                             if !m.readyOnly {
                                 if m.showArchive {
-                                    section(.archive, p.archive, fs, working, nameWidth: nameWidth, cursor: cursor, selection: selection)
+                                    section(.archive, p.archive, fs, working, chatting, nameWidth: nameWidth, cursor: cursor, selection: selection)
                                 } else if !p.archive.isEmpty {
                                     HStack(spacing: 6) {
                                         Button("archive · \(p.archive.count)") { app.runner.dispatch("archive.toggle", via: .click) }
@@ -91,7 +92,7 @@ struct ForestsPage: View {
     }
 
     @ViewBuilder
-    private func section(_ state: ProjectState, _ projects: [Project], _ fs: [String: ForestView], _ working: [String: [TodoItem]], nameWidth: CGFloat, cursor: String?, selection: Set<String>) -> some View {
+    private func section(_ state: ProjectState, _ projects: [Project], _ fs: [String: ForestView], _ working: [String: [TodoItem]], _ chatting: [String: [WorkContext.Chat]], nameWidth: CGFloat, cursor: String?, selection: Set<String>) -> some View {
         let m = app.forestModel
         let views = projects.compactMap { fs[$0.id] }.filter { !m.readyOnly || !$0.ready.isEmpty }
         if !m.readyOnly || !views.isEmpty {
@@ -104,9 +105,10 @@ struct ForestsPage: View {
                     Text("empty").foregroundStyle(theme.inkFaint).padding(.leading, 44).padding(.vertical, 8)
                 }
                 ForEach(views, id: \.p.id) { f in
-                    ForestRowView(f: f, working: working, nameWidth: nameWidth, cursor: cursor == RowKey.project(f.p.id), selected: selection.contains(RowKey.project(f.p.id)))
-                    ForEach(f.branches.filter { working[$0.b.id] != nil }, id: \.b.id) { v in
+                    ForestRowView(f: f, working: working, chatting: chatting, nameWidth: nameWidth, cursor: cursor == RowKey.project(f.p.id), selected: selection.contains(RowKey.project(f.p.id)))
+                    ForEach(f.branches.filter { working[$0.b.id] != nil || chatting[$0.b.id] != nil }, id: \.b.id) { v in
                         ForEach(working[v.b.id] ?? [], id: \.id) { item in BranchWorkLine(branch: v.b, item: item) }
+                        if let chats = chatting[v.b.id] { BranchChatsLine(branch: v.b, chats: chats) }
                     }
                     WorkContextView(subject: .forest(f.p.id), compact: true).padding(.leading, 44).padding(.trailing, 16)
                     if m.launching == f.p.id { LaunchLine(f: f) }
@@ -219,6 +221,7 @@ private struct ForestRowView: View {
     @Environment(\.theme) private var theme
     let f: ForestView
     let working: [String: [TodoItem]]
+    let chatting: [String: [WorkContext.Chat]]
     let nameWidth: CGFloat
     let cursor: Bool
     let selected: Bool
@@ -283,13 +286,13 @@ private struct ForestRowView: View {
                     ForEach(f.branches, id: \.b.id) { v in
                         Circle().fill(v.st.ship == .landed ? theme.patina : v.st.ready ? theme.goldLeaf : theme.inkFaint.opacity(0.45))
                             .frame(width: 6, height: 6)
-                            .overlay { if working[v.b.id] != nil { Circle().stroke(theme.goldLeaf, lineWidth: 1.25).frame(width: 11, height: 11) } }
-                            .padding(.horizontal, working[v.b.id] != nil ? 2.5 : 0)
+                            .overlay { if working[v.b.id] != nil || chatting[v.b.id] != nil { Circle().stroke(theme.goldLeaf, lineWidth: 1.25).frame(width: 11, height: 11) } }
+                            .padding(.horizontal, working[v.b.id] != nil || chatting[v.b.id] != nil ? 2.5 : 0)
                     }
                 }
                 .fixedSize()
                 .frame(minWidth: 60, alignment: .trailing)
-                .explains("forest|dots|\(p.id)", RowName(word: "● ● ●", meaning: "one dot per branch in merge order: green has landed, gold is ready for you, faint is still in the works; a ring marks work in progress on it, named on the line below"))
+                .explains("forest|dots|\(p.id)", RowName(word: "● ● ●", meaning: "one dot per branch in merge order: green has landed, gold is ready for you, faint is still in the works; a ring marks work in progress or a chat bound to it, named on the lines below"))
             }
         }
         .frame(height: 30)

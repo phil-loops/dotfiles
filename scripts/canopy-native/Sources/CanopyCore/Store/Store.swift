@@ -237,6 +237,11 @@ public final class Store {
         return obj
     }
 
+    /// Every raw entity of a type the shared models lack, overlay applied.
+    public func rawAll(_ type: String) -> [String: JSONObject] {
+        Dictionary(uniqueKeysWithValues: (raw[type] ?? [:]).keys.compactMap { id in rawView(type, id).map { (id, $0) } })
+    }
+
     public var counts: [String: Int] {
         Dictionary(uniqueKeysWithValues: EntityType.allCases.map { t in (t.rawValue, raw[t.rawValue]?.count ?? 0) })
     }
