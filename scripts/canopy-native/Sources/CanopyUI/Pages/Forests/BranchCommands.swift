@@ -116,6 +116,7 @@ enum BranchCommands {
             available: { id in m.branchView(id)?.b.owes != nil },
             write: { id, _ in
                 guard let v = m.branchView(id) else { return nil }
+                if app.runner.runOf("branch.catchup", id)?.state == .sending { throw Refusal("still catching up — the strip says when it lands") }
                 return Write(path: t.atRepo(v.b.repo, "/catch-up"), body: ["branch": .string(v.b.name)], settled: { true },
                              said: "caught the chain up — p pushes next",
                              failed: "the catch-up stopped — a conflict to resolve by hand, or the forest is busy", alone: true)
@@ -126,6 +127,7 @@ enum BranchCommands {
             available: { id in id.map { ShipState.of(app).prepOf($0)?.route == "conform" } ?? false },
             write: { id, _ in
                 guard let v = m.branchView(id) else { return nil }
+                if app.runner.runOf("branch.conform", id)?.state == .sending { throw Refusal("still taking origin's copy — the strip says when it lands") }
                 return Write(path: t.atRepo(v.b.repo, "/prep-push"), body: ["branch": .string(v.b.name)], settled: { true },
                              said: "took origin's copy — local matches the PR again",
                              failed: "couldn't take origin's copy — local moved, or its worktree has uncommitted changes", alone: true)
