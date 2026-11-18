@@ -321,6 +321,17 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = f
         #expect(BranchCommands.pushRoute("r:c", a) == "branch.gates.run", "no PR yet: the full set")
     }
 
+    @Test func pNamesTheCatchUpWhenABranchAboveMovedInsteadOfAPushThatWouldBeRefused() throws {
+        let a = world()
+        var obj = try #require(a.store.rawView("branch", "r:d"))
+        obj["owes"] = "c"
+        #expect(a.store.applyPatch(try Patch.make(domain: Domain.git, version: (a.store.versions[Domain.git] ?? 0) + 1,
+                                                  upserts: ["branch": ["r:d": .object(obj)]])) == .ok)
+        #expect(BranchCommands.pushRoute("r:d", a) == "branch.catchup")
+        let w = try #require(try a.registry.command("branch.catchup")!.write!("r:d", nil))
+        #expect(w.path == "/r/catch-up" && w.body == ["branch": "d"])
+    }
+
     @Test func eachForestKeepsItsOwnCursor() {
         let a = world()
         a.go(.forest(repo: "r", project: "tree"))
