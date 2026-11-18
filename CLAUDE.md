@@ -15,8 +15,7 @@ Non-negotiable, in every repo, regardless of what a task seems to call for.
 
 - **Never amend commits** — always create new commits. PRs are squash-merged, so local history noise doesn't matter.
 - **Never add Co-Authored-By lines.**
-- **Never create merge commits** — forest history stays linear; fan-in lives in `requires` metadata + carried cherry-picks.
-- **Never `git push --force` a branch another session may be live on** — leave a cosmetically-wrong commit message alone rather than rewrite shared history.
+- **History's rules follow who can see it.** *Local, unpublished:* linear — rebase freely; fan-in lives in `requires` metadata + carried cherry-picks, never a merge commit. *A published PR branch* (reviews, CI and checkouts reference it): append-only — new commits on top; a moved base catches up by a catch-up merge of the base's new head (so the PR diff stays its own change); never `git push --force` it, nor any branch another session may be live on, except an explicit replace of an unreviewed draft — leave a cosmetically-wrong message alone. *main:* linear by squash-merge. (2026-11-17: a GitHub-side rebase plus local restacks of a published stack ended in a hand-run force push.)
 
 **Production & cloud access**
 
