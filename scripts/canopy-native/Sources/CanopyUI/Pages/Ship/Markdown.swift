@@ -1,13 +1,13 @@
 import Foundation
 
-// markdown.ts: GitHub-flavoured markdown for review comments, PR bodies and wiki pages, parsed into
+// markdown.ts: GitHub-flavoured markdown for review comments and PR bodies, parsed into
 // blocks of styled spans — never HTML, so nothing a comment says can become markup or a script.
 //
 // Blocks: fenced code (```suggestion becomes a suggested change), headings, quotes, lists (task
 // boxes too), tables, rules, paragraphs with GitHub's hard line breaks. Inline: code, bold, italic,
 // strikethrough, http(s) links and bare URLs, @mentions. HTML comments (PR templates) are dropped.
 //
-// Published for the Wiki area (PORTING.md §8 C → F):
+// Published API:
 //   Markdown.parse(text, replaces:) -> [MdBlock]     the AST, testable
 //   MarkdownView(text, replaces:)                     the SwiftUI rendering (MarkdownView.swift)
 //   Markdown.inline(text) -> [MdSpan]                 one line of inline markup

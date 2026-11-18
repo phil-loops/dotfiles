@@ -51,7 +51,6 @@ enum KeySheet {
         case .item: return t.flatMap { s.view(TodoItem.self, $0)?.title } ?? "this item"
         case .server: return t.map { "the server \($0)" } ?? "this server"
         case .queue: return "this queue row"
-        case .article: return app.state { WikiState() }.page(t)?.title ?? "this page"
         case .concept: return t.map { $0.replacingOccurrences(of: "-", with: " ") } ?? "this concept"
         case .lesson, .session: return "this session"
         case .line: return "this line"

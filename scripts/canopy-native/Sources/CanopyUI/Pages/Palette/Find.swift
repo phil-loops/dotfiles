@@ -1,10 +1,10 @@
 import Foundation
 
 /// What the space menu finds besides commands (find.ts): branches and forests by fuzzy name, a
-/// branch by its PR number, wiki pages by title, the tutor's concepts by name. Each result is a
+/// branch by its PR number, the tutor's concepts by name. Each result is a
 /// quiet command plus its argument, so opening one runs through the runner. Pure.
 struct Find: Equatable {
-    /// find.branch | find.forest | find.wiki | find.concept
+    /// find.branch | find.forest | find.concept
     var cmd: String
     var id: String
     var title: String
@@ -16,13 +16,11 @@ struct FindWorld {
     struct Branch: Equatable { var id: String; var name: String; var project: String }
     struct Project: Equatable { var id: String; var name: String; var archived: Bool }
     struct Pr: Equatable { var id: String; var number: Int }
-    struct Page: Equatable { var slug: String; var title: String; var section: String }
     struct Concept: Equatable { var id: String; var name: String }
 
     var branches: [Branch] = []
     var projects: [Project] = []
     var prs: [Pr] = []
-    var pages: [Page] = []
     var concepts: [Concept] = []
 }
 
@@ -50,7 +48,7 @@ enum Finder {
 
     private static func squash(_ s: String) -> String { s.lowercased().filter { !$0.isWhitespace } }
 
-    /// The branches, forests, wiki pages and concepts matching what's typed, best first; an archived
+    /// The branches, forests and concepts matching what's typed, best first; an archived
     /// forest's sink to the end.
     static func finds(_ q: String, _ w: FindWorld) -> [Find] {
         let needle = squash(q)
@@ -73,10 +71,6 @@ enum Finder {
             push(Find(cmd: "find.branch", id: b.id, title: b.name, sub: sub), s, project?.archived ?? false)
         }
         if number == nil {
-            for p in w.pages {
-                let s = max(fuzzyScore(needle, squash(p.title)), fuzzyScore(needle, p.slug))
-                if s > -.infinity { push(Find(cmd: "find.wiki", id: p.slug, title: p.title, sub: "wiki · \(p.section)"), s, false) }
-            }
             for c in w.concepts {
                 let s = fuzzyScore(needle, squash(c.name))
                 if s > -.infinity { push(Find(cmd: "find.concept", id: c.id, title: c.name, sub: "concept"), s, false) }

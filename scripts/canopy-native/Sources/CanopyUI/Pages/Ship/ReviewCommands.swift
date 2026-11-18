@@ -54,7 +54,7 @@ enum ReviewCommands {
                 app.setCursor(words.shown[id].map { WordsState.githubOwns($0.pr) } == false ? "w|title" : "w|desc")
             }))
 
-        // ── address: the commit that fixes a thread (wiki canopy-v2-address) ──
+        // ── address: the commit that fixes a thread ──
 
         let closeAddress = {
             ship.addressing = nil

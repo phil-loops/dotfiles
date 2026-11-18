@@ -9,8 +9,6 @@ import Testing
         ("/v2/dashboard", .dashboard),
         ("/v2/todo", .todo),
         ("/v2/machine", .machine),
-        ("/v2/wiki", .wiki(slug: nil)),
-        ("/v2/wiki/canopy-v2-sync", .wiki(slug: "canopy-v2-sync")),
         ("/v2/tutor", .tutor(session: nil)),
         ("/v2/tutor/abc", .tutor(session: "abc")),
         ("/v2/p/loops/svix-timeouts", .forest(repo: "loops", project: "svix-timeouts")),
@@ -38,7 +36,7 @@ import Testing
 
     @Test func pathsRoundTripWithEncoding() {
         let routes: [Route] = [
-            .forests, .dashboard, .todo, .machine, .wiki(slug: nil), .wiki(slug: "a b"), .tutor(session: "s 1"),
+            .forests, .dashboard, .todo, .machine, .tutor(session: nil), .tutor(session: "s 1"),
             .forest(repo: "loops", project: "url-safety"), .review(repo: "loops", branch: "a/b c", stretch: "outgoing"),
             .review(repo: "loops", branch: Route.integrationRef("p")),
             .review(repo: "loops", branch: "x", stretch: "abc..def"), .review(repo: "loops", branch: "x", stretch: "main"),

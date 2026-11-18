@@ -40,7 +40,7 @@ public enum Verb: String, CaseIterable, Sendable, Comparable {
     case github, preview
     case githubMain = "github-main", githubBranch = "github-branch"
     case goForests = "go-forests", goDashboard = "go-dashboard", goTodo = "go-todo"
-    case goMachine = "go-machine", goWiki = "go-wiki", goTutor = "go-tutor"
+    case goMachine = "go-machine", goTutor = "go-tutor"
     case alternate
     case slot1 = "slot-1", slot2 = "slot-2", slot3 = "slot-3", slot4 = "slot-4", slot5 = "slot-5"
     case slot6 = "slot-6", slot7 = "slot-7", slot8 = "slot-8", slot9 = "slot-9"
@@ -98,7 +98,7 @@ public enum KeySection: String, CaseIterable, Sendable {
     public static func of(_ verb: Verb) -> KeySection? {
         switch verb {
         case .conversation, .changedFiles, .map, .alternate,
-             .goForests, .goDashboard, .goTodo, .goMachine, .goWiki, .goTutor,
+             .goForests, .goDashboard, .goTodo, .goMachine, .goTutor,
              .slot1, .slot2, .slot3, .slot4, .slot5, .slot6, .slot7, .slot8, .slot9:
             return .places
         case .find, .branches, .jumps, .flags, .findings, .grep, .lastPicker:
@@ -256,7 +256,6 @@ public enum Verbs {
         v(.goDashboard, .nav, ["g S"], "go to the dashboard"),
         v(.goTodo, .nav, ["g O"], "go to the tracker"),
         v(.goMachine, .nav, ["g M"], "go to the machine"),
-        v(.goWiki, .nav, ["g W"], "go to the wiki"),
         v(.goTutor, .nav, ["g T"], "go to the tutor"),
         v(.alternate, .nav, ["g a"], "the alternate place (where the last jump left from)"),
         v(.slot1, .nav, ["g 1"], "focus forest 1"), v(.slot2, .nav, ["g 2"], "focus forest 2"), v(.slot3, .nav, ["g 3"], "focus forest 3"),

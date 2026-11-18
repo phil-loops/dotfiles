@@ -4,7 +4,7 @@ import Testing
 
 @MainActor struct ReaderContextTests {
     @Test func listCursorAwayAndBackDoesNotReviveAReaderEffect() throws {
-        let app = try ModalTests().wikiApp()
+        let app = ModalTests().panesApp()
         app.setCursor(try #require(app.rows.first))
         let origin = ReaderContext(app)
         let before = app.here()
@@ -15,7 +15,7 @@ import Testing
     }
 
     @Test func anUnchangedCursorAndAnotherPaneKeepTheReaderCurrent() throws {
-        let app = try ModalTests().wikiApp()
+        let app = ModalTests().panesApp()
         app.setCursor(try #require(app.rows.first))
         let origin = ReaderContext(app)
         app.setCursor(app.selected)
@@ -26,7 +26,7 @@ import Testing
     }
 
     @Test func unfocusedCursorWritesAreRememberedWhenThatPaneIsFocused() throws {
-        let app = try ModalTests().wikiApp()
+        let app = ModalTests().panesApp()
         let pane = try #require(app.pane)
         app.setCursor(try #require(pane.rows.first))
         let origin = ReaderContext(app)
@@ -36,7 +36,7 @@ import Testing
     }
 
     @Test func fallbackRowAwayAndBackAlsoChangesTheReaderRevision() throws {
-        let app = try ModalTests().wikiApp()
+        let app = ModalTests().panesApp()
         app.cursor = nil
         app.cursorIdx = 0
         let origin = ReaderContext(app)
@@ -46,7 +46,7 @@ import Testing
     }
 
     @Test func aPickerOwnsExactlyItsNextClosingTransition() throws {
-        let app = try ModalTests().wikiApp()
+        let app = ModalTests().panesApp()
         var origin: ReaderContext?
         var accepted: [Bool] = []
         app.nav.pick("choose", [PickItem(label: "one")]) { _ in
@@ -61,7 +61,7 @@ import Testing
     }
 
     @Test func leavingAndReturningToNormalModeRevokesTheReader() throws {
-        let app = try ModalTests().wikiApp()
+        let app = ModalTests().panesApp()
         let origin = ReaderContext(app)
         app.keys.openLayer(.sheet)
         app.keys.closeLayer()
@@ -70,7 +70,7 @@ import Testing
     }
 
     @Test func movingAwayAndBackDuringAPickerRevokesItsChoice() throws {
-        let app = try ModalTests().wikiApp()
+        let app = ModalTests().panesApp()
         app.setCursor(try #require(app.rows.first))
         var origin: ReaderContext?
         var accepted = true

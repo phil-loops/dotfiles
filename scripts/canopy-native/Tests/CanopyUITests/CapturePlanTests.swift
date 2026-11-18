@@ -12,7 +12,7 @@ struct CapturePlanTests {
         let plan = try CapturePlan(config())
         #expect(plan.shots == [.init(name: "review", address: "/v2/b/r/feature", actions: [.key("space"), .key("?"), .draw("menu"), .wait(250_000_000), .state, .terminalState])])
         #expect(plan.settle == 4_000_000_000)
-        for address in ["/v2", "/v2/", "/v2/dashboard", "/v2/machine", "/v2/b/r/my/branch?commit=abc1234..def5678", "/v2/wiki/a%20page", "/v2/keytutor/stack"] {
+        for address in ["/v2", "/v2/", "/v2/dashboard", "/v2/machine", "/v2/b/r/my/branch?commit=abc1234..def5678", "/v2/tutor/a%20session", "/v2/keytutor/stack"] {
             #expect(CapturePlan.knownAddress(address))
         }
     }

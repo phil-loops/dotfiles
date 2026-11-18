@@ -15,22 +15,21 @@ import Testing
     }
 
     /// Every page, by its route — the review page with no diff read yet (its motions hold, and say so),
-    /// the machine page before it has taken stock, the wiki with its fixture pages, the tutors cold.
+    /// the machine page before it has taken stock, the tutors cold.
     static let pages: [String: Route] = [
         "forests": .forests, "forest": .forest(repo: "loops", project: "hankles-limited-label"),
         "review": .review(repo: "loops", branch: "add-hankles-limited-label"),
-        "todo": .todo, "machine": .machine, "dashboard": .dashboard, "wiki": .wiki(slug: nil),
+        "todo": .todo, "machine": .machine, "dashboard": .dashboard,
         "tutor": .tutor(session: nil), "keytutor": .keytutor(lesson: nil),
     ]
 
-    @Test(arguments: ["forests", "forest", "review", "todo", "machine", "dashboard", "wiki", "tutor", "keytutor"])
+    @Test(arguments: ["forests", "forest", "review", "todo", "machine", "dashboard", "tutor", "keytutor"])
     func everyMotionAtEitherEndMovesOrSaysWhy(_ page: String) throws {
         let route = Self.pages[page]!
         var silent: [String] = []
         for end in ["top", "bottom"] {
             for k in ["j", "k", "g g", "G", "C-d", "C-u", "h", "l", "J", "K"] {
                 let a = try app(route)
-                if case .wiki = route { a.state { WikiState() }.seed(try JSONDecoder().decode(PagesReply.self, from: Data(WikiFixture.pages.utf8))) }
                 // the key tutor hands every key to its practice app: that is where a motion answers
                 let inner: AppModel = { if case .keytutor = route { return KeyTutor.of(a).ensureSandbox() } else { return a } }()
                 inner.cursorTo(end == "top" ? 0 : Int.max)

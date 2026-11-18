@@ -107,7 +107,7 @@ enum ShellCommands {
                            }))
 
         // ── pages ── (g + a capital: lowercase g keys are Helix's moves in the code)
-        let go: [String: Verb] = ["forests": .goForests, "dashboard": .goDashboard, "todo": .goTodo, "machine": .goMachine, "wiki": .goWiki, "tutor": .goTutor]
+        let go: [String: Verb] = ["forests": .goForests, "dashboard": .goDashboard, "todo": .goTodo, "machine": .goMachine, "tutor": .goTutor]
         for s in Surface.all where !s.arg || s.bare {
             r.register(Command(id: "nav.\(s.id)", title: "Go to \(s.title)", scope: .global, verb: go[s.id],
                                local: { [weak app] _, _ in app?.go(Route(s.path)) }))
