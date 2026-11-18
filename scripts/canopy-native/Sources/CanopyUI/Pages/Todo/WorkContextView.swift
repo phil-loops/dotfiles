@@ -183,13 +183,29 @@ struct UnboundChatsList: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("On no work · \(chats.count)").font(Theme.text(11)).foregroundStyle(theme.inkFaint)
                     ForEach(chats, id: \.id) { c in
-                        Text(WorkContext.whereItStands(c, now: ctx.date.timeIntervalSince1970)).font(Theme.text(12)).foregroundStyle(theme.inkDim).lineLimit(1)
+                        ChatButton(chat: c) {
+                            Text(WorkContext.whereItStands(c, now: ctx.date.timeIntervalSince1970)).foregroundStyle(theme.inkDim).lineLimit(1)
+                        }
                     }
                 }
                 .help("live Claude Code chats whose binding names no work: claim an item or start a branch from one to bind it")
                 .padding(.leading, 44).padding(.trailing, 16).padding(.top, 10)
             }
         }
+    }
+}
+
+/// A chat that a click brings forward in its tmux pane (claude-jump); it never types into it.
+struct ChatButton<Label: View>: View {
+    @Environment(AppModel.self) private var app
+    let chat: WorkContext.Chat
+    @ViewBuilder let label: () -> Label
+
+    var body: some View {
+        Button { app.runner.dispatch("chat.focus", via: .click, arg: chat.id) } label: { label().font(Theme.text(12)) }
+            .buttonStyle(.plain)
+            .help(chat.pane == nil ? "this chat isn't in tmux" : "bring this chat's pane forward")
+            .disabled(chat.pane == nil)
     }
 }
 
@@ -204,7 +220,9 @@ struct BranchChatsLine: View {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text("◌").foregroundStyle(theme.goldLeaf)
                 Text(leaf(branch.name)).foregroundStyle(theme.ink).fixedSize()
-                Text(WorkContext.chatsLine(chats, now: ctx.date.timeIntervalSince1970)).foregroundStyle(theme.inkDim).lineLimit(1)
+                ForEach(chats, id: \.id) { c in
+                    ChatButton(chat: c) { Text(WorkContext.chatLabel(c, now: ctx.date.timeIntervalSince1970)).foregroundStyle(theme.inkDim) }
+                }
                 Spacer(minLength: 0)
             }
             .font(Theme.text(12))

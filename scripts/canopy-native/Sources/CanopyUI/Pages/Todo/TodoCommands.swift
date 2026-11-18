@@ -69,6 +69,13 @@ enum TodoCommands {
                                    if let first = app?.panes.first?.rows.first { app?.setCursor(first) }
                                }
                            }))
+        r.register(Command(id: "chat.focus", title: "Bring a chat's tmux pane forward", scope: .global, needsArg: true, quiet: true,
+                           local: { [weak app] _, arg in
+                               guard let app, let session = arg as? String, !session.isEmpty else { throw Refusal("no such chat") }
+                               DispatchQueue.global(qos: .userInitiated).async {
+                                   if let failed = ChatJump.run(session) { DispatchQueue.main.async { app.runner.say(failed) } }
+                               }
+                           }))
         r.register(Command(id: "todo.show", title: "Show an item on its list", scope: .global, needsArg: true, quiet: true,
                            local: { [weak app, weak ui] _, arg in
                                guard let app, let ui, let id = arg as? String, let t = app.store.trackerItem(id) else { throw Refusal("no such item") }

@@ -300,8 +300,10 @@ struct WorkContext {
     }
 
     static func chatsLine(_ chats: [Chat], now: Double) -> String {
-        chats.map { "chat \($0.id.prefix(8)) \(live($0, now: now) ? "live" : "idle")" }.joined(separator: " · ")
+        chats.map { chatLabel($0, now: now) }.joined(separator: " · ")
     }
+
+    static func chatLabel(_ c: Chat, now: Double) -> String { "chat \(c.id.prefix(8)) \(live(c, now: now) ? "live" : "idle")" }
 
     /// The owner's short session id and the tracker's day, the facts a working line can state.
     @MainActor static func workedBy(_ item: TodoItem, _ store: Store) -> String {
