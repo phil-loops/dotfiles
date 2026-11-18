@@ -364,6 +364,8 @@ The viewer's `todo` domain carries a bounded, read-only freshness summary per re
 
 ## Round 27: a chat says what it works on by binding, never by where it stands
 
+*The first principles table and encoding order below were revised by the verified findings at the end of this round.*
+
 Phil asked how canopy can show what each Claude Code chat is working on. The parts exist: work ids (`canopy-work work --repo R --branch B`), conversation bindings with generations (`canopy-work bind`), and the forest row's ringed dot and line. Only Show's composer binds, and the journal has never been created on this machine (no work-bound deck reply was ever sent). A Claude Code chat appears only as a presence record: cwd, branch and recently touched files. The session that found this gap shows why presence can't say what a chat works on: its record read `loops · wt-085751`, and every edit it made was in `~/.dotfiles/scripts/show-autobuild`.
 
 ### Principles and current enforcers
@@ -392,3 +394,38 @@ The server joins each binding to presence by session id for liveness (live, idle
 6. `draw-bound-sessions`: the dot and line from bindings, the unbound list, bind-by-click and focus-pane.
 
 Open: whether a `UserPromptSubmit` hook makes Claude Code a captured source, not only a bound one. The hook is warn-only, the same weakness round 25 named for presence, so binding ships first.
+
+### Findings, verified against the code
+
+An own pass and an independent pass, briefed with the principles and not these conclusions, converged on three findings; the second pass added two.
+
+**Confirmed: a branch has no identity of its own, so a reused name inherits a chat.** The journal mints work only for tracker items (`workjournal.py:399`); a branch is a name on that work, under a non-unique index (`workjournal.py:100`). `stack-reshape rename` and `contract` move and delete git branches without touching the journal (`srv/reshape.py:157`, `:183`), and `work_for_todo(create=True)` returns existing work without updating its links (`workjournal.py:405`). Rename B to C: the work still says B, the dot on C stays dark, nothing says so. Create a new B: a name lookup hands it the old work and the old chat. Retiring work by branch name would instead retire live item work. This is round 26's incarnation lesson, unapplied to branches.
+
+**Confirmed: assignment and binding are different facts.** `claim` refuses a second live owner under the tracker lock (`canopy-todo:178`); bindings are many-to-many on purpose (a Show section and a chat on one item), and generations serialize decisions within a conversation, never across them. Making `owner` a projection of bindings either loses the refusal or makes bindings exclusive and breaks Show. Principle 2 as written also contradicts round 25's principle 7.
+
+**Confirmed: a stale decision silently replaces a newer one.** `bind` increments the generation unconditionally (`workjournal.py:487`). Canopy shows generation 7 bound to A; the chat switches to B (8); Phil's click from the older view binds C (9), erasing B unseen. A client-side `--add` that reads the set and writes the union loses a concurrent click the same way.
+
+**Confirmed: the conversation key conflates a chat with its subagents.** Presence keys on the hook's `session_id` and drops `agent_id` (`claude-session-track:103`); `canopy-todo me()` truncates to eight characters (`canopy-todo:50`). A subagent's command that switched the binding would re-point its parent; one that adds is true, since the chat Phil talks to directs both.
+
+**Confirmed: Show's reader assumes one work per conversation** (`srv/showingest.py:51`, `works[0]`) while capture records the whole frozen generation. `--add` must never reach a Show conversation. The frozen generation itself is sound: a probe with Show's submission code showed a reply accepted before an `--add` still targets only its original work.
+
+### Revised principles
+
+1. A chat's work is an explicit binding, never inferred from cwd, branch, files or activity.
+2. **Assignment and binding stay separate facts**: tracker `owner` is the one exclusive assignment; journal bindings are every conversation on a work. `claim` writes both, assignment first; a crash between leaves "assigned, no chat bound", which is true.
+3. Binding, liveness and capture are separate observations.
+4. Binding rides the motion that starts the work, and a work-start only **adds**; replacing a set is a deliberate switch.
+5. Liveness belongs to the conversation, not the process.
+6. **A branch's work identity lives in the branch's own config** (`branch.<n>.stack-work`): git carries it through `branch -m` and drops it with `branch -D`, so rename keeps it and a recreated name starts fresh. The journal's `branch` column is a display label; nothing joins on it. Orphaned branch work is inert until a doctor sweep retires it.
+7. **A decision made from a view names the generation it saw**; a stale one is refused with the current binding. `--add` computes its union inside the write transaction.
+8. **A binding names the top-level conversation by its full id.** A subagent's work-start adds to its parent; children are not conversations until a host gives them their own.
+
+### Revised encoding order
+
+1. `presence-per-conversation`: a presence record per full session id; `/clear` ends the previous one, a subagent never erases its parent's.
+2. `branch-work-identity`: `stack-reshape new` mints the branch's work and writes `branch.<n>.stack-work`; `stack-doctor --prune` retires work no branch names.
+3. `bind-add`: `canopy-work bind --add` with the union in-transaction, `--expect-generation` on every view-made decision, and the `claude-code` source; refused for a Show conversation.
+4. `claim-binds-session`: `claim` keeps the exclusive `owner` and adds a binding of the full session id to the item's work.
+5. `reshape-new-binds-session`: `stack-reshape new` adds the creating session's binding to the branch's work.
+6. `serve-bound-sessions`: a branch's chats are bindings to its `stack-work` plus to items it solves, each with liveness from presence.
+7. `draw-bound-sessions`: assignment and chats drawn apart; the unbound list; bind by click with the generation seen; focus the pane.
