@@ -239,12 +239,17 @@ public final class ShipState {
         }
     }
 
-    /// The run as the server pushed it (GateRuns), with the output tail from the on-demand read;
-    /// the read alone only for a server that doesn't push runs yet.
-    public func progressOf(_ id: String) -> GateProgress? {
-        guard let app, var pushed = GateRuns.progress(app, id) else { return progress[id]?.value }
-        pushed.tail = progress[id]?.value?.tail
-        return pushed
+    /// The run for the branch's current tree as the server pushed it (GateRuns), with the output
+    /// tail from the on-demand read; the read alone only for a server that doesn't push runs yet.
+    /// A run for a tree the branch has left is never this: its checks aren't this code's.
+    public func progressOf(_ id: String) -> GateProgress? { runsOf(id).current }
+
+    /// The last run in hand for a tree the branch has left — drawn dimmed as the previous commit's, never routed on.
+    public func previousOf(_ id: String) -> GateProgress? { runsOf(id).previous }
+
+    private func runsOf(_ id: String) -> (current: GateProgress?, previous: GateProgress?) {
+        guard let app, let b = app.store.view(Branch.self, id) else { return (nil, nil) }
+        return GatesRun.split(pushed: GateRuns.pushed(app, id), read: progress[id]?.value, tree: b.tree)
     }
     /// The answers for the branch as it is NOW — what an action may route on; nil while the
     /// only answer in hand was read for a tree the branch has left.

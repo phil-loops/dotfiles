@@ -86,9 +86,11 @@ public struct GateProgress: Decodable, Equatable, Sendable {
     public var err: String?
     /// the last lines a gate has written — the running one, or the one asked for
     public var tail: Tail?
+    /// the tree the run gated: its rows are the branch's checks only while the branch is on it
+    public var tree: String?
 
-    public init(running: Bool, elapsed: Double? = nil, events: [GateEvent]? = nil, dead: Bool? = nil, err: String? = nil, tail: Tail? = nil) {
-        self.running = running; self.elapsed = elapsed; self.events = events; self.dead = dead; self.err = err; self.tail = tail
+    public init(running: Bool, elapsed: Double? = nil, events: [GateEvent]? = nil, dead: Bool? = nil, err: String? = nil, tail: Tail? = nil, tree: String? = nil) {
+        self.running = running; self.elapsed = elapsed; self.events = events; self.dead = dead; self.err = err; self.tail = tail; self.tree = tree
     }
 }
 
@@ -145,6 +147,28 @@ public enum GatesRun {
             return GateRow(name: name, state: result != nil ? .skipped : running ? .queued : .stopped, ms: nil,
                            summary: result.flatMap { nonempty($0.note) })
         }
+    }
+
+    /// The runs in hand sorted by the branch's tree: `current` is the branch's checks, `previous` a
+    /// run for a tree the branch has left — history, never drawn as this code's checks. `pushed` is
+    /// the store's copy, `read` the GET /gates-progress answer (the output tail, or a server that
+    /// doesn't push runs); a read without a tree is trusted only for the pushed run's tail.
+    public static func split(pushed: GateProgress?, read: GateProgress?, tree: String) -> (current: GateProgress?, previous: GateProgress?) {
+        var current: GateProgress?
+        if var p = pushed, p.tree == tree {
+            if read?.tree == nil || read?.tree == p.tree { p.tail = read?.tail }
+            current = p
+        } else if let r = read, r.tree == tree {
+            current = r
+        }
+        let older = [pushed, read].compactMap { $0 }.first { $0.tree != nil && $0.tree != tree && !rows($0, now: 0).isEmpty }
+        return (current, older)
+    }
+
+    /// The left tree's rows to draw, dimmed, while a run for the new tree has none of its own yet.
+    public static func previousRows(current: GateProgress?, previous: GateProgress?, inFlight: Bool, now: Double) -> [GateRow] {
+        guard inFlight, rows(current, now: now).isEmpty else { return [] }
+        return rows(previous, now: now)
     }
 
     public static func isRunning(_ p: GateProgress?) -> Bool {

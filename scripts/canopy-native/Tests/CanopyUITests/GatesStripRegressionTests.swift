@@ -38,6 +38,30 @@ import Testing
                 "so the strip says the run is starting instead of going blank")
     }
 
+    @Test func aPreviousTreesGreenChecksAreHistoryBesideTheNewRunsSetup() throws {
+        // two commits landed: the new tree's run waits for a slot while the read still holds the
+        // old tree's six green ticks — they must not read as this code's checks (2026-11-18)
+        let six = ["env", "fresh", "typecheck", "format", "lint", "tests"]
+        let old = GateProgress(running: false, events: [GateEvent(event: "plan", planned: six)]
+            + six.map { GateEvent(event: "done", gate: $0, ok: true) } + [GateEvent(event: "result", ok: true)], tree: "old-tree")
+        let queued = GateProgress(running: true, events: [GateEvent(event: "setup", step: "queue", position: 1, behind: "other")], tree: "new-tree")
+        let (current, previous) = GatesRun.split(pushed: queued, read: old, tree: "new-tree")
+        #expect(current == queued && previous == old)
+        #expect(GatesRun.rows(current, now: 0).isEmpty, "no green tick is drawn as the branch's checks")
+        #expect(GatesRun.waiting(current, rows: [], inFlight: true, now: 0)?.text == "waiting on other", "the new run's setup stays the status")
+        #expect(GatesRun.previousRows(current: current, previous: previous, inFlight: true, now: 0).map(\.state) == Array(repeating: .green, count: 6))
+        #expect(GatesRun.previousRows(current: current, previous: previous, inFlight: false, now: 0).isEmpty, "history shows only while the re-run readies")
+
+        // the store alone holding the old tree's run: never current, kept as the previous commit's
+        let (a, _) = try app(gates: "running") { _ in
+            run(tree: "an-older-tree", running: false, events: [plan, .object(["event": "result", "ok": true])])
+        }
+        #expect(ShipState.of(a).progressOf(id) == nil)
+        #expect(ShipState.of(a).previousOf(id)?.tree == "an-older-tree")
+        #expect(GatesRun.split(pushed: nil, read: GateProgress(running: false, events: old.events), tree: "new-tree").current == nil,
+                "a read that doesn't say its tree is never this code's checks")
+    }
+
     @Test func theStripReadsThePushedRunWithoutPollingAndTheDoorFlipsOnTheVerdict() throws {
         let (a, port) = try app(gates: "running") { tree in
             run(tree: tree, running: true, events: [plan, .object(["event": "start", "gate": "env", "ts": .number(Date().timeIntervalSince1970 - 3)])])

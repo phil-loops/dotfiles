@@ -19,11 +19,17 @@ public struct ShipStripView: View {
             TimelineView(.periodic(from: .now, by: 1)) { ctx in
                 let progress = ship.progressOf(branchID)
                 let rows = GatesRun.rows(progress, now: ctx.date.timeIntervalSince1970)
+                let previous = ship.previousOf(branchID)
+                let before = GatesRun.previousRows(current: progress, previous: previous,
+                                                   inFlight: b.gates == .running || GatesRun.isRunning(progress), now: ctx.date.timeIntervalSince1970)
                 VStack(alignment: .leading, spacing: 4) {
                     line(b, m, rows, progress, now: ctx.date.timeIntervalSince1970, detailed: m == nil && stripShown(rows, progress, shown, ship))
                     if let m { StepsStrip(branchID: branchID, motion: m, vertical: sidebar) }
-                    else if stripShown(rows, progress, shown, ship) || sidebar && b.gates == .running {
+                    else if stripShown(rows, progress, shown, ship) || sidebar && b.gates == .running && before.isEmpty {
                         GatesStrip(branchID: branchID, rows: rows, progress: progress, shown: shown, vertical: sidebar)
+                    } else if !before.isEmpty && !ship.gatesHidden.contains(branchID) {
+                        // the left tree's checks while the new tree's run readies: history, dimmed and said so
+                        GatesStrip(branchID: branchID, rows: before, progress: previous, shown: nil, vertical: sidebar, previous: true)
                     }
                     if m == nil, b.diverged, case .some(.some(let s)) = ship.forceScopeOf(app, branchID) { GuardStrip(guards: s.guards, vertical: sidebar) }
                     if ship.inspecting == branchID { DivergenceView(branch: b) }
@@ -311,6 +317,8 @@ struct GatesStrip: View {
     let progress: GateProgress?
     let shown: String?
     var vertical = false
+    /// the rows are a run for a tree the branch has left: the previous commit's checks, not this code's
+    var previous = false
 
     static let step: [GateRow.State: StepState] = [.queued: .idle, .running: .run, .green: .ok, .waived: .skip, .red: .fail, .stopped: .idle, .skipped: .skip]
 
@@ -318,9 +326,9 @@ struct GatesStrip: View {
         VStack(alignment: .leading, spacing: 3) {
             if vertical {
                 HStack {
-                    Text("checks").foregroundStyle(theme.inkFaint)
+                    Text(previous ? Self.previousLabel : "checks").foregroundStyle(theme.inkFaint)
                     Spacer(minLength: 0)
-                    if GatesRun.isRunning(progress), let elapsed = progress?.elapsed {
+                    if !previous, GatesRun.isRunning(progress), let elapsed = progress?.elapsed {
                         Text(GatesRun.secs(elapsed * 1000)).foregroundStyle(theme.inkFaint).monospacedDigit()
                     }
                     KeyButton(title: "output", id: "review.gates.show", target: branchID)
@@ -349,7 +357,7 @@ struct GatesStrip: View {
                 }
             } else {
                 HStack(spacing: 12) {
-                    Text("gates").foregroundStyle(theme.inkFaint)
+                    Text(previous ? Self.previousLabel : "gates").foregroundStyle(theme.inkFaint)
                     ViewThatFits(in: .horizontal) {
                         gateRow(timings: true)
                         gateRow(timings: false)
@@ -394,7 +402,10 @@ struct GatesStrip: View {
         }
         .padding(vertical ? 0 : 6)
         .overlay(Rectangle().stroke(vertical ? .clear : theme.rule, lineWidth: 1))
+        .opacity(previous ? 0.5 : 1)
     }
+
+    static let previousLabel = "previous commit · re-running for this one"
 
     @ViewBuilder private func gateRow(timings: Bool) -> some View {
         HStack(spacing: 12) {
