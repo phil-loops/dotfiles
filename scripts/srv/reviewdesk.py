@@ -56,6 +56,7 @@ import tempfile
 import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 
 from . import ctx, ghreview, linemap, outbox, packet, repostate, watch
 
@@ -606,6 +607,10 @@ def _commit_file(tip, path, content, message):
 
 def _commit_files(tip, contents, message):
     """A commit on `tip` with each path's content replaced (None removes it), made without a worktree."""
+    return _commit_tree(tip, _tree_with_files(tip, contents), message)
+
+
+def _tree_with_files(tip, contents):
     fd, index = tempfile.mkstemp(prefix="rv-index-")
     os.close(fd)
     try:
@@ -624,6 +629,10 @@ def _commit_files(tip, contents, message):
         tree = _git(["write-tree"], env=env).stdout.strip()
     finally:
         os.unlink(index)
+    return tree
+
+
+def _commit_tree(tip, tree, message):
     r = _git(["commit-tree", tree, "-p", tip, "-F", "-"], input=message)
     if r.returncode != 0:
         raise ghreview.Refused((r.stderr or "commit failed").strip()[:200])
@@ -702,21 +711,29 @@ def helix(req, d):
             raise ghreview.Refused((r.stderr or "couldn't check the branch out for Helix").strip()[-200:])
         return _send(req, 200, {"ok": True, "dir": lines[-1], "sha": tip})
     wt, seen = d.get("dir") or "", d.get("sha") or ""
-    if not wt or _git(["-C", wt, "rev-parse", "--git-common-dir"]).returncode != 0 \
-            or _git(["-C", wt, "symbolic-ref", "-q", "HEAD"]).returncode == 0:
+    checkout = _git(["-C", wt, "rev-parse", "--git-common-dir", "--symbolic-full-name", "HEAD"]) if wt else None
+    if not checkout or checkout.returncode != 0 or checkout.stdout.rstrip("\n").rsplit("\n", 1)[-1] != "HEAD":
         raise ghreview.Refused("want {branch, op: land, dir, sha} with dir the diff-view checkout")
     if seen and not tip.startswith(seen):
         raise ghreview.Refused(f"the branch moved while you edited — your edits are saved in {wt}")
-    changed = [p for p in _git(["-C", wt, "diff", "--name-only", "-z", tip]).stdout.split("\0") if p]
-    changed += [p for p in _git(["-C", wt, "ls-files", "--others", "--exclude-standard", "-z"]).stdout.split("\0") if p]
-    if not changed:
-        return _send(req, 200, {"ok": True, "nothing": True})
-    contents = {}
-    for p in changed:
-        f = os.path.join(wt, p)
-        contents[p] = open(f, encoding="utf-8", newline="").read() if os.path.isfile(f) else None
-    message = _edit_message(branch, tip, wt, changed[0])
-    new = _commit_files(tip, contents, message)
+    with ThreadPoolExecutor(max_workers=2, initializer=ctx.set_repo, initargs=(ctx.repo_cwd(),)) as pool:
+        tracked = pool.submit(_git, ["-C", wt, "diff", "--name-only", "-z", tip])
+        untracked = pool.submit(_git, ["-C", wt, "ls-files", "--others", "--exclude-standard", "-z"])
+        changed = [p for p in tracked.result().stdout.split("\0") if p]
+        changed += [p for p in untracked.result().stdout.split("\0") if p]
+        if not changed:
+            return _send(req, 200, {"ok": True, "nothing": True})
+        contents = {}
+        for p in changed:
+            f = os.path.join(wt, p)
+            if os.path.isfile(f):
+                with open(f, encoding="utf-8", newline="") as content:
+                    contents[p] = content.read()
+            else:
+                contents[p] = None
+        tree = pool.submit(_tree_with_files, tip, contents)
+        message = _edit_message(branch, tip, wt, changed[0])
+        new = _commit_tree(tip, tree.result(), message)
     _land(branch, tip, new, changed)
     _send(req, 200, {"ok": True, "sha": new, "message": message.strip(), "files": changed})
 
@@ -729,12 +746,13 @@ def _edit_message(branch, tip, wt, path):
     if not hunk:
         return f"edit {leaf}\n"
     line = max(1, int(hunk.group(1)))
-    blame = _git(["blame", "--porcelain", "-L", f"{line},{line}", tip, "--", path]).stdout.split()
-    sha = blame[0] if blame else ""
     parent = _git(["config", f"branch.{branch}.stack-parent"]).stdout.strip() or "main"
-    own = sha and sha in _git(["rev-list", f"{parent}..{tip}"]).stdout.split()
-    pushed = own and _git(["for-each-ref", "--count=1", "--contains", sha, "refs/remotes"]).stdout.strip()
-    if not own or pushed:
+    own = set(_git(["rev-list", f"{parent}..{tip}"]).stdout.split())
+    if not own:
+        return f"edit {leaf}\n"
+    blame = _git(["blame", "--porcelain", "-L", f"{line},{line}", f"{parent}..{tip}", "--", path]).stdout.split()
+    sha = blame[0] if blame else ""
+    if sha not in own or _git(["for-each-ref", "--count=1", "--contains", sha, "refs/remotes"]).stdout.strip():
         return f"edit {leaf}\n"
     subject = _git(["log", "-1", "--format=%s", sha]).stdout.strip()
     return f"{subject if subject.startswith('fixup! ') else 'fixup! ' + subject}\n"

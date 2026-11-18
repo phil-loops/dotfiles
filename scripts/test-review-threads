@@ -9,6 +9,7 @@ import sys
 import tempfile
 import types
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from srv import ctx, ghreview, linemap, reviewdesk  # noqa: E402
@@ -393,11 +394,81 @@ class HelixLand(unittest.TestCase):
         self.write(self.wt, "a.ts", "ONE\ntwo\nthree\n")
         self.assertEqual(self.land().get("message"), "edit a.ts")
 
+    def test_the_fixup_names_the_older_branch_commit_that_wrote_the_line(self):
+        newer = self.git("commit-tree", "b^{tree}", "-p", self.tip, "-m", "feat: later change")
+        self.git("update-ref", "refs/heads/b", newer, self.tip)
+        self.tip = newer
+        self.write(self.wt, "a.ts", "one\ntwo\nTHREE\n")
+        self.assertEqual(self.land().get("message"), "fixup! feat: add three")
+
+    def test_a_line_already_on_a_remote_gets_a_new_edit_commit(self):
+        self.git("update-ref", "refs/remotes/origin/b", self.tip)
+        self.write(self.wt, "a.ts", "one\ntwo\nTHREE\n")
+        self.assertEqual(self.land().get("message"), "edit a.ts")
+
+    def test_a_fixup_of_an_existing_fixup_keeps_its_subject(self):
+        self.write(self.wt, "a.ts", "one\ntwo\nTHREE\n")
+        self.git("-C", self.wt, "add", "a.ts")
+        tree = self.git("-C", self.wt, "write-tree")
+        fixup = self.git("commit-tree", tree, "-p", self.tip, "-m", "fixup! feat: add three")
+        self.git("update-ref", "refs/heads/b", fixup, self.tip)
+        self.tip = fixup
+        self.write(self.wt, "a.ts", "one\ntwo\nThree\n")
+        self.assertEqual(self.land().get("message"), "fixup! feat: add three")
+
     def test_a_new_file_lands_too(self):
         self.write(self.wt, "b.ts", "x\n")
         r = self.land()
         self.assertEqual(r.get("files"), ["b.ts"], r)
         self.assertEqual(self.git("show", "b:b.ts"), "x")
+
+    def test_a_replacement_file_lands_with_the_deleted_file_in_one_commit(self):
+        os.unlink(os.path.join(self.wt, "a.ts"))
+        self.write(self.wt, "b.ts", "replacement\n")
+        r = self.land()
+        self.assertTrue(r.get("ok"), r)
+        self.assertEqual(self.git("ls-tree", "--name-only", "b"), "b.ts")
+        self.assertEqual(self.git("show", "b:b.ts"), "replacement")
+        self.assertEqual(self.git("rev-parse", "b^"), self.tip)
+
+    def test_parallel_preparation_keeps_the_request_repository(self):
+        with tempfile.TemporaryDirectory() as other:
+            subprocess.run(["git", "init", "-q", other], check=True)
+            ctx.CWD = other
+            ctx.set_repo(self.repo)
+            try:
+                self.write(self.wt, "a.ts", "one\ntwo\nTHREE\n")
+                r = self.land()
+                self.assertTrue(r.get("ok"), r)
+                self.assertEqual(self.git("show", "b:a.ts"), "one\ntwo\nTHREE")
+            finally:
+                ctx.clear_repo()
+                ctx.CWD = self.repo
+
+    def test_an_attached_checkout_is_refused(self):
+        self.assertFalse(self.land(dir=self.repo).get("ok"))
+        self.assertEqual(self.git("rev-parse", "b"), self.tip)
+
+    def test_failed_parallel_preparation_does_not_move_the_branch(self):
+        self.write(self.wt, "a.ts", "one\ntwo\nTHREE\n")
+        with mock.patch.object(reviewdesk, "_tree_with_files", side_effect=ghreview.Refused("couldn't stage the edit")):
+            r = self.land()
+        self.assertFalse(r.get("ok"), r)
+        self.assertEqual(self.git("rev-parse", "b"), self.tip)
+
+    def test_a_branch_that_moves_during_preparation_keeps_its_new_tip(self):
+        self.write(self.wt, "a.ts", "one\ntwo\nTHREE\n")
+        moved = self.git("commit-tree", "b^{tree}", "-p", self.tip, "-m", "another writer")
+        prepare = reviewdesk._tree_with_files
+
+        def move_then_prepare(tip, contents):
+            self.git("update-ref", "refs/heads/b", moved, tip)
+            return prepare(tip, contents)
+
+        with mock.patch.object(reviewdesk, "_tree_with_files", side_effect=move_then_prepare):
+            r = self.land()
+        self.assertFalse(r.get("ok"), r)
+        self.assertEqual(self.git("rev-parse", "b"), moved)
 
     def test_a_moved_branch_keeps_the_edits_where_they_are(self):
         self.write(self.wt, "a.ts", "changed\n")
