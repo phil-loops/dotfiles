@@ -2,7 +2,8 @@ import Foundation
 
 /// The gesture that sent a write (sync.ts `via`). The server refuses GitHub writes without a key
 /// or a click (srv/ghreview.py refusal()).
-public enum Via: String, Sendable { case key, click, palette, menu, drag }
+/// How a command was asked for; `auto` is canopy acting on its own (a forest archiving itself), never a person.
+public enum Via: String, Sendable { case key, click, palette, menu, drag, auto }
 
 /// A write's answer — sync.ts `Sent`.
 public struct Sent: Sendable {

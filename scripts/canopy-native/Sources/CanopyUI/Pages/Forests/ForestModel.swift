@@ -92,6 +92,8 @@ public final class ForestModel {
     /// open PRs awaiting my review, newest search first; empty until the first answer
     public private(set) var reviewRequests: [ReviewRequest] = []
     @ObservationIgnored var wasClosed: Set<String>?
+    /// Archive a forest (the app dispatches `project.archive`, so `u` undoes it).
+    @ObservationIgnored var archive: ((String) -> Void)?
 
     public enum Face: String { case branches, story }
 
@@ -283,6 +285,7 @@ public final class ForestModel {
         guard let was = wasClosed else {
             shelved = closed
             wasClosed = closed
+            archiveDone(closed)
             return
         }
         // a shelved forest that grows a new branch is open again, so it comes back out
@@ -295,9 +298,17 @@ public final class ForestModel {
                 self.shelved.insert(id)
                 self.expanded.remove(id)
                 if self.launching == id { self.launching = nil }
+                self.archiveDone([id])
             }
         }
         wasClosed = closed
+    }
+
+    /// A closed forest archives itself once its work is done: every PR landed and nothing left
+    /// open on its own list — a forest that closed while canopy was shut goes on the next look.
+    func archiveDone(_ ids: Set<String>) {
+        let open = Set(store.list(TodoItem.self).filter { ![.done, .dropped, .broken].contains($0.state) }.compactMap(\.project))
+        for id in ids.sorted() where store.view(Project.self, id)?.state != .archive && !open.contains(id) { archive?(id) }
     }
 
     // ── integrate.ts: does the whole forest merge? ──
@@ -365,6 +376,7 @@ public extension AppModel {
             let m = ForestModel(store: store, router: router, transport: transport)
             m.reads = { [weak self] b in self.map { ShipState.of($0).situationReads($0, b) } ?? SituationReads() }
             m.readsVersion = { [weak self] in self.map { ShipState.of($0).readsVersion } ?? 0 }
+            m.archive = { [weak self] id in self?.runner.dispatch("project.archive", via: .auto, target: id) }
             return m
         }
     }

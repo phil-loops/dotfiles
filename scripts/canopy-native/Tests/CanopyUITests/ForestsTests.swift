@@ -299,6 +299,27 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = f
         #expect(ForestNav.primary(for: "p:r:done", a)?.id == "forest.page")
     }
 
+    /// Phil 2026-11-18: when all the work is done, the forest archives itself — through the archive
+    /// command, so u undoes it — and a forest with open items on its own list stays out.
+    @Test func aForestWhoseWorkIsDoneArchivesItself() {
+        let a = world()
+        var archived: [String] = []
+        a.forestModel.archive = { archived.append($0) }
+        a.forestModel.syncClosings()
+        #expect(archived == ["r:done"])
+    }
+
+    @Test func aClosedForestWithOpenItemsOnItsListStays() throws {
+        let a = world()
+        let item: JSONValue = ["id": "left", "title": "one more thing", "kind": "fix", "state": "open", "area": "x", "size": "S", "why": "", "project": "r:done"]
+        #expect(a.store.applyPatch(try Patch.make(domain: Domain.todo, version: (a.store.versions[Domain.todo] ?? 0) + 1, upserts: ["todo": ["left": item]])) == .ok)
+        #expect(a.store.view(TodoItem.self, "left")?.project == "r:done")
+        var archived: [String] = []
+        a.forestModel.archive = { archived.append($0) }
+        a.forestModel.syncClosings()
+        #expect(archived.isEmpty)
+    }
+
     @Test func prsAwaitingReviewSitBetweenFocusAndTheWorkbenchAndRetOpensThem() {
         let a = world()
         a.forestModel.syncClosings()
