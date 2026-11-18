@@ -124,5 +124,18 @@ import Testing
         try await wait("the delayed stream acknowledgement") { app.store.asOf[Domain.git] == 2 }
         #expect(page.tip == finalTip && page.diffCurrent)
         #expect(page.diffCanvas.canvas.text.string.contains("after the second edit"))
+        let interrupted: JSONValue? = await app.transport.ask("/test/recover-last", JSONObject())
+        #expect(interrupted?["ok"] == true && interrupted?["sha"]?.string == finalTip)
+        app.runner.dispatch("review.helix.recover", via: .key, target: page.id)
+        await page.editorRecoveryTask?.value
+        try #require(app.nav.picker?.title == "saved Helix edits")
+        app.nav.choose(0)
+        try await wait("the recovered operation through the real HTTP server") { app.runner.note == "recovered the saved Helix edit" }
+        let recovered: JSONValue = try await app.transport.getJSON("/test/result")
+        #expect(recovered["tip"]?.string == finalTip && recovered["count"]?.int == 3)
+        #expect(page.tip == finalTip && page.diffCanvas.canvas.text.string.contains("after the second edit"))
+        let requests = recovered["requests"]?.array ?? []
+        #expect(requests.contains { $0["path"] == "/loops/edit-workspaces" })
+        #expect(requests.contains { $0["path"] == "/loops/edit-recover" && $0["body"]?["operation"] == interrupted?["operation"] })
     }
 }

@@ -63,7 +63,7 @@ def main():
     os.environ["STACK_OPEN_NO_GEN_SYNC"] = "1"
     os.environ["STACK_REVIEW_GH_FAKE"] = str(root / "github.json")
     (root / "github.json").write_text('{"viewer":"editor-flow","prs":{}}')
-    from srv import ctx, repostate, review, routes, state
+    from srv import ctx, edits, repostate, review, routes, state
     ctx.CWD = ctx.MAIN_WT = str(repo)
     ctx.SCRIPTS = str(SCRIPTS)
     ctx.REPOS = {"loops": str(repo)}
@@ -175,6 +175,7 @@ def main():
                 if u.path == "/test/result":
                     (root / "git-calls.json").write_text(json.dumps(git_calls, indent=2))
                     return self._send(200, json.dumps({"tip": git("rev-parse", branch), "initial": initial,
+                                                        "count": int(git("rev-list", "--count", "main.." + branch)),
                                                         "text": git("show", f"{branch}:a.txt"), "requests": requests,
                                                         "parkedTip": json.loads((repo / ".git/canopy-edits/ready.json").read_text()).get("tip") if (repo / ".git/canopy-edits/ready.json").exists() else None}))
                 if u.path == "/review-requests":
@@ -191,8 +192,19 @@ def main():
             self._actor = "browser"
             phase.stage = path
             try:
-                if path in ("/loops/review-helix", "/loops/edit-session", "/loops/edit-commit", "/loops/edit-warm"):
+                if path in ("/loops/review-helix", "/loops/edit-session", "/loops/edit-commit", "/loops/edit-warm",
+                            "/loops/edit-workspaces", "/loops/edit-recover"):
                     return routes.post(self, path.removeprefix("/loops"), raw)
+                if path == "/test/recover-last":
+                    tip = git("rev-parse", branch)
+                    saved = [(file.parent, edits._load(file.parent)) for file in (repo / ".git/canopy-edits").glob("*/session.json")]
+                    saved = [(directory, value) for directory, value in saved if value.get("kind") == "editor" and value.get("receipt", {}).get("sha") == tip]
+                    if len(saved) != 1:
+                        raise RuntimeError("the fixture needs exactly one saved operation at its current tip")
+                    directory, value = saved[0]
+                    value["state"] = "landing"
+                    edits._save(directory / "session.json", value)
+                    return self._send(200, json.dumps({"ok": True, "sha": tip, "operation": value["operation"]}))
                 if path == "/loops/syntax/units":
                     return self._send(200, '{"ok":true,"units":[],"functions":[],"classes":[]}')
                 return self._send(200, '{"ok":true}')

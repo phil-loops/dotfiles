@@ -17,6 +17,7 @@ struct HelixLanding {
     }
 
     static func install(_ app: AppModel) {
+        EditorRecovery.install(app)
         app.registry.register(Command(id: "review.helix.land", title: "Commit an editor session on its original branch", scope: .global,
             budget: .gitWrite, needsArg: true, quiet: true, write: { [weak app] id, arg in
                 guard let app, let landing = arg as? HelixLanding, id == landing.open.source.id else { return nil }
