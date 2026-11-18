@@ -361,3 +361,34 @@ Delivery (`scripts/srv/workdelivery.py`) prepares a stored, immutable packet of 
 Completion is judged in the transaction that records it: current only for the latest generation of a managed attempt citing its latest acknowledged delivery of the work's revision now, with complete capture coverage. Tracker closes pass the same boundary and record unverified completions. Show's composer is the owned ingress: a section binds its work when opened, each reply is captured from its literal submission before delivery, and opening the deck resumes safe pending deliveries.
 
 The viewer's `todo` domain carries a bounded, read-only freshness summary per record, and native work context shows the latest literal instruction, delivery, observed worker, dated progress and completion basis. Remaining open: other chat hosts have no capture and stay unknown; delivery proves receipt, not understanding; resume needs no hook only because every owned turn carries the whole packet.
+
+## Round 27: a chat says what it works on by binding, never by where it stands
+
+Phil asked how canopy can show what each Claude Code chat is working on. The parts exist: work ids (`canopy-work work --repo R --branch B`), conversation bindings with generations (`canopy-work bind`), and the forest row's ringed dot and line. Only Show's composer binds, and the journal has never been created on this machine (no work-bound deck reply was ever sent). A Claude Code chat appears only as a presence record: cwd, branch and recently touched files. The session that found this gap shows why presence can't say what a chat works on: its record read `loops · wt-085751`, and every edit it made was in `~/.dotfiles/scripts/show-autobuild`.
+
+### Principles and current enforcers
+
+| Principle | Current enforcer and strength | Verified source |
+| --- | --- | --- |
+| 1. A chat's work is an explicit binding, never inferred from cwd, branch, files or activity | Round 25's rule; nothing binds a Claude Code chat, so nothing infers either | `scripts/srv/workjournal.py:487` |
+| 2. The journal is the one authority for who is on what; tracker `owner` is a projection | **Two authorities would appear on first bind.** `claim` writes `owner`, and the native line reads it | `scripts/canopy-todo` claim, `WorkContext.swift:261` |
+| 3. Binding, liveness and capture are separate observations | Presence liveness is pid + lstart; capture coverage for Claude Code is absent, so freshness reads unknown | `scripts/srv/agents.py:20`, `WORK-CONTEXT.md` |
+| 4. Binding rides the motion that starts the work | **Unenforced.** `claim` records `solved_by` but not a binding; `stack-reshape new` records nothing about the session | `scripts/canopy-todo`, `scripts/stack-reshape` |
+| 5. Liveness belongs to the conversation, not the process | **Wrong today.** Presence keeps one record per pid, newest activity wins, and deletes the rest: a subagent or `/clear` sharing the process erases the other conversation's record, so a bound session can read ended while it works | `scripts/claude-sessions` `load_live` |
+
+### Proposed design
+
+The source is `claude-code`; the conversation is `$CLAUDE_CODE_SESSION_ID`, so `--resume` keeps its binding and `/clear` starts a new, unbound conversation. Binding happens inside the commands that start work: `canopy-todo claim` binds the session to the item's work (replacing the `owner` write), and `stack-reshape new` binds it to the new branch's work. Anything else is an explicit `canopy-work bind` or stays unbound. `bind --add` widens the set as a new generation; plain `bind` remains a switch.
+
+The server joins each binding to presence by session id for liveness (live, idle, ended) and to work link metadata for its branch. Canopy draws the ringed dot and line from bindings, offers a click that focuses the session's tmux pane (never types into it), and lists live but unbound sessions as such, without guessing their work. Phil's click can bind one (`by: phil`).
+
+### Proposed encoding order
+
+1. `presence-per-conversation`: presence keeps a record per session id; `/clear` ends the previous one, a subagent never erases its parent's.
+2. `bind-add`: `canopy-work bind --add` and the `claude-code` source.
+3. `claim-binds-session`: `canopy-todo claim` binds through the journal; `owner` becomes a projection.
+4. `reshape-new-binds-session`: `stack-reshape new` binds the creating session.
+5. `serve-bound-sessions`: the todo and branch domains carry bound sessions with liveness.
+6. `draw-bound-sessions`: the dot and line from bindings, the unbound list, bind-by-click and focus-pane.
+
+Open: whether a `UserPromptSubmit` hook makes Claude Code a captured source, not only a bound one. The hook is warn-only, the same weakness round 25 named for presence, so binding ships first.
