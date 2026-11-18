@@ -65,6 +65,7 @@ extension ReviewPageState {
         case .diff:
             guard tip == pending.source.tip || tip == commit else { pendingHelixReturn = nil; return false }
             guard diffCurrent, tip == commit else { return false }
+            Log.line("helix \(pending.session): updated diff ready · \(pending.source.id)")
             pendingHelixReturn = nil
             guard let key = stopNear(path: pending.path, line: pending.line) else { return false }
             setCursor(key)

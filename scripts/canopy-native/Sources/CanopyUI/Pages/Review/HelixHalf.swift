@@ -22,6 +22,8 @@ public struct HelixOpen: Equatable {
     let source: BranchSource
     let reader: ReaderContext
 
+    func log(_ event: String) { Log.line("helix \(session): \(event) · \(source.id)") }
+
     public static func == (lhs: HelixOpen, rhs: HelixOpen) -> Bool {
         lhs.session == rhs.session && lhs.path == rhs.path && lhs.line == rhs.line && lhs.col == rhs.col &&
             lhs.dir == rhs.dir && lhs.sha == rhs.sha && lhs.whole == rhs.whole && lhs.fromSide == rhs.fromSide && lhs.source == rhs.source
@@ -41,6 +43,7 @@ extension ReviewPageState {
         pendingHelixReturn = nil
         helixAt = nil
         helix = open
+        open.log("preparing checkout")
         let checking = "checking \(source.repo)/\(branch) out for Helix…"
         app.runner.say(checking)
         helixTask = Task { @MainActor in
@@ -63,12 +66,13 @@ extension ReviewPageState {
                 return app.runner.say(answer?.err ?? "couldn't prepare Helix at the shown commit · try again")
             }
             helix?.dir = dir
+            open.log("checkout ready")
             app.runner.say("Helix on \(source.repo)/\(branch) · :w saves · quitting commits it")
         }
     }
 
-    @discardableResult func cancelHelixPreparation() -> Bool {
-        guard let open = helix, open.dir == nil else { return false }
+    @discardableResult func cancelHelixPreparation(session: UUID? = nil) -> Bool {
+        guard let open = helix, open.dir == nil, session == nil || session == open.session else { return false }
         helixTask?.cancel()
         helixTask = nil
         helix = nil
@@ -122,6 +126,7 @@ extension ReviewPageState {
 
     func finishHelix(_ app: AppModel, session: UUID, exitCode: Int32?) {
         guard let open = helix, open.session == session else { return }
+        open.log("process exited \(exitCode.map(String.init) ?? "unknown")")
         guard exitCode == 0 else {
             helix = nil
             helixAt = nil
@@ -162,6 +167,8 @@ extension ReviewPageState {
         }
         let landing = HelixLanding(open: open, dir: dir, reader: reader)
         helixLandingPermits.insert(open.session)
+        open.log("commit queued")
+        if reader?.isCurrent(app) == true { app.runner.say("committing the Helix edit to \(open.source.repo)/\(open.source.name)…") }
         app.runner.dispatch("review.helix.land", via: .key, target: open.source.id, arg: landing)
     }
 
@@ -179,6 +186,22 @@ func helixStatus(_ line: String) -> (path: String, line: Int)? {
 /// A terminal that reads Helix's status line as the screen updates, so quitting knows where the cursor was.
 final class HelixTerminal: LocalProcessTerminalView {
     var onPosition: ((String, Int) -> Void)?
+    var preparing = true
+    var cancelPreparation: (() -> Void)?
+    var onWriteQuit: (() -> Void)?
+
+    override func send(source: TerminalView, data: ArraySlice<UInt8>) {
+        guard !preparing else {
+            if data.elementsEqual([0x1b]) { cancelPreparation?() }
+            return
+        }
+        if data.contains(13) {
+            let terminal = getTerminal()
+            let command = terminal.getLine(row: terminal.rows - 1)?.translateToString(trimRight: true).trimmingCharacters(in: .whitespaces)
+            if let command, [":wq", ":wq!", ":x", ":x!", ":write-quit", ":write-quit!"].contains(command) { onWriteQuit?() }
+        }
+        super.send(source: source, data: data)
+    }
 
     override func dataReceived(slice: ArraySlice<UInt8>) {
         super.dataReceived(slice: slice)
@@ -195,9 +218,10 @@ final class HelixTerminal: LocalProcessTerminalView {
 /// The terminal Helix runs in, over the new half or the whole page. It takes the keyboard while it's open.
 struct HelixHalf: NSViewRepresentable {
     let open: HelixOpen
-    let dir: String
+    let dir: String?
     let colors: CanvasColors
     var moved: (String, Int) -> Void = { _, _ in }
+    var cancelPreparation: () -> Void = {}
     let quit: (Int32?) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(quit: quit) }
@@ -211,21 +235,31 @@ struct HelixHalf: NSViewRepresentable {
         t.font = .monospacedSystemFont(ofSize: DocFont.size, weight: .regular)
         t.nativeBackgroundColor = colors.bg
         t.nativeForegroundColor = colors.ink
-        var env = ProcessInfo.processInfo.environment
-        env["TERM"] = "xterm-256color"
-        env["COLORTERM"] = "truecolor"
-        t.startProcess(executable: Zsh.path, args: Zsh.arguments("exec hx \"$0\"", ["\(open.path):\(open.line):\(open.col)"]),
-                       environment: env.map { "\($0)=\($1)" }, currentDirectory: dir)
+        updateNSView(t, context: context)
         DispatchQueue.main.async { t.window?.makeFirstResponder(t) }
         return t
     }
 
     func updateNSView(_ t: LocalProcessTerminalView, context: Context) {
         context.coordinator.quit = quit
+        guard let terminal = t as? HelixTerminal else { return }
+        terminal.cancelPreparation = cancelPreparation
+        terminal.onPosition = moved
+        terminal.onWriteQuit = { open.log("write-quit requested") }
+        guard let dir, !context.coordinator.started else { return }
+        context.coordinator.started = true
+        terminal.preparing = false
+        open.log("starting process")
+        var env = ProcessInfo.processInfo.environment
+        env["TERM"] = "xterm-256color"
+        env["COLORTERM"] = "truecolor"
+        t.startProcess(executable: Zsh.path, args: Zsh.arguments("exec hx \"$0\"", ["\(open.path):\(open.line):\(open.col)"]),
+                       environment: env.map { "\($0)=\($1)" }, currentDirectory: dir)
     }
 
     final class Coordinator: NSObject, LocalProcessTerminalViewDelegate {
         var quit: (Int32?) -> Void
+        var started = false
         init(quit: @escaping (Int32?) -> Void) { self.quit = quit }
 
         func processTerminated(source: TerminalView, exitCode: Int32?) {
