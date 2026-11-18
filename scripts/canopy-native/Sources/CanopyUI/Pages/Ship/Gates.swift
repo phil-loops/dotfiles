@@ -171,18 +171,11 @@ public enum GatesRun {
         return rows(previous, now: now)
     }
 
-    /// Whether `p` can move this run up: it waits in line behind a run Phil didn't click. Behind
-    /// only his own clicks, holding the slot or readying its checkout, the press would move nothing.
+    /// Whether `p` can move this run up: something waits ahead of it in line. `p` puts it at the
+    /// front — ahead of Phil's earlier clicks too — so the only run it can't pass is the one running.
     public static func canPutNext(_ setup: GateEvent?) -> Bool {
-        guard let setup, setup.step == "queue", (setup.position ?? 2) > 1 else { return false }
-        guard let ahead = setup.ahead else { return true }
-        return setup.tier != "interactive" && ahead.contains { $0.key != "interactive" && $0.value > 0 }
-    }
-
-    /// What `p` on a queued run says from the server's answer: a run already among Phil's clicks moves nothing.
-    public static func nextSaid(was: String?, waitingOn: String?) -> String {
-        guard was != "interactive" else { return "already next among yours\(waitingOn.map { " — waiting on \($0)" } ?? "")" }
-        return "these gates go next — p pushes once they're green"
+        guard let setup, setup.step == "queue" else { return false }
+        return (setup.position ?? 2) > 1
     }
 
     public static func isRunning(_ p: GateProgress?) -> Bool {
@@ -245,12 +238,12 @@ public enum GatesRun {
         switch e.step {
         case "queue":
             if let p = e.position, p > 1 {
-                guard let ahead = e.ahead, let tier = e.tier, tier != "interactive" else {
-                    return "#\(p) in line for gates\(busy.map { " · \($0) running" } ?? "")"
+                guard let ahead = e.ahead else {
+                    return "#\(p) in line for gates\(busy.map { " · \($0) running" } ?? "") · p puts it next"
                 }
                 let kinds = [("interactive", "yours"), ("ship", "ready to ship"), ("background", "agent")]
                     .compactMap { k, word in ahead[k].flatMap { $0 > 0 ? "\($0) \(word)" : nil } }
-                return "#\(p) in line · behind \(kinds.joined(separator: ", "))\(canPutNext(e) ? " · p puts it next" : "")"
+                return "#\(p) in line · behind \(kinds.joined(separator: ", ")) · p puts it next"
             }
             return busy.map { "waiting on \($0)" } ?? "waiting for a gates slot"
         case "checkout": return "preparing the checkout"

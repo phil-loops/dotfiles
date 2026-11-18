@@ -28,6 +28,11 @@ ORPHANED_SLOT_GRACE_SECONDS = 30
 TIERS = {"interactive": 0, "ship": 1, "background": 2}
 
 
+def line_key(record, path):
+    """A request's place in line: tier, then the latest "put it next" first, then arrival."""
+    return (record["priority"], -record.get("next", 0), record["created"], str(path))
+
+
 def alive(pid):
     try:
         os.kill(int(pid), 0)
@@ -59,6 +64,7 @@ def promote(path):
             path.with_suffix(".promoted").touch()
             return
         record["priority"] = 0
+        record["next"] = time.time_ns()
         save(path, record)
 
 
@@ -71,10 +77,10 @@ def claim(root, request):
                 if not alive(record["pid"]):
                     path.unlink()
                 elif record.get("state") == "queued":
-                    candidates.append((record["priority"], record["created"], str(path), record))
+                    candidates.append(line_key(record, path))
             except (OSError, ValueError, KeyError):
                 continue
-        if not candidates or min(candidates, key=lambda c: c[:3])[2] != str(request):
+        if not candidates or min(candidates)[-1] != str(request):
             return None
         slot = root / "slot1"
         if slot.exists():
@@ -126,14 +132,14 @@ def standing(root, request):
             if not alive(record.get("pid")):
                 continue
             if record.get("state") == "queued":
-                queued.append((record["priority"], record["created"], str(path)))
+                queued.append(line_key(record, path))
             elif record.get("state") == "running":
                 running = branch_of(path.name)
         queued.sort()
-        order = [q[2] for q in queued]
+        order = [q[-1] for q in queued]
         place = order.index(str(request)) + 1 if str(request) in order else 0
         ahead = {name: 0 for name in TIERS}
-        for priority, _, _ in queued[:max(place - 1, 0)]:
+        for priority, *_ in queued[:max(place - 1, 0)]:
             ahead[names.get(priority, "background")] += 1
         tier = names.get(queued[place - 1][0], "") if place else ""
         if not running:
@@ -210,6 +216,7 @@ def main(argv=None):
         promotion = request.with_suffix(".promoted")
         if promotion.exists():
             record["priority"] = 0
+            record["next"] = time.time_ns()
             promotion.unlink()
         save(request, record)
     slot = None

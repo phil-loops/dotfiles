@@ -104,14 +104,33 @@ import Testing
         }
     }
 
-    @Test func queuedBehindOnlyYourOwnClicksOffersNoPriority() throws {
-        let (app, port) = try queued(ahead: ["interactive": 2, "ship": 0, "background": 0])
+    @Test func queuedBehindYourOwnClicksStillPutsItNext() throws {
+        let (app, port) = try queued(ahead: ["interactive": 2, "ship": 0, "background": 0], tier: "interactive")
+        ShipStub.answer(port, "POST", "/loops/gates", #"{"ok":true,"next":true}"#)
         let branch = try #require(app.store.view(Branch.self, ShipTests.branch))
-        #expect(BranchCommands.pushRoute(branch.id, app) == nil, "p can't move a run ahead of Phil's own clicks")
-        #expect(GatesRun.words(try #require(GatesRun.setup(ShipState.of(app).progressOf(branch.id)))) == "#3 in line · behind 2 yours")
-        app.runner.dispatch("review.push", via: .key, target: branch.id)
-        #expect(ShipStub.posts(port).isEmpty)
-        #expect(GatesRun.nextSaid(was: "interactive", waitingOn: "mine-first") == "already next among yours — waiting on mine-first")
+        #expect(BranchCommands.pushRoute(branch.id, app) == "branch.gates.next", "p moves a run ahead of Phil's earlier clicks too")
+        #expect(GatesRun.words(try #require(GatesRun.setup(ShipState.of(app).progressOf(branch.id)))) == "#3 in line · behind 2 yours · p puts it next")
+    }
+
+    @Test func aRunFirstInLineOffersNoPriority() throws {
+        let subject = ShipTests()
+        let (app, _) = try subject.app { state in
+            subject.entity(&state, "branch", ShipTests.branch) { branch in
+                branch["pushed"] = "local"
+                branch["gates"] = "running"
+            }
+            let tree = state["entities"]?.object?["branch"]?.object?[ShipTests.branch]?.object?["tree"]?.string ?? ""
+            var ents = state["entities"]!.object!
+            ents["gaterun"] = .object([ShipTests.branch: .object([
+                "id": .string(ShipTests.branch), "branch": .string(ShipTests.branch), "tree": .string(tree), "running": true,
+                "started": .number(Date().timeIntervalSince1970 - 5),
+                "events": .array([.object(["event": "setup", "step": "queue", "position": 1, "behind": "other",
+                                           "tier": "interactive", "ahead": .object([:])])]),
+            ])])
+            state["entities"] = .object(ents)
+        }
+        let branch = try #require(app.store.view(Branch.self, ShipTests.branch))
+        #expect(BranchCommands.pushRoute(branch.id, app) == nil, "first in line: only the running run is ahead, and p can't pass it")
     }
 
     @Test func aRunningGateKeepsItsPriorityAction() async throws {
