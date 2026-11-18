@@ -296,7 +296,7 @@ public enum ShipRules {
             case "branch.conform": return "take origin's copy"
             case "branch.force.arm": return "replace origin's copy"
             case "branch.catchup": return "catch up to \(leaf(b.owes ?? b.parent)) first"
-            case "branch.sync": return "diverged — sync carries it on top"
+            case "branch.sync": return "diverged — sync catches it up here, then push"
             case "branch.pr":
                 if st.ship == .pushed { return "open its PR" }
                 return st.waiting.first.map { $0.kind == .merge ? "merge it" : "waiting on \($0.label)" } ?? "merge it"

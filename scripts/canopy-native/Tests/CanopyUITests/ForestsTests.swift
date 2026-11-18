@@ -84,7 +84,7 @@ private let NOW = iso("2026-10-22T18:00:00Z") // Thu 11:00 PT
         let diverged = br(["gates": "green", "pushed": "ahead", "ahead": 1, "diverged": true])
         #expect(stand(diverged).actor == .unknown, "the force scope isn't read: unknown, never ready")
         #expect(ShipRules.stand(diverged, nil, nil, now: NOW, reads: SituationReads(prepRead: true, force: (false, true))).next == "branch.sync",
-                "origin can't be replaced: sync carries it on top, the one remedy")
+                "origin can't be replaced: sync catches it up locally, the one remedy")
         let agentOn = { (running: Bool?) in ShipRules.stand(br(["gates": "stale"]), nil, nil, now: NOW, reads: SituationReads(agent: "t1", agentRunning: running)) }
         #expect(agentOn(true).actor == .agent("t1"))
         #expect(agentOn(nil).actor == .agent("t1"), "a claim the journal doesn't observe still names its agent")

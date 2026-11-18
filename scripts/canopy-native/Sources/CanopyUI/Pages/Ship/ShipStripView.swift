@@ -150,7 +150,7 @@ public struct ShipStripView: View {
             if live == nil, slot != .guards, b.diverged, case .some(.some(let s)) = ship.forceScopeOf(app, branchID), !s.eligible,
                !s.guards.allSatisfy({ $0.ok || $0.k == "gates" }), let bad = s.guards.first(where: { !$0.ok }) {
                 Text("diverged · ✗ \(bad.label)").foregroundStyle(theme.ember)
-                Text("· sync carries it on top").foregroundStyle(theme.inkFaint)
+                Text("· sync catches it up here · then \(app.registry.keyOf("review.push")) pushes").foregroundStyle(theme.inkFaint)
             }
             if !acts && live == nil && app.store.view(Pr.self, branchID) == nil && app.forestModel.opensPR(branchID)
                 && app.store.view(Warm.self, b.repo)?.prs == true {
