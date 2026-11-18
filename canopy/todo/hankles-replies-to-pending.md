@@ -6,7 +6,7 @@ area = "review"
 size = "S"
 why = "review replies land on GitHub without retyping them there, while still nothing posts until I press Submit"
 waiting = "john-hankles's next review on one of Phil's PRs, for the first real reply-joins-pending check"
-links = ["wiki/loops/canopy-v2-review.md", "memory:project_canopy-v2.md", "b1a8621"]
+links = ["memory:project_canopy-v2.md", "b1a8621"]
 created = "2026-10-25"
 updated = "2026-10-25"
 +++

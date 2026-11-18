@@ -5,7 +5,7 @@ state = "done"
 area = "v1-retire"
 size = "L"
 why = "one app, one key registry covering every page, and ~15k lines of v1 gone"
-links = ["wiki/loops/canopy-v2-plan.md", "memory:project_canopy-v2.md"]
+links = ["memory:project_canopy-v2.md"]
 created = "2026-10-25"
 updated = "2026-10-27"
 +++

@@ -15,11 +15,11 @@ with a ranked queue, steps written into the top items, and a short report. Phil 
 ## 1 · Read the state
 
 - `canopy-todo ls --json` and `canopy-todo check` (fix what check reports before ranking).
-- What landed since items were written: `git -C ~/.dotfiles log --since=<oldest open item's updated> --oneline -- scripts/ wiki/loops/canopy* .claude/skills/next`.
+- What landed since items were written: `git -C ~/.dotfiles log --since=<oldest open item's updated> --oneline -- scripts/ .claude/skills/next`.
 - What hurts in daily use: `curl -s 127.0.0.1:62497/telemetry/summary` — commands over budget
   (`over`, p95 vs budget), high refusal/failure rates, never-used commands. Read-only GET; never
   probe a mutating endpoint.
-- The design page for each area you rank near the top: `wiki/loops/canopy-v2*.md`.
+- The design notes for each area you rank near the top: `scripts/canopy-native/{DESIGN,NAV,PORTING}.md`.
 
 ## 2 · Triage
 
@@ -41,7 +41,7 @@ rest stay unranked). Order by value over cost, using these — say which one dec
 3. **Unblocking**: an item others name in `blocked_by` rises with each one it frees. Never rank an
    item above its blocker.
 4. **Decay**: things that rot if left — a feature half-landed, a flag that's built and off, a stale
-   design page.
+   design note.
 5. **Cost**: S beats M at equal value. L doesn't get ranked (step 2 split it).
 
 ## 4 · Check the design of each top pick

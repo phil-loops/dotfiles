@@ -5,7 +5,7 @@ state = "open"
 area = "review"
 size = "L"
 why = "reading a stacked teammate series gets the same map, walk and preview as my own forests"
-links = ["wiki/loops/foreign-forests.md", "memory:project_viewer-foreign-forests.md", "d1f6bf5"]
+links = ["memory:project_viewer-foreign-forests.md", "d1f6bf5"]
 created = "2026-10-25"
 updated = "2026-10-25"
 +++
