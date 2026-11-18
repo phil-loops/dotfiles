@@ -929,14 +929,21 @@ def push_now(branch, stay=False):
     v = _origin_verdict(branch)
     if v is None:
         return {"_status": 400, "ok": False, "err": "no such branch"}
-    if not v["ok"]:
-        return {"ok": False, "err": "; ".join(v["reasons"]), "verdict": v}
     # The verdict's ff ward read the last fetch's origin/<branch>; only trunk is fetched on a
     # throttle. A commit landed from github.com (an accepted suggestion) leaves that ref stale,
     # the ward green, and the push rejected with a stderr the header can't show. Fetch the one
     # ref now and refuse in words before git does.
     # A first push has no origin/<branch> to fetch or compare — the ward is only for re-pushes.
     ctx.run(["git", "fetch", "--quiet", "origin", branch])
+    # A push is idempotent: origin holding this exact tip is the press's goal already reached
+    # (pushed from another door), so the next step is the PR, not a failed run (2026-11-18).
+    if already_on_origin(branch):
+        repostate.invalidate()
+        target = _open_pr_url(branch) or v["web"]
+        return {"ok": True, "already": True, "remote": "origin", "web": target,
+                "opened": False if stay else _open_web(target), "out": "", "err": "", "carried": []}
+    if not v["ok"]:
+        return {"ok": False, "err": "; ".join(v["reasons"]), "verdict": v}
     has_remote = ctx.run(["git", "rev-parse", "--verify", "-q", f"refs/remotes/origin/{branch}"]).returncode == 0
     if has_remote and ctx.run(["git", "merge-base", "--is-ancestor", f"origin/{branch}", branch]).returncode != 0:
         n = ctx.run(["git", "rev-list", "--count", f"{branch}..origin/{branch}"]).stdout.strip() or "?"
@@ -969,6 +976,13 @@ def push_now(branch, stay=False):
         "err": (r.stderr or "").strip(),
         "carried": carried,
     }
+
+
+def already_on_origin(branch):
+    """origin/<branch> is exactly the local tip, as of the last fetch."""
+    tips = [ctx.run(["git", "rev-parse", "--verify", "-q", ref]).stdout.strip()
+            for ref in (f"refs/heads/{branch}", f"refs/remotes/origin/{branch}")]
+    return bool(tips[0]) and tips[0] == tips[1]
 
 
 def push_carried(branch):
