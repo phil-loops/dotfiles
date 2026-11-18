@@ -20,6 +20,7 @@ Apply them exactly; where this file and a topic file disagree, the topic file wi
 
 # Agent-specific mechanics
 
+- **Move structure with `stack-reshape`** (`new`, `reparent`, `contract`, `rename`, `catch-up` — one motion each under the forest's lock, config and descendants included); raw git only for content surgery, under `forest-lock <project> -- …`.
 - **Work in throwaway worktrees, never in a worktree another session may be live on.** `git worktree add /tmp/reforest-<name> <branch-or-base>` (`--detach` for scratch states), `git worktree remove` when done. A branch checked out in ANY worktree cannot be rebased/reset from elsewhere — check `git worktree list` first.
 - **Split a commit across branches by content, not by cherry-pick, when its hunks belong to different capabilities**: check out the base, apply the needed hunks (`git checkout <commit> -- <paths>` for whole files, or edit to the target state), commit with a fresh message.
 - **Verify by end-state, not by process**: after the reshape, the tip *tree* of each chain must equal the pre-reshape tree it replaces (`git rev-parse <ref>^{tree}` comparison, or empty `git diff old-tip new-tip`). State this evidence in your report. End-state also includes the export audit: every `export` the forest adds needs a consumer outside its module at the tip — unused = un-export in the introducing branch.
