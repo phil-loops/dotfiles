@@ -435,3 +435,34 @@ An own pass and an independent pass, briefed with the principles and not these c
 Each encoding landed with its tests. Presence already held per conversation (`test-session-presence.py`). `stack-reshape new` mints a branch's work into `branch.<n>.stack-work`, a rename relabels it, and `stack-doctor --prune` retires work whose branch is gone, never an item's or another repo's (`test-stack-reshape.py`, `test-stack-doctor-work.sh`). `bind --add` takes its union in the write and `--expect-generation` refuses a stale decision with the binding now (`test-work-journal.py`). `claim` assigns, then binds the full session id; `stack-reshape new` binds its creator (`test-todo-claim.py`). The server serves a `chat` per live session with the work its binding names, and branches their `work` (`test-chats.py`). Canopy rings a branch for its bound chats apart from who is assigned, lists chats on no work by where they stand, focuses a chat's pane through `claude-jump`, and binds a chat to a branch by Phil's click through `/chat-bind`, refused from a stale generation (`WorkContextTests`, `ChatBindTests`).
 
 Still open: binding a chat whose work is a tracker item, not a branch, by click; and round 25's question of capturing Claude Code messages through `UserPromptSubmit`.
+
+## Round 28: a chat is on the branches it acts on
+
+Phil found round 27 asked too much of him: a chat showed on a branch only once it claimed an item, started the branch, or he bound it by click. Round 25's rule (never infer a chat's work) was written against guessing from where a chat *stands*; it also discarded what a chat *does*, which the machine already records. Loops' `post-commit` hook logs every commit with its branch and the session that made it (`stack-usage.jsonl`: 932 commits stamped by a chat, restacks stamped `server`); presence records every file a chat edits, and each file sits in a worktree with a branch checked out.
+
+### Principles
+
+1. A chat is on a branch it **bound** (round 27) or **acted on**: committed to it, or edited a file in a worktree checked out on it. Never where it stands — its cwd, its worktree's branch, a title or an open PR.
+2. Every link says its evidence and age ("committed 4m ago", "editing", "bound"); an inferred link is never drawn as a binding.
+3. An inferred link fades after `ACTED_WITHIN` (2 hours) without a new action on that branch; a binding doesn't fade.
+4. Only a chat's own action counts: a replayed commit (rebase, cherry-pick) or one a server or Phil made is no chat's evidence.
+5. Evidence is recorded when the action happens, with its time and branch resolved then — a branch renamed or a worktree moved later never retargets it.
+6. Phil corrects, he doesn't associate: pin (a binding) adds a link evidence missed, dismiss hides one evidence drew wrongly until the chat acts there again.
+
+### Enforcers (proposed)
+
+| Principle | Enforcer | Strength |
+| --- | --- | --- |
+| 1 | The presence hook resolves an edited file's worktree branch at the edit; the server reads commits only from the usage log's chat-stamped rows | one code path each |
+| 2 | Each served link carries `how` and `at`; the view words it from those | type |
+| 3 | The server serves a link only when `now - at < ACTED_WITHIN` | one code path |
+| 4 | Rows with `replay` set or `actor != claude` are skipped | one code path |
+| 5 | Branch and repo are written into the evidence by the hook and post-commit at the moment | one code path |
+| 6 | Dismissals live in the journal beside bindings, keyed by conversation and branch work, cleared by newer evidence | journal transaction |
+
+### Encoding order
+
+1. `record-branch-edits`: the presence hook keeps, per chat, the last edit time on each `<repo>:<branch>` it edited in (detached worktrees record nothing).
+2. `serve-chat-actions`: each served chat carries `acted` — the branches it edited or committed to within `ACTED_WITHIN`, newest first — reading the usage log's tail, not its history.
+3. `draw-chat-actions`: a branch rings for chats that acted on it as well as bound ones, each worded by its evidence; a chat on no branch either way stays in the no-work list.
+4. `dismiss-chat-link`: Phil's dismiss hides an inferred link until the chat's next action on that branch.
