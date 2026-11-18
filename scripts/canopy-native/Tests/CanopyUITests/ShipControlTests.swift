@@ -153,3 +153,31 @@ import Testing
         #expect(ShipStub.posts(port).count == 1)
     }
 }
+
+@MainActor @Suite struct ChatSituationTests {
+    /// The fixture branch, local and building, with one chat that committed to it `ago` seconds after its last tool call.
+    func stand(chatIdleFor idle: Double) throws -> Stand {
+        let now = Date().timeIntervalSince1970
+        let (app, _) = try ShipTests().app { state in
+            var ents = state["entities"]!.object!
+            var table = ents["pr"]?.object ?? [:]
+            table.removeValue(forKey: ShipTests.branch)
+            ents["pr"] = .object(table)
+            ents["chat"] = .object(["c1": .object([
+                "id": "c1abcdef-0000", "generation": 1, "activeAt": .number(now - idle), "works": .array([]),
+                "acted": .array([.object(["branch": .string(ShipTests.branch), "how": "commit", "at": .number(now - idle)])])])])
+            state["entities"] = .object(ents)
+            ShipTests().entity(&state, "branch", ShipTests.branch) { $0["gates"] = "stale"; $0["pushed"] = "local" }
+        }
+        return try #require(app.forestModel.branchView(ShipTests.branch)).st
+    }
+
+    @Test func aLiveChatOnTheBranchHoldsItsMove() throws {
+        #expect(try stand(chatIdleFor: 10).actor == .agent("chat c1abcdef"))
+    }
+
+    @Test func anIdleChatHandsTheMoveBack() throws {
+        let st = try stand(chatIdleFor: 600)
+        #expect(st.actor == .you && st.awaiting == "chat c1abcdef")
+    }
+}

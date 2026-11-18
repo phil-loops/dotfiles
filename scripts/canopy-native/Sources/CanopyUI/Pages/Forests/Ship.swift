@@ -282,7 +282,7 @@ public enum ShipRules {
     public static func says(_ st: Stand, _ b: Branch, _ pr: Pr?) -> String {
         switch st.actor {
         case .you:
-            if st.awaiting != nil { return "its agent finished a turn — your reply" }
+            if let a = st.awaiting { return "\(a.hasPrefix("chat ") ? a : "its agent") finished a turn — your reply" }
             switch st.next {
             case "branch.push.arm": return "push \(b.pushed == .ahead ? b.ahead : b.commits)"
             case "branch.conform": return "take origin's copy"
@@ -297,7 +297,7 @@ public enum ShipRules {
                 if pr?.draft == true { return "a draft — mark it ready" }
                 return "your move"
             }
-        case .agent: return "an agent is on it"
+        case .agent(let a): return a.hasPrefix("chat ") ? "\(a) is on it" : "an agent is on it"
         case .gates: return "gates running"
         case .ci: return "waiting on required checks"
         case .reviewer: return "waiting on review"
