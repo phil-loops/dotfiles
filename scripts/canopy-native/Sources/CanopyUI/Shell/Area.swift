@@ -13,7 +13,7 @@ public protocol PageArea {
 /// cursor and the keys need — the parts of model.ts that differ per page.
 @MainActor
 public protocol SurfaceProvider {
-    /// A `Surface.all` id: forests, dashboard, review, todo, forest, machine, wiki, tutor.
+    /// A `Surface.all` id: forests, dashboard, review, todo, forest, machine, tutor.
     var surfaceID: String { get }
     func view(_ app: AppModel, route: Route) -> AnyView
     /// The rows the cursor moves through, top to bottom ("p:<id>", "b:<id>", "t:<id>", …).
@@ -40,7 +40,7 @@ public protocol SurfaceProvider {
     /// wear the modifier, or to drop some.
     func targets(_ app: AppModel) -> [LabelTarget]
     /// A row's text, for `/` (search the page) and the label layer. Default: the shell's guess from
-    /// the store (a branch's or forest's name, a wiki slug) or the key itself.
+    /// the store (a branch's or forest's name) or the key itself.
     func title(for row: String, _ app: AppModel) -> String?
     /// What `/` matches a row against. Default: its title.
     func searchText(for row: String, _ app: AppModel) -> String?
@@ -111,7 +111,6 @@ public enum RowKey {
     public static func server(_ id: String) -> String { "m:\(id)" }
     /// a Machine queue row: a ticket by its id, or un-queued heavy work by its pid ("o:<pid>")
     public static func queue(_ id: String) -> String { "q:\(id)" }
-    public static func wiki(_ slug: String) -> String { "w:\(slug)" }
     public static func concept(_ id: String) -> String { "c:\(id)" }
     public static func lesson(_ id: String) -> String { "s:\(id)" }
 

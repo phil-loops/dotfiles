@@ -7,7 +7,7 @@ enum CaptureSession {
     static func configure(_ app: AppModel) {
         Clipboard.board = NSPasteboard(name: NSPasteboard.Name("canopy-capture-\(UUID())"))
         app.runner.refusal = { command in
-            command.write != nil || command.verbs.contains(.editor) || ["review.open", "review.compose.edit", "wiki.url"].contains(command.id)
+            command.write != nil || command.verbs.contains(.editor) || ["review.open", "review.compose.edit"].contains(command.id)
                 ? "capture is read-only · \(command.id) refused" : nil
         }
         let ship = ShipState.of(app)

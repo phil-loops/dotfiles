@@ -16,7 +16,6 @@ public struct Scope: OpenString {
     public static let branchLine: Scope = "branch-line"
     public static let todo: Scope = "todo", item: Scope = "item", forest: Scope = "forest"
     public static let machine: Scope = "machine", server: Scope = "server"
-    public static let wiki: Scope = "wiki", article: Scope = "article"
     public static let tutor: Scope = "tutor", concept: Scope = "concept", lesson: Scope = "lesson", session: Scope = "session"
 }
 
@@ -362,7 +361,6 @@ public final class CommandRegistry {
         "todo": [.item, .todo],
         "forest": [.branch, .row, .forest, .project],
         "machine": [.server, .machine],
-        "wiki": [.article, .wiki],
         "tutor": [.concept, .lesson, .session, .tutor],
     ]
 
@@ -371,7 +369,7 @@ public final class CommandRegistry {
         "branch": "On a branch", "dashboard": "On the dashboard", "review": "Reviewing a branch", "line": "On a diff line",
         "branch-line": "On the branch's line", "thread": "On a conversation", "pending": "On a pending comment", "gap": "On hidden lines", "history": "In the history",
         "commit": "In one commit", "todo": "On the tracker", "item": "On an item", "forest": "On a forest's page",
-        "machine": "On the machine", "server": "On a server", "wiki": "On the wiki", "article": "On a page in the list",
+        "machine": "On the machine", "server": "On a server",
         "tutor": "On the tutor", "concept": "On a concept", "lesson": "On a session you keep", "session": "In a session",
     ]
 }

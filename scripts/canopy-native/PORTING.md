@@ -114,7 +114,7 @@ launch, in `Areas.all` order. That list is pre-populated with every area, so nob
 `install` you:
 
 - `app.addSurface(MySurface())` for each routed page you own (`Surface.all` ids: forests, dashboard,
-  review, todo, forest, machine, wiki, tutor, keytutor — the last native only, `Pages/KeyTutor/`).
+  review, todo, forest, machine, tutor, keytutor — the last native only, `Pages/KeyTutor/`).
 - `app.registry.register(Command(...))` for your commands (§4).
 - `app.registry.addScopes([...], to: "<surface>")` if you add a scope (`extension Scope { static let x: Scope = "x" }`).
 - `app.addCloser(isOpen:close:)` for anything `esc` in normal mode should back out of (v2's armed push, a launch).
@@ -133,8 +133,8 @@ launch, in `Areas.all` order. That list is pre-populated with every area, so nob
 | `primary(for: row, app)` → `RouteTo?` | the row's main action (what `ret` does) | nil |
 | `crumbs(app, route)` | `Crumbs` in App.tsx | the surface title |
 
-Row keys follow model.ts (`RowKey.project/branch/todo/landed/server/wiki/concept/lesson`: `p:<id>`,
-`b:<id>`, `t:`, `d:`, `m:`, `w:`, `c:`, `s:`). The shell keeps a cursor and a select anchor **per pane**:
+Row keys follow model.ts (`RowKey.project/branch/todo/landed/server/concept/lesson`: `p:<id>`,
+`b:<id>`, `t:`, `d:`, `m:`, `c:`, `s:`). The shell keeps a cursor and a select anchor **per pane**:
 `app.selected`, `app.selection` (the range in select mode), `app.pane`, `app.isFocused(paneID)`,
 `app.setCursor`, `app.cursorTo`, `app.focus(pane:)`, `app.focus(.left)`.
 
@@ -177,7 +177,7 @@ app.registry.register(Command(
 - **Select mode**: `v` drops an anchor at the cursor, `j`/`k` extend it, and `app.selection` is the range. Make
   multi-row commands (archive these, hold these) act on `app.selection`, and list `.select` in their modes.
 - **Esc** backs out exactly one level, innermost first: pending chord → layer → mode → your page's own
-  `esc` in normal (`overlay.close` closers, `review.back`, `wiki.back`, …). Don't bind esc in other modes.
+  `esc` in normal (`overlay.close` closers, `review.back`, …). Don't bind esc in other modes.
 - **Your own layer** (a composer, a confirm step): `extension KeyMode { static let confirm: KeyMode = "confirm" }`,
   then `app.keys.openLayer(.confirm)` / `closeLayer()`, and bind its keys with `modes: [.confirm]`. If it
   takes text, add it to `KeyMode.textEntry` in your install.
@@ -308,7 +308,7 @@ reply, resolve, apply suggestions, address), the words (description, outline, pa
 `commands/sync.ts` 414 · `commands/words.ts` 111 · `commands/review.ts` ship half: `review.{push,words,history,address*,comment,gutter,
 pending.*,compose.*,send*,reply,note.*,thread.show,resolve,apply,unapply,finish,preview,github}`, `history.*`, `commit.*`,
 `branch.pr`, `branch.preview`, `forest.preview`.
-**Publishes** a markdown renderer (from markdown.ts), which Wiki uses. The composer is a `ModalTextField` in insert mode.
+**Publishes** a markdown renderer (from markdown.ts). The composer is a `ModalTextField` in insert mode.
 
 ### D. Tutor: `Pages/Tutor/` (~2,700)
 The concept graph, sessions, the Socratic turn stream (`POST /tutor` via `streamPost`), the code pane
@@ -321,15 +321,15 @@ Previews, servers, footprint, logs (the `procs` pulse); the telemetry dashboard 
 `Machine.tsx` 364 · `workstation.ts` 167 · `commands/machine.ts` 257 · `Dashboard.tsx` 238 · `budgets.ts` 12 ·
 `dashboard.range` (from `commands/app.ts`) · `Todo.tsx` 82 · `tracker.ts` 53 · `commands/todo.ts` 127.
 
-### F. Wiki and the palette chrome: `Pages/Wiki/` + `Pages/Palette/` (~850, plus the chrome polish)
-The wiki (page list, markdown via C's renderer, citations), and the shell overlays brought up to v2: the space menu
-with finds (branches, forests, wiki pages, concepts from `/state?archived=1`), the `?` sheet's sections,
+### F. The palette chrome: `Pages/Palette/` (~850, plus the chrome polish)
+The shell overlays brought up to v2: the space menu
+with finds (branches, forests, concepts from `/state?archived=1`), the `?` sheet's sections,
 the picker, which-key. Also polishing the `:` completion list look and the statusline (logic stays in the shell).
-`Wiki.tsx` 187 · `wikiread.ts` 43 · `wikitext.ts` 67 · `commands/wiki.ts` 75 · `Menu.tsx` 142 · `find.ts` 68 ·
+`Menu.tsx` 142 · `find.ts` 68 ·
 `KeySheet.tsx` 145 · `Picker.tsx` 61 · `WhichKey.tsx` 49 · `pick.ts` 30 (core done).
 
 **Cross-area seams.** B ↔ C go through the three Ship views on the review page and B's `ReviewPageState`.
-A → C go through `ForestModel`. C → F go through the markdown renderer. B → D go through the LSP helper and `CodeTextView`. The publishing
+A → C go through `ForestModel`. B → D go through the LSP helper and `CodeTextView`. The publishing
 area defines the type in its own folder; consumers only read it. Agree on a seam's signature before both sides build on it.
 
 ### G. Keytutor: `Pages/KeyTutor/` (native only)

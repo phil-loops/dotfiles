@@ -98,7 +98,7 @@
 | github | `space o g` | open it on GitHub |
 | lines on GitHub | `space o m` / `space o b` | the lines under the cursor or selection on GitHub, on main / at the branch (the open file: at its commit) — Helix's gh-open keys |
 | preview | `space o p` | preview it on a side port |
-| go-forests / go-dashboard / go-todo / go-machine / go-wiki / go-tutor | `g F` / `g S` / `g O` / `g M` / `g W` / `g T` | go to that page (g + a capital: lowercase g is Helix's) |
+| go-forests / go-dashboard / go-todo / go-machine / go-tutor | `g F` / `g S` / `g O` / `g M` / `g T` | go to that page (g + a capital: lowercase g is Helix's) |
 | alternate | `g a` | the alternate place (where the last jump left from) |
 | slot-1 … slot-9 | `g 1` … `g 9` | the Nth focus forest |
 | jump-back / jump-forward / save-jump | `C-o` / `C-i` / `C-s` | the jumplist |

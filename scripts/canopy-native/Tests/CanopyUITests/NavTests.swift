@@ -6,20 +6,14 @@ import Testing
 
 /// The navigation core (NAV.md): its seams, the label layer, the jumplist, the pickers, the keymap deltas.
 @MainActor @Suite struct NavSeamTests {
-    func app(_ route: Route = .wiki(slug: nil)) -> AppModel {
-        var c = AppConfig()
-        c.route = route
-        let a = AppModel(config: c, port: 1, telemetry: false)
-        if case .wiki = route { a.state { WikiState() }.seed(try! JSONDecoder().decode(PagesReply.self, from: Data(WikiFixture.pages.utf8))) }
-        return a
-    }
+    func app(_ route: Route = .tutor(session: nil)) -> AppModel { ModalTests().panesApp(route) }
 
-    /// What a PaneList would report for the rows of the wiki: pages | page.
+    /// What a PaneList would report for the rows of the tutor's home: due over topics | questions.
     func layOut(_ a: AppModel) {
         for p in a.panes {
-            a.notePaneFrame(p.id, CGRect(x: Double(p.column) * 400, y: 0, width: 400, height: 300))
+            a.notePaneFrame(p.id, CGRect(x: Double(p.column) * 400, y: Double(p.row) * 300, width: 400, height: 300))
             for (i, r) in p.rows.enumerated() {
-                a.noteTarget(LabelTarget(pane: p.id, key: r, rect: CGRect(x: Double(p.column) * 400, y: Double(i) * 20, width: 300, height: 18)))
+                a.noteTarget(LabelTarget(pane: p.id, key: r, rect: CGRect(x: Double(p.column) * 400, y: Double(p.row) * 300 + Double(i) * 20, width: 300, height: 18)))
             }
         }
     }
@@ -58,12 +52,12 @@ import Testing
     @Test func offScreenAndForeignRowsAreNotTargets() {
         let a = app()
         layOut(a)
-        a.noteTarget(LabelTarget(pane: "page", key: "src:gone.tsx", rect: CGRect(x: 400, y: 0, width: 10, height: 10)))
-        a.noteTarget(LabelTarget(pane: "page", key: a.panes[1].rows[0], rect: CGRect(x: 400, y: 900, width: 10, height: 10)))
+        a.noteTarget(LabelTarget(pane: "topics", key: "c:gone", rect: CGRect(x: 0, y: 300, width: 10, height: 10)))
+        a.noteTarget(LabelTarget(pane: "topics", key: a.panes[1].rows[0], rect: CGRect(x: 0, y: 1200, width: 10, height: 10)))
         a.noteTarget(LabelTarget(pane: "tabs", key: "tab:x", rect: CGRect(x: 0, y: 0, width: 10, height: 10)))
         a.noteTarget(LabelTarget(pane: "tabs", key: "tab:y", rect: CGRect(x: 20, y: 0, width: 10, height: 10), run: RouteTo("nav.forests")))
         let keys = a.visibleTargets().map(\.key)
-        #expect(!keys.contains("src:gone.tsx"), "a row its pane no longer holds")
+        #expect(!keys.contains("c:gone"), "a row its pane no longer holds")
         #expect(!keys.contains(a.panes[1].rows[0]), "scrolled out of its pane")
         #expect(!keys.contains("tab:x"), "a free target needs a run")
         #expect(keys.contains("tab:y"))
@@ -71,27 +65,21 @@ import Testing
 
     @Test func hereIsExact() {
         let a = app()
-        a.focus(pane: "page")
+        a.focus(pane: "topics")
         a.keys.handle("j")
         let p = a.here()
-        #expect(p.route == .wiki(slug: nil) && p.pane == "page" && p.cursorKey == a.panes[1].rows[1])
+        #expect(p.route == .tutor(session: nil) && p.pane == "topics" && p.cursorKey == a.panes[1].rows[1])
     }
 }
 
 /// The label layer, driven by key names.
 @MainActor @Suite struct LabelLayerTests {
-    func app(_ route: Route = .wiki(slug: nil)) -> AppModel {
-        var c = AppConfig()
-        c.route = route
-        let a = AppModel(config: c, port: 1, telemetry: false)
-        if case .wiki = route { a.state { WikiState() }.seed(try! JSONDecoder().decode(PagesReply.self, from: Data(WikiFixture.pages.utf8))) }
-        return a
-    }
+    func app(_ route: Route = .tutor(session: nil)) -> AppModel { ModalTests().panesApp(route) }
 
     func layOut(_ a: AppModel, extra: Int = 0) {
         for p in a.panes {
             for (i, r) in p.rows.prefix(4).enumerated() {
-                a.noteTarget(LabelTarget(pane: p.id, key: r, rect: CGRect(x: Double(p.column) * 400, y: Double(i) * 20, width: 300, height: 18)))
+                a.noteTarget(LabelTarget(pane: p.id, key: r, rect: CGRect(x: Double(p.column) * 400, y: Double(p.row) * 300 + Double(i) * 20, width: 300, height: 18)))
             }
         }
         for i in 0..<extra {
@@ -106,19 +94,20 @@ import Testing
         #expect(a.keys.active == .labels)
         let s = a.labeling!
         let last = a.panes[1].rows.prefix(4).last!
-        let l = s.label("page", last)!
+        let l = s.label("topics", last)!
         #expect(l.count == 1, "≤ 10 targets: one key")
         for ch in l { a.keys.handle(String(ch)) }
         #expect(a.keys.active == .normal && a.labeling == nil, "one pick, then the layer is gone")
-        #expect(a.pane?.id == "page" && a.selected == last)
-        #expect(a.jumps.back.last?.pane == "pages", "a label pick is a jump")
+        #expect(last == "tc:croon-job-locks|lock-ttl")
+        #expect(TutorArea.state(a).drawer == "lock-ttl", "the pick lands on the row and runs its main action")
+        #expect(a.jumps.back.last?.pane == "due", "a label pick is a jump")
         a.keys.handle("g"); a.keys.handle("w")
         #expect(a.keys.active == .labels)
     }
 
     @Test func gTGCGBGoToTheScreensTopMiddleAndBottom() {
         let a = app()
-        a.focus(pane: "page")
+        a.focus(pane: "topics")
         layOut(a)
         let shown = Array(a.panes[1].rows.prefix(4))
         a.keys.handle("g"); a.keys.handle("b")
@@ -137,7 +126,7 @@ import Testing
         a.keys.handle("g"); a.keys.handle("w")
         let first = a.labeling!.items.map(\.label)
         #expect(first.allSatisfy { $0.count == 2 }, "> 10 targets: two keys, the first picking the pane")
-        #expect(Set(a.labeling!.items.filter { $0.pane == "pages" }.map { $0.label.first! }).count == 1)
+        #expect(Set(a.labeling!.items.filter { $0.pane == "due" }.map { $0.label.first! }).count == 1)
         a.keys.handle("esc")
         #expect(a.keys.active == .normal)
         a.keys.handle("j")
@@ -154,7 +143,7 @@ import Testing
         #expect(a.keys.active == .labels && a.labeling?.typed.count == 1)
         a.keys.handle("z")
         #expect(a.keys.active == .normal && a.labeling == nil)
-        #expect(a.router.route == .wiki(slug: nil))
+        #expect(a.router.route == .tutor(session: nil))
         a.keys.handle("g"); a.keys.handle("w")
         for ch in tab { a.keys.handle(String(ch)) }
         #expect(a.router.route == .todo, "a free target runs its command")
@@ -163,11 +152,11 @@ import Testing
 
     @Test func inSelectModeAPickExtendsTheRange() {
         let a = app()
-        a.focus(pane: "page")
+        a.focus(pane: "topics")
         layOut(a)
         a.keys.handle("v")
         a.keys.handle("g"); a.keys.handle("w")
-        let l = a.labeling!.label("page", a.panes[1].rows[3])!
+        let l = a.labeling!.label("topics", a.panes[1].rows[3])!
         a.keys.handle(l)
         #expect(a.keys.mode == .select && a.selection.count == 4)
     }
@@ -183,17 +172,11 @@ import Testing
 
 /// The app-wide jumplist and esc, through keys.
 @MainActor @Suite struct HistoryTests {
-    func app(_ route: Route = .wiki(slug: nil)) -> AppModel {
-        var c = AppConfig()
-        c.route = route
-        let a = AppModel(config: c, port: 1, telemetry: false)
-        if case .wiki = route { a.state { WikiState() }.seed(try! JSONDecoder().decode(PagesReply.self, from: Data(WikiFixture.pages.utf8))) }
-        return a
-    }
+    func app(_ route: Route = .tutor(session: nil)) -> AppModel { ModalTests().panesApp(route) }
 
     @Test func pageChangesRecordAndCORestoresPaneAndCursorExactly() {
         let a = app()
-        a.focus(pane: "page")
+        a.focus(pane: "topics")
         a.keys.handle("j"); a.keys.handle("j")
         let spot = a.selected
         a.keys.handle("g"); a.keys.handle("O")
@@ -202,7 +185,7 @@ import Testing
         a.keys.handle("C-o")
         #expect(a.router.route == .todo)
         a.keys.handle("C-o")
-        #expect(a.router.route == .wiki(slug: nil) && a.pane?.id == "page" && a.selected == spot)
+        #expect(a.router.route == .tutor(session: nil) && a.pane?.id == "topics" && a.selected == spot)
         a.keys.handle("C-i"); a.keys.handle("C-i")
         #expect(a.router.route == .machine)
         #expect(a.jumps.fwd.isEmpty)
@@ -222,7 +205,7 @@ import Testing
 
     @Test func motionDoesntRecordButGGAndGDo() {
         let a = app()
-        a.focus(pane: "page")
+        a.focus(pane: "topics")
         a.keys.handle("j"); a.keys.handle("j"); a.keys.handle("k")
         #expect(a.jumps.back.isEmpty, "j/k aren't jumps")
         a.keys.handle("G")
@@ -237,7 +220,7 @@ import Testing
         #expect(a.jumps.back.count == 1)
         a.keys.handle("g"); a.keys.handle("O")
         a.keys.handle("g"); a.keys.handle("a")
-        #expect(a.router.route == .wiki(slug: nil))
+        #expect(a.router.route == .tutor(session: nil))
         a.keys.handle("g"); a.keys.handle("a")
         #expect(a.router.route == .todo, "g a again comes back")
     }
@@ -265,7 +248,7 @@ import Testing
     @Test func escWithNothingToCancelSaysWhereToGo() {
         let a = app()
         a.keys.handle("esc")
-        #expect(a.router.route == .wiki(slug: nil))
+        #expect(a.router.route == .tutor(session: nil))
         #expect(a.runner.note == KeyEngine.nothingToCancel)
     }
 }
@@ -377,20 +360,14 @@ import Testing
 }
 
 @MainActor @Suite struct KeymapDeltaTests {
-    func app(_ route: Route = .wiki(slug: nil)) -> AppModel {
-        var c = AppConfig()
-        c.route = route
-        let a = AppModel(config: c, port: 1, telemetry: false)
-        if case .wiki = route { a.state { WikiState() }.seed(try! JSONDecoder().decode(PagesReply.self, from: Data(WikiFixture.pages.utf8))) }
-        return a
-    }
+    func app(_ route: Route = .tutor(session: nil)) -> AppModel { ModalTests().panesApp(route) }
 
     @Test func altHJKLMovesPanesLikeCtrlW() {
         let a = app()
         a.keys.handle("A-l")
-        #expect(a.pane?.id == "page")
+        #expect(a.pane?.id == "questions")
         a.keys.handle("A-h")
-        #expect(a.pane?.id == "pages")
+        #expect(a.pane?.id == "due")
         #expect(KeyName.name(keyCode: 4, characters: "˙", charactersIgnoringModifiers: "h", ctrl: false, meta: false, alt: true) == "A-h")
     }
 

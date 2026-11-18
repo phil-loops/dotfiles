@@ -50,15 +50,6 @@ import Testing
         #expect(f.sub == "#11130 · dep-cleanup")
     }
 
-    @Test func aWikiPageIsFoundByTitleOrSlugNeverByAPRNumber() {
-        var w = world
-        w.pages = [.init(slug: "canopy-v2-keys", title: "Keys like Helix", section: "Canopy v2")]
-        #expect(ids("keys like", w) == ["find.wiki:canopy-v2-keys"])
-        #expect(ids("v2keys", w) == ["find.wiki:canopy-v2-keys"])
-        #expect(ids("11130", w) == ["find.branch:loops:dep-cleanup/remove-unused-deps"])
-        #expect(Finder.finds("helix", w)[0].sub == "wiki · Canopy v2")
-    }
-
     @Test func aConceptIsFoundByItsName() {
         var w = world
         w.concepts = [.init(id: "one-runner-per-tick", name: "One runner per tick")]
@@ -153,7 +144,6 @@ import Testing
         #expect(MenuGroups.of("nav.todo") == "go")
         #expect(MenuGroups.of("review.split") == "view")
         #expect(MenuGroups.of("branch.push") == "words & push")
-        #expect(MenuGroups.of("wiki.forest") == "wiki")
         #expect(MenuGroups.of("machine.kill") == "machine")
         #expect(MenuGroups.of("review.reply") == "review")
     }
@@ -193,18 +183,14 @@ import Testing
     /// The store holds archived forests too, so the finder reaches their branches by name or PR number.
     @Test func whatTheMenuFindsRunsWithItsArgument() {
         let a = world()
-        a.state { WikiState() }.seed(PagesReply(pages: [WikiPage(slug: "canopy-v2-keys", title: "Keys like Helix", section: "Canopy v2")]))
         a.menuOpen = true
         let menu = a.state { MenuState() }
         #expect(menu.world(a).branches.contains { $0.id == "r:o" }, "the archived forest's branch")
         menu.query = "12"
         #expect(menu.rows(a).last == MenuRow(id: "find.branch", arg: "r:x", title: "x", side: "#12 · done", group: "branches"))
-        menu.query = "keys like"
-        let r = menu.rows(a).first { $0.group == "wiki pages" }
-        #expect(r?.arg == "canopy-v2-keys")
-        menu.index = menu.rows(a).firstIndex { $0.group == "wiki pages" }!
+        menu.index = menu.rows(a).firstIndex { $0.id == "find.branch" }!
         a.keys.handle("ret")
-        #expect(a.router.route == .wiki(slug: "canopy-v2-keys"))
+        #expect(a.router.route == .review(repo: "r", branch: "x"))
     }
 
     @Test func conceptsAreFoundOnlyWhenSomethingCanOpenThem() {
@@ -310,16 +296,8 @@ import Testing
         #expect(chosen == [2])
     }
 
-    @Test func theSheetNamesTheWikiPageUnderTheCursor() throws {
-        let a = app(.wiki(slug: "hop-park"))
-        let w = a.state { WikiState() }
-        w.seed(try JSONDecoder().decode(PagesReply.self, from: Data(WikiFixture.pages.utf8)))
-        w.arrive(a)
-        #expect(KeySheet.model(a).here == w.page("hop-park")!.title)
-    }
-
     @Test func whichKeyShowsWhatFollowsAPrefixHere() throws {
-        let a = app(.wiki(slug: nil))
+        let a = app(.todo)
         a.keys.handle("g")
         let rows = a.keys.whichKeyRows()
         #expect(rows.contains { $0.key == "F" && $0.what == "go to Forests" })

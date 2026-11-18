@@ -9,7 +9,7 @@ import Observation
 ///   * a half-typed chord (`space`, `g`, `C-w`) is pending until its next key; which-key shows it;
 ///   * `esc` always backs out exactly one level, innermost first: the pending chord → the layer →
 ///     the mode (back to normal) → the page's own back-out (`esc` bound in normal: overlay.close,
-///     review.back, wiki.back, …).
+///     review.back, …).
 ///
 /// In text-entry modes (insert, command, menu, picker) a key nobody bound in that mode returns
 /// false, and the caller hands it to the focused text field. Insert routes `↵` by the field's kind

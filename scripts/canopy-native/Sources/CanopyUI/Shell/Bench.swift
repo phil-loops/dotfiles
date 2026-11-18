@@ -283,7 +283,7 @@ public enum Bench {
 
     /// Every top-level page, the first focus forest, and three focus branches with a PR (the reviews Phil reads).
     static func defaultPages(_ app: AppModel) -> [String] {
-        var out = ["/v2", "/v2/todo", "/v2/machine", "/v2/dashboard", "/v2/wiki", "/v2/tutor", "/v2/keytutor"]
+        var out = ["/v2", "/v2/todo", "/v2/machine", "/v2/dashboard", "/v2/tutor", "/v2/keytutor"]
         let m = app.forestModel
         let focus = m.projects().focus
         if let p = focus.first { out.append("/v2/p/\(p.repo)/\(p.name)") }

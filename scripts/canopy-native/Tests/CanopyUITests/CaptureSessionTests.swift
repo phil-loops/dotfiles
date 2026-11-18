@@ -23,7 +23,7 @@ import Testing
         #expect(KeyTutor.of(app).store is MemoryProgress)
         #expect(KeyTutor.of(app).store.load()?.step == 2)
         #expect(Clipboard.board.name != board.name)
-        for id in ["review.open", "review.compose.edit", "wiki.url"] {
+        for id in ["review.open", "review.compose.edit"] {
             let command = try #require(app.registry.command(id))
             #expect(app.runner.refusal?(command) != nil)
         }

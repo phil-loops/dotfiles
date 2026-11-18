@@ -8,7 +8,6 @@ enum Areas {
         ShipArea.self,
         TutorArea.self,
         MachineArea.self,
-        WikiArea.self,
         TodoArea.self,
         PaletteArea.self,
         KeyTutorArea.self,

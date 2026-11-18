@@ -280,7 +280,6 @@ enum KeyLessons {
             KeyStep("{pane-next} cycles through them.", [.paneNext]),
             KeyStep("{go-dashboard}: the dashboard.", [.goDashboard], check: { $0.router.route == .dashboard }),
             KeyStep("{go-machine}: the machine.", [.goMachine], check: { $0.router.route == .machine }),
-            KeyStep("{go-wiki}: the wiki.", [.goWiki], check: { $0.router.route.surfaceID == "wiki" }),
             KeyStep("{go-todo}: the tracker.", [.goTodo], check: { $0.router.route == .todo }),
             KeyStep("{go-forests}: home.", [.goForests], check: { $0.router.route == .forests }),
             KeyStep("On a forest's page, {face} flips its face: the branches ⇄ the story.", [.face],

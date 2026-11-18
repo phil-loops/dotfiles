@@ -227,13 +227,6 @@ All machine calls are unprefixed [—], so they run against the default repo.
 | `POST /preview-main` | MUTATING (process) | `{port}` | `{ok, port, url[, dir]}` | `commands/machine.ts` |
 | `POST /stack-up` | MUTATING (starts the Docker stack) | `{dir}` | `{ok, starting, dir}` | `commands/machine.ts` |
 
-## 8. Wiki
-
-| Call | R/M | Query | Response | Used by |
-|---|---|---|---|---|
-| `GET /wiki-pages` [—] | READ | `[?project=]` | *(live)* `{pages:[{slug, title, section, order, ask, lede, project, kind, body, words, dir}], ref, repo, problems[], searched[], roots[]}` · `{err}` | `wikiread.ts` (once per page load) |
-| `GET /wiki-src` [—] | READ | `?anchor=` | `{path, start, end, from, text, ref}` · `{err}` (always 200) | `wikiread.ts` |
-
 ## 9. Tutor and learning
 
 All tutor and learning calls are unprefixed [—]. The learning graph is global (`~/.dotfiles/learning`).
@@ -306,7 +299,7 @@ The todo items themselves arrive through the `todo` store domain (`/state`, `/v2
 - `GET /v2`, `/v2/*`: the SPA shell (`dist/v2/index.html`) with the injected `__VIEWER_REPOS__`,
   `__CANOPY_KEYS__` and `__CANOPY_ASSET__`.
 - `GET /assets/*`: the hashed build assets.
-- `GET /`, `/forests/…`, `/branch/…`, `/review/…`, `/wiki/…`, `/tutor/…` and others: 302 redirects from v1
+- `GET /`, `/forests/…`, `/branch/…`, `/review/…`, `/tutor/…` and others: 302 redirects from v1
   pages to v2 (`srv/v1redirect.py`).
 - `GET /model?branch=`: v1's forest model (`stack-forest`), served stale-while-revalidate.
 - `GET /sig`: `{sig, repo, pid}`, a cheap change detector; `stack-review-serve` also uses it to detect a

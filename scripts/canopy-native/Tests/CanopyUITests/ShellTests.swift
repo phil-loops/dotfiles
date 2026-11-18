@@ -172,19 +172,22 @@ import Testing
         #expect(KeyboardRule.violations(a).isEmpty, "\(KeyboardRule.violations(a))")
     }
 
-    /// The wiki's real panes (its page list | the page's stops), from a saved /wiki-pages.
-    func wikiApp() throws -> AppModel {
-        let a = app(.wiki(slug: nil))
-        a.state { WikiState() }.seed(try JSONDecoder().decode(PagesReply.self, from: Data(WikiFixture.pages.utf8)))
+    /// The tutor's home on a saved /learning-state: due (2 rows) above topics (4 rows), questions
+    /// (1 row) to their right.
+    func panesApp(_ route: Route = .tutor(session: nil)) -> AppModel {
+        let a = app(route)
+        let t = TutorArea.state(a)
+        t.sessionsFile = nil
+        t.sessions = []
+        t.learn = try! JSONDecoder().decode(LearnState.self, from: Data(learningFixture.utf8))
         return a
     }
 
     @Test func motionThroughPanes() throws {
-        let a = try wikiApp()
-        // focus starts on the first pane: the page list | the page's stops
-        #expect(a.pane?.id == "pages")
-        a.keys.handle("C-w"); a.keys.handle("l")
-        #expect(a.pane?.id == "page")
+        let a = panesApp()
+        #expect(a.pane?.id == "due")
+        a.keys.handle("C-w"); a.keys.handle("j")
+        #expect(a.pane?.id == "topics")
         #expect(a.selected == a.rows.first)
         a.keys.handle("G")
         #expect(a.selected == a.rows.last)
@@ -192,15 +195,17 @@ import Testing
         #expect(a.selected == a.rows.first)
         a.keys.handle("j")
         #expect(a.cursorIdx == 1)
-        a.keys.handle("C-w"); a.keys.handle("h")
-        #expect(a.pane?.id == "pages")
         a.keys.handle("C-w"); a.keys.handle("l")
+        #expect(a.pane?.id == "questions")
+        a.keys.handle("C-w"); a.keys.handle("h")
+        a.keys.handle("C-w"); a.keys.handle("j")
+        #expect(a.pane?.id == "topics")
         #expect(a.cursorIdx == 1, "each pane keeps its own cursor")
     }
 
     @Test func selectModeExtendsFromTheAnchor() throws {
-        let a = try wikiApp()
-        a.focus(pane: "pages")
+        let a = panesApp()
+        a.focus(pane: "topics")
         a.keys.handle("j")
         a.keys.handle("v")
         #expect(a.keys.mode == .select)

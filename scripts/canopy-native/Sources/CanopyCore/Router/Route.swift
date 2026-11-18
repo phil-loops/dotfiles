@@ -8,7 +8,7 @@ public struct Surface: Hashable, Sendable {
     public var title: String
     /// the path is a prefix: what follows is the surface's argument
     public var arg: Bool = false
-    /// with `arg`: the path alone is the surface too (the wiki's first page, the tutor's home)
+    /// with `arg`: the path alone is the surface too (the tutor's home)
     public var bare: Bool = false
 
     public static let base = "/v2"
@@ -19,7 +19,6 @@ public struct Surface: Hashable, Sendable {
         Surface(id: "todo", path: "\(base)/todo", title: "Todo"),
         Surface(id: "forest", path: "\(base)/p", title: "Forest", arg: true),
         Surface(id: "machine", path: "\(base)/machine", title: "Machine"),
-        Surface(id: "wiki", path: "\(base)/wiki", title: "Wiki", arg: true, bare: true),
         Surface(id: "tutor", path: "\(base)/tutor", title: "Tutor", arg: true, bare: true),
         // native only (no v2 page): the vimtutor-style walkthrough of the keys, on practice data
         Surface(id: "keytutor", path: "\(base)/keytutor", title: "Keytutor", arg: true, bare: true),
@@ -40,8 +39,6 @@ public enum Route: Hashable, Sendable {
     /// one setting a v2 address carries: "" what lands, `main` or `outgoing` (?base=), or one commit
     /// `<sha>` / a run `<from>..<to>` (?commit=).
     case review(repo: String, branch: String, stretch: String = "")
-    /// /v2/wiki[/<slug>]
-    case wiki(slug: String?)
     /// /v2/tutor[/<session>]
     case tutor(session: String?)
     /// /v2/keytutor[/<lesson>] — native only
@@ -55,7 +52,6 @@ public enum Route: Hashable, Sendable {
         case .machine: return .named("machine")
         case .forest: return .named("forest")
         case .review: return .named("review")
-        case .wiki: return .named("wiki")
         case .tutor: return .named("tutor")
         case .keytutor: return .named("keytutor")
         }
@@ -68,14 +64,13 @@ public enum Route: Hashable, Sendable {
         switch self {
         case .forest(let r, let p): return "\(r)/\(p)"
         case .review(let r, let b, _): return "\(r)/\(b)"
-        case .wiki(let s): return s ?? ""
         case .tutor(let s): return s ?? ""
         case .keytutor(let l): return l ?? ""
         default: return ""
         }
     }
 
-    /// The address, encoded as router.ts builds it (forestPath, reviewPath, wikiPath, tutorPath).
+    /// The address, encoded as router.ts builds it (forestPath, reviewPath, tutorPath).
     public var path: String {
         let b = Surface.base
         switch self {
@@ -88,7 +83,6 @@ public enum Route: Hashable, Sendable {
             let tail = br.split(separator: "/", omittingEmptySubsequences: false).map { String($0).uriComponent }.joined(separator: "/")
             let q = stretch.isEmpty ? "" : Self.presets.contains(stretch) ? "?base=\(stretch.uriComponent)" : "?commit=\(stretch.uriComponent)"
             return "\(b)/b/\(r.uriComponent)/\(tail)" + q
-        case .wiki(let s): return s.map { "\(b)/wiki/\($0.uriComponent)" } ?? "\(b)/wiki"
         case .tutor(let s): return s.map { "\(b)/tutor/\($0.uriComponent)" } ?? "\(b)/tutor"
         case .keytutor(let l): return l.map { "\(b)/keytutor/\($0.uriComponent)" } ?? "\(b)/keytutor"
         }
@@ -141,7 +135,6 @@ public enum Route: Hashable, Sendable {
         case "dashboard": return .dashboard
         case "todo": return .todo
         case "machine": return .machine
-        case "wiki": return .wiki(slug: arg.isEmpty ? nil : arg)
         case "tutor": return .tutor(session: arg.isEmpty ? nil : arg)
         case "keytutor": return .keytutor(lesson: arg.isEmpty ? nil : arg)
         case "forest", "review":

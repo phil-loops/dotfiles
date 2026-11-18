@@ -3,16 +3,15 @@ import Foundation
 import SwiftUI
 
 /// `space ?` (Menu.tsx): every command in reach, filterable, grouped, each showing its key so using
-/// the menu teaches it; then the branches, forests, wiki pages and concepts the text finds. `ret`
+/// the menu teaches it; then the branches, forests and concepts the text finds. `ret`
 /// runs the highlighted one. Its keys are the `menu` layer's (menu.next/prev/run); typing goes to
 /// its filter.
 enum MenuGroups {
     /// The palette's sections, in this order; within one, what the cursor is on comes first.
-    static let order = ["move", "view", "review", "words & push", "machine", "wiki", "tutor", "go", "forests", "branches", "wiki pages", "concepts"]
+    static let order = ["move", "view", "review", "words & push", "machine", "tutor", "go", "forests", "branches", "concepts"]
 
     static func of(_ id: String) -> String {
         if Rx.test("^machine\\.", id) { return "machine" }
-        if Rx.test("^wiki\\.", id) { return "wiki" }
         if Rx.test("^tutor\\.", id) { return "tutor" }
         if Rx.test("^(nav|place)\\.|^help\\.|^branch\\.(pr|open)$|^forest\\.page$|^review\\.(definition|open|finish)$", id) { return "go" }
         if Rx.test("^(cursor|focus|history|commit)\\.|^review\\.(down|up|top|bottom|thread\\.(next|prev)|file\\.(next|prev)|leave|back)$|^forest\\.(expand|collapse|leave)$|^todo\\.(up|down)$", id) { return "move" }
@@ -21,7 +20,7 @@ enum MenuGroups {
         return "review"
     }
 
-    static let ofFind = ["find.forest": "forests", "find.wiki": "wiki pages", "find.concept": "concepts", "find.branch": "branches"]
+    static let ofFind = ["find.forest": "forests", "find.concept": "concepts", "find.branch": "branches"]
 }
 
 struct MenuRow: Equatable {
@@ -46,7 +45,6 @@ final class MenuState {
         query = ""
         index = 0
         let t = app.transport
-        app.state { WikiState() }.load(app)
         if app.registry.command("find.concept") != nil, concepts.isEmpty {
             Task { @MainActor [weak self] in
                 if let l = try? await t.getJSON("/learning-state", as: LearningConcepts.self) {
@@ -76,11 +74,9 @@ final class MenuState {
 
     func world(_ app: AppModel) -> FindWorld {
         let s = app.store
-        let wiki = app.state { WikiState() }
         return FindWorld(branches: s.list(Branch.self).map { FindWorld.Branch(id: $0.id, name: $0.name, project: $0.project) },
                          projects: s.list(Project.self).map { FindWorld.Project(id: $0.id, name: $0.name, archived: $0.state == .archive) },
                          prs: s.list(Pr.self).map { FindWorld.Pr(id: $0.id, number: $0.number) },
-                         pages: wiki.pages.map { FindWorld.Page(slug: $0.slug, title: $0.title, section: $0.section) },
                          concepts: concepts)
     }
 
