@@ -44,6 +44,21 @@ enum BranchCommands {
     /// An additive push onto a PR that's open: origin already has the branch and local only adds to it.
     static func quickFollowUp(_ v: BranchView) -> Bool { ShipRules.gatesAdvise(v.b, v.pr) }
 
+    /// What a push's answer says about the children it carried: who came along, and the first
+    /// that needs a hand. nil when it carried none.
+    static func carriedLine(_ body: JSONObject) -> String? {
+        guard case .array(let rows)? = body["carried"], !rows.isEmpty else { return nil }
+        let recs = rows.compactMap { r -> (String, String?)? in
+            guard case .object(let o) = r, let b = o["branch"]?.string else { return nil }
+            return (leaf(b), o["err"]?.string)
+        }
+        let moved = recs.filter { $0.1 == nil }.map(\.0), stuck = recs.filter { $0.1 != nil }
+        var parts: [String] = []
+        if !moved.isEmpty { parts.append("carried \(moved.joined(separator: ", ")) along") }
+        if let s = stuck.first { parts.append("\(s.0) stayed — \(s.1 ?? "")") }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
     /// What the runner holds while a branch's push, or its force, waits for the second press.
     static func pushArm(_ id: String) -> String { "push \(id)" }
     static func forceArm(_ id: String) -> String { "force \(id)" }
@@ -182,7 +197,12 @@ enum BranchCommands {
                     path: t.atRepo(v.b.repo, "/push-origin"), body: ["branch": .string(v.b.name), "stay": true],
                     settled: { s.table(Branch.self)[id]?.pushed == .synced },
                     said: v.pr.map { "pushed \(v.b.ahead) follow-up\(v.b.ahead == 1 ? "" : "s") onto #\($0.number)" },
-                    failed: "\(leaf(v.b.name)) didn't push")
+                    failed: "\(leaf(v.b.name)) didn't push",
+                    answered: { ok, body in
+                        // the children the push carried (P7) are said right after the push's own line
+                        guard ok, let line = carriedLine(body) else { return }
+                        DispatchQueue.main.async { app.runner.say(line) }
+                    })
             }))
 
         // ── the one sanctioned force: replace origin's copy while nobody else has read it ──
