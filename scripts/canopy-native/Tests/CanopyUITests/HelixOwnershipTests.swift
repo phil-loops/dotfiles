@@ -1,5 +1,8 @@
+import AppKit
 import CanopyCore
 import Foundation
+import SwiftTerm
+import SwiftUI
 import Testing
 @testable import CanopyUI
 
@@ -140,6 +143,77 @@ import Testing
             #expect(page.helix == nil)
             #expect(app.runner.note?.contains("couldn't prepare Helix") == true)
         }
+    }
+
+    @Test func thePreparingTerminalTakesKeysAndEscapeCancelsOnlyItsSession() async throws {
+        let (app, port) = try await app(), page = ReviewPageState.of(app)
+        HeldLookupStub.hold(port, path)
+        app.keys.handle("o")
+        let oldTask = page.helixTask, old = try #require(page.helix)
+        await until("the editor preparation") { HeldLookupStub.waiting(port, path) }
+        let cursor = app.selected
+        let terminal = HelixTerminal(frame: .zero)
+        terminal.cancelPreparation = { _ = page.cancelHelixPreparation(session: old.session) }
+        terminal.send(source: terminal, data: Array("b:wq\r".utf8)[...])
+        #expect(page.helix?.session == old.session && app.selected == cursor && !terminal.process.running)
+        terminal.send(source: terminal, data: [0x1b][...])
+        #expect(page.helix == nil)
+        app.keys.handle("o")
+        let newTask = page.helixTask, new = try #require(page.helix)
+        terminal.send(source: terminal, data: [0x1b][...])
+        #expect(page.helix?.session == new.session)
+        HeldLookupStub.release(port, path, try answer(page))
+        await oldTask?.value
+        await until("the replacement preparation") { HeldLookupStub.waiting(port, path) }
+        HeldLookupStub.release(port, path, try answer(page))
+        await newTask?.value
+        #expect(page.helix?.session == new.session && page.helix?.dir != nil)
+        #expect(!page.cancelHelixPreparation(session: new.session))
+    }
+
+    @Test func aPreparingEditorAlreadyOwnsTheKeyboard() async throws {
+        let (app, port) = try await app(), page = ReviewPageState.of(app)
+        HeldLookupStub.hold(port, path)
+        _ = NSApplication.shared
+        let frame = NSRect(x: -20000, y: -20000, width: 1100, height: 800)
+        let window = NSWindow(contentRect: frame, styleMask: .borderless, backing: .buffered, defer: false)
+        let host = NSHostingView(rootView: RootView().environment(app))
+        host.frame = NSRect(origin: .zero, size: frame.size)
+        window.contentView = host
+        defer { window.contentView = nil }
+        app.keys.handle("o")
+        let task = page.helixTask
+        await until("the editor preparation") { HeldLookupStub.waiting(port, path) }
+        host.layoutSubtreeIfNeeded()
+        await until("the preparing terminal's keyboard focus") { window.firstResponder is HelixTerminal }
+        let terminal = try #require(window.firstResponder as? HelixTerminal)
+        #expect(terminal.preparing && !terminal.process.running)
+        terminal.send(source: terminal, data: [0x1b][...])
+        #expect(page.helix == nil)
+        HeldLookupStub.release(port, path, try answer(page))
+        await task?.value
+    }
+
+    @Test func writeQuitTimingObservesTheCommandBeforeTheProcessExits() {
+        let terminal = HelixTerminal(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+        terminal.preparing = false
+        var writes = 0
+        terminal.onWriteQuit = { writes += 1 }
+        terminal.feed(text: "\u{1b}[\(terminal.getTerminal().rows);1H:wq")
+        terminal.send(source: terminal, data: [13][...])
+        #expect(writes == 1 && !terminal.process.running)
+    }
+
+    @Test func quittingShowsTheCommitInProgressUntilTheAnswerArrives() async throws {
+        let (app, port) = try await app(), page = ReviewPageState.of(app)
+        let open = try await ready(app, port)
+        HeldLookupStub.hold(port, path)
+        page.finishHelix(app, session: open.session, exitCode: 0)
+        #expect(page.helix == nil && app.runner.note == "committing the Helix edit to loops/\(branch)…")
+        await until("the editor commit") { HeldLookupStub.waiting(port, path) }
+        HeldLookupStub.release(port, path, #"{"ok":true,"nothing":true}"#)
+        await until("the commit answer") { app.runner.runOf("review.helix.land", id)?.state == .done }
+        #expect(app.runner.note == "nothing changed")
     }
 
     @Test func quitKeepsItsOriginalBranchAndRepositoryAndUsesRunnerWriteOnce() async throws {

@@ -535,10 +535,18 @@ diffbase_sync(){   # <dir> <branch> <base> <tip> — make the files the tip and 
 ensure_diff_worktree(){   # echo the diff-view checkout for <branch>; the ordinary one when there
                           # is nothing to mark or the diff view can't be built
   local b="$1" base tip src dir gd
-  src=$(ensure_worktree "$b") || return 1
-  base=$(diff_base_of "$b") || { echo "$src"; return 0; }
+  base=$(diff_base_of "$b") || { ensure_worktree "$b"; return; }
   tip=$(git rev-parse "$b^{commit}")
   dir="$SCRATCH/${b//\//_}.diffbase"
+  if [[ -f "$dir/.git" && -e "$dir/node_modules" && -e "$dir/.gen" ]]; then
+    gd=$(git -C "$dir" rev-parse --absolute-git-dir 2>/dev/null) || gd=""
+    if [[ "$gd" == "$_common_dir"/worktrees/* && -f "$gd/stack-open-diff-base" && -f "$gd/stack-open-branch" \
+          && "$(<"$gd/stack-open-branch")" == "$b" \
+          && "$(<"$gd/HEAD")" == "$base" && "$(<"$gd/stack-open-diff-base")" == "$base $tip" ]]; then
+      touch "$dir"; echo "$dir"; return 0
+    fi
+  fi
+  src=$(ensure_worktree "$b") || return 1
   if [[ -d "$dir" ]] && ! git -C "$dir" rev-parse --git-dir >/dev/null 2>&1; then
     mv "$dir" "${dir}.zombie-$(date +%Y%m%d%H%M%S)" 2>/dev/null || true   # same zombie rule as above: park, never delete
     git worktree prune 2>/dev/null || true

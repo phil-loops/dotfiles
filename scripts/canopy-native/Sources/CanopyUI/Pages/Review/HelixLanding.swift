@@ -28,6 +28,7 @@ struct HelixLanding {
                     body: ["branch": .string(source.name), "op": "land", "dir": .string(landing.dir), "sha": .string(source.tip)],
                     settled: { true }, failed: "the edit didn't commit · saved in \(landing.dir)",
                     answered: { ok, body in
+                        landing.open.log(ok ? "commit answered" : "commit refused or failed")
                         let speaks = landing.presents(app)
                         let page = ReviewPageState.of(app)
                         let unchanged = ok && body["ok"] == true && body["nothing"] == true

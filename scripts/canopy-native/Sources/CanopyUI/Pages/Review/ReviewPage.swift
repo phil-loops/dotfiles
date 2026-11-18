@@ -104,7 +104,7 @@ struct ReviewPage: View {
             }
         }
         .overlay { if app.keys.layer == .map { MapOverlay() } }
-        .overlay { if let h = pg.helix, h.whole, let dir = h.dir { HelixCover(open: h, dir: dir) } }
+        .overlay { if let h = pg.helix, h.whole { HelixCover(open: h).id(h.session) } }
         .onAppear { pg.sync() }
         .task(id: "\(pg.contextKey)|\(pg.payloadGen)|\(pg.diffCurrent)|\(pg.here?.path ?? "")") { if let p = pg.here?.path { await ReviewUnits.of(app).load(pg, path: p) } }
     }
@@ -162,6 +162,12 @@ private struct ReviewHeader: View {
                 if pg.integration == nil, let t = pg.target { EvidenceChip(target: t) }
             }
             if pg.integration == nil && !shippingInSidebar { ShipStripView(branchID: pg.id) }
+            if app.runner.runOf("review.helix.land", pg.id)?.state == .sending {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.mini)
+                    Text("committing the Helix edit…").font(Theme.text(11.5)).foregroundStyle(theme.inkDim)
+                }
+            }
             if pg.tab == "files", pg.integration == nil { BranchLine().padding(.top, 4) }
             if pg.integration == nil, let b { WorkContextView(subject: .branch(project: b.project, name: b.name), compact: true, showsMissing: true) }
             if pg.integration == nil, let b { BenchSummaryView(subject: .branch(repo: b.repo, name: b.name)) }
@@ -320,7 +326,6 @@ private struct HelixCover: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme
     let open: HelixOpen
-    let dir: String
 
     var body: some View {
         let pg = ReviewPageState.of(app)
@@ -331,10 +336,21 @@ private struct HelixCover: View {
                 .padding(.horizontal, 10).padding(.vertical, 4)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(theme.vellumRaise)
-            HelixHalf(open: open, dir: dir, colors: CanvasColors(theme), moved: { pg.moveHelix(session: open.session, path: $0, line: $1) }) {
+            HelixHalf(open: open, dir: open.dir, colors: CanvasColors(theme), moved: { pg.moveHelix(session: open.session, path: $0, line: $1) }, cancelPreparation: {
+                if pg.cancelHelixPreparation(session: open.session) { app.runner.say("Helix opening cancelled") }
+            }) {
                 pg.finishHelix(app, session: open.session, exitCode: $0)
             }
             .id(open.session)
+            .overlay {
+                if open.dir == nil {
+                    VStack(spacing: 12) {
+                        ProgressView().controlSize(.small)
+                        Text("opening Helix… · esc cancels").font(Theme.text(12)).foregroundStyle(theme.inkDim)
+                    }
+                    .allowsHitTesting(false)
+                }
+            }
         }
         .background(theme.vellumNight)
     }
@@ -368,8 +384,8 @@ private struct DiffPane: View {
     /// Helix over the diff: `o` covers it all; `i` starts where the split puts the new half, so the
     /// old half stays to read against.
     @ViewBuilder private func helix(_ pg: ReviewPageState) -> some View {
-        if let h = pg.helix, !h.whole, let dir = h.dir {
-            HelixCover(open: h, dir: dir)
+        if let h = pg.helix, !h.whole {
+            HelixCover(open: h)
                 .id(h.session)
                 .padding(.leading, CGFloat(pg.divider(path: h.path, line: h.line)) * DocFont.charWidth)
         }
