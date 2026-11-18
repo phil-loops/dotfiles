@@ -90,6 +90,8 @@ public struct Branch: Entity {
     public var behind: Int
     /// its parent's tip isn't in its history
     public var drifted: Bool
+    /// the highest link in its chain that is off its parent's tip (srv/state.py); nil when the chain is current
+    public var owes: String?
     /// its tracking ref ("" for none, the forest norm)
     public var upstream: String
     public var upstreamBad: Bool

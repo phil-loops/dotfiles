@@ -210,6 +210,8 @@ func shipBranch(_ f: (inout Branch) -> Void = { _ in }) -> Branch {
     @Test func dirtDriftLagAndAnUnvoicedTailEachMakeItNeedOne() {
         #expect(Syncing.needs(shipBranch(), facts: SyncFacts(dirty: ["a.ts", "b.ts"])) == ["2 uncommitted"])
         #expect(Syncing.needs(shipBranch { $0.drifted = true }) == ["off f/a's tip"])
+        // its own parent is current but a branch above it moved: the chain owes a catch-up
+        #expect(Syncing.needs(shipBranch { $0.owes = "f/up" }) == ["f/up is behind its parent — sync catches the chain up"])
         #expect(Syncing.needs(shipBranch(), facts: SyncFacts(behind: 3, restack: true)) == ["3 behind main"])
         #expect(Syncing.needs(shipBranch(), prep: PrepRoute(route: "squash")) == ["not one voiced commit"])
         #expect(Syncing.needs(shipBranch(), prep: PrepRoute(route: "additive")) == ["diverged from its PR"])
@@ -225,6 +227,7 @@ func shipBranch(_ f: (inout Branch) -> Void = { _ in }) -> Branch {
     @Test func theStepsFollowV1sOrder() {
         #expect(Syncing.planSteps(drifted: false, facts: SyncFacts()).map(\.id) == [.dirt, .prep, .gates, .tests])
         #expect(Syncing.planSteps(drifted: true, facts: SyncFacts(behind: 2, syncable: true)).map(\.id) == [.dirt, .reseat, .rebase, .prep, .gates, .tests])
+        #expect(Syncing.planSteps(drifted: true, facts: SyncFacts())[1].label == "catch up")
         #expect(Syncing.planSteps(drifted: false, facts: SyncFacts(behind: 2, restack: true))[1].label == "restack")
     }
 
