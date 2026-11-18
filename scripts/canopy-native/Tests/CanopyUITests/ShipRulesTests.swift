@@ -213,6 +213,8 @@ func shipBranch(_ f: (inout Branch) -> Void = { _ in }) -> Branch {
         #expect(Syncing.needs(shipBranch(), facts: SyncFacts(behind: 3, restack: true)) == ["3 behind main"])
         #expect(Syncing.needs(shipBranch(), prep: PrepRoute(route: "squash")) == ["not one voiced commit"])
         #expect(Syncing.needs(shipBranch(), prep: PrepRoute(route: "additive")) == ["diverged from its PR"])
+        // a GitHub-side rewrite with nothing local lacks is a conform, never "diverged"
+        #expect(Syncing.needs(shipBranch { $0.diverged = true }, prep: PrepRoute(route: "conform")) == ["origin rewrote it — sync takes origin's copy"])
         #expect(Syncing.needs(shipBranch { $0.diverged = true }, prep: PrepRoute(route: "ready")) == ["diverged from origin"])
     }
 
