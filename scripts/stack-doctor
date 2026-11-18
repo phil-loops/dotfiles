@@ -159,6 +159,21 @@ prune() {
   done < <(git config --name-only --get-regexp '^stack-project\.' 2>/dev/null \
            | sed -E 's/^stack-project\.(.*)\.[^.]+$/\1/' | sort -u)
 
+  # branch work whose branch is gone: git dropped its branch.<b>.stack-work, so no live key names it (round 27, P6)
+  local journal="${CANOPY_WORK_JOURNAL:-$HOME/.local/state/canopy/work-journal.sqlite3}" repo gone dry=""
+  [ "$dry_run" = "1" ] && dry="--dry-run"
+  if [ -f "$journal" ]; then
+    repo=$(basename "$(git worktree list --porcelain | head -1 | sed 's/^worktree //')")
+    gone=$(git config --get-regexp '^branch\..*\.stack-work$' 2>/dev/null | awk '{print $2}' \
+      | "$(dirname "$0")/canopy-work" retire-unbranched --repo "$repo" $dry \
+      | python3 -c 'import json,sys; [print(w["work_id"], w["branch"] or "?") for w in json.load(sys.stdin)["retired"]]')
+    while read -r w b; do
+      [ -n "$w" ] || continue
+      if [ "$dry_run" = "1" ]; then echo "    would retire work $w (branch $b is gone)"; else echo "  ⊘ work $w retired (branch $b is gone)"; fi
+      pruned=$((pruned+1))
+    done <<< "$gone"
+  fi
+
   if [ "$pruned" = "0" ]; then echo "  nothing to prune — config is clean"
   elif [ "$dry_run" = "1" ]; then echo "── $pruned dangling key(s) would be pruned (--prune without --dry-run to apply) ──"
   else echo "── $pruned dangling key(s) pruned ──"; fi

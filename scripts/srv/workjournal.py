@@ -450,6 +450,22 @@ class Journal:
                           VALUES (?,?,?,?,?,?)""", (work_id, repo, project, branch, title, self.now()))
         return work_id
 
+    def retire_unbranched(self, repo, named, *, dry_run=False):
+        """Retires `repo`'s branch work (work with no tracker item) that no branch names any more in
+        `branch.<n>.stack-work`: its branch was deleted, so the identity ends as history. Returns
+        [{work_id, branch}] retired, or that would be."""
+        if not repo:
+            raise JournalError("a branch is only a subject with its repository")
+        with self.tx() as db:
+            gone = [dict(r) for r in db.execute(
+                "SELECT work_id, branch FROM work WHERE repo = ? AND todo_id IS NULL AND retired_at IS NULL ORDER BY created_at",
+                (repo,)) if r["work_id"] not in set(named)]
+            if not dry_run:
+                now = self.now()
+                for w in gone:
+                    db.execute("UPDATE work SET retired_at = ? WHERE work_id = ?", (now, w["work_id"]))
+        return gone
+
     def relink(self, work_id, **links):
         """Updates link metadata (a branch rename, a new forest). Identity and history stay."""
         allowed = {"repo", "project", "branch", "title"}
