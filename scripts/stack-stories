@@ -90,11 +90,9 @@ def plan_of(project, branch):
     """The forest's steps in merge order. stack_facts fetches a plan THROUGH a branch, so a
     bare project name resolves to any live branch registered under it."""
     if not branch:
-        for b in git("config", "--get-all", f"stack-project.{project}.branch").split():
-            if subprocess.run(["git", "rev-parse", "--verify", "-q", f"refs/heads/{b}"],
-                              capture_output=True).returncode == 0:
-                branch = b
-                break
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from stack_members import members
+        branch = next(iter(members(project)), "")
     if not branch:
         die(f"no live branches registered for {project}")
     f = stack_facts.steps(branch)

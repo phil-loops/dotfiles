@@ -38,6 +38,7 @@
 
 set -e
 
+SELF_DIR="${0:A:h}"   # here, not in a function: there zsh's $0 is the function's name
 MAIN_BRANCH=$(git config stack.main-branch 2>/dev/null || echo "main")
 CHECK_ONLY=0
 STATUS=0
@@ -159,7 +160,7 @@ build_integration() {
   local -a members
   while IFS= read -r m; do
     [[ -n "$m" ]] && members+=("$m")
-  done < <(git config --get-all "stack-project.${project}.branch" 2>/dev/null || true)
+  done < <("${SELF_DIR}/stack-members" "$project" 2>/dev/null || true)
   if (( ${#members[@]} == 0 )); then
     echo "no such project: $project" >&2
     return 2

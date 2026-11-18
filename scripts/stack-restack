@@ -234,11 +234,11 @@ topo_order() {
   while IFS= read -r m; do
     [[ -n "$m" ]] && members+=("$m")
   done < <("$sf" "$project" 2>/dev/null | jq -r '.nodes // {} | keys[]' 2>/dev/null)
-  # Fallback: if stack-forest is unavailable/errored, use the literal seed list.
+  # Fallback: if stack-forest is unavailable/errored, the branches tagged into the project.
   if (( ${#members[@]} == 0 )); then
     while IFS= read -r m; do
       [[ -n "$m" ]] && members+=("$m")
-    done < <(git config --get-all "stack-project.${project}.branch" 2>/dev/null)
+    done < <("${SELF_DIR}/stack-members" "$project" 2>/dev/null)
   fi
 
   local -A is_member
@@ -976,7 +976,7 @@ elif [[ "$MODE" == "start" ]]; then
   fi
 
   # Validate project exists.
-  if [[ -z "$(git config --get-all "stack-project.${PROJECT}.branch" 2>/dev/null)" ]]; then
+  if [[ -z "$(git config --get-all "stack-project.${PROJECT}.branch" 2>/dev/null)$("${SELF_DIR}/stack-members" "$PROJECT" 2>/dev/null)" ]]; then
     echo "no such project: $PROJECT" >&2
     exit 1
   fi
@@ -1407,15 +1407,7 @@ if (( ${#TO_DROP[@]} + ${#ORPHANS[@]} > 0 )); then
       stack_cfg_unset "$orphan" parent
       _purge_member_refs "$orphan"
 
-      typeset -a remaining
-      remaining=()
-      while IFS= read -r m; do
-        [[ -n "$m" ]] && [[ "$m" != "$orphan" ]] && remaining+=("$m")
-      done < <(git config --get-all "stack-project.${PROJECT}.branch" 2>/dev/null)
-      git config --unset-all "stack-project.${PROJECT}.branch" 2>/dev/null || true
-      for m in "${remaining[@]}"; do
-        git config --add "stack-project.${PROJECT}.branch" "$m"
-      done
+      "${SELF_DIR}/stack-registry" remove "$PROJECT" "$orphan" --via "stack-restack: orphan" || true
     done
   fi
 
@@ -1459,16 +1451,10 @@ if (( ${#TO_DROP[@]} + ${#ORPHANS[@]} > 0 )); then
       stack_cfg_unset "$b" base
       _purge_member_refs "$b"
 
-      # Remove from project listing.
-      typeset -a remaining
-      remaining=()
-      while IFS= read -r m; do
-        [[ -n "$m" ]] && [[ "$m" != "$b" ]] && remaining+=("$m")
-      done < <(git config --get-all "stack-project.${PROJECT}.branch" 2>/dev/null)
-      git config --unset-all "stack-project.${PROJECT}.branch" 2>/dev/null || true
-      for m in "${remaining[@]}"; do
-        git config --add "stack-project.${PROJECT}.branch" "$m"
-      done
+      # Remove from project listing — one checked, logged config call (stack-registry). The old
+      # read + unset-all + re-add-each lost a survivor when one re-add hit .git/config's lock
+      # (cite-what-ses-saw, 2026-11-18).
+      "${SELF_DIR}/stack-registry" remove "$PROJECT" "$b" --via "stack-restack: drop" || true
     done
   fi
 
@@ -1484,7 +1470,7 @@ if (( ${#TO_DROP[@]} + ${#ORPHANS[@]} > 0 )); then
     [[ "$b" == "$MAIN_BRANCH" || -n "${_dropped[$b]:-}" || -n "${_seeded[$b]:-}" ]] && continue
     pp=$(git config "branch.${b}.stack-parent" 2>/dev/null || echo "$MAIN_BRANCH")
     if [[ "$pp" == "$MAIN_BRANCH" ]]; then
-      git config --add "stack-project.${PROJECT}.branch" "$b"
+      "${SELF_DIR}/stack-registry" add "$PROJECT" "$b" --via "stack-restack: re-seed" || true
       echo "  re-seed new root: $b"
     fi
   done
@@ -1497,7 +1483,7 @@ fi
 # own branch.<b>.* namespace, which git GCs on delete, so nothing else reclaims them.
 # Only when the registry is EMPTY — a project mid-setup keeps its keys.
 _PROJECT_SHIPPED=0
-if [[ -z "$(git config --get-all "stack-project.${PROJECT}.branch" 2>/dev/null)" ]]; then
+if [[ -z "$(git config --get-all "stack-project.${PROJECT}.branch" 2>/dev/null)$("${SELF_DIR}/stack-members" "$PROJECT" 2>/dev/null)" ]]; then
   while IFS= read -r _k; do
     [[ -n "$_k" ]] || continue
     git config --unset-all "$_k" 2>/dev/null || true

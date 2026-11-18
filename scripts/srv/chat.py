@@ -22,7 +22,7 @@ import json
 import threading
 import time
 
-from . import ctx, prompts, runs
+from . import ctx, prompts, runs, stackcfg
 
 
 READ_ONLY_TOOLS = ["Read", "Grep", "Glob"]
@@ -34,14 +34,8 @@ def _node_diff(branch):
 
 
 def _project_branches(project):
-    # the project's member branches (stack-project.<p>.branch multivar), order preserved, deduped
-    raw = ctx.run(["git", "config", "--get-all", f"stack-project.{project}.branch"]).stdout.split()
-    seen, out = set(), []
-    for b in raw:
-        if b and b not in seen:
-            seen.add(b)
-            out.append(b)
-    return out
+    # the project's member branches: tagged into it, in registry order (stackcfg.members)
+    return stackcfg.members(project)
 
 
 def _project_integrator(project):

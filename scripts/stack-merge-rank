@@ -8,13 +8,18 @@
 # a node one fan-in/parent step deeper = 2; and so on. Siblings share a rank (they're independent).
 #
 # Canonical merge order = STABLE sort by mergeRank ascending over the project's branch-list order
-# (the order in stack-project.<p>.branch) — so equal ranks keep their declared order, identically
+# (members are the branches tagged branch.<b>.stack-project=<p>, in the order of
+# stack-project.<p>.branch, then unlisted by name) — so equal ranks keep their declared order, identically
 # for every consumer. The emitted "order" array already encodes that; consumers can render it as-is.
 #
 # Output (JSON): {"project": "...", "rank": {branch: rank, ...}, "order": [branch, ...]}
 import json
+import os
 import subprocess
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from stack_members import order as member_order  # noqa: E402
 
 
 # one spawn for the whole namespace — per-key `git config` spawns cost ~40ms each, and the old
@@ -40,7 +45,10 @@ def compute(key, conf):
     project = one(f"branch.{key}.stack-project")
     if not project:
         project = key
-    branches = many(f"stack-project.{project}.branch")
+    # members are the branches TAGGED into the project (stack_members); the registry only orders them
+    tags = {k[len("branch."):-len(".stack-project")]: (v or [""])[-1].strip()
+            for k, v in conf.items() if k.startswith("branch.") and k.endswith(".stack-project")}
+    branches = member_order(project, tags, many(f"stack-project.{project}.branch"), lambda b: True)
     if not branches:
         return {"project": project, "rank": {}, "order": []}
 

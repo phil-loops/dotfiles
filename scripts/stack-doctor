@@ -29,6 +29,9 @@
 #              (the one-dep test): set parent=<dep> and drop the requires.
 #   ∅ purpose  no branch description — an unfinished operation; every forest member
 #              carries a one-line purpose (git branch --edit-description).
+#   ≠ member   a branch's own stack-project tag and the stack-project.<p>.branch registry
+#              disagree. The tag is membership (stack-members); the registry is an order that
+#              lost an entry on 2026-11-18 — exits 1, and stack-registry add/remove mends it.
 #   ⧉ viewer   the running viewer serves a different branch set than git does — its
 #              per-forest /model cache froze. Nothing else compares the two, which is
 #              why a contracted branch rendered on the map for 25 minutes before anyone
@@ -278,13 +281,26 @@ viewer_drift() {  # $1 = project → a report line iff served ≠ git; silent if
 }
 
 problems=0
-projects=$(git config --get-regexp '^stack-project\..*\.branch$' 2>/dev/null | sed -E 's/^stack-project\.([^.]+)\.branch .*/\1/' | sort -u)
+# membership disagreements, computed once: "<project>\t<branch>\t<why>" (stack_members.mismatches)
+mismatch=$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import stack_members as m
+for b, p, why in m.mismatches(*m.load()): print(f"{p}\t{b}\t{why}")' "$here")
+projects=$( { git config --get-regexp '^stack-project\..*\.branch$' 2>/dev/null | sed -E 's/^stack-project\.([^.]+)\.branch .*/\1/'
+              git config --get-regexp '^branch\..*\.stack-project$' 2>/dev/null | awk '{print $2}'; } | sort -u)
 [ -n "$projects" ] || { echo "no stack-projects configured"; exit 0; }
 
 for proj in $projects; do
   [ -n "$want" ] && [ "$proj" != "$want" ] && continue
   lines=""; proj_problem=0; proof_members=""; shippable_alive=0
-  for b in $(git config --get-all "stack-project.$proj.branch"); do
+  while IFS=$'\t' read -r mp mb why; do
+    [ "$mp" = "$proj" ] || continue
+    case "$why" in
+      tagged*) fix="stack-registry add $proj $mb" ;;
+      *untagged) fix="git config branch.$mb.stack-project $proj" ;;
+      *) fix="stack-registry remove $proj $mb" ;;
+    esac
+    lines+="  ≠ $mb — $why: $fix"$'\n'; proj_problem=1; member_mismatch=1
+  done <<< "$mismatch"
+  for b in $( { "$here/stack-members" "$proj"; git config --get-all "stack-project.$proj.branch"; } | awk '!seen[$0]++'); do
     if ! git rev-parse --verify -q "$b" >/dev/null; then
       lines+="  ✗ MISSING  $b (in config, no ref)"$'\n'; proj_problem=1; continue
     fi
@@ -391,3 +407,5 @@ for proj in $projects; do
 done
 
 echo "── scanned against origin/main $(sha "$OM"); $problems project(s) need attention ──"
+[ "${member_mismatch:-0}" = "1" ] && { echo "✗ forest membership disagrees with the registry (≠ above)" >&2; exit 1; }
+exit 0
