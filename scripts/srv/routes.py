@@ -52,6 +52,7 @@ POST = {
     "/syntax/units": _r(syntax.units),
     "/integrate": _r(integrate.check),                   # does the whole forest land on main (scratch worktree)
     "/edit-session": _r(edits.prepare, "machine"),
+    "/edit-release": _r(edits.release, "machine"),
     "/edit-warm": _r(edits.prime, "machine"),
     "/edit-workspaces": _r(edits.workspaces, "machine"),
 

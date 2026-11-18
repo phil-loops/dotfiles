@@ -1,4 +1,4 @@
-"""Retire unchanged generated indexes after a workspace's save is committed."""
+"""Retire unchanged generated indexes after a workspace is committed or released."""
 import os
 import stat
 import uuid
@@ -30,7 +30,9 @@ def matches(root, session, name):
 
 
 def collect(root, session, *, save):
-    if session.get("state") != "committed" or not session.get("receipt") or "workspaceIdentity" not in session:
+    committed = session.get("state") == "committed" and session.get("receipt")
+    abandoned = session.get("state") == "released" and session.get("viewOwner") and not session.get("entered") and not session.get("operation")
+    if not (committed or abandoned) or "workspaceIdentity" not in session:
         return
     fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
