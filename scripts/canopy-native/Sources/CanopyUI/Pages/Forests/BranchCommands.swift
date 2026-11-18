@@ -22,7 +22,11 @@ enum BranchCommands {
         if v.b.diverged {
             // origin was rewritten upstream (GitHub's rebase) and already has everything local has:
             // origin wins — never a force, never a refusal (tooling-doctor P7, A1)
-            if ShipState.of(app).prepOf(id)?.route == "conform", v.b.pending == nil { return "branch.conform" }
+            // only on the prep route read for this very tip: an answer from before the branch moved
+            // routes nothing, and p waits for the current one (A5)
+            let ship = ShipState.of(app)
+            if ship.prepOf(id)?.route == "conform", v.b.pending == nil { return "branch.conform" }
+            if !ship.prepFresh(id) { return nil }
             guard let s = forceScope(id, app), v.b.pending == nil else { return nil }
             if s.eligible { return app.runner.armed == forceArm(id) ? "branch.force.confirm" : "branch.force.arm" }
             if !s.guards.allSatisfy({ $0.ok || $0.k == "gates" }) { return nil }

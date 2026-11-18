@@ -54,8 +54,10 @@ public final class ShipState {
     public var inspecting: String?
 
     // ── the strip's reads, per branch, keyed by what they depend on ──
-    public private(set) var facts: [String: (key: String, value: SyncFacts?)] = [:]
-    public private(set) var prep: [String: (key: String, value: PrepRoute?)] = [:]
+    /// `key` is the read last asked for, `read` the one whose answer `value` is — they differ
+    /// while a newer read is in flight, and the old answer then draws dimmed and routes nothing
+    public private(set) var facts: [String: (key: String, value: SyncFacts?, read: String)] = [:]
+    public private(set) var prep: [String: (key: String, value: PrepRoute?, read: String)] = [:]
     public private(set) var progress: [String: (key: String, value: GateProgress?)] = [:]
     public private(set) var forceScopes: [String: (key: String, value: ForceScope??)] = [:]
     public private(set) var divergence: [String: DivergedDetail?] = [:]
@@ -179,12 +181,18 @@ public final class ShipState {
 
     // ── reads (GET only; never a write) ──
 
-    /// GET /sync and /prep-route for the strip, once per `key` (the branch's tip, push state,
-    /// drift and the motion's phase — what can change their answer).
+    /// What the strip's reads depend on: the branch's tip, push state, drift and the motion's
+    /// phase. An answer read under another key describes a tree the branch has left (A5).
+    static func factsKey(_ b: Branch, _ m: SyncMotion?) -> String {
+        "\(b.repo)|\(b.name)|\(b.tip)|\(b.pushed.rawValue)|\(b.ahead)|\(b.behind)|\(b.drifted)|\(m?.phase.rawValue ?? "")"
+    }
+
+    /// GET /sync and /prep-route for the strip, once per `key` (factsKey). The last answer stays
+    /// on screen meanwhile, marked by its own key, so it reads as stale and never as current.
     public func readFacts(_ app: AppModel, _ b: Branch, key: String) {
         if facts[b.id]?.key == key { return }
-        facts[b.id] = (key, facts[b.id]?.value)
-        prep[b.id] = (key, prep[b.id]?.value)
+        facts[b.id] = (key, facts[b.id]?.value, facts[b.id]?.read ?? "")
+        prep[b.id] = (key, prep[b.id]?.value, prep[b.id]?.read ?? "")
         let t = app.transport
         let q = "?branch=\(b.name.uriComponent)"
         let syncPath = t.atRepo(b.repo, "/sync\(q)"), prepPath = t.atRepo(b.repo, "/prep-route\(q)")
@@ -193,9 +201,21 @@ public final class ShipState {
             async let p = try? t.getJSON(prepPath, as: PrepRoute.self)
             let (fv, pv) = await (f, p)
             guard let self, self.facts[b.id]?.key == key else { return }
-            self.facts[b.id] = (key, fv)
-            self.prep[b.id] = (key, pv)
+            self.facts[b.id] = (key, fv, key)
+            self.prep[b.id] = (key, pv, key)
         }
+    }
+
+    /// Put both answers in place as read under `key` (tests; a write's answer that carries them).
+    func putReads(_ id: String, key: String, facts f: SyncFacts?, prep p: PrepRoute?) {
+        facts[id] = (key, f, key)
+        prep[id] = (key, p, key)
+    }
+
+    /// The key the branch's reads must carry to describe it now; nil when the branch is gone.
+    private func currentKey(_ id: String) -> String? {
+        guard let app, let b = app.store.view(Branch.self, id) else { return nil }
+        return Self.factsKey(b, motionOf(id))
     }
 
     /// GET /gates-progress, re-read every 2s while the run is going (as v2 polls it). The app
@@ -226,8 +246,17 @@ public final class ShipState {
         pushed.tail = progress[id]?.value?.tail
         return pushed
     }
-    public func factsOf(_ id: String) -> SyncFacts? { facts[id]?.value }
-    public func prepOf(_ id: String) -> PrepRoute? { prep[id]?.value }
+    /// The answers for the branch as it is NOW — what an action may route on; nil while the
+    /// only answer in hand was read for a tree the branch has left.
+    public func factsOf(_ id: String) -> SyncFacts? { facts[id].flatMap { $0.read == currentKey(id) ? $0.value : nil } }
+    public func prepOf(_ id: String) -> PrepRoute? { prep[id].flatMap { $0.read == currentKey(id) ? $0.value : nil } }
+    /// whether the prep route in hand was read for the branch as it is now
+    public func prepFresh(_ id: String) -> Bool { prep[id].map { $0.read == currentKey(id) } ?? false }
+    /// The last answers whatever tree they were read for, and whether that tree has been left —
+    /// for drawing (dimmed while stale), never for routing.
+    public func lastReads(_ id: String) -> (facts: SyncFacts?, prep: PrepRoute?, stale: Bool) {
+        (facts[id]?.value, prep[id]?.value, facts[id].map { $0.read != currentKey(id) } ?? false)
+    }
 
     static func scopeKey(_ b: Branch) -> String { "\(b.tip)|\(b.ahead)|\(b.gates.rawValue)" }
 

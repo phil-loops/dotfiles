@@ -332,6 +332,30 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = f
         #expect(w.path == "/r/catch-up" && w.body == ["branch": "d"])
     }
 
+    @Test func aPrepRouteReadBeforeTheBranchMovedRoutesNothing() throws {
+        let a = world()
+        let ship = ShipState.of(a)
+        func move(_ fn: (inout JSONObject) -> Void) throws {
+            var obj = try #require(a.store.rawView("branch", "r:a"))
+            fn(&obj)
+            #expect(a.store.applyPatch(try Patch.make(domain: Domain.git, version: (a.store.versions[Domain.git] ?? 0) + 1,
+                                                      upserts: ["branch": ["r:a": .object(obj)]])) == .ok)
+        }
+        try move { $0["diverged"] = true }
+        #expect(BranchCommands.pushRoute("r:a", a) == nil, "diverged with no prep read for this tip: p waits for it")
+        let b = try #require(a.store.view(Branch.self, "r:a"))
+        ship.putReads("r:a", key: ShipState.factsKey(b, nil), facts: nil, prep: PrepRoute(route: "conform"))
+        #expect(BranchCommands.pushRoute("r:a", a) == "branch.conform")
+        #expect(ship.lastReads("r:a").stale == false)
+        // the branch moves under the answer: it no longer routes, and draws as stale
+        try move { $0["tip"] = "fffffff" }
+        #expect(ship.prepOf("r:a") == nil && !ship.prepFresh("r:a"))
+        #expect(BranchCommands.pushRoute("r:a", a) == nil, "never take origin's copy on an answer about a tree the branch has left")
+        #expect(ship.lastReads("r:a").prep?.route == "conform" && ship.lastReads("r:a").stale, "the old answer still draws, dimmed")
+        let now = try #require(a.store.view(Branch.self, "r:a"))
+        #expect(ShipControlState.push(now, route: nil, contextKnown: true, checking: true).reason == "checking origin's copy…")
+    }
+
     @Test func eachForestKeepsItsOwnCursor() {
         let a = world()
         a.go(.forest(repo: "r", project: "tree"))
