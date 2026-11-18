@@ -275,6 +275,19 @@ import Testing
         await until("the reread diff") { pg.baseSha == "moved" }
     }
 
+    /// A contract or reparent changes the parent but not the tip: the diff against the parent is read again.
+    @Test func aNewParentRereadsTheDiff() async throws {
+        let (a, p) = try await app()
+        let pg = ReviewPageState.of(a)
+        #expect(pg.baseSha != "new-parent")
+        ShipStub.answer(p, "GET", "/loops/node", #"{"branch":"add-hankles-limited-label","baseSha":"new-parent","files":[]}"#)
+        var changed = try #require(a.store.raw["branch"]?[Self.branch]?.object)
+        changed["parent"] = "a-different-parent"
+        let version = try #require(a.store.versions[Domain.git])
+        #expect(a.store.applyPatch(try Patch.make(domain: Domain.git, version: version + 1, upserts: ["branch": [Self.branch: .object(changed)]])) == .ok)
+        await until("the reread diff") { pg.baseSha == "new-parent" }
+    }
+
     func keys(_ a: AppModel, _ ks: String...) { for k in ks { a.keys.handle(k) } }
 
     @Test func theDiffLandsWithTheCursorOnItsFirstChange() async throws {

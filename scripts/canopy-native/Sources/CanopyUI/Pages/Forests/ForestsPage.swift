@@ -96,7 +96,7 @@ struct ForestsPage: View {
         }
         // the cursor landing on a branch warms its review page's diff (Forests.tsx warmSelected)
         .onChange(of: cursor, initial: true) { _, k in
-            if let b = RowKey.id(k, "b").flatMap({ app.store.view(Branch.self, $0) }) { ReviewPageState.of(app).warm(repo: b.repo, name: b.name, at: b.tip) }
+            if let b = RowKey.id(k, "b").flatMap({ app.store.view(Branch.self, $0) }) { ReviewPageState.of(app).warm(repo: b.repo, name: b.name, at: b.tip, parent: b.parent) }
         }
         // the cursor resting on a forest asks whether it merges — a second of git, so only the one you stop on
         .task(id: cursor) {
