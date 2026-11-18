@@ -97,6 +97,43 @@ def catch_up_one(b, wt=None):
     return ("merged", _move(b, tip, carrier))
 
 
+def land_plan(c, ptip, wt=None):
+    """(how, new_tip, err) for a child whose parent (tip `ptip`) landed on main by a squash merge,
+    computed without moving anything. git's merge base for the child and main is pre-squash, so
+    the parent's change reads as made twice and conflicts with the child's own edits to it
+    (#11659, #11674). The base that tells the truth is the parent tip the child was built on —
+    merge-base(child, ptip): from there main's side is main's moves alone and the child's side
+    is its own change (on #11674 this matched the hand resolution byte for byte).
+      published    a catch-up merge (parents: the child, origin/main) whose tree is that merge
+      unpublished  its own commits rebased onto origin/main from the same cut
+    A conflict at that base is a real overlap with main: reported, never retried at another base."""
+    tip, main = _sha(f"refs/heads/{c}"), _sha("refs/remotes/origin/main")
+    base = _git("merge-base", tip, ptip).stdout.strip() if tip and ptip else ""
+    if not (tip and main and base):
+        return "", "", f"couldn't find where {c} sits on its landed parent"
+    if _git("merge-base", "--is-ancestor", main, tip).returncode == 0:
+        return "current", tip, ""
+    if _sha(f"refs/remotes/origin/{c}"):
+        r = _git("merge-tree", "--write-tree", f"--merge-base={base}", tip, main)
+        tree = r.stdout.split("\n", 1)[0].strip()
+        if r.returncode != 0 or not tree:
+            return "", "", f"{c} overlaps main beyond its parent's landed change — a real conflict; resolve it by hand (nothing was moved)"
+        msg = f"catch up to main\n\nits parent landed; merged against the tip {c} was built on ({base[:10]})"
+        carrier = _git("commit-tree", tree, "-p", tip, "-p", main, "-m", msg).stdout.strip()
+        return ("merged", carrier, "") if carrier else ("", "", f"couldn't build {c}'s catch-up merge")
+    wt = wt or sync._scratch_wt()
+    if rebaseguard.heal(wt) in ("person", "live"):
+        return "", "", f"the scratch checkout {wt} has a rebase in progress — finish or abort it"
+    _git("-C", wt, "checkout", "-q", "--detach", tip)
+    r = rebaseguard.run(wt, ["--onto", main, base])
+    if r.returncode != 0:
+        _git("-C", wt, "checkout", "-q", "--detach", tip)
+        return "", "", f"{c} conflicts with main beyond its parent's landed change — resolve it by hand (nothing was moved)"
+    rebased = _git("-C", wt, "rev-parse", "HEAD").stdout.strip()
+    _git("-C", wt, "checkout", "-q", "--detach")
+    return "rebased", rebased, ""
+
+
 def catch_up(branch, wt=None):
     """Walk the chain top-down; returns {ok, moved: [{branch, how}], stopped?: {branch, why}}."""
     moved = []

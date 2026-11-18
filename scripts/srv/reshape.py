@@ -4,7 +4,9 @@ forest's lock (P2), so canopy's background restack and a click in canopy never i
 
   new        create a branch with its purpose, parent, project and registry entry in one motion
   reparent   move an UNPUBLISHED branch onto another parent; its descendants follow (catchup.carry)
-  contract   drop a branch whose diff is empty or merged; children re-point to its parent
+  contract   drop a branch whose diff is empty or merged; children re-point to its parent — a
+             root that landed on main first catches its children up on main (land)
+  land       catch a landed root's children up on main against the tip they were built on
   rename     rename an UNPUBLISHED branch; the registry and every edge naming it follow
   catch-up   catch the chain down to a branch up to its moved ancestors (catchup.catch_up)
 
@@ -214,19 +216,59 @@ def _merged_on_github(branch):
     return pr.get("state") == "MERGED" and pr.get("head") == _sha(branch)
 
 
+def _landed(branch):
+    return bool(_sha("origin/main")) and (
+        _git("merge-base", "--is-ancestor", branch, "origin/main").returncode == 0
+        or _in_main(branch)) or _merged_on_github(branch)
+
+
+def land(parent, only_published=False):
+    """`parent` landed on main: catch each child up on origin/main against the tip it was built
+    on (catchup.land_plan) and point it at main. Every child's result is computed first, so one
+    conflict refuses the lot with nothing moved; grandchildren then follow their moved parent
+    (catchup.carry). only_published leaves unpublished children to the restack's rebase."""
+    _need(parent)
+    if not _landed(parent):
+        raise Refused(f"{parent} hasn't landed on main — nothing to catch its children up to")
+    ptip = _sha(f"refs/heads/{parent}")
+    kids = [c for c in catchup.children(parent) if not only_published or published(c)]
+    if not kids:
+        return {"ok": True, "parent": parent, "landed": [], "carried": []}
+    with scratch() as wt:
+        plans = []
+        for c in kids:
+            how, new_tip, err = catchup.land_plan(c, ptip, wt)
+            if err:
+                raise Refused(err)
+            plans.append((c, how, new_tip))
+        out, carried = [], []
+        for c, how, new_tip in plans:
+            tip = _sha(f"refs/heads/{c}")
+            err = catchup._move(c, tip, new_tip) if new_tip != tip else ""
+            if err:
+                out.append({"branch": c, "how": how, "err": err})
+                continue
+            _ok("config", f"branch.{c}.stack-parent", "main")
+            _ok("config", f"branch.{c}.stack-base", _sha("refs/remotes/origin/main"))
+            out.append({"branch": c, "how": how})
+            carried += catchup.carry(c, None, wt)
+    if any(r.get("err") for r in out):
+        raise Refused("; ".join(r["err"] for r in out if r.get("err")))
+    return {"ok": True, "parent": parent, "landed": out, "carried": carried}
+
+
 def contract(branch):
     _need(branch)
     parent = catchup.parent(branch) or "main"
     base = _base(parent)
     empty = _git("diff", "--quiet", f"{base}...{branch}").returncode == 0
-    merged = bool(_sha("origin/main")) and (
-        _git("merge-base", "--is-ancestor", branch, "origin/main").returncode == 0
-        or _in_main(branch)) or _merged_on_github(branch)
+    merged = _landed(branch)
     if not (empty or merged):
         raise Refused(f"{branch} still carries changes {parent} lacks — not empty, not merged; nothing to contract")
     holder = sync._worktree_of(branch)
     if holder:
         raise Refused(f"{branch} is checked out in {holder} — move that checkout off it first")
+    landed = land(branch)["landed"] if merged and parent in TRUNKS and catchup.children(branch) else []
     kids = catchup.children(branch)
     for c in kids:
         _ok("config", f"branch.{c}.stack-parent", "main" if parent in TRUNKS else parent)
@@ -237,7 +279,7 @@ def contract(branch):
         _unset_value(f"stack-project.{proj}.branch", branch)
     _ok("branch", "-D", branch)   # git drops branch.<b>.* with it
     return {"ok": True, "contracted": branch, "why": "empty" if empty else "merged",
-            "children": kids, "parent": parent}
+            "children": kids, "parent": parent, "landed": landed}
 
 
 def rename(old, new_name):

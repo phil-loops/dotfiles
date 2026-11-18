@@ -183,6 +183,58 @@ check("contract: GitHub's MERGED at the local tip contracts it, though main move
       rc == 0 and out.get("why") == "merged", (rc, out, err))
 env["PATH"] = real_path
 
+# land: a root squash-merges; its published child edits the very lines the root wrote (#11674).
+# git's own merge base is pre-squash, so the root's change reads as made twice and conflicts; the
+# tip the child was built on is the base that tells the truth
+env["PATH"] = shim + os.pathsep + real_path
+reshape("new", "lp", "--parent", "main", "--project", "f", "--description", "root that lands")
+git("checkout", "-q", "lp"); commit("shared.txt", "one\npar\nthree\n", "lp1")
+reshape("new", "lk", "--parent", "lp", "--project", "f", "--description", "published child")
+git("checkout", "-q", "lk"); commit("shared.txt", "one\nkid\nthree\n", "lk1")
+reshape("new", "lg", "--parent", "lk", "--project", "f", "--description", "its unpublished child")
+git("checkout", "-q", "lg"); commit("lg.txt", "lg\n", "lg1")
+reshape("new", "lu", "--parent", "lp", "--project", "f", "--description", "unpublished sibling")
+git("checkout", "-q", "lu"); commit("lu.txt", "lu\n", "lu1")
+git("update-ref", "refs/remotes/origin/lk", "lk")
+git("checkout", "-q", "main"); git("merge", "-q", "--squash", "lp"); git("commit", "-q", "-m", "squash lp (#3)")
+commit("other.txt", "main moves on\n", "main moves on")
+git("update-ref", "refs/remotes/origin/main", "main")
+github_says("lp", git("rev-parse", "lp"))
+lk_old, lu_old = git("rev-parse", "lk"), git("rev-parse", "lu")
+trap = subprocess.run(["git", "-C", repo, "merge-tree", "--write-tree", "lk", "origin/main"], capture_output=True, env=env)
+check("land: git's default merge base conflicts (the trap)", trap.returncode == 1, trap.returncode)
+rc, out, err = reshape("contract", "lp")
+check("land: contracting the landed root lands its children", rc == 0 and out.get("why") == "merged"
+      and sorted((r["branch"], r["how"]) for r in out.get("landed", [])) == [("lk", "merged"), ("lu", "rebased")], (rc, out, err))
+check("land: the published child is a catch-up merge (child, origin/main) — append-only",
+      git("rev-list", "--parents", "-n1", "lk").split()[1:] == [lk_old, git("rev-parse", "origin/main")])
+check("land: its tree is the child's own change on main",
+      git("show", "lk:shared.txt") == "one\nkid\nthree" and git("show", "lk:other.txt") == "main moves on"
+      and git("diff", "origin/main", "lk", "--name-only") == "shared.txt", git("diff", "origin/main", "lk"))
+check("land: the unpublished sibling is rebased onto main with only its own commit",
+      anc("origin/main", "lu") and git("rev-list", "--count", "origin/main..lu") == "1" and not anc(lu_old, "lu"))
+check("land: children point at main, the root is gone",
+      cfg("branch.lk.stack-parent") == ["main"] and cfg("branch.lu.stack-parent") == ["main"]
+      and git("rev-parse", "--verify", "-q", "lp", ok=False) == "")
+check("land: the grandchild follows its parent", anc("lk", "lg") and git("show", "lg:lg.txt") == "lg", out.get("carried"))
+
+# a child that overlaps main beyond the root's change: a real conflict, refused with nothing moved
+reshape("new", "lp2", "--parent", "main", "--project", "f", "--description", "another root")
+git("checkout", "-q", "lp2"); commit("s2.txt", "a\nroot\nc\n", "lp2")
+reshape("new", "lk2", "--parent", "lp2", "--project", "f", "--description", "overlapping child")
+git("checkout", "-q", "lk2"); commit("s2.txt", "a\nchild\nc\n", "lk2")
+git("update-ref", "refs/remotes/origin/lk2", "lk2")
+git("checkout", "-q", "main"); git("merge", "-q", "--squash", "lp2"); git("commit", "-q", "-m", "squash lp2 (#4)")
+commit("s2.txt", "a\nmain rewrote it\nc\n", "main rewrites the root's line")
+git("update-ref", "refs/remotes/origin/main", "main")
+github_says("lp2", git("rev-parse", "lp2"))
+lk2_old = git("rev-parse", "lk2")
+rc, out, err = reshape("contract", "lp2")
+check("land: a real overlap refuses the contract and moves nothing",
+      rc == 1 and "conflict" in out.get("err", "") and git("rev-parse", "lk2") == lk2_old
+      and git("rev-parse", "--verify", "-q", "lp2", ok=False) != "" and cfg("branch.lk2.stack-parent") == ["lp2"], (rc, out))
+env["PATH"] = real_path
+
 # catch-up: a moves (as if a follow-up landed), its child chain catches up
 git("checkout", "-q", "a"); commit("a2.txt", "a2\n", "a2"); git("checkout", "-q", "main")
 reshape("new", "d", "--parent", "a", "--project", "f", "--description", "add d")

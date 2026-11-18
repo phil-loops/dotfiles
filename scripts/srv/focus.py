@@ -212,6 +212,32 @@ def _sync_project(project, st, cwds):
     return True
 
 
+def _land_published_children(project, landed, cwds):
+    """A landed root's published children can't be rebased, and contract-only won't drop a parent
+    under a live child, so the forest sat until someone merged main into the child by hand
+    (disable-evidence, 47 min after #11659). Catch each up on main against the tip it was built
+    on (reshape.land), under the forest's lock, then queue its quick gates: the merge is a new
+    tree its PR hasn't been checked on. A conflict there is a real overlap, logged and left."""
+    from . import catchup, push, reshape
+    for b in landed:
+        if _parent(b) != "main":
+            continue
+        kids = [c for c in catchup.children(b) if _tip(f"refs/remotes/origin/{c}")]
+        if not kids or _busy(kids, cwds):
+            continue
+        try:
+            with forestlock.hold(ctx.repo_cwd(), forestlock.key_for(ctx.repo_cwd(), project=project),
+                                 "focus-sync · land", wait=0, export=False):
+                res = reshape.land(b, only_published=True)
+        except (forestlock.Held, reshape.Refused) as e:
+            ctx.log(f"focus-sync: {b}'s published children not caught up on main: {e}")
+            continue
+        for r in res["landed"]:
+            if r["how"] == "merged":
+                push._spawn_gates(r["branch"], background=True, quick=True)
+        ctx.log(f"focus-sync: {b} landed — {', '.join(r['branch'] + ' ' + r['how'] for r in res['landed'])} on main")
+
+
 def _contract_project(project, merged, st, cwds):
     """Drop the members that landed. What a pass leaves (live children sit on it) isn't retried until
     the forest's shape changes or another member lands; a held member is retried every tick."""
@@ -229,6 +255,7 @@ def _contract_project(project, merged, st, cwds):
     if len(held) == len(landed):
         return False   # nothing to drop until a worktree frees
     tips = {b: _tip(f"refs/heads/{b}") for b in landed}
+    _land_published_children(project, [b for b in landed if b not in held and merged.get(b) == tips[b]], cwds)
     ctx.log(f"focus-sync: contracting {project} ({', '.join(landed)}{'; holding ' + ', '.join(held) if held else ''})")
     _restack(project, hold=held, merged=merged)
     members = _members(project)
