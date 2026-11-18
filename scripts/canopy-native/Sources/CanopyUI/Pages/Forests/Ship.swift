@@ -197,11 +197,12 @@ public enum ShipRules {
         return b.gates == .green && b.commits > 0 ? .green : .local
     }
 
-    /// An approval counts only for the code it saw: the commit it approved is the PR's head, and the head is the
-    /// branch's tip. New commits pushed (or still local) after it put the PR back in review. Unsent shas keep it.
+    /// An approval counts only for the code it saw: the commit it approved is the PR's head on GitHub, and no local
+    /// commit sits beyond it unpushed. Commits pushed or still local after it put the PR back in review; a checkout
+    /// that is merely behind GitHub (an "update branch" there) doesn't. Unsent shas keep it.
     static func approvalHolds(_ b: Branch, _ pr: Pr) -> Bool {
         guard let approved = pr.approvedSha, let head = pr.headSha else { return true }
-        return approved == head && head == b.tip
+        return approved == head && b.pushed != .ahead
     }
 
     static func settled(_ s: ShipStage?) -> Bool { s == nil || s == .landed }

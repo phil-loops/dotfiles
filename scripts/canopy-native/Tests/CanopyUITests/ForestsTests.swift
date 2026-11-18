@@ -48,8 +48,10 @@ private let NOW = iso("2026-10-22T18:00:00Z") // Thu 11:00 PT
         #expect(stand(br(), pr(["review": "APPROVED", "headSha": "t", "approvedSha": "t"])).ship == .approved, "approved at the tip")
         #expect(stand(br(), pr(["review": "APPROVED", "headSha": "t", "approvedSha": "old"])).ship == .review,
                 "an approval of older code doesn't approve the commits pushed since")
-        #expect(stand(br(["tip": "local"]), pr(["review": "APPROVED", "headSha": "t", "approvedSha": "t"])).ship == .review,
+        #expect(stand(br(["pushed": "ahead", "ahead": 1]), pr(["review": "APPROVED", "headSha": "t", "approvedSha": "t"])).ship == .review,
                 "nor commits still local")
+        #expect(stand(br(["tip": "behind", "pushed": "synced"]), pr(["review": "APPROVED", "headSha": "t", "approvedSha": "t"])).ship == .approved,
+                "a checkout behind GitHub's head keeps the approval GitHub holds")
         #expect(stand(br(), pr(["state": "MERGED"])).ship == .landed)
     }
 
