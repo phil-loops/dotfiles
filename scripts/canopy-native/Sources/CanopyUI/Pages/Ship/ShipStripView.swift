@@ -54,7 +54,7 @@ public struct ShipStripView: View {
         let push = latestPush()
         let live: Run.State? = push.flatMap { [.sending, .landing, .failed].contains($0.run.state) ? $0.run.state : nil }
         let forcing = route == "branch.force.arm" || route == "branch.force.confirm"
-        let acts = route == "branch.gates.run" || route == "branch.push.arm" || route == "branch.push.confirm" || forcing
+        let acts = route == "branch.gates.run" || route == "branch.gates.quick" || route == "branch.push.arm" || route == "branch.push.confirm" || forcing
         let waiting = route == "branch.gates.next"
         let control = ShipControlState.push(b, route: route, contextKnown: app.forestModel.branchView(branchID) != nil)
         let running = rows.first { $0.state == .running }
@@ -154,6 +154,7 @@ public struct ShipStripView: View {
         switch route {
         case "branch.gates.next": return "prioritize gates"
         case "branch.gates.run": return b.gates == .red ? "re-run the gates" : "run the gates"
+        case "branch.gates.quick": return b.gates == .red ? "re-run the quick gates" : "run the quick gates"
         case "branch.force.confirm":
             let lease: String = {
                 if case .some(.some(let s)) = ShipState.of(app).forceScopeOf(app, branchID) { return String(s.lease.prefix(7)) }
