@@ -268,7 +268,8 @@ struct StepsStrip: View {
             let layout = vertical ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6)) : AnyLayout(HStackLayout(spacing: 12))
             layout {
                 ForEach(motion.steps, id: \.id) { s in
-                    Text("\(stepIcon[s.state] ?? "·") \(s.label)").foregroundStyle(stepColor(s.state, theme))
+                    let shown = s.id == .gates ? Syncing.gatesShown(s.state, live: app.store.view(Branch.self, branchID)?.gates ?? .none) : s.state
+                    Text("\(stepIcon[shown] ?? "·") \(s.label)").foregroundStyle(stepColor(shown, theme))
                 }
                 if !vertical { Spacer(minLength: 0) }
                 if !vertical && motion.phase != .running && motion.phase != .dirt { KeyButton(title: "put away", id: "review.sync.dismiss", target: branchID) }

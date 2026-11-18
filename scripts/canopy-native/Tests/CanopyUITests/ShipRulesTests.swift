@@ -256,6 +256,24 @@ func shipBranch(_ f: (inout Branch) -> Void = { _ in }) -> Branch {
         #expect(Syncing.testsOf(["err": "network"]).note == "couldn't run")
     }
 
+    /// A step that couldn't run is never drawn as done.
+    @Test func testsThatCouldntRunAreNotATick() {
+        #expect(Syncing.testsOf(["err": "network"]).state == .fail)
+        let unrun = Syncing.testsOf(["ran": false, "summary": "no test database"])
+        #expect(unrun.state == .fail && unrun.note == "no test database")
+        #expect(Syncing.testsOf(["noTests": true]).state == .ok)
+    }
+
+    /// Starting the gates isn't passing them: the step reads the branch's live gates.
+    @Test func theGatesStepIsTheBranchsGates() {
+        #expect(Syncing.gatesShown(.run, live: .running) == .run)
+        #expect(Syncing.gatesShown(.run, live: .stale) == .run)
+        #expect(Syncing.gatesShown(.run, live: .green) == .ok)
+        #expect(Syncing.gatesShown(.run, live: .red) == .fail)
+        #expect(Syncing.gatesShown(.skip, live: .green) == .skip)
+        #expect(Syncing.gatesShown(.idle, live: .red) == .idle)
+    }
+
     @Test func onlyASealSendsYouToTheWords() {
         #expect(Syncing.sealed(["routed": ["sealed 3 unpushed commits into one (voiced)"]]))
         #expect(!Syncing.sealed(["routed": ["2 voiced commits — pushed as they are, no seal"]]))
