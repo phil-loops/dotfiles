@@ -24,7 +24,7 @@
 #   blocking behavior) for callers that need up-to-the-second data.
 #   `--refresh` drops the cache and fetches synchronously.
 #
-# A refresh lock (atomic mkdir, stolen after LOCK_TTL) ensures at most one gh
+# A refresh lock (a kernel lock, fdlock — dies with the refresh) ensures at most one gh
 # fetch runs at a time across ALL callers/sessions — no stampede, no hammering.
 # On a failed/offline fetch the last good cache is kept, never overwritten empty.
 #
@@ -40,7 +40,7 @@ gitdir=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || tr
 CACHE="${gitdir:-${TMPDIR:-/tmp}}/stack-prs.json"
 TTL=${STACK_PRS_TTL:-300}
 LOCK="$CACHE.refresh.lock"
-LOCK_TTL=120   # steal a refresh lock left behind by a crashed/killed fetch
+FDLOCK="${0:A:h}/fdlock"
 
 [[ "${1:-}" == "--refresh" ]] && rm -f "$CACHE"
 
@@ -80,13 +80,14 @@ _refresh() {
 # flight. Fully detaches (fds off the caller's pipe, disowned) so the HTTP
 # request that spawned us returns instantly.
 _refresh_bg() {
-  # Steal a stale lock from a fetch that died mid-flight.
-  if [[ -d "$LOCK" ]] && (( $(_age "$LOCK") > LOCK_TTL )); then
-    rmdir "$LOCK" 2>/dev/null || true
-  fi
-  mkdir "$LOCK" 2>/dev/null || return 0   # another refresh already running → skip
-  ( _refresh || true; rmdir "$LOCK" 2>/dev/null || true ) >/dev/null 2>&1 &
+  # A kernel lock (fdlock) the background refresh holds through the fd it inherits: it's released
+  # when that refresh exits, however it exits — no stale lock to steal after a killed fetch.
+  rmdir "$LOCK" 2>/dev/null || true   # the mkdir lock this replaced
+  exec 9>>"$LOCK.f"
+  "$FDLOCK" 9 --wait 0 || { exec 9>&-; return 0; }   # a refresh already in flight → skip
+  ( _refresh || true ) >/dev/null 2>&1 &
   disown 2>/dev/null || true
+  exec 9>&-   # the refresh keeps the lock; this shell lets go of its copy
 }
 
 # TTL=0 → caller explicitly wants synchronous fresh data (bypass SWR).
