@@ -192,9 +192,16 @@ public enum ShipRules {
     /// review (or approved), else synced commits are pushed and green gates on commits are green.
     public static func shipOf(_ b: Branch, _ pr: Pr?) -> ShipStage {
         if pr?.state == "MERGED" { return .landed }
-        if pr?.state == "OPEN" { return pr?.review == "APPROVED" ? .approved : .review }
+        if let pr, pr.state == "OPEN" { return pr.review == "APPROVED" && approvalHolds(b, pr) ? .approved : .review }
         if b.pushed == .synced && b.commits > 0 { return .pushed }
         return b.gates == .green && b.commits > 0 ? .green : .local
+    }
+
+    /// An approval counts only for the code it saw: the commit it approved is the PR's head, and the head is the
+    /// branch's tip. New commits pushed (or still local) after it put the PR back in review. Unsent shas keep it.
+    static func approvalHolds(_ b: Branch, _ pr: Pr) -> Bool {
+        guard let approved = pr.approvedSha, let head = pr.headSha else { return true }
+        return approved == head && head == b.tip
     }
 
     static func settled(_ s: ShipStage?) -> Bool { s == nil || s == .landed }

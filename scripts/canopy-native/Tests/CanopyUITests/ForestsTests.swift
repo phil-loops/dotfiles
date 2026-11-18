@@ -45,6 +45,11 @@ private let NOW = iso("2026-10-22T18:00:00Z") // Thu 11:00 PT
         #expect(stand(br(["gates": "green", "pushed": "synced"])).action == .pr)
         #expect(stand(br(), pr()).ship == .review)
         #expect(stand(br(), pr(["review": "APPROVED"])).ship == .approved)
+        #expect(stand(br(), pr(["review": "APPROVED", "headSha": "t", "approvedSha": "t"])).ship == .approved, "approved at the tip")
+        #expect(stand(br(), pr(["review": "APPROVED", "headSha": "t", "approvedSha": "old"])).ship == .review,
+                "an approval of older code doesn't approve the commits pushed since")
+        #expect(stand(br(["tip": "local"]), pr(["review": "APPROVED", "headSha": "t", "approvedSha": "t"])).ship == .review,
+                "nor commits still local")
         #expect(stand(br(), pr(["state": "MERGED"])).ship == .landed)
     }
 
