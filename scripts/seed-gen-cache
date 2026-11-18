@@ -30,7 +30,7 @@ where each file physically lives, the npm identity of each package it reached, w
 node_modules links lead, the configs, the compiler's own files and seed-gen's. A stored entry carries
 the graph it was built from; a tree hits only when that graph's every file hashes identically in it
 and every probe answers the same — so it would read the very same files, and emit the same.
-Design, the counterexample per key part, and measurements: wiki loops/canopy-v2-gen-cache.
+Design, the counterexample per key part, and measurements: git -C ~/.dotfiles show f3432ad6^:wiki/loops/canopy-v2-gen-cache.md
 """
 import ctypes
 import hashlib
