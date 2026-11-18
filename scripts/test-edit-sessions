@@ -13,7 +13,7 @@ import uuid
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from srv import ctx, editprojection, edits, ghreview, state
+from srv import ctx, editlease, editprojection, edits, ghreview, state
 
 
 class Request:
@@ -25,6 +25,7 @@ class EditSessions(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix="canopy-edit-test-")
         self.root = Path(self.temporary.name)
+        self.processes = []
         self.repo = self.root / "repo"
         self.repo.mkdir()
         self.git("init", "-q", "-b", "main")
@@ -51,6 +52,10 @@ class EditSessions(unittest.TestCase):
         ctx.run = lambda args, timeout=None: subprocess.run(args, cwd=ctx.repo_cwd(), capture_output=True, text=True)
 
     def tearDown(self):
+        for process in self.processes:
+            if process.poll() is None:
+                process.terminate()
+            process.communicate(timeout=5)
         self.cleanup_patch.stop()
         self.warm_patch.stop()
         ctx.CWD, ctx.MAIN_WT, ctx.REPOS, ctx.run = self.old
@@ -76,6 +81,172 @@ class EditSessions(unittest.TestCase):
 
     def commit(self, data):
         return self.call(edits.commit, {**data, "operation": data["session"]})
+
+    def leased(self):
+        data = {"branch": "feature", "expectedTip": self.tip, "baseSha": self.base, "session": str(uuid.uuid4()),
+                "epoch": state.EPOCH, "leaseProtocol": 1, "entry": {"path": "a.txt", "line": 1, "col": 1}}
+        answer = self.call(edits.prepare, data)
+        self.assertTrue(answer["ok"], answer)
+        data["attachment"] = answer["attachment"]["token"]
+        return data, Path(answer["dir"]), answer["attachment"]
+
+    def launcher(self, attachment, checkout, *, close_descriptors=False, wait=True):
+        directory = self.root / "bin"
+        directory.mkdir(exist_ok=True)
+        hx = directory / "hx"
+        hx.write_text('''#!/usr/bin/env python3
+import os, pathlib, time
+if os.environ.get("CLOSE_LEASE"):
+    for fd in range(3, 256):
+        try: os.close(fd)
+        except OSError: pass
+pathlib.Path(os.environ["EDITOR_READY"]).write_text(str(os.getpid()))
+while True: time.sleep(1)
+''')
+        hx.chmod(0o755)
+        ready = self.root / ("ready-" + str(uuid.uuid4()))
+        env = {**os.environ, "PATH": str(directory) + os.pathsep + os.environ["PATH"], "EDITOR_READY": str(ready)}
+        if close_descriptors:
+            env["CLOSE_LEASE"] = "1"
+        script = Path(__file__).resolve().parent / "canopy-editor"
+        process = subprocess.Popen([sys.executable, str(script), attachment["record"], attachment["token"], "a.txt:1:1"],
+                                   cwd=checkout, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.processes.append(process)
+        if wait:
+            until = time.monotonic() + 5
+            while not ready.exists() and process.poll() is None and time.monotonic() < until:
+                time.sleep(0.01)
+            self.assertTrue(ready.exists(), process.communicate() if process.poll() is not None else "the editor did not attach")
+        return process
+
+    def test_resuming_a_leased_workspace_keeps_its_identity_and_unsaved_files(self):
+        data, checkout, attachment = self.leased()
+        identity = checkout.stat().st_ino
+        (checkout / "a.txt").write_text("unsaved editor files\n")
+        answer = self.call(edits.prepare, data)
+        self.assertTrue(answer["ok"], answer)
+        self.assertEqual(answer["dir"], str(checkout))
+        self.assertEqual(checkout.stat().st_ino, identity)
+        self.assertEqual((checkout / "a.txt").read_text(), "unsaved editor files\n")
+        self.assertNotEqual(answer["attachment"]["token"], attachment["token"])
+        self.assertFalse(self.commit(data)["ok"])
+        data["attachment"] = answer["attachment"]["token"]
+        self.assertTrue(self.commit(data)["ok"])
+        self.assertEqual(self.git("show", "feature:a.txt"), "unsaved editor files")
+
+    def test_live_editor_leases_survive_a_server_epoch_change(self):
+        data, checkout, attachment = self.leased()
+        process = self.launcher(attachment, checkout)
+        (checkout / "a.txt").write_text("live edit\n")
+        with mock.patch.object(state, "EPOCH", "restarted"):
+            answer = self.call(edits.prepare, {**data, "epoch": "restarted"})
+            self.assertFalse(answer["ok"])
+            self.assertIn("live editor", answer["err"])
+            self.assertFalse(self.commit({**data, "epoch": "restarted"})["ok"])
+            listing = self.call(edits.workspaces, {"epoch": "restarted"})
+            self.assertFalse(listing["workspaces"][0]["resumable"])
+        self.assertNotIn("operation", edits._load(edits._root(data["session"])[1]))
+        process.kill()
+        process.wait()
+        listing = self.call(edits.workspaces, {"epoch": state.EPOCH})
+        self.assertTrue(listing["workspaces"][0]["resumable"])
+        self.assertEqual((checkout / "a.txt").read_text(), "live edit\n")
+        self.assertTrue(self.call(edits.prepare, data)["ok"])
+
+    def test_process_birth_identity_protects_an_editor_that_closes_inherited_descriptors(self):
+        data, checkout, attachment = self.leased()
+        process = self.launcher(attachment, checkout, close_descriptors=True)
+        answer = self.call(edits.prepare, data)
+        self.assertFalse(answer["ok"])
+        self.assertIn("live editor", answer["err"])
+        self.assertFalse(self.commit(data)["ok"])
+        process.kill()
+        process.wait()
+        self.assertTrue(self.call(edits.prepare, data)["ok"])
+
+    def test_an_old_attachment_cannot_launch_after_an_unstarted_ticket_is_replaced(self):
+        data, checkout, old = self.leased()
+        answer = self.call(edits.prepare, data)
+        self.assertTrue(answer["ok"])
+        process = self.launcher(old, checkout, wait=False)
+        _, error = process.communicate(timeout=5)
+        self.assertEqual(process.returncode, 75)
+        self.assertIn("no longer current", error)
+        winner = self.launcher(answer["attachment"], checkout)
+        self.assertIsNone(winner.poll())
+
+    def test_two_simultaneous_launches_share_only_one_kernel_attachment(self):
+        data, checkout, attachment = self.leased()
+        first = self.launcher(attachment, checkout, wait=False)
+        second = self.launcher(attachment, checkout, wait=False)
+        until = time.monotonic() + 5
+        while first.poll() is None and second.poll() is None and time.monotonic() < until:
+            time.sleep(0.01)
+        self.assertEqual(sum(p.poll() is None for p in (first, second)), 1)
+        loser = next(p for p in (first, second) if p.poll() is not None)
+        self.assertEqual(loser.returncode, 75)
+        self.assertEqual(edits._load(edits._root(data["session"])[1])["attachment"]["token"], attachment["token"])
+
+    def test_a_missing_or_replaced_lease_file_is_never_recreated(self):
+        for replaced in (False, True):
+            data, checkout, _ = self.leased()
+            lock = edits._root(data["session"])[1] / "editor.lock"
+            lock.rename(lock.with_suffix(".old"))
+            if replaced:
+                lock.write_text("foreign lease\n")
+            self.assertFalse(self.call(edits.prepare, data)["ok"])
+            self.assertFalse(self.commit(data)["ok"])
+            self.assertEqual(lock.read_text() if replaced else lock.exists(), "foreign lease\n" if replaced else False)
+            self.assertEqual((checkout / "a.txt").read_text(), "before\n")
+
+    def test_unknown_process_liveness_preserves_the_existing_attachment(self):
+        data, checkout, attachment = self.leased()
+        root = edits._root(data["session"])[1]
+        saved = edits._load(root)
+        saved["attachment"]["process"] = editlease.process_identity(os.getpid())
+        edits._save(root / "session.json", saved)
+        with mock.patch.object(editlease, "process_identity", side_effect=ghreview.Refused("process unavailable")):
+            self.assertFalse(self.call(edits.prepare, data)["ok"])
+            self.assertFalse(self.commit(data)["ok"])
+            self.assertFalse(self.call(edits.workspaces, {"epoch": state.EPOCH})["workspaces"][0]["resumable"])
+        self.assertEqual(edits._load(root)["attachment"]["token"], attachment["token"])
+
+    def test_a_reused_pid_is_not_the_original_editor_process(self):
+        data, checkout, attachment = self.leased()
+        root = edits._root(data["session"])[1]
+        saved = edits._load(root)
+        process = editlease.process_identity(os.getpid())
+        process[-1] = str(process[-1]) + "-previous"
+        saved["attachment"]["process"] = process
+        edits._save(root / "session.json", saved)
+        answer = self.call(edits.prepare, data)
+        self.assertTrue(answer["ok"], answer)
+        self.assertNotEqual(answer["attachment"]["token"], attachment["token"])
+
+    def test_legacy_workspaces_are_not_assumed_to_have_attachment_leases(self):
+        data, checkout = self.prepare()
+        listing = self.call(edits.workspaces, {"epoch": state.EPOCH})
+        self.assertFalse(listing["workspaces"][0]["resumable"])
+        self.assertFalse(self.call(edits.prepare, {**data, "leaseProtocol": 1, "entry": {"path": "a.txt", "line": 1, "col": 1}})["ok"])
+        self.assertFalse((edits._root(data["session"])[1] / "editor.lock").exists())
+
+    def test_frozen_receipts_do_not_require_the_old_attachment_file(self):
+        data, checkout, _ = self.leased()
+        (checkout / "a.txt").write_text("frozen\n")
+        receipt = self.commit(data)
+        self.assertTrue(receipt["ok"], receipt)
+        (edits._root(data["session"])[1] / "editor.lock").unlink()
+        self.assertEqual(self.commit(data), receipt)
+
+    def test_a_frozen_leased_save_recovers_after_process_death_without_its_attachment_file(self):
+        data, checkout, _ = self.leased()
+        (checkout / "a.txt").write_text("frozen leased files\n")
+        saved = self.crash_save(data, "ref-before-index")
+        (edits._root(data["session"])[1] / "editor.lock").unlink()
+        answer = self.recover(data)
+        self.assertTrue(answer["ok"], answer)
+        self.assertEqual(answer["sha"], saved["receipt"]["sha"])
+        self.assertEqual(self.git("show", "feature:a.txt"), "frozen leased files")
 
     def crash_save(self, data, phase):
         program = r'''
