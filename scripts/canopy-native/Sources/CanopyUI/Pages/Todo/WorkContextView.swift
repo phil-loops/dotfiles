@@ -113,7 +113,7 @@ struct WorkInProgressView: View {
 
     /// The bound chats on each listed branch, by its own work or an item placed on it.
     @MainActor static func chatsPlaced(_ app: AppModel, _ placed: [String: [TodoItem]]) -> [String: [WorkContext.Chat]] {
-        let chats = app.store.rawAll("chat").values.compactMap { try? JSONValue.object($0).decode(WorkContext.Chat.self) }
+        let chats = chats(app)
         guard !chats.isEmpty else { return [:] }
         let m = app.forestModel, p = m.projects(), fs = m.forests()
         let listed = (p.focus + p.workbench + (m.showArchive ? p.archive : [])).compactMap { fs[$0.id] }.filter { !$0.closed }
@@ -124,6 +124,10 @@ struct WorkInProgressView: View {
         return WorkContext.chatsOnBranches(chats, branchWork: work, placed: placed)
     }
 
+    @MainActor static func chats(_ app: AppModel) -> [WorkContext.Chat] {
+        app.store.rawAll("chat").values.compactMap { try? JSONValue.object($0).decode(WorkContext.Chat.self) }
+    }
+
     /// The rest: work no listed branch carries, so it keeps its own line at the top.
     @MainActor static func items(_ app: AppModel) -> [TodoItem] {
         let onDots = Set(placed(app).values.flatMap { $0.map(\.id) })
@@ -131,7 +135,7 @@ struct WorkInProgressView: View {
     }
 
     @MainActor static func visible(_ app: AppModel) -> Bool {
-        !items(app).isEmpty || app.focusedPane["forests"] == "work"
+        !items(app).isEmpty || !WorkContext.onNoWork(chats(app)).isEmpty || app.focusedPane["forests"] == "work"
     }
 
     var body: some View {
@@ -161,13 +165,34 @@ struct WorkInProgressView: View {
                     }
                     .labelTarget(pane: "work", key: RowKey.todo(item.id), title: item.title)
                 }
+                UnboundChatsList(chats: WorkContext.onNoWork(Self.chats(app)))
             }
             .cursorMarks("work").paneRing("work").padding(.bottom, 22)
         }
     }
 }
 
-/// Work in progress on one of a forest's branches, under the forest's row: the branch, what it's doing now, who holds it.
+/// Live chats bound to no work: where each stands, never a guess at what it's doing (round 27, P1).
+struct UnboundChatsList: View {
+    @Environment(\.theme) private var theme
+    let chats: [WorkContext.Chat]
+
+    var body: some View {
+        if !chats.isEmpty {
+            TimelineView(.periodic(from: .now, by: 30)) { ctx in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("On no work · \(chats.count)").font(Theme.text(11)).foregroundStyle(theme.inkFaint)
+                    ForEach(chats, id: \.id) { c in
+                        Text(WorkContext.whereItStands(c, now: ctx.date.timeIntervalSince1970)).font(Theme.text(12)).foregroundStyle(theme.inkDim).lineLimit(1)
+                    }
+                }
+                .help("live Claude Code chats whose binding names no work: claim an item or start a branch from one to bind it")
+                .padding(.leading, 44).padding(.trailing, 16).padding(.top, 10)
+            }
+        }
+    }
+}
+
 /// The chats bound to a branch, apart from who is assigned its items (round 27, P2).
 struct BranchChatsLine: View {
     @Environment(\.theme) private var theme
@@ -189,6 +214,7 @@ struct BranchChatsLine: View {
     }
 }
 
+/// Work in progress on one of a forest's branches, under the forest's row: the branch, what it's doing now, who holds it.
 struct BranchWorkLine: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme
