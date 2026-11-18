@@ -16,6 +16,7 @@ import time
 import threading
 from urllib.parse import quote, parse_qs
 
+from . import rebaseguard
 from . import ctx, stage, sync, repostate, shellout, stackcfg, gate_queue, runs
 from . import actor, verdicts   # own line: Phil-only checks + the waiver
 from . import openprs
@@ -1095,7 +1096,7 @@ def prep_push(req, raw):
                 held = next((p for p, b in stage._worktrees() if b == branch and p != scratch), None)
                 cut = ctx.run(["git", "merge-base", branch, "origin/main"]).stdout.strip()
                 if held is None:
-                    r = ctx.run(["git", "-C", scratch, "rebase", "--onto", "origin/main", cut, branch])
+                    r = rebaseguard.run(scratch, ["--onto", "origin/main", cut, branch])
                     if r.returncode == 0:
                         # the move records its own base — stale records swallow main on the seal below
                         stackcfg.set_key(branch, "base", ctx.run(["git", "rev-parse", "origin/main"]).stdout.strip())
