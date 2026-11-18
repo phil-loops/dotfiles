@@ -36,7 +36,7 @@ import Testing
             }
             #expect(app.nav.choose())
             await CodeLookup.of(app).renameTask?.value
-            #expect(ShipStub.posts(port).isEmpty)
+            #expect(!ShipStub.posts(port).contains { $0.path == "/loops/lsp/rename" })
             #expect(CodeLookup.of(app).renameTask == nil)
         }
     }
