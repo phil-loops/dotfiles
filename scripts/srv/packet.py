@@ -227,11 +227,10 @@ def body_mode(branch):
 
 
 def casual_why(f):
-    """The opening commit's own why, when it's short enough to read as Phil writes one (1–3 lines);
-    else nothing — he types it."""
+    """The opening commit's own why, whatever its length — it is the PR's most important part, so a
+    long one opens the PR rather than leaving it to the template (the words editor nudges length)."""
     first = ctx.run(["git", "log", "--reverse", "--first-parent", "--format=%b%x1e", f"{f['floor']}..{f['branch']}"]).stdout.split("\x1e")[0]
-    why = rp.strip_plan(first)
-    return why if why and len(why) <= 280 and len([ln for ln in why.splitlines() if ln.strip()]) <= 3 else ""
+    return rp.strip_plan(first)
 
 
 def drafted(branch, f=None):

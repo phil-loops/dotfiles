@@ -434,7 +434,7 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
         o.commits[0].locked = ""
         o.commits[0].body = "one\ntwo\nthree\nfour"
         w.setShown(Self.branch, o)
-        #expect(w.prHints(Self.branch).contains { $0.id == "dropped" }, "a four-line why owned by the commit won't reach the PR, and says so")
+        #expect(!w.prHints(Self.branch).contains { $0.id == "dropped" }, "a long why owned by the commit opens the PR whole — nothing warns it away")
     }
 
     // ── the words by name: :title, :why, :desc, :reword ──
