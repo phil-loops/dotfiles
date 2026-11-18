@@ -49,11 +49,15 @@ import datetime
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import time
 import uuid
 
 SCHEMA_VERSION = 3
+SHOW_SOURCE = "show"
+CLAUDE_CODE_SOURCE = "claude-code"
+SESSION_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 BOUNDARIES = ("start", "resume", "turn", "compaction")
 KINDS = ("progress", "completion")
 AUTHORS = ("user", "agent", "system")
@@ -79,6 +83,14 @@ class Absent(JournalError):
 
 class Conflict(JournalError):
     """An identity already names different content (immutable messages, unique sequence numbers)."""
+
+
+class Stale(Conflict):
+    """A decision made from a view of an older binding generation; `current` is the binding now."""
+
+    def __init__(self, message, current):
+        super().__init__(message)
+        self.current = current
 
 
 SCHEMA = """
@@ -496,13 +508,30 @@ class Journal:
         db.execute("INSERT INTO conversation (source_id, conversation_id) VALUES (?, ?)", (source_id, conversation_id))
         return db.execute("SELECT * FROM conversation WHERE source_id = ? AND conversation_id = ?", (source_id, conversation_id)).fetchone()
 
-    def bind(self, source_id, conversation_id, work_ids, *, by):
+    def bind(self, source_id, conversation_id, work_ids, *, by, add=False, expect_generation=None):
         """Starts a new binding generation: launching or switching work. An empty list unbinds
-        (later messages are captured unassigned, never guessed). Returns the generation."""
+        (later messages are captured unassigned, never guessed). Returns the generation.
+
+        `add` widens the binding in force to include `work_ids`, computed in this transaction so a
+        concurrent decision is never lost; adding what is already bound starts no generation.
+        `expect_generation` is the generation the decision was made from: any other refuses with
+        `Stale` carrying the binding now."""
         with self.tx() as db:
             conv = self._conversation(db, source_id, conversation_id, create=True)
             if conv["excluded"]:
                 raise NotCollected(f"{source_id}/{conversation_id} is excluded from collection")
+            if expect_generation is not None and conv["binding_generation"] != expect_generation:
+                current = {"generation": conv["binding_generation"],
+                           "works": self._generation_works(db, conv["conv_pk"], conv["binding_generation"])}
+                raise Stale(f"{source_id}/{conversation_id} is at generation {current['generation']}, "
+                            f"not {expect_generation}", current)
+            if add:
+                if source_id == SHOW_SOURCE:
+                    raise JournalError("a Show section binds one work: its reader reads the first")
+                bound = self._generation_works(db, conv["conv_pk"], conv["binding_generation"])
+                if set(work_ids) <= set(bound):
+                    return conv["binding_generation"]
+                work_ids = bound + [w for w in work_ids if w not in bound]
             for w in work_ids:
                 self._live_work(db, w)
             gen = conv["binding_generation"] + 1
@@ -512,6 +541,15 @@ class Journal:
                 db.execute("INSERT INTO binding_work VALUES (?,?,?)", (conv["conv_pk"], gen, w))
             db.execute("UPDATE conversation SET binding_generation = ? WHERE conv_pk = ?", (gen, conv["conv_pk"]))
             return gen
+
+    def bind_session(self, session_id, work_ids, *, by):
+        """Adds work to a Claude Code chat's binding, keyed by its full session id: a subagent
+        carries its parent's id, so its work-starts widen the chat Phil talks to."""
+        if not SESSION_ID.fullmatch(session_id or ""):
+            raise JournalError(f"{session_id!r} is not a full Claude Code session id")
+        if not self.db.execute("SELECT 1 FROM source WHERE source_id = ?", (CLAUDE_CODE_SOURCE,)).fetchone():
+            self.register_source(CLAUDE_CODE_SOURCE, adapter="claude-code", ordering="none")
+        return self.bind(CLAUDE_CODE_SOURCE, session_id, work_ids, by=by, add=True)
 
     def exclude(self, source_id, conversation_id):
         """Marks a conversation private/unrelated: nothing from it is ever captured."""

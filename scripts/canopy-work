@@ -9,7 +9,9 @@ Identities and bindings
   canopy-work relink --work W [--branch B …]           a rename; identity and history stay
   canopy-work retire --work W                          the branch or item is gone; the id is never reused
   canopy-work source --source S --adapter A [--ordering sequence|none]
-  canopy-work bind --source S --conversation C [--work W …] --by WHO   launch/switch work (no --work: unbind)
+  canopy-work bind --source S --conversation C [--work W …] --by WHO [--add] [--expect-generation G]
+                                                        launch/switch work (no --work: unbind); --add widens it;
+                                                        a stale --expect-generation exits 3 with the binding now
   canopy-work exclude --source S --conversation C      private/unrelated: never collected
 
 Capture and coverage (an owned ingress calls these before it accepts a message for delivery)
@@ -98,6 +100,8 @@ def main():
     p.add_argument("--conversation", required=True)
     p.add_argument("--work", action="append", default=[])
     p.add_argument("--by", required=True)
+    p.add_argument("--add", action="store_true")
+    p.add_argument("--expect-generation", type=int)
     p = sub.add_parser("exclude")
     p.add_argument("--source", required=True)
     p.add_argument("--conversation", required=True)
@@ -195,7 +199,12 @@ def main():
         j.register_source(args.source, adapter=args.adapter, ordering=args.ordering)
         out({"source": args.source})
     elif c == "bind":
-        out({"generation": j.bind(args.source, args.conversation, args.work, by=args.by)})
+        try:
+            out({"generation": j.bind(args.source, args.conversation, args.work, by=args.by, add=args.add,
+                                      expect_generation=args.expect_generation)})
+        except wj.Stale as e:
+            out({"stale": str(e), "current": e.current})
+            sys.exit(3)
     elif c == "exclude":
         j.exclude(args.source, args.conversation)
         out({"excluded": True})
