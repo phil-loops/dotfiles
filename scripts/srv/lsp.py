@@ -9,8 +9,7 @@
 # re-reads those and rebuilds the program incrementally on the next request. A small pool of trees
 # keeps each dependency family's derived state (node_modules view, prisma client, packages dist):
 # a commit goes to the tree already holding its lockfile + packages, so hopping between forests
-# based on different mains doesn't re-derive them. Design + measurements: the
-# canopy-v2-types wiki page.
+# based on different mains doesn't re-derive them.
 #
 # Exactness rules (test-lsp-differential checks answers byte-for-byte against a cold tsgo on a
 # fresh worktree):

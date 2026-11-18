@@ -21,7 +21,6 @@ from srv import ctx as srvctx, restack, sync, picker, review, chat, integrate, r
 ROOT, SCRIPTS, CWD = sys.argv[1], sys.argv[2], sys.argv[3]
 from srv import stage   # own line: the big srv import above is contested across sessions
 from srv import prep    # own line: same reason
-from srv import wiki    # own line: same reason
 from srv import focus   # own line: same reason
 from srv import footprint   # own line: same reason
 from srv import queue       # own line: same reason
@@ -338,8 +337,8 @@ class H(BaseHTTPRequestHandler):
     def _dispatch_get(self, u):
         if u.path == "/v2" or (u.path.startswith("/v2/") and u.path != "/v2/events"):
             return self._send_open_in_canopy(u.path + (f"?{u.query}" if u.query else ""))
-        if (u.path in ("/", "/index.html", "/work", "/forests", "/watching", "/wiki", "/machine", "/tutor", "/outbox")
-                or u.path.startswith(("/forests/", "/branch/", "/review/", "/push/", "/wiki/", "/tutor/", "/outbox/"))):
+        if (u.path in ("/", "/index.html", "/work", "/forests", "/watching", "/machine", "/tutor", "/outbox")
+                or u.path.startswith(("/forests/", "/branch/", "/review/", "/push/", "/tutor/", "/outbox/"))):
             return self._redirect(v1redirect.target(u))   # v1's page URLs (and /) → their v2 page
         elif u.path == "/model":          return review.model(self, u)
         elif u.path == "/sig":   # cheap change-detector for live polling (no stack-forest)
@@ -426,9 +425,6 @@ class H(BaseHTTPRequestHandler):
         elif u.path == "/telemetry/summary": return telemetry.summary(self, u)   # command/surface latency vs budgets, from daily rollups
         elif u.path == "/ext-mtime":       return reviews.ext_mtime(self)
         elif u.path == "/review-requests": return reviews.requests(self)   # Home's review section
-        # Hyphenated, not /wiki/… — /wiki/<slug> is a client route served index.html above.
-        elif u.path == "/wiki-pages":     return wiki.pages(self, u)   # every page for this repo, nav-ordered
-        elif u.path == "/wiki-src":       return wiki.src(self, u)     # resolve one citation to its source lines
         elif u.path == "/tutor-src":      return tutor.src(self, u)    # a pinned file for the code pane
         elif u.path == "/lsp/src":        return lsp.src(self, u)      # a definition target, at the commit its answer came from
         elif u.path == "/learning-state": return tutor.learning_state(self, u)   # the concept graph, depth + due derived

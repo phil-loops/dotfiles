@@ -13,7 +13,7 @@ def v2_path(path):
     segs = [s for s in path.split("/") if s]
     if segs == ["machine"]:
         return "/v2/machine"
-    if segs and segs[0] in ("wiki", "tutor") and len(segs) <= 2:
+    if segs and segs[0] == "tutor" and len(segs) <= 2:
         return "/v2/" + "/".join(segs)
     head, rest = (segs[0], segs[1:]) if segs else ("", [])
     repo = ctx.repo_name()
