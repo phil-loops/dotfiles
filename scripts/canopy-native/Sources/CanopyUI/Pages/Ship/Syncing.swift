@@ -153,11 +153,22 @@ public enum Syncing {
     /// POST /delta-tests as the tests step's state and note — advisory, so a failure never stops
     /// the motion. Its `ok` is the tests' verdict, so the answer is read whole, not as a refusal.
     public static func testsOf(_ body: JSONObject) -> (state: StepState, note: String) {
-        if body["ran"] == nil && body["noTests"] == nil { return (.ok, "couldn't run") }
+        if body["ran"] == nil && body["noTests"] == nil { return (.fail, "couldn't run") }
         if truthy(body["noTests"]) { return (.ok, "no changed tests") }
-        if !truthy(body["ran"]) { return (.ok, str(body["summary"]).shipNonEmpty ?? "couldn't run") }
+        if !truthy(body["ran"]) { return (.fail, str(body["summary"]).shipNonEmpty ?? "couldn't run") }
         if truthy(body["ok"]) { return (.ok, "\(num(body["passed"])) ✓") }
         return (.fail, "\(num(body["failed"])) failed (advisory — the motion went on):\n\(str(body["summary"]))")
+    }
+
+    /// The gates step once sync has started them: the branch's live gates, not a mark of its own —
+    /// starting the gates is not passing them.
+    public static func gatesShown(_ step: StepState, live: Gates) -> StepState {
+        guard step == .run else { return step }
+        switch live {
+        case .green: return .ok
+        case .red: return .fail
+        default: return .run
+        }
     }
 
     /// Whether the prep answer sealed the outgoing commits — their words are new and want a look.
