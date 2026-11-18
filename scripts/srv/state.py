@@ -55,7 +55,7 @@ import threading
 import time
 from urllib.parse import parse_qs
 
-from . import chats, ctx, outbox, push, repostate, reviewdesk, sync, todo, viewed, watch, workfresh
+from . import chats, ctx, outbox, push, pushintent, repostate, reviewdesk, sync, todo, viewed, watch, workfresh
 
 EPOCH = f"{os.getpid():x}{int(time.time()):x}"
 DOMAINS = ("git", "remote", "review", "todo")
@@ -265,6 +265,8 @@ def _git_entities(name, snap, jobs):
             "behind": behind.get(b, 0),
             "drifted": bool(tip) and not rooted and not _is_ancestor(graph, snap.local(parent), tip),
             "upstream": up, "upstreamBad": up_bad, "diverged": diverged,
+            # a push Phil queued for when its gates go green (srv/pushintent.py), and what it came to
+            "pushQueued": pushintent.queued(b, snap, tree), "pushSaid": pushintent.said(b, snap),
         }
     # what each branch owes: the highest link in its chain that is off its parent's tip (its own
     # parent may not have moved at all — a grandparent did). /catch-up walks the chain from there.

@@ -271,9 +271,10 @@ public enum ShipRules {
             return parentOnOrigin || pr != nil ? (.you, "branch.push.arm", false) : (.parent, "branch.push.arm", false)
         }
         if pushableButGates(b, pr) {
-            // the run can't be passed and nothing else holds it back: Phil may ship before it answers (two presses)
-            if b.gates == .running && gatesNext.1 == nil { return (gatesNext.0, "branch.push.early.arm", false) }
-            return gatesNext
+            // a queued run that can be put ahead goes first; a red one re-runs (a queued push would cancel on the same red)
+            if b.gates == .running && gatesNext.1 != nil || b.gates == .red { return gatesNext }
+            // only the gates hold it: p queues the push for green; once queued, p offers to ship without them
+            return (gatesNext.0, b.pushQueued == true ? "branch.push.early.arm" : "branch.push.queue", false)
         }
         switch ship {
         case .pushed: return held ? (.clock, nil, false) : (.you, "branch.pr", false)

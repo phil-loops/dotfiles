@@ -18,7 +18,7 @@
 
 import time
 
-from . import ctx, push, restack
+from . import ctx, push, pushintent, restack
 
 POLL_S = 45
 
@@ -91,6 +91,10 @@ def _candidate():
 def pregate_forever():
     while True:
         time.sleep(POLL_S)
+        try:
+            pushintent.sweep()   # a queued push whose watcher a restart lost settles here
+        except Exception:
+            pass
         try:
             if not ctx.watched():
                 continue   # nobody is looking: a speculative typecheck is pure heat

@@ -17,6 +17,7 @@ import json
 from collections import namedtuple
 
 from . import evidence   # own line: the big import below is contested across sessions
+from . import pushintent   # own line: the big import below is contested across sessions
 from . import catchup, ctx, edits, forestlock
 from . import (actor, chat, chats, integrate, lsp, outbox, outline, packet, picker, preview, push, queue, restack,
                review, reviewdesk, reviews, sync, syntax, todo, tutor, usage, verdicts, viewed)
@@ -115,6 +116,7 @@ POST = {
 
     # ── what other people see ──
     "/push-origin": _r(push.push_origin, "outward", phil=True),
+    "/push-when-green": _r(pushintent.post, "outward", phil=True),   # Phil's press, sent when the gates go green
     "/force-origin": _r(push.force_origin, "outward", phil=True),
 }
 

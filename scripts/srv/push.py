@@ -917,12 +917,20 @@ def force_origin(req, raw):
 
 def push_origin(req, raw):
     d = json.loads(raw or "{}")
-    branch = d.get("branch", "")
+    res = push_now(d.get("branch", ""), stay=bool(d.get("stay")))
+    status = res.pop("_status", 200)
+    req._send(status, json.dumps(res))
+
+
+def push_now(branch, stay=False):
+    """The door p goes through, as a function: every ward recomputed, a plain push from the
+    branch's own worktree, its children carried. A press (POST /push-origin) and a push Phil
+    queued for green (srv/pushintent.py) are the same act. Answers what /push-origin sends."""
     v = _origin_verdict(branch)
     if v is None:
-        return req._send(400, json.dumps({"ok": False, "err": "no such branch"}))
+        return {"_status": 400, "ok": False, "err": "no such branch"}
     if not v["ok"]:
-        return req._send(200, json.dumps({"ok": False, "err": "; ".join(v["reasons"]), "verdict": v}))
+        return {"ok": False, "err": "; ".join(v["reasons"]), "verdict": v}
     # The verdict's ff ward read the last fetch's origin/<branch>; only trunk is fetched on a
     # throttle. A commit landed from github.com (an accepted suggestion) leaves that ref stale,
     # the ward green, and the push rejected with a stderr the header can't show. Fetch the one
@@ -932,10 +940,8 @@ def push_origin(req, raw):
     has_remote = ctx.run(["git", "rev-parse", "--verify", "-q", f"refs/remotes/origin/{branch}"]).returncode == 0
     if has_remote and ctx.run(["git", "merge-base", "--is-ancestor", f"origin/{branch}", branch]).returncode != 0:
         n = ctx.run(["git", "rev-list", "--count", f"{branch}..origin/{branch}"]).stdout.strip() or "?"
-        return req._send(200, json.dumps({
-            "ok": False, "verdict": v,
-            "err": f"origin/{branch} has {n} commit{'' if n == '1' else 's'} you don't — sync first",
-        }))
+        return {"ok": False, "verdict": v,
+                "err": f"origin/{branch} has {n} commit{'' if n == '1' else 's'} you don't — sync first"}
     # plain push — no --force under any circumstance; the pre-push hook still runs
     # underneath as the last net (WIP trailers, merge commits, deploy-critical gap). Run it in
     # the branch's own worktree so the hook checks the tree that went green; no /checkout-to-main
@@ -953,8 +959,8 @@ def push_origin(req, raw):
     # An open PR already exists → jump to it; otherwise the compare-and-create form.
     target = (_open_pr_url(branch, first=not has_remote) or v["web"]) if ok else v["web"]
     # stay: the outbox's push, whose next step is its own open-PR link — no tab pops mid-sheet
-    opened = _open_web(target) if ok and not d.get("stay") else False
-    req._send(200, json.dumps({
+    opened = _open_web(target) if ok and not stay else False
+    return {
         "ok": ok,
         "remote": "origin",
         "web": target,
@@ -962,7 +968,7 @@ def push_origin(req, raw):
         "out": (r.stdout or "").strip(),
         "err": (r.stderr or "").strip(),
         "carried": carried,
-    }))
+    }
 
 
 def push_carried(branch):

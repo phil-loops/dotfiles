@@ -376,31 +376,43 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = f
         try! a.runner.arm("push r:s")
         let sent = try! a.registry.command("branch.push.confirm")!.write!("r:s", nil)!
         #expect(sent.path == "/r/push-origin" && sent.body == ["branch": "s", "stay": true])
-        // a branch with only the gates in the way: p runs them
-        #expect(BranchCommands.pushRoute("r:c", a) == "branch.gates.run")
+        // a branch with only the gates in the way: p queues the push for green (and the server starts them)
+        #expect(BranchCommands.pushRoute("r:c", a) == "branch.push.queue")
     }
 
-    /// Phil 2026-11-18: push before the gates answer, with friction — p arms, p again waives them
-    /// for this code (the door names it his call) and sends; a branch held back otherwise never offers it.
-    @Test func pWhileTheGatesRunArmsAPushThatShipsWithoutThem() throws {
+    /// Phil 2026-11-18: one press queues the push for green — the server sends it through the same
+    /// door when the gates pass; only shipping WITHOUT them costs two more presses, and u takes the queue back.
+    @Test func pQueuesThePushForGreenAndOnlyShippingWithoutThemCostsMore() throws {
         let a = world()
-        var obj = try #require(a.store.rawView("branch", "r:c"))
-        obj["gates"] = "running"
-        #expect(a.store.applyPatch(try Patch.make(domain: Domain.git, version: (a.store.versions[Domain.git] ?? 0) + 1,
-                                                  upserts: ["branch": ["r:c": .object(obj)]])) == .ok)
-        #expect(BranchCommands.pushRoute("r:c", a) == "branch.push.early.arm")
-        #expect(a.registry.command("branch.push.early")!.available!("r:c") == false, "nothing sends before the first press")
+        func set(_ f: JSONObject) throws {
+            var obj = try #require(a.store.rawView("branch", "r:c"))
+            for (k, v) in f { obj[k] = v }
+            #expect(a.store.applyPatch(try Patch.make(domain: Domain.git, version: (a.store.versions[Domain.git] ?? 0) + 1,
+                                                      upserts: ["branch": ["r:c": .object(obj)]])) == .ok)
+        }
+        try set(["gates": "running"])
+        #expect(BranchCommands.pushRoute("r:c", a) == "branch.push.queue")
+        let q = try #require(try a.registry.command("branch.push.queue")!.write!("r:c", nil))
+        #expect(q.path == "/r/push-when-green" && q.body == ["branch": "c"])
+        let undo: Inverse? = q.inverse?(JSONObject()) ?? nil
+        #expect(undo?.id == "branch.push.unqueue", "u takes the queue back")
+        let back = try #require(try a.registry.command("branch.push.unqueue")!.write!("r:c", nil))
+        #expect(back.body == ["branch": "c", "cancel": true])
+
+        try set(["pushQueued": true])
+        #expect(BranchCommands.pushRoute("r:c", a) == "branch.push.early.arm", "queued: p offers to ship it now")
+        #expect(a.registry.command("branch.push.early")!.available!("r:c") == false, "nothing ships without the gates before a second press")
         a.runner.dispatch("branch.push", via: .key, target: "r:c")
-        #expect(a.runner.armed == "push early r:c")
-        #expect(BranchCommands.isArmed("r:c", a))
+        #expect(a.runner.armed == "push early r:c" && BranchCommands.isArmed("r:c", a))
         #expect(BranchCommands.pushRoute("r:c", a) == "branch.push.early")
         #expect(a.registry.command("branch.push.early")!.available!("r:c"))
         a.keys.handle("esc")
         #expect(a.runner.armed == nil)
-        obj["diverged"] = true
-        #expect(a.store.applyPatch(try Patch.make(domain: Domain.git, version: (a.store.versions[Domain.git] ?? 0) + 1,
-                                                  upserts: ["branch": ["r:c": .object(obj)]])) == .ok)
-        #expect(BranchCommands.pushRoute("r:c", a) != "branch.push.early.arm", "a diverged branch never pushes early")
+
+        try set(["gates": "red", "pushQueued": false])
+        #expect(BranchCommands.pushRoute("r:c", a) == "branch.gates.run", "red: re-run first — a queue would cancel on the same red")
+        try set(["gates": "running", "diverged": true])
+        #expect(BranchCommands.pushRoute("r:c", a) != "branch.push.queue", "a diverged branch never queues")
     }
 
     @Test func pPushesAFollowUpOntoAnOpenPRWithItsGatesAdvising() throws {
@@ -411,7 +423,7 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = f
         #expect(a.store.applyPatch(try Patch.make(domain: Domain.git, version: (a.store.versions[Domain.git] ?? 0) + 1,
                                                   upserts: ["branch": ["r:a": .object(obj)]])) == .ok)
         #expect(BranchCommands.pushRoute("r:a", a) == "branch.push.arm", "CI checks every push to a PR: the gates advise")
-        #expect(BranchCommands.pushRoute("r:c", a) == "branch.gates.run", "no PR yet: a first push needs the full set")
+        #expect(BranchCommands.pushRoute("r:c", a) == "branch.push.queue", "no PR yet: a first push waits on the full set, queued")
     }
 
     @Test func pNamesTheCatchUpWhenABranchAboveMovedInsteadOfAPushThatWouldBeRefused() throws {
