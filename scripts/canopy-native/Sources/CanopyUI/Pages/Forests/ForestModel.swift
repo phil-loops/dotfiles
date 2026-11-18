@@ -21,6 +21,9 @@ public struct ForestView: Equatable {
     public var unopened: [BranchView]
     public var onGitHub: Int
     public var closed: Bool
+    /// where it sits on the home, and its one line: the fold of its branches' situations
+    public var move: Move = .waiting
+    public var says: String = ""
 }
 
 /// An open PR GitHub says awaits my review (GET /review-requests); `imported` once its head is a
@@ -144,6 +147,9 @@ public final class ForestModel {
             let live = branches.filter { $0.st.ship != .landed }
             out[p.id] = ForestView(p: p, branches: branches, ready: branches.filter(\.st.ready), unopened: live.filter { $0.pr == nil },
                                    onGitHub: branches.filter { $0.pr != nil }.count, closed: ShipRules.isClosed(branches.map { ($0.st.ship, $0.b.role == "proof") }))
+            let fold = ShipRules.fold(branches.map { ($0.st, ShipRules.says($0.st, $0.b, $0.pr)) })
+            out[p.id]?.move = fold.move
+            out[p.id]?.says = fold.says
         }
         return out
     }
@@ -195,6 +201,13 @@ public final class ForestModel {
         return s.landed.map { RowKey.landed($0.id) } + (s.inFlight + s.left).map { RowKey.branch($0.b.id) }
     }
 
+    /// The focus lane by whose move: each group keeps your hand order.
+    public func focusGroups() -> [(move: Move, projects: [Project])] {
+        let f = forests()
+        let focus = projects().focus
+        return Move.allCases.map { mv in (mv, focus.filter { (f[$0.id]?.move ?? .waiting) == mv }) }.filter { !$0.projects.isEmpty }
+    }
+
     /// The home's rows: forests and the branches of open ones (or, filtered, only what's ready).
     public func homeRows() -> [String] {
         let p = projects()
@@ -215,8 +228,12 @@ public final class ForestModel {
                 if expanded.contains(x.id) { out += (f[x.id]?.branches ?? []).map { RowKey.branch($0.b.id) } }
             }
         }
-        add(p.focus)
-        out += reviewRequests.map { RowKey.reviewRequest($0.number) }
+        // the order ForestsPage draws: your move (then the PRs awaiting your review), moving, waiting, landed
+        for g in focusGroups() {
+            add(g.projects)
+            if g.move == .yours { out += reviewRequests.map { RowKey.reviewRequest($0.number) } }
+        }
+        if !focusGroups().contains(where: { $0.move == .yours }) { out += reviewRequests.map { RowKey.reviewRequest($0.number) } }
         add(p.workbench + (showArchive ? p.archive : []))
         return out
     }

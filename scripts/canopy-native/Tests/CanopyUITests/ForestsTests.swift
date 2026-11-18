@@ -84,6 +84,16 @@ private let NOW = iso("2026-10-22T18:00:00Z") // Thu 11:00 PT
         #expect(agentOn(false).actor == .you && agentOn(false).awaiting == "t1", "an agent done with its turn waits on you")
     }
 
+    @Test func aForestSitsAtItsMostUrgentBranch() {
+        func st(_ a: Actor, done: Bool = false) -> Stand { Stand(ship: .local, action: nil, waiting: [], held: false, actor: a, next: nil, done: done) }
+        let mixed = ShipRules.fold([(st(.reviewer), "waiting on review"), (st(.you), "push 2"), (st(.gates), "gates running"), (st(.you), "merge it")])
+        #expect(mixed.move == .yours && mixed.says == "push 2 · 1 more for you · 2 moving")
+        let others = ShipRules.fold([(st(.ci), "waiting on required checks"), (st(.reviewer), "waiting on review"), (st(.reviewer), "waiting on review")])
+        #expect(others.move == .moving && others.says == "waiting on required checks · waiting on review")
+        #expect(ShipRules.fold([(st(.building), "being built"), (st(.nobody, done: true), "landed")]).move == .waiting)
+        #expect(ShipRules.fold([(st(.nobody, done: true), "landed")]).move == .done)
+    }
+
     @Test func aProofBranchIsDoneAtGreenGates() {
         let proof = stand(br(["gates": "green", "role": "proof"]))
         #expect(proof.done && proof.actor == .nobody && !proof.ready)

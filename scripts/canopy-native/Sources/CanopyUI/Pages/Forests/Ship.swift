@@ -84,6 +84,53 @@ extension Actor {
     public var agentItem: String? { if case .agent(let id) = self { return id }; return nil }
 }
 
+/// Where a forest sits on the home: the most urgent of its branches' situations.
+public enum Move: String, Sendable, CaseIterable {
+    /// a branch waits on you
+    case yours
+    /// someone else holds a branch: an agent, the gates, CI, a reviewer, a write in flight
+    case moving
+    /// nothing can move yet: being built, a parent first, held, or a read still out
+    case waiting
+    /// every branch it merges has landed
+    case done
+
+    public var title: String {
+        switch self {
+        case .yours: "your move"
+        case .moving: "moving"
+        case .waiting: "waiting"
+        case .done: "landed"
+        }
+    }
+
+    static func of(_ a: Actor) -> Move {
+        switch a {
+        case .you: .yours
+        case .agent, .gates, .canopy, .ci, .reviewer: .moving
+        case .parent, .clock, .building, .unknown: .waiting
+        case .nobody: .done
+        }
+    }
+}
+
+extension ShipRules {
+    /// A forest's place and its one line: the first branch (in merge order) at the most urgent move, and who holds the rest.
+    public static func fold(_ branches: [(st: Stand, says: String)]) -> (move: Move, says: String) {
+        let live = branches.filter { !$0.st.done }
+        guard !live.isEmpty else { return (branches.isEmpty ? .waiting : .done, branches.isEmpty ? "no branches" : "every branch landed") }
+        let move = live.map { Move.of($0.st.actor) }.min { Move.allCases.firstIndex(of: $0)! < Move.allCases.firstIndex(of: $1)! }!
+        let at = live.filter { Move.of($0.st.actor) == move }
+        var words = [at[0].says + (at.count > 1 ? " · \(at.count - 1) more for you" : "")]
+        if move != .yours { words = [at.map(\.says).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }.joined(separator: " · ")] }
+        else {
+            let others = live.filter { Move.of($0.st.actor) == .moving }.count
+            if others > 0 { words.append("\(others) moving") }
+        }
+        return (move, words.joined(separator: " · "))
+    }
+}
+
 /// What a branch's derivation needs beyond the store: reads made for this tip, nil while not in.
 public struct SituationReads: Equatable, Sendable {
     /// the prep route read for this tip ("conform", "additive", …)
