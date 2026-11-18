@@ -356,5 +356,27 @@ check("eight concurrent writers: every message kept, once", codes == [0] * 8 and
 check("revisions are contiguous with no lost or doubled update", revs == list(range(1, 201)) and jj.work(w)["revision"] == 200 and len(jj.outbox()) == 200)
 jj.close()
 
+# binding decisions (DESIGN.md round 27, principles 4, 7 and 8)
+bpath = os.path.join(TMP, "bind.sqlite3")
+b1, b2 = wj.Journal(bpath), wj.Journal(bpath)
+X, Y, Z = (b1.mint_branch_work("loops", n) for n in ("x", "y", "z"))
+SID = "a00f70db-e640-4416-86e5-11eefc979852"
+g1 = b1.bind_session(SID, [X], by="claim")
+seen = b2.binding("claude-code", SID)["generation"]
+b1.bind_session(SID, [Y], by="reshape")
+check("a work-start adds; the union is taken in the write, so neither start is lost",
+      b2.bind_session(SID, [Z], by="claim") == g1 + 2 and set(b1.bound_works("claude-code", SID)) == {X, Y, Z})
+check("adding what is already bound starts no generation", b1.bind_session(SID, [X, Y], by="claim") == g1 + 2)
+stale = raises(wj.Stale, lambda: b2.bind("claude-code", SID, [X], by="phil", expect_generation=seen))
+check("a decision made from an older view is refused with the binding now",
+      stale is not None and stale.current["generation"] == g1 + 2 and set(stale.current["works"]) == {X, Y, Z}
+      and set(b1.bound_works("claude-code", SID)) == {X, Y, Z})
+check("a decision from the current view switches", b2.bind("claude-code", SID, [X], by="phil", expect_generation=g1 + 2) == g1 + 3
+      and b1.bound_works("claude-code", SID) == [X])
+check("a chat is named by its full session id", raises(wj.JournalError, lambda: b1.bind_session(SID[:8], [X], by="claim")) is not None)
+b1.register_source("show", adapter="show")
+check("a Show section is never widened", raises(wj.JournalError, lambda: b1.bind("show", "deck#s", [X], by="t", add=True)) is not None)
+b1.close(); b2.close()
+
 print(f"\n{failures} failure(s)" if failures else "\nall passed")
 sys.exit(1 if failures else 0)
