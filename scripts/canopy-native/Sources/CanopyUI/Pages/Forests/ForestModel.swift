@@ -84,6 +84,10 @@ public final class ForestModel {
 
     public enum Face: String { case branches, story }
 
+    /// The reads made for a branch's tip beyond the store (ShipState's), and their version for the memo.
+    @ObservationIgnored var reads: ((Branch) -> SituationReads)?
+    @ObservationIgnored var readsVersion: (() -> Int)?
+
     init(store: Store, router: Router, transport: Transport) {
         self.store = store; self.router = router; self.transport = transport
     }
@@ -104,7 +108,7 @@ public final class ForestModel {
     /// Every forest with its branches in merge order, each knowing where it stands. Built once per
     /// store change: the cursor alone asks for it dozens of times a keypress.
     public func forests() -> [String: ForestView] {
-        let key = ForestsKey(epoch: store.epoch, versions: store.versions, ops: store.ops.map(\.seq), now: now)
+        let key = ForestsKey(epoch: store.epoch, versions: store.versions, ops: store.ops.map(\.seq), now: now, reads: readsVersion?() ?? 0)
         if let memo = forestsMemo, memo.key == key { return memo.value }
         let value = buildForests()
         forestsMemo = (key, value)
@@ -112,7 +116,7 @@ public final class ForestModel {
     }
 
     private struct ForestsKey: Equatable {
-        var epoch: String, versions: Versions, ops: [Int], now: Date
+        var epoch: String, versions: Versions, ops: [Int], now: Date, reads: Int
     }
     @ObservationIgnored private var forestsMemo: (key: ForestsKey, value: [String: ForestView])?
 
@@ -132,7 +136,7 @@ public final class ForestModel {
                 let pv = pb.map { viewOf($0, depth + 1) }
                 let parent = pv.map { ParentStand(ship: $0.st.ship, pr: $0.pr, name: $0.b.name) }
                 let pr = prs[b.id]
-                let v = BranchView(b: b, pr: pr, st: ShipRules.stand(b, pr, parent, now: now, reads: SituationReads(agent: agents[b.id]?.first?.id)), base: ShipRules.baseFor(b, parent, trunk: trunk))
+                let v = BranchView(b: b, pr: pr, st: ShipRules.stand(b, pr, parent, now: now, reads: readsOf(b, agents[b.id]?.first)), base: ShipRules.baseFor(b, parent, trunk: trunk))
                 seen[b.id] = v
                 return v
             }
@@ -145,6 +149,15 @@ public final class ForestModel {
     }
 
     public func forest(_ pid: String?) -> ForestView? { pid.flatMap { forests()[$0] } }
+
+    /// Everything a branch's situation reads beyond the store: the tip's reads, and the agent working on it — running,
+    /// or done with its turn and so waiting on you.
+    private func readsOf(_ b: Branch, _ item: TodoItem?) -> SituationReads {
+        var r = reads?(b) ?? SituationReads()
+        r.agent = item?.id
+        r.agentRunning = item?.work?.worker.flatMap { $0.state == "running" ? true : $0.state == "ended" ? false : nil }
+        return r
+    }
 
     /// The standing of a branch's parent, as its derivation reads it.
     public func parentStand(of b: Branch) -> ParentStand? {
@@ -307,5 +320,12 @@ public final class ForestModel {
 
 public extension AppModel {
     /// The forests area's state (ForestModel), made once per window.
-    var forestModel: ForestModel { state { ForestModel(store: store, router: router, transport: transport) } }
+    var forestModel: ForestModel {
+        state {
+            let m = ForestModel(store: store, router: router, transport: transport)
+            m.reads = { [weak self] b in self.map { ShipState.of($0).situationReads($0, b) } ?? SituationReads() }
+            m.readsVersion = { [weak self] in self.map { ShipState.of($0).readsVersion } ?? 0 }
+            return m
+        }
+    }
 }

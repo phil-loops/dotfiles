@@ -76,7 +76,12 @@ private let NOW = iso("2026-10-22T18:00:00Z") // Thu 11:00 PT
         #expect(ShipRules.stand(br(["gates": "green"]), nil, nil, now: NOW, reads: SituationReads(agent: "t1")).actor == .agent("t1"))
         let diverged = br(["gates": "green", "pushed": "ahead", "ahead": 1, "diverged": true])
         #expect(stand(diverged).actor == .unknown, "the force scope isn't read: unknown, never ready")
-        #expect(ShipRules.stand(diverged, nil, nil, now: NOW, reads: SituationReads(prepRead: true, force: (false, true))).next == nil)
+        #expect(ShipRules.stand(diverged, nil, nil, now: NOW, reads: SituationReads(prepRead: true, force: (false, true))).next == "branch.sync",
+                "origin can't be replaced: sync carries it on top, the one remedy")
+        let agentOn = { (running: Bool?) in ShipRules.stand(br(["gates": "stale"]), nil, nil, now: NOW, reads: SituationReads(agent: "t1", agentRunning: running)) }
+        #expect(agentOn(true).actor == .agent("t1"))
+        #expect(agentOn(nil).actor == .agent("t1"), "a claim the journal doesn't observe still names its agent")
+        #expect(agentOn(false).actor == .you && agentOn(false).awaiting == "t1", "an agent done with its turn waits on you")
     }
 
     @Test func aProofBranchIsDoneAtGreenGates() {
@@ -379,8 +384,8 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = f
         #expect(ship.prepOf("r:a") == nil && !ship.prepFresh("r:a"))
         #expect(BranchCommands.pushRoute("r:a", a) == nil, "never take origin's copy on an answer about a tree the branch has left")
         #expect(ship.lastReads("r:a").prep?.route == "conform" && ship.lastReads("r:a").stale, "the old answer still draws, dimmed")
-        let now = try #require(a.store.view(Branch.self, "r:a"))
-        #expect(ShipControlState.push(now, route: nil, contextKnown: true, checking: true).reason == "checking origin's copy…")
+        let v = try #require(a.forestModel.branchView("r:a"))
+        #expect(ShipRules.says(v.st, v.b, v.pr) == "reading origin…", "while the read for this tip is out, the situation is unknown")
     }
 
     @Test func aPushSaysTheChildrenItCarried() {

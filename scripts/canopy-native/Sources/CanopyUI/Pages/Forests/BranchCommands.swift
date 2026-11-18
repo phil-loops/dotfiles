@@ -17,25 +17,13 @@ enum BranchCommands {
     /// diverged from origin can't push; inside the force scope `p` arms a force-with-lease instead.
     static func pushRoute(_ id: String?, _ app: AppModel) -> String? {
         guard let id, let v = app.forestModel.branchView(id) else { return nil }
-        let next = situation(v, app).next
+        let next = v.st.next
         switch next {
         case "branch.push.arm": return app.runner.armed == pushArm(id) ? "branch.push.confirm" : next
         case "branch.force.arm": return app.runner.armed == forceArm(id) ? "branch.force.confirm" : next
         case "branch.conform", "branch.catchup", "branch.gates.run", "branch.gates.next", "branch.proof": return next
         default: return nil
         }
-    }
-
-    /// The branch's situation with every read the branch page has made for this tip.
-    static func situation(_ v: BranchView, _ app: AppModel) -> Stand {
-        let ship = ShipState.of(app), id = v.b.id
-        let scope = forceScope(id, app)
-        let reads = SituationReads(
-            prepRoute: ship.prepOf(id)?.route, prepRead: ship.prepFresh(id),
-            force: scope.map { ($0.eligible, !$0.guards.allSatisfy { $0.ok || $0.k == "gates" }) },
-            gatesCanPutNext: GatesRun.canPutNext(GatesRun.setup(ship.progressOf(id))),
-            agent: v.st.actor.agentItem)
-        return ShipRules.stand(v.b, v.pr, app.forestModel.parentStand(of: v.b), now: app.forestModel.now, reads: reads)
     }
 
     /// `p` while the gates run: put the run next when anything waits ahead of it — otherwise the

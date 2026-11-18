@@ -96,15 +96,18 @@ public struct SituationReads: Equatable, Sendable {
     public var gatesCanPutNext = false
     /// a tracker item in progress on this branch
     public var agent: String?
+    /// whether its agent's turn is running (true), finished and so waiting on you (false), or not observed (nil)
+    public var agentRunning: Bool?
 
     public init(prepRoute: String? = nil, prepRead: Bool = false, force: (eligible: Bool, blocked: Bool)? = nil,
-                gatesCanPutNext: Bool = false, agent: String? = nil) {
+                gatesCanPutNext: Bool = false, agent: String? = nil, agentRunning: Bool? = nil) {
         self.prepRoute = prepRoute; self.prepRead = prepRead; self.force = force; self.gatesCanPutNext = gatesCanPutNext; self.agent = agent
+        self.agentRunning = agentRunning
     }
 
     public static func == (a: Self, b: Self) -> Bool {
         a.prepRoute == b.prepRoute && a.prepRead == b.prepRead && a.force?.eligible == b.force?.eligible && a.force?.blocked == b.force?.blocked
-            && a.gatesCanPutNext == b.gatesCanPutNext && a.agent == b.agent
+            && a.gatesCanPutNext == b.gatesCanPutNext && a.agent == b.agent && a.agentRunning == b.agentRunning
     }
 }
 
@@ -122,6 +125,8 @@ public struct Stand: Equatable, Sendable {
     public var next: String?
     /// nothing left to do for its role: landed, or a proof branch with green gates
     public var done: Bool
+    /// the tracker item whose agent finished its turn and waits on you
+    public var awaiting: String? = nil
     /// you can act on it right now (the ready filter): your move, nothing else
     public var ready: Bool { actor == .you }
 }
@@ -169,8 +174,11 @@ public enum ShipRules {
         let ship = shipOf(b, pr)
         let held = pr == nil && (b.holdUntil.flatMap(parseISO).map { $0 > now } ?? false)
         let waiting = ship == .approved && pr != nil ? waitingOn(pr!, parent) : []
-        let (actor, next, done) = situation(b, pr, ship: ship, waiting: waiting, parent: parent, held: held, reads: reads)
-        return Stand(ship: ship, action: action(ship), waiting: waiting, held: held, actor: actor, next: next, done: done)
+        var (actor, next, done) = situation(b, pr, ship: ship, waiting: waiting, parent: parent, held: held, reads: reads)
+        var awaiting: String?
+        if case .agent(let id) = actor, reads.agentRunning == false { actor = .you; awaiting = id }
+        if actor == .you, next == nil, awaiting == nil, b.diverged, reads.force?.blocked == true { next = "branch.sync" }
+        return Stand(ship: ship, action: action(ship), waiting: waiting, held: held, actor: actor, next: next, done: done, awaiting: awaiting)
     }
 
     /// Whose move it is and the one step that makes it, in priority order: a role that's done, a write in flight, an
@@ -220,6 +228,40 @@ public enum ShipRules {
             default: return (.you, "branch.pr", false)
             }
         default: return (.nobody, nil, false)
+        }
+    }
+
+    /// The situation in one sentence: whose move, and the step or the wait — every surface's words for it.
+    public static func says(_ st: Stand, _ b: Branch, _ pr: Pr?) -> String {
+        switch st.actor {
+        case .you:
+            if st.awaiting != nil { return "its agent finished a turn — your reply" }
+            switch st.next {
+            case "branch.push.arm": return "push \(b.pushed == .ahead ? b.ahead : b.commits)"
+            case "branch.conform": return "take origin's copy"
+            case "branch.force.arm": return "replace origin's copy"
+            case "branch.catchup": return "catch up to \(leaf(b.owes ?? b.parent)) first"
+            case "branch.sync": return "diverged — sync carries it on top"
+            case "branch.pr":
+                if st.ship == .pushed { return "open its PR" }
+                return st.waiting.first.map { $0.kind == .merge ? "merge it" : "waiting on \($0.label)" } ?? "merge it"
+            default:
+                if pr?.review == "CHANGES_REQUESTED" { return "changes requested" }
+                if pr?.draft == true { return "a draft — mark it ready" }
+                return "your move"
+            }
+        case .agent: return "an agent is on it"
+        case .gates: return "gates running"
+        case .ci: return "waiting on required checks"
+        case .reviewer: return "waiting on review"
+        case .parent: return "waiting on \(leaf(b.parent))"
+        case .clock: return "held for the morning"
+        case .canopy: return "\(b.pending ?? "working")…"
+        case .building: return b.gates == .red ? "gates red\(b.redGates.isEmpty ? "" : ": " + b.redGates.joined(separator: ", "))" : "being built — gates \(b.gates == .stale ? "stale" : "not run")"
+        case .unknown: return "reading origin…"
+        case .nobody:
+            if b.role == "proof" && st.done { return "proof run green" }
+            return st.done ? "landed" : b.commits == 0 ? "no changes yet" : "up to date"
         }
     }
 
