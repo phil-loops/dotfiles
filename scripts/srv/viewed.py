@@ -1,4 +1,4 @@
-"""What Phil has read on the review page, per change block (wiki canopy-v2-viewed).
+"""What Phil has read on the review page, per change block.
 
   store   $GIT_COMMON_DIR/stack-viewed.json
             {"version": 2, "subjects": {<id>: {"viewed": {key: at}, "flagged": {key: at}}}}

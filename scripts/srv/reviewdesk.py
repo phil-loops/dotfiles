@@ -10,7 +10,7 @@
 #                                    (srv/linemap.py), with the commit that changed it, if one did;
 #                                    `note` is the second reader's, when it left one; `fixedBy` the
 #                                    commits that declare they address it (an `Addresses: <url of its
-#                                    first comment>` trailer — wiki canopy-v2-address)
+#                                    first comment>` trailer)
 #   draft   <repo>:<branch>          the ledger's items for this branch (below), each with its state
 #
 # The ledger (<common>/stack-review-ledger.json) holds every comment and reply Phil writes here,
