@@ -172,6 +172,24 @@ acquire_lock() {
     rm -f "$LOCK_FILE"
   done
 }
+# One writer per forest (srv/forestlock.py, tooling-doctor P2): the repo lock above only keeps
+# restacks apart; an agent's reshape, a canopy click and this walk must not rewrite the same forest
+# at once. A kernel lock (fdlock) on the forest's file, so it dies with this process. Skipped when an
+# outer `forest-lock` already holds this forest (STACK_FOREST_LOCKED). STACK_RESTACK_FOREST_WAIT=0
+# (focus-sync) skips a held forest instead of waiting.
+acquire_forest_lock() {
+  [[ -n "$PROJECT" ]] || return 0
+  local key="forest-${PROJECT//[^A-Za-z0-9._-]/_}"
+  [[ "${STACK_FOREST_LOCKED:-}" == "$key" ]] && return 0
+  local file="${GIT_COMMON_DIR}/stack-${key}.lock" fd
+  exec {fd}>>"$file" || return 0
+  if ! "$SELF_DIR/fdlock" $fd --wait "${STACK_RESTACK_FOREST_WAIT:-600}"; then
+    echo "forest $PROJECT is being changed by $(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d.get("who","another process"), "(pid", str(d.get("pid","?")) + ")")' "$file" 2>/dev/null || echo another process) — restack it when that's done" >&2
+    exit 75
+  fi
+  print -r -- "{\"who\": \"stack-restack $MODE\", \"pid\": $$, \"since\": $(date +%s)}" > "$file"
+  export STACK_FOREST_LOCKED="$key"
+}
 release_lock() {
   [[ -n "$LOCK_HELD" ]] || return 0
   local holder; holder="$(cat "$LOCK_HELD" 2>/dev/null)"
@@ -198,6 +216,7 @@ if [[ "$MODE" != "plan" && "$MODE" != "abort" ]]; then
   trap 'walk_exit; exit 143' TERM
   trap 'walk_exit' EXIT
   acquire_lock "$MODE $PROJECT"
+  acquire_forest_lock
 fi
 
 # ---------- helpers ----------
