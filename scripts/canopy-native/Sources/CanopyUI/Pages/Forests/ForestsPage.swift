@@ -31,9 +31,6 @@ struct ForestsPage: View {
                         VStack(alignment: .leading, spacing: 0) {
                             WorkInProgressView()
                             WindowLine(fs: fs, now: m.now)
-                            if !m.readyOnly, let next = p.focus.compactMap({ fs[$0.id] }).first(where: { !$0.ready.isEmpty }) {
-                                NextMove(f: next)
-                            }
                             if m.readyOnly {
                                 let n = fs.values.filter { $0.p.state != .archive }.reduce(0) { $0 + $1.ready.count }
                                 HStack(spacing: 6) {
@@ -46,8 +43,18 @@ struct ForestsPage: View {
                                 }
                                 .padding(.leading, 44).padding(.bottom, 20)
                             }
-                            section(.focus, p.focus, fs, working, chatting, nameWidth: nameWidth, cursor: cursor, selection: selection)
-                            if !m.readyOnly { ReviewQueue(nameWidth: nameWidth, cursor: cursor, selection: selection) }
+                            if m.readyOnly {
+                                section(.focus, p.focus, fs, working, chatting, nameWidth: nameWidth, cursor: cursor, selection: selection)
+                            } else {
+                                // the focus lane by whose move, your hand order inside each; PRs awaiting your review are yours too
+                                let groups = m.focusGroups()
+                                ForEach(groups, id: \.move) { g in
+                                    section(.focus, g.projects, fs, working, chatting, title: "\(g.move.title) · \(g.projects.count)", gold: g.move == .yours,
+                                            nameWidth: nameWidth, cursor: cursor, selection: selection)
+                                    if g.move == .yours { ReviewQueue(nameWidth: nameWidth, cursor: cursor, selection: selection) }
+                                }
+                                if !groups.contains(where: { $0.move == .yours }) { ReviewQueue(nameWidth: nameWidth, cursor: cursor, selection: selection) }
+                            }
                             section(.workbench, p.workbench, fs, working, chatting, nameWidth: nameWidth, cursor: cursor, selection: selection)
                             if !m.readyOnly {
                                 if m.showArchive {
@@ -101,12 +108,15 @@ struct ForestsPage: View {
     }
 
     @ViewBuilder
-    private func section(_ state: ProjectState, _ projects: [Project], _ fs: [String: ForestView], _ working: [String: [TodoItem]], _ chatting: [String: [WorkContext.Chat]], nameWidth: CGFloat, cursor: String?, selection: Set<String>) -> some View {
+    private func section(_ state: ProjectState, _ projects: [Project], _ fs: [String: ForestView], _ working: [String: [TodoItem]], _ chatting: [String: [WorkContext.Chat]], title: String? = nil, gold: Bool = false, nameWidth: CGFloat, cursor: String?, selection: Set<String>) -> some View {
         let m = app.forestModel
         let views = projects.compactMap { fs[$0.id] }.filter { !m.readyOnly || !$0.ready.isEmpty }
         if !m.readyOnly || !views.isEmpty {
             VStack(alignment: .leading, spacing: 0) {
-                if state != .focus {
+                if let title {
+                    Text(title).font(Theme.text(11)).foregroundStyle(gold ? theme.goldLeaf : theme.inkFaint)
+                        .padding(.leading, 44).padding(.bottom, 4)
+                } else if state != .focus {
                     TermText("lane|\(state.rawValue)", state).font(Theme.text(11)).foregroundStyle(theme.inkFaint)
                         .padding(.leading, 44).padding(.bottom, 4)
                 }
@@ -191,27 +201,6 @@ private struct ReviewQueue: View {
     }
 }
 
-/// What to do next, in words: the first focus forest with branches waiting on you. A label target
-/// that opens it, so `f` and a key get there without a click.
-private struct NextMove: View {
-    @Environment(AppModel.self) private var app
-    @Environment(\.theme) private var theme
-    let f: ForestView
-
-    var body: some View {
-        let n = f.ready.count
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text("next").foregroundStyle(theme.inkFaint)
-                .explains("home|next", RowName(word: "next", meaning: "the first focus forest with branches you can act on now"))
-            Text(f.p.name).foregroundStyle(theme.goldLeaf).font(Theme.text(14, weight: .semibold))
-            Text("\(n) branch\(n == 1 ? "" : "es") ready for you").foregroundStyle(theme.inkDim)
-        }
-        .font(Theme.text(13))
-        .padding(.leading, 44).padding(.bottom, 22)
-        .labelTarget(pane: "controls", key: "next:\(f.p.id)", title: f.p.name, run: RouteTo("forest.page", target: f.p.id))
-    }
-}
-
 /// The holds that came due overnight.
 private struct WindowLine: View {
     @Environment(\.theme) private var theme
@@ -292,6 +281,10 @@ private struct ForestRowView: View {
                     .explains("forest|line|\(p.id)", RowName(word: "the line", meaning: p.summaryBy == "phil" ? "your words for this forest"
                         : "\(p.summaryBy == "claude" ? "Claude's draft" : "its first branch's") · \(app.registry.keyOf("project.describe.edit")) writes your own"))
             }
+            // the forest's one line — its most urgent branch's situation — and, under the cursor, its counts
+            if !f.closed && !f.says.isEmpty {
+                Text(f.says).font(Theme.text(11)).foregroundStyle(f.move == .yours && f.p.state == .focus ? theme.ink : theme.inkFaint).lineLimit(1).fixedSize()
+            }
             if cursor, !meta(verdict).isEmpty { Text(meta(verdict)).font(Theme.text(11)).foregroundStyle(theme.inkFaint).fixedSize() }
             if !f.closed && !f.branches.isEmpty {
                 // one dot per branch in merge order: landed, ready to act on, still in the works; ringed while work is in progress on it
@@ -316,7 +309,6 @@ private struct ForestRowView: View {
     private func meta(_ verdict: IntegrationVerdict?) -> String {
         if f.p.state == .archive || f.branches.isEmpty { return "" }
         var parts = ["\(f.branches.count) branch\(f.branches.count == 1 ? "" : "es")"]
-        if !f.ready.isEmpty { parts.append("\(f.ready.count) ready") }
         if f.unopened.count > 1 { parts.append("\(f.unopened.count) without a PR") }
         if verdict?.state == .clean { parts.append("merges clean") } else if verdict?.state == .conflicts { parts.append("doesn't merge") }
         if let t = f.p.ticket { parts.append(t) }
