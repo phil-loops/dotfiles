@@ -10,7 +10,7 @@ import subprocess
 import threading
 import uuid
 
-from . import ctx, ghreview, push, reviewdesk
+from . import ctx, editprojection, ghreview, push, reviewdesk
 
 _ROOTS = {}
 _VALID_BRANCHES = set()
@@ -97,11 +97,23 @@ def _save(path, data):
         os.close(fd)
 
 
+def _transition(root, session, state):
+    previous = session.get("state", "editing")
+    allowed = {"preparing": {"editing", "cached"}, "editing": {"prepared"},
+               "prepared": {"landing", "committed"}, "landing": {"landing", "committed"}, "committed": {"committed"}}
+    if state != previous and state not in allowed.get(previous, set()):
+        raise ghreview.Refused(f"the workspace cannot move from {previous} to {state}; its files are preserved")
+    session.update(workspaceVersion=1, state=state)
+    _save(root / "session.json", session)
+
+
 def _load(root):
     try:
         session = json.loads((root / "session.json").read_text())
-        if session.get("session") != root.name:
+        if not isinstance(session, dict) or session.get("session") != root.name:
             raise ValueError("session identity changed")
+        if session.get("workspaceVersion", 1) != 1:
+            raise ValueError("unsupported workspace version")
         return session
     except (OSError, ValueError):
         raise ghreview.Refused("the edit session is unavailable; its checkout has been preserved")
@@ -155,6 +167,8 @@ def _prepare(req, data, cache=False):
                 raise ghreview.Refused("that session belongs to another revision")
             if saved.get("operation"):
                 raise ghreview.Refused("that edit session already owns a frozen save")
+            if saved.get("state") == "preparing":
+                raise ghreview.Refused(f"workspace preparation was interrupted; its files are preserved in {_checkout(root, saved)}")
             _validate(common, root, saved)
             return reviewdesk._send(req, 200, {"ok": True, "epoch": _epoch(), "session": session, "dir": str(_checkout(root, saved)), "sha": tip, "baseSha": base})
         if not tip or not base:
@@ -165,6 +179,10 @@ def _prepare(req, data, cache=False):
         checkout = root / "checkout"
         if os.path.lexists(checkout):
             raise ghreview.Refused(f"the earlier preparation left a checkout; it is preserved in {checkout}")
+        saved = {"workspaceVersion": 1, "state": "preparing", "session": session, "kind": "cache" if cache else "editor",
+                 "checkout": str(checkout), "openedEpoch": _epoch(), "repo": str(common), "identity": _identity(common),
+                 "repoName": ctx.repo_name(), "branch": branch, "expectedTip": tip, "baseSha": base}
+        _save(root / "session.json", saved)
         priming = None
         reserved = False
         if not cache:
@@ -199,11 +217,10 @@ def _prepare(req, data, cache=False):
         values = metadata.stdout.strip().splitlines()
         expected_tree = values[0]
         parent_sha = values[1] if metadata.returncode == 0 and len(values) == 2 else ""
-        saved = {"session": session, "kind": "cache" if cache else "editor", "checkout": str(checkout), "openedEpoch": _epoch(), "repo": str(common), "identity": _identity(common), "repoName": ctx.repo_name(),
-                 "branch": branch, "expectedTip": tip, "baseSha": base, "checkoutIdentity": _identity(checkout),
-                 "gitdir": gitdir, "gitdirIdentity": _identity(gitdir), "expectedTree": expected_tree, "parentSha": parent_sha,
-                 "indexStamp": _stamp(Path(gitdir) / "index")}
-        _save(root / "session.json", saved)
+        saved.update(checkoutIdentity=_identity(checkout),
+                     gitdir=gitdir, gitdirIdentity=_identity(gitdir), expectedTree=expected_tree, parentSha=parent_sha,
+                     indexStamp=_stamp(Path(gitdir) / "index"))
+        _transition(root, saved, "cached" if cache else "editing")
         reviewdesk._send(req, 200, {"ok": True, "epoch": _epoch(), "session": session, "dir": str(checkout), "sha": tip, "baseSha": base})
     if not cache:
         _warm_later(root)
@@ -391,8 +408,8 @@ def _freeze(root, session, operation):
             receipt.update(sha=new, tree=tree, message=message.strip(), paths=paths,
                            incremental=not bool(requires_result.result().stdout.strip()), files=files_result.result(),
                            history={"sha": new, "subject": subject, "body": body, "author": author, "date": date, "own": True, "pushed": False})
-    session.update(operation=operation, receipt=receipt, state="prepared")
-    _save(root / "session.json", session)
+    session.update(operation=operation, receipt=receipt)
+    _transition(root, session, "prepared")
     return receipt
 
 
@@ -427,38 +444,44 @@ def _attached(branch):
 
 
 def _advance(session):
+    root = _root(session["session"])[1]
     branch, tip, new = session["branch"], session["expectedTip"], session["receipt"]["sha"]
     current = _text("rev-parse", f"refs/heads/{branch}")
-    if current == new:
+    committed = current == new
+    if committed and (not session.get("projection") or session["projection"].get("phase") == "index-applied"):
         return
-    if current != tip:
+    if current not in (tip, new):
         raise ghreview.Refused("the branch moved while you edited; the session's checkout and frozen save are preserved")
     run = push.gate_run(branch)
     if run and run.alive():
         raise ghreview.Refused("a gates run owns the branch's worktree; the frozen save is preserved")
     checkout = _attached(branch)
+    if session.get("projection") and checkout != session["projection"]["checkout"]:
+        raise ghreview.Refused("the branch's attached checkout changed; the frozen save and recovery journal are preserved")
     if not checkout:
+        _transition(root, session, "landing")
         _git("update-ref", "-m", f"canopy edit {session['session']}", f"refs/heads/{branch}", new, tip)
         return
-    process = subprocess.Popen(["git", "update-ref", "--stdin"], cwd=checkout,
-                               stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    try:
-        process.stdin.write(f"start\nupdate refs/heads/{branch} {new} {tip}\nprepare\n")
-        process.stdin.flush()
-        if process.stdout.readline() != "start: ok\n" or process.stdout.readline() != "prepare: ok\n":
-            raise ghreview.Refused("the branch could not be locked; the frozen save is preserved")
-        if _text("symbolic-ref", "HEAD", cwd=checkout) != f"refs/heads/{branch}":
-            raise ghreview.Refused("the branch's worktree changed; the frozen save is preserved")
-        _git("read-tree", "-m", "-u", tip, new, cwd=checkout)
-        process.stdin.write("commit\n")
-        process.stdin.flush()
-        if process.stdout.readline() != "commit: ok\n":
-            raise ghreview.Refused("the ref transaction failed; the checkout and frozen save are preserved")
-    finally:
-        process.stdin.close()
-        process.wait()
-        process.stdout.close()
-        process.stderr.close()
+    with editprojection.Projection(root, session, checkout, git=_git, save=_save) as projection:
+        process = subprocess.Popen(["git", "update-ref", "--stdin"], cwd=checkout,
+                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            process.stdin.write(f"start\nupdate refs/heads/{branch} {new} {current}\nprepare\n")
+            process.stdin.flush()
+            if process.stdout.readline() != "start: ok\n" or process.stdout.readline() != "prepare: ok\n":
+                raise ghreview.Refused("the branch could not be locked; the frozen save is preserved")
+            projection.apply(committed=committed)
+            projection.head()
+            process.stdin.write("commit\n")
+            process.stdin.flush()
+            if process.stdout.readline() != "commit: ok\n":
+                raise ghreview.Refused("the ref transaction failed; the checkout and frozen save are preserved")
+            projection.install()
+        finally:
+            process.stdin.close()
+            process.wait()
+            process.stdout.close()
+            process.stderr.close()
 
 
 def _retire(root, session):
@@ -591,6 +614,15 @@ def _cleanup_later(root):
 
 @reviewdesk._guarded
 def commit(req, data):
+    return _commit(req, data)
+
+
+@reviewdesk._guarded
+def recover(req, data):
+    return _commit(req, data, frozen=True)
+
+
+def _commit(req, data, frozen=False):
     _require_epoch(data)
     common, root = _root(data.get("session"))
     if not root.is_dir():
@@ -600,6 +632,8 @@ def commit(req, data):
         session = _load(root)
         if session.get("kind") == "cache":
             raise ghreview.Refused("that checkout belongs to the editor cache")
+        if session.get("state") == "preparing":
+            raise ghreview.Refused("workspace preparation was interrupted; its files are preserved")
         if session["repo"] != str(common) or session["identity"] != _identity(common):
             raise ghreview.Refused("that edit session belongs to another repository")
         if data.get("branch") != session["branch"] or data.get("expectedTip") != session["expectedTip"]:
@@ -611,14 +645,43 @@ def commit(req, data):
             raise ghreview.Refused("invalid save operation")
         if session.get("operation") and operation != session["operation"]:
             raise ghreview.Refused("that session already owns a frozen save")
+        if frozen and not session.get("receipt"):
+            raise ghreview.Refused("that workspace has no frozen save to recover")
         if session.get("state") == "committed":
             receipt = session["receipt"]
         else:
-            _validate(common, root, session)
-            receipt = session.get("receipt") or _freeze(root, session, operation)
+            receipt = session.get("receipt")
+            if not receipt:
+                _validate(common, root, session)
+                receipt = _freeze(root, session, operation)
             if not receipt.get("nothing"):
                 _advance(session)
-            session["state"] = "committed"
-            _save(root / "session.json", session)
+            _transition(root, session, "committed")
         reviewdesk._send(req, 200, {**receipt, "epoch": _epoch()})
     _cleanup_later(root)
+
+
+@reviewdesk._guarded
+def workspaces(req, data):
+    _require_epoch(data)
+    common = _common()
+    result = []
+    for root in sorted((common / "canopy-edits").glob("*/session.json")):
+        if root.parent.is_symlink():
+            continue
+        try:
+            session = _load(root.parent)
+            if (session.get("kind") == "cache" or session["repo"] != str(common) or session["identity"] != _identity(common)
+                    or (data.get("branch") and session["branch"] != data["branch"])):
+                continue
+            phase = session.get("state", "editing")
+            if phase == "committed" and not data.get("completed"):
+                continue
+            result.append({"session": session["session"], "branch": session["branch"], "expectedTip": session["expectedTip"],
+                           "baseSha": session["baseSha"], "state": phase, "dir": str(_checkout(root.parent, session)),
+                           "operation": session.get("operation"), "sha": session.get("receipt", {}).get("sha"),
+                           "message": session.get("receipt", {}).get("message"),
+                           "projection": session.get("projection", {}).get("phase"), "retryable": bool(session.get("receipt"))})
+        except (ghreview.Refused, OSError, KeyError) as error:
+            ctx.log(f"editor workspace unavailable: {root.parent}: {error}")
+    return reviewdesk._send(req, 200, {"ok": True, "epoch": _epoch(), "workspaces": result})
