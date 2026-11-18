@@ -56,11 +56,33 @@ private let NOW = iso("2026-10-22T18:00:00Z") // Thu 11:00 PT
         #expect(stand(br(["pushed": "synced"])).ready)
         #expect(!stand(br(), pr()).ready)
         let appr = pr(["review": "APPROVED", "mergeState": "CLEAN"])
-        #expect(stand(br(), appr).ready)
-        #expect(stand(br(), appr).waiting.first?.kind == .merge)
-        let waits = stand(br(), appr, ParentStand(ship: .review, pr: pr(["number": 3]), name: "f/a"))
+        let onOrigin = br(["pushed": "synced"])
+        #expect(stand(onOrigin, appr).ready)
+        #expect(stand(onOrigin, appr).waiting.first?.kind == .merge)
+        let waits = stand(onOrigin, appr, ParentStand(ship: .review, pr: pr(["number": 3]), name: "f/a"))
         #expect(!waits.ready && waits.waiting.first?.label == "parent #3 to merge")
-        #expect(stand(br(), appr, ParentStand(ship: .landed, name: "f/a")).ready)
+        #expect(stand(onOrigin, appr, ParentStand(ship: .landed, name: "f/a")).ready)
+    }
+
+    @Test func readyIsYourMoveAndNothingElse() {
+        let onOrigin = br(["pushed": "synced"])
+        #expect(stand(onOrigin, pr(["review": "APPROVED", "mergeState": "BLOCKED"])).actor == .ci, "required checks are CI's move")
+        #expect(stand(onOrigin, pr(["review": "CHANGES_REQUESTED"])).actor == .you)
+        #expect(stand(onOrigin, pr()).actor == .reviewer)
+        #expect(stand(br(["gates": "green", "pending": "pushing"])).actor == .canopy)
+        #expect(stand(br(["gates": "stale"])).actor == .building, "getting the gates green is the builder's job")
+        let followUp = stand(br(["gates": "stale", "pushed": "ahead", "ahead": 2]), pr(["review": "APPROVED"]))
+        #expect(followUp.actor == .you && followUp.next == "branch.push.arm", "new commits on an approved PR: push them, not merge")
+        #expect(ShipRules.stand(br(["gates": "green"]), nil, nil, now: NOW, reads: SituationReads(agent: "t1")).actor == .agent("t1"))
+        let diverged = br(["gates": "green", "pushed": "ahead", "ahead": 1, "diverged": true])
+        #expect(stand(diverged).actor == .unknown, "the force scope isn't read: unknown, never ready")
+        #expect(ShipRules.stand(diverged, nil, nil, now: NOW, reads: SituationReads(prepRead: true, force: (false, true))).next == nil)
+    }
+
+    @Test func aProofBranchIsDoneAtGreenGates() {
+        let proof = stand(br(["gates": "green", "role": "proof"]))
+        #expect(proof.done && proof.actor == .nobody && !proof.ready)
+        #expect(stand(br(["gates": "red", "role": "proof"])).next == "branch.gates.run")
     }
 
     @Test func aHoldKeepsABranchOutOfReadyUntilDue() {
@@ -77,9 +99,11 @@ private let NOW = iso("2026-10-22T18:00:00Z") // Thu 11:00 PT
     }
 
     @Test func aForestClosesWhenEverythingLanded() {
-        #expect(ShipRules.isClosed([.landed, .landed]))
-        #expect(!ShipRules.isClosed([.landed, .approved]))
+        #expect(ShipRules.isClosed([(.landed, false), (.landed, false)]))
+        #expect(!ShipRules.isClosed([(.landed, false), (.approved, false)]))
         #expect(!ShipRules.isClosed([]))
+        #expect(ShipRules.isClosed([(.landed, false), (.green, true)]), "a proof branch rides along and never merges")
+        #expect(!ShipRules.isClosed([(.green, true)]))
     }
 
     @Test func thePushWindowSpeaksOnlyNearAndAfterTheCliff() {
@@ -122,8 +146,9 @@ private let NOW = iso("2026-10-22T18:00:00Z") // Thu 11:00 PT
         #expect(at(br(["pushed": "synced"]), pr(["state": "MERGED"])) == "done")
     }
 
-    @Test func newCommitsOnAnOpenPRSendTheLoopBackToGates() {
-        #expect(at(br(["pushed": "ahead", "ahead": 2, "gates": "stale"]), pr()) == "gates stale")
+    @Test func newCommitsOnAnOpenPRArePushedWithTheGatesAdvising() {
+        // p pushes a follow-up with its gates advising (P5), so the loop's step in the way is the push, as p says
+        #expect(at(br(["pushed": "ahead", "ahead": 2, "gates": "stale"]), pr()) == "push")
         #expect(at(br(["pushed": "ahead", "ahead": 2, "gates": "green"]), pr()) == "push")
     }
 

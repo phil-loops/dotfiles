@@ -66,7 +66,9 @@ public struct ShipStripView: View {
         let ship = ShipState.of(app)
         let route = ReviewCommands.pushRoute(app, branchID)
         let push = latestPush()
-        let live: Run.State? = push.flatMap { [.sending, .landing, .failed].contains($0.run.state) ? $0.run.state : nil }
+        // a failed push explains the button only while pushing is still the next step; the route owns the label
+        let pushing = [nil, "branch.push.arm", "branch.push.confirm", "branch.force.arm", "branch.force.confirm"].contains(route)
+        let live: Run.State? = push.flatMap { [.sending, .landing].contains($0.run.state) || $0.run.state == .failed && pushing ? $0.run.state : nil }
         let forcing = route == "branch.force.arm" || route == "branch.force.confirm"
         let acts = route == "branch.gates.run" || route == "branch.gates.quick" || route == "branch.push.arm" || route == "branch.push.confirm"
             || route == "branch.catchup" || route == "branch.conform" || forcing

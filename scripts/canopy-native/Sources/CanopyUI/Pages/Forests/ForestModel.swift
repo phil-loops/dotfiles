@@ -120,6 +120,7 @@ public final class ForestModel {
         var groups: [String: [Branch]] = [:]
         for b in store.list(Branch.self) { groups[b.project, default: []].append(b) }
         let prs = store.table(Pr.self)
+        let agents = WorkContext.onBranches(store.trackerItems().filter { $0.state == .doing }, store.list(Branch.self))
         var out: [String: ForestView] = [:]
         for p in store.list(Project.self) {
             let bs = (groups[p.id] ?? []).sorted { $0.order != $1.order ? $0.order < $1.order : $0.name < $1.name }
@@ -131,19 +132,24 @@ public final class ForestModel {
                 let pv = pb.map { viewOf($0, depth + 1) }
                 let parent = pv.map { ParentStand(ship: $0.st.ship, pr: $0.pr, name: $0.b.name) }
                 let pr = prs[b.id]
-                let v = BranchView(b: b, pr: pr, st: ShipRules.stand(b, pr, parent, now: now), base: ShipRules.baseFor(b, parent, trunk: trunk))
+                let v = BranchView(b: b, pr: pr, st: ShipRules.stand(b, pr, parent, now: now, reads: SituationReads(agent: agents[b.id]?.first?.id)), base: ShipRules.baseFor(b, parent, trunk: trunk))
                 seen[b.id] = v
                 return v
             }
             let branches = bs.map { viewOf($0) }
             let live = branches.filter { $0.st.ship != .landed }
             out[p.id] = ForestView(p: p, branches: branches, ready: branches.filter(\.st.ready), unopened: live.filter { $0.pr == nil },
-                                   onGitHub: branches.filter { $0.pr != nil }.count, closed: ShipRules.isClosed(branches.map(\.st.ship)))
+                                   onGitHub: branches.filter { $0.pr != nil }.count, closed: ShipRules.isClosed(branches.map { ($0.st.ship, $0.b.role == "proof") }))
         }
         return out
     }
 
     public func forest(_ pid: String?) -> ForestView? { pid.flatMap { forests()[$0] } }
+
+    /// The standing of a branch's parent, as its derivation reads it.
+    public func parentStand(of b: Branch) -> ParentStand? {
+        branchView(b.parentId).map { ParentStand(ship: $0.st.ship, pr: $0.pr, name: $0.b.name) }
+    }
 
     public func branchView(_ id: String?) -> BranchView? {
         guard let id, let b = store.view(Branch.self, id) else { return nil }

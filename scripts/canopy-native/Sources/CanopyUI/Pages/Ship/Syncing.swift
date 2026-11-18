@@ -92,15 +92,12 @@ public enum Syncing {
         let dirty = facts?.dirty.count ?? 0
         if dirty > 0 { out.append("\(dirty) uncommitted") }
         if b.drifted { out.append("off \(b.parent)'s tip") }
-        // a branch above it moved: its own parent may be current, but its chain isn't
-        else if let o = b.owes, o != b.name { out.append("\(o) is behind its parent — sync catches the chain up") }
         if let f = facts, f.behind > 0, f.syncable || f.restack { out.append("\(f.behind) behind main") }
         if prep?.route == "squash" { out.append("not one voiced commit") }
-        // origin was rewritten upstream (GitHub's update-branch, or its rebase after a base PR
-        // merged) and already has everything local has: sync takes origin's copy (/prep-push)
-        if prep?.route == "conform" { out.append("origin rewrote it — sync takes origin's copy") }
-        else if prep?.route == "additive" { out.append("diverged from its PR") }
-        else if b.diverged { out.append("diverged from origin") }
+        // a chain behind its moved ancestors and origin's rewritten copy each have one remedy, and it's `p`
+        // (catch up · take origin's copy): sync doesn't claim them too
+        if prep?.route == "additive" { out.append("diverged from its PR") }
+        else if b.diverged && prep?.route != "conform" { out.append("diverged from origin") }
         return out
     }
 

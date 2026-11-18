@@ -55,16 +55,75 @@ public struct Waiting: Equatable, Sendable {
 /// The branch's action on ↵ — one per state.
 public enum ShipAction: String, Sendable { case push, pr, open }
 
-/// Everything the pages show about where one branch stands.
+/// Who holds a branch's next move.
+public enum Actor: Equatable, Sendable {
+    case you
+    /// a tracker item in progress on this branch (its id)
+    case agent(String)
+    /// the push gates are running on it
+    case gates
+    /// CI or required checks on its PR
+    case ci
+    case reviewer
+    /// its parent has to move first
+    case parent
+    /// held for the morning push window
+    case clock
+    /// a write to it is in flight
+    case canopy
+    /// still being built: its gates aren't green on this tip (getting them green is the builder's job)
+    case building
+    /// nothing left to do for its role
+    case nobody
+    /// the read that would decide isn't in for this tip
+    case unknown
+}
+
+extension Actor {
+    /// the tracker item holding it, when an agent does
+    public var agentItem: String? { if case .agent(let id) = self { return id }; return nil }
+}
+
+/// What a branch's derivation needs beyond the store: reads made for this tip, nil while not in.
+public struct SituationReads: Equatable, Sendable {
+    /// the prep route read for this tip ("conform", "additive", …)
+    public var prepRoute: String?
+    /// whether the prep route above was read for this tip at all
+    public var prepRead = false
+    /// the force scope read for this tip: eligible, and whether a guard other than gates refuses
+    public var force: (eligible: Bool, blocked: Bool)?
+    /// a run in progress can be put ahead of others waiting
+    public var gatesCanPutNext = false
+    /// a tracker item in progress on this branch
+    public var agent: String?
+
+    public init(prepRoute: String? = nil, prepRead: Bool = false, force: (eligible: Bool, blocked: Bool)? = nil,
+                gatesCanPutNext: Bool = false, agent: String? = nil) {
+        self.prepRoute = prepRoute; self.prepRead = prepRead; self.force = force; self.gatesCanPutNext = gatesCanPutNext; self.agent = agent
+    }
+
+    public static func == (a: Self, b: Self) -> Bool {
+        a.prepRoute == b.prepRoute && a.prepRead == b.prepRead && a.force?.eligible == b.force?.eligible && a.force?.blocked == b.force?.blocked
+            && a.gatesCanPutNext == b.gatesCanPutNext && a.agent == b.agent
+    }
+}
+
+/// Everything the pages show about where one branch stands: one derivation, every surface a projection of it.
 public struct Stand: Equatable, Sendable {
     public var ship: ShipStage
     public var action: ShipAction?
     /// an approved PR: what it still waits on, first thing first
     public var waiting: [Waiting]
-    /// you can act on it right now (the ready filter)
-    public var ready: Bool
     /// held for the morning and not yet due
     public var held: Bool
+    /// who holds the next move
+    public var actor: Actor
+    /// the command that is the next step (an arm, never its confirm); nil when there's none to run
+    public var next: String?
+    /// nothing left to do for its role: landed, or a proof branch with green gates
+    public var done: Bool
+    /// you can act on it right now (the ready filter): your move, nothing else
+    public var ready: Bool { actor == .you }
 }
 
 /// The parent's standing a child's stand depends on (merge order makes it available first).
@@ -104,21 +163,64 @@ public enum ShipRules {
         return out
     }
 
-    /// Everything the page shows about one branch, given its parent's standing. `now` decides
-    /// whether a hold has come due.
-    public static func stand(_ b: Branch, _ pr: Pr?, _ parent: ParentStand?, now: Date) -> Stand {
+    /// Everything the page shows about one branch, given its parent's standing and the reads made for its tip.
+    /// `now` decides whether a hold has come due.
+    public static func stand(_ b: Branch, _ pr: Pr?, _ parent: ParentStand?, now: Date, reads: SituationReads = SituationReads()) -> Stand {
         let ship = shipOf(b, pr)
         let held = pr == nil && (b.holdUntil.flatMap(parseISO).map { $0 > now } ?? false)
         let waiting = ship == .approved && pr != nil ? waitingOn(pr!, parent) : []
-        let parentOnOrigin = parent == nil || (parent!.ship != .local && parent!.ship != .green)
-        var ready = false
-        switch ship {
-        case .green: ready = parentOnOrigin && !held
-        case .pushed: ready = !held
-        case .approved: ready = waiting.first?.kind != .parent
-        default: break
+        let (actor, next, done) = situation(b, pr, ship: ship, waiting: waiting, parent: parent, held: held, reads: reads)
+        return Stand(ship: ship, action: action(ship), waiting: waiting, held: held, actor: actor, next: next, done: done)
+    }
+
+    /// Whose move it is and the one step that makes it, in priority order: a role that's done, a write in flight, an
+    /// agent at work, then the push's own route (origin's copy, a force, a catch-up, the push, the gates), then the PR.
+    static func situation(_ b: Branch, _ pr: Pr?, ship: ShipStage, waiting: [Waiting], parent: ParentStand?, held: Bool,
+                          reads: SituationReads) -> (Actor, String?, Bool) {
+        let gatesNext: (Actor, String?, Bool) = b.gates == .running
+            ? (.gates, reads.gatesCanPutNext ? "branch.gates.next" : nil, false) : (.building, "branch.gates.run", false)
+        if b.role == "proof" {
+            if b.gates == .green { return (.nobody, "branch.proof", true) }
+            return gatesNext
         }
-        return Stand(ship: ship, action: action(ship), waiting: waiting, ready: ready, held: held)
+        if ship == .landed { return (.nobody, nil, true) }
+        if b.pending != nil { return (.canopy, nil, false) }
+        let (actor, next, done) = route(b, pr, ship: ship, waiting: waiting, parent: parent, held: held, reads: reads, gatesNext: gatesNext)
+        if let agent = reads.agent, actor == .you || actor == .building { return (.agent(agent), next, done) }
+        return (actor, next, done)
+    }
+
+    private static func route(_ b: Branch, _ pr: Pr?, ship: ShipStage, waiting: [Waiting], parent: ParentStand?, held: Bool,
+                              reads: SituationReads, gatesNext: (Actor, String?, Bool)) -> (Actor, String?, Bool) {
+        if b.diverged {
+            // origin rewrote it and has everything local has: origin wins, never a force (tooling-doctor P7, A1)
+            if reads.prepRoute == "conform" { return (.you, "branch.conform", false) }
+            guard reads.prepRead, let force = reads.force else { return (.unknown, nil, false) }
+            if force.eligible { return (.you, "branch.force.arm", false) }
+            if force.blocked { return (.you, nil, false) }
+            return gatesNext
+        }
+        // a branch above it moved: the push would be refused, so the catch-up is the next step (A1)
+        if b.owes != nil { return (.you, "branch.catchup", false) }
+        let parentOnOrigin = parent == nil || (parent!.ship != .local && parent!.ship != .green)
+        if canPush(b, pr) {
+            if held { return (.clock, "branch.push.arm", false) }
+            return parentOnOrigin || pr != nil ? (.you, "branch.push.arm", false) : (.parent, "branch.push.arm", false)
+        }
+        if pushableButGates(b, pr) { return gatesNext }
+        switch ship {
+        case .pushed: return held ? (.clock, nil, false) : (.you, "branch.pr", false)
+        case .review:
+            if pr?.draft == true || pr?.review == "CHANGES_REQUESTED" { return (.you, nil, false) }
+            return (.reviewer, nil, false)
+        case .approved:
+            switch waiting.first?.kind {
+            case .parent: return (.parent, nil, false)
+            case .checks: return (.ci, nil, false)
+            default: return (.you, "branch.pr", false)
+            }
+        default: return (.nobody, nil, false)
+        }
     }
 
     /// What ↵ does for a branch at this stage: push it, go to its PR, or open it.
@@ -154,8 +256,11 @@ public enum ShipRules {
         return trunk
     }
 
-    /// A forest is closed once every branch in it has landed.
-    public static func isClosed(_ ships: [ShipStage]) -> Bool { !ships.isEmpty && ships.allSatisfy { $0 == .landed } }
+    /// A forest is closed once every branch it merges has landed; a proof branch rides along and never merges.
+    public static func isClosed(_ stands: [(ship: ShipStage, proof: Bool)]) -> Bool {
+        let merging = stands.filter { !$0.proof }
+        return !merging.isEmpty && merging.allSatisfy { $0.ship == .landed }
+    }
 }
 
 /// The last path segment of a branch name ("goal-metrics/metrics-job" → "metrics-job").
