@@ -17,9 +17,9 @@ def check(req, raw):
     if not project:
         req._send(400, json.dumps({"ok": False, "err": "no project"}))
         return
-    # stack-integrate octopus-merges the project's leaves onto main in an ephemeral
+    # stack-integrate replays the project onto main in merge order into an ephemeral
     # refs/stack/ ref (never a branch, never pushed) and exits 0 clean / 1 on conflict
-    # (printing the conflicting leaves) / 2 on a bad project. All three modes also emit
+    # (naming the member that doesn't apply, its commit and the files) / 2 on a bad project. All three modes also emit
     # "k: v" playground-status lines (path / exists / dirty / fresh) on stdout.
     mode = "--worktree-reset" if reset else "--worktree" if checkout else "--status"
     r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-integrate"), project, mode])
