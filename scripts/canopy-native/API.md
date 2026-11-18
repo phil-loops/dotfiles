@@ -26,8 +26,17 @@ worktree's unsaved changes must survive its two-tree update or the save is refus
 
 The operation and receipt are durable before the branch moves. Repeating the same operation returns
 the same frozen save, including after a lost response or server restart. A different operation
-cannot recapture that session. Failed saves retain the checkout and frozen commit; successful saves
-remove the checkout only when Git considers it clean and it contains no additional ignored files.
+cannot recapture that session. Failed saves retain the checkout and frozen commit. After replying,
+successful saves may park one clean checkout per repository. A new session exclusively claims and
+moves it under a new lease, updating only the tree changes when opening a different tip or branch;
+no active checkout is reused or reset. Dirty files, staged
+changes, and additional ignored files preserve the checkout. Replacing the cache evicts its older
+clean entry without force-removing files.
+
+Index cache preparation runs while Helix is open. Validation uses the lease's filesystem identity
+and unchanged index fingerprint, with Git verification after an index change. Frozen index copies
+preserve timestamps so Git's racy-index checks still detect same-size edits. Independent immutable
+diff and history reads overlap; branch writes remain ordered under the forest lock.
 
 The receipt's `files` replace its `paths` in the diff pinned to `expectedTip` and `baseSha`; absent
 files remove old diff cards. Rename sources and destinations are included. `history` is the new
