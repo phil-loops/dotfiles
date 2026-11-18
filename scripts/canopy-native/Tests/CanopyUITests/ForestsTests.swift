@@ -380,6 +380,29 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = f
         #expect(BranchCommands.pushRoute("r:c", a) == "branch.gates.run")
     }
 
+    /// Phil 2026-11-18: push before the gates answer, with friction — p arms, p again waives them
+    /// for this code (the door names it his call) and sends; a branch held back otherwise never offers it.
+    @Test func pWhileTheGatesRunArmsAPushThatShipsWithoutThem() throws {
+        let a = world()
+        var obj = try #require(a.store.rawView("branch", "r:c"))
+        obj["gates"] = "running"
+        #expect(a.store.applyPatch(try Patch.make(domain: Domain.git, version: (a.store.versions[Domain.git] ?? 0) + 1,
+                                                  upserts: ["branch": ["r:c": .object(obj)]])) == .ok)
+        #expect(BranchCommands.pushRoute("r:c", a) == "branch.push.early.arm")
+        #expect(a.registry.command("branch.push.early")!.available!("r:c") == false, "nothing sends before the first press")
+        a.runner.dispatch("branch.push", via: .key, target: "r:c")
+        #expect(a.runner.armed == "push early r:c")
+        #expect(BranchCommands.isArmed("r:c", a))
+        #expect(BranchCommands.pushRoute("r:c", a) == "branch.push.early")
+        #expect(a.registry.command("branch.push.early")!.available!("r:c"))
+        a.keys.handle("esc")
+        #expect(a.runner.armed == nil)
+        obj["diverged"] = true
+        #expect(a.store.applyPatch(try Patch.make(domain: Domain.git, version: (a.store.versions[Domain.git] ?? 0) + 1,
+                                                  upserts: ["branch": ["r:c": .object(obj)]])) == .ok)
+        #expect(BranchCommands.pushRoute("r:c", a) != "branch.push.early.arm", "a diverged branch never pushes early")
+    }
+
     @Test func pPushesAFollowUpOntoAnOpenPRWithItsGatesAdvising() throws {
         let a = world()
         // a has PR #11 open; make it a follow-up: origin has it, local adds one commit, not gated yet

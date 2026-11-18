@@ -22,6 +22,7 @@ enum BranchCommands {
         case "branch.push.arm": return app.runner.armed == pushArm(id) ? "branch.push.confirm" : next
         case "branch.force.arm": return app.runner.armed == forceArm(id) ? "branch.force.confirm" : next
         case "branch.conform", "branch.catchup", "branch.gates.run", "branch.gates.next", "branch.proof": return next
+        case "branch.push.early.arm": return app.runner.armed == earlyArm(id) ? "branch.push.early" : next
         default: return nil
         }
     }
@@ -53,11 +54,16 @@ enum BranchCommands {
     /// What the runner holds while a branch's push, or its force, waits for the second press.
     static func pushArm(_ id: String) -> String { "push \(id)" }
     static func forceArm(_ id: String) -> String { "force \(id)" }
+    static func earlyArm(_ id: String) -> String { "push early \(id)" }
 
     /// Whether this branch has a push or a force waiting for its second press.
     static func isArmed(_ id: String, _ app: AppModel) -> Bool {
-        app.runner.armed == pushArm(id) || app.runner.armed == forceArm(id)
+        [pushArm(id), forceArm(id), earlyArm(id)].contains(app.runner.armed)
     }
+
+    /// The gates are still running on a branch nothing else holds back (its Stand says so): Phil may
+    /// ship it before they answer, with a second press, and the door records the waiver as his call.
+    static func canPushEarly(_ v: BranchView) -> Bool { v.st.next == "branch.push.early.arm" }
 
     /// The branch whose description is being typed, if any.
     static func describing(_ app: AppModel) -> String? { LineEdit.target(app.insertField, prefix: "words.desc") }
@@ -173,6 +179,23 @@ enum BranchCommands {
                     settled: { true },
                     said: "gates waived for this code — p pushes it",
                     failed: "the waiver didn't take", alone: true)
+            }))
+        r.register(Command(
+            id: "branch.push.early.arm", title: "Ready a push before the gates answer (the next press waives them for this code and sends it)",
+            scope: .branch, quiet: true,
+            available: { id in m.branchView(id).map(canPushEarly) ?? false },
+            local: { id, _ in if let id { try app.runner.arm(earlyArm(id)) } }))
+        r.register(Command(
+            id: "branch.push.early", title: "Send the readied push before the gates answer — the door records it as your call",
+            scope: .branch, budget: .gitWrite, quiet: true,
+            available: { id in id.map { app.runner.armed == earlyArm($0) } == true && m.branchView(id).map(canPushEarly) == true },
+            task: { id, _ in
+                guard let id, let v = m.branchView(id) else { return nil }
+                let w = await t.post(t.atRepo(v.b.repo, "/gates-waive"), ["branch": JSONValue.string(v.b.name)] as JSONObject, via: .key)
+                guard w.ok else { throw Refusal("\(leaf(v.b.name)) didn't push — the waiver didn't take\(w.err.map { " (\($0))" } ?? "")") }
+                try app.runner.arm(pushArm(id))
+                app.runner.dispatch("branch.push.confirm", via: .key, target: id)
+                return nil   // the push says its own line
             }))
         r.register(Command(
             id: "branch.push.arm", title: "Ready a push (the next press sends it)", scope: .branch, quiet: true,

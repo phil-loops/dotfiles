@@ -135,7 +135,8 @@ import Testing
             state["entities"] = .object(ents)
         }
         let branch = try #require(app.store.view(Branch.self, ShipTests.branch))
-        #expect(BranchCommands.pushRoute(branch.id, app) == nil, "first in line: only the running run is ahead, and p can't pass it")
+        #expect(BranchCommands.pushRoute(branch.id, app) == "branch.push.early.arm",
+                "first in line: p can't pass the running run, so it offers the push before the gates answer (Phil 2026-11-18)")
     }
 
     @Test func aRunningGateKeepsItsPriorityAction() async throws {

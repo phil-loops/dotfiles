@@ -270,7 +270,11 @@ public enum ShipRules {
             if held { return (.clock, "branch.push.arm", false) }
             return parentOnOrigin || pr != nil ? (.you, "branch.push.arm", false) : (.parent, "branch.push.arm", false)
         }
-        if pushableButGates(b, pr) { return gatesNext }
+        if pushableButGates(b, pr) {
+            // the run can't be passed and nothing else holds it back: Phil may ship before it answers (two presses)
+            if b.gates == .running && gatesNext.1 == nil { return (gatesNext.0, "branch.push.early.arm", false) }
+            return gatesNext
+        }
         switch ship {
         case .pushed: return held ? (.clock, nil, false) : (.you, "branch.pr", false)
         case .review:
