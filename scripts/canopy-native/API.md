@@ -7,13 +7,15 @@ SolidJS app's `viewer-solid/src/v2/types.ts` (git history, before 37e9eca) was t
 
 ## Editor transactions
 
-The native editor uses two repo-prefixed POSTs (`srv/edits.py`):
+The native editor uses repo-prefixed POSTs (`srv/edits.py`):
 
 | Route | Request | Response |
 | --- | --- | --- |
 | `/edit-warm` | `{branch, epoch?, expectedTip?}` | `{ok}` acknowledges background preparation |
 | `/edit-session` | `{epoch, session: UUID, branch, expectedTip, baseSha}` | `{ok, epoch, session, dir, sha, baseSha}` |
 | `/edit-commit` | `{epoch, session, operation: UUID, branch, expectedTip}` | `{ok, epoch, session, operation, repo, branch, expectedTip, baseSha, sha, tree, paths, files, history, incremental}` or `{ok, nothing: true, …}` |
+| `/edit-workspaces` | `{epoch, branch?, completed?: Bool}` | `{ok, epoch, workspaces: [{session, branch, expectedTip, baseSha, state, dir, operation?, sha?, message?, projection?, retryable}]}` |
+| `/edit-recover` | `{epoch, session, operation, branch, expectedTip}` | the original frozen commit receipt; refuses a workspace without a frozen save |
 
 For editor sessions and commits, the server checks the request's epoch before accepting work and stamps its own epoch on the reply;
 after restart an explicit retry must name the new epoch. `expectedTip` and `baseSha` are full immutable commit IDs. Each session owns a private locked
@@ -45,6 +47,32 @@ moves it under a new lease, updating only the tree changes when opening a differ
 no active checkout is reused or reset. Dirty files, staged
 changes, and additional ignored files preserve the checkout. Replacing the cache evicts its older
 clean entry without force-removing files.
+
+Workspace records have `workspaceVersion: 1` and an explicit lifecycle:
+`preparing → editing → prepared → landing → committed`. Cache builders use `preparing → cached`;
+checkout resource state (`parked`, `released`, `preserved`, `retired`) stays separate from save state.
+Preparation writes its record before creating or transferring a checkout. Interrupted preparation
+is discoverable and preserved; it is never silently restarted over existing files. Legacy records
+without a version remain readable, while unknown versions are refused.
+
+An attached checkout is a recoverable projection of the frozen commit. Its journal records the
+checkout/Git-directory identities, before/after index trees, immutable index snapshots and owned
+lock token. A prepared Git ref transaction and the real checkout's `index.lock` exclude cooperating
+Git writers while a private index drives the file update. The index lock remains held until the
+branch transaction commits; the prepared index is then installed atomically and fsynced. Journal
+phases are `locked`, `planned`, `files-applied` and `index-applied`.
+
+An explicit retry uses the same operation and commit. If the ref already advanced, it finishes
+the pending index installation without rewriting working files. If file application completed
+before its journal acknowledgement, recovery checks affected file contents, modes, symlinks and
+deletions against the target tree. Partial or externally changed files that Git cannot update
+safely are preserved and refused. Changed staging, a switched/replaced checkout, damaged snapshots
+or a foreign/changed lock also stop recovery. Only a lock with the recorded inode and unique token
+is reclaimed; a partially overwritten lock remains for inspection. A completed receipt can replay
+without the private editor checkout, and subsequent local edits are never recaptured.
+
+Recovery is on demand; a server restart does not automatically move branches. Unsaved workspaces
+are listed by the protocol but are not automatically attached or deleted.
 
 Index cache preparation runs while Helix is open. Validation uses the lease's filesystem identity
 and unchanged index fingerprint, with Git verification after an index change. Frozen index copies

@@ -7,12 +7,13 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 import uuid
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from srv import ctx, edits, ghreview, state
+from srv import ctx, editprojection, edits, ghreview, state
 
 
 class Request:
@@ -75,6 +76,262 @@ class EditSessions(unittest.TestCase):
 
     def commit(self, data):
         return self.call(edits.commit, {**data, "operation": data["session"]})
+
+    def crash_save(self, data, phase):
+        program = r'''
+import json, os, signal, subprocess, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from srv import ctx, edits, editprojection, state
+ctx.CWD = ctx.MAIN_WT = sys.argv[2]
+ctx.REPOS = {"fixture": sys.argv[2]}
+ctx.run = lambda args, timeout=None: subprocess.run(args, cwd=ctx.repo_cwd(), capture_output=True, text=True)
+data = json.load(sys.stdin)
+data.update(epoch=state.EPOCH, operation=data["session"])
+phase = sys.argv[3]
+original_save, original_git = edits._save, edits._git
+def die():
+    os.kill(os.getpid(), signal.SIGKILL)
+def save(path, value):
+    current = value.get("projection", {}).get("phase")
+    if phase == "index-unrecorded" and current == "index-applied":
+        die()
+    original_save(path, value)
+    if current == phase:
+        die()
+def git(*args, **kw):
+    if "read-tree" in args and "-u" in args and Path(kw.get("cwd", "/")).resolve() == Path(ctx.CWD).resolve():
+        if phase == "partial-files":
+            (Path(ctx.CWD) / "a.txt").write_text("interrupted file bytes\n")
+            die()
+        result = original_git(*args, **kw)
+        if phase == "files-unrecorded":
+            die()
+        return result
+    return original_git(*args, **kw)
+edits._save, edits._git = save, git
+if phase == "ref-before-index":
+    editprojection.Projection.install = lambda self: die()
+edits._cleanup_later = lambda root: None
+class Request:
+    def _send(self, code, body, *args):
+        print(body)
+edits.commit(Request(), json.dumps(data))
+'''
+        result = subprocess.run([sys.executable, "-c", program, str(Path(__file__).resolve().parent), str(self.repo), phase],
+                                input=json.dumps(data), capture_output=True, text=True, timeout=20)
+        self.assertEqual(result.returncode, -9, result.stdout + result.stderr)
+        until = time.monotonic() + 5
+        while (self.repo / ".git/HEAD.lock").exists() and time.monotonic() < until:
+            time.sleep(0.01)
+        self.assertFalse((self.repo / ".git/HEAD.lock").exists())
+        return edits._load(edits._root(data["session"])[1])
+
+    def recover(self, data):
+        return self.call(edits.recover, {**data, "operation": data["session"]})
+
+    def test_real_process_death_at_each_landing_boundary_recovers_the_same_commit(self):
+        for phase in ("planned", "files-unrecorded", "files-applied", "ref-before-index", "index-unrecorded", "index-applied"):
+            with self.subTest(phase=phase):
+                data, checkout = self.prepare()
+                (checkout / "a.txt").write_text(phase + "\n")
+                saved = self.crash_save(data, phase)
+                listing = self.call(edits.workspaces, {"epoch": state.EPOCH, "branch": "feature"})
+                row = next(row for row in listing["workspaces"] if row["session"] == data["session"])
+                self.assertTrue(row["retryable"])
+                self.assertEqual(row["operation"], data["session"])
+                (checkout / "a.txt").write_text("later private edit\n")
+                receipt = self.recover(data)
+                self.assertTrue(receipt["ok"], receipt)
+                self.assertEqual(receipt["sha"], saved["receipt"]["sha"])
+                self.assertEqual(self.git("show", "feature:a.txt"), phase)
+                self.assertEqual((self.repo / "a.txt").read_text(), phase + "\n")
+                self.assertEqual(self.git("status", "--porcelain"), "")
+                self.assertEqual(self.git("rev-list", "--count", f"{self.tip}..feature"), "1")
+                self.assertEqual(self.recover(data), receipt)
+                self.assertFalse((self.repo / ".git/index.lock").exists())
+                self.tip = receipt["sha"]
+
+    def test_interrupted_preparation_is_discoverable_and_never_overwritten(self):
+        original = edits._git
+        def fail(*args, **kw):
+            if "read-tree" in args and "--reset" in args:
+                raise ghreview.Refused("interrupted preparation")
+            return original(*args, **kw)
+        data = {"session": str(uuid.uuid4()), "branch": "feature", "expectedTip": self.tip, "baseSha": self.base, "epoch": state.EPOCH}
+        with mock.patch.object(edits, "_git", side_effect=fail):
+            self.assertFalse(self.call(edits.prepare, data)["ok"])
+        root = edits._root(data["session"])[1]
+        (root / "checkout/private.txt").write_text("preserve\n")
+        answer = self.call(edits.prepare, data)
+        self.assertFalse(answer["ok"])
+        self.assertIn("interrupted", answer["err"])
+        self.assertEqual((root / "checkout/private.txt").read_text(), "preserve\n")
+        listing = self.call(edits.workspaces, {"epoch": state.EPOCH})
+        self.assertEqual(listing["workspaces"][0]["state"], "preparing")
+        self.assertFalse(listing["workspaces"][0]["retryable"])
+        self.assertFalse(self.recover(data)["ok"])
+
+    def test_a_damaged_workspace_cannot_hide_other_recoverable_saves(self):
+        data, checkout = self.prepare()
+        (checkout / "a.txt").write_text("frozen\n")
+        self.crash_save(data, "planned")
+        broken = edits._root(str(uuid.uuid4()))[1]
+        broken.mkdir()
+        (broken / "session.json").write_text("[]")
+        listing = self.call(edits.workspaces, {"epoch": state.EPOCH, "branch": "feature"})
+        self.assertEqual([row["session"] for row in listing["workspaces"]], [data["session"]])
+        self.assertEqual((broken / "session.json").read_text(), "[]")
+        self.assertTrue(self.recover(data)["ok"])
+
+    def test_recovery_never_freezes_an_open_editor_or_another_operation(self):
+        data, checkout = self.prepare()
+        (checkout / "a.txt").write_text("editing\n")
+        self.assertFalse(self.recover(data)["ok"])
+        self.assertNotIn("operation", edits._load(edits._root(data["session"])[1]))
+        self.crash_save(data, "planned")
+        self.assertFalse(self.recover({**data, "session": str(uuid.uuid4())})["ok"])
+        answer = self.call(edits.recover, {**data, "operation": str(uuid.uuid4())})
+        self.assertFalse(answer["ok"])
+        self.assertEqual(self.git("rev-parse", "feature"), self.tip)
+
+    def test_recovery_preserves_a_replaced_git_lock(self):
+        data, checkout = self.prepare()
+        (checkout / "a.txt").write_text("frozen\n")
+        self.crash_save(data, "planned")
+        lock = self.repo / ".git/index.lock"
+        lock.rename(lock.with_suffix(".previous"))
+        lock.write_text("foreign lock\n")
+        answer = self.recover(data)
+        self.assertFalse(answer["ok"])
+        self.assertEqual(lock.read_text(), "foreign lock\n")
+        self.assertEqual(self.git("rev-parse", "feature"), self.tip)
+
+    def test_recovery_preserves_a_lock_whose_contents_changed_on_the_same_inode(self):
+        data, checkout = self.prepare()
+        (checkout / "a.txt").write_text("frozen\n")
+        self.crash_save(data, "planned")
+        lock = self.repo / ".git/index.lock"
+        identity = lock.stat().st_ino
+        lock.write_text("replaced contents\n")
+        self.assertEqual(lock.stat().st_ino, identity)
+        self.assertFalse(self.recover(data)["ok"])
+        self.assertEqual(lock.read_text(), "replaced contents\n")
+
+    def test_recovery_rejects_modified_index_snapshots_and_old_epochs(self):
+        data, checkout = self.prepare()
+        (checkout / "a.txt").write_text("frozen\n")
+        self.crash_save(data, "planned")
+        root = edits._root(data["session"])[1]
+        self.assertFalse(self.recover({**data, "epoch": "old-server"})["ok"])
+        index = root / "attached-index-after"
+        subprocess.run(["git", "read-tree", self.base], cwd=self.repo,
+                       env={**os.environ, "GIT_INDEX_FILE": str(index)}, check=True)
+        self.assertFalse(self.recover(data)["ok"])
+        self.assertEqual(self.git("rev-parse", "feature"), self.tip)
+        self.assertEqual((self.repo / "a.txt").read_text(), "before\n")
+
+    def test_recovery_refuses_new_staging_without_resetting_it(self):
+        data, checkout = self.prepare()
+        (checkout / "a.txt").write_text("frozen\n")
+        self.crash_save(data, "files-applied")
+        (self.repo / ".git/index.lock").unlink()
+        (self.repo / "untouched.txt").write_text("new staged bytes\n")
+        self.git("add", "untouched.txt")
+        answer = self.recover(data)
+        self.assertFalse(answer["ok"])
+        self.assertEqual(self.git("show", ":untouched.txt"), "new staged bytes")
+        self.assertEqual((self.repo / "a.txt").read_text(), "frozen\n")
+        self.assertEqual(self.git("rev-parse", "feature"), self.tip)
+
+    def test_recovery_refuses_a_switched_checkout_without_writing_its_files(self):
+        data, checkout = self.prepare()
+        (checkout / "a.txt").write_text("frozen\n")
+        self.crash_save(data, "planned")
+        (self.repo / ".git/index.lock").unlink()
+        self.git("checkout", "main")
+        self.assertFalse(self.recover(data)["ok"])
+        self.assertEqual((self.repo / "a.txt").read_text(), "base\n")
+        self.assertEqual(self.git("symbolic-ref", "HEAD"), "refs/heads/main")
+        self.assertEqual(self.git("rev-parse", "feature"), self.tip)
+
+    def test_partial_file_application_is_preserved_when_it_cannot_be_proven_safe(self):
+        data, checkout = self.prepare()
+        (checkout / "a.txt").write_text("frozen\n")
+        (checkout / "untouched.txt").write_text("second edit\n")
+        self.crash_save(data, "partial-files")
+        answer = self.recover(data)
+        self.assertFalse(answer["ok"])
+        self.assertEqual((self.repo / "a.txt").read_text(), "interrupted file bytes\n")
+        self.assertEqual((self.repo / "untouched.txt").read_text(), "keep\n")
+        self.assertEqual(self.git("rev-parse", "feature"), self.tip)
+
+    def test_a_frozen_save_recovers_without_the_original_private_checkout(self):
+        data, checkout = self.prepare()
+        (checkout / "a.txt").write_text("frozen\n")
+        self.crash_save(data, "planned")
+        self.git("worktree", "unlock", str(checkout))
+        self.git("worktree", "remove", "--force", str(checkout))
+        self.assertTrue(self.recover(data)["ok"])
+        self.assertEqual(self.git("show", "feature:a.txt"), "frozen")
+
+    def test_external_git_checkout_cannot_enter_during_the_attached_update(self):
+        data, checkout = self.prepare()
+        (checkout / "a.txt").write_text("frozen\n")
+        original = edits._git
+        attempts = []
+        def competing(*args, **kw):
+            if "read-tree" in args and "-u" in args and Path(kw.get("cwd", "/")).resolve() == self.repo.resolve():
+                attempts.append(subprocess.run(["git", "checkout", "main"], cwd=self.repo, capture_output=True))
+            return original(*args, **kw)
+        with mock.patch.object(edits, "_git", side_effect=competing):
+            answer = self.commit(data)
+        self.assertTrue(answer["ok"], answer)
+        self.assertEqual(len(attempts), 1)
+        self.assertNotEqual(attempts[0].returncode, 0)
+        self.assertEqual(self.git("symbolic-ref", "HEAD"), "refs/heads/feature")
+
+    def test_a_failed_save_releases_the_ref_transaction_before_the_checkout_lock(self):
+        data, checkout = self.prepare()
+        (checkout / "a.txt").write_text("frozen\n")
+        original_git, original_exit = edits._git, editprojection.Projection.__exit__
+        attempts = []
+        def fail(*args, **kw):
+            if "read-tree" in args and "-u" in args and Path(kw.get("cwd", "/")).resolve() == self.repo.resolve():
+                raise ghreview.Refused("fixture interrupted the file update")
+            return original_git(*args, **kw)
+        def release(projection, *args):
+            original_exit(projection, *args)
+            attempts.append(subprocess.run(["git", "checkout", "main"], cwd=self.repo, capture_output=True))
+        with mock.patch.object(edits, "_git", side_effect=fail), mock.patch.object(editprojection.Projection, "__exit__", release):
+            self.assertFalse(self.commit(data)["ok"])
+        self.assertEqual(len(attempts), 1)
+        self.assertEqual(attempts[0].returncode, 0, attempts[0].stderr)
+        self.assertEqual(self.git("symbolic-ref", "HEAD"), "refs/heads/main")
+        self.assertEqual((self.repo / "a.txt").read_text(), "base\n")
+        self.assertEqual(self.git("rev-parse", "feature"), self.tip)
+
+    def test_completed_index_application_replays_without_touching_later_local_edits(self):
+        data, checkout = self.prepare()
+        (checkout / "a.txt").write_text("frozen\n")
+        self.crash_save(data, "index-applied")
+        (self.repo / "a.txt").write_text("later local edit\n")
+        self.git("add", "a.txt")
+        self.assertTrue(self.recover(data)["ok"])
+        self.assertEqual(self.git("show", ":a.txt"), "later local edit")
+        self.assertEqual((self.repo / "a.txt").read_text(), "later local edit\n")
+
+    def test_recovery_after_file_application_preserves_later_edits_and_earlier_staging(self):
+        data, checkout = self.prepare()
+        (self.repo / "untouched.txt").write_text("earlier staging\n")
+        self.git("add", "untouched.txt")
+        (checkout / "a.txt").write_text("frozen\n")
+        self.crash_save(data, "files-applied")
+        (self.repo / "a.txt").write_text("later working bytes\n")
+        self.assertTrue(self.recover(data)["ok"])
+        self.assertEqual(self.git("show", "feature:a.txt"), "frozen")
+        self.assertEqual(self.git("show", ":untouched.txt"), "earlier staging")
+        self.assertEqual((self.repo / "a.txt").read_text(), "later working bytes\n")
 
     def test_each_editor_owns_its_checkout_and_gutter_base(self):
         first, a = self.prepare()

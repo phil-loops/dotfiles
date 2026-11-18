@@ -52,6 +52,7 @@ POST = {
     "/integrate": _r(integrate.check),                   # does the whole forest land on main (scratch worktree)
     "/edit-session": _r(edits.prepare, "machine"),
     "/edit-warm": _r(edits.prime, "machine"),
+    "/edit-workspaces": _r(edits.workspaces, "machine"),
 
     # ── this repo's state ──
     "/open-url": _r(reviews.open_url, "repo"),           # a GitHub URL → its page (imports a PR as review/pr-N)
@@ -96,6 +97,7 @@ POST = {
     "/review-address": _r(reviewdesk.address, "history"),
     "/review-helix": _r(reviewdesk.helix, "history", "machine"),   # opens Helix, then lands its edits
     "/edit-commit": _r(edits.commit, "history", "machine"),
+    "/edit-recover": _r(edits.recover, "history", "machine"),
 
     # ── the machine ──
     "/open": _r(picker.open_file, "machine"),            # a file in the warm review-nvim
