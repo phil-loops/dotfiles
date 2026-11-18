@@ -733,19 +733,15 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
         ShipStub.answer(port, "POST", "/loops/gates", #"{"ok":true}"#)
         a.keys.handle("s")
         let ship = ShipState.of(a)
-        await until("the motion to finish") { ship.motionOf(Self.branch)?.phase == .done }
-        let steps = try #require(ship.motionOf(Self.branch)?.steps)
-        #expect(steps.map(\.id) == [.dirt, .rebase, .prep, .gates, .tests])
-        #expect(steps.map(\.state) == [.ok, .ok, .ok, .ok, .ok])   // area A's branch.gates.run starts the gates
-        #expect(steps[1].note == "replayed 3 commits" && steps[4].note == "2 ✓")
+        #expect(Syncing.planSteps(drifted: false, facts: SyncFacts(behind: 3, syncable: true)).map(\.id) == [.dirt, .rebase, .prep, .gates, .tests])
+        // a clean motion leaves no steps behind: its line says what it did
+        await until("the motion to finish") { ship.motionOf(Self.branch) == nil && ShipStub.posts(port).count == 4 }
         // the gates post on the FIFO queue, the delta tests beside it (`alone`): either may land first
         #expect(Set(ShipStub.posts(port).map(\.path)) == ["/loops/sync", "/loops/prep-push", "/loops/gates", "/loops/delta-tests"])
         // the motion's note and the gates write's are two concurrent writes' (FIFO queue vs
         // `alone`): either may be the last said — asserting one was the 1-in-3 flake
-        #expect(["synced add-hankles-limited-label", "running the gates — p pushes once they're green"].contains(a.runner.note ?? ""),
-                "\(a.runner.note ?? "nil")")
-        a.runner.dispatch("review.sync.dismiss", via: .key)
-        #expect(ship.motionOf(Self.branch) == nil)
+        #expect(["synced add-hankles-limited-label · replayed 3 commits · 3 voiced commits — pushed as they are · tests 2 ✓",
+                 "running the gates — p pushes once they're green"].contains(a.runner.note ?? ""), "\(a.runner.note ?? "nil")")
     }
 
     @Test func gatesAnsweredCachedSettleAtOnce() async throws {
@@ -774,12 +770,32 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
         a.runner.dispatch("review.sync.dirt.show", via: .key)
         #expect(ship.dirtOpen == "\(Self.branch)|a.ts")
         a.runner.dispatch("review.sync.stash", via: .key)
-        await until("the motion to finish") { ship.motionOf(Self.branch)?.phase == .done && ShipStub.posts(port).count == 3 }
+        await until("the motion to finish") { ship.motionOf(Self.branch) == nil && ShipStub.posts(port).count == 3 }
         let posts = ShipStub.posts(port)
         #expect(posts.map(\.path) == ["/loops/dirty-resolve", "/loops/prep-push", "/loops/dirty-resolve"])
         #expect(posts[0].body["action"] == "stash" && posts[2].body["action"] == "pop")
-        await until("the pop") { ship.motionOf(Self.branch)?.stashed == false }
-        #expect(ship.motionOf(Self.branch)?.steps.first?.note == "stash popped — your uncommitted changes are back")
+    }
+
+    @Test func aFailedStepKeepsTheMotionInView() async throws {
+        let (a, port) = try app()
+        ShipStub.answer(port, "GET", "/loops/sync", #"{"behind":0,"dirty":[]}"#)
+        ShipStub.answer(port, "POST", "/loops/prep-push", #"{"ok":true,"routed":[]}"#)
+        ShipStub.answer(port, "POST", "/loops/gates", #"{"ok":true}"#)
+        ShipStub.answer(port, "POST", "/loops/delta-tests", #"{"ok":false,"ran":true,"failed":1,"summary":"x.test.ts"}"#)
+        let ship = ShipState.of(a)
+        a.runner.dispatch("branch.sync", via: .key, target: Self.branch)
+        await until("the motion to finish") { ship.motionOf(Self.branch)?.phase == .done }
+        #expect(ship.motionOf(Self.branch)?.steps.last?.state == .fail)
+        a.runner.dispatch("review.sync.dismiss", via: .key)
+        #expect(ship.motionOf(Self.branch) == nil)
+    }
+
+    @Test func aCleanMotionSaysWhatItDidInOneLine() {
+        let step = { (id: StepID, state: StepState, note: String?) in SyncStep(id: id, label: id.rawValue, state: state, note: note) }
+        #expect(Syncing.doneLine("b", [step(.dirt, .ok, nil), step(.prep, .ok, "nothing to push — origin already has this"),
+                                       step(.gates, .skip, nil), step(.tests, .skip, nil)]) == "b is already in sync — nothing to push")
+        #expect(Syncing.doneLine("b", [step(.dirt, .ok, nil), step(.rebase, .ok, "replayed 2 commits"), step(.prep, .ok, nil),
+                                       step(.gates, .ok, nil), step(.tests, .ok, "no changed tests")]) == "synced b · replayed 2 commits · tests no changed tests")
     }
 
     @Test func aRebaseConflictGoesToClaude() async throws {

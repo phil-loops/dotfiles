@@ -115,6 +115,16 @@ public enum Syncing {
         return s
     }
 
+    /// A clean motion's one line: what changed, or that nothing needed to.
+    public static func doneLine(_ name: String, _ steps: [SyncStep]) -> String {
+        let said = steps.filter { $0.state == .ok && $0.id != .gates }.compactMap { s in s.note.map { s.id == .tests ? "tests \($0)" : $0 } }
+        if steps.contains(where: { $0.id == .prep && $0.state == .ok }) && steps.contains(where: { $0.id == .gates && $0.state == .skip })
+            && said.allSatisfy({ $0.hasPrefix("nothing to push") }) {
+            return "\(name) is already in sync — nothing to push"
+        }
+        return (["synced \(name)"] + said.filter { !$0.hasPrefix("nothing to push") }).joined(separator: " · ")
+    }
+
     public static func rebases(_ f: SyncFacts) -> Bool { f.behind > 0 && (f.syncable || f.restack) }
 
     /// What a POST /sync answer means for the motion.
