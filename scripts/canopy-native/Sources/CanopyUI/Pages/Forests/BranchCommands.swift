@@ -20,11 +20,17 @@ enum BranchCommands {
         guard let id, let v = m.branchView(id) else { return nil }
         if v.b.role == "proof" { return v.b.gates == .running ? "branch.gates.next" : v.b.gates == .green ? "branch.proof" : "branch.gates.run" }
         if v.b.diverged {
+            // origin was rewritten upstream (GitHub's rebase) and already has everything local has:
+            // origin wins — never a force, never a refusal (tooling-doctor P7, A1)
+            if ShipState.of(app).prepOf(id)?.route == "conform", v.b.pending == nil { return "branch.conform" }
             guard let s = forceScope(id, app), v.b.pending == nil else { return nil }
             if s.eligible { return app.runner.armed == forceArm(id) ? "branch.force.confirm" : "branch.force.arm" }
             if !s.guards.allSatisfy({ $0.ok || $0.k == "gates" }) { return nil }
             return v.b.gates == .running ? "branch.gates.next" : "branch.gates.run"
         }
+        // a branch above it moved: the push would be refused (its PR wouldn't stack), so p's next
+        // step is the catch-up, named on the key (A1) — never "retry the push"
+        if v.b.owes != nil, v.b.pending == nil { return "branch.catchup" }
         if ShipRules.canPush(v.b, v.pr) { return app.runner.armed == pushArm(id) ? "branch.push.confirm" : "branch.push.arm" }
         if !ShipRules.pushableButGates(v.b, v.pr) { return nil }
         if v.b.gates == .running { return "branch.gates.next" }
@@ -92,6 +98,26 @@ enum BranchCommands {
                 failed: "the gates didn't start",
                 answered: { ok, body in if ok, body["cached"] == true { answeredCached = true } })
         }
+        r.register(Command(
+            id: "branch.catchup", title: "Catch the chain up to its moved ancestors — drafts rebase, published links get a catch-up merge",
+            scope: .branch, label: "catch up", quiet: true,
+            available: { id in m.branchView(id)?.b.owes != nil },
+            write: { id, _ in
+                guard let v = m.branchView(id) else { return nil }
+                return Write(path: t.atRepo(v.b.repo, "/catch-up"), body: ["branch": .string(v.b.name)], settled: { true },
+                             said: "caught the chain up — p pushes next",
+                             failed: "the catch-up stopped — a conflict to resolve by hand, or the forest is busy", alone: true)
+            }))
+        r.register(Command(
+            id: "branch.conform", title: "Take origin's copy — it was rewritten upstream and already has everything local has",
+            scope: .branch, label: "take origin's copy", quiet: true,
+            available: { id in id.map { ShipState.of(app).prepOf($0)?.route == "conform" } ?? false },
+            write: { id, _ in
+                guard let v = m.branchView(id) else { return nil }
+                return Write(path: t.atRepo(v.b.repo, "/prep-push"), body: ["branch": .string(v.b.name)], settled: { true },
+                             said: "took origin's copy — local matches the PR again",
+                             failed: "couldn't take origin's copy — local moved, or its worktree has uncommitted changes", alone: true)
+            }))
         r.register(Command(
             id: "branch.gates.run", title: "Run the push gates", scope: .branch, label: "gates", quiet: true,
             available: { id in m.branchView(id).map { $0.b.gates != .running } ?? false },
