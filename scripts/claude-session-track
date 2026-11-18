@@ -13,7 +13,7 @@ WARN-ONLY / NEVER BLOCKS: always exits 0 and swallows every error — a presence
 tracker must never break a tool call. Each session owns its own file, so concurrent
 sessions never contend on a write.
 """
-import sys, os, json, subprocess, time, glob
+import sys, os, json, subprocess, time, glob, fcntl
 
 DIR = os.environ.get("CLAUDE_SESSION_PRESENCE_DIR") or os.path.expanduser("~/.claude/session-presence")
 FILES_CAP = 8       # keep only the most-recent N touched files
@@ -63,9 +63,10 @@ def pid_alive(pid, start):
 
 
 def branch_of(path):
-    """'<repo>:<branch>' for the worktree a file sits in, resolved now (round 28, P5): the repo is
-    its main worktree's name, as the viewer names repos. None for a detached or non-git place."""
-    d = os.path.dirname(os.path.abspath(path))
+    """('<repo>:<branch>', its work id or None) for the worktree a file really sits in, resolved now
+    (round 28, P5): the repo is its main worktree's name, as the viewer names repos; the work id
+    keeps a recreated branch of the same name from inheriting it. None for a detached or non-git place."""
+    d = os.path.dirname(os.path.realpath(path))
     while d and not os.path.isdir(d):
         d = os.path.dirname(d)
     out = sh(["git", "-C", d, "rev-parse", "--path-format=absolute", "--git-common-dir", "--abbrev-ref", "HEAD"]).splitlines()
@@ -73,7 +74,7 @@ def branch_of(path):
         return None
     common = out[0].rstrip("/")
     main = os.path.dirname(common) if os.path.basename(common) == ".git" else common
-    return f"{os.path.basename(main)}:{out[1]}"
+    return f"{os.path.basename(main)}:{out[1]}", sh(["git", "-C", d, "config", f"branch.{out[1]}.stack-work"]) or None
 
 
 def gc_stale():
@@ -122,6 +123,10 @@ def main():
 
     os.makedirs(DIR, exist_ok=True)
     path = os.path.join(DIR, sid + ".json")
+    # a parent and its subagents share a session id and their hooks run at once: one writer at a time,
+    # or two edits read the same record and the second write drops the first's evidence
+    lock = open(os.path.join(DIR, ".lock"), "w")
+    fcntl.flock(lock, fcntl.LOCK_EX)
     rec = {}
     if os.path.exists(path):
         try:
@@ -168,14 +173,18 @@ def main():
             files.append(rel)
             rec["files"] = files[-FILES_CAP:]
             if rec["last_tool"] in ("Edit", "Write", "MultiEdit", "NotebookEdit"):
-                at = branch_of(fp)
-                if at:
+                hit = branch_of(fp)
+                if hit:
+                    at, work = hit
                     acted = {k: v for k, v in (rec.get("acted") or {}).items() if k != at}
-                    acted[at] = {"edit": now}
+                    acted[at] = {"edit": now, **({"work": work} if work else {})}
                     rec["acted"] = dict(sorted(acted.items(), key=lambda kv: -kv[1]["edit"])[:ACTED_CAP])
 
-    with open(path, "w") as fh:
+    tmp = f"{path}.{os.getpid()}.tmp"
+    with open(tmp, "w") as fh:
         json.dump(rec, fh)
+    os.replace(tmp, path)   # a crash mid-write leaves the old record, never an empty one
+    lock.close()
 
     if event == "SessionStart":
         gc_stale()   # reap dead records + supersede our pid's prior session_id

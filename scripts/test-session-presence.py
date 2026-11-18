@@ -52,11 +52,37 @@ class Presence(unittest.TestCase):
         with open(os.path.join(self.dir, "chat.json")) as f:
             acted = json.load(f).get("acted", {})
         self.assertEqual(list(acted), ["proj:feat/x"], "named by its main worktree, as the viewer names repos")
+        git("config", "branch.feat/x.stack-work", "w_feat")
+        link = os.path.join(self.dir, "link.ts")
+        os.symlink(edited, link)
+        self.hook("PostToolUse", "chat", tool_name="Write", tool_input={"file_path": link})
+        with open(os.path.join(self.dir, "chat.json")) as f:
+            self.assertEqual(json.load(f)["acted"]["proj:feat/x"].get("work"), "w_feat",
+                             "a symlink resolves to the worktree it points into, and the branch's work id rides along")
         git("-C", os.path.join(self.dir, "proj-wt"), "checkout", "-q", "--detach")
         self.hook("PostToolUse", "chat", tool_name="Edit", tool_input={"file_path": edited})
         self.hook("PostToolUse", "chat", tool_name="Bash", tool_input={})
         with open(os.path.join(self.dir, "chat.json")) as f:
             self.assertEqual(list(json.load(f).get("acted", {})), ["proj:feat/x"], "a detached worktree or a Bash call records nothing")
+
+
+    def test_concurrent_hooks_keep_every_edit(self):
+        repos = []
+        for n in range(6):
+            repo = os.path.join(self.dir, f"r{n}")
+            subprocess.run(["git", "init", "-q", "-b", f"b{n}", repo], check=True)
+            subprocess.run(["git", "-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "root"], check=True)
+            repos.append(os.path.join(repo, "f.ts"))
+        env = dict(os.environ, CLAUDE_SESSION_PRESENCE_DIR=self.dir)
+        procs = [subprocess.Popen([sys.executable, HOOK], stdin=subprocess.PIPE, text=True, env=env) for _ in repos]
+        for p, f in zip(procs, repos):
+            p.stdin.write(json.dumps({"hook_event_name": "PostToolUse", "session_id": "shared", "cwd": self.dir,
+                                      "tool_name": "Edit", "tool_input": {"file_path": f}}))
+            p.stdin.close()
+        for p in procs:
+            p.wait()
+        with open(os.path.join(self.dir, "shared.json")) as f:
+            self.assertEqual(sorted(json.load(f)["acted"]), [f"r{n}:b{n}" for n in range(6)], "a parent and its subagents writing at once lose nothing")
 
 
 if __name__ == "__main__":
