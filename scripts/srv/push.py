@@ -1011,41 +1011,79 @@ def _squash_unpushed(branch, message=""):
 
 
 def origin_has_local(branch):
-    """origin's copy already carries everything local does: merging local into origin/<branch>
-    leaves origin's tree as it is. That is someone rewriting the published branch (GitHub's
-    update-branch, or GitHub rebasing a child PR after its base PR merges) while local still
-    holds the old shape of the same work. Content, not patch-ids: after a base PR squash-merges,
-    the parent's commits live in main as one squash, so no single patch matches."""
+    """origin's copy was rewritten upstream and already carries everything local does."""
+    return conform_plan(branch) == []
+
+
+def _carries(rev, tree, other):
+    """`rev` (whose tree is `tree`) already holds everything `other` changes: merging `other`
+    into it leaves its tree as it is."""
+    r = ctx.run(["git", "merge-tree", "--write-tree", rev, other])
+    return r.returncode == 0 and r.stdout.split("\n", 1)[0].strip() == tree
+
+
+def conform_plan(branch):
+    """What local adds on top of a rewritten origin copy: walk local's first parents (only those
+    origin's history lacks) back to the newest one origin's copy already carries; the non-merge commits after it are local's own
+    work to replay ([] when origin carries the tip). None when origin isn't rewritten (absent,
+    or local simply ahead) or no commit of local's is carried — a real divergence."""
     o = f"refs/remotes/origin/{branch}"
     otree = ctx.run(["git", "rev-parse", "--verify", "-q", f"{o}^{{tree}}"]).stdout.strip()
     if not otree or ctx.run(["git", "merge-base", "--is-ancestor", o, f"refs/heads/{branch}"]).returncode == 0:
-        return False   # nothing on origin, or local is simply ahead
-    r = ctx.run(["git", "merge-tree", "--write-tree", o, f"refs/heads/{branch}"])
-    return r.returncode == 0 and r.stdout.split("\n", 1)[0].strip() == otree
+        return None
+    chain = ctx.run(["git", "rev-list", "--first-parent", "--max-count=30", f"refs/heads/{branch}",
+                     "--not", o]).stdout.split()
+    for i, c in enumerate(chain):
+        if _carries(o, otree, c):
+            own = reversed(chain[:i])
+            return [x for x in own if len(ctx.run(["git", "rev-list", "--parents", "-n1", x]).stdout.split()) == 2]
+    return None
+
+
+def _replay(onto, commits):
+    """Cherry-pick `commits` onto `onto` in a scratch worktree; the new tip, or "" on conflict."""
+    scratch = tempfile.mkdtemp(prefix="viewer-conform-")
+    os.rmdir(scratch)
+    try:
+        if ctx.run(["git", "worktree", "add", "--detach", scratch, onto]).returncode != 0:
+            return ""
+        for c in commits:
+            if ctx.run(["git", "-C", scratch, "cherry-pick", "--allow-empty", c]).returncode != 0:
+                ctx.run(["git", "-C", scratch, "cherry-pick", "--abort"])
+                return ""
+        return ctx.run(["git", "-C", scratch, "rev-parse", "HEAD"]).stdout.strip()
+    finally:
+        ctx.run(["git", "worktree", "remove", "--force", scratch])
 
 
 def conform_to_origin(branch):
-    """Local is never the stale side (tooling-doctor P6/P7): when origin_has_local, move local to
-    origin's copy. Never loses work (the check above), never touches a dirty holder, and moves
+    """Local is never the stale side (tooling-doctor P6/P7): when origin's copy was rewritten
+    upstream, move local to it, replaying the commits local made after the work origin carries.
+    Never loses work (the result must carry local's tip), never touches a dirty holder, and moves
     the ref only from the tip it checked (compare-and-swap). Returns (ok, words)."""
     origin = ctx.run(["git", "rev-parse", "--verify", "-q", f"refs/remotes/origin/{branch}"]).stdout.strip()
     tip = _tip(branch)
-    if not origin or not origin_has_local(branch):
+    plan = conform_plan(branch) if origin else None
+    if plan is None:
         return False, "local has work origin's copy lacks — not a conform"
+    target = _replay(origin, plan) if plan else origin
+    if not target or not _carries(target, _tree(target), tip):
+        return False, "local's own commits don't replay cleanly onto origin's copy — not a conform"
     holder = next((p for p, b in stage._worktrees() if b == branch), None)
     if holder:
         if stage._dirty(holder):
             return False, f"{holder} holds {branch} with uncommitted changes — commit or stash first"
         if ctx.run(["git", "-C", holder, "rev-parse", "HEAD"]).stdout.strip() != tip:
             return False, "branch moved while checking — reload and retry"
-        r = ctx.run(["git", "-C", holder, "reset", "--hard", origin])
+        r = ctx.run(["git", "-C", holder, "reset", "--hard", target])
     else:
-        r = ctx.run(["git", "update-ref", f"refs/heads/{branch}", origin, tip])
+        r = ctx.run(["git", "update-ref", f"refs/heads/{branch}", target, tip])
     if r.returncode != 0:
         return False, "branch moved while checking — reload and retry"
     n = ctx.run(["git", "rev-list", "--count", f"{origin}..{tip}"]).stdout.strip() or "0"
+    replayed = f"; replayed {len(plan)} local commit{'' if len(plan) == 1 else 's'} on top" if plan else ""
     return True, (f"took origin's copy — it was rewritten upstream (e.g. GitHub rebased it) and already "
-                  f"carries everything local had; {n} old local commit{'' if n == '1' else 's'} retired")
+                  f"carries the rest of local; {n} old local commit{'' if n == '1' else 's'} retired{replayed}")
 
 
 def prep_push(req, raw):
@@ -1069,9 +1107,9 @@ def prep_push(req, raw):
     tip_before = _tip(branch)
     routed = []
 
-    if not v["ff"] and origin_has_local(branch):
-        # someone rewrote origin's copy and local holds nothing it lacks: conform, never a
-        # catch-up merge on top of stale shapes and never a Claude reconcile
+    if not v["ff"] and conform_plan(branch) is not None:
+        # someone rewrote origin's copy and local only adds commits on top of what it carries:
+        # conform (replaying those), never a catch-up merge on stale shapes, never a reconcile
         ctx.run(["git", "fetch", "--quiet", "origin", branch])
         ok, words = conform_to_origin(branch)
         if not ok:

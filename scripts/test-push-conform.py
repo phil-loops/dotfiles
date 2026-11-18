@@ -92,7 +92,7 @@ check("post-merge rebase: the parent's commits live in main's squash, so it stil
 ok, words = push.conform_to_origin("c")
 check("post-merge rebase: local takes origin's copy", ok and git("rev-parse", "c") == git("rev-parse", "origin/c"), words)
 
-# 3 · local has real work origin lacks → never a conform
+# 3 · origin rewritten, and local added a commit after the work origin carries → replay it
 git("checkout", "-q", "-b", "d", m0)
 commit("d.txt", "d\n", "d1")
 git("checkout", "-q", "-b", "gh-d", m1)
@@ -100,11 +100,25 @@ commit("d.txt", "d\n", "d1 (rebased)")
 origin("d", git("rev-parse", "HEAD"))
 git("checkout", "-q", "d")
 commit("d2.txt", "local only\n", "d2")
+git("merge", "-q", "--no-edit", "main")
 git("checkout", "-q", "main")
-before = git("rev-parse", "d")
-check("local work origin lacks is not a conform", not push.origin_has_local("d"))
-ok, _ = push.conform_to_origin("d")
-check("…and conform refuses, leaving local where it was", not ok and git("rev-parse", "d") == before)
+check("a newer local commit on rewritten work is not a plain conform", not push.origin_has_local("d"))
+check("…its plan is that one commit, the catch-up merge left behind", [git("log", "-1", "--format=%s", c) for c in push.conform_plan("d") or []] == ["d2"], push.conform_plan("d"))
+ok, words = push.conform_to_origin("d")
+check("…and conform takes origin's copy with d2 replayed on top",
+      ok and git("rev-parse", "d^") == git("rev-parse", "origin/d") and git("show", "d:d2.txt") == "local only", words)
+
+# 3b · origin changed the work itself → nothing of local's is carried, never a conform
+git("checkout", "-q", "-b", "g", m0)
+commit("g.txt", "g\n", "g1")
+git("checkout", "-q", "-b", "gh-g", m1)
+commit("g.txt", "g, edited on github\n", "g1 (edited)")
+origin("g", git("rev-parse", "HEAD"))
+git("checkout", "-q", "main")
+before = git("rev-parse", "g")
+check("origin's own edit to the work is a real divergence", push.conform_plan("g") is None)
+ok, _ = push.conform_to_origin("g")
+check("…and conform refuses, leaving local where it was", not ok and git("rev-parse", "g") == before)
 
 # 4 · local simply ahead of origin → an ordinary push, not a conform
 git("checkout", "-q", "-b", "e", m0)

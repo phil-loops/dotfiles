@@ -91,10 +91,13 @@ def _route(branch):
               "body": {"branch": branch, "action": "include | stash"}},
              dirty=h["dirty"], dirtyWorktree=h.get("dirtyWorktree", ""))
 
-    if up.get("diverged") and push.origin_has_local(branch):
+    plan = push.conform_plan(branch) if up.get("diverged") else None
+    if plan is not None:
         return send("conform",
              "origin's copy was rewritten upstream (e.g. GitHub rebased it) and already carries "
-             "everything local has — take origin's copy",
+             "everything local has — take origin's copy" if not plan else
+             f"origin's copy was rewritten upstream (e.g. GitHub rebased it); take it and replay "
+             f"local's {len(plan)} newer commit{'' if len(plan) == 1 else 's'} on top",
              {"method": "POST", "path": "/prep-push", "body": {"branch": branch}})
 
     if up.get("diverged") and h.get("published"):
