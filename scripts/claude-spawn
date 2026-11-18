@@ -1,0 +1,26 @@
+#!/bin/zsh
+# claude-spawn <dir> <name> <prompt> — start a Claude Code session an AGENT asked for (a coordinator
+# handing work to a fresh chat), in the detached tmux session `agents`, never in Phil's own
+# sessions. Phil's windows are his: on 2026-11-17 Codex opened a fresh chat as loops:5 between his
+# own windows. Sessions Phil starts himself from canopy keep using stack-claude, which places them
+# beside his panes on purpose.
+#
+#   claude-spawn ~/.dotfiles canopy-impl "Read /tmp/handoff.txt, then implement it."
+#   CLAUDE_SPAWN_MODEL=opus claude-spawn …   pick the model (a plain token)
+#
+# Prints the new pane id. Find the session later with `claude-say` (it lists every Claude pane) or
+# `tmux attach -t agents`.
+emulate -L zsh; set -euo pipefail
+
+(( $# == 3 )) || { print -u2 "usage: claude-spawn <dir> <name> <prompt>"; exit 2; }
+dir="${1:A}" name="$2" prompt="$3"
+[[ -d "$dir" ]] || { print -u2 "claude-spawn: no such dir: $dir"; exit 2; }
+[[ "$name" =~ '^[A-Za-z0-9._-]+$' ]] || { print -u2 "claude-spawn: name is letters, digits, . _ -"; exit 2; }
+model="${CLAUDE_SPAWN_MODEL:-}"
+[[ -z "$model" || "$model" =~ '^[A-Za-z0-9._-]+$' ]] || { print -u2 "claude-spawn: bad model"; exit 2; }
+
+SESSION=agents
+tmux has-session -t "=$SESSION" 2>/dev/null || tmux new-session -d -s "$SESSION" -n home -c "$HOME"
+
+run="claude --dangerously-skip-permissions ${model:+--model $model }\"\$CLAUDE_SPAWN_PROMPT\"; exec \$SHELL"
+tmux new-window -d -t "=$SESSION:" -n "$name" -c "$dir" -P -F '#{pane_id}' -e "CLAUDE_SPAWN_PROMPT=$prompt" "$run"
