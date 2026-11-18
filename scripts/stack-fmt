@@ -152,8 +152,8 @@ for b in "${ORDER[@]}"; do
   #    resolves it semantically-identically and this branch's own format step (below)
   #    re-normalizes. A failure here is therefore a real (delete/modify) conflict.
   if [[ "$MODE" == "write" && -n "${MOVED[$parent]:-}" ]]; then
-    if ! git -C "$dir" rebase -X theirs --onto "${NEWTIP[$parent]}" "${OLDTIP[$parent]}" "$b" >/dev/null 2>&1; then
-      git -C "$dir" rebase --abort >/dev/null 2>&1
+    # rebase-guarded aborts a failed rebase itself, and a death mid-rebase is healed next run
+    if ! "$(cd "$(dirname "$0")" && pwd -P)/rebase-guarded" -C "$dir" -X theirs --onto "${NEWTIP[$parent]}" "${OLDTIP[$parent]}" "$b" >/dev/null 2>&1; then
       echo "  ✗ $b — rebase onto reformatted ${parent} didn't auto-resolve; resolve by hand, then re-run" >&2
       FAIL=1
       break
