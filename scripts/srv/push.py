@@ -112,6 +112,16 @@ def gate_result(run):
     return next((e for e in gate_events(run) if e.get("event") == "result"), None)
 
 
+def tree_reds(branch, tree):
+    """The gates that failed in the branch's finished run for exactly `tree` ([] when no such
+    run, or it's still going) — what the push door names when the gates only advise."""
+    run = gate_run(branch)
+    if not run or not tree or run.meta.get("tree") != tree or run.alive():
+        return []
+    result = gate_result(run) or {}
+    return [g.get("name", "?") for g in result.get("gates", []) if not g.get("ok")]
+
+
 def _tail(path, n):
     try:
         with open(path, "rb") as f:
@@ -770,6 +780,13 @@ def _origin_verdict(branch):
     gates_waived = snap.branch_key_all(branch, "gates-waived") if gates_green else []
     todo = _todo_debt(branch, tip, scan=bool(outgoing))
     chain_broken = _chain_break(branch)
+    # Gate the merge, not the push (tooling-doctor P5, B4): a follow-up onto an open PR is
+    # checked by CI on the push and guarded at the merge, so its gates advise — the door names
+    # what's red and lets it go. A first push still needs them. A red squawk blocks either way:
+    # a migration is the costliest red to ship (it runs against prod on deploy).
+    reds = [] if gates_green else tree_reds(branch, snap.tree(tip))
+    squawk_red = "squawk" in reds
+    gates_advisory = followup and has_outgoing and not squawk_red
 
     def ward(k, label, ok, why, advisory=False):
         return {"k": k, "label": label, "ok": bool(ok), "why": "" if ok else why, "advisory": advisory}
@@ -809,7 +826,11 @@ def _origin_verdict(branch):
         ward("gates", f"gates waived · {waived_by}" if waived_by else
              _gates_label(gates_waived) + (" · carried through the rebase" if gates_how == "delta" else ""),
              gates_green or waived_by,
-             "not green for this exact commit — ⟲ sync runs the gates"),
+             "squawk fails on the migration — fix it before it ships" if squawk_red else
+             (f"gates ✗ {', '.join(reds)} — CI checks it on the push" if reds else
+              "gates not green on this commit — CI checks it on the push") if gates_advisory else
+             "not green for this exact commit — ⟲ sync runs the gates",
+             advisory=gates_advisory),
         # The pre-push TODO ratchet, moved to the door: a TODO clears by naming a ticket the
         # branch acked (`branch.<b>.stack-todo-ack`), so a reviewer-requested marker ships
         # while undeclared debt still stops here.
