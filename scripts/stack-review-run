@@ -169,11 +169,14 @@ def prescan(diff):
     return hits
 
 
-def scope_of(repo, branch, parent, base, tip):
-    """The branch's own words for the scope lens: its description, its parent's, its commit subjects."""
+def scope_of(repo, branch, parent, base, tip, carried=frozenset()):
+    """The branch's own words for the scope lens: its description, its parent's, its commit subjects
+    (its own commits only: carried ones are reviewed on the branch they come from)."""
     desc = git(repo, "config", f"branch.{branch}.description").stdout.strip()
     pdesc = git(repo, "config", f"branch.{parent}.description").stdout.strip() if parent != "main" else ""
-    subjects = git(repo, "log", "--reverse", "--format=%h %s", f"{base}..{tip}").stdout.strip()
+    subjects = "\n".join(ln.split(" ", 1)[1] for ln in
+                         git(repo, "log", "--reverse", "--format=%H %h %s", f"{base}..{tip}").stdout.splitlines()
+                         if ln.split(" ", 1)[0] not in carried)
     text = [f"- description: {desc}" if desc else "- description: (none: the branch has no description; report that, and judge scope by the commits)",
             "- commits, oldest first:\n" + "\n".join(f"    {s}" for s in subjects.splitlines()) if subjects else "- commits: (none)"]
     if parent != "main":
@@ -184,6 +187,41 @@ def scope_of(repo, branch, parent, base, tip):
     if parent != "main":
         covered["parent_description"] = bool(pdesc)
     return "\n".join(text), note, covered
+
+
+def own_base(repo, branch, base, tip):
+    """The base this branch's own work is diffed against: its parent's merge base plus the commits it
+    carries from its `requires` deps.
+    Reviewing parent...branch whole judged carried code as this branch's own scope (2026-11-17: three
+    goal-flip-converter branches flagged for capabilities they only carried). Returns (base, carried
+    shas); if the carried commits don't replay onto the base, the plain base and no carried shas.
+    A commit counts as carried when it is in a dep outright or `git cherry` matches its patch there."""
+    deps = [d for d in git(repo, "config", "--get-all", f"branch.{branch}.stack-requires").stdout.split() if d]
+    carried = set()
+    own = set(git(repo, "rev-list", f"{base}..{tip}").stdout.split())
+    for dep in deps:
+        # in the dep outright (the cherry-pick reproduced its commit) …
+        carried |= own - set(git(repo, "rev-list", f"{dep}..{tip}").stdout.split())
+        # … or a copy of one of its patches
+        for ln in git(repo, "cherry", dep, tip, base).stdout.splitlines():
+            if ln.startswith("- "):
+                carried.add(ln[2:].strip())
+    if not carried:
+        return base, []
+    order = [c for c in git(repo, "rev-list", "--reverse", f"{base}..{tip}").stdout.split() if c in carried]
+    wt = tempfile.mkdtemp(prefix="stack-review-base-")
+    try:
+        if git(repo, "-c", "core.hooksPath=/dev/null", "worktree", "add", "--detach", wt, base).returncode != 0:
+            return base, []
+        pick = ["-c", "core.hooksPath=/dev/null", "-c", "user.name=stack-review-run", "-c", "user.email=stack-review-run@localhost"]
+        for c in order:
+            if git(wt, *pick, "cherry-pick", "--empty=drop", "--allow-empty-message", c).returncode != 0:
+                git(wt, "cherry-pick", "--abort")
+                return base, []
+        return git(wt, "rev-parse", "HEAD").stdout.strip(), order
+    finally:
+        git(repo, "worktree", "remove", "--force", wt)
+        shutil.rmtree(wt, ignore_errors=True)
 
 
 def depth_for(files):
@@ -219,10 +257,11 @@ def main():
     tree = git(repo, "rev-parse", f"{tip}^{{tree}}").stdout.strip()
     parent = git(repo, "config", f"branch.{branch}.stack-parent").stdout.strip() or "main"
     base = git(repo, "merge-base", parent, tip).stdout.strip()
+    base, carried = own_base(repo, branch, base, tip)
     files = [f for f in git(repo, "diff", "--name-only", base, tip).stdout.splitlines() if f]
     depth = a.depth or depth_for(files)
     head = {"branch": branch, "tip": tip, "tree": tree, "parent": parent, "base": base,
-            "depth": depth, "auto": not a.depth, "files": len(files)}
+            "depth": depth, "auto": not a.depth, "files": len(files), "carried": len(carried)}
     if not files:
         return emit(a.out, {"ok": True, **head, "findings": [], "note": "empty diff"})
 
@@ -231,7 +270,7 @@ def main():
     if len(diff) > DIFF_CAP:
         diff = diff[:DIFF_CAP] + f"\n… diff truncated at {DIFF_CAP} chars — read the rest with git diff\n"
     check, quiet = checklist()
-    scope, parent_note, scope_cov = scope_of(repo, branch, parent, base, tip)
+    scope, parent_note, scope_cov = scope_of(repo, branch, parent, base, tip, set(carried))
     listed = "\n".join(f"- {p}:{n}: `{t}`" for p, n, t in hits[:PRESCAN_CAP])
     if len(hits) > PRESCAN_CAP:
         listed += f"\n- … and {len(hits) - PRESCAN_CAP} more: grep the added lines yourself"
