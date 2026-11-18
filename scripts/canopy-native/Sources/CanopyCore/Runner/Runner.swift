@@ -177,6 +177,8 @@ public final class Runner {
             DispatchQueue.main.async { [weak self] in
                 var e = base
                 e["feedbackMs"] = .number((Date().timeIntervalSince(t0) * 10000).rounded() / 10)
+                // the press itself, in ms: the server's `ts` is the second the 3 s batch arrived
+                e["at"] = .number((t0.timeIntervalSince1970 * 1000).rounded())
                 e.merge(extra) { $1 }
                 self?.telemetry.emit(e)
             }

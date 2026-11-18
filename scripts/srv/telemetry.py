@@ -19,13 +19,14 @@ import re
 import threading
 import time
 
-ROLLUP_V = 5   # 3: per-command surface and cold splits; 4: per-launch session stats (refusals, undo-soon, reversed motions); 5: the previous command per launch lives in the cache
+ROLLUP_V = 6   # 3: per-command surface and cold splits; 4: per-launch session stats (refusals, undo-soon, reversed motions); 5: the previous command per launch lives in the cache; 6: gaps read the press time (`at`), not the batch's receipt second
 # Only Phil's own browser counts: Claude's curls, the extension and headless checks would skew
 # the timings this dashboard exists to steer by.
 HUMAN_ACTORS = {"browser", None}
 COLD_MS = 1500   # a key this soon after a page open is a cold one: its wait is the page's first paint
 UNDO_SOON_S = 3    # an undo this soon after a key is a key that did the wrong thing
-REVERSE_S = 1      # j then k (or the like) this close is a motion that overshot or was refused in effect
+REVERSE_S = 1      # j then k (or the like) this close is a motion that overshot — measured on press times (`at`, ms):
+                   # `ts` is the second a 3 s batch arrived, so every key in it shares one (2026-11-18)
 REVERSES = {("cursor.down", "cursor.up"), ("cursor.up", "cursor.down"), ("review.down", "review.up"), ("review.up", "review.down"),
             ("history.next", "history.prev"), ("history.prev", "history.next"), ("review.file.next", "review.file.prev"),
             ("review.file.prev", "review.file.next"), ("review.hunk.next", "review.hunk.prev"), ("review.hunk.prev", "review.hunk.next")}
@@ -133,16 +134,20 @@ def _fold(days, reg, last, e):
         if e.get("outcome") == "refused":
             s["refused"] += 1
         prev = last.get(pl)
-        ts, cid = e.get("ts", 0), e.get("id") or "?"
+        ts, cid, at = e.get("ts", 0), e.get("id") or "?", e.get("at")
         if prev:
-            if cid == "undo" and ts - prev[0] <= UNDO_SOON_S:
+            at0 = prev[2] if len(prev) > 2 else None
+            gap = (at - at0) / 1000 if isinstance(at, (int, float)) and isinstance(at0, (int, float)) else None
+            if cid == "undo" and (gap if gap is not None else ts - prev[0]) <= UNDO_SOON_S:
                 s["undoSoon"] += 1
-            if (prev[1], cid) in REVERSES and ts - prev[0] <= REVERSE_S:
+            # only a measured gap counts, and a refused first move is a bounce off the end, not an overshoot
+            bounced = len(prev) > 3 and prev[3]
+            if (prev[1], cid) in REVERSES and gap is not None and gap <= REVERSE_S and not bounced:
                 s["reversed"] += 1
         if len(last) > 256:   # a launch's pairs only reach back seconds: forget the long-quiet ones
             for k in [k for k, (t0, _) in last.items() if ts - t0 > 600]:
                 del last[k]
-        last[pl] = (ts, cid)
+        last[pl] = (ts, cid, at, e.get("outcome") == "refused")
         k = f"{app}|{e.get('id') or '?'}"
         c = d["cmd"].setdefault(k, {"budget": e.get("budget") or "local", "n": 0, "via": {}, "out": {}, "err": {}, "fb": [], "st": [],
                                     "surf": {}, "cold": [], "warm": []})

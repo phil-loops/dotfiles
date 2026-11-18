@@ -40,8 +40,8 @@ events += [
      "via": "key", "outcome": "ok", "feedbackMs": 12, "surface": "forest", "sinceNavMs": 9000},
 ]
 events += [
-    {"schema": 2, "app": "native", "type": "cmd", "id": "history.next", "ts": now - 10, "actor": actor, "pl": "p1", "budget": "local", "via": "key", "outcome": "ok", "feedbackMs": 5},
-    {"schema": 2, "app": "native", "type": "cmd", "id": "history.prev", "ts": now - 9.5, "actor": actor, "pl": "p1", "budget": "local", "via": "key", "outcome": "ok", "feedbackMs": 5},
+    {"schema": 2, "app": "native", "type": "cmd", "id": "history.next", "ts": now - 10, "at": (now - 10) * 1000, "actor": actor, "pl": "p1", "budget": "local", "via": "key", "outcome": "ok", "feedbackMs": 5},
+    {"schema": 2, "app": "native", "type": "cmd", "id": "history.prev", "ts": now - 9.5, "at": (now - 9.5) * 1000, "actor": actor, "pl": "p1", "budget": "local", "via": "key", "outcome": "ok", "feedbackMs": 5},
     {"schema": 2, "app": "native", "type": "cmd", "id": "words.save", "ts": now - 8, "actor": actor, "pl": "p1", "budget": "git-write", "via": "key", "outcome": "ok", "feedbackMs": 5},
     {"schema": 2, "app": "native", "type": "cmd", "id": "undo", "ts": now - 7, "actor": actor, "pl": "p1", "budget": "local", "via": "key", "outcome": "ok", "feedbackMs": 5},
     {"schema": 2, "app": "native", "type": "cmd", "id": "history.prev", "ts": now - 6, "actor": actor, "pl": "p2", "budget": "local", "via": "key", "outcome": "refused", "err": "already at the top", "feedbackMs": 5},
@@ -75,6 +75,28 @@ resumed = telemetry.summarize(again, days=30, now=now)["sessions"]
 check("a restart mid-launch still pairs the undo with the key before it", resumed == s["sessions"], resumed)
 check("sessions count launches, refusals, an undo right after a key, and a reversed motion",
       sess["launches"] == 2 and sess["refused"] == 1 and sess["undoSoon"] == 1 and sess["reversed"] == 1, sess)
+
+
+# 2026-11-18: one 3 s batch shares one receipt second, so "reversed within 1 s" counted any opposite
+# pair in a batch — and a move refused at the end followed by its opposite counted as an overshoot
+def launch(pl, moves):
+    c = {"days": {}, "registry": None}
+    for i, (cid, at, outcome) in enumerate(moves):
+        e = {"schema": 2, "app": "native", "type": "cmd", "id": cid, "ts": int(now), "actor": actor, "pl": pl,
+             "budget": "local", "via": "key", "outcome": outcome, "feedbackMs": 5}
+        if at is not None:
+            e["at"] = (now + at) * 1000
+        telemetry.fold(c, e)
+    return telemetry.summarize(c, days=30, now=now)["sessions"]["native"]["reversed"]
+
+
+check("one receipt second, presses 2.5 s apart: not a reversal",
+      launch("q1", [("review.down", 0, "ok"), ("review.up", 2.5, "ok")]) == 0)
+check("presses 0.3 s apart: a reversal", launch("q2", [("review.down", 0, "ok"), ("review.up", 0.3, "ok")]) == 1)
+check("a move refused at the end, then back: a bounce, not a reversal",
+      launch("q3", [("review.down", 0, "refused"), ("review.up", 0.2, "ok")]) == 0)
+check("no press times: the gap is unknown, so it isn't counted",
+      launch("q4", [("review.down", None, "ok"), ("review.up", None, "ok")]) == 0)
 
 print(f"\n{'OK' if not failures else 'FAIL'} — {failures} failure(s)")
 sys.exit(1 if failures else 0)
