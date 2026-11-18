@@ -5,7 +5,6 @@ state = "open"
 area = "forests"
 size = "S"
 why = "the routine wins feel like wins instead of silent state changes"
-links = ["wiki/loops/canopy-v2-joy.md"]
 created = "2026-10-25"
 updated = "2026-10-25"
 +++

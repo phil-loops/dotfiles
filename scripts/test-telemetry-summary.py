@@ -23,10 +23,10 @@ actor = next(a for a in telemetry.HUMAN_ACTORS if a)
 cache = {"v": telemetry.ROLLUP_V, "ino": None, "off": 0, "days": {}, "registry": None}
 events = [
     {"schema": 2, "app": "native", "type": "registry", "ts": now - 60,
-     "commands": [{"id": "cursor.down"}, {"id": "cursor.halfdown"}, {"id": "review.down"}, {"id": "nav.wiki", "v1": ["key:w"]}]},
+     "commands": [{"id": "cursor.down"}, {"id": "cursor.halfdown"}, {"id": "review.down"}, {"id": "nav.tutor", "v1": ["key:t"]}]},
     {"schema": 2, "app": "native", "type": "cmd", "id": "cursor.halfdown", "ts": now - 30, "actor": actor,
      "budget": "local", "via": "key", "outcome": "ok", "feedbackMs": 8},
-    {"schema": 2, "app": "native", "type": "cmd", "id": "nav.wiki", "ts": now - 30, "actor": actor,
+    {"schema": 2, "app": "native", "type": "cmd", "id": "nav.tutor", "ts": now - 30, "actor": actor,
      "budget": "local", "via": "key", "outcome": "ok", "feedbackMs": 9},
     {"schema": 2, "app": "v2", "type": "cmd", "id": "cursor.down", "ts": now - 30, "actor": actor,
      "budget": "local", "via": "key", "outcome": "ok", "feedbackMs": 5},
@@ -52,7 +52,7 @@ s = telemetry.summarize(cache, days=30, now=now)
 
 check("a native command with uses is not never-used", "cursor.halfdown" not in s["neverUsed"], s["neverUsed"])
 check("a registered command only v2 used is never-used for native", "cursor.down" in s["neverUsed"], s["neverUsed"])
-pair = next((p for p in s["pairs"] if p["id"] == "nav.wiki"), None)
+pair = next((p for p in s["pairs"] if p["id"] == "nav.tutor"), None)
 check("a v1 pair reads the registry app's row", pair is not None and (pair["v2"] or {}).get("app") == "native", pair)
 
 down = next(c for c in s["commands"] if c["app"] == "native" and c["id"] == "review.down")

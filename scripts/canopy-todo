@@ -4,7 +4,7 @@ list, plus a todo list per forest (items with --project <repo>:<stack-project>, 
 <stack-project> in the current repo). Without --project every command works on the viewer's list.
 
   canopy-todo add "Fix the o key in line-by-line view" --kind fix --area review --size S \\
-      --why "opens Helix on the wrong line" [--link wiki/loops/x.md] [--waiting "…"] [--body -] [--solved-by <branch>]
+      --why "opens Helix on the wrong line" [--link memory:x.md] [--waiting "…"] [--body -] [--solved-by <branch>]
   canopy-todo ls [--all] [--json] [--project P|all]   open work in rank order (--all adds done/dropped)
   canopy-todo show <id>
   canopy-todo claim <id>                take it before building: state=doing, owner=this session; refused while

@@ -49,4 +49,3 @@ Harness-bundled skills (artifact-*, dataviz, run, …) are Anthropic-owned — n
 - `~/.dotfiles/OWNERS` — lane map, read by `own` and the own-hook.
 - Hooks (`~/.claude/settings.json`): own-hook (PreToolUse lane guard), claude-session-track
   (SessionStart presence) — enforcement/telemetry; their output reaches Claude as tool feedback.
-- Viewer Wiki tab — human-facing docs; in context only when a session reads them.

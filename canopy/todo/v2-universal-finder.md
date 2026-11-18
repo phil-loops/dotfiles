@@ -5,7 +5,6 @@ state = "done"
 area = "keys"
 size = "M"
 why = "one keystroke reaches anything, which is what lets the rail shrink to Forests"
-links = ["wiki/loops/canopy-v2-interaction.md", "wiki/loops/canopy-v2-plan.md"]
 created = "2026-10-25"
 updated = "2026-10-27"
 +++

@@ -90,7 +90,6 @@ hx --health typescript         # language server found via volta
 | `.claude/` | Claude Code `settings.json`, agents, skills (linked to `~/.claude/`) |
 | `OWNERS` | file lanes for concurrent Claude sessions; `own` reads it |
 | `patches/` | patch artifacts from the concurrent-session edit protocol |
-| `wiki/` | notes the viewer's Wiki tab serves |
 
 ## Working in this repo
 
