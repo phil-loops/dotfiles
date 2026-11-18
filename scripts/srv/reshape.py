@@ -18,7 +18,7 @@ import os
 import re
 import tempfile
 
-from . import catchup, ctx, rebaseguard, sync
+from . import catchup, ctx, rebaseguard, sync, workjournal
 
 TRUNKS = catchup.TRUNKS
 
@@ -100,12 +100,38 @@ def new(branch, parent, project, description):
     base = _base(parent)
     if not _sha(base):
         raise Refused(f"no {base} to start {branch} from")
+    work = _mint_work(branch, project, description.strip())
     _ok("branch", "--no-track", branch, base)
+    _ok("config", f"branch.{branch}.stack-work", work)
     _ok("config", f"branch.{branch}.description", description.strip())
     _ok("config", f"branch.{branch}.stack-parent", "main" if parent in TRUNKS else parent)
     _ok("config", f"branch.{branch}.stack-project", project)
     _ok("config", "--add", f"stack-project.{project}.branch", branch)
-    return {"ok": True, "branch": branch, "parent": parent or "main", "sha": _sha(f"refs/heads/{branch}")[:10]}
+    return {"ok": True, "branch": branch, "parent": parent or "main", "sha": _sha(f"refs/heads/{branch}")[:10], "work": work}
+
+
+def _mint_work(branch, project, title):
+    """The branch's work identity, made before the branch so a journal that can't write leaves no
+    branch behind; a work whose branch never lands is inert."""
+    j = workjournal.Journal()
+    try:
+        return j.mint_branch_work(ctx.repo_name(), branch, project=project, title=title)
+    finally:
+        j.close()
+
+
+def _relabel_work(branch):
+    work = _git("config", f"branch.{branch}.stack-work").stdout.strip()
+    if not work:
+        return None
+    j = workjournal.Journal()
+    try:
+        j.relink(work, branch=branch)
+        return work
+    except workjournal.JournalError as e:
+        return f"label not moved: {e}"
+    finally:
+        j.close()
 
 
 def reparent(branch, new_parent, description=""):
@@ -200,7 +226,7 @@ def rename(old, new_name):
         key = key.replace(f"branch.{old}.", f"branch.{new_name}.", 1) if key.startswith(f"branch.{old}.") else key
         _unset_value(key, old)
         _ok("config", "--add", key, new_name)
-    return {"ok": True, "from": old, "to": new_name, "children": kids}
+    return {"ok": True, "from": old, "to": new_name, "children": kids, "work": _relabel_work(new_name)}
 
 
 def catch_up(branch):

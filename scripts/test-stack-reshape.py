@@ -23,6 +23,17 @@ def check(name, ok, detail=""):
 
 
 repo = os.path.join(tempfile.mkdtemp(prefix="reshape-"), "r")
+env["CANOPY_WORK_JOURNAL"] = os.path.join(os.path.dirname(repo), "journal.sqlite3")
+sys.path.insert(0, HERE)
+from srv import workjournal  # noqa: E402
+
+
+def work_of(work_id):
+    j = workjournal.Journal(env["CANOPY_WORK_JOURNAL"])
+    try:
+        return j.work(work_id) or {}
+    finally:
+        j.close()
 subprocess.run(["git", "init", "-q", "-b", "main", repo], check=True, env=env)
 
 
@@ -63,6 +74,9 @@ check("new: created", rc == 0 and git("rev-parse", "a") == git("rev-parse", "ori
 check("new: purpose, parent, project and registry set",
       cfg("branch.a.description") == ["add", "a"] and cfg("branch.a.stack-parent") == ["main"]
       and cfg("branch.a.stack-project") == ["f"] and cfg("stack-project.f.branch") == ["a"])
+work_a = (cfg("branch.a.stack-work") or [""])[0]
+check("new: the branch carries its own work identity", work_a.startswith("w_") and out.get("work") == work_a
+      and work_of(work_a).get("branch") == "a" and work_of(work_a).get("todo_id") is None, (out, work_a))
 rc, out, _ = reshape("new", "x", "--parent", "main", "--project", "f")
 check("new: refused without a purpose", rc == 1 and "description" in out.get("err", ""), out)
 
@@ -95,6 +109,12 @@ check("rename: registry follows", sorted(cfg("stack-project.f.branch")) == ["a",
 check("rename: child's parent follows", cfg("branch.c.stack-parent") == ["b2"])
 check("rename: an after edge follows", cfg("branch.c.stack-after") == ["b2"], cfg("branch.c.stack-after"))
 check("rename: config carried", cfg("branch.b2.description")[-1] == "own")
+work_b = (cfg("branch.b2.stack-work") or [""])[0]
+check("rename: the work identity follows and its label moves", work_b.startswith("w_") and out.get("work") == work_b
+      and work_of(work_b).get("branch") == "b2", (out, work_b))
+rc, out, err = reshape("new", "b", "--parent", "main", "--project", "f", "--description", "a new b")
+check("a recreated name gets a new identity", rc == 0 and cfg("branch.b.stack-work")[0] not in ("", work_b), (rc, out, err))
+reshape("contract", "b")
 rc, out, _ = reshape("rename", "a", "a2")
 check("rename: a published branch is Phil's call", rc == 1 and "published" in out.get("err", ""), out)
 
