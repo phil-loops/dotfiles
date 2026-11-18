@@ -79,6 +79,15 @@ struct ForestsPage: View {
         .onChange(of: m.closedIDs(), initial: true) { _, _ in m.syncClosings() }
         .task { await tick(m) }
         .task { await pollReviews(m) }
+        // a diverged branch's situation turns on its tip's prep route and force scope: the home reads them too, so
+        // its dot and `p` on the branch's page say the same thing
+        .task(id: divergedKey(fs)) {
+            let ship = ShipState.of(app)
+            for v in fs.values.flatMap(\.branches) where v.b.diverged && v.st.ship != .landed {
+                ship.readFacts(app, v.b, key: ShipState.factsKey(v.b, ship.motionOf(v.b.id)))
+                ship.readForceScope(app, v.b.id)
+            }
+        }
         // the cursor landing on a branch warms its review page's diff (Forests.tsx warmSelected)
         .onChange(of: cursor, initial: true) { _, k in
             if let b = RowKey.id(k, "b").flatMap({ app.store.view(Branch.self, $0) }) { ReviewPageState.of(app).warm(repo: b.repo, name: b.name, at: b.tip) }
@@ -120,6 +129,10 @@ struct ForestsPage: View {
             }
             .padding(.bottom, 28)
         }
+    }
+
+    private func divergedKey(_ fs: [String: ForestView]) -> String {
+        fs.values.flatMap(\.branches).filter { $0.b.diverged && $0.st.ship != .landed }.map { "\($0.b.id)@\($0.b.tip)" }.sorted().joined(separator: ",")
     }
 
     private func pollReviews(_ m: ForestModel) async {

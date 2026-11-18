@@ -56,10 +56,12 @@ public final class ShipState {
     // ── the strip's reads, per branch, keyed by what they depend on ──
     /// `key` is the read last asked for, `read` the one whose answer `value` is — they differ
     /// while a newer read is in flight, and the old answer then draws dimmed and routes nothing
-    public private(set) var facts: [String: (key: String, value: SyncFacts?, read: String)] = [:]
-    public private(set) var prep: [String: (key: String, value: PrepRoute?, read: String)] = [:]
-    public private(set) var progress: [String: (key: String, value: GateProgress?)] = [:]
-    public private(set) var forceScopes: [String: (key: String, value: ForceScope??)] = [:]
+    public private(set) var facts: [String: (key: String, value: SyncFacts?, read: String)] = [:] { didSet { readsVersion &+= 1 } }
+    public private(set) var prep: [String: (key: String, value: PrepRoute?, read: String)] = [:] { didSet { readsVersion &+= 1 } }
+    public private(set) var progress: [String: (key: String, value: GateProgress?)] = [:] { didSet { readsVersion &+= 1 } }
+    public private(set) var forceScopes: [String: (key: String, value: ForceScope??)] = [:] { didSet { readsVersion &+= 1 } }
+    /// moves with every read above: a branch's situation is derived from them, so its memo keys on this
+    public private(set) var readsVersion = 0
     public private(set) var divergence: [String: DivergedDetail?] = [:]
     /// the gate whose output the strip shows instead of the running one's — "<branch id> <gate>"
     public var gateShown: String?
@@ -268,6 +270,14 @@ public final class ShipState {
         let last = lastReads(b.id)
         guard let f = last.facts, !last.stale, prepFresh(b.id) else { return nil }
         return Syncing.needs(b, facts: f, prep: last.prep)
+    }
+
+    /// The reads made for a branch's tip, as its situation takes them — the same for every surface that shows it.
+    public func situationReads(_ app: AppModel, _ b: Branch) -> SituationReads {
+        let scope = forceScopeOf(app, b.id) ?? nil
+        return SituationReads(prepRoute: prepOf(b.id)?.route, prepRead: prepFresh(b.id),
+                              force: scope.map { ($0.eligible, !$0.guards.allSatisfy { $0.ok || $0.k == "gates" }) },
+                              gatesCanPutNext: GatesRun.canPutNext(GatesRun.setup(progressOf(b.id))))
     }
 
     static func scopeKey(_ b: Branch) -> String { "\(b.tip)|\(b.ahead)|\(b.gates.rawValue)" }

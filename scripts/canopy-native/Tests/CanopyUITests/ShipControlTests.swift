@@ -14,39 +14,44 @@ import Testing
         return try #require(app.store.view(Branch.self, ShipTests.branch))
     }
 
-    @Test func aSyncedBranchKeepsAnExplicitPushState() throws {
-        let branch = try branch(["pushed": "synced", "ahead": 0])
-        #expect(ShipControlState.push(branch, route: nil, contextKnown: true) == ShipControlState(enabled: false, reason: "up to date on origin"))
+    /// The push button for a branch with these fields, as the strip builds it: its route, else its situation's sentence.
+    func control(_ fields: JSONObject) throws -> ShipControlState {
+        let subject = ShipTests()
+        let (app, _) = try subject.app { state in
+            subject.entity(&state, "branch", ShipTests.branch) { branch in branch.merge(fields) { _, new in new } }
+        }
+        let v = try #require(app.forestModel.branchView(ShipTests.branch))
+        return ShipControlState.push(route: ReviewCommands.pushRoute(app, v.b.id), situation: ShipRules.says(v.st, v.b, v.pr))
     }
 
-    @Test func missingContextCannotClaimTheBranchIsUpToDate() throws {
-        let branch = try branch(["pushed": "synced", "ahead": 0])
-        #expect(ShipControlState.push(branch, route: nil, contextKnown: false) == ShipControlState(enabled: false, reason: "branch details unavailable"))
+    @Test func aSyncedBranchSaysItsNextStepNotAPushState() throws {
+        // the fixture's PR has changes requested: that, not a push state, is what the button says
+        let c = try control(["pushed": "synced", "ahead": 0, "gates": "green"]); #expect(c == ShipControlState(enabled: false, reason: "changes requested"), "\(c)")
     }
 
-    @Test func aPendingOperationKeepsItsOwnReason() throws {
-        let branch = try branch(["pending": "pushing", "pushed": "synced"])
-        #expect(ShipControlState.push(branch, route: nil, contextKnown: true).reason == "branch operation pending")
+    @Test func missingContextCannotClaimTheBranchIsUpToDate() {
+        #expect(ShipControlState.push(route: nil, situation: nil) == ShipControlState(enabled: false, reason: "branch details unavailable"))
+    }
+
+    @Test func aPendingOperationSaysSo() throws {
+        #expect(try control(["pending": "pushing", "pushed": "synced"]).reason == "pushing…")
     }
 
     @Test func noCommitsCannotBecomeAnEnabledPush() throws {
-        let branch = try branch(["commits": 0, "pushed": "local"])
-        #expect(ShipControlState.push(branch, route: nil, contextKnown: true) == ShipControlState(enabled: false, reason: "no changes to push"))
+        let c = try control(["commits": 0, "pushed": "local"]); #expect(!c.enabled, "\(c)")
     }
 
     @Test(arguments: ["branch.gates.run", "branch.gates.next", "branch.push.arm", "branch.push.confirm", "branch.force.arm", "branch.force.confirm"])
-    func anAvailableRouteKeepsItsExistingAction(_ route: String) throws {
-        #expect(ShipControlState.push(try branch(), route: route, contextKnown: true) == ShipControlState(enabled: true, reason: nil))
+    func anAvailableRouteKeepsItsExistingAction(_ route: String) {
+        #expect(ShipControlState.push(route: route, situation: "x") == ShipControlState(enabled: true, reason: nil))
     }
 
-    @Test func aProofBranchStaysVisibleWithoutOfferingAPush() throws {
-        let branch = try branch()
-        #expect(ShipControlState.push(branch, route: "branch.proof", contextKnown: true) == ShipControlState(enabled: false, reason: "proof branches do not push"))
+    @Test func aProofBranchStaysVisibleWithoutOfferingAPush() {
+        #expect(ShipControlState.push(route: "branch.proof", situation: "proof run green") == ShipControlState(enabled: false, reason: "proof branches do not push"))
     }
 
-    @Test func divergenceDoesNotClaimItIsStillChecking() throws {
-        let branch = try branch(["diverged": true])
-        #expect(ShipControlState.push(branch, route: nil, contextKnown: true) == ShipControlState(enabled: false, reason: "origin replacement unavailable"))
+    @Test func divergenceWithNoReadSaysItIsReading() throws {
+        #expect(try control(["diverged": true, "pushed": "ahead", "ahead": 1]) == ShipControlState(enabled: false, reason: "reading origin…"))
     }
 
     @Test func aMissingForestKeepsTheUnavailableReasonAndCannotSend() throws {
@@ -59,7 +64,7 @@ import Testing
         #expect(app.forestModel.branchView(branch.id) == nil)
         let route = ReviewCommands.pushRoute(app, branch.id)
         #expect(route == nil)
-        #expect(ShipControlState.push(branch, route: route, contextKnown: false).reason == "branch details unavailable")
+        #expect(ShipControlState.push(route: route, situation: nil).reason == "branch details unavailable")
         app.runner.dispatch("review.push", via: .key, target: branch.id)
         #expect(app.runner.armed == nil)
         #expect(ShipStub.posts(port).isEmpty)
@@ -76,7 +81,7 @@ import Testing
         }
         let branch = try #require(app.store.view(Branch.self, ShipTests.branch))
         #expect(ReviewCommands.pushRoute(app, branch.id) == "branch.push.arm")
-        #expect(ShipControlState.push(branch, route: ReviewCommands.pushRoute(app, branch.id), contextKnown: true).enabled)
+        #expect(ShipControlState.push(route: ReviewCommands.pushRoute(app, branch.id), situation: nil).enabled)
         app.runner.dispatch("review.push", via: .click, target: branch.id)
         #expect(app.runner.armed == BranchCommands.pushArm(branch.id))
         #expect(ReviewCommands.pushRoute(app, branch.id) == "branch.push.confirm")
@@ -139,7 +144,7 @@ import Testing
         let branch = try #require(app.store.view(Branch.self, ShipTests.branch))
         let route = ReviewCommands.pushRoute(app, branch.id)
         #expect(route == "branch.gates.next")
-        #expect(ShipControlState.push(branch, route: route, contextKnown: true).enabled)
+        #expect(ShipControlState.push(route: route, situation: nil).enabled)
         app.runner.dispatch("review.push", via: .click, target: branch.id)
         await until("the gate priority request") { !ShipStub.posts(port).isEmpty }
         let post = try #require(ShipStub.posts(port).first)
