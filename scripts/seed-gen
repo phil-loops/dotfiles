@@ -37,6 +37,10 @@
 #
 # NB: .gen does NOT reduce tsc memory — purely correctness.
 set -u
+# seed-gen only reads git, and the hooks run it in the background while the same worktree may
+# be mid-rebase: `git status` refreshing the index took index.lock and stopped three rebases
+# halfway (2026-11-17). Optional locks off = it can never hold a lock a real git command needs.
+export GIT_OPTIONAL_LOCKS=0
 
 realpath_of(){ (cd "$1" 2>/dev/null && pwd -P); }
 
