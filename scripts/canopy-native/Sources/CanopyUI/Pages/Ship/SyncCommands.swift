@@ -304,20 +304,23 @@ struct SyncMotionDriver {
         await finish(id, via: via, .done)
     }
 
-    /// Bring a sync stash back once the motion is over, whatever stopped it.
+    /// Bring a sync stash back once the motion is over, whatever stopped it. A motion that ends clean leaves no steps
+    /// behind: what it did is said once, and the ship line already reads the branch's new state.
     func finish(_ id: String, via: Via, _ phase: SyncPhase) async {
         ship.patch(id) { [tip = branch(id)?.tip] m in m.phase = phase; m.tip = tip ?? m.tip }
         let failed = ship.motionOf(id)?.steps.first { $0.state == .fail }
         let name = shipLeaf(branch(id)?.name ?? id)
         switch phase {
-        case .done: app.runner.say("synced \(name)")
+        case .done: app.runner.say(ship.motionOf(id).map { Syncing.doneLine(name, $0.steps) } ?? "synced \(name)")
         case .stopped: app.runner.say("\(name): \(failed?.label ?? "sync") — \((failed?.note ?? "stopped").components(separatedBy: "\n")[0])")
         default: app.runner.say("\(name): \(phase.word ?? "")")
         }
-        guard ship.motionOf(id)?.stashed == true else { return }
-        let r = await step("branch.sync.dirt", id, via, ["action": "pop"])
-        ship.patch(id) { $0.stashed = false }
-        ship.setStep(id, .dirt, r.ok ? .ok : .fail, r.ok ? "stash popped — your uncommitted changes are back" : "the stash didn't pop (still stashed):\n\(r.body["err"]?.string ?? "")")
+        if ship.motionOf(id)?.stashed == true {
+            let r = await step("branch.sync.dirt", id, via, ["action": "pop"])
+            ship.patch(id) { $0.stashed = false }
+            ship.setStep(id, .dirt, r.ok ? .ok : .fail, r.ok ? "stash popped — your uncommitted changes are back" : "the stash didn't pop (still stashed):\n\(r.body["err"]?.string ?? "")")
+        }
+        if phase == .done, ship.motionOf(id)?.steps.contains(where: { $0.state == .fail }) == false { ship.motions[id] = nil }
     }
 
     func reseatWhy(_ body: JSONObject) -> String {

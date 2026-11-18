@@ -259,11 +259,14 @@ struct StepsStrip: View {
                     Text("\(stepIcon[s.state] ?? "·") \(s.label)").foregroundStyle(stepColor(s.state, theme))
                 }
                 if !vertical { Spacer(minLength: 0) }
-                if motion.phase != .running && motion.phase != .dirt { KeyButton(title: "put away", id: "review.sync.dismiss", target: branchID) }
+                if !vertical && motion.phase != .running && motion.phase != .dirt { KeyButton(title: "put away", id: "review.sync.dismiss", target: branchID) }
             }
             ForEach(motion.steps.filter { $0.note != nil }, id: \.id) { s in
                 (Text(s.label).bold() + Text(" \(s.note ?? "")")).foregroundStyle(s.state == .fail ? theme.ember : theme.inkDim)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+            if vertical && motion.phase != .running && motion.phase != .dirt {
+                KeyButton(title: "put away", id: "review.sync.dismiss", target: branchID).padding(.top, 4)
             }
             if motion.phase == .dirt, let dirt = motion.dirt {
                 let open = ship.dirtOpen.flatMap { $0.hasPrefix("\(branchID)|") ? String($0.dropFirst(branchID.count + 1)) : nil }
