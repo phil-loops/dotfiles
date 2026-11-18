@@ -107,7 +107,8 @@ def new(branch, parent, project, description):
     _ok("config", f"branch.{branch}.stack-parent", "main" if parent in TRUNKS else parent)
     _ok("config", f"branch.{branch}.stack-project", project)
     _ok("config", "--add", f"stack-project.{project}.branch", branch)
-    return {"ok": True, "branch": branch, "parent": parent or "main", "sha": _sha(f"refs/heads/{branch}")[:10], "work": work}
+    return {"ok": True, "branch": branch, "parent": parent or "main", "sha": _sha(f"refs/heads/{branch}")[:10], "work": work,
+            "bound": _bind_creator(work)}
 
 
 def _mint_work(branch, project, title):
@@ -116,6 +117,22 @@ def _mint_work(branch, project, title):
     j = workjournal.Journal()
     try:
         return j.mint_branch_work(ctx.repo_name(), branch, project=project, title=title)
+    finally:
+        j.close()
+
+
+def _bind_creator(work):
+    """Adds the new branch's work to the binding of the chat that made it (round 27, P4); a branch
+    made from canopy or a script has no chat, and says so."""
+    session = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+    if not session:
+        return None
+    j = workjournal.Journal()
+    try:
+        j.bind_session(session, [work], by="stack-reshape new")
+        return session
+    except workjournal.JournalError as e:
+        return f"not bound: {e}"
     finally:
         j.close()
 
