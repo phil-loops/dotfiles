@@ -1,7 +1,7 @@
 +++
 title = "Name the broken link and offer the sync when a push is refused for a moved ancestor"
 kind = "fix"
-state = "open"
+state = "done"
 area = "push"
 size = "S"
 why = "'retry the push' was offered for a refusal no retry can fix, and the message was cut off before the branch that moved"
@@ -20,3 +20,6 @@ The push's chain ward (`push.py` `_chain_break`) found `origin/let-disable-take-
 2. The message never truncates the branch name: put the moved branch first ("let-disable-… moved on origin — catch cite-… and this branch up"), or wrap.
 3. Prevention (tooling-doctor): a commit pushed to a stacked branch flags its descendants as owing a catch-up, so the chain shows the debt before anyone presses push.
 4. Test: a push refused by the chain ward routes `p` to the catch-up, never to a retry.
+
+## Done
+2026-11-17 — bab290ae owes + /catch-up, the chain refusal names the step; this commit: p reads 'catch up to <link> first' and runs it, and 'take origin's copy' for a GitHub-side rewrite
