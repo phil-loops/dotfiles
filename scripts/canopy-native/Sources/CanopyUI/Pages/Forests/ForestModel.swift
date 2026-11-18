@@ -9,6 +9,14 @@ public struct BranchView: Equatable {
     public var st: Stand
     /// the compare form's base: the parent while it's unlanded, else trunk
     public var base: String
+    /// the chats on it — bound to it or acting on it (rounds 27–28); the situation's agent reads the same list
+    var chats: [WorkContext.Chat] = []
+
+    /// Whether someone other than Phil is on it: an agent holds its move, or finished a turn and handed it back.
+    public var worked: Bool {
+        if case .agent = st.actor { return true }
+        return st.awaiting != nil
+    }
 }
 
 /// One forest as the pages show it.
@@ -140,7 +148,8 @@ public final class ForestModel {
                 let pv = pb.map { viewOf($0, depth + 1) }
                 let parent = pv.map { ParentStand(ship: $0.st.ship, pr: $0.pr, name: $0.b.name) }
                 let pr = prs[b.id]
-                let v = BranchView(b: b, pr: pr, st: ShipRules.stand(b, pr, parent, now: now, reads: readsOf(b, agents[b.id]?.first, chats[b.id] ?? [])), base: ShipRules.baseFor(b, parent, trunk: trunk))
+                let v = BranchView(b: b, pr: pr, st: ShipRules.stand(b, pr, parent, now: now, reads: readsOf(b, agents[b.id]?.first, chats[b.id] ?? [])), base: ShipRules.baseFor(b, parent, trunk: trunk),
+                                   chats: chats[b.id] ?? [])
                 seen[b.id] = v
                 return v
             }
