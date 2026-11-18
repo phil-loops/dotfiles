@@ -61,6 +61,9 @@ EPOCH = f"{os.getpid():x}{int(time.time()):x}"
 DOMAINS = ("git", "remote", "review", "todo")
 RING = 128
 REVIEW_TYPES = ("conv", "thread", "draft", "viewed")
+# what the git domain carries: _git_entities builds exactly these and the merge keeps exactly these —
+# one list, so a type built is a type delivered (gaterun was built and dropped, 2026-11-18)
+GIT_TYPES = ("repo", "project", "branch", "gaterun")
 TICK = 0.5
 _TRUNKS = ("main", "master")
 
@@ -226,7 +229,7 @@ def _git_entities(name, snap, jobs):
     graph = _graph(snap, trunk, tips)
     trees = snap.head_trees()
     ents = {"repo": {name: {"id": name, "name": name, "main": main, "trunk": snap.sha.get(f"refs/remotes/{trunk}", snap.local(main))}},
-            "project": {}, "branch": {}, "gaterun": {}}
+            **{t: {} for t in GIT_TYPES if t != "repo"}}
     behind = _behind_trunk(snap, trunk, member)
     sizes = collections.Counter(member.values())
     order = {}
@@ -400,7 +403,7 @@ def refresh():
         built = None
         if fp != _D["git"].fp:
             built = _merge(_each_repo(lambda n: _git_entities(n, probes[n][0], probes[n][1]) if n in probes else {}).values(),
-                           ("repo", "project", "branch"))
+                           GIT_TYPES)
         _commit("git", built, fp, git_as_of)
         git = _D["git"].ents
         remote = _each_repo(lambda n: _remote_entities(n, git))

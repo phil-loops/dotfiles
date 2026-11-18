@@ -98,5 +98,19 @@ check("a move refused at the end, then back: a bounce, not a reversal",
 check("no press times: the gap is unknown, so it isn't counted",
       launch("q4", [("review.down", None, "ok"), ("review.up", None, "ok")]) == 0)
 
+# 2026-11-18: the per-launch record grew to (ts, id, at, refused) and the cleanup past 256 launches
+# still unpacked two — the fold raised and the rollup offset never advanced again
+many = {"days": {}, "registry": None}
+try:
+    for i in range(300):
+        telemetry.fold(many, {"schema": 2, "app": "native", "type": "cmd", "id": "cursor.down", "ts": now - 5000 + i * 10,
+                              "at": (now - 5000 + i * 10) * 1000, "actor": actor, "pl": f"launch{i}", "budget": "local",
+                              "via": "key", "outcome": "ok", "feedbackMs": 5})
+    folded = True
+except Exception as e:
+    folded = e
+check("a fold past 256 launches forgets the quiet ones instead of raising", folded is True, folded)
+check("…and keeps the live ones", 0 < len(many["last"]) <= 300, len(many.get("last", {})))
+
 print(f"\n{'OK' if not failures else 'FAIL'} — {failures} failure(s)")
 sys.exit(1 if failures else 0)

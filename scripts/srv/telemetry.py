@@ -145,7 +145,7 @@ def _fold(days, reg, last, e):
             if (prev[1], cid) in REVERSES and gap is not None and gap <= REVERSE_S and not bounced:
                 s["reversed"] += 1
         if len(last) > 256:   # a launch's pairs only reach back seconds: forget the long-quiet ones
-            for k in [k for k, (t0, _) in last.items() if ts - t0 > 600]:
+            for k in [k for k, v in last.items() if ts - v[0] > 600]:
                 del last[k]
         last[pl] = (ts, cid, at, e.get("outcome") == "refused")
         k = f"{app}|{e.get('id') or '?'}"
