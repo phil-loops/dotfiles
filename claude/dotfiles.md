@@ -23,6 +23,6 @@ Land when the file goes quiet, or hand the `.patch` to the session that owns the
 
 ## Messaging between sessions
 
-`claude-say <who> "<note>"` sends to another Claude tmux session by default. Use `--draft` only for text a human must finish; the helper refuses non-Claude panes and leaves a draft when the target composer already holds text.
+`claude-say <who> "<note>"` sends to another Claude tmux session by default. A NEW session you hand work to starts with `claude-spawn <dir> <name> "<prompt>"` (detached tmux session `agents`), never a window in Phil's own sessions. Use `--draft` only for text a human must finish; the helper refuses non-Claude panes and leaves a draft when the target composer already holds text.
 
 For Codex replies, use `/codex-reply` or `~/.dotfiles/scripts/codex-pane-say`: Phil runs Codex in the CLI, and the helper submits a signed note into the one tmux pane titled for the chat, refusing if its composer holds text. Phil authorized attributed Opus research replies to the chat titled **Review override cases**; tests go only to a throwaway Codex pane Phil names. (The GUI IPC bridge `codex-say` was retired 2026-10-22 after a desktop update broke its build pin.)
