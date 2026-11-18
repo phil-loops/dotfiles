@@ -257,6 +257,16 @@ time.sleep(float(os.environ.get('GATE_TEST_SECONDS', '0.05')))
         self.finish()
         self.assertEqual(self.log.read_text().splitlines(), ["b", "a"])
 
+    def test_put_next_goes_ahead_of_earlier_clicks_latest_press_first(self):
+        self.start("a", "interactive")
+        _, second, _ = self.start("b", "interactive")
+        _, agent, _ = self.start("clicked")
+        queue.promote(second)
+        queue.promote(agent)
+        self.release()
+        self.finish()
+        self.assertEqual(self.log.read_text().splitlines(), ["clicked", "b", "a"])
+
     def test_obsolete_queued_tree_never_runs(self):
         _, _, progress = self.start("a")
         write(self.repo, "lib/used.ts", "export const used = 4;\n")

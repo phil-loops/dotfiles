@@ -59,7 +59,7 @@ import Testing
             GateEvent(event: "queued", ts: 0),
             GateEvent(event: "setup", ts: 10, step: "queue", position: 2, behind: "move-notices-out-of-the-feed")])
         let w = GatesRun.waiting(queued, rows: GatesRun.rows(queued, now: 70), inFlight: true, now: 70)
-        #expect(w?.text == "#2 in line for gates · move-notices-out-of-the-feed running" && w?.secs == 60 && w?.stuck == false)
+        #expect(w?.text == "#2 in line for gates · move-notices-out-of-the-feed running · p puts it next" && w?.secs == 60 && w?.stuck == false)
         let checkout = GateProgress(running: true, elapsed: 4452, events: [GateEvent(event: "setup", ts: 0, step: "checkout")])
         let s = GatesRun.waiting(checkout, rows: GatesRun.rows(checkout, now: 4452), inFlight: true, now: 4452)
         #expect(s?.text == "stuck preparing the checkout" && s?.stuck == true)
@@ -68,7 +68,7 @@ import Testing
         #expect(GatesRun.waiting(agentsAhead, rows: [], inFlight: true, now: 1)?.text == "#9 in line · behind 3 ready to ship, 5 agent · p puts it next")
         let clicked = GateProgress(running: true, events: [GateEvent(event: "setup", ts: 0, step: "queue", position: 2, behind: "a",
                                                                      ahead: ["interactive": 1, "ship": 0, "background": 0], tier: "interactive")])
-        #expect(GatesRun.waiting(clicked, rows: [], inFlight: true, now: 1)?.text == "#2 in line for gates · a running")
+        #expect(GatesRun.waiting(clicked, rows: [], inFlight: true, now: 1)?.text == "#2 in line · behind 1 yours · p puts it next")
         let next = GateProgress(running: true, events: [GateEvent(event: "setup", ts: 0, step: "queue", position: 1, behind: "stack-donor")])
         #expect(GatesRun.waiting(next, rows: [], inFlight: true, now: 1)?.text == "waiting on stack-donor")
         let planned = GateProgress(running: true, elapsed: 3, events: [GateEvent(event: "setup", ts: 0, step: "env"), plan])

@@ -41,8 +41,8 @@ enum BranchCommands {
         return v.b.gates == .running ? runningRoute(id, app) : "branch.gates.run"
     }
 
-    /// `p` while the gates run: put the run next only when it waits behind runs Phil didn't click —
-    /// otherwise the press moves nothing, and `p` has no route until the gates answer.
+    /// `p` while the gates run: put the run next when anything waits ahead of it — otherwise the
+    /// press moves nothing, and `p` has no route until the gates answer.
     static func runningRoute(_ id: String, _ app: AppModel) -> String? {
         GatesRun.canPutNext(GatesRun.setup(ShipState.of(app).progressOf(id))) ? "branch.gates.next" : nil
     }
@@ -161,15 +161,11 @@ enum BranchCommands {
             scope: .branch, quiet: true,
             write: { id, _ in
                 guard let v = m.branchView(id) else { return nil }
-                let waitingOn = GatesRun.setup(ShipState.of(app).progressOf(v.b.id))?.behind.flatMap { $0.isEmpty ? nil : $0 }
                 return Write(
                     path: t.atRepo(v.b.repo, "/gates"), body: ["branch": .string(v.b.name), "next": true],
                     settled: { true },
-                    failed: "the gates are running — p pushes once they're green",
-                    answered: { ok, body in
-                        // a refusal is said by the runner, with the server's own sentence
-                        if ok { app.runner.say(GatesRun.nextSaid(was: body["was"]?.string, waitingOn: waitingOn)) }
-                    }, alone: true)
+                    said: "these gates go next — p pushes once they're green",
+                    failed: "the gates are running — p pushes once they're green", alone: true)
             }))
         r.register(Command(
             id: "branch.review.run", title: "Review this branch's diff — the findings land as review flags for this code",
