@@ -29,6 +29,11 @@ struct BranchSource: Hashable {
         return s
     }
 
+    /// The same branch state, ignoring the repo-wide git/remote versions: those move on every other
+    /// branch's commit and every fetch (~45 s), so an editor opening or a page lookup keyed on them was
+    /// dropped mid-request for nothing (2026-11-17: `o` sat at "checking … out for Helix…").
+    func sameBranch(as other: BranchSource) -> Bool { forHistory(parentTip: "") == other.forHistory(parentTip: "") }
+
     @MainActor static func history(_ app: AppModel, _ id: String) -> BranchSource? {
         guard let s = current(app, id) else { return nil }
         return s.forHistory(parentTip: app.store.view(Branch.self, "\(s.repo):\(s.parent)")?.tip ?? "")

@@ -66,13 +66,45 @@ import Testing
             case "focus": app.focus(pane: ShipSeam.wordsPane); app.focus(pane: reviewDiffPane)
             case "mode": app.keys.setMode(.select); app.keys.setMode(.normal)
             default:
-                #expect(app.store.applyPatch(try Patch.make(domain: Domain.remote, version: (app.store.versions[Domain.remote] ?? 0) + 1)) == .ok)
+                var moved = try #require(app.store.rawView("branch", id))
+                moved["tip"] = "0123456789abcdef0123456789abcdef01234567"
+                #expect(app.store.applyPatch(try Patch.make(domain: Domain.git, version: (app.store.versions[Domain.git] ?? 0) + 1,
+                    upserts: ["branch": [id: .object(moved)]])) == .ok)
             }
             app.runner.say("newer feedback")
             HeldLookupStub.release(port, path, try answer(page))
             await task?.value
             #expect(page.helix == nil && app.runner.note == "newer feedback")
         }
+    }
+
+    @Test func anotherBranchsCommitOrAFetchMidPreparationStillOpensHelix() async throws {
+        // the repo-wide git/remote versions move on every other branch's commit and every fetch;
+        // keyed on them, `o` was dropped mid-request and sat at "checking … out for Helix…" (2026-11-17)
+        let (app, port) = try await app(), page = ReviewPageState.of(app)
+        HeldLookupStub.hold(port, path)
+        app.keys.handle("i")
+        let task = page.helixTask
+        await until("the editor preparation") { HeldLookupStub.waiting(port, path) }
+        #expect(app.store.applyPatch(try Patch.make(domain: Domain.remote, version: (app.store.versions[Domain.remote] ?? 0) + 1)) == .ok)
+        #expect(app.store.applyPatch(try Patch.make(domain: Domain.git, version: (app.store.versions[Domain.git] ?? 0) + 1)) == .ok)
+        HeldLookupStub.release(port, path, try answer(page))
+        await task?.value
+        #expect(page.helix?.dir == "/tmp/owned.diffbase")
+    }
+
+    @Test func aDroppedPreparationNeverLeavesCheckingStanding() async throws {
+        let (app, port) = try await app(), page = ReviewPageState.of(app)
+        HeldLookupStub.hold(port, path)
+        app.keys.handle("i")
+        let task = page.helixTask
+        await until("the editor preparation") { HeldLookupStub.waiting(port, path) }
+        #expect(app.runner.note?.hasPrefix("checking ") == true)
+        app.keys.setMode(.select); app.keys.setMode(.normal)
+        HeldLookupStub.release(port, path, try answer(page))
+        await task?.value
+        #expect(page.helix == nil)
+        #expect(app.runner.note?.hasPrefix("Helix didn't open") == true, "the opening that ended says so")
     }
 
     @Test func escapeAndOldSamePathRepliesCannotReplaceANewerSession() async throws {

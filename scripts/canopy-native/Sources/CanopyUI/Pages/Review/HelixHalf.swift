@@ -41,12 +41,20 @@ extension ReviewPageState {
         pendingHelixReturn = nil
         helixAt = nil
         helix = open
-        app.runner.say("checking \(source.repo)/\(branch) out for Helix…")
+        let checking = "checking \(source.repo)/\(branch) out for Helix…"
+        app.runner.say(checking)
         helixTask = Task { @MainActor in
             @MainActor func current() -> Bool {
-                helix?.session == open.session && !Task.isCancelled && reader.isCurrent(app) && diffCurrent && BranchSource.current(app, source.id) == source
+                helix?.session == open.session && !Task.isCancelled && reader.isCurrent(app) && diffCurrent
+                    && BranchSource.current(app, source.id)?.sameBranch(as: source) == true
             }
-            defer { if helix?.session == open.session && helix?.dir == nil { helix = nil } }
+            defer {
+                if helix?.session == open.session && helix?.dir == nil {
+                    helix = nil
+                    // never leave "checking…" standing for an opening that ended; newer feedback stays
+                    if app.runner.note == checking { app.runner.say("Helix didn't open — the view or the branch moved while it checked out · o opens it again") }
+                }
+            }
             guard current() else { return }
             let body = ["branch": source.name, "op": "where"]
             let answer = await app.transport.ask(app.transport.atRepo(source.repo, "/review-helix"), body, as: HelixWhere.self)
@@ -76,7 +84,7 @@ extension ReviewPageState {
 
     /// Resolve origin from an explicitly targeted checkout at the observed head.
     func githubPage(_ app: AppModel, source: BranchSource) async -> String? {
-        func current() -> Bool { !Task.isCancelled && BranchSource.current(app, source.id) == source }
+        func current() -> Bool { !Task.isCancelled && BranchSource.current(app, source.id)?.sameBranch(as: source) == true }
         guard current() else { return nil }
         if let stub = githubWeb {
             let web = await stub(app)
