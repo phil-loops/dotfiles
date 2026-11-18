@@ -275,6 +275,22 @@ def _spawn_gates(branch, fix=False, background=False, skip=(), quick=False):
         return run
 
 
+def run_progress(run):
+    """A gates run as the store carries it (state.py's `gaterun`, git domain): what
+    /gates-progress answers, minus the output tail (read on demand) and the per-second elapsed
+    (the client counts from `started`). Pure: the verdict harvest stays with the endpoint, and
+    state._gates already reads a finished run's result for the branch's own `gates`."""
+    events = gate_events(run)
+    result = next((e for e in events if e.get("event") == "result"), None)
+    running = run.alive()
+    out = {"running": running, "started": round(run.started, 3), "tree": run.meta.get("tree"), "events": events}
+    if result:
+        out["result"] = {"ok": result.get("ok"), "gates": result.get("gates", []), "note": result.get("note")}
+    elif not running:
+        out["dead"] = True
+    return out
+
+
 def gates_progress(req, u):
     qs = parse_qs(u.query)
     branch = (qs.get("branch") or [""])[0]
