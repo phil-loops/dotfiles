@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import tempfile
+from urllib.parse import urlparse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -58,5 +59,16 @@ dead = push.run_progress(Run([plan], alive=False))
 check("a run that died without a result is dead", dead.get("dead") is True)
 check("no verdict is harvested by building the entity", harvested == [])
 check("the entity is plain JSON", json.loads(json.dumps(done)) == done)
+
+
+class Req:
+    def _send(self, status, body):
+        self.sent = (status, json.loads(body))
+
+
+req = Req()
+push.gate_run = lambda branch: Run([plan], alive=True)
+push.gates_progress(req, urlparse("/gates-progress?branch=b"))
+check("GET /gates-progress says which tree the run gated", req.sent[0] == 200 and req.sent[1].get("tree") == "t1", req.sent)
 print("all passed" if not failures else f"{failures} failed")
 sys.exit(1 if failures else 0)

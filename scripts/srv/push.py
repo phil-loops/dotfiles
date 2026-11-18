@@ -312,7 +312,8 @@ def gates_progress(req, u):
     if result and result.get("ok") and _harvest_green(branch, run.meta["tree"], result.get("gates", [])):
         repostate.invalidate()   # the verdict landed outside a POST: unstale the snapshot now
     running = run.alive()
-    out = {"running": running, "elapsed": round(time.time() - run.started, 1), "events": events}
+    # the tree it gated: the client draws a run for a tree the branch has left as history, not as its checks
+    out = {"running": running, "elapsed": round(time.time() - run.started, 1), "tree": run.meta.get("tree"), "events": events}
     # a gate's output so far: the one running, or ?gate= for any gate the run started
     want = (qs.get("gate") or [""])[0]
     done = {e.get("gate") for e in events if e.get("event") == "done"}
