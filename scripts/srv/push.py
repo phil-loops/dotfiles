@@ -943,9 +943,13 @@ def push_origin(req, raw):
     wt = _branch_worktree(branch)
     r = ctx.run((["git", "-C", wt] if wt else ["git"]) + ["push", "origin", branch])
     ok = r.returncode == 0
+    carried = []
     if ok:
         from . import reviewdesk
         reviewdesk.pushed()   # replies waiting on these commits go out on the next tick
+        # its children come along in the same press (P7): each catches up, published ones push
+        from . import catchup
+        carried = catchup.carry(branch, push_carried)
     # An open PR already exists → jump to it; otherwise the compare-and-create form.
     target = (_open_pr_url(branch, first=not has_remote) or v["web"]) if ok else v["web"]
     # stay: the outbox's push, whose next step is its own open-PR link — no tab pops mid-sheet
@@ -957,7 +961,21 @@ def push_origin(req, raw):
         "opened": opened,
         "out": (r.stdout or "").strip(),
         "err": (r.stderr or "").strip(),
+        "carried": carried,
     }))
+
+
+def push_carried(branch):
+    """Push a child its parent's push carried (catchup.carry): the same door as p — every ward
+    recomputed, a plain push from the branch's own worktree, never a force. (ok, err)."""
+    v = _origin_verdict(branch)
+    if v is None:
+        return False, "no such branch"
+    if not v["ok"]:
+        return False, "caught up locally; " + "; ".join(v["reasons"])
+    wt = _branch_worktree(branch)
+    r = ctx.run((["git", "-C", wt] if wt else ["git"]) + ["push", "origin", branch])
+    return r.returncode == 0, (r.stderr or "").strip()[:300]
 
 
 # ── prep to push — ONE state-routed motion (design.md "the header is two buttons") ──

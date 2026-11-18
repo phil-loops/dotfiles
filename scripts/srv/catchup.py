@@ -109,6 +109,40 @@ def catch_up(branch):
     return {"ok": True, "moved": moved}
 
 
+def children(b):
+    """Branches whose stack-parent is `b`."""
+    out = _git("config", "--get-regexp", r"^branch\..*\.stack-parent$").stdout
+    return sorted(k[len("branch."):-len(".stack-parent")] for k, _, v in
+                  (ln.partition(" ") for ln in out.splitlines()) if v.strip() == b)
+
+
+def carry(branch, push_one):
+    """A parent's push carries its children (tooling-doctor P7, A4): after `branch` went out, each
+    child off its tip catches up — a published child by a catch-up merge then a plain push through
+    push_one(child) → (ok, err), an unpublished one by a local rebase — and the walk goes on down.
+    A stop (conflict, a dirty holder, a door that refuses) is reported for that child and its own
+    children are left as they were; siblings still go. Callers hold the forest lock."""
+    out = []
+    for c in children(branch):
+        if not off_parent(c):
+            out += carry(c, push_one)   # caught up already (an earlier press): its children may not be
+            continue
+        how, err = catch_up_one(c)
+        rec = {"branch": c, "how": how}
+        if err:
+            out.append({**rec, "err": err})
+            continue
+        if how == "merged":
+            ok, perr = push_one(c)
+            rec["pushed"] = ok
+            if not ok:
+                out.append({**rec, "err": perr or f"{c} didn't push"})
+                continue
+        out.append(rec)
+        out += carry(c, push_one)
+    return out
+
+
 def owes(branch):
     """The highest link in `branch`'s chain that is off its parent's tip, or "" — what the page
     names as the catch-up the branch owes (its own parent may not have moved at all)."""
