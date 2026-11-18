@@ -4,7 +4,7 @@ import Testing
 
 /// Answers every request from a per-path table, recording what was sent.
 final class Stub: URLProtocol, @unchecked Sendable {
-    struct Answer { var status: Int; var body: String; var headers: [String: String] = [:] }
+    struct Answer { var status: Int; var body: String; var headers: [String: String] = [:]; var lost = false }
     nonisolated(unsafe) static var answers: [String: Answer] = [:]
     nonisolated(unsafe) static var seen: [URLRequest] = []
     static let lock = NSLock()
@@ -14,6 +14,7 @@ final class Stub: URLProtocol, @unchecked Sendable {
     override func startLoading() {
         let path = request.url!.path
         let a = Stub.lock.withLock { Stub.seen.append(request); return Stub.answers[path] } ?? Answer(status: 404, body: "{}")
+        if a.lost { return client!.urlProtocol(self, didFailWithError: URLError(.networkConnectionLost)) }
         let resp = HTTPURLResponse(url: request.url!, statusCode: a.status, httpVersion: "HTTP/1.1", headerFields: a.headers)!
         client?.urlProtocol(self, didReceive: resp, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data(a.body.utf8))
@@ -323,6 +324,55 @@ final class Ctx: CommandContext {
         for _ in 0..<50 where runner.runOf("t.old", id)?.state == .sending { try await Task.sleep(nanoseconds: 20_000_000) }
         #expect(runner.runOf("t.old", id)?.state == .done)
         #expect(store.ops.isEmpty)
+    }
+
+    /// 2026-11-18: a push landed but its answer was lost, and the page said it didn't push. A lost
+    /// answer is an unknown: the write's own check decides, once a read comes back.
+    @Test func aLostAnswerIsSettledByTheWritesOwnCheck() async throws {
+        let (runner, store, _) = try setup()
+        Stub.answers["/push"] = .init(status: 0, body: "", lost: true)
+        let id = "loops:add-hankles-limited-label"
+        var onServer = false
+        var resyncs = 0
+        runner.resync = { resyncs += 1 }
+        runner.registry.register(Command(id: "t.push", title: "P", scope: .branch, write: { _, _ in
+            Write(path: "/push", body: [:], settled: { onServer }, said: "pushed", failed: "didn't push")
+        }))
+        runner.dispatch("t.push", via: .key, target: id)
+        for _ in 0..<50 where runner.runOf("t.push", id)?.state == .sending { try await Task.sleep(nanoseconds: 20_000_000) }
+        #expect(runner.runOf("t.push", id)?.state == .landing)
+        #expect(runner.note == "no answer · checking whether it landed")
+        #expect(resyncs == 1)
+        onServer = true
+        store.nudge()
+        #expect(runner.runOf("t.push", id)?.state == .done)
+        #expect(runner.note == "pushed")
+    }
+
+    @Test func aLostAnswerTheServerDoesntShowIsAFailure() async throws {
+        let (runner, store, _) = try setup()
+        Stub.answers["/push"] = .init(status: 0, body: "", lost: true)
+        let id = "loops:add-hankles-limited-label"
+        runner.resync = { store.hydrate(try! Snapshot.decode(fixture("state.json"))) }
+        runner.registry.register(Command(id: "t.push2", title: "P", scope: .branch, write: { _, _ in
+            Write(path: "/push", body: [:], settled: { false }, said: "pushed", failed: "didn't push")
+        }))
+        runner.dispatch("t.push2", via: .key, target: id)
+        for _ in 0..<50 where runner.runOf("t.push2", id)?.state != .failed { try await Task.sleep(nanoseconds: 20_000_000) }
+        #expect(runner.runOf("t.push2", id)?.state == .failed)
+        #expect(runner.note == "didn't push — no answer, and the server doesn't show it")
+    }
+
+    @Test func aLostAnswerWithACheckThatCantTellSaysSo() async throws {
+        let (runner, _, _) = try setup()
+        Stub.answers["/next"] = .init(status: 0, body: "", lost: true)
+        let id = "loops:add-hankles-limited-label"
+        runner.registry.register(Command(id: "t.next", title: "N", scope: .branch, write: { _, _ in
+            Write(path: "/next", body: [:], settled: { true }, failed: "the gates didn't queue")
+        }))
+        runner.dispatch("t.next", via: .key, target: id)
+        for _ in 0..<50 where runner.runOf("t.next", id)?.state != .failed { try await Task.sleep(nanoseconds: 20_000_000) }
+        #expect(runner.note == "the gates didn't queue — no answer, so it may have landed — the page shows what the server has")
     }
 
     @Test func keyEngineDrivesTheRunner() throws {

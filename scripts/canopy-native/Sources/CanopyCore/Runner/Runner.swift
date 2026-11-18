@@ -249,6 +249,8 @@ public final class Runner {
         runs[runKey] = Run(state: .sending, t0: started)
         seq += 1
         let s = seq
+        // a check already true can't tell a lost answer's write landed; one that was false can
+        let tellsLanding = !w.settled()
         store.addOps(w.ops.map { var o = $0; o.seq = s; return o })
         let t = transport
         let prev = w.alone ? nil : tail
@@ -272,19 +274,35 @@ public final class Runner {
                 self.reconcile(s, w, wrote: r.body?["wrote"]?.int) { self.runs[runKey] = Run(state: .done, t0: started, t1: Date()) }
             } else {
                 self.store.dropOps(seq: s)
-                w.rollback?()
-                // the cursor goes back too — unless it has moved on since, which would yank it away
-                if let before, before != after, self.context?.placeNow() == after { self.context?.returnTo(before) }
-                // the server's own sentence says what to do next; the short class is the fallback
-                let bodyErr = r.body?["err"]?.string ?? r.body?["error"]?.string
-                let why: String = {
-                    if let e = bodyErr, e.count <= 140 { return e }
-                    if let e = r.err, e != "refused" { return e.replacingOccurrences(of: "-", with: " ") }
-                    return ""
-                }()
-                let line = "\(w.failed)\(why.isEmpty ? "" : " — \(why)")"
-                if !w.silent { self.say(line) }
-                self.runs[runKey] = Run(state: .failed, t0: started, t1: Date(), err: line)
+                let fail = { [weak self] (why: String) in
+                    guard let self else { return }
+                    w.rollback?()
+                    // the cursor goes back too — unless it has moved on since, which would yank it away
+                    if let before, before != after, self.context?.placeNow() == after { self.context?.returnTo(before) }
+                    let line = "\(w.failed)\(why.isEmpty ? "" : " — \(why)")"
+                    if !w.silent { self.say(line) }
+                    self.runs[runKey] = Run(state: .failed, t0: started, t1: Date(), err: line)
+                }
+                if r.err == "network" {
+                    // no answer: the server may have done it, so its next read says which
+                    guard tellsLanding else { return fail("no answer, so it may have landed — the page shows what the server has") }
+                    if !w.silent { self.say("no answer · checking whether it landed") }
+                    self.runs[runKey] = Run(state: .landing, t0: started)
+                    self.confirmLost(w) { landed in
+                        guard landed else { return fail("no answer, and the server doesn't show it") }
+                        if let said = w.said, !w.silent { self.say(said) }
+                        self.runs[runKey] = Run(state: .done, t0: started, t1: Date())
+                    }
+                } else {
+                    // the server's own sentence says what to do next; the short class is the fallback
+                    let bodyErr = r.body?["err"]?.string ?? r.body?["error"]?.string
+                    let why: String = {
+                        if let e = bodyErr, e.count <= 140 { return e }
+                        if let e = r.err, e != "refused" { return e.replacingOccurrences(of: "-", with: " ") }
+                        return ""
+                    }()
+                    fail(why)
+                }
             }
             var extra: JSONObject = ["outcome": .string(r.outcome.rawValue), "settledMs": .number(settledMs), "rid": .string(r.rid)]
             if let e = r.err { extra["err"] = .string(e) }
@@ -328,6 +346,25 @@ public final class Runner {
             resync()
             DispatchQueue.main.asyncAfter(deadline: .now() + Self.settleWait) { done() }
         }
+    }
+
+    /// A write whose answer was lost: resync, and let its own check say whether the server did it —
+    /// as soon as a read shows it, or no once a fresh copy lands without it (or `settleWait` passes).
+    private func confirmLost(_ w: Write, _ verdict: @escaping (Bool) -> Void) {
+        seq += 1
+        let k = seq
+        let store = self.store
+        let h = store.hydrations
+        var finished = false
+        let end = { [weak self] (landed: Bool) in
+            guard !finished else { return }
+            finished = true
+            self?.awaiting[k] = nil
+            verdict(landed)
+        }
+        awaiting[k] = ({ w.settled() || store.hydrations > h }, { end(w.settled()) })
+        resync?()
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.settleWait) { end(w.settled()) }
     }
 
     /// The latest run of command `id` on `target` this launch.
