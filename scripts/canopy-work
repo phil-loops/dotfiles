@@ -8,6 +8,7 @@ Identities and bindings
   canopy-work work --repo R --branch B                 live work linked to that branch
   canopy-work relink --work W [--branch B …]           a rename; identity and history stay
   canopy-work retire --work W                          the branch or item is gone; the id is never reused
+  canopy-work retire-unbranched --repo R [--dry-run] < ids   retire R's branch work no listed stack-work id names
   canopy-work source --source S --adapter A [--ordering sequence|none]
   canopy-work bind --source S --conversation C [--work W …] --by WHO [--add] [--expect-generation G]
                                                         launch/switch work (no --work: unbind); --add widens it;
@@ -102,6 +103,9 @@ def main():
     p.add_argument("--by", required=True)
     p.add_argument("--add", action="store_true")
     p.add_argument("--expect-generation", type=int)
+    p = sub.add_parser("retire-unbranched")
+    p.add_argument("--repo", required=True)
+    p.add_argument("--dry-run", action="store_true")
     p = sub.add_parser("exclude")
     p.add_argument("--source", required=True)
     p.add_argument("--conversation", required=True)
@@ -205,6 +209,9 @@ def main():
         except wj.Stale as e:
             out({"stale": str(e), "current": e.current})
             sys.exit(3)
+    elif c == "retire-unbranched":
+        named = {line.strip() for line in sys.stdin if line.strip()}
+        out({"retired": j.retire_unbranched(args.repo, named, dry_run=args.dry_run), "dry_run": args.dry_run})
     elif c == "exclude":
         j.exclude(args.source, args.conversation)
         out({"excluded": True})
