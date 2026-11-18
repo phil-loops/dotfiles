@@ -69,6 +69,8 @@ public struct ShipStripView: View {
         // a failed push explains the button only while pushing is still the next step; the route owns the label
         let pushing = [nil, "branch.push.arm", "branch.push.confirm", "branch.force.arm", "branch.force.confirm"].contains(route)
         let live: Run.State? = push.flatMap { [.sending, .landing].contains($0.run.state) || $0.run.state == .failed && pushing ? $0.run.state : nil }
+        let stepping = route.flatMap { ["branch.conform", "branch.catchup"].contains($0) ? app.runner.runOf($0, branchID) : nil }
+            .map { [.sending, .landing].contains($0.state) } == true
         let forcing = route == "branch.force.arm" || route == "branch.force.confirm"
         let acts = route == "branch.gates.run" || route == "branch.gates.quick" || route == "branch.push.arm" || route == "branch.push.confirm"
             || route == "branch.catchup" || route == "branch.conform" || forcing
@@ -81,9 +83,10 @@ public struct ShipStripView: View {
         let syncButton = KeyButton(title: "⟲ sync", id: "review.sync", target: branchID, busy: m?.phase == .running)
             .disabled(b.tip.isEmpty || m?.phase == .dirt || m == nil && ship.syncNeeds(b)?.isEmpty == true)
             .explains("ship|sync", "sync: the branch is behind its parent or main, or has dirt — it rebases and tidies")
-        let label = acts || waiting || live != nil ? pushLabel(b, route: route, live: live, forced: push?.forced ?? false) : "push"
+        let label = stepping ? (route == "branch.conform" ? "taking origin's copy…" : "catching up…")
+            : acts || waiting || live != nil ? pushLabel(b, route: route, live: live, forced: push?.forced ?? false) : "push"
         let pushButton = KeyButton(title: label, id: "review.push", target: branchID,
-                                   gold: control.enabled, busy: live == .sending || live == .landing, failed: live == .failed)
+                                   gold: control.enabled, busy: stepping || live == .sending || live == .landing, failed: live == .failed)
             .disabled(!control.enabled)
             .settles(label, reduced: reduced)
             .explains("ship|push", "p: this branch's next step — run the gates, then push to origin")
