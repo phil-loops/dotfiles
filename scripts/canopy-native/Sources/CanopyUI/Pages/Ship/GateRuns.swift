@@ -7,12 +7,18 @@ import Foundation
 /// older tree's finished run is history, so `p` over a new commit reads as "gates starting", never
 /// as the last run's verdict.
 enum GateRuns {
-    @MainActor static func progress(_ app: AppModel, _ id: String) -> GateProgress? {
-        guard let b = app.store.view(Branch.self, id), let obj = app.store.rawView("gaterun", id),
-              let tree = obj["tree"]?.string, tree == b.tree,
+    /// The run the store holds for the branch, whatever tree it gated (`tree` says which).
+    @MainActor static func pushed(_ app: AppModel, _ id: String) -> GateProgress? {
+        guard let obj = app.store.rawView("gaterun", id), obj["tree"]?.string != nil,
               let data = try? JSONEncoder().encode(JSONValue.object(obj)),
               var p = try? JSONDecoder().decode(GateProgress.self, from: data) else { return nil }
         if p.running, let started = obj["started"]?.number { p.elapsed = max(0, Date().timeIntervalSince1970 - started) }
+        return p
+    }
+
+    /// The pushed run, only when it gated the branch's current tree.
+    @MainActor static func progress(_ app: AppModel, _ id: String) -> GateProgress? {
+        guard let b = app.store.view(Branch.self, id), let p = pushed(app, id), p.tree == b.tree else { return nil }
         return p
     }
 }
