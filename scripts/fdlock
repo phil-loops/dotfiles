@@ -1,0 +1,69 @@
+#!/usr/bin/env python3
+"""fdlock — a kernel lock for shell scripts, held through a file descriptor the shell opened.
+
+  exec 9>>"$lockfile"; fdlock 9 [--wait SECS]   take an exclusive lock on the shell's fd 9: exit 0
+                                                held, 1 still contended after SECS (default: wait
+                                                as long as it takes; 0 tries once)
+  fdlock --held <lockfile>                       exit 0 while a live process holds it, else 1
+
+A flock(2) lock belongs to the open file description, which this process shares with the shell
+that opened fd 9. So the lock stays the shell's after fdlock exits, and the kernel drops it when
+the last fd onto that description closes: the shell exiting, crashing or being SIGKILLed. A lock
+can't outlive what holds it, so there is nothing to steal and no age to guess at.
+
+Close the fd to release early (`exec 9>&-`). Close it on any spawn meant to outlive the lock
+(`cmd 9>&- &`): a child that keeps the fd keeps the lock, and one that then asks for the same
+lock on a fresh fd waits on itself.
+"""
+import fcntl
+import os
+import sys
+import time
+
+
+def held(path):
+    try:
+        fd = os.open(path, os.O_RDONLY)
+    except OSError:
+        return False
+    try:
+        # shared + non-blocking: conflicts only with an exclusive holder, and never makes a
+        # waiter that polls miss its turn for longer than this one call
+        fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return True
+    finally:
+        os.close(fd)
+    return False
+
+
+def take(fd, wait):
+    if wait is None:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        return True
+    deadline = time.monotonic() + wait
+    while True:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return True
+        except BlockingIOError:
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.05)
+
+
+def main(argv):
+    if len(argv) == 2 and argv[0] == "--held":
+        return 0 if held(argv[1]) else 1
+    if len(argv) in (1, 3) and argv[0].isdigit() and (len(argv) == 1 or argv[1] == "--wait"):
+        try:
+            return 0 if take(int(argv[0]), float(argv[2]) if len(argv) == 3 else None) else 1
+        except OSError as e:
+            print(f"fdlock: fd {argv[0]}: {e.strerror}", file=sys.stderr)
+            return 2
+    print(__doc__.strip().split("\n\n")[1], file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

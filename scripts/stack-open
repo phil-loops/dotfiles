@@ -244,7 +244,7 @@ strip_fat(){   # <days> [--dry-run] — shed regenerable weight from worktrees n
       STRIP_ITEMS+=("${d:t}"$'\t'"node_modules"$'\t'"${kb:-0}")
     fi
     # a frozen 17M .gen copy is the same wrong state; seed-gen owns that trade, so ask it
-    if [[ -d "$d/.gen" && ! -L "$d/.gen" && ! -d "$d/.gen/.rebuilding" ]]; then
+    if [[ -d "$d/.gen" && ! -L "$d/.gen" ]] && ! "$SCRIPTS/fdlock" --held "$d/.gen/.rebuild.flock"; then
       kb=$(du -sk "$d/.gen" 2>/dev/null | cut -f1) || kb=0
       total=$(( total + kb ))
       [[ -n "$dry" ]] || "$SCRIPTS/seed-gen" "$d" >/dev/null 2>&1

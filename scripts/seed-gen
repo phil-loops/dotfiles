@@ -44,24 +44,20 @@ export GIT_OPTIONAL_LOCKS=0
 
 realpath_of(){ (cd "$1" 2>/dev/null && pwd -P); }
 
-# .rebuilding is the single-flight lock. A crashed build strands it, and a stranded lock
-# silently freezes that tree's .gen forever (bit us 2026-07-30) — steal locks older than 10m.
-# A live lock means someone else is doing the work we came to do — join it (wait, then
-# re-check) instead of failing: the gate's --sync used to red on the viewer's background heal
-# of the same scratch tree, and the typecheck then ran against the stale types (2026-09-08).
-wait_lock(){ # $1 = lock dir; returns once we hold it, 1 after 600s of someone else holding it
-  local lock="$1" waited=0 age
-  until mkdir "$lock" 2>/dev/null; do
-    # The lock's home vanished (a scratch worktree pruned mid-run): mkdir can never succeed, and
-    # the failed stat reads as an ancient lock, so this used to spin without sleeping — two such
-    # runs held both heavy-turn slots for 3h (2026-11-08).
-    [[ -d "$(dirname "$lock")" ]] || return 1
-    age=$(( $(date +%s) - $(stat -f %m "$lock" 2>/dev/null || echo 0) ))
-    (( age > 600 )) && { rm -rf "$lock"; continue; }
-    (( waited >= 600 )) && return 1
-    sleep 2; waited=$(( waited + 2 ))
-  done
-  return 0
+# Every lock here is a kernel lock (fdlock): held through an fd this shell opened, so it dies with
+# its holder however the holder dies, SIGKILL included. The mkdir locks it replaced outlived a
+# killed holder, and a waiter could only steal one after 10 minutes (2026-11-17: the gate queue
+# SIGKILLed a gates run outrun by a new commit; the tree's locks stayed, and the next run sat
+# "preparing the checkout"). A live lock means someone else is doing the work we came to do —
+# join it (wait, then re-check) instead of failing: the gate's --sync used to red on the viewer's
+# background heal of the same scratch tree, and the typecheck then ran against stale types
+# (2026-09-08). Close the fds (7, 8, 9) on any spawn meant to outlive the lock.
+FDLOCK="$(cd "$(dirname "$0")" && pwd -P)/fdlock"
+wait_lock(){ # $1 = lock file, $2 = fd to hold it on; returns once held, 1 after 600s contended
+  [[ -d "$(dirname "$1")" ]] || return 1   # its home vanished (a scratch worktree pruned mid-run)
+  eval "exec $2>>\"\$1\"" 2>/dev/null || return 1
+  "$FDLOCK" "$2" --wait 600 && return 0
+  eval "exec $2>&-"; return 1
 }
 # What a --sync's result depends on: this tree's HEAD and tracked edits, and the donor's HEAD and
 # finished build. A sync that exits 0 stamps the state it started from in the tree's git dir, and
@@ -80,14 +76,14 @@ finish(){ # EXIT trap of a tree run: a sync records what it made current, or for
   fi
   drop_tree_lock
 }
-take_lock(){ wait_lock "$1/.rebuilding"; }   # $1 = the .gen dir
-drop_lock(){ rmdir "$1/.rebuilding" 2>/dev/null; }
+take_lock(){ wait_lock "$1/.rebuild.flock" 8; }   # $1 = the .gen dir: one types rebuild at a time
+drop_lock(){ exec 8>&-; }
 
 # One seed-gen at a time per tree: the whole materialization (node_modules view, packages
 # dist, prisma client, .gen) is serialized on a lock in the worktree's own git dir — never
 # under .gen, which may still be a link into MAIN's.
 tree_lock=""
-drop_tree_lock(){ [[ -n "$tree_lock" ]] && rmdir "$tree_lock" 2>/dev/null; }
+drop_tree_lock(){ [[ -n "$tree_lock" ]] && exec 9>&-; }
 
 # A tree's node_modules is in one of three states and every one of them rots, so all three are
 # handled here — the guard used to return unless it was a symlink, and the other two went unseen.
@@ -358,7 +354,7 @@ deps_home(){ # $1 = tree, $2 = donor
   home="$HOME/.cache/seed-gen/nm/$stamp"
   if [[ ! -f "$home/.ready" ]]; then
     mkdir -p "$HOME/.cache/seed-gen/nm"
-    wait_lock "$home.lock" || { echo "$donor"; return 1; }
+    wait_lock "$home.flock" 7 || { echo "$donor"; return 1; }
     if [[ ! -f "$home/.ready" ]]; then
       tmp="$home.tmp.$$"
       rm -rf "$tmp" "$home"; mkdir -p "$tmp"
@@ -381,11 +377,11 @@ deps_home(){ # $1 = tree, $2 = donor
       else
         echo "could not build node_modules for this branch's lockfile — borrowing main's, so a typecheck here answers for main's dependencies:"
         tail -3 "$tmp.log" 2>/dev/null
-        rm -rf "$tmp" "$tmp.log"; rmdir "$home.lock" 2>/dev/null
+        rm -rf "$tmp" "$tmp.log"; exec 7>&-
         echo "$donor"; return 1
       fi
     fi
-    rmdir "$home.lock" 2>/dev/null
+    exec 7>&-
   fi
   echo "$home"
 }
@@ -402,7 +398,7 @@ prune_deps_homes(){ # $1 = tree
   find "$HOME/.cache/seed-gen/nm" "$HOME/.cache/seed-gen/deps" -mindepth 1 -maxdepth 1 -type d -mtime +7 2>/dev/null \
     | while IFS= read -r d; do
         grep -qx "$(basename "$d")" <<<"$live" || echo "$d"
-      done | ( xargs -I{} rm -rf {} >/dev/null 2>&1 & )
+      done | ( xargs -I{} rm -rf {} >/dev/null 2>&1 7>&- 8>&- 9>&- & )
   return 0
 }
 
@@ -500,7 +496,7 @@ build_started(){
 # the tree moves first. SEED_GEN_CACHE_INSERT=wait keeps it in the foreground (tests).
 cache_insert(){
   if [[ "${SEED_GEN_CACHE_INSERT:-}" == wait ]]; then cache insert "$@"
-  else ( cache insert "$@" </dev/null >/dev/null 2>&1 & ); fi
+  else ( cache insert "$@" </dev/null >/dev/null 2>&1 7>&- 8>&- 9>&- & ); fi
 }
 mark_restored(){ printf '%s\n' "${2%% *}" > "$1/.gen/.seed-gen-restored"; }
 # A gate (SEED_GEN_CACHE=audit) takes no types from the cache — not even ones an earlier sync of this
@@ -580,9 +576,9 @@ if [[ "$(realpath_of "$dir")" != "$(realpath_of "$src")" ]]; then
   # A plain seed of a tree that already has its .gen has nothing to wait for: the --sync holding
   # the lock owns the tree and will leave .gen right. Waiting here (2s polls) is what turned a warm
   # open's 0.7s prep into 2.7–9s whenever the previous open's background heal was still running.
-  (( ! sync )) && [[ -e "$dir/.gen" && -d "$_gitdir/seed-gen.lock" ]] && exit 0
-  wait_lock "$_gitdir/seed-gen.lock" || { echo "a seed-gen run has held this tree for over 10 minutes"; exit 1; }
-  tree_lock="$_gitdir/seed-gen.lock"; trap finish EXIT
+  (( ! sync )) && [[ -e "$dir/.gen" ]] && "$FDLOCK" --held "$_gitdir/seed-gen.flock" && exit 0
+  wait_lock "$_gitdir/seed-gen.flock" 9 || { echo "a seed-gen run has held this tree for over 10 minutes"; exit 1; }
+  tree_lock="$_gitdir/seed-gen.flock"; trap finish EXIT
 
   if (( sync )); then
     head=$(git -C "$dir" rev-parse HEAD 2>/dev/null) || exit 0
@@ -624,7 +620,7 @@ if [[ "$(realpath_of "$dir")" != "$(realpath_of "$src")" ]]; then
     if [[ ! -e "$dir/.gen" ]]; then
       cp -cR "$src/.gen" "$dir/.gen" 2>/dev/null || cp -R "$src/.gen" "$dir/.gen" 2>/dev/null || mkdir -p "$dir/.gen"
       rm -f "$marker"                     # the copy was built for main's HEAD, not this one
-      rm -rf "$dir/.gen/.rebuilding"      # a lock riding along in the copy is not ours
+      rm -rf "$dir/.gen/.rebuilding"      # a pre-fdlock lock dir riding along in the copy
     fi
     proj=$(trpc_types_project "$dir") || exit 0
     tsc="$dir/node_modules/typescript/bin/tsc"
@@ -696,7 +692,7 @@ if [[ "$(realpath_of "$dir")" != "$(realpath_of "$src")" ]]; then
     # types frozen at whenever it was seeded — including the 47 the pre-2026-07-22 seeders left
     # behind. Trade each one for the live link on its next open, unless a rebuild is holding it.
     # A marker matching HEAD is a --sync-built copy that is MORE accurate than main's seed: keep it.
-    if [[ ! -L "$dir/.gen" && -d "$dir/.gen" && ! -d "$dir/.gen/.rebuilding" ]]; then
+    if [[ ! -L "$dir/.gen" && -d "$dir/.gen" ]] && ! "$FDLOCK" --held "$dir/.gen/.rebuild.flock"; then
       if [[ "$(cat "$dir/.gen/.seed-gen-sha" 2>/dev/null)" != "$(git -C "$dir" rev-parse HEAD 2>/dev/null)" ]]; then
         rm -rf "$dir/.gen"
       fi
@@ -725,7 +721,7 @@ if [[ "$(realpath_of "$dir")" != "$(realpath_of "$src")" ]]; then
     self="$(cd "$(dirname "$0")" && pwd -P)"
     nohup "$self/heavy-turn" --batch --class seed-gen --key "seed-gen:$dir" \
       --unless "$(printf '%q --synced %q' "$self/seed-gen" "$dir")" -- "$self/seed-gen" --sync "$dir" \
-      >"$_gitdir/seed-gen-sync.log" 2>&1 </dev/null &
+      >"$_gitdir/seed-gen-sync.log" 2>&1 </dev/null 7>&- 8>&- 9>&- &   # it takes this lock itself
   fi
   exit 0
 fi
@@ -796,5 +792,6 @@ else
   # pipes us waits for EOF on those fds, so holding them open makes this "background" rebuild
   # block that caller for as long as the compile takes. Call the binary DIRECTLY (never npx —
   # backgrounded npx with no TTY hangs on its install prompt and piles up runaway procs).
-  ( build_main ) >/dev/null 2>&1 &
+  # It inherits fd 8, so the rebuild lock lives exactly as long as the build does.
+  ( build_main ) >/dev/null 2>&1 7>&- 9>&- &
 fi

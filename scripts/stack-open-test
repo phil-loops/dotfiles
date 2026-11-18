@@ -162,12 +162,12 @@ if [[ -d "$MAIN/.gen" ]]; then
   # A warm open must not queue behind the previous open's background heal: with the tree's lock
   # held (as a running --sync holds it), seeding an already-seeded tree returns at once.
   ggd=$(git -C "$gdir" rev-parse --path-format=absolute --git-dir 2>/dev/null)
-  mkdir -p "$ggd/seed-gen.lock"
+  exec 9>>"$ggd/seed-gen.flock"; "${SO:h}/fdlock" 9
   zmodload zsh/datetime; t0=$EPOCHREALTIME
   STACK_OPEN_DIR="$g" "${SO:h}/seed-gen" "$gdir" >/dev/null 2>&1
   (( EPOCHREALTIME - t0 < 1.0 )) && ok "seeding a seeded tree doesn't wait on a running heal" \
                                  || no "seeding waited $(( EPOCHREALTIME - t0 ))s on the tree's heal lock"
-  rmdir "$ggd/seed-gen.lock" 2>/dev/null
+  exec 9>&-
 
   # A copy carries the marker of the tree it came from — left there it claims this worktree's
   # .gen was built for a commit it has never seen, which is what made 53 trees look up to date.
