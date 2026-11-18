@@ -33,8 +33,9 @@ def route(req, u):
     # GET /prep-route?branch=X — read-only: classify the branch and name the ONE next motion.
     # Routes, in precedence order:
     #   dirty        — uncommitted files in the holding worktree: fold or stash → POST /dirty-resolve
-    #   push-vehicle — diverged w/ open PR and the additive vehicle exists: push it (no next)
-    #   additive     — diverged w/ open PR: draft the vehicle        → POST /diverged-additive
+    #   conform      — origin rewritten upstream and already has all local has → POST /prep-push
+    #   additive     — diverged w/ open PR: draft (or take the drafted) vehicle and absorb it as the
+    #                  branch tip, so the plain push leaves local == origin → POST /prep-push
     #   restack      — behind origin/main, unpublished root          → POST /sync
     #   nothing      — outgoing set is empty: everything is shared
     #   squash       — any WIP/fixup subject: collapse/voice → POST /prep
@@ -98,15 +99,16 @@ def _route(branch):
 
     if up.get("diverged") and h.get("published"):
         vehicle = f"{branch}-additive"
-        if ctx.run(["git", "rev-parse", "--verify", "--quiet",
-                    f"refs/heads/{vehicle}"]).returncode == 0:
-            return send("push-vehicle",
-                 f"the additive update is drafted on {vehicle} — pushing it fast-forwards the PR",
-                 push_cmd=f"git push origin {vehicle}:{branch}", vehicle=vehicle)
+        # one route for both: /prep-push builds the vehicle (or takes a drafted one) and
+        # absorbs it as the branch tip, so the plain push sends refs/heads/<branch> and local
+        # is never left behind what origin got (a hand-run `push vehicle:branch` left it stale)
+        drafted = ctx.run(["git", "rev-parse", "--verify", "--quiet", f"refs/heads/{vehicle}"]).returncode == 0
         return send("additive",
-             "local diverged from the pushed PR head — draft one commit on top of it "
-             "carrying local's content (history preserved, never a force-push)",
-             {"method": "POST", "path": "/diverged-additive", "body": {"branch": branch}})
+             (f"the additive update is drafted on {vehicle} — prep absorbs it as the branch tip, then a plain push"
+              if drafted else
+              "local diverged from the pushed PR head — draft one commit on top of it "
+              "carrying local's content (history preserved, never a force-push)"),
+             {"method": "POST", "path": "/prep-push", "body": {"branch": branch}}, vehicle=vehicle if drafted else None)
 
     if h.get("syncable"):
         return send("restack",

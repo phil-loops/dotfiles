@@ -1054,7 +1054,12 @@ def prep_push(req, raw):
             routed.append(f"carried your restack ({folded} commit{'s' if folded != '1' else ''} on the new base) "
                           "as a catch-up merge on origin's head — additive history, plain push")
         else:
-            res = sync.build_additive(branch)
+            vehicle = f"{branch}-additive"
+            drafted = ctx.run(["git", "rev-parse", "--verify", "-q", f"refs/heads/{vehicle}"]).stdout.strip()
+            # a vehicle drafted earlier (/diverged-additive) is absorbed as it stands, never
+            # pushed by hand as vehicle:branch, which left local behind origin
+            res = ({"ok": True, "vehicle": vehicle, "shaFull": drafted} if drafted
+                   else sync.build_additive(branch))
             if not res.get("ok"):
                 return req._send(res.pop("code", 200), json.dumps(res))
             sha = res["shaFull"]
