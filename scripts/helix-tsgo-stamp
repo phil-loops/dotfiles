@@ -42,15 +42,22 @@ if (( ! ${KNOWN[(Ie)$blob]} )) && ! git -C "$top" cat-file -p "$blob" | grep -q 
   exit 3
 fi
 
+# Hide the file BEFORE editing it: if skip-worktree can't be set (index.lock held by a checkout
+# or rebase in flight), nothing is edited. Editing first left a visible modification that made
+# git refuse the next rebase (2026-11-17).
+hide() { git -C "$top" update-index --skip-worktree .helix/languages.toml; }
+
 # pin-oxfmt-tailwind-config fixes the cause (oxfmt no longer guesses where Tailwind's config is), so
 # a checkout that carries it needs no path rewrite
 if grep -q '"%{buffer_name}"' "$cfg" && ! grep -q '"config": "./tailwind.config.js"' "$top/.oxfmtrc.json" 2>/dev/null; then
+  hide || exit 4
   sed -i '' 's/"%{buffer_name}"/"%{file_path_absolute}"/g' "$cfg"
-  git -C "$top" update-index --skip-worktree .helix/languages.toml
 fi
 
 grep -q 'typescript-language-server' "$cfg" || exit 0   # not the config we override
 grep -q 'language-server.tsgo' "$cfg" && exit 0         # already stamped
+
+hide || exit 4
 
 cat >> "$cfg" <<'TSGO'
 
@@ -64,5 +71,3 @@ sed -i '' \
   -e 's/"typescript-language-server"/"tsgo"/g' \
   -e 's/auto-format = true/auto-format = false/g' \
   "$cfg"
-
-git -C "$top" update-index --skip-worktree .helix/languages.toml
