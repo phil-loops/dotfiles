@@ -7,7 +7,7 @@ list, plus a todo list per forest (items with --project <repo>:<stack-project>, 
       --why "opens Helix on the wrong line" [--link memory:x.md] [--waiting "…"] [--body -] [--solved-by <branch>]
   canopy-todo ls [--all] [--json] [--project P|all]   open work in rank order (--all adds done/dropped)
   canopy-todo show <id>
-  canopy-todo claim <id>                take it before building: state=doing, owner=this session; refused while
+  canopy-todo claim <id>                take it before building: state=doing, owner=this session, and this chat bound to its work; refused while
                                         another live session owns it (--force takes it over). Claimed from a
                                         forest's branch, it records that branch as solved_by, so the home marks its dot
   canopy-todo set <id> key=value …      e.g. state=doing size=M blocked_by=a,b, or solved_by=<branch> on a
@@ -80,6 +80,21 @@ def forest_branch():
     name = git("symbolic-ref", "--quiet", "--short", "HEAD")
     proj = name and git("config", f"branch.{name}.stack-project")
     return (name, project_id(proj)) if proj else None
+
+
+def bind_claim(it):
+    """After the assignment lands, binds this chat (its full session id) to the item's work: the
+    assignment stays the one exclusive owner, the binding is every chat on it (round 27, P2)."""
+    j = workjournal.Journal()
+    try:
+        w = j.work_for_todo(it["id"], it.get("incarnation"), create=True, project=it.get("project"),
+                            branch=it.get("solved_by"), title=it.get("title"))
+        gen = j.bind_session(os.environ.get("CLAUDE_CODE_SESSION_ID", ""), [w], by="claim")
+        return f"journal: this chat is bound to work {w} (generation {gen})"
+    except workjournal.JournalError as e:
+        return f"journal: assigned but not bound — {e}"
+    finally:
+        j.close()
 
 
 def in_list(it, project):
@@ -182,7 +197,9 @@ def main():
             here = forest_branch()
             on = here and not it.get("solved_by") and (it.get("project") or here[1]) == here[1]
             return {"state": "doing", "owner": session, **({"solved_by": here[0]} if on else {})}
-        print(line(todo.update(args.id, edit=take)))
+        it = todo.update(args.id, edit=take)
+        print(line(it))
+        print(bind_claim(it), file=sys.stderr)
     elif args.cmd == "set":
         fields = {}
         for pair in args.pairs:

@@ -9,7 +9,9 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 TMP = tempfile.mkdtemp(prefix="todo-claim-test-")
 REPO = os.path.join(TMP, "repo")
-ENV = {**os.environ, "CANOPY_TODO_DIR": os.path.join(TMP, "todo"), "CLAUDE_CODE_SESSION_ID": "feedface-0000"}
+SID = "feedface-0000-4000-8000-000000000001"
+ENV = {**os.environ, "CANOPY_TODO_DIR": os.path.join(TMP, "todo"), "CLAUDE_CODE_SESSION_ID": SID,
+       "CANOPY_WORK_JOURNAL": os.path.join(TMP, "journal.sqlite3")}
 os.makedirs(ENV["CANOPY_TODO_DIR"])
 failures = 0
 
@@ -57,5 +59,22 @@ run("git", "switch", "-q", "--detach")
 todo("add", "detached-item", "--kind", "build", "--area", "x", "--why", "w")
 todo("claim", "detached-item")
 check("a detached HEAD records nothing", solved_by("detached-item") is None, solved_by("detached-item"))
+
+sys.path.insert(0, HERE)
+from srv import todo as T, workjournal as wj  # noqa: E402
+T.DIR = ENV["CANOPY_TODO_DIR"]
+j = wj.Journal(ENV["CANOPY_WORK_JOURNAL"])
+work = j.work_for_todo("forest-item", T.read("forest-item")["incarnation"])
+check("a claim binds this chat, by its full id, to the item's work", work is not None
+      and work in j.bound_works("claude-code", SID), (work, j.bound_works("claude-code", SID)))
+check("the claim's branch is the work's label", (j.work(work) or {}).get("branch") == "feat/a", j.work(work))
+check("every claim adds; none switches the chat away", len(j.bound_works("claude-code", SID)) == 6, j.bound_works("claude-code", SID))
+j.close()
+
+OTHER = {**ENV, "CLAUDE_CODE_SESSION_ID": "feedface"}
+todo("add", "short-id-item", "--kind", "build", "--area", "x", "--why", "w")
+r = subprocess.run([os.path.join(HERE, "canopy-todo"), "claim", "short-id-item"], cwd=REPO, env=OTHER, capture_output=True, text=True)
+check("a chat without a full id is assigned and says it isn't bound", r.returncode == 0 and "doing" in r.stdout
+      and "not bound" in r.stderr, (r.returncode, r.stdout, r.stderr))
 
 sys.exit(1 if failures else 0)
