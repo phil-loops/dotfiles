@@ -87,26 +87,35 @@ def _sha_or_dash(path):
         return "-"
 
 
+def canon_bytes(path):
+    """One emitted file up to TS7's own nondeterminism: two builds of one tree differ in the order of
+    synthesized `?: undefined` members (4-7 of ~2,600 files), so a declaration counts as its sorted
+    lines and a map without its `mappings` — the bar test-lsp-differential holds .gen to."""
+    raw = open(path, "rb").read()
+    if path.endswith(".map"):
+        try:
+            j = json.loads(raw)
+            j.pop("mappings", None)
+            return json.dumps(j, sort_keys=True).encode()
+        except ValueError:
+            return raw
+    return b"\n".join(sorted(raw.split(b"\n")))
+
+
+def canon_files(out):
+    """{relpath: canonical sha} for every file of an emit."""
+    return {os.path.relpath(os.path.join(dp, f), out): sha(canon_bytes(os.path.join(dp, f)))
+            for dp, _dns, fns in os.walk(out) for f in fns}
+
+
 def canon_digest(out):
-    """The emit up to TS7's own nondeterminism: two builds of one tree differ in the order of
-    synthesized `?: undefined` members (4-7 of ~2,600 files), so each declaration counts as its
-    sorted lines and each map without its `mappings` — the bar test-lsp-differential holds .gen to."""
+    """The emit as one digest, each file counted by canon_bytes."""
     d = hashlib.sha256()
     for dp, _dns, fns in sorted(os.walk(out)):
         for f in sorted(fns):
             p = os.path.join(dp, f)
             d.update(os.path.relpath(p, out).encode() + b"\0")
-            raw = open(p, "rb").read()
-            if f.endswith(".map"):
-                try:
-                    j = json.loads(raw)
-                    j.pop("mappings", None)
-                    raw = json.dumps(j, sort_keys=True).encode()
-                except ValueError:
-                    pass
-            else:
-                raw = b"\n".join(sorted(raw.split(b"\n")))
-            d.update(raw + b"\0")
+            d.update(canon_bytes(p) + b"\0")
     return d.hexdigest()
 
 
@@ -856,6 +865,24 @@ def _insert(root, compiler, since):
     return 0
 
 
+POISON_KEEP = 20
+
+
+def poison_evidence(stored, built, where):
+    """Which emitted files the stored entry and the fresh build disagree on, with both copies of the
+    first POISON_KEEP kept under `where`/{entry,built} — the entry itself is evicted, and without
+    the two sides nobody can name the input the key missed."""
+    a, b = canon_files(stored), canon_files(built)
+    differ = sorted(f for f in a.keys() | b.keys() if a.get(f) != b.get(f))
+    for f in differ[:POISON_KEEP]:
+        for side, src in (("entry", stored), ("built", built)):
+            if os.path.exists(os.path.join(src, f)):
+                dst = os.path.join(where, side, f)
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                shutil.copyfile(os.path.join(src, f), dst)
+    return differ
+
+
 def audit(root, entry, k, keyer, graph, since, gpath):
     """A tree built what the store already holds: compare. Equal up to the emit's own nondeterminism
     is the expected case; anything else means the key missed something, and the entry is poison —
@@ -875,9 +902,11 @@ def audit(root, entry, k, keyer, graph, since, gpath):
         log(f"audit {k[:12]} {root}: equal")
         return 0
     os.makedirs(store("poison"), exist_ok=True)
+    name = f"{k[:16]}.{int(time.time())}"
+    differ = poison_evidence(os.path.join(entry, "out"), os.path.join(root, OUT), store("poison", name))
     report = {"key": k, "entryHead": man.get("head"), "entryTree": man.get("tree"), "entryCreated": man.get("created"),
-              "tree": root, "head": _head(root), "at": time.time()}
-    write_atomic(store("poison", f"{k[:16]}.{int(time.time())}.json"), json.dumps(report, indent=1).encode())
+              "tree": root, "head": _head(root), "at": time.time(), "differ": differ}
+    write_atomic(store("poison", f"{name}.json"), json.dumps(report, indent=1).encode())
     log(f"POISON {k[:12]}: stored from {str(man.get('head'))[:10]} in {man.get('tree')}, rebuilt differently from "
         f"{report['head'][:10]} in {root}")
     evict(entry, "poison")
