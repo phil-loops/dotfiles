@@ -630,6 +630,11 @@ threading.Thread(target=watcher, daemon=True).start()
 threading.Thread(target=pulse, daemon=True).start()
 threading.Thread(target=restack.drain_forever, daemon=True).start()   # queued restacks run the moment the driver seat frees
 if not SANDBOX:
+    def _heal_at_start():
+        from srv import heal   # a previous server's claims are dead by definition: clean them up once
+        for f in heal.heal(srvctx.MAIN_WT):
+            srvctx.log(f"heal: {f['kind']} {f['action']} {f['path']} — {f['why']}")
+    threading.Thread(target=_heal_at_start, daemon=True).start()
     threading.Thread(target=focus.sync_forever, daemon=True).start()   # focus forests follow origin/main on their own
     threading.Thread(target=pregate.pregate_forever, daemon=True).start()   # current roots pre-gated → the push door is already unlocked (or the red is already parked) on arrival
 httpd.serve_forever()
