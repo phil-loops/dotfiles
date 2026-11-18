@@ -449,6 +449,38 @@ def db_reachable(cwd, timeout=2.0):
         return f"local Postgres is down at {host}:{port} ({e.strerror or e}) — start OrbStack / the database", False
 
 
+def ci_services(cwd):
+    """The local services CI's test-prepare waits on before tests run (tasks/ci/tasks.yml), as
+    [(target, port)] — read from the tree, so the list is CI's own and moves with it."""
+    import re
+    try:
+        text = open(os.path.join(cwd, "tasks", "ci", "tasks.yml")).read()
+    except OSError:
+        return []
+    block = text.split("test-prepare:", 1)[1] if "test-prepare:" in text else ""
+    block = re.split(r"\n  \S", block, maxsplit=1)[0]
+    found = []
+    for m in re.finditer(r"wait-on[^\n]*?\s(tcp:localhost:(\d+)|https?://localhost:(\d+)\S*)", block):
+        found.append((m.group(1), int(m.group(2) or m.group(3))))
+    return found
+
+
+def services_down(cwd, timeout=1.0):
+    """CI's test services that nothing answers on locally: the note a red test would otherwise
+    bury under ECONNREFUSED frames (2026-11-18: ElasticMQ down redded 'webhook date persistence')."""
+    import socket
+    down = []
+    for target, port in ci_services(cwd):
+        if port == 5432:
+            continue                     # Postgres has its own check, which blocks
+        try:
+            with socket.create_connection(("localhost", port), timeout=timeout):
+                pass
+        except OSError:
+            down.append(target)
+    return down
+
+
 def env_repair(cwd):
     """Deterministic repairs to the tree's generated artifacts (all gitignored) so a gate
     red means the code is wrong, not the environment. Returns (notes, ok): notes only for
@@ -483,6 +515,11 @@ def env_repair(cwd):
     if not up:
         notes.append(note)
         ok = False
+    down = services_down(cwd)
+    if down:
+        # advisory: only the tests that reach these fail, so name the cause and let the rest run
+        notes.append(f"not answering locally: {', '.join(down)} — CI starts it before tests "
+                     "(tasks/ci/tasks.yml test-prepare); a test that reaches it will fail with ECONNREFUSED")
     elif test_db_capable(cwd):
         # a tree that can take its query-test database from the environment gets one built from its
         # own migrations and seed — never the shared one some other checkout last migrated
