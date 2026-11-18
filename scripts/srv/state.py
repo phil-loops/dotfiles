@@ -198,6 +198,16 @@ def _gates(snap, b, tree, jobs):
     return ("stale" if green else "none"), []
 
 
+def _owes_all(br):
+    """Set each branch entity's `owes`: the highest link in its chain off its parent's tip, or None."""
+    for e in br.values():
+        up, cur = [], e
+        while cur is not None and len(up) < 30:
+            up.append(cur)
+            cur = br.get(cur["parentId"]) if cur.get("parentId") else None
+        e["owes"] = next((n["name"] for n in reversed(up) if n["drifted"]), None)
+
+
 def _git_fp(name):
     snap = repostate.snapshot()
     jobs = push.gate_runs()
@@ -253,6 +263,9 @@ def _git_entities(name, snap, jobs):
             "drifted": bool(tip) and not rooted and not _is_ancestor(graph, snap.local(parent), tip),
             "upstream": up, "upstreamBad": up_bad, "diverged": diverged,
         }
+    # what each branch owes: the highest link in its chain that is off its parent's tip (its own
+    # parent may not have moved at all — a grandparent did). /catch-up walks the chain from there.
+    _owes_all(ents["branch"])
     for p in names:
         members = [b for b, q in member.items() if q == p]
         roots = [b for b in members if snap.parent(b) not in member]

@@ -799,8 +799,8 @@ def _origin_verdict(branch):
              if has_remote and _is_restack(branch) else
              "diverged from origin — reconcile first; shared history is never overwritten"),
         ward("chain", "stacked on origin history", not chain_broken,
-             f"history diverged from origin/{chain_broken} — its PR won't stack clean; "
-             f"reset the chain onto origin's copy and replay (restack conforms it)"),
+             f"{chain_broken} moved on origin and this branch doesn't carry it yet — "
+             f"catch the chain up first (sync, or POST /catch-up), then push"),
         # FF-additive to a published head is exempt (mirrors the gates' fresh gate,
         # d051e01): the branch must sit on the PR tip to fast-forward, so it can never
         # "rebase forward" without rewriting shared history.

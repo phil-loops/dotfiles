@@ -17,7 +17,7 @@ import json
 from collections import namedtuple
 
 from . import evidence   # own line: the big import below is contested across sessions
-from . import ctx, forestlock
+from . import catchup, ctx, forestlock
 from . import (actor, chat, integrate, lsp, outbox, outline, packet, picker, preview, push, queue, restack,
                review, reviewdesk, reviews, sync, syntax, todo, tutor, usage, verdicts, viewed)
 
@@ -77,6 +77,7 @@ POST = {
     # ── branches move ──
     "/reseat-children": _r(reviews.reseat, "history"),
     "/sync": _r(sync.post_sync, "history"),
+    "/catch-up": _r(catchup.post, "history"),             # the chain onto its moved ancestors (srv/catchup.py)
     "/prep-push": _r(push.prep_push, "history"),
     "/outline": _r(outline.save, "history"),             # rewords unpushed messages
     "/outline-undo": _r(outline.undo, "history"),
