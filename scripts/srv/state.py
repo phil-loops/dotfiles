@@ -215,7 +215,7 @@ def _git_entities(name, snap, jobs):
     graph = _graph(snap, trunk, tips)
     trees = snap.head_trees()
     ents = {"repo": {name: {"id": name, "name": name, "main": main, "trunk": snap.sha.get(f"refs/remotes/{trunk}", snap.local(main))}},
-            "project": {}, "branch": {}}
+            "project": {}, "branch": {}, "gaterun": {}}
     behind = _behind_trunk(snap, trunk, member)
     sizes = collections.Counter(member.values())
     order = {}
@@ -231,6 +231,12 @@ def _git_entities(name, snap, jobs):
         ahead = len(graph.own(tip, remote)) if remote and tip else 0
         tree = trees.get(b, "")
         gates, red = _gates(snap, b, tree, jobs)
+        # the branch's latest gates run, pushed to every view (one fact, one owner, one copy):
+        # the forest row, the strip and the door read this instead of each polling
+        # /gates-progress. The git fingerprint includes each journal's mtime, so every step
+        # the run writes re-emits it; the client counts only the run for the branch's tree.
+        if jobs.get(b):
+            ents["gaterun"][f"{name}:{b}"] = {"id": f"{name}:{b}", "branch": f"{name}:{b}", **push.run_progress(jobs[b])}
         up, up_bad, diverged = _upstream(snap, graph, b, main, tip, remote)
         rooted = parent in _TRUNKS or parent == trunk or not snap.exists(parent)
         ents["branch"][f"{name}:{b}"] = {
