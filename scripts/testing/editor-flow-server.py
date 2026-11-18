@@ -191,7 +191,7 @@ def main():
             self._actor = "browser"
             phase.stage = path
             try:
-                if path in ("/loops/review-helix", "/loops/edit-session", "/loops/edit-commit"):
+                if path in ("/loops/review-helix", "/loops/edit-session", "/loops/edit-commit", "/loops/edit-warm"):
                     return routes.post(self, path.removeprefix("/loops"), raw)
                 if path == "/loops/syntax/units":
                     return self._send(200, '{"ok":true,"units":[],"functions":[],"classes":[]}')

@@ -6,12 +6,13 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 import uuid
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from srv import ctx, edits, state
+from srv import ctx, edits, ghreview, state
 
 
 class Request:
@@ -382,6 +383,125 @@ class EditSessions(unittest.TestCase):
         self.assertFalse(answer["ok"])
         self.assertEqual(self.git("rev-parse", "feature"), other)
         self.assertEqual((self.repo / "a.txt").read_text(), "before\n")
+
+    def prime(self):
+        data = {"branch": "feature", "expectedTip": self.tip, "epoch": state.EPOCH}
+        answer = self.call(edits.prime, data)
+        self.assertTrue(answer["ok"], answer)
+        with edits._PRIME_LOCK:
+            future = edits._PRIMING.get(str((self.repo / ".git").resolve()))
+        if future:
+            future.result(timeout=10)
+
+    def test_review_warmup_creates_a_snapshot_without_a_commit_or_edit_authority(self):
+        self.prime()
+        self.assertEqual(self.git("rev-parse", "feature"), self.tip)
+        self.assertEqual(self.git("for-each-ref", "refs/canopy/edits"), "")
+        ready = json.loads((self.repo / ".git/canopy-edits/ready.json").read_text())
+        cache = edits._load(edits._root(ready["session"])[1])
+        self.assertEqual(cache["kind"], "cache")
+        self.assertNotIn("receipt", cache)
+        self.assertNotIn("operation", cache)
+        answer = self.commit({"session": ready["session"], "branch": "feature", "expectedTip": self.tip, "epoch": state.EPOCH})
+        self.assertFalse(answer["ok"])
+        original = edits._checkout(edits._root(ready["session"])[1], cache)
+        identity = original.stat().st_ino
+        data, checkout = self.prepare()
+        self.assertEqual(checkout.stat().st_ino, identity)
+        self.assertNotEqual(data["session"], ready["session"])
+        self.assertEqual((checkout / "a.txt").read_text(), "before\n")
+
+    def test_warmup_can_resolve_the_initial_branch_before_client_hydration(self):
+        answer = self.call(edits.prime, {"branch": "feature"})
+        self.assertTrue(answer["ok"], answer)
+        with edits._PRIME_LOCK:
+            future = edits._PRIMING.get(str((self.repo / ".git").resolve()))
+        if future:
+            future.result(timeout=10)
+        ready = json.loads((self.repo / ".git/canopy-edits/ready.json").read_text())
+        self.assertEqual(ready["tip"], self.tip)
+        self.assertEqual(self.git("rev-parse", "feature"), self.tip)
+
+    def test_first_open_joins_inflight_warmup_instead_of_copying_again(self):
+        started, release, finished = threading.Event(), threading.Event(), threading.Event()
+        original = edits._git
+        copies = []
+        def held(*args, **kwargs):
+            if "read-tree" in args and "--reset" in args:
+                copies.append(args)
+                started.set()
+                if not release.wait(10):
+                    raise AssertionError("warmup was never released")
+            return original(*args, **kwargs)
+        results = []
+        def opening():
+            ctx.set_repo(str(self.repo))
+            try:
+                session = str(uuid.uuid4())
+                results.append(self.call(edits.prepare, {"session": session, "branch": "feature", "expectedTip": self.tip,
+                                                         "baseSha": self.base, "epoch": state.EPOCH}))
+            finally:
+                ctx.clear_repo()
+                finished.set()
+        with mock.patch.object(edits, "_git", side_effect=held):
+            self.call(edits.prime, {"branch": "feature", "expectedTip": self.tip, "epoch": state.EPOCH})
+            self.assertTrue(started.wait(10))
+            self.call(edits.prime, {"branch": "feature", "expectedTip": self.tip, "epoch": state.EPOCH})
+            worker = threading.Thread(target=opening)
+            worker.start()
+            try:
+                self.assertFalse(finished.wait(0.05))
+            finally:
+                release.set()
+                worker.join(10)
+            self.assertTrue(finished.is_set())
+        self.assertEqual(len(copies), 1)
+        self.assertTrue(results[0]["ok"], results)
+        self.assertEqual((Path(results[0]["dir"]) / "a.txt").read_text(), "before\n")
+
+    def test_failed_warmup_falls_back_to_an_ordinary_private_editor_checkout(self):
+        original = edits._prepare
+        def failed(req, data, cache=False):
+            if cache:
+                raise ghreview.Refused("fixture failure")
+            return original(req, data)
+        with mock.patch.object(edits, "_prepare", side_effect=failed):
+            self.prime()
+            data, checkout = self.prepare()
+        self.assertEqual((checkout / "a.txt").read_text(), "before\n")
+
+    def test_an_idle_snapshot_cannot_bypass_validation_through_a_direct_handoff(self):
+        self.prime()
+        common = (self.repo / ".git").resolve()
+        ready = json.loads((common / "canopy-edits/ready.json").read_text())
+        source = edits._root(ready["session"])[1]
+        destination = edits._root(str(uuid.uuid4()))[1]
+        destination.mkdir()
+        with self.assertRaises(ghreview.Refused):
+            edits._take_reserved(common, destination, source)
+        self.assertTrue((source / "checkout/a.txt").exists())
+
+    def test_dirty_unused_warmup_files_are_preserved_when_an_editor_claims(self):
+        self.prime()
+        common = (self.repo / ".git").resolve()
+        ready = json.loads((common / "canopy-edits/ready.json").read_text())
+        source = edits._root(ready["session"])[1]
+        (source / "checkout/a.txt").write_text("changed after warmup\n")
+        data, checkout = self.prepare()
+        self.assertEqual((checkout / "a.txt").read_text(), "before\n")
+        self.assertEqual((source / "checkout/a.txt").read_text(), "changed after warmup\n")
+
+    def test_replacing_a_cached_checkout_prevents_eviction(self):
+        self.prime()
+        common = (self.repo / ".git").resolve()
+        ready = json.loads((common / "canopy-edits/ready.json").read_text())
+        source = edits._root(ready["session"])[1]
+        checkout = source / "checkout"
+        checkout.rename(source / "original-checkout")
+        checkout.mkdir()
+        (checkout / "keep.txt").write_text("replacement\n")
+        edits._evict(str(self.repo), source)
+        self.assertEqual((checkout / "keep.txt").read_text(), "replacement\n")
 
 
 if __name__ == "__main__":

@@ -249,6 +249,8 @@ public final class ReviewPageState: ShipHost {
     @ObservationIgnored var helixTask: Task<Void, Never>?
     @ObservationIgnored var helixSession: UUID?
     @ObservationIgnored var helixLandingPermits: Set<UUID> = []
+    @ObservationIgnored var editorWarmRepos: Set<String> = []
+    @ObservationIgnored var editorWarmEnabled = false
     /// The half of the split the cursor reads, kept as it moves up and down; `h` / `l` switch it.
     public var column: Side = .right {
         didSet { if column != oldValue { sourceGeneration &+= 1 } }
@@ -424,6 +426,7 @@ public final class ReviewPageState: ShipHost {
     public func sync() {
         guard let t = target else { return }
         arrive()
+        if let app { warmEditor(app) }
         if let guideContext, guideContext != contextKey, let app { ReviewGuide.close(app) }
         if stretchKey != shownStretch {
             shownStretch = stretchKey

@@ -51,6 +51,7 @@ POST = {
     "/syntax/units": _r(syntax.units),
     "/integrate": _r(integrate.check),                   # does the whole forest land on main (scratch worktree)
     "/edit-session": _r(edits.prepare, "machine"),
+    "/edit-warm": _r(edits.prime, "machine"),
 
     # ── this repo's state ──
     "/open-url": _r(reviews.open_url, "repo"),           # a GitHub URL → its page (imports a PR as review/pr-N)
