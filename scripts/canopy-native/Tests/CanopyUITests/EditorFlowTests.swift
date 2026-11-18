@@ -52,7 +52,6 @@ import Testing
         try await wait("the real diff and history") { page.diffCurrent && BranchHistory.of(app).rows(page.id) != nil }
         app.focus(pane: reviewDiffPane)
         page.setCursor("l|a.txt|R:1")
-        let initial = page.tip
         let size = NSSize(width: 1100, height: 800)
         let window = NSWindow(contentRect: NSRect(origin: NSPoint(x: -20000, y: -20000), size: size), styleMask: .borderless, backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
@@ -61,45 +60,61 @@ import Testing
         host.sizingOptions = []
         window.contentView = host
         defer { window.contentView = nil; window.close() }
-        let opening = Date()
-        app.keys.handle("o")
-        try await wait("the actual terminal") { window.firstResponder is HelixTerminal && page.helix?.dir != nil }
-        let terminal = try #require(window.firstResponder as? HelixTerminal)
-        try await wait("Helix normal mode") {
-            let t = terminal.getTerminal()
-            return (0..<t.rows).contains { t.getLine(row: $0)?.translateToString(trimRight: true).contains("NOR") == true }
-        }
-        let openMs = Date().timeIntervalSince(opening) * 1000
-        terminal.send(source: terminal, data: Array("ggxc".utf8)[...])
-        try await Task.sleep(nanoseconds: 100_000_000)
-        terminal.send(source: terminal, data: Array("\u{1b}[200~after edit transaction\n\u{1b}[201~".utf8)[...])
-        terminal.send(source: terminal, data: [0x1b][...])
-        try await Task.sleep(nanoseconds: 300_000_000)
-        terminal.send(source: terminal, data: Array(":wq".utf8)[...])
-        try await Task.sleep(nanoseconds: 200_000_000)
-        let saving = Date()
-        terminal.send(source: terminal, data: [13][...])
-        try await wait("the committed revision") { page.helix == nil && page.tip != initial && page.diffCurrent }
-        try await wait("the committed history row") { BranchHistory.of(app).rows(page.id)?.first.map { page.tip.hasPrefix($0.sha) } == true }
-        try await wait("the rendered edit") {
+        var finalTip = page.tip
+        for (index, text) in ["after edit transaction", "after the second edit"].enumerated() {
+            let initial = page.tip
+            app.focus(pane: reviewDiffPane)
+            page.setCursor("l|a.txt|R:1")
+            let opening = Date()
+            app.keys.handle("o")
+            try await wait("the actual terminal") { window.firstResponder is HelixTerminal && page.helix?.dir != nil }
+            let terminal = try #require(window.firstResponder as? HelixTerminal)
+            try await wait("Helix normal mode") {
+                let t = terminal.getTerminal()
+                return (0..<t.rows).contains { t.getLine(row: $0)?.translateToString(trimRight: true).contains("NOR") == true }
+            }
+            let openMs = Date().timeIntervalSince(opening) * 1000
+            terminal.send(source: terminal, data: Array("ggxc".utf8)[...])
+            try await Task.sleep(nanoseconds: 100_000_000)
+            terminal.send(source: terminal, data: Array("\u{1b}[200~\(text)\n\u{1b}[201~".utf8)[...])
+            terminal.send(source: terminal, data: [0x1b][...])
+            try await Task.sleep(nanoseconds: 300_000_000)
+            terminal.send(source: terminal, data: Array(":wq".utf8)[...])
+            try await Task.sleep(nanoseconds: 200_000_000)
+            let saving = Date()
+            terminal.send(source: terminal, data: [13][...])
+            try await wait("the committed revision") { page.helix == nil && page.tip != initial && page.diffCurrent }
+            try await wait("the committed history row") { BranchHistory.of(app).rows(page.id)?.first.map { page.tip.hasPrefix($0.sha) } == true }
+            try await wait("the rendered edit") {
+                host.layoutSubtreeIfNeeded()
+                return page.diffCanvas.canvas.text.string.contains(text)
+            }
             host.layoutSubtreeIfNeeded()
-            return page.diffCanvas.canvas.text.string.contains("after edit transaction")
+            let bitmap = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+            host.cacheDisplay(in: host.bounds, to: bitmap)
+            let paintMs = Date().timeIntervalSince(saving) * 1000
+            #expect(app.store.versions[Domain.git] == 1, "the receipt paints before the delayed state patch")
+            try #require(bitmap.representation(using: .png, properties: [:])).write(to: root.appendingPathComponent("after-\(index).png"))
+            let result: JSONValue = try await app.transport.getJSON("/test/result")
+            #expect(result["tip"]?.string == page.tip)
+            #expect(result["text"]?.string == text)
+            #expect(app.runner.runOf("review.helix.land", page.id)?.state == .done)
+            let timing: JSONValue = ["openMs": .number(openMs), "saveToPaintMs": .number(paintMs), "tip": .string(page.tip)]
+            try JSONEncoder().encode(timing).write(to: root.appendingPathComponent("timings-\(index).json"))
+            print("editor-flow \(index == 0 ? "cold" : "warm"): \(root.path) · open \(Int(openMs)) ms · save to paint \(Int(paintMs)) ms")
+            finalTip = page.tip
+            if index == 0 {
+                var parked = false
+                for _ in 0..<100 {
+                    let ready: JSONValue = try await app.transport.getJSON("/test/result")
+                    if ready["parkedTip"]?.string == page.tip { parked = true; break }
+                    try await Task.sleep(nanoseconds: 20_000_000)
+                }
+                try #require(parked, "the completed checkout is available for an exclusive new lease")
+            }
         }
-        host.layoutSubtreeIfNeeded()
-        let bitmap = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
-        host.cacheDisplay(in: host.bounds, to: bitmap)
-        let paintMs = Date().timeIntervalSince(saving) * 1000
-        #expect(app.store.versions[Domain.git] == 1, "the receipt paints before the delayed state patch")
-        try #require(bitmap.representation(using: .png, properties: [:])).write(to: root.appendingPathComponent("after.png"))
-        let result: JSONValue = try await app.transport.getJSON("/test/result")
-        #expect(result["tip"]?.string == page.tip)
-        #expect(result["text"]?.string == "after edit transaction")
-        #expect(app.runner.runOf("review.helix.land", page.id)?.state == .done)
-        let timing: JSONValue = ["openMs": .number(openMs), "saveToPaintMs": .number(paintMs), "tip": .string(page.tip)]
-        try JSONEncoder().encode(timing).write(to: root.appendingPathComponent("timings.json"))
-        print("editor-flow: \(root.path) · open \(Int(openMs)) ms · save to paint \(Int(paintMs)) ms")
-        try await wait("the delayed stream acknowledgement") { app.store.asOf[Domain.git] == 1 }
-        #expect(page.tip == result["tip"]?.string && page.diffCurrent)
-        #expect(page.diffCanvas.canvas.text.string.contains("after edit transaction"))
+        try await wait("the delayed stream acknowledgement") { app.store.asOf[Domain.git] == 2 }
+        #expect(page.tip == finalTip && page.diffCurrent)
+        #expect(page.diffCanvas.canvas.text.string.contains("after the second edit"))
     }
 }

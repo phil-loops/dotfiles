@@ -74,6 +74,21 @@ def main():
     updates = []
     writes = 0
     requests = []
+    git_calls = []
+    phase = threading.local()
+    run = subprocess.run
+
+    def measured(argv, *args, **kwargs):
+        started = time.perf_counter()
+        try:
+            return run(argv, *args, **kwargs)
+        finally:
+            stage = getattr(phase, "stage", "") or "background"
+            if argv and Path(argv[0]).name == "git":
+                git_calls.append({"phase": stage, "argv": [str(arg) for arg in argv],
+                                  "ms": (time.perf_counter() - started) * 1000})
+
+    subprocess.run = measured
 
     def branch_entity():
         tip = git("rev-parse", branch)
@@ -158,8 +173,10 @@ def main():
                 if u.path == "/loops/file":
                     return review.file(self, u)
                 if u.path == "/test/result":
+                    (root / "git-calls.json").write_text(json.dumps(git_calls, indent=2))
                     return self._send(200, json.dumps({"tip": git("rev-parse", branch), "initial": initial,
-                                                        "text": git("show", f"{branch}:a.txt"), "requests": requests}))
+                                                        "text": git("show", f"{branch}:a.txt"), "requests": requests,
+                                                        "parkedTip": json.loads((repo / ".git/canopy-edits/ready.json").read_text()).get("tip") if (repo / ".git/canopy-edits/ready.json").exists() else None}))
                 if u.path == "/review-requests":
                     return self._send(200, "[]")
                 return self._send(200, "{}")
@@ -172,6 +189,7 @@ def main():
             raw = self.rfile.read(int(self.headers.get("Content-Length", "0"))).decode()
             requests.append({"method": "POST", "path": path, "body": json.loads(raw or "{}")})
             self._actor = "browser"
+            phase.stage = path
             try:
                 if path in ("/loops/review-helix", "/loops/edit-session", "/loops/edit-commit"):
                     return routes.post(self, path.removeprefix("/loops"), raw)
@@ -179,6 +197,7 @@ def main():
                     return self._send(200, '{"ok":true,"units":[],"functions":[],"classes":[]}')
                 return self._send(200, '{"ok":true}')
             finally:
+                phase.stage = ""
                 repostate.invalidate()
                 ctx.clear_repo()
 

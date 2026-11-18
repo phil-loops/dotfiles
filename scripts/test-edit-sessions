@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Exercise editor transactions against disposable repositories, without remotes."""
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -41,12 +42,15 @@ class EditSessions(unittest.TestCase):
         self.old = ctx.CWD, ctx.MAIN_WT, ctx.REPOS, ctx.run
         self.cleanup_patch = mock.patch.object(edits, "_cleanup_later")
         self.cleanup_patch.start()
+        self.warm_patch = mock.patch.object(edits, "_warm_later")
+        self.warm_patch.start()
         ctx.CWD = ctx.MAIN_WT = str(self.repo)
         ctx.REPOS = {"fixture": str(self.repo)}
         ctx.run = lambda args, timeout=None: subprocess.run(args, cwd=ctx.repo_cwd(), capture_output=True, text=True)
 
     def tearDown(self):
         self.cleanup_patch.stop()
+        self.warm_patch.stop()
         ctx.CWD, ctx.MAIN_WT, ctx.REPOS, ctx.run = self.old
         ctx.clear_repo()
         self.temporary.cleanup()
@@ -60,11 +64,12 @@ class EditSessions(unittest.TestCase):
         self.assertEqual(req.code, 200)
         return req.data
 
-    def prepare(self):
+    def prepare(self, branch="feature"):
         session = str(uuid.uuid4())
-        data = {"branch": "feature", "expectedTip": self.tip, "baseSha": self.base, "session": session, "epoch": state.EPOCH}
+        data = {"branch": branch, "expectedTip": self.tip, "baseSha": self.base, "session": session, "epoch": state.EPOCH}
         answer = self.call(edits.prepare, data)
         self.assertTrue(answer["ok"], answer)
+        edits._warm(str(self.repo), edits._root(session)[1])
         return data, Path(answer["dir"])
 
     def commit(self, data):
@@ -81,6 +86,17 @@ class EditSessions(unittest.TestCase):
         again = self.call(edits.prepare, first)
         self.assertEqual(again["dir"], str(a))
         self.assertEqual((a / "a.txt").read_text(), "private\n")
+
+    def test_a_partial_preparation_is_preserved_instead_of_replaced(self):
+        session = str(uuid.uuid4())
+        root = edits._root(session)[1]
+        checkout = root / "checkout"
+        checkout.mkdir(parents=True)
+        (checkout / "saved.txt").write_text("preserve\n")
+        answer = self.call(edits.prepare, {"session": session, "branch": "feature", "expectedTip": self.tip,
+                                          "baseSha": self.base, "epoch": state.EPOCH})
+        self.assertFalse(answer["ok"])
+        self.assertEqual((checkout / "saved.txt").read_text(), "preserve\n")
 
     def test_save_receipt_names_exact_git_objects_and_updates_attached_checkout(self):
         data, checkout = self.prepare()
@@ -109,14 +125,81 @@ class EditSessions(unittest.TestCase):
         self.assertEqual(self.git("show", "feature:a.txt"), "frozen")
         self.assertEqual(self.git("rev-list", "--count", "main..feature"), "2")
 
-    def test_success_retires_the_checkout_but_keeps_the_replay_receipt(self):
+    def test_success_parks_an_exclusively_claimed_checkout_and_keeps_the_replay_receipt(self):
         data, checkout = self.prepare()
         (checkout / "a.txt").write_text("saved\n")
         receipt = self.commit(data)
         self.assertTrue(receipt["ok"], receipt)
-        edits._cleanup(str(self.repo), checkout.parent)
+        edits._cleanup(str(self.repo), edits._root(data["session"])[1])
+        self.assertTrue(checkout.exists())
+        self.tip = receipt["sha"]
+        newer, next_checkout = self.prepare()
+        self.assertNotEqual(checkout, next_checkout)
         self.assertFalse(checkout.exists())
+        self.assertEqual((next_checkout / "a.txt").read_text(), "saved\n")
+        other, other_checkout = self.prepare()
+        self.assertNotEqual(next_checkout, other_checkout)
+        (next_checkout / "a.txt").write_text("new owner\n")
+        self.assertEqual((other_checkout / "a.txt").read_text(), "saved\n")
         self.assertEqual(self.commit(data), {**receipt, "epoch": state.EPOCH})
+
+    def test_a_dirty_parked_checkout_is_preserved_instead_of_reset(self):
+        data, checkout = self.prepare()
+        (checkout / "a.txt").write_text("saved\n")
+        receipt = self.commit(data)
+        edits._cleanup(str(self.repo), edits._root(data["session"])[1])
+        (checkout / "a.txt").write_text("late external edit\n")
+        self.tip = receipt["sha"]
+        newer, next_checkout = self.prepare()
+        self.assertEqual((next_checkout / "a.txt").read_text(), "saved\n")
+        self.assertEqual((checkout / "a.txt").read_text(), "late external edit\n")
+
+    def test_another_branch_claims_the_cached_checkout_and_updates_only_its_private_files(self):
+        data, checkout = self.prepare()
+        (checkout / "a.txt").write_text("saved\n")
+        receipt = self.commit(data)
+        edits._cleanup(str(self.repo), edits._root(data["session"])[1])
+        identity = checkout.stat().st_ino
+        self.git("checkout", "-qb", "other", "main")
+        self.git("config", "branch.other.stack-parent", "main")
+        (self.repo / "a.txt").write_text("other branch\n")
+        self.git("commit", "-qam", "other")
+        self.tip = self.git("rev-parse", "HEAD")
+        newer, next_checkout = self.prepare(branch="other")
+        self.assertEqual(next_checkout.stat().st_ino, identity)
+        self.assertEqual((next_checkout / "a.txt").read_text(), "other branch\n")
+        self.assertEqual((self.repo / "a.txt").read_text(), "other branch\n")
+        self.assertEqual(self.commit(data), receipt)
+
+    def test_fixup_still_names_the_older_unpublished_commit(self):
+        self.git("commit", "-qm", "unrelated", "--allow-empty")
+        self.tip = self.git("rev-parse", "HEAD")
+        data, checkout = self.prepare()
+        (checkout / "a.txt").write_text("edited\n")
+        receipt = self.commit(data)
+        self.assertEqual(receipt["message"], "fixup! feat: change a")
+
+    def test_a_published_commit_uses_an_edit_message(self):
+        self.git("update-ref", "refs/remotes/fixture/feature", self.tip)
+        data, checkout = self.prepare()
+        (checkout / "a.txt").write_text("edited\n")
+        receipt = self.commit(data)
+        self.assertEqual(receipt["message"], "edit a.txt")
+
+    def test_a_parent_boundary_line_uses_an_edit_message(self):
+        data, checkout = self.prepare()
+        (checkout / "untouched.txt").write_text("edited\n")
+        receipt = self.commit(data)
+        self.assertEqual(receipt["message"], "edit untouched.txt")
+
+    def test_late_staged_content_is_preserved_during_cache_cleanup(self):
+        data, checkout = self.prepare()
+        (checkout / "a.txt").write_text("saved\n")
+        self.assertTrue(self.commit(data)["ok"])
+        (checkout / "a.txt").write_text("staged after commit\n")
+        subprocess.run(["git", "add", "a.txt"], cwd=checkout, check=True)
+        edits._cleanup(str(self.repo), edits._root(data["session"])[1])
+        self.assertEqual(subprocess.check_output(["git", "show", ":a.txt"], cwd=checkout, text=True), "staged after commit\n")
 
     def test_uncommitted_ignored_files_keep_the_checkout(self):
         data, checkout = self.prepare()
@@ -127,7 +210,7 @@ class EditSessions(unittest.TestCase):
         (checkout / "private-note").write_text("keep me\n")
         receipt = self.commit(data)
         self.assertTrue(receipt["ok"], receipt)
-        edits._cleanup(str(self.repo), checkout.parent)
+        edits._cleanup(str(self.repo), edits._root(data["session"])[1])
         self.assertEqual((checkout / "private-note").read_text(), "keep me\n")
 
     def test_restart_after_ref_advance_recovers_the_prepared_receipt(self):
@@ -167,7 +250,26 @@ class EditSessions(unittest.TestCase):
         self.assertFalse(refusal["ok"])
         self.assertEqual(self.git("show", "feature:a.txt"), "first")
         self.assertEqual((second / "a.txt").read_text(), "second\n")
-        self.assertEqual(edits._load(second.parent)["state"], "prepared")
+        self.assertEqual(edits._load(edits._root(b["session"])[1])["state"], "prepared")
+
+    def test_capture_preserves_racy_index_detection_for_same_size_edits(self):
+        self.git("config", "core.checkStat", "minimal")
+        self.git("config", "core.trustctime", "false")
+        data, checkout = self.prepare()
+        root = edits._root(data["session"])[1]
+        session = edits._load(root)
+        path = checkout / "a.txt"
+        stamp = path.stat()
+        older = stamp.st_mtime_ns - 10_000_000_000
+        os.utime(path, ns=(stamp.st_atime_ns, older))
+        subprocess.run(["git", "update-index", "--refresh"], cwd=checkout, check=True, capture_output=True)
+        index = Path(session["gitdir"]) / "index"
+        os.utime(index, ns=(stamp.st_atime_ns, older))
+        path.write_text("edited\n")
+        os.utime(path, ns=(stamp.st_atime_ns, older))
+        tree, paths = edits._capture(root, session)
+        self.assertIn("a.txt", paths)
+        self.assertEqual(self.git("show", f"{tree}:a.txt"), "edited")
 
     def test_attached_worktree_edits_to_the_same_path_are_preserved(self):
         data, checkout = self.prepare()
