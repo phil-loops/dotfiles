@@ -76,6 +76,16 @@ def _edges_naming(b):
     return [(k, v) for k, _, v in (ln.partition(" ") for ln in out.splitlines()) if v.strip() == b]
 
 
+_REGISTRY = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "stack-registry")
+
+
+def _registry(op, project, branch, verb):
+    """The forest's registry list moves through stack-registry: one config call, checked, logged."""
+    r = ctx.run([_REGISTRY, op, project, branch, "--via", f"stack-reshape {verb}"])
+    if r.returncode != 0:
+        raise Refused((r.stderr or f"stack-registry {op} failed").strip()[:300])
+
+
 def _unset_value(key, value):
     _git("config", "--unset", key, f"^{re.escape(value)}$")
 
@@ -108,7 +118,7 @@ def new(branch, parent, project, description):
     _ok("config", f"branch.{branch}.description", description.strip())
     _ok("config", f"branch.{branch}.stack-parent", "main" if parent in TRUNKS else parent)
     _ok("config", f"branch.{branch}.stack-project", project)
-    _ok("config", "--add", f"stack-project.{project}.branch", branch)
+    _registry("add", project, branch, "new")
     return {"ok": True, "branch": branch, "parent": parent or "main", "sha": _sha(f"refs/heads/{branch}")[:10], "work": work,
             "bound": _bind_creator(work)}
 
@@ -276,7 +286,7 @@ def contract(branch):
         _unset_value(key, branch)
     proj = project_of(branch)
     if proj:
-        _unset_value(f"stack-project.{proj}.branch", branch)
+        _registry("remove", proj, branch, "contract")
     _ok("branch", "-D", branch)   # git drops branch.<b>.* with it
     return {"ok": True, "contracted": branch, "why": "empty" if empty else "merged",
             "children": kids, "parent": parent, "landed": landed}
@@ -294,8 +304,8 @@ def rename(old, new_name):
     _ok("branch", "-m", old, new_name)   # git carries branch.<old>.* to branch.<new>.*
     proj = project_of(new_name)
     if proj:
-        _unset_value(f"stack-project.{proj}.branch", old)
-        _ok("config", "--add", f"stack-project.{proj}.branch", new_name)
+        _registry("remove", proj, old, "rename")
+        _registry("add", proj, new_name, "rename")
     for c in kids:
         _ok("config", f"branch.{c}.stack-parent", new_name)
     for key, _ in edges:

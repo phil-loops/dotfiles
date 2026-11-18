@@ -66,8 +66,9 @@ def _focus_projects():
 
 
 def _members(project):
-    names = _git("config", "--get-all", f"stack-project.{project}.branch").stdout.split()
-    return [b for b in names if _tip(f"refs/heads/{b}")]
+    """Read fresh, not from the snapshot: a restack this tick just moved the config under it."""
+    from stack_members import members
+    return members(project, cwd=ctx.repo_cwd())
 
 
 def _parent(branch):

@@ -8,6 +8,14 @@
 from . import ctx, repostate
 
 
+def members(project, snap=None):
+    """A forest's members: the branches tagged branch.<b>.stack-project=<project>, in registry
+    order (stack_members — the registry is an order, never membership)."""
+    from stack_members import order
+    snap = snap or repostate.snapshot()
+    return order(project, snap.branch_keys("project"), snap.get_all(f"stack-project.{project}.branch"), snap.exists)
+
+
 def _key(branch, key):
     return f"branch.{branch}.stack-{key}"
 

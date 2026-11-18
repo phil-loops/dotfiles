@@ -1,0 +1,91 @@
+#!/usr/bin/env python3
+"""stack-registry — the one writer of a forest's registry list (stack-project.<p>.branch), and its log.
+
+  stack-registry add <project> <branch> [--via <who>]
+  stack-registry remove <project> <branch> [--via <who>]
+  stack-registry log [<project>]
+
+Each change is ONE git-config call (add, or unset-all of exactly that value), retried while
+another writer holds .git/config's lock, its failure reported (exit 1) — never the read, unset-all,
+re-add loop that lost cite-what-ses-saw's entry on 2026-11-18 when one re-add hit "could not lock
+config file" and nothing checked. Every add and remove appends a line to <git-common-dir>/
+stack-registry.log: time, op, project, branch, who (--via, else the calling command), pid.
+Membership itself is each branch's own stack-project tag (stack-members); this list is order."""
+import os
+import re
+import subprocess
+import sys
+import time
+
+
+def git(*a):
+    return subprocess.run(["git", *a], capture_output=True, text=True)
+
+
+def caller():
+    r = subprocess.run(["ps", "-o", "command=", "-p", str(os.getppid())], capture_output=True, text=True)
+    return " ".join(r.stdout.split())[:200] or "?"
+
+
+def config(*a):
+    """git config with a retry while another writer holds the lock; (rc, stderr)."""
+    for attempt in range(12):
+        r = git("config", *a)
+        if r.returncode == 0 or "could not lock config file" not in r.stderr:
+            return r.returncode, r.stderr.strip()
+        time.sleep(0.05 * (attempt + 1))
+    return r.returncode, r.stderr.strip()
+
+
+def log_path():
+    common = git("rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip()
+    return os.path.join(common, "stack-registry.log")
+
+
+def record(op, project, branch, via):
+    line = "\t".join([time.strftime("%Y-%m-%dT%H:%M:%S%z"), op, project, branch, via, str(os.getppid())])
+    with open(log_path(), "a") as f:
+        f.write(line + "\n")
+
+
+def main(argv):
+    if not argv or argv[0] in ("-h", "--help"):
+        print(__doc__.strip())
+        return 0 if argv else 2
+    via = None
+    if "--via" in argv:
+        i = argv.index("--via")
+        via = argv[i + 1] if i + 1 < len(argv) else None
+        argv = argv[:i] + argv[i + 2:]
+    op, args = argv[0], argv[1:]
+    if op == "log":
+        try:
+            with open(log_path()) as f:
+                rows = [ln for ln in f if not args or ln.split("\t")[2:3] == args[:1]]
+        except FileNotFoundError:
+            rows = []
+        sys.stdout.write("".join(rows))
+        return 0
+    if op not in ("add", "remove") or len(args) != 2 or not all(args):
+        print(__doc__.strip(), file=sys.stderr)
+        return 2
+    project, branch = args
+    key = f"stack-project.{project}.branch"
+    listed = git("config", "--get-all", key).stdout.split()
+    if op == "add":
+        if branch in listed:
+            return 0
+        rc, err = config("--add", key, branch)
+    else:
+        if branch not in listed:
+            return 0
+        rc, err = config("--unset-all", key, "^" + re.sub(r"([][.*^$\\+?(){}|])", r"\\\1", branch) + "$")
+    if rc != 0:
+        print(f"stack-registry {op} {project} {branch}: {err or f'git config exit {rc}'}", file=sys.stderr)
+        return 1
+    record(op, project, branch, via or caller())
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

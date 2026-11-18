@@ -78,7 +78,7 @@ topo_order() {
   if (( ${#members[@]} == 0 )); then
     while IFS= read -r m; do
       [[ -n "$m" ]] && members+=("$m")
-    done < <(git config --get-all "stack-project.${project}.branch" 2>/dev/null)
+    done < <("${SELF_DIR}/stack-members" "$project" 2>/dev/null)
   fi
 
   local -A is_member emitted

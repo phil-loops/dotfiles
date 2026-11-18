@@ -290,7 +290,7 @@ def _members(snap, d):
     if d.get("branch"):
         return [d["branch"]] if snap.exists(d["branch"]) else []
     project = d.get("project", "")
-    return [b for b in snap.get_all(f"stack-project.{project}.branch") if snap.exists(b)] if project else []
+    return stackcfg.members(project, snap) if project else []
 
 
 def hold(req, raw):
