@@ -458,7 +458,7 @@ Phil found round 27 asked too much of him: a chat showed on a branch only once i
 | 3 | The server serves a link only when `now - at < ACTED_WITHIN` | one code path |
 | 4 | Rows with `replay` set or `actor != claude` are skipped | one code path |
 | 5 | Branch and repo are written into the evidence by the hook and post-commit at the moment | one code path |
-| 6 | Dismissals live in the journal beside bindings, keyed by conversation and branch work, cleared by newer evidence | journal transaction |
+| 6 | Dismissals live in the server's state file beside the evidence they correct, kept only while that evidence can be served; a newer action outranks one | one code path |
 
 ### Encoding order
 
@@ -466,3 +466,22 @@ Phil found round 27 asked too much of him: a chat showed on a branch only once i
 2. `serve-chat-actions`: each served chat carries `acted` — the branches it edited or committed to within `ACTED_WITHIN`, newest first — reading the usage log's tail, not its history.
 3. `draw-chat-actions`: a branch rings for chats that acted on it as well as bound ones, each worded by its evidence; a chat on no branch either way stays in the no-work list.
 4. `dismiss-chat-link`: Phil's dismiss hides an inferred link until the chat's next action on that branch.
+
+### Findings, verified
+
+An independent pass, briefed with the principles, found four gaps; three held.
+
+**Confirmed: evidence named branches, so a recreated name inherited it.** An edit now records the branch's work id when it has one, and canopy draws evidence only on the branch with that id.
+
+**Confirmed: commits were matched by an eight-character prefix, with a pane fallback that can name the next conversation.** `stack-usage-event` now stamps the chat's full `$CLAUDE_CODE_SESSION_ID`, frozen in the chat's own process before the hook detaches; the server matches it exactly and reads an older row's prefix as before.
+
+**Confirmed: the presence record could lose evidence.** A parent and its subagents share it and their hooks run at once; the hook truncated before writing. Writes now take a directory lock and land by rename. An edit also resolves its real path first, so a symlink lands in the worktree it points into.
+
+**Rejected: nothing invalidates a link when it ages out.** The chat domain's fingerprint carries the minute, so expiry recomputes it.
+
+Remaining limits: commits made through `commit-tree` or a foreign hook leave no usage row; a Bash-only edit (sed, a script) records no file; both read as no evidence, never as wrong evidence.
+
+### Built
+
+`record-branch-edits` (presence `acted`), `serve-chat-actions` (each chat's `acted`, two-hour window, usage-log tail), `draw-chat-actions` (rings and evidence words; the no-branch list holds every chat no dot shows), the three fixes above, and `dismiss-chat-link` (`/chat-dismiss`, Phil's click). Tests: `test-session-presence.py`, `test-chats.py`, `WorkContextTests`, `ChatBindTests`.
+
