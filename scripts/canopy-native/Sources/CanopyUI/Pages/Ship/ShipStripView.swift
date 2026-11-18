@@ -198,6 +198,8 @@ public struct ShipStripView: View {
             }()
             return "\(app.registry.keyOf("review.push")) again · force-with-lease over origin's \(lease)"
         case "branch.force.arm": return "diverged · replace origin?"
+        case "branch.push.early.arm": return "push before the gates answer?"
+        case "branch.push.early": return "\(app.registry.keyOf("review.push")) again · ships this code without the gates — the door says it was your call"
         case "branch.push.confirm":
             // the second press says what the push carries when its gates only advise (P5)
             let again = "\(app.registry.keyOf("review.push")) again to push"
