@@ -77,6 +77,16 @@ check("new: purpose, parent, project and registry set",
 work_a = (cfg("branch.a.stack-work") or [""])[0]
 check("new: the branch carries its own work identity", work_a.startswith("w_") and out.get("work") == work_a
       and work_of(work_a).get("branch") == "a" and work_of(work_a).get("todo_id") is None, (out, work_a))
+check("new: a branch made outside a chat binds nothing", out.get("bound") is None, out)
+SID = "feedface-0000-4000-8000-000000000002"
+env["CLAUDE_CODE_SESSION_ID"] = SID
+rc, out, err = reshape("new", "made-by-chat", "--parent", "main", "--project", "f", "--description", "add a chat's branch")
+del env["CLAUDE_CODE_SESSION_ID"]
+jj = workjournal.Journal(env["CANOPY_WORK_JOURNAL"])
+check("new: the chat that made the branch is bound to its work", rc == 0 and out.get("bound") == SID
+      and jj.bound_works("claude-code", SID) == cfg("branch.made-by-chat.stack-work"), (rc, out, err))
+jj.close()
+reshape("contract", "made-by-chat")
 rc, out, _ = reshape("new", "x", "--parent", "main", "--project", "f")
 check("new: refused without a purpose", rc == 1 and "description" in out.get("err", ""), out)
 
