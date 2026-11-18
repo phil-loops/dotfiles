@@ -68,9 +68,9 @@ def area(r):
 
 
 def load_live():
-    """Live session records, one per process. Deletes dead ones; and since a /clear,
-    resume, or subagent reuses a process under a new session_id, dedupes by pid —
-    keeping the newest record per live process so one claude == one row."""
+    """Live session records, one per process. Deletes dead ones; and since a /clear or
+    /resume starts a new conversation in the same process under a new session_id, dedupes
+    by pid — keeping the newest record per live process so one claude == one row."""
     best = {}   # pid -> (file, record), newest by last_active
     for f in sorted(glob.glob(os.path.join(DIR, "*.json"))):
         try:
