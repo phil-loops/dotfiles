@@ -67,8 +67,10 @@ def attribution():
     if os.environ.get("STACK_VIA") == "viewer":
         return {"actor": os.environ.get("STACK_ACTOR") or "server", "via": "viewer",
                 "session": os.environ.get("STACK_SESSION") or None}
-    sid = session()
-    ev = {"actor": "claude" if sid else "cli", "session": sid}
+    # a chat's own process carries its full id: exact, and frozen before the hook detaches (round 28)
+    full = os.environ.get("CLAUDE_CODE_SESSION_ID") or ""
+    sid = full[:8] or session()
+    ev = {"actor": "claude" if sid else "cli", "session": sid, **({"sessionId": full} if full else {})}
     if os.environ.get("DESKTOP_TRAMPOLINE_TOKEN") or "GitHub Desktop" in os.environ.get("GIT_ASKPASS", ""):
         ev["client"] = "gh-desktop"
     elif os.environ.get("HELIX_RUNTIME") or os.environ.get("STACK_CLIENT") == "helix":
