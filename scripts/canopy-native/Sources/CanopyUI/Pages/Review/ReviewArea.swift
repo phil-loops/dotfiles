@@ -51,11 +51,17 @@ enum ReviewArea: PageArea {
     private static func watch(_ app: AppModel, _ pg: ReviewPageState) {
         withObservationTracking {
             _ = app.router.route
+            _ = app.store.epoch
+            _ = app.store.hydrations
             if case .review = app.router.route { _ = pg.keyOf }
         } onChange: { [weak app, weak pg] in
             DispatchQueue.main.async {
                 guard let app, let pg else { return }
                 if case .review = app.router.route { pg.sync() }
+                else {
+                    pg.cancelHelixPreparation()
+                    pg.releaseEditorPreparation(app)
+                }
                 watch(app, pg)
             }
         }

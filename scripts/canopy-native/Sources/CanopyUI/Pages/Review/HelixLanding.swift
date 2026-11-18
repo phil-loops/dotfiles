@@ -31,6 +31,9 @@ struct HelixLanding {
                            "attachment": .string(attachment.token)],
                     settled: { true }, failed: "the edit didn't commit · saved in \(landing.dir)",
                     answered: { ok, body in
+                        defer {
+                            Task { @MainActor in ReviewPageState.of(app).warmEditor(app) }
+                        }
                         landing.open.log(ok ? "commit answered" : "commit refused or failed")
                         let speaks = landing.presents(app)
                         let page = ReviewPageState.of(app)

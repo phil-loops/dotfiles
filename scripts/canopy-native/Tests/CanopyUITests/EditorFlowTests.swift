@@ -48,10 +48,6 @@ import Testing
         let app = AppModel(config: config, port: port, telemetry: false)
         app.nativeKeysPath = root.appendingPathComponent("no-key-overrides.toml").path
         let page = ReviewPageState.of(app)
-        if !prewarm {
-            page.editorWarmRepos.insert("initial|loops")
-            page.editorWarmRepos.insert("\(try #require(info["epoch"]?.string))|loops")
-        }
         let size = NSSize(width: 1100, height: 800)
         let window = NSWindow(contentRect: NSRect(origin: NSPoint(x: -20000, y: -20000), size: size), styleMask: .borderless, backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
@@ -62,6 +58,7 @@ import Testing
         defer { window.contentView = nil; window.close() }
         let loading = Date()
         app.start()
+        page.editorWarmEnabled = prewarm
         defer { app.stream.stop() }
         try await wait("the real diff and history") { page.diffCurrent && BranchHistory.of(app).rows(page.id) != nil }
         host.layoutSubtreeIfNeeded()
@@ -73,6 +70,7 @@ import Testing
             let initial = page.tip
             app.focus(pane: reviewDiffPane)
             page.setCursor("l|a.txt|R:1")
+            let prepared = page.editorPreparation?.answer?.ok == true ? page.editorPreparation : nil
             let opening = Date()
             app.keys.handle("o")
             try await wait("the actual terminal") { window.firstResponder is HelixTerminal && page.helix?.dir != nil }
@@ -83,6 +81,13 @@ import Testing
             }
             let openMs = Date().timeIntervalSince(opening) * 1000
             let entryToEditorMs = Date().timeIntervalSince(loading) * 1000
+            if let prepared {
+                #expect(page.helix?.lease == prepared.session && page.helix?.dir == prepared.answer?.dir)
+                let afterOpen: JSONValue = try await app.transport.getJSON("/test/result")
+                #expect(afterOpen["requests"]?.array?.filter { $0["path"] == "/loops/edit-session"
+                    && $0["body"]?["expectedTip"]?.string == prepared.source.tip && $0["body"]?["baseSha"]?.string == prepared.base }.count == 1,
+                        "a ready review opens its exact attachment without another preparation request")
+            }
             terminal.send(source: terminal, data: Array("ggxc".utf8)[...])
             try await Task.sleep(nanoseconds: 100_000_000)
             terminal.send(source: terminal, data: Array("\u{1b}[200~\(text)\n\u{1b}[201~".utf8)[...])
@@ -108,11 +113,15 @@ import Testing
             #expect(result["tip"]?.string == page.tip)
             #expect(result["text"]?.string == text)
             #expect(app.runner.runOf("review.helix.land", page.id)?.state == .done)
-            let timing: JSONValue = ["prewarm": .bool(prewarm), "reviewMs": .number(reviewMs), "entryToEditorMs": .number(entryToEditorMs), "openMs": .number(openMs), "saveToPaintMs": .number(paintMs), "tip": .string(page.tip)]
+            let timing: JSONValue = ["prewarm": .bool(prewarm), "readyAttachment": .bool(prepared != nil), "reviewMs": .number(reviewMs), "entryToEditorMs": .number(entryToEditorMs), "openMs": .number(openMs), "saveToPaintMs": .number(paintMs), "tip": .string(page.tip)]
             try JSONEncoder().encode(timing).write(to: root.appendingPathComponent("timings-\(index).json"))
             print("editor-flow prewarm=\(prewarm) \(index == 0 ? "first" : "repeat"): \(root.path) · review \(Int(reviewMs)) ms · open \(Int(openMs)) ms · entry to editor \(Int(entryToEditorMs)) ms · save to paint \(Int(paintMs)) ms")
             finalTip = page.tip
             if index == 0 {
+                if prewarm {
+                    try await wait("the next revision's own editor attachment") { page.editorPreparation?.answer?.ok == true }
+                    continue
+                }
                 var parked = false
                 for _ in 0..<100 {
                     let ready: JSONValue = try await app.transport.getJSON("/test/result")
@@ -203,11 +212,11 @@ import Testing
         let saveMs = Date().timeIntervalSince(saving) * 1000
         let result: JSONValue = try await app.transport.getJSON("/test/result")
         #expect(result["text"]?.string == savedText && result["count"]?.int == 4)
-        var retired = result["indexArtifactBytes"]?.int == 0
+        var retired = result["completedIndexArtifactBytes"]?.int == 0
         for _ in 0..<100 where !retired {
             try await Task.sleep(nanoseconds: 20_000_000)
             let collected: JSONValue = try await app.transport.getJSON("/test/result")
-            retired = collected["indexArtifactBytes"]?.int == 0
+            retired = collected["completedIndexArtifactBytes"]?.int == 0
         }
         #expect(retired, "completed saves keep their receipts without retaining generated index copies")
         #expect(app.store.asOf[Domain.git] == 2, "the resumed edit paints before its stream acknowledgement")
@@ -215,6 +224,16 @@ import Testing
         #expect(resumedAcknowledgement?["ok"] == true)
         try await wait("the resumed edit's stream acknowledgement") { app.store.asOf[Domain.git] == 4 }
         #expect(page.diffCurrent && page.diffCanvas.canvas.text.string.contains(savedText))
+        page.editorWarmEnabled = false
+        page.releaseEditorPreparation(app)
+        await page.editorReleaseTask?.value
+        var releasedIndexes = false
+        for _ in 0..<100 where !releasedIndexes {
+            let collected: JSONValue = try await app.transport.getJSON("/test/result")
+            releasedIndexes = collected["indexArtifactBytes"]?.int == 0
+            if !releasedIndexes { try await Task.sleep(nanoseconds: 20_000_000) }
+        }
+        #expect(releasedIndexes, "releasing the final unused review also retires its generated index")
         let timing: JSONValue = ["resumeMs": .number(resumeMs), "saveToPaintMs": .number(saveMs)]
         try JSONEncoder().encode(timing).write(to: root.appendingPathComponent("timings-resume.json"))
         print("editor-resume prewarm=\(prewarm): \(root.path) · resume \(Int(resumeMs)) ms · save to paint \(Int(saveMs)) ms")

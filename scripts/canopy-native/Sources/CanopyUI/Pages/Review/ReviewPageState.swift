@@ -251,6 +251,9 @@ public final class ReviewPageState: ShipHost {
     @ObservationIgnored var helixLandingPermits: Set<UUID> = []
     @ObservationIgnored var editorWarmRepos: Set<String> = []
     @ObservationIgnored var editorWarmEnabled = false
+    @ObservationIgnored var editorPreparation: EditorPreparation?
+    @ObservationIgnored var helixPreparation: EditorPreparation?
+    @ObservationIgnored var editorReleaseTask: Task<Void, Never>?
     @ObservationIgnored var editorRecoveryTask: Task<Void, Never>?
     @ObservationIgnored var editorRecoveryIntent = 0
     /// The half of the split the cursor reads, kept as it moves up and down; `h` / `l` switch it.
@@ -509,6 +512,7 @@ public final class ReviewPageState: ShipHost {
         prepareTypes()
         settleCursor()
         warmNeighbours()
+        if let app { warmEditor(app) }
         app?.runner.releaseHeld()
     }
 

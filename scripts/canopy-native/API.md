@@ -38,6 +38,8 @@ the prior release request to finish. A failed or lost release can leave an older
 View-owned preparation finishes its index-warming attempt before publishing readiness, without a post-reply warmup
 that could take the workspace lock ahead of the launcher. Its complete ticket and index metadata still
 publish in the same second manifest.
+An editor save suppresses speculation at its old tip while queued or landing. Its answer schedules
+preparation after the runner finishes, so the next workspace follows the resulting revision.
 
 Release takes the workspace lock and durably revokes the attachment before background cleanup. It
 may arrive before preparation: a cancellation record prevents the later request from materializing
