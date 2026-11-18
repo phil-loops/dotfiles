@@ -65,5 +65,25 @@ else
     || bad "overlap message" "$out"
 fi
 
+# git failing without a conflict (the 2026-11-16 flake: a lock held by a concurrent process)
+# says nothing about whether the forest merges — exit 2, "couldn't check", never "doesn't apply".
+REAL_GIT=$(command -v git)
+mkdir -p "$ROOT/shim"
+cat > "$ROOT/shim/git" <<SHIM
+#!/usr/bin/env bash
+for a in "\$@"; do
+  [[ \$a == --abort ]] && exec "$REAL_GIT" "\$@"
+done
+for a in "\$@"; do
+  [[ \$a == cherry-pick ]] && { echo "fatal: Unable to create '.git/index.lock': File exists." >&2; exit 128; }
+done
+exec "$REAL_GIT" "\$@"
+SHIM
+chmod +x "$ROOT/shim/git"
+out=$(PATH="$ROOT/shim:$PATH" "$INTEGRATE" p 2>&1); rc=$?
+[[ $rc == 2 && "$out" == *"couldn't check"* && "$out" == *"index.lock"* && "$out" != *"doesn't apply"* ]] \
+  && ok "a failure that isn't a conflict says it couldn't check, with git's reason, never that the forest doesn't merge" \
+  || bad "non-conflict failure" "rc=$rc $out"
+
 echo "$PASS passed, $FAIL failed"
 (( FAIL == 0 ))
