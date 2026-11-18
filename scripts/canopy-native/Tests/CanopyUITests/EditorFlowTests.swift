@@ -25,7 +25,7 @@ import Testing
         let server = Process()
         server.executableURL = URL(fileURLWithPath: "/bin/zsh")
         server.arguments = ["-c", "exec python3 \"$@\"", "editor-flow", scripts.appendingPathComponent("testing/editor-flow-server.py").path,
-                            root.path, "--refresh-delay", "5"]
+                            root.path, "--refresh-delay", "5", "--hold-refresh"]
         if let source = ProcessInfo.processInfo.environment["CANOPY_EDITOR_FIXTURE_REPO"] {
             server.arguments?.append(contentsOf: ["--source-repo", source])
         }
@@ -122,9 +122,13 @@ import Testing
                 try #require(parked, "the completed checkout is available for an exclusive new lease")
             }
         }
+        let released: JSONValue? = await app.transport.ask("/test/refresh", ["held": JSONValue.bool(false)])
+        #expect(released?["ok"] == true)
         try await wait("the delayed stream acknowledgement") { app.store.asOf[Domain.git] == 2 }
         #expect(page.tip == finalTip && page.diffCurrent)
         #expect(page.diffCanvas.canvas.text.string.contains("after the second edit"))
+        let held: JSONValue? = await app.transport.ask("/test/refresh", ["held": JSONValue.bool(true)])
+        #expect(held?["ok"] == true)
         let interrupted: JSONValue? = await app.transport.ask("/test/recover-last", JSONObject())
         #expect(interrupted?["ok"] == true && interrupted?["sha"]?.string == finalTip)
         app.runner.dispatch("review.helix.recover", via: .key, target: page.id)
@@ -206,6 +210,11 @@ import Testing
             retired = collected["indexArtifactBytes"]?.int == 0
         }
         #expect(retired, "completed saves keep their receipts without retaining generated index copies")
+        #expect(app.store.asOf[Domain.git] == 2, "the resumed edit paints before its stream acknowledgement")
+        let resumedAcknowledgement: JSONValue? = await app.transport.ask("/test/refresh", ["held": JSONValue.bool(false)])
+        #expect(resumedAcknowledgement?["ok"] == true)
+        try await wait("the resumed edit's stream acknowledgement") { app.store.asOf[Domain.git] == 4 }
+        #expect(page.diffCurrent && page.diffCanvas.canvas.text.string.contains(savedText))
         let timing: JSONValue = ["resumeMs": .number(resumeMs), "saveToPaintMs": .number(saveMs)]
         try JSONEncoder().encode(timing).write(to: root.appendingPathComponent("timings-resume.json"))
         print("editor-resume prewarm=\(prewarm): \(root.path) · resume \(Int(resumeMs)) ms · save to paint \(Int(saveMs)) ms")

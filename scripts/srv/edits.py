@@ -142,7 +142,12 @@ def _prepared(req, root, saved, data):
         raise ghreview.Refused("that workspace has a different attachment protocol; its files are preserved")
     if saved.get("leaseProtocol") == 1 and _text("rev-parse", f"refs/heads/{saved['branch']}") != saved["expectedTip"]:
         raise ghreview.Refused("the branch moved since that workspace opened; its files are preserved")
-    attachment = editlease.issue(root, saved, save=_save)
+    def ready(path, metadata):
+        if metadata.get("state") == "preparing":
+            _transition(root, metadata, "editing")
+        else:
+            _save(path, metadata)
+    attachment = editlease.issue(root, saved, save=ready)
     body = {"ok": True, "epoch": _epoch(), "session": saved["session"], "dir": str(_checkout(root, saved)),
             "sha": saved["expectedTip"], "baseSha": saved["baseSha"]}
     if attachment:
@@ -200,6 +205,7 @@ def _prepare(req, data, cache=False):
             if type(data["leaseProtocol"]) is not int or data["leaseProtocol"] != 1:
                 raise ghreview.Refused("unsupported editor attachment protocol")
             saved.update(leaseProtocol=1, entry=_entry(data))
+            editlease.initialize(root, saved)
         _save(root / "session.json", saved)
         priming = None
         reserved = False
@@ -238,7 +244,8 @@ def _prepare(req, data, cache=False):
         saved.update(checkoutIdentity=_identity(checkout),
                      gitdir=gitdir, gitdirIdentity=_identity(gitdir), expectedTree=expected_tree, parentSha=parent_sha,
                      indexStamp=_stamp(Path(gitdir) / "index"))
-        _transition(root, saved, "cached" if cache else "editing")
+        if saved.get("leaseProtocol") != 1:
+            _transition(root, saved, "cached" if cache else "editing")
         _prepared(req, root, saved, data)
     if not cache:
         _warm_later(root)

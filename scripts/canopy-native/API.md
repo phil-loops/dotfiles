@@ -62,6 +62,11 @@ an unavailable liveness probe preserves the workspace. Neither elapsed time nor 
 proves abandonment. Legacy workspaces remain supported but are not offered for resumption because
 their editors never opted into attachment leases.
 
+A fresh leased workspace publishes two manifests: `preparing` includes its attachment-lock identity,
+then one atomic `editing` record includes both the completed checkout identity and its ticket.
+There is no durable leased editable state without a complete attachment. Readiness publication failure
+leaves a preserved preparation and no usable ticket. Resumption publishes only the new ticket.
+
 `canopy-editor` validates the ticket, repository, checkout and comparison HEAD under the workspace
 lock, acquires `editor.lock`, durably records its process identity, and execs Helix with the lock
 descriptor inherited. The process identity also prevents reattachment if Helix closes inherited
