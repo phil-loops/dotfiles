@@ -19,7 +19,8 @@ def check(req, raw):
         return
     # stack-integrate replays the project onto main in merge order into an ephemeral
     # refs/stack/ ref (never a branch, never pushed) and exits 0 clean / 1 on conflict
-    # (naming the member that doesn't apply, its commit and the files) / 2 on a bad project. All three modes also emit
+    # (naming the member that doesn't apply, its commit and the files) / 2 when it couldn't check
+    # (a bad project, or git failing without a conflict — never reported as "doesn't merge"). All three modes also emit
     # "k: v" playground-status lines (path / exists / dirty / fresh) on stdout.
     mode = "--worktree-reset" if reset else "--worktree" if checkout else "--status"
     r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-integrate"), project, mode])
