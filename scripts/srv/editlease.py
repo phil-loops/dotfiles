@@ -7,6 +7,7 @@ from functools import lru_cache
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 import uuid
 
@@ -163,10 +164,18 @@ def launch(record, token, position):
                 or _identity(gitdir) != session["gitdirIdentity"]
                 or (gitdir / "HEAD").read_text().strip() != session["baseSha"]):
             raise ghreview.Refused("the editor workspace changed; its files are preserved")
+        if session.get("viewOwner"):
+            branch = subprocess.run(["git", "rev-parse", "--verify", "--end-of-options", f"refs/heads/{session['branch']}"],
+                                    cwd=checkout, capture_output=True, text=True,
+                                    env={key: value for key, value in os.environ.items() if key not in {"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_PREFIX"}})
+            if branch.returncode or branch.stdout.strip() != session["expectedTip"]:
+                raise ghreview.Refused("the branch moved before the editor attached; its workspace is preserved")
         path, line, col = position.rsplit(":", 2)
         if not path or any(part in ("", ".", "..") for part in path.split("/")) or int(line) <= 0 or int(col) <= 0:
             raise ghreview.Refused("the editor position is outside its workspace")
         with available(root, session) as fd:
+            session["entered"] = True
+            session["entry"] = {"path": path, "line": int(line), "col": int(col)}
             session["attachment"]["process"] = process_identity(os.getpid())
             write_record(record, session)
             os.set_inheritable(fd, True)

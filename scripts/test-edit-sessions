@@ -47,6 +47,8 @@ class EditSessions(unittest.TestCase):
         self.cleanup_patch.start()
         self.warm_patch = mock.patch.object(edits, "_warm_later")
         self.warm_patch.start()
+        self.release_patch = mock.patch.object(edits, "_release_later")
+        self.release_patch.start()
         ctx.CWD = ctx.MAIN_WT = str(self.repo)
         ctx.REPOS = {"fixture": str(self.repo)}
         ctx.run = lambda args, timeout=None: subprocess.run(args, cwd=ctx.repo_cwd(), capture_output=True, text=True)
@@ -58,6 +60,7 @@ class EditSessions(unittest.TestCase):
             process.communicate(timeout=5)
         self.cleanup_patch.stop()
         self.warm_patch.stop()
+        self.release_patch.stop()
         ctx.CWD, ctx.MAIN_WT, ctx.REPOS, ctx.run = self.old
         ctx.clear_repo()
         self.temporary.cleanup()
@@ -82,15 +85,225 @@ class EditSessions(unittest.TestCase):
     def commit(self, data):
         return self.call(edits.commit, {**data, "operation": data["session"]})
 
-    def leased(self):
+    def leased(self, **options):
         data = {"branch": "feature", "expectedTip": self.tip, "baseSha": self.base, "session": str(uuid.uuid4()),
                 "epoch": state.EPOCH, "leaseProtocol": 1, "entry": {"path": "a.txt", "line": 1, "col": 1}}
+        data.update(options)
         answer = self.call(edits.prepare, data)
         self.assertTrue(answer["ok"], answer)
         data["attachment"] = answer["attachment"]["token"]
         return data, Path(answer["dir"]), answer["attachment"]
 
-    def launcher(self, attachment, checkout, *, close_descriptors=False, wait=True):
+    def test_released_reviews_invalidate_tickets_and_retire_only_owned_clean_checkouts(self):
+        data, checkout, attachment = self.leased(viewOwner=str(uuid.uuid4()))
+        root = edits._root(data["session"])[1]
+        edits._warm(str(self.repo), root)
+        self.assertTrue((root / "warm-index").exists())
+        result = self.call(edits.release, data)
+        self.assertTrue(result["released"])
+        process = self.launcher(attachment, checkout, wait=False)
+        _, error = process.communicate(timeout=5)
+        self.assertEqual(process.returncode, 75)
+        self.assertIn("no longer current", error)
+        self.assertFalse(self.call(edits.prepare, data)["ok"])
+        edits._release_checkout(str(self.repo), root)
+        self.assertFalse(checkout.exists())
+        self.assertFalse((root / "warm-index").exists())
+        self.assertEqual(edits._load(root)["checkoutState"], "retired")
+        self.assertTrue(self.call(edits.release, data)["released"])
+        edits._release_checkout(str(self.repo), root)
+        self.assertEqual(self.git("rev-parse", "feature"), self.tip)
+
+    def test_review_readiness_includes_index_preparation_without_a_later_workspace_lock_holder(self):
+        records = []
+        original = edits._save
+        def capture(path, value, **kw):
+            records.append(json.loads(json.dumps(value)))
+            original(path, value, **kw)
+        with mock.patch.object(edits, "_save", side_effect=capture):
+            data, _, attachment = self.leased(viewOwner=str(uuid.uuid4()))
+        self.assertEqual([record["state"] for record in records], ["preparing", "editing"])
+        ready = records[-1]
+        root = edits._root(data["session"])[1]
+        self.assertTrue(editartifacts.matches(root, ready, "warm-index"))
+        self.assertEqual(ready["attachment"]["token"], attachment["token"])
+        self.assertEqual(ready["indexStamp"], edits._stamp(Path(ready["gitdir"]) / "index"))
+        edits._warm_later.assert_not_called()
+
+    def test_release_before_preparation_is_a_durable_cancellation(self):
+        data = {"session": str(uuid.uuid4()), "viewOwner": str(uuid.uuid4()), "branch": "feature",
+                "expectedTip": self.tip, "baseSha": self.base, "epoch": state.EPOCH, "leaseProtocol": 1,
+                "entry": {"path": "a.txt", "line": 1, "col": 1}}
+        self.assertTrue(self.call(edits.release, data)["released"])
+        with mock.patch.object(edits, "_git", side_effect=AssertionError("a cancelled review never materializes")):
+            self.assertFalse(self.call(edits.prepare, data)["ok"])
+        self.assertFalse((edits._root(data["session"])[1] / "checkout").exists())
+        self.assertFalse(self.commit(data)["ok"])
+        self.assertEqual(self.call(edits.workspaces, {"epoch": state.EPOCH, "branch": "feature"})["workspaces"], [])
+
+    def test_release_cannot_reclaim_a_workspace_once_an_editor_entered_it(self):
+        data, checkout, attachment = self.leased(viewOwner=str(uuid.uuid4()))
+        process = self.launcher(attachment, checkout, position="a.txt:4:2")
+        self.assertEqual(edits._load(edits._root(data["session"])[1])["entry"], {"path": "a.txt", "line": 4, "col": 2})
+        (checkout / "a.txt").write_text("keep my file\n")
+        self.assertTrue(self.call(edits.release, data)["preserved"])
+        process.kill()
+        process.wait()
+        self.assertTrue(self.call(edits.release, data)["preserved"])
+        resumed = self.call(edits.prepare, {key: value for key, value in data.items() if key != "viewOwner"})
+        self.assertTrue(resumed["ok"], resumed)
+        self.assertTrue(self.call(edits.release, data)["preserved"])
+        self.assertEqual((checkout / "a.txt").read_text(), "keep my file\n")
+        self.assertNotEqual(resumed["attachment"]["token"], attachment["token"])
+
+    def test_a_review_workspace_refuses_other_owners_and_never_appears_as_an_abandoned_edit(self):
+        data, checkout, attachment = self.leased(viewOwner=str(uuid.uuid4()))
+        for handler in (edits.prepare, edits.release):
+            self.assertFalse(self.call(handler, {**data, "viewOwner": str(uuid.uuid4())})["ok"])
+        self.assertFalse(self.call(edits.prepare, {key: value for key, value in data.items() if key != "viewOwner"})["ok"])
+        self.assertEqual(self.call(edits.workspaces, {"epoch": state.EPOCH})["workspaces"], [])
+        process = self.launcher(attachment, checkout)
+        process.kill()
+        process.wait()
+        self.assertTrue(self.call(edits.workspaces, {"epoch": state.EPOCH})["workspaces"][0]["resumable"])
+
+    def test_review_release_preserves_external_changes_and_unknown_generated_files(self):
+        for name in ("a.txt", "untracked.txt", "ignored.txt"):
+            data, checkout, _ = self.leased(viewOwner=str(uuid.uuid4()))
+            if name == "ignored.txt":
+                (Path(edits._load(edits._root(data["session"])[1])["gitdir"]) / "info").mkdir(exist_ok=True)
+                with (self.repo / ".git/info/exclude").open("a") as out:
+                    out.write("\nignored.txt\n")
+            (checkout / name).write_text("external changes\n")
+            root = edits._root(data["session"])[1]
+            (root / "snapshot-index").write_text("unknown generated name")
+            self.assertTrue(self.call(edits.release, data)["released"])
+            edits._release_checkout(str(self.repo), root)
+            self.assertEqual((checkout / name).read_text(), "external changes\n")
+            self.assertEqual((root / "snapshot-index").read_text(), "unknown generated name")
+            self.assertEqual(edits._load(root)["checkoutState"], "preserved")
+
+    def test_release_survives_an_epoch_change_but_cannot_cancel_another_repository(self):
+        data, checkout, _ = self.leased(viewOwner=str(uuid.uuid4()))
+        with mock.patch.object(state, "EPOCH", "another-epoch"):
+            self.assertTrue(self.call(edits.release, data)["released"])
+        root = edits._root(data["session"])[1]
+        saved = edits._load(root)
+        saved["identity"] = [0, 0]
+        edits._save(root / "session.json", saved)
+        self.assertFalse(self.call(edits.release, data)["ok"])
+        edits._release_checkout(str(self.repo), root)
+        self.assertTrue(checkout.exists())
+
+    def test_warming_a_released_view_cannot_recreate_index_artifacts(self):
+        data, _, _ = self.leased(viewOwner=str(uuid.uuid4()))
+        root = edits._root(data["session"])[1]
+        self.call(edits.release, data)
+        edits._release_checkout(str(self.repo), root)
+        with mock.patch.object(edits.subprocess, "run", side_effect=AssertionError("a released review does no index warming")):
+            edits._warm(str(self.repo), root)
+        self.assertFalse((root / "warm-index").exists())
+
+    def test_an_unused_review_with_manually_changed_index_flags_is_preserved(self):
+        data, checkout, _ = self.leased(viewOwner=str(uuid.uuid4()))
+        edits._git("update-index", "--assume-unchanged", "a.txt", cwd=checkout)
+        (checkout / "a.txt").write_text("hidden external change\n")
+        self.call(edits.release, data)
+        edits._release_checkout(str(self.repo), edits._root(data["session"])[1])
+        self.assertEqual((checkout / "a.txt").read_text(), "hidden external change\n")
+
+    def test_a_replaced_review_checkout_is_never_retired_through_an_alias(self):
+        data, checkout, _ = self.leased(viewOwner=str(uuid.uuid4()))
+        original = checkout.with_name("moved-checkout")
+        checkout.rename(original)
+        checkout.symlink_to(original, target_is_directory=True)
+        self.call(edits.release, data)
+        edits._release_checkout(str(self.repo), edits._root(data["session"])[1])
+        self.assertEqual((original / "a.txt").read_text(), "before\n")
+        self.assertTrue(checkout.is_symlink())
+
+    def test_review_retirement_replays_after_its_private_head_was_already_aligned(self):
+        data, checkout, _ = self.leased(viewOwner=str(uuid.uuid4()))
+        root = edits._root(data["session"])[1]
+        self.call(edits.release, data)
+        original = edits._git
+        def interrupt(*args, **kw):
+            if args[:2] == ("worktree", "remove"):
+                raise ghreview.Refused("fixture interrupted removal")
+            return original(*args, **kw)
+        with mock.patch.object(edits, "_git", side_effect=interrupt):
+            edits._release_checkout(str(self.repo), root)
+        self.assertTrue(checkout.is_dir())
+        self.assertEqual(Path(edits._load(root)["gitdir"], "HEAD").read_text().strip(), self.tip)
+        edits._release_checkout(str(self.repo), root)
+        self.assertFalse(checkout.exists())
+
+    def test_review_release_preserves_a_checkout_with_an_unknown_lock_owner(self):
+        data, checkout, _ = self.leased(viewOwner=str(uuid.uuid4()))
+        root = edits._root(data["session"])[1]
+        locked = Path(edits._load(root)["gitdir"], "locked")
+        locked.write_text("another operation\n")
+        self.call(edits.release, data)
+        edits._release_checkout(str(self.repo), root)
+        self.assertTrue(checkout.is_dir())
+        self.assertEqual(locked.read_text(), "another operation\n")
+
+    def test_release_of_an_interrupted_preparation_preserves_its_partial_checkout(self):
+        data = {"session": str(uuid.uuid4()), "viewOwner": str(uuid.uuid4()), "branch": "feature",
+                "expectedTip": self.tip, "baseSha": self.base, "epoch": state.EPOCH, "leaseProtocol": 1,
+                "entry": {"path": "a.txt", "line": 1, "col": 1}}
+        with mock.patch.object(edits, "_prepared", side_effect=ghreview.Refused("fixture interrupted readiness")):
+            self.assertFalse(self.call(edits.prepare, data)["ok"])
+        self.assertTrue(self.call(edits.release, data)["released"])
+        root = edits._root(data["session"])[1]
+        edits._release_checkout(str(self.repo), root)
+        self.assertEqual((root / "checkout/a.txt").read_text(), "before\n")
+
+    def test_a_prepared_review_rechecks_the_actual_branch_when_its_ticket_launches(self):
+        data, checkout, attachment = self.leased(viewOwner=str(uuid.uuid4()))
+        self.git("update-ref", "refs/heads/feature", self.base, self.tip)
+        process = self.launcher(attachment, checkout, wait=False)
+        _, error = process.communicate(timeout=5)
+        self.assertEqual(process.returncode, 75)
+        self.assertIn("branch moved", error)
+        self.assertNotIn("entered", edits._load(edits._root(data["session"])[1]))
+
+    def test_releasing_during_preparation_waits_for_the_owned_checkout_and_revokes_it(self):
+        started, resume = threading.Event(), threading.Event()
+        data = {"session": str(uuid.uuid4()), "viewOwner": str(uuid.uuid4()), "branch": "feature",
+                "expectedTip": self.tip, "baseSha": self.base, "epoch": state.EPOCH, "leaseProtocol": 1,
+                "entry": {"path": "a.txt", "line": 1, "col": 1}}
+        original = edits._git
+        def held(*args, **kw):
+            if "read-tree" in args and "--reset" in args:
+                started.set()
+                if not resume.wait(10):
+                    raise AssertionError("the fixture never released preparation")
+            return original(*args, **kw)
+        results = []
+        def request(handler):
+            ctx.set_repo(str(self.repo))
+            try:
+                results.append(self.call(handler, data))
+            finally:
+                ctx.clear_repo()
+        with mock.patch.object(edits, "_git", side_effect=held):
+            preparing = threading.Thread(target=request, args=(edits.prepare,))
+            preparing.start()
+            self.assertTrue(started.wait(10))
+            releasing = threading.Thread(target=request, args=(edits.release,))
+            releasing.start()
+            resume.set()
+            preparing.join(10)
+            releasing.join(10)
+        self.assertEqual(len(results), 2)
+        self.assertTrue(all(result["ok"] for result in results), results)
+        root = edits._root(data["session"])[1]
+        self.assertEqual(edits._load(root)["state"], "released")
+        edits._release_checkout(str(self.repo), root)
+        self.assertFalse((root / "checkout").exists())
+
+    def launcher(self, attachment, checkout, *, close_descriptors=False, wait=True, position="a.txt:1:1"):
         directory = self.root / "bin"
         directory.mkdir(exist_ok=True)
         hx = directory / "hx"
@@ -109,7 +322,7 @@ while True: time.sleep(1)
         if close_descriptors:
             env["CLOSE_LEASE"] = "1"
         script = Path(__file__).resolve().parent / "canopy-editor"
-        process = subprocess.Popen([sys.executable, str(script), attachment["record"], attachment["token"], "a.txt:1:1"],
+        process = subprocess.Popen([sys.executable, str(script), attachment["record"], attachment["token"], position],
                                    cwd=checkout, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         self.processes.append(process)
         if wait:

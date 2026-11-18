@@ -12,7 +12,8 @@ The native editor uses repo-prefixed POSTs (`srv/edits.py`):
 | Route | Request | Response |
 | --- | --- | --- |
 | `/edit-warm` | `{branch, epoch?, expectedTip?}` | `{ok}` acknowledges background preparation |
-| `/edit-session` | `{epoch, session: UUID, branch, expectedTip, baseSha, leaseProtocol?: 1, entry?: {path, line, col}}` | `{ok, epoch, session, dir, sha, baseSha, attachment?: {script, record, token}}` |
+| `/edit-session` | `{epoch, session: UUID, branch, expectedTip, baseSha, leaseProtocol?: 1, entry?: {path, line, col}, viewOwner?: UUID}` | `{ok, epoch, session, dir, sha, baseSha, attachment?: {script, record, token}, viewOwner?}` |
+| `/edit-release` | `{session: UUID, viewOwner: UUID}` | `{ok, released: true}` or `{ok, preserved: true}` after an editor entered |
 | `/edit-commit` | `{epoch, session, operation: UUID, branch, expectedTip, attachment?: UUID}` | `{ok, epoch, session, operation, repo, branch, expectedTip, baseSha, sha, tree, paths, files, history, incremental}` or `{ok, nothing: true, …}` |
 | `/edit-workspaces` | `{epoch, branch?, completed?: Bool}` | `{ok, epoch, workspaces: [{session, branch, expectedTip, baseSha, state, dir, operation?, sha?, message?, projection?, retryable, resumable, entry?}]}` |
 | `/edit-recover` | `{epoch, session, operation, branch, expectedTip}` | the original frozen commit receipt; refuses a workspace without a frozen save |
@@ -27,6 +28,30 @@ the initial state read when the route already names a branch. `/edit-warm` has n
 it may resolve the current branch before the client knows its epoch or tip, creates no commit, and
 never returns an editor directory. The actual editor request still requires the full epoch, tip
 and comparison revision. Capture, dump, and benchmark sessions do not prewarm machine checkouts.
+
+Once a revision-qualified diff arrives, the review requests its own `/edit-session`, with a unique
+`viewOwner`, full source revisions and an initial file position. `o` takes this exact ready attachment
+or joins the same preparation already in flight; it issues no second preparation request. Cursor
+movement does not invalidate a prepared workspace. Source, comparison base, epoch, hydration, reader
+navigation and permission changes release an unused preparation. Replacement preparation waits for
+the prior release request to finish. A failed or lost release can leave an older unused workspace preserved.
+View-owned preparation finishes its index-warming attempt before publishing readiness, without a post-reply warmup
+that could take the workspace lock ahead of the launcher. Its complete ticket and index metadata still
+publish in the same second manifest.
+
+Release takes the workspace lock and durably revokes the attachment before background cleanup. It
+may arrive before preparation: a cancellation record prevents the later request from materializing
+anything. The original owner can release across server epochs. Once the launcher has recorded
+`entered`, release preserves that workspace permanently, including after editor exit or ticket
+rotation. It checks the actual branch tip before entering a view-owned attachment and records the
+actual file position. Unentered view preparations are excluded from edit recovery choices.
+
+Cleanup removes only a known unused checkout with its original directory identities and index stamp,
+unchanged tracked files and no extra untracked or ignored files. The private HEAD may advance to the
+already indexed tip before non-forced removal; cleanup accepts either recorded revision after an
+interruption. Unknown locks, changed files, index flags and replacement paths preserve the checkout.
+Generated indexes retire through the existing ownership journal. Crashed clients that never release
+can leave preserved unused preparations; automatic orphan reclamation and metadata retention remain open.
 
 An editor request can reserve the in-flight builder's result. It receives that new checkout
 directly, under a fresh lease, instead of starting another copy or waiting for idle-cache validation.
@@ -50,6 +75,7 @@ clean entry without force-removing files.
 
 Workspace records have `workspaceVersion: 1` and an explicit lifecycle:
 `preparing → editing → prepared → landing → committed`. Cache builders use `preparing → cached`;
+unused view preparations can move to `released`, which forbids attachment and commit;
 checkout resource state (`parked`, `released`, `preserved`, `retired`) stays separate from save state.
 Preparation writes its record before creating or transferring a checkout. Interrupted preparation
 is discoverable and preserved; it is never silently restarted over existing files. Legacy records

@@ -17,6 +17,7 @@ _ROOTS = {}
 _VALID_BRANCHES = set()
 _PRIMING = {}
 _PRIME_LOCK = threading.Lock()
+_LOCK_REASON = "Canopy edit session"
 
 
 class _Warmup(Future):
@@ -152,6 +153,8 @@ def _prepared(req, root, saved, data):
             "sha": saved["expectedTip"], "baseSha": saved["baseSha"]}
     if attachment:
         body["attachment"] = attachment
+    if saved.get("viewOwner"):
+        body["viewOwner"] = saved["viewOwner"]
     return reviewdesk._send(req, 200, body)
 
 
@@ -164,8 +167,18 @@ def _entry(data):
     return {key: entry[key] for key in ("path", "line", "col")}
 
 
+def _view_owner(data):
+    try:
+        return str(uuid.UUID(data["viewOwner"]))
+    except (KeyError, ValueError, TypeError, AttributeError):
+        raise ghreview.Refused("the review workspace needs its original owner")
+
+
 def _prepare(req, data, cache=False):
     _require_epoch(data)
+    owner = _view_owner(data) if "viewOwner" in data else None
+    if owner and (cache or data.get("leaseProtocol") != 1):
+        raise ghreview.Refused("a review workspace needs a leased editor attachment")
     session = data.get("session")
     common, root = _root(session)
     session = root.name
@@ -173,11 +186,12 @@ def _prepare(req, data, cache=False):
     with (root / "lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         branch, tip, base = (data.get(key) or "" for key in ("branch", "expectedTip", "baseSha"))
-        if branch not in _VALID_BRANCHES:
-            _git("check-ref-format", f"refs/heads/{branch}")
-            _VALID_BRANCHES.add(branch)
         if (root / "session.json").exists():
             saved = _load(root)
+            if saved.get("state") == "released":
+                raise ghreview.Refused("that review released its workspace; its remaining files are preserved")
+            if saved.get("viewOwner") and not saved.get("entered") and saved["viewOwner"] != owner:
+                raise ghreview.Refused("that workspace belongs to another review")
             if saved.get("kind") == "cache":
                 raise ghreview.Refused("that checkout belongs to the editor cache")
             if (saved["branch"], saved["expectedTip"], saved["baseSha"]) != (branch, tip, base):
@@ -189,6 +203,9 @@ def _prepare(req, data, cache=False):
             with editlease.available(root, saved):
                 _validate(common, root, saved)
             return _prepared(req, root, saved, data)
+        if branch not in _VALID_BRANCHES:
+            _git("check-ref-format", f"refs/heads/{branch}")
+            _VALID_BRANCHES.add(branch)
         if not tip or not base:
             raise ghreview.Refused("the edit needs its full tip and comparison revision")
         revisions = _text("rev-parse", "--revs-only", "--end-of-options", f"refs/heads/{branch}", f"{base}^{{commit}}").splitlines()
@@ -201,6 +218,8 @@ def _prepare(req, data, cache=False):
                  "workspaceIdentity": _identity(root),
                  "checkout": str(checkout), "openedEpoch": _epoch(), "repo": str(common), "identity": _identity(common),
                  "repoName": ctx.repo_name(), "branch": branch, "expectedTip": tip, "baseSha": base}
+        if owner:
+            saved["viewOwner"] = owner
         if not cache and data.get("leaseProtocol") is not None:
             if type(data["leaseProtocol"]) is not int or data["leaseProtocol"] != 1:
                 raise ghreview.Refused("unsupported editor attachment protocol")
@@ -229,7 +248,7 @@ def _prepare(req, data, cache=False):
             _git("worktree", "add", "--detach", "--no-checkout", str(checkout), base)
             _git("-c", "checkout.workers=4", "read-tree", "--reset", "-u", tip, cwd=checkout)
         if not reused:
-            _git("worktree", "lock", "--reason", "Canopy edit session", str(checkout))
+            _git("worktree", "lock", "--reason", _LOCK_REASON, str(checkout))
         for name in ("node_modules", ".gen"):
             source = Path(ctx.repo_cwd()) / name
             if source.exists() and not (checkout / name).exists():
@@ -244,10 +263,15 @@ def _prepare(req, data, cache=False):
         saved.update(checkoutIdentity=_identity(checkout),
                      gitdir=gitdir, gitdirIdentity=_identity(gitdir), expectedTree=expected_tree, parentSha=parent_sha,
                      indexStamp=_stamp(Path(gitdir) / "index"))
+        if owner:
+            try:
+                _warm_index(root, saved)
+            except (ghreview.Refused, OSError) as error:
+                ctx.log(f"review workspace {root.name}: index preparation skipped: {error}")
         if saved.get("leaseProtocol") != 1:
             _transition(root, saved, "cached" if cache else "editing")
         _prepared(req, root, saved, data)
-    if not cache:
+    if not cache and not owner:
         _warm_later(root)
 
 
@@ -324,29 +348,35 @@ def _take_reserved(common, root, source):
         return saved["expectedTip"]
 
 
+def _warm_index(root, session):
+    checkout = _checkout(root, session)
+    refreshed = subprocess.run(["git", "-c", "core.fsmonitor=false", "update-index", "--refresh"], cwd=checkout, capture_output=True)
+    if refreshed.returncode not in (0, 1):
+        return False
+    _text("write-tree", cwd=checkout)
+    index = Path(session["gitdir"]) / "index"
+    stamp = _stamp(index)
+    snapshot = root / "warm-index"
+    shutil.copy2(index, snapshot)
+    if stamp != _stamp(index):
+        return False
+    env = {**os.environ, "GIT_INDEX_FILE": str(snapshot)}
+    if _text("write-tree", cwd=checkout, env=env) != session["expectedTree"]:
+        return False
+    session["indexStamp"] = stamp
+    editartifacts.remember(root, session, "warm-index")
+    return True
+
+
 def _warm(repo, root):
     ctx.set_repo(repo)
     try:
         with (root / "lock").open("a") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
             session = _load(root)
-            if session.get("operation"):
+            if session.get("operation") or session.get("state") != "editing":
                 return
-            checkout = _checkout(root, session)
-            refreshed = subprocess.run(["git", "-c", "core.fsmonitor=false", "update-index", "--refresh"], cwd=checkout, capture_output=True)
-            if refreshed.returncode not in (0, 1):
-                return
-            _text("write-tree", cwd=checkout)
-            index = Path(session["gitdir"]) / "index"
-            stamp = _stamp(index)
-            snapshot = root / "warm-index"
-            shutil.copy2(index, snapshot)
-            if stamp != _stamp(index):
-                return
-            env = {**os.environ, "GIT_INDEX_FILE": str(snapshot)}
-            if _text("write-tree", cwd=checkout, env=env) == session["expectedTree"]:
-                session["indexStamp"] = stamp
-                editartifacts.remember(root, session, "warm-index")
+            if _warm_index(root, session):
                 _save(root / "session.json", session)
     except (ghreview.Refused, OSError) as error:
         ctx.log(f"edit session {root.name}: index warm-up skipped: {error}")
@@ -531,6 +561,18 @@ def _clean(checkout):
     return True
 
 
+def _unmodified(checkout):
+    try:
+        _git("diff-files", "--quiet", "--", cwd=checkout)
+    except ghreview.Refused:
+        return False
+    for entry in _git("ls-files", "--others", "--directory", "-z", "--", cwd=checkout).split(b"\0"):
+        path = os.fsdecode(entry).rstrip("/")
+        if path and not (path in ("node_modules", ".gen") and (checkout / path).is_symlink()):
+            return False
+    return True
+
+
 def _validate_parked(root, session):
     tip = session.get("cacheTip") or session.get("receipt", {}).get("sha")
     return _validate(Path(session["repo"]), root, {**session, "baseSha": tip, "expectedTip": tip,
@@ -648,6 +690,78 @@ def _cleanup_later(root):
 
 
 @reviewdesk._guarded
+def release(req, data):
+    owner = _view_owner(data)
+    common, root = _root(data.get("session"))
+    root.mkdir(parents=True, exist_ok=True)
+    with (root / "lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if (root / "session.json").exists():
+            saved = _load(root)
+            if (saved.get("viewOwner") != owner or saved["repo"] != str(common) or saved["identity"] != _identity(common)):
+                raise ghreview.Refused("that workspace belongs to another review; its files are preserved")
+            if saved.get("entered") or saved.get("operation"):
+                return reviewdesk._send(req, 200, {"ok": True, "preserved": True})
+            with editlease.available(root, saved):
+                saved["state"] = "released"
+                _save(root / "session.json", saved)
+        else:
+            if os.path.lexists(root / "checkout"):
+                raise ghreview.Refused("an unrecorded checkout exists; its files are preserved")
+            _save(root / "session.json", {"workspaceVersion": 1, "session": root.name, "kind": "editor", "state": "released",
+                  "viewOwner": owner, "repo": str(common), "identity": _identity(common)})
+    reviewdesk._send(req, 200, {"ok": True, "released": True})
+    _release_later(root)
+
+
+def _release_checkout(repo, root):
+    ctx.set_repo(repo)
+    try:
+        with (root / "lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            saved = _load(root)
+            common = _common()
+            if (saved.get("state") != "released" or not saved.get("viewOwner") or saved.get("entered") or saved.get("operation")
+                    or saved["repo"] != str(common) or saved["identity"] != _identity(common)):
+                return
+            checkout = _checkout(root, saved)
+            if not checkout.exists():
+                editartifacts.collect(root, saved, save=_save)
+                return
+            if root.is_symlink() or checkout.is_symlink() or saved.get("workspaceIdentity") != _identity(root):
+                raise ghreview.Refused("the review workspace was replaced; its files are preserved")
+            if not all(key in saved for key in ("gitdir", "checkoutIdentity", "gitdirIdentity", "indexStamp")):
+                raise ghreview.Refused("review preparation was interrupted; its files are preserved")
+            with editlease.available(root, saved):
+                if saved.get("indexStamp") != _stamp(Path(saved["gitdir"]) / "index"):
+                    raise ghreview.Refused("the unused review's index changed; its files are preserved")
+                head = (Path(saved["gitdir"]) / "HEAD").read_text().strip()
+                validation = {**saved, "baseSha": head} if head == saved["expectedTip"] else saved
+                _validate(common, root, validation)
+                if _unmodified(checkout):
+                    _git("update-ref", "--no-deref", "HEAD", saved["expectedTip"], head, cwd=checkout)
+                    locked = Path(saved["gitdir"]) / "locked"
+                    if locked.exists():
+                        if locked.is_symlink() or locked.read_text().strip() != _LOCK_REASON:
+                            raise ghreview.Refused("another operation locked the review checkout; its files are preserved")
+                        _git("worktree", "unlock", str(checkout))
+                    _git("worktree", "remove", str(checkout))
+                    saved["checkoutState"] = "retired"
+                else:
+                    saved["checkoutState"] = "preserved"
+                _save(root / "session.json", saved)
+                editartifacts.collect(root, saved, save=_save)
+    except (ghreview.Refused, OSError) as error:
+        ctx.log(f"review workspace {root.name}: checkout preserved: {error}")
+    finally:
+        ctx.clear_repo()
+
+
+def _release_later(root):
+    threading.Thread(target=_release_checkout, args=(ctx.repo_cwd(), root), daemon=True).start()
+
+
+@reviewdesk._guarded
 def commit(req, data):
     return _commit(req, data)
 
@@ -669,6 +783,8 @@ def _commit(req, data, frozen=False):
             raise ghreview.Refused("that checkout belongs to the editor cache")
         if session.get("state") == "preparing":
             raise ghreview.Refused("workspace preparation was interrupted; its files are preserved")
+        if session.get("state") == "released":
+            raise ghreview.Refused("that review released its workspace; its files are preserved")
         if session["repo"] != str(common) or session["identity"] != _identity(common):
             raise ghreview.Refused("that edit session belongs to another repository")
         if data.get("branch") != session["branch"] or data.get("expectedTip") != session["expectedTip"]:
@@ -710,10 +826,12 @@ def workspaces(req, data):
             continue
         try:
             session = _load(root.parent)
+            phase = session.get("state", "editing")
+            if phase == "released" or (session.get("viewOwner") and not session.get("entered")):
+                continue
             if (session.get("kind") == "cache" or session["repo"] != str(common) or session["identity"] != _identity(common)
                     or (data.get("branch") and session["branch"] != data["branch"])):
                 continue
-            phase = session.get("state", "editing")
             if phase == "committed" and not data.get("completed"):
                 continue
             result.append({"session": session["session"], "branch": session["branch"], "expectedTip": session["expectedTip"],
