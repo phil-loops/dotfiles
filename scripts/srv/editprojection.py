@@ -5,7 +5,7 @@ import shutil
 import stat
 import uuid
 
-from . import ghreview
+from . import editartifacts, ghreview
 
 
 def _identity(path):
@@ -172,17 +172,25 @@ class Projection:
                      env={**os.environ, "GIT_INDEX_FILE": str(working)})
             saved.update(beforeTree=current, afterTree=self.tree(working))
             _copy(working, after)
+            for name in ("attached-index-before", "attached-index-after"):
+                editartifacts.remember(self.root, self.session, name)
             saved["paths"] = [os.fsdecode(path) for path in self.git("diff-tree", "--no-commit-id", "--name-only", "-r", "-z",
                 saved["beforeTree"], saved["afterTree"], cwd=self.checkout).split(b"\0") if path]
             self.persist("planned")
         elif current == saved["afterTree"]:
+            editartifacts.remember(self.root, self.session, "attached-index-working")
             self.persist("index-applied")
             self.installed = True
             return
         elif current != saved["beforeTree"]:
             raise ghreview.Refused("the attached index changed after the interrupted save; its files and recovery journal are preserved")
-        if planned and (self.tree(before) != saved["beforeTree"] or self.tree(after) != saved["afterTree"]):
-            raise ghreview.Refused("the saved index snapshots changed; the checkout and frozen save are preserved")
+        if planned:
+            for path, expected in ((before, saved["beforeTree"]), (after, saved["afterTree"])):
+                owned = editartifacts.matches(self.root, self.session, path.name)
+                if self.tree(path) != expected:
+                    raise ghreview.Refused("the saved index snapshots changed; the checkout and frozen save are preserved")
+                if owned:
+                    editartifacts.remember(self.root, self.session, path.name)
         self.head()
         if committed or saved["phase"] in ("files-applied", "index-applied") or (planned and self.matches_after(saved["paths"])):
             _copy(after, working)
@@ -193,6 +201,7 @@ class Projection:
         if self.tree(working) != saved["afterTree"]:
             raise ghreview.Refused("the attached index did not reach the planned revision; the recovery journal is preserved")
         self.working_stamp = _stamp(working)
+        editartifacts.remember(self.root, self.session, "attached-index-working")
         self.persist("files-applied")
         self.head()
 

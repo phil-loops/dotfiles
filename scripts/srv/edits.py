@@ -11,7 +11,7 @@ import subprocess
 import threading
 import uuid
 
-from . import ctx, editlease, editprojection, ghreview, push, reviewdesk
+from . import ctx, editartifacts, editlease, editprojection, ghreview, push, reviewdesk
 
 _ROOTS = {}
 _VALID_BRANCHES = set()
@@ -193,6 +193,7 @@ def _prepare(req, data, cache=False):
         if os.path.lexists(checkout):
             raise ghreview.Refused(f"the earlier preparation left a checkout; it is preserved in {checkout}")
         saved = {"workspaceVersion": 1, "state": "preparing", "session": session, "kind": "cache" if cache else "editor",
+                 "workspaceIdentity": _identity(root),
                  "checkout": str(checkout), "openedEpoch": _epoch(), "repo": str(common), "identity": _identity(common),
                  "repoName": ctx.repo_name(), "branch": branch, "expectedTip": tip, "baseSha": base}
         if not cache and data.get("leaseProtocol") is not None:
@@ -338,6 +339,7 @@ def _warm(repo, root):
             env = {**os.environ, "GIT_INDEX_FILE": str(snapshot)}
             if _text("write-tree", cwd=checkout, env=env) == session["expectedTree"]:
                 session["indexStamp"] = stamp
+                editartifacts.remember(root, session, "warm-index")
                 _save(root / "session.json", session)
     except (ghreview.Refused, OSError) as error:
         ctx.log(f"edit session {root.name}: index warm-up skipped: {error}")
@@ -397,6 +399,7 @@ def _capture(root, session):
     tree = _text("write-tree", cwd=checkout, env=env)
     tip = session["expectedTip"]
     paths = [os.fsdecode(path) for path in _git("diff-tree", "--no-commit-id", "--name-only", "--no-renames", "-r", "-z", tip, tree).split(b"\0") if path]
+    editartifacts.remember(root, session, "snapshot-index")
     return tree, paths
 
 
@@ -617,9 +620,16 @@ def _cleanup(repo, root):
             except BlockingIOError:
                 return
             session = _load(root)
-            if session.get("state") == "committed" and not session.get("checkoutState") and _checkout(root, session).is_dir():
+            if session.get("state") == "committed":
+                common = _common()
+                if root != common / "canopy-edits" / session["session"] or session["repo"] != str(common) or session["identity"] != _identity(common):
+                    raise ghreview.Refused("the workspace belongs to another repository; its files are preserved")
                 with editlease.available(root, session):
-                    _park(root, session)
+                    try:
+                        if not session.get("checkoutState") and _checkout(root, session).is_dir():
+                            _park(root, session)
+                    finally:
+                        editartifacts.collect(root, session, save=_save)
     except (ghreview.Refused, OSError) as error:
         ctx.log(f"edit session {root.name}: checkout preserved: {error}")
     finally:

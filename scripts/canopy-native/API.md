@@ -100,6 +100,19 @@ file bytes under a fresh attachment. Its tip and comparison base must match the 
 Catalog availability is advisory; preparation rechecks the kernel lease and process before issuing
 the ticket. Resumption does not recover editor buffers that were never written to files.
 
+Generated indexes are disposable after `committed` is durable. New workspaces record their directory
+identity and the inode/size/timestamps of each generated `warm-index`, `snapshot-index` and attached
+index snapshot. Background cleanup publishes a reusable checkout first, then retires only matching
+generated copies; project files, attachment locks, receipts and frozen Git refs remain intact.
+Pending saves and legacy/unrecognized artifacts are preserved.
+
+Retirement is journaled before an index is moved to a private temporary name. The moved inode is
+checked again before unlinking; a replacement is restored or preserved, never force-deleted. A
+process dying after the move or unlink can resume that retirement from its journal. Directory file
+descriptors anchor removal and metadata updates to the original workspace even if its pathname is
+replaced concurrently. Changed files and symlinks are skipped. Completed receipt replay needs none
+of these retired indexes.
+
 Index cache preparation runs while Helix is open. Validation uses the lease's filesystem identity
 and unchanged index fingerprint, with Git verification after an index change. Frozen index copies
 preserve timestamps so Git's racy-index checks still detect same-size edits. Independent immutable

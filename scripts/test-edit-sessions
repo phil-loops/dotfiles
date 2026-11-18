@@ -13,7 +13,7 @@ import uuid
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from srv import ctx, editlease, editprojection, edits, ghreview, state
+from srv import ctx, editartifacts, editlease, editprojection, edits, ghreview, state
 
 
 class Request:
@@ -247,6 +247,169 @@ while True: time.sleep(1)
         self.assertTrue(answer["ok"], answer)
         self.assertEqual(answer["sha"], saved["receipt"]["sha"])
         self.assertEqual(self.git("show", "feature:a.txt"), "frozen leased files")
+
+    def completed(self):
+        data, checkout = self.prepare()
+        (checkout / "a.txt").write_text("completed\n")
+        receipt = self.commit(data)
+        self.assertTrue(receipt["ok"], receipt)
+        return data, checkout, receipt, edits._root(data["session"])[1]
+
+    def test_completed_index_copies_are_retired_while_receipts_and_the_checkout_survive(self):
+        data, checkout, receipt, root = self.completed()
+        saved = edits._load(root)
+        names = set(saved["artifacts"])
+        self.assertEqual(names, editartifacts.FILES)
+        self.assertTrue(all((root / name).exists() for name in names))
+        edits._cleanup(str(self.repo), root)
+        saved = edits._load(root)
+        self.assertFalse(saved["artifacts"])
+        self.assertFalse(saved["retiringArtifacts"])
+        self.assertTrue(all(not (root / name).exists() for name in names))
+        self.assertTrue((root / "session.json").exists() and (root / "lock").exists())
+        self.assertTrue(checkout.exists())
+        self.assertEqual((checkout / "a.txt").read_text(), "completed\n")
+        self.assertEqual(self.commit(data), receipt)
+        edits._cleanup(str(self.repo), root)
+        self.assertFalse(edits._load(root)["artifacts"])
+
+    def test_pending_save_artifacts_remain_available_for_recovery(self):
+        data, checkout = self.prepare()
+        (checkout / "a.txt").write_text("pending\n")
+        self.crash_save(data, "planned")
+        root = edits._root(data["session"])[1]
+        names = set(edits._load(root)["artifacts"])
+        edits._cleanup(str(self.repo), root)
+        self.assertTrue(all((root / name).exists() for name in names))
+        self.assertTrue(self.recover(data)["ok"])
+        edits._cleanup(str(self.repo), root)
+        self.assertFalse(edits._load(root)["artifacts"])
+
+    def test_changed_or_replaced_artifacts_are_preserved(self):
+        data, checkout, receipt, root = self.completed()
+        (root / "warm-index").write_text("manual saved bytes\n")
+        snapshot = root / "snapshot-index"
+        snapshot.rename(root / "snapshot-original")
+        snapshot.write_bytes((root / "snapshot-original").read_bytes())
+        edits._cleanup(str(self.repo), root)
+        self.assertEqual((root / "warm-index").read_text(), "manual saved bytes\n")
+        self.assertTrue(snapshot.exists() and (root / "snapshot-original").exists())
+        self.assertEqual(set(edits._load(root)["artifacts"]), {"warm-index", "snapshot-index"})
+        self.assertEqual(self.commit(data), receipt)
+
+    def test_symlinks_and_unrecognized_artifact_names_cannot_delete_project_files(self):
+        data, checkout, _, root = self.completed()
+        protected = self.root / "protected.txt"
+        protected.write_text("keep\n")
+        (root / "warm-index").unlink()
+        (root / "warm-index").symlink_to(protected)
+        saved = edits._load(root)
+        saved["artifacts"].update({"checkout/a.txt": [1, 2, 3, 4, 5], "session.json": [1, 2, 3, 4, 5]})
+        edits._save(root / "session.json", saved)
+        edits._cleanup(str(self.repo), root)
+        self.assertEqual(protected.read_text(), "keep\n")
+        self.assertTrue((root / "warm-index").is_symlink())
+        self.assertEqual((checkout / "a.txt").read_text(), "completed\n")
+        self.assertTrue((root / "session.json").is_file())
+
+    def test_finished_snapshot_retirement_preserves_later_uncommitted_checkout_files(self):
+        data, checkout, receipt, root = self.completed()
+        (checkout / "a.txt").write_text("later editor files\n")
+        (checkout / "private-note").write_text("keep this too\n")
+        edits._cleanup(str(self.repo), root)
+        self.assertFalse(edits._load(root)["artifacts"])
+        self.assertEqual((checkout / "a.txt").read_text(), "later editor files\n")
+        self.assertEqual((checkout / "private-note").read_text(), "keep this too\n")
+        self.assertEqual(self.commit(data), receipt)
+
+    def test_replaced_workspace_roots_are_not_collected(self):
+        _, _, _, root = self.completed()
+        old = root.with_suffix(".old")
+        root.rename(old)
+        root.mkdir()
+        (root / "session.json").write_bytes((old / "session.json").read_bytes())
+        (root / "warm-index").write_text("foreign workspace\n")
+        before = (root / "session.json").read_bytes()
+        edits._cleanup(str(self.repo), root)
+        self.assertEqual((root / "warm-index").read_text(), "foreign workspace\n")
+        self.assertEqual((root / "session.json").read_bytes(), before)
+
+    def test_a_file_replaced_during_retirement_is_restored_without_deletion(self):
+        _, _, _, root = self.completed()
+        original = editartifacts.os.rename
+        def replace(name, target, **kw):
+            if name == "warm-index":
+                (root / name).rename(root / "warm-index-original")
+                (root / name).write_text("arrived during retirement\n")
+            return original(name, target, **kw)
+        with mock.patch.object(editartifacts.os, "rename", side_effect=replace):
+            edits._cleanup(str(self.repo), root)
+        self.assertEqual((root / "warm-index").read_text(), "arrived during retirement\n")
+        self.assertTrue((root / "warm-index-original").exists())
+
+    def test_retirement_keeps_using_the_owned_directory_after_its_path_is_replaced(self):
+        _, _, _, root = self.completed()
+        original = editartifacts.os.rename
+        old = root.with_suffix(".old")
+        moved = False
+        def replace(name, target, **kw):
+            nonlocal moved
+            if not moved and name in editartifacts.FILES:
+                moved = True
+                root.rename(old)
+                root.mkdir()
+                (root / "session.json").write_text("foreign directory\n")
+            return original(name, target, **kw)
+        with mock.patch.object(editartifacts.os, "rename", side_effect=replace):
+            edits._cleanup(str(self.repo), root)
+        self.assertTrue(moved)
+        self.assertEqual((root / "session.json").read_text(), "foreign directory\n")
+        self.assertFalse(json.loads((old / "session.json").read_text())["artifacts"])
+
+    def crash_retirement(self, root, boundary):
+        program = r'''
+import os, signal, subprocess, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from srv import ctx, editartifacts, edits
+ctx.CWD = ctx.MAIN_WT = sys.argv[2]
+ctx.REPOS = {"fixture": sys.argv[2]}
+ctx.run = lambda args, timeout=None: subprocess.run(args, cwd=ctx.repo_cwd(), capture_output=True, text=True)
+original, original_rename = os.unlink, os.rename
+def unlink(name, *args, **kw):
+    result = original(name, *args, **kw)
+    if sys.argv[4] == "unlink" and str(name).startswith(editartifacts.PREFIX):
+        os.kill(os.getpid(), signal.SIGKILL)
+    return result
+def rename(name, *args, **kw):
+    result = original_rename(name, *args, **kw)
+    if sys.argv[4] == "rename" and name in editartifacts.FILES:
+        os.kill(os.getpid(), signal.SIGKILL)
+    return result
+os.unlink = unlink
+os.rename = rename
+edits._cleanup(sys.argv[2], Path(sys.argv[3]))
+'''
+        result = subprocess.run([sys.executable, "-c", program, str(Path(__file__).resolve().parent), str(self.repo), str(root), boundary],
+                                capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, -9, result.stdout + result.stderr)
+
+    def test_process_death_mid_retirement_replays_cleanup_without_losing_the_receipt(self):
+        data, checkout, receipt, root = self.completed()
+        self.crash_retirement(root, "unlink")
+        self.assertTrue(edits._load(root)["retiringArtifacts"])
+        edits._cleanup(str(self.repo), root)
+        self.assertFalse(edits._load(root)["artifacts"] or edits._load(root)["retiringArtifacts"])
+        self.assertEqual(self.commit(data), receipt)
+
+    def test_process_death_after_retirement_rename_reclaims_the_known_moved_index(self):
+        data, checkout, receipt, root = self.completed()
+        self.crash_retirement(root, "rename")
+        self.assertTrue(list(root.glob(editartifacts.PREFIX + "*")))
+        edits._cleanup(str(self.repo), root)
+        self.assertFalse(list(root.glob(editartifacts.PREFIX + "*")))
+        self.assertFalse(edits._load(root)["artifacts"] or edits._load(root)["retiringArtifacts"])
+        self.assertEqual(self.commit(data), receipt)
 
     def crash_save(self, data, phase):
         program = r'''
