@@ -18,7 +18,7 @@ enum BranchCommands {
     static func pushRoute(_ id: String?, _ app: AppModel) -> String? {
         let m = app.forestModel
         guard let id, let v = m.branchView(id) else { return nil }
-        if v.b.role == "proof" { return v.b.gates == .running ? "branch.gates.next" : v.b.gates == .green ? "branch.proof" : "branch.gates.run" }
+        if v.b.role == "proof" { return v.b.gates == .running ? runningRoute(id, app) : v.b.gates == .green ? "branch.proof" : "branch.gates.run" }
         if v.b.diverged {
             // origin was rewritten upstream (GitHub's rebase) and already has everything local has:
             // origin wins — never a force, never a refusal (tooling-doctor P7, A1)
@@ -30,7 +30,7 @@ enum BranchCommands {
             guard let s = forceScope(id, app), v.b.pending == nil else { return nil }
             if s.eligible { return app.runner.armed == forceArm(id) ? "branch.force.confirm" : "branch.force.arm" }
             if !s.guards.allSatisfy({ $0.ok || $0.k == "gates" }) { return nil }
-            return v.b.gates == .running ? "branch.gates.next" : "branch.gates.run"
+            return v.b.gates == .running ? runningRoute(id, app) : "branch.gates.run"
         }
         // a branch above it moved: the push would be refused (its PR wouldn't stack), so p's next
         // step is the catch-up, named on the key (A1) — never "retry the push"
@@ -38,7 +38,13 @@ enum BranchCommands {
         if ShipRules.canPush(v.b, v.pr) { return app.runner.armed == pushArm(id) ? "branch.push.confirm" : "branch.push.arm" }
         if !ShipRules.pushableButGates(v.b, v.pr) { return nil }
         // a follow-up onto an open PR pushes above (its gates advise); what's left needs them
-        return v.b.gates == .running ? "branch.gates.next" : "branch.gates.run"
+        return v.b.gates == .running ? runningRoute(id, app) : "branch.gates.run"
+    }
+
+    /// `p` while the gates run: put the run next only when it waits behind runs Phil didn't click —
+    /// otherwise the press moves nothing, and `p` has no route until the gates answer.
+    static func runningRoute(_ id: String, _ app: AppModel) -> String? {
+        GatesRun.canPutNext(GatesRun.setup(ShipState.of(app).progressOf(id))) ? "branch.gates.next" : nil
     }
 
     /// An additive push onto a PR that's open: origin already has the branch and local only adds to it.
@@ -155,11 +161,15 @@ enum BranchCommands {
             scope: .branch, quiet: true,
             write: { id, _ in
                 guard let v = m.branchView(id) else { return nil }
+                let waitingOn = GatesRun.setup(ShipState.of(app).progressOf(v.b.id))?.behind.flatMap { $0.isEmpty ? nil : $0 }
                 return Write(
                     path: t.atRepo(v.b.repo, "/gates"), body: ["branch": .string(v.b.name), "next": true],
                     settled: { true },
-                    said: "these gates go next — p pushes once they're green",
-                    failed: "the gates are running — p pushes once they're green", alone: true)
+                    failed: "the gates are running — p pushes once they're green",
+                    answered: { ok, body in
+                        // a refusal is said by the runner, with the server's own sentence
+                        if ok { app.runner.say(GatesRun.nextSaid(was: body["was"]?.string, waitingOn: waitingOn)) }
+                    }, alone: true)
             }))
         r.register(Command(
             id: "branch.review.run", title: "Review this branch's diff — the findings land as review flags for this code",

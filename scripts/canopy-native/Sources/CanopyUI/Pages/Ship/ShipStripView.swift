@@ -60,7 +60,8 @@ public struct ShipStripView: View {
         let forcing = route == "branch.force.arm" || route == "branch.force.confirm"
         let acts = route == "branch.gates.run" || route == "branch.gates.quick" || route == "branch.push.arm" || route == "branch.push.confirm"
             || route == "branch.catchup" || route == "branch.conform" || forcing
-        let waiting = route == "branch.gates.next"
+        // a run in flight that `p` can't move up still owns the line: its setup step, never "push unavailable"
+        let waiting = route == "branch.gates.next" || route == nil && b.gates == .running
         let control = ShipControlState.push(b, route: route, contextKnown: app.forestModel.branchView(branchID) != nil,
                                             checking: b.diverged && !ship.prepFresh(branchID))
         let running = rows.first { $0.state == .running }

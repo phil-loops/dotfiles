@@ -1,4 +1,5 @@
 import CanopyCore
+import Foundation
 import Testing
 @testable import CanopyUI
 
@@ -82,15 +83,39 @@ import Testing
         #expect(ShipStub.posts(port).isEmpty)
     }
 
-    @Test func aRunningGateKeepsItsPriorityAction() async throws {
+    /// a first push whose gates hold the door (a follow-up's only advise, and push), its run queued
+    /// at #3 behind `ahead` in each tier
+    func queued(ahead: [String: Int], tier: String = "background") throws -> (AppModel, Int) {
         let subject = ShipTests()
-        let (app, port) = try subject.app { state in
-            // a first push: its gates hold the door (a follow-up's only advise, and push)
+        return try subject.app { state in
             subject.entity(&state, "branch", ShipTests.branch) { branch in
                 branch["pushed"] = "local"
                 branch["gates"] = "running"
             }
+            let tree = state["entities"]?.object?["branch"]?.object?[ShipTests.branch]?.object?["tree"]?.string ?? ""
+            var ents = state["entities"]!.object!
+            ents["gaterun"] = .object([ShipTests.branch: .object([
+                "id": .string(ShipTests.branch), "branch": .string(ShipTests.branch), "tree": .string(tree), "running": true,
+                "started": .number(Date().timeIntervalSince1970 - 5),
+                "events": .array([.object(["event": "setup", "step": "queue", "position": 3, "behind": "mine-first",
+                                           "tier": .string(tier), "ahead": .object(ahead.mapValues { .number(Double($0)) })])]),
+            ])])
+            state["entities"] = .object(ents)
         }
+    }
+
+    @Test func queuedBehindOnlyYourOwnClicksOffersNoPriority() throws {
+        let (app, port) = try queued(ahead: ["interactive": 2, "ship": 0, "background": 0])
+        let branch = try #require(app.store.view(Branch.self, ShipTests.branch))
+        #expect(BranchCommands.pushRoute(branch.id, app) == nil, "p can't move a run ahead of Phil's own clicks")
+        #expect(GatesRun.words(try #require(GatesRun.setup(ShipState.of(app).progressOf(branch.id)))) == "#3 in line · behind 2 yours")
+        app.runner.dispatch("review.push", via: .key, target: branch.id)
+        #expect(ShipStub.posts(port).isEmpty)
+        #expect(GatesRun.nextSaid(was: "interactive", waitingOn: "mine-first") == "already next among yours — waiting on mine-first")
+    }
+
+    @Test func aRunningGateKeepsItsPriorityAction() async throws {
+        let (app, port) = try queued(ahead: ["interactive": 1, "ship": 0, "background": 1])
         ShipStub.answer(port, "POST", "/loops/gates", #"{"ok":true}"#)
         let branch = try #require(app.store.view(Branch.self, ShipTests.branch))
         let route = ReviewCommands.pushRoute(app, branch.id)
