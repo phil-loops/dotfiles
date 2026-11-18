@@ -1,0 +1,92 @@
+#!/usr/bin/env python3
+"""stack-reshape — reshape a forest in one motion per step, under its lock (srv/reshape.py, B5).
+
+  stack-reshape new <branch> --parent <p|main> --project <proj> --description "<one line>"
+  stack-reshape reparent <branch> <new-parent> [--description "<one line>"]
+  stack-reshape contract <branch>
+  stack-reshape rename <old> <new>
+  stack-reshape catch-up <branch>
+
+Use these instead of raw git for a forest's structure: each verb keeps refs, parent/requires/after
+edges, the project registry and descriptions consistent, moves refs by compare-and-swap, guards its
+rebases, never rewrites a published branch and never pushes. Content surgery (splitting a commit's
+hunks across branches) is still raw git, under `forest-lock <project> -- …`.
+
+Prints the result as JSON. Exit: 0 done; 1 refused (the line says why); 75 the forest is being
+changed by someone else (wait for it — don't work around it); 2 usage."""
+import json
+import os
+import subprocess
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+from srv import ctx, forestlock  # noqa: E402
+
+_SCRUB = ("GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE", "GIT_PREFIX")
+
+
+def _setup():
+    env = {k: v for k, v in os.environ.items() if k not in _SCRUB}
+    top = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, env=env).stdout.strip()
+    if not top:
+        print("stack-reshape: not in a git repo", file=sys.stderr)
+        sys.exit(2)
+    ctx.run = lambda argv, timeout=None, **kw: subprocess.run(argv, capture_output=True, text=True, env=env,
+                                                             cwd=kw.get("cwd", top), timeout=timeout)
+    listing = ctx.run(["git", "worktree", "list", "--porcelain"]).stdout
+    ctx.CWD = top
+    ctx.MAIN_WT = next((ln[len("worktree "):] for ln in listing.splitlines() if ln.startswith("worktree ")), top)
+    return top
+
+
+def _opts(args):
+    pos, opt = [], {}
+    i = 0
+    while i < len(args):
+        if args[i].startswith("--") and i + 1 < len(args):
+            opt[args[i][2:]] = args[i + 1]
+            i += 2
+        else:
+            pos.append(args[i])
+            i += 1
+    return pos, opt
+
+
+def main(argv):
+    if not argv or argv[0] in ("-h", "--help"):
+        print(__doc__.strip())
+        return 0 if argv else 2
+    verb, (pos, opt) = argv[0], _opts(argv[1:])
+    top = _setup()
+    from srv import reshape   # after ctx is set up
+    calls = {
+        "new": (1, lambda: reshape.new(pos[0], opt.get("parent", "main"), opt.get("project", ""), opt.get("description", ""))),
+        "reparent": (2, lambda: reshape.reparent(pos[0], pos[1], opt.get("description", ""))),
+        "contract": (1, lambda: reshape.contract(pos[0])),
+        "rename": (2, lambda: reshape.rename(pos[0], pos[1])),
+        "catch-up": (1, lambda: reshape.catch_up(pos[0])),
+    }
+    if verb not in calls or len(pos) != calls[verb][0]:
+        print(__doc__.strip(), file=sys.stderr)
+        return 2
+    project = opt.get("project", "") if verb == "new" else reshape.project_of(pos[0])
+    key = forestlock.key_for(top, project, pos[0])
+    sid = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+    who = f"claude {sid[:8]} · stack-reshape {verb}" if sid else f"stack-reshape {verb}"
+    try:
+        with forestlock.hold(top, key, who, wait=float(opt.get("wait", 60))):
+            res = calls[verb][1]()
+    except forestlock.Held as e:
+        print(f"stack-reshape: {e}", file=sys.stderr)
+        return 75
+    except reshape.Refused as e:
+        print(json.dumps({"ok": False, "err": str(e)}))
+        print(f"stack-reshape {verb}: {e}", file=sys.stderr)
+        return 1
+    print(json.dumps(res))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

@@ -66,14 +66,15 @@ def _move(b, old, new):
     return "" if r.returncode == 0 else f"{b} moved while catching up — retry"
 
 
-def catch_up_one(b):
-    """(how, err): how is 'rebased' or 'merged'; err non-empty stops the walk."""
+def catch_up_one(b, wt=None):
+    """(how, err): how is 'rebased' or 'merged'; err non-empty stops the walk. `wt` is the
+    detached scratch checkout to compute in (default: the server's own)."""
     p = parent(b)
     tip, ptip = _sha(f"refs/heads/{b}"), _sha(f"refs/heads/{p}")
     cut = _git("merge-base", tip, ptip).stdout.strip()
     if not (tip and ptip and cut):
         return "", f"couldn't resolve {b}'s parent {p}"
-    wt = sync._scratch_wt()
+    wt = wt or sync._scratch_wt()
     state = rebaseguard.heal(wt)
     if state in ("person", "live"):
         return "", f"the scratch checkout {wt} has a rebase in progress — finish or abort it"
@@ -96,13 +97,13 @@ def catch_up_one(b):
     return ("merged", _move(b, tip, carrier))
 
 
-def catch_up(branch):
+def catch_up(branch, wt=None):
     """Walk the chain top-down; returns {ok, moved: [{branch, how}], stopped?: {branch, why}}."""
     moved = []
     for b in chain(branch):
         if not off_parent(b):
             continue
-        how, err = catch_up_one(b)
+        how, err = catch_up_one(b, wt)
         if err:
             return {"ok": False, "moved": moved, "stopped": {"branch": b, "why": err}, "err": err}
         moved.append({"branch": b, "how": how})
@@ -116,30 +117,31 @@ def children(b):
                   (ln.partition(" ") for ln in out.splitlines()) if v.strip() == b)
 
 
-def carry(branch, push_one):
+def carry(branch, push_one=None, wt=None):
     """A parent's push carries its children (tooling-doctor P7, A4): after `branch` went out, each
     child off its tip catches up — a published child by a catch-up merge then a plain push through
     push_one(child) → (ok, err), an unpublished one by a local rebase — and the walk goes on down.
+    push_one=None catches up locally only (an agent's reshape: Phil pushes).
     A stop (conflict, a dirty holder, a door that refuses) is reported for that child and its own
     children are left as they were; siblings still go. Callers hold the forest lock."""
     out = []
     for c in children(branch):
         if not off_parent(c):
-            out += carry(c, push_one)   # caught up already (an earlier press): its children may not be
+            out += carry(c, push_one, wt)   # caught up already (an earlier press): its children may not be
             continue
-        how, err = catch_up_one(c)
+        how, err = catch_up_one(c, wt)
         rec = {"branch": c, "how": how}
         if err:
             out.append({**rec, "err": err})
             continue
-        if how == "merged":
+        if how == "merged" and push_one:
             ok, perr = push_one(c)
             rec["pushed"] = ok
             if not ok:
                 out.append({**rec, "err": perr or f"{c} didn't push"})
                 continue
         out.append(rec)
-        out += carry(c, push_one)
+        out += carry(c, push_one, wt)
     return out
 
 
