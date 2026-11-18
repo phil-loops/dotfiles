@@ -15,7 +15,7 @@ sessions never contend on a write.
 """
 import sys, os, json, subprocess, time, glob
 
-DIR = os.path.expanduser("~/.claude/session-presence")
+DIR = os.environ.get("CLAUDE_SESSION_PRESENCE_DIR") or os.path.expanduser("~/.claude/session-presence")
 FILES_CAP = 8       # keep only the most-recent N touched files
 GIT_TTL = 20        # re-resolve repo/branch/purpose at most once per N seconds (keeps PostToolUse cheap)
 
@@ -63,9 +63,10 @@ def pid_alive(pid, start):
 
 def gc_stale():
     """Reap records whose process is gone, AND superseded records that share a LIVE
-    pid: one claude process == one session, but a /clear, resume, or subagent reuses
-    the process under a NEW session_id, orphaning the old record (its pid stays alive
-    so a plain liveness check never drops it). Keep the newest per pid, drop the rest."""
+    pid: a SessionStart under a new session_id in the same process (/clear, /resume) ends
+    the previous conversation, whose pid stays alive so a plain liveness check never drops
+    it. Subagents carry their parent's session_id and never start a record of their own.
+    Keep the newest per pid, drop the rest."""
     best = {}   # pid -> (file, last_active)
     for f in glob.glob(os.path.join(DIR, "*.json")):
         try:
