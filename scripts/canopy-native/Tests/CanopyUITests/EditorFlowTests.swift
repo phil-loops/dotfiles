@@ -13,8 +13,8 @@ import Testing
         try #require(ready(), "timed out waiting for \(what)")
     }
 
-    @Test(.enabled(if: ProcessInfo.processInfo.environment["CANOPY_EDITOR_E2E"] == "1"))
-    func aRealEditorSaveCommitsAndPaintsThroughHTTPAndTheQueue() async throws {
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["CANOPY_EDITOR_E2E"] == "1"), arguments: [false, true])
+    func aRealEditorSaveCommitsAndPaintsThroughHTTPAndTheQueue(_ prewarm: Bool) async throws {
         _ = NSApplication.shared
         NSApplication.shared.setActivationPolicy(.prohibited)
         Fonts.register()
@@ -46,10 +46,16 @@ import Testing
         config.route = .review(repo: "loops", branch: "editor-flow")
         let app = AppModel(config: config, port: port, telemetry: false)
         app.nativeKeysPath = root.appendingPathComponent("no-key-overrides.toml").path
+        let page = ReviewPageState.of(app)
+        if !prewarm {
+            page.editorWarmRepos.insert("initial|loops")
+            page.editorWarmRepos.insert("\(try #require(info["epoch"]?.string))|loops")
+        }
+        let loading = Date()
         app.start()
         defer { app.stream.stop() }
-        let page = ReviewPageState.of(app)
         try await wait("the real diff and history") { page.diffCurrent && BranchHistory.of(app).rows(page.id) != nil }
+        let reviewMs = Date().timeIntervalSince(loading) * 1000
         app.focus(pane: reviewDiffPane)
         page.setCursor("l|a.txt|R:1")
         let size = NSSize(width: 1100, height: 800)
@@ -99,9 +105,9 @@ import Testing
             #expect(result["tip"]?.string == page.tip)
             #expect(result["text"]?.string == text)
             #expect(app.runner.runOf("review.helix.land", page.id)?.state == .done)
-            let timing: JSONValue = ["openMs": .number(openMs), "saveToPaintMs": .number(paintMs), "tip": .string(page.tip)]
+            let timing: JSONValue = ["prewarm": .bool(prewarm), "reviewMs": .number(reviewMs), "openMs": .number(openMs), "saveToPaintMs": .number(paintMs), "tip": .string(page.tip)]
             try JSONEncoder().encode(timing).write(to: root.appendingPathComponent("timings-\(index).json"))
-            print("editor-flow \(index == 0 ? "cold" : "warm"): \(root.path) · open \(Int(openMs)) ms · save to paint \(Int(paintMs)) ms")
+            print("editor-flow prewarm=\(prewarm) \(index == 0 ? "first" : "repeat"): \(root.path) · review \(Int(reviewMs)) ms · open \(Int(openMs)) ms · save to paint \(Int(paintMs)) ms")
             finalTip = page.tip
             if index == 0 {
                 var parked = false

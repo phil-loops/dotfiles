@@ -1,6 +1,6 @@
 """Owned editor checkouts, frozen saves, and revision-qualified commit receipts."""
 import fcntl
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 import json
 import os
 from pathlib import Path
@@ -14,6 +14,17 @@ from . import ctx, ghreview, push, reviewdesk
 
 _ROOTS = {}
 _VALID_BRANCHES = set()
+_PRIMING = {}
+_PRIME_LOCK = threading.Lock()
+
+
+class _Warmup(Future):
+    def __init__(self):
+        super().__init__()
+        self.phase = "building"
+        self.claimed = None
+        self.root = None
+        self.claim = threading.Event()
 
 
 def _stamp(path):
@@ -121,6 +132,10 @@ def _validate(common, root, session):
 
 @reviewdesk._guarded
 def prepare(req, data):
+    return _prepare(req, data)
+
+
+def _prepare(req, data, cache=False):
     _require_epoch(data)
     session = data.get("session")
     common, root = _root(session)
@@ -134,6 +149,8 @@ def prepare(req, data):
             _VALID_BRANCHES.add(branch)
         if (root / "session.json").exists():
             saved = _load(root)
+            if saved.get("kind") == "cache":
+                raise ghreview.Refused("that checkout belongs to the editor cache")
             if (saved["branch"], saved["expectedTip"], saved["baseSha"]) != (branch, tip, base):
                 raise ghreview.Refused("that session belongs to another revision")
             if saved.get("operation"):
@@ -148,14 +165,27 @@ def prepare(req, data):
         checkout = root / "checkout"
         if os.path.lexists(checkout):
             raise ghreview.Refused(f"the earlier preparation left a checkout; it is preserved in {checkout}")
-        reused = _take(common, root)
+        priming = None
+        reserved = False
+        if not cache:
+            with _PRIME_LOCK:
+                priming = _PRIMING.get(str(common))
+                if priming and priming.phase in ("building", "ready") and priming.claimed is None:
+                    priming.claimed = root.name
+                    priming.claim.set()
+                    reserved = True
+            if priming:
+                priming.result(timeout=120)
+        reused = _take_reserved(common, root, priming.root) if reserved and priming.result() else False
+        if not reused and not cache:
+            reused = _take(common, root)
         if reused:
             if reused != tip:
-                _git("read-tree", "-m", "-u", reused, tip, cwd=checkout)
+                _git("-c", "checkout.workers=4", "read-tree", "-m", "-u", reused, tip, cwd=checkout)
             _git("update-ref", "--no-deref", "HEAD", base, cwd=checkout)
         else:
             _git("worktree", "add", "--detach", "--no-checkout", str(checkout), base)
-            _git("read-tree", "--reset", "-u", tip, cwd=checkout)
+            _git("-c", "checkout.workers=4", "read-tree", "--reset", "-u", tip, cwd=checkout)
         if not reused:
             _git("worktree", "lock", "--reason", "Canopy edit session", str(checkout))
         for name in ("node_modules", ".gen"):
@@ -169,13 +199,87 @@ def prepare(req, data):
         values = metadata.stdout.strip().splitlines()
         expected_tree = values[0]
         parent_sha = values[1] if metadata.returncode == 0 and len(values) == 2 else ""
-        saved = {"session": session, "checkout": str(checkout), "openedEpoch": _epoch(), "repo": str(common), "identity": _identity(common), "repoName": ctx.repo_name(),
+        saved = {"session": session, "kind": "cache" if cache else "editor", "checkout": str(checkout), "openedEpoch": _epoch(), "repo": str(common), "identity": _identity(common), "repoName": ctx.repo_name(),
                  "branch": branch, "expectedTip": tip, "baseSha": base, "checkoutIdentity": _identity(checkout),
                  "gitdir": gitdir, "gitdirIdentity": _identity(gitdir), "expectedTree": expected_tree, "parentSha": parent_sha,
                  "indexStamp": _stamp(Path(gitdir) / "index")}
         _save(root / "session.json", saved)
         reviewdesk._send(req, 200, {"ok": True, "epoch": _epoch(), "session": session, "dir": str(checkout), "sha": tip, "baseSha": base})
-    _warm_later(root)
+    if not cache:
+        _warm_later(root)
+
+
+@reviewdesk._guarded
+def prime(req, data):
+    if "epoch" in data:
+        _require_epoch(data)
+    data = {**data, "epoch": _epoch()}
+    common = _common()
+    with _PRIME_LOCK:
+        current = _PRIMING.get(str(common))
+        if current and not current.done():
+            return reviewdesk._send(req, 200, {"ok": True})
+        try:
+            ready = json.loads((common / "canopy-edits/ready.json").read_text())
+        except (OSError, ValueError):
+            ready = {}
+        if ready.get("session"):
+            return reviewdesk._send(req, 200, {"ok": True})
+        job = _Warmup()
+        _PRIMING[str(common)] = job
+        threading.Thread(target=_prime, args=(ctx.repo_cwd(), common, data, job), daemon=True).start()
+    reviewdesk._send(req, 200, {"ok": True})
+
+
+def _prime(repo, common, data, job):
+    ctx.set_repo(repo)
+    try:
+        session = str(uuid.uuid4())
+        answer = reviewdesk._Answer()
+        tip = data.get("expectedTip") or _text("rev-parse", "--verify", f"refs/heads/{data.get('branch') or ''}")
+        _prepare(answer, {**data, "session": session, "expectedTip": tip, "baseSha": tip}, cache=True)
+        if not answer.ok():
+            raise ghreview.Refused(answer.data.get("err") or "editor cache preparation failed")
+        _, root = _root(session)
+        with _PRIME_LOCK:
+            job.root = root
+            job.phase = "ready"
+        job.claim.wait(0.25)
+        with _PRIME_LOCK:
+            claimant = job.claimed
+            job.phase = "claimed" if claimant else "parking"
+        with (root / "lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            saved = _load(root)
+            saved["state"] = "cached"
+            if claimant:
+                saved.update(checkoutState="reserved", reservedFor=claimant)
+                _save(root / "session.json", saved)
+            else:
+                _park(root, saved, tip=tip)
+        job.set_result(True)
+    except Exception as error:
+        ctx.log(f"editor cache preparation skipped: {error}")
+        job.set_result(False)
+    finally:
+        with _PRIME_LOCK:
+            if _PRIMING.get(str(common)) is job:
+                del _PRIMING[str(common)]
+        ctx.clear_repo()
+
+
+def _take_reserved(common, root, source):
+    """Transfer builder output reserved before it could enter the idle cache."""
+    with (source / "lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        saved = _load(source)
+        if saved.get("kind") != "cache" or saved.get("checkoutState") != "reserved" or saved.get("reservedFor") != root.name:
+            raise ghreview.Refused("that prepared checkout belongs to another editor")
+        _validate(common, source, saved)
+        _git("worktree", "move", "--force", "--force", str(_checkout(source, saved)), str(root / "checkout"))
+        saved["checkoutState"] = "released"
+        _save(source / "session.json", saved)
+        return saved["expectedTip"]
 
 
 def _warm(repo, root):
@@ -359,6 +463,7 @@ def _advance(session):
 
 def _retire(root, session):
     checkout = _checkout(root, session)
+    _validate_parked(root, session)
     if not _clean(checkout):
         return False
     _git("worktree", "unlock", str(checkout))
@@ -374,6 +479,13 @@ def _clean(checkout):
         if not (entry[:3] == b"!! " and path in ("node_modules", ".gen") and (checkout / path).is_symlink()):
             return False
     return True
+
+
+def _validate_parked(root, session):
+    tip = session.get("cacheTip") or session.get("receipt", {}).get("sha")
+    return _validate(Path(session["repo"]), root, {**session, "baseSha": tip, "expectedTip": tip,
+        "expectedTree": session.get("cacheTree") or session.get("receipt", {}).get("tree") or session.get("expectedTree"),
+        "indexStamp": session.get("parkedStamp")})
 
 
 def _take(common, root):
@@ -395,10 +507,9 @@ def _take(common, root):
             session = _load(previous)
             checkout = _checkout(previous, session)
             if (session.get("checkoutState") != "parked" or session["repo"] != str(common)
-                    or session["identity"] != _identity(common) or session["receipt"]["sha"] != tip or not checkout.is_dir()):
+                    or session["identity"] != _identity(common) or (session.get("cacheTip") or session.get("receipt", {}).get("sha")) != tip or not checkout.is_dir()):
                 return False
-            _validate(common, previous, {**session, "baseSha": tip, "expectedTip": tip,
-                "expectedTree": session["receipt"].get("tree") or session.get("expectedTree"), "indexStamp": session.get("parkedStamp")})
+            _validate_parked(previous, session)
             if not _clean(checkout):
                 session["checkoutState"] = "preserved"
                 _save(previous / "session.json", session)
@@ -414,15 +525,18 @@ def _take(common, root):
         return False
 
 
-def _park(root, session):
+def _park(root, session, tip=None):
     checkout = _checkout(root, session)
     _validate(Path(session["repo"]), root, session)
-    tip = session["receipt"]["sha"]
-    _git("read-tree", tip, cwd=checkout)
-    _git("update-ref", "--no-deref", "HEAD", tip, cwd=checkout)
+    tip = tip or session["receipt"]["sha"]
+    if session.get("kind") != "cache":
+        _git("read-tree", tip, cwd=checkout)
+        _git("update-ref", "--no-deref", "HEAD", tip, cwd=checkout)
     if not _clean(checkout):
         return
     session["checkoutState"] = "parked"
+    session["cacheTip"] = tip
+    session["cacheTree"] = session.get("receipt", {}).get("tree") or session["expectedTree"]
     session["parkedStamp"] = _stamp(Path(session["gitdir"]) / "index")
     _save(root / "session.json", session)
     directory = root.parent
@@ -484,6 +598,8 @@ def commit(req, data):
     with (root / "lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         session = _load(root)
+        if session.get("kind") == "cache":
+            raise ghreview.Refused("that checkout belongs to the editor cache")
         if session["repo"] != str(common) or session["identity"] != _identity(common):
             raise ghreview.Refused("that edit session belongs to another repository")
         if data.get("branch") != session["branch"] or data.get("expectedTip") != session["expectedTip"]:

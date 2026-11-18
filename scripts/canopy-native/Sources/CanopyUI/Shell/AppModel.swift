@@ -130,6 +130,9 @@ public final class AppModel: CommandContext {
 
     /// Connect: read the bootstrap (repos + keys), then hydrate and hold the event stream.
     public func start() {
+        let editor = ReviewPageState.of(self)
+        editor.editorWarmEnabled = !config.dump && !config.bench && !config.shootRequested
+        editor.warmEditor(self)
         stream.connect()
         Task { await loadBootstrap() }
         seedFrecency()

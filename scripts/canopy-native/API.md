@@ -11,13 +11,26 @@ The native editor uses two repo-prefixed POSTs (`srv/edits.py`):
 
 | Route | Request | Response |
 | --- | --- | --- |
+| `/edit-warm` | `{branch, epoch?, expectedTip?}` | `{ok}` acknowledges background preparation |
 | `/edit-session` | `{epoch, session: UUID, branch, expectedTip, baseSha}` | `{ok, epoch, session, dir, sha, baseSha}` |
 | `/edit-commit` | `{epoch, session, operation: UUID, branch, expectedTip}` | `{ok, epoch, session, operation, repo, branch, expectedTip, baseSha, sha, tree, paths, files, history, incremental}` or `{ok, nothing: true, …}` |
 
-The server checks the request's epoch before accepting work and stamps its own epoch on the reply;
+For editor sessions and commits, the server checks the request's epoch before accepting work and stamps its own epoch on the reply;
 after restart an explicit retry must name the new epoch. `expectedTip` and `baseSha` are full immutable commit IDs. Each session owns a private locked
 worktree under the common Git directory. HEAD is the comparison base for Helix's gutter; files
 and index initially hold the expected tip. Preparation never resets another editor's checkout.
+
+Interactive app startup prepares one immutable snapshot per repository in the background, before
+the initial state read when the route already names a branch. `/edit-warm` has no edit authority:
+it may resolve the current branch before the client knows its epoch or tip, creates no commit, and
+never returns an editor directory. The actual editor request still requires the full epoch, tip
+and comparison revision. Capture, dump, and benchmark sessions do not prewarm machine checkouts.
+
+An editor request can reserve the in-flight builder's result. It receives that new checkout
+directly, under a fresh lease, instead of starting another copy or waiting for idle-cache validation.
+The builder waits briefly for demand before performing optional idle-cache work; a reservation
+wakes it immediately. Once the checkout enters the idle cache, the normal full dirt and ownership
+checks apply before reuse. Git's parallel checkout is scoped to these private checkouts.
 
 Commit takes the forest lock, validates the checkout's repository and index, scans its files with
 Git, and freezes a tree and commit before moving the branch. Binary data, symlinks, executable
