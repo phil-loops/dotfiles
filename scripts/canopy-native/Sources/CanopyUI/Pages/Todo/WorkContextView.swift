@@ -111,15 +111,19 @@ struct WorkInProgressView: View {
         return WorkContext.onBranches(all(app), listed.flatMap { $0.branches.map(\.b) })
     }
 
+    /// Every branch of a forest the home lists, in its forest's merge order.
+    @MainActor static func listedBranches(_ app: AppModel) -> [Branch] {
+        let m = app.forestModel, p = m.projects(), fs = m.forests()
+        return (p.focus + p.workbench + (m.showArchive ? p.archive : [])).compactMap { fs[$0.id] }.filter { !$0.closed }.flatMap { $0.branches.map(\.b) }
+    }
+
     /// The bound chats on each listed branch, by its own work or an item placed on it.
     @MainActor static func chatsPlaced(_ app: AppModel, _ placed: [String: [TodoItem]]) -> [String: [WorkContext.Chat]] {
         let chats = chats(app)
         guard !chats.isEmpty else { return [:] }
-        let m = app.forestModel, p = m.projects(), fs = m.forests()
-        let listed = (p.focus + p.workbench + (m.showArchive ? p.archive : [])).compactMap { fs[$0.id] }.filter { !$0.closed }
         var work: [String: String] = [:]
-        for v in listed.flatMap(\.branches) {
-            if let w = app.store.rawView("branch", v.b.id)?["work"]?.string { work[v.b.id] = w }
+        for b in listedBranches(app) {
+            if let w = app.store.rawView("branch", b.id)?["work"]?.string { work[b.id] = w }
         }
         return WorkContext.chatsOnBranches(chats, branchWork: work, placed: placed)
     }
@@ -174,6 +178,7 @@ struct WorkInProgressView: View {
 
 /// Live chats bound to no work: where each stands, never a guess at what it's doing (round 27, P1).
 struct UnboundChatsList: View {
+    @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme
     let chats: [WorkContext.Chat]
 
@@ -183,8 +188,13 @@ struct UnboundChatsList: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("On no work · \(chats.count)").font(Theme.text(11)).foregroundStyle(theme.inkFaint)
                     ForEach(chats, id: \.id) { c in
-                        ChatButton(chat: c) {
-                            Text(WorkContext.whereItStands(c, now: ctx.date.timeIntervalSince1970)).foregroundStyle(theme.inkDim).lineLimit(1)
+                        HStack(spacing: 10) {
+                            ChatButton(chat: c) {
+                                Text(WorkContext.whereItStands(c, now: ctx.date.timeIntervalSince1970)).foregroundStyle(theme.inkDim).lineLimit(1)
+                            }
+                            Button("bind…") { app.runner.dispatch("chat.bind", via: .click, arg: c) }
+                                .buttonStyle(.plain).font(Theme.text(11)).foregroundStyle(theme.inkFaint)
+                                .help("bind this chat to a branch's work")
                         }
                     }
                 }

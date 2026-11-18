@@ -121,6 +121,16 @@ def _mint_work(branch, project, title):
         j.close()
 
 
+def work_of(branch):
+    """The branch's work identity, made now for a branch born before it had one."""
+    _need(branch)
+    work = _git("config", f"branch.{branch}.stack-work").stdout.strip()
+    if not work:
+        work = _mint_work(branch, project_of(branch), _git("config", f"branch.{branch}.description").stdout.strip() or None)
+        _ok("config", f"branch.{branch}.stack-work", work)
+    return work
+
+
 def _bind_creator(work):
     """Adds the new branch's work to the binding of the chat that made it (round 27, P4); a branch
     made from canopy or a script has no chat, and says so."""

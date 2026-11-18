@@ -18,6 +18,7 @@ reading as unbound.
 import glob
 import json
 import os
+import re
 
 from . import agents, workfresh, workjournal as wj
 
@@ -60,6 +61,32 @@ def fingerprint():
             continue
         out.append((os.path.basename(f), st.st_mtime_ns))
     return tuple(out) + tuple((r.get("session_id"), _running(r.get("pid"))) for r in _records())
+
+
+def bind(req, raw):
+    """POST /chat-bind {session, branch, generation} — Phil's click adds a branch's work to a chat's
+    binding, decided from the binding generation his view showed: any other answers 409 with the
+    binding now, never overwriting a decision made since he looked (round 27, P7)."""
+    from . import reshape, state
+    try:
+        d = json.loads(raw or "{}")
+        session, branch, generation = d.get("session") or "", d.get("branch") or "", d.get("generation")
+        if not wj.SESSION_ID.fullmatch(session) or not isinstance(generation, int) or not re.fullmatch(r"[\w./-]+", branch):
+            raise ValueError("chat-bind takes {session: a full session id, branch, generation: an integer}")
+        work = reshape.work_of(branch)
+        j = wj.Journal()
+        try:
+            if not j.db.execute("SELECT 1 FROM source WHERE source_id = ?", (SOURCE,)).fetchone():
+                j.register_source(SOURCE, adapter="claude-code", ordering="none")
+            gen = j.bind(SOURCE, session, [work], by="phil", add=True, expect_generation=generation)
+        finally:
+            j.close()
+    except wj.Stale as e:
+        return req._send(409, json.dumps({"ok": False, "err": "the chat's binding changed since you looked", "current": e.current}))
+    except (reshape.Refused, wj.JournalError, ValueError) as e:
+        return req._send(400, json.dumps({"ok": False, "err": str(e)}))
+    state.poke()
+    return req._send(200, json.dumps({"ok": True, "work": work, "generation": gen}))
 
 
 def entities():

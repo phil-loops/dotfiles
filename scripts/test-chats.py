@@ -67,4 +67,40 @@ with open(os.environ["CANOPY_WORK_JOURNAL"], "r+b") as f:
 got = chats.entities()["chat"][BOUND]
 check("an unreadable journal says so instead of reading unbound", got["works"] is None and "unreadable" in got.get("bindingError", ""), got)
 
+# POST /chat-bind: Phil's click, decided from the generation his view showed (round 27, P7)
+import json as _json  # noqa: E402
+from srv import ctx  # noqa: E402
+
+os.remove(os.environ["CANOPY_WORK_JOURNAL"])
+repo = os.path.join(TMP, "repo")
+genv = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+for k in ("GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE"):
+    genv.pop(k, None)
+subprocess.run(["git", "init", "-q", "-b", "main", repo], check=True, env=genv)
+subprocess.run(["git", "-C", repo, "commit", "-q", "--allow-empty", "-m", "root"], check=True, env=genv)
+subprocess.run(["git", "-C", repo, "branch", "old-branch"], check=True, env=genv)
+ctx.CWD = ctx.MAIN_WT = repo
+ctx.run = lambda argv, timeout=None, **kw: subprocess.run(argv, cwd=repo, capture_output=True, text=True, env=genv)
+
+
+class Req:
+    def _send(self, code, body):
+        self.code, self.body = code, _json.loads(body)
+
+
+def post(body):
+    r = Req()
+    chats.bind(r, _json.dumps(body))
+    return r.code, r.body
+
+
+code, body = post({"session": BOUND, "branch": "old-branch", "generation": 0})
+work = subprocess.run(["git", "-C", repo, "config", "branch.old-branch.stack-work"], capture_output=True, text=True).stdout.strip()
+check("a click binds a branch born before identities, giving it one", code == 200 and body["work"] == work and work.startswith("w_"), (code, body))
+code, body = post({"session": BOUND, "branch": "old-branch", "generation": 0})
+check("a click from a view of an older generation is refused with the binding now",
+      code == 409 and body["current"] == {"generation": 1, "works": [work]}, (code, body))
+check("a malformed click is refused in words", post({"session": "short", "branch": "old-branch", "generation": 1})[0] == 400)
+check("a branch that isn't there is refused", post({"session": BOUND, "branch": "no-such", "generation": 1})[0] == 400)
+
 sys.exit(1 if failures else 0)

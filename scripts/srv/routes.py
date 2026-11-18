@@ -18,7 +18,7 @@ from collections import namedtuple
 
 from . import evidence   # own line: the big import below is contested across sessions
 from . import catchup, ctx, edits, forestlock
-from . import (actor, chat, integrate, lsp, outbox, outline, packet, picker, preview, push, queue, restack,
+from . import (actor, chat, chats, integrate, lsp, outbox, outline, packet, picker, preview, push, queue, restack,
                review, reviewdesk, reviews, sync, syntax, todo, tutor, usage, verdicts, viewed)
 
 EFFECTS = ("repo", "history", "machine", "outward")
@@ -61,6 +61,7 @@ POST = {
     "/focus": _r(review.focus_set, "repo"),
     "/viewed": _r(viewed.post, "repo"),
     "/todo-item": _r(todo.post, "repo"),
+    "/chat-bind": _r(chats.bind, "repo", phil=True),     # Phil binds a chat to a branch's work
     "/outbox-hold": _r(outbox.hold, "repo"),
     "/fix-upstream": _r(sync.fix_upstream, "repo"),      # unset a footgun tracking ref
     "/diverged-additive": _r(sync.diverged_additive, "repo"),   # drafts a push-vehicle branch; never pushes
