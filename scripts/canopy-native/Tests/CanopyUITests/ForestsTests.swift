@@ -310,6 +310,17 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = f
         #expect(BranchCommands.pushRoute("r:c", a) == "branch.gates.run")
     }
 
+    @Test func pRunsTheQuickGatesForAFollowUpOntoAnOpenPR() throws {
+        let a = world()
+        // a has PR #11 open; make it a follow-up: origin has it, local adds one commit, not gated yet
+        var obj = try #require(a.store.rawView("branch", "r:a"))
+        obj["gates"] = "none"; obj["pushed"] = "ahead"; obj["ahead"] = .number(1)
+        #expect(a.store.applyPatch(try Patch.make(domain: Domain.git, version: (a.store.versions[Domain.git] ?? 0) + 1,
+                                                  upserts: ["branch": ["r:a": .object(obj)]])) == .ok)
+        #expect(BranchCommands.pushRoute("r:a", a) == "branch.gates.quick", "CI re-runs typecheck and lint on a follow-up push")
+        #expect(BranchCommands.pushRoute("r:c", a) == "branch.gates.run", "no PR yet: the full set")
+    }
+
     @Test func eachForestKeepsItsOwnCursor() {
         let a = world()
         a.go(.forest(repo: "r", project: "tree"))

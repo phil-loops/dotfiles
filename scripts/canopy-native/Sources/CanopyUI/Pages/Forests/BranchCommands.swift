@@ -27,7 +27,16 @@ enum BranchCommands {
         }
         if ShipRules.canPush(v.b, v.pr) { return app.runner.armed == pushArm(id) ? "branch.push.confirm" : "branch.push.arm" }
         if !ShipRules.pushableButGates(v.b, v.pr) { return nil }
-        return v.b.gates == .running ? "branch.gates.next" : "branch.gates.run"
+        if v.b.gates == .running { return "branch.gates.next" }
+        // gate the merge, not the push (tooling-doctor P5): a follow-up onto an open PR is
+        // additive and CI re-runs typecheck and lint on it, so p runs the quick gates there;
+        // a first push and a restack keep the full set
+        return quickFollowUp(v) ? "branch.gates.quick" : "branch.gates.run"
+    }
+
+    /// An additive push onto a PR that's open: origin already has the branch and local only adds to it.
+    static func quickFollowUp(_ v: BranchView) -> Bool {
+        v.pr?.state == "OPEN" && v.b.pushed == .ahead && !v.b.diverged
     }
 
     /// What the runner holds while a branch's push, or its force, waits for the second press.

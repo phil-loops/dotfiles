@@ -286,7 +286,9 @@ struct SyncMotionDriver {
         // the gates run detached on the shaped tip; the ship strip follows them from there
         if branch(id)?.gates == .running { ship.setStep(id, .gates, .ok) }
         else if app.registry.command("branch.gates.run") != nil {
-            app.runner.dispatch("branch.gates.run", via: via, target: id)
+            // the same tier p would run: quick for a follow-up onto an open PR (CI re-runs the rest)
+            let quick = BranchCommands.pushRoute(id, app) == "branch.gates.quick"
+            app.runner.dispatch(quick ? "branch.gates.quick" : "branch.gates.run", via: via, target: id)
             ship.setStep(id, .gates, .ok)
         } else {
             ship.setStep(id, .gates, .skip, "no gates command installed (area A's branch.gates.run)")
