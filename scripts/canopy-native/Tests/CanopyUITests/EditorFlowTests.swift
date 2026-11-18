@@ -1,5 +1,6 @@
 import AppKit
 import CanopyCore
+import Darwin
 import Foundation
 import SwiftTerm
 import SwiftUI
@@ -137,5 +138,69 @@ import Testing
         let requests = recovered["requests"]?.array ?? []
         #expect(requests.contains { $0["path"] == "/loops/edit-workspaces" })
         #expect(requests.contains { $0["path"] == "/loops/edit-recover" && $0["body"]?["operation"] == interrupted?["operation"] })
+        app.focus(pane: reviewDiffPane)
+        page.setCursor("l|a.txt|R:1")
+        app.keys.handle("o")
+        try await wait("the editor whose files will survive its crash") { page.helix?.dir != nil && window.firstResponder is HelixTerminal }
+        let abandoned = try #require(page.helix)
+        let dying = try #require(window.firstResponder as? HelixTerminal)
+        defer { if dying.process.running { dying.terminate() } }
+        try await wait("the attached editor's normal mode") {
+            let t = dying.getTerminal()
+            return (0..<t.rows).contains { t.getLine(row: $0)?.translateToString(trimRight: true).contains("NOR") == true }
+        }
+        let savedText = "saved before the editor stopped"
+        dying.send(source: dying, data: Array("ggxc".utf8)[...])
+        try await Task.sleep(nanoseconds: 100_000_000)
+        dying.send(source: dying, data: Array("\u{1b}[200~\(savedText)\n\u{1b}[201~".utf8)[...])
+        dying.send(source: dying, data: [0x1b][...])
+        try await Task.sleep(nanoseconds: 150_000_000)
+        dying.send(source: dying, data: Array(":w\r".utf8)[...])
+        let lease = try #require(abandoned.lease)
+        var workspace: JSONValue = .null
+        for _ in 0..<100 {
+            workspace = try await app.transport.getJSON("/test/workspace?session=\(lease)")
+            if workspace["text"]?.string?.trimmingCharacters(in: .whitespacesAndNewlines) == savedText { break }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        try #require(workspace["text"]?.string?.trimmingCharacters(in: .whitespacesAndNewlines) == savedText)
+        #expect(Darwin.kill(dying.process.shellPid, SIGKILL) == 0)
+        try await wait("the stopped editor") { page.helix == nil }
+        #expect(page.tip == finalTip)
+        let resuming = Date()
+        app.runner.dispatch("review.helix.resume", via: .key, target: page.id)
+        await page.editorRecoveryTask?.value
+        try #require(app.nav.picker?.title == "Helix workspaces")
+        app.nav.choose(0)
+        try await wait("the resumed editor") { page.helix?.dir != nil && window.firstResponder is HelixTerminal && window.firstResponder !== dying }
+        let resumed = try #require(page.helix)
+        let terminal = try #require(window.firstResponder as? HelixTerminal)
+        defer { if terminal.process.running { terminal.terminate() } }
+        try await wait("the saved contents in the resumed editor") {
+            let t = terminal.getTerminal()
+            let lines = (0..<t.rows).compactMap { t.getLine(row: $0)?.translateToString(trimRight: true) }
+            return lines.contains { $0.contains("NOR") } && lines.contains { $0.contains(savedText) }
+        }
+        let resumeMs = Date().timeIntervalSince(resuming) * 1000
+        #expect(resumed.lease == lease && resumed.dir == abandoned.dir && resumed.session != abandoned.session)
+        #expect(resumed.attachment?.token != abandoned.attachment?.token)
+        let unchanged: JSONValue = try await app.transport.getJSON("/test/workspace?session=\(lease)")
+        #expect(unchanged["inode"] == workspace["inode"] && unchanged["text"] == workspace["text"])
+        terminal.send(source: terminal, data: Array(":wq".utf8)[...])
+        try await Task.sleep(nanoseconds: 100_000_000)
+        let saving = Date()
+        terminal.send(source: terminal, data: [13][...])
+        try await wait("the resumed workspace's commit") { page.helix == nil && page.tip != finalTip && page.diffCurrent }
+        try await wait("the resumed edit's diff and history") {
+            host.layoutSubtreeIfNeeded()
+            return page.diffCanvas.canvas.text.string.contains(savedText)
+                && BranchHistory.of(app).rows(page.id)?.first.map { page.tip.hasPrefix($0.sha) } == true
+        }
+        let saveMs = Date().timeIntervalSince(saving) * 1000
+        let result: JSONValue = try await app.transport.getJSON("/test/result")
+        #expect(result["text"]?.string == savedText && result["count"]?.int == 4)
+        let timing: JSONValue = ["resumeMs": .number(resumeMs), "saveToPaintMs": .number(saveMs)]
+        try JSONEncoder().encode(timing).write(to: root.appendingPathComponent("timings-resume.json"))
+        print("editor-resume prewarm=\(prewarm): \(root.path) · resume \(Int(resumeMs)) ms · save to paint \(Int(saveMs)) ms")
     }
 }

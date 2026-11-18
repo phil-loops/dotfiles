@@ -94,7 +94,9 @@ operation, base and frozen commit before the native store accepts it. Neither di
 creates a new save from an open editor. Machine routes are refused in the sandbox; native discovery
 and recovery also respect read-only sessions.
 Recovery is on demand; a server restart does not automatically move branches. Unsaved workspaces
-are not automatically attached or deleted.
+are not automatically attached or deleted. **Resume a Helix workspace** explicitly reopens an
+idle leased workspace at its recorded file position, preserving the same checkout and uncommitted
+file bytes under a fresh attachment. Its tip and comparison base must match the current review.
 Catalog availability is advisory; preparation rechecks the kernel lease and process before issuing
 the ticket. Resumption does not recover editor buffers that were never written to files.
 

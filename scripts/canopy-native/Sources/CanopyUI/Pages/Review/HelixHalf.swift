@@ -14,6 +14,7 @@ public struct HelixOpen: Equatable {
     public var dir: String?
     var lease: String?
     var editBase: String?
+    var attachment: EditorAttachment?
     /// the tip Helix opened at; the commit is refused if the branch moved since
     public var sha: String
     /// over the whole diff (`o`), not just its new half (`i`)
@@ -28,14 +29,14 @@ public struct HelixOpen: Equatable {
 
     public static func == (lhs: HelixOpen, rhs: HelixOpen) -> Bool {
         lhs.session == rhs.session && lhs.path == rhs.path && lhs.line == rhs.line && lhs.col == rhs.col &&
-            lhs.dir == rhs.dir && lhs.lease == rhs.lease && lhs.sha == rhs.sha && lhs.whole == rhs.whole && lhs.fromSide == rhs.fromSide && lhs.source == rhs.source
+            lhs.dir == rhs.dir && lhs.lease == rhs.lease && lhs.attachment == rhs.attachment && lhs.sha == rhs.sha && lhs.whole == rhs.whole && lhs.fromSide == rhs.fromSide && lhs.source == rhs.source
     }
 }
 
-private struct HelixWhere: Decodable { var ok: Bool; var dir: String?; var sha: String?; var session: String?; var baseSha: String?; var epoch: String?; var err: String? }
+private struct HelixWhere: Decodable { var ok: Bool; var dir: String?; var sha: String?; var session: String?; var baseSha: String?; var epoch: String?; var attachment: EditorAttachment?; var err: String? }
 
 extension ReviewPageState {
-    func openHelix(_ app: AppModel, branch: String, path: String, line: Int, col: Int, whole: Bool = false, fromSide: Bool = false) {
+    func openHelix(_ app: AppModel, branch: String, path: String, line: Int, col: Int, whole: Bool = false, fromSide: Bool = false, workspace: String? = nil) {
         guard helix == nil, diffCurrent, !scoped, integration == nil, let t = target, t.name == branch,
               let source = BranchSource.current(app, t.id), HelixLanding.fullObject(source.tip) else { return }
         let reader = ReaderContext(app)
@@ -63,16 +64,22 @@ extension ReviewPageState {
                 }
             }
             guard current() else { return }
-            let body = ["branch": source.name, "session": open.session.uuidString.lowercased(), "expectedTip": source.tip, "baseSha": editBase, "epoch": source.epoch]
+            let body: JSONObject = ["branch": .string(source.name), "session": .string(workspace ?? open.session.uuidString.lowercased()),
+                "expectedTip": .string(source.tip), "baseSha": .string(editBase), "epoch": .string(source.epoch), "leaseProtocol": 1,
+                "entry": ["path": .string(path), "line": .number(Double(line)), "col": .number(Double(col))]]
             let answer = await app.transport.ask(app.transport.atRepo(source.repo, "/edit-session"), body, as: HelixWhere.self)
             guard current() else { return }
             guard let answer, answer.ok, answer.epoch == source.epoch, answer.sha == source.tip, let lease = answer.session, UUID(uuidString: lease) != nil,
                   answer.baseSha == editBase, let dir = answer.dir, dir.hasPrefix("/") else {
                 return app.runner.say(answer?.err ?? "couldn't prepare Helix at the shown commit · try again")
             }
+            guard let attachment = answer.attachment, attachment.belongs(to: lease), workspace == nil || workspace == lease else {
+                return app.runner.say("couldn't verify the editor attachment · its workspace is preserved")
+            }
             helix?.dir = dir
             helix?.lease = lease
             helix?.editBase = editBase
+            helix?.attachment = attachment
             open.log("checkout ready")
             app.runner.say("Helix on \(source.repo)/\(branch) · :w saves · quitting commits it")
         }
@@ -253,14 +260,14 @@ struct HelixHalf: NSViewRepresentable {
         terminal.cancelPreparation = cancelPreparation
         terminal.onPosition = moved
         terminal.onWriteQuit = { open.log("write-quit requested") }
-        guard let dir, !context.coordinator.started else { return }
+        guard let dir, let attachment = open.attachment, !context.coordinator.started else { return }
         context.coordinator.started = true
         terminal.preparing = false
         open.log("starting process")
         var env = ProcessInfo.processInfo.environment
         env["TERM"] = "xterm-256color"
         env["COLORTERM"] = "truecolor"
-        t.startProcess(executable: Zsh.path, args: Zsh.arguments("exec hx \"$0\"", ["\(open.path):\(open.line):\(open.col)"]),
+        t.startProcess(executable: Zsh.path, args: attachment.arguments(position: "\(open.path):\(open.line):\(open.col)"),
                        environment: env.map { "\($0)=\($1)" }, currentDirectory: dir)
     }
 
