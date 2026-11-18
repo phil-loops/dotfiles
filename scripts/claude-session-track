@@ -17,6 +17,7 @@ import sys, os, json, subprocess, time, glob
 
 DIR = os.environ.get("CLAUDE_SESSION_PRESENCE_DIR") or os.path.expanduser("~/.claude/session-presence")
 FILES_CAP = 8       # keep only the most-recent N touched files
+ACTED_CAP = 20      # branches a chat acted on, newest kept (DESIGN.md round 28)
 GIT_TTL = 20        # re-resolve repo/branch/purpose at most once per N seconds (keeps PostToolUse cheap)
 
 
@@ -59,6 +60,20 @@ def pid_alive(pid, start):
     except Exception:
         return False
     return proc_start(pid) == start   # start-time match guards against pid reuse
+
+
+def branch_of(path):
+    """'<repo>:<branch>' for the worktree a file sits in, resolved now (round 28, P5): the repo is
+    its main worktree's name, as the viewer names repos. None for a detached or non-git place."""
+    d = os.path.dirname(os.path.abspath(path))
+    while d and not os.path.isdir(d):
+        d = os.path.dirname(d)
+    out = sh(["git", "-C", d, "rev-parse", "--path-format=absolute", "--git-common-dir", "--abbrev-ref", "HEAD"]).splitlines()
+    if len(out) != 2 or out[1] in ("", "HEAD"):
+        return None
+    common = out[0].rstrip("/")
+    main = os.path.dirname(common) if os.path.basename(common) == ".git" else common
+    return f"{os.path.basename(main)}:{out[1]}"
 
 
 def gc_stale():
@@ -152,6 +167,12 @@ def main():
             files = [x for x in rec.get("files", []) if x != rel]
             files.append(rel)
             rec["files"] = files[-FILES_CAP:]
+            if rec["last_tool"] in ("Edit", "Write", "MultiEdit", "NotebookEdit"):
+                at = branch_of(fp)
+                if at:
+                    acted = {k: v for k, v in (rec.get("acted") or {}).items() if k != at}
+                    acted[at] = {"edit": now}
+                    rec["acted"] = dict(sorted(acted.items(), key=lambda kv: -kv[1]["edit"])[:ACTED_CAP])
 
     with open(path, "w") as fh:
         json.dump(rec, fh)
