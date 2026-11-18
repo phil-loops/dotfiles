@@ -934,6 +934,44 @@ def _squash_unpushed(branch, message=""):
     return err if err else verdict
 
 
+def origin_has_local(branch):
+    """origin's copy already carries everything local does: merging local into origin/<branch>
+    leaves origin's tree as it is. That is someone rewriting the published branch (GitHub's
+    update-branch, or GitHub rebasing a child PR after its base PR merges) while local still
+    holds the old shape of the same work. Content, not patch-ids: after a base PR squash-merges,
+    the parent's commits live in main as one squash, so no single patch matches."""
+    o = f"refs/remotes/origin/{branch}"
+    otree = ctx.run(["git", "rev-parse", "--verify", "-q", f"{o}^{{tree}}"]).stdout.strip()
+    if not otree or ctx.run(["git", "merge-base", "--is-ancestor", o, f"refs/heads/{branch}"]).returncode == 0:
+        return False   # nothing on origin, or local is simply ahead
+    r = ctx.run(["git", "merge-tree", "--write-tree", o, f"refs/heads/{branch}"])
+    return r.returncode == 0 and r.stdout.split("\n", 1)[0].strip() == otree
+
+
+def conform_to_origin(branch):
+    """Local is never the stale side (tooling-doctor P6/P7): when origin_has_local, move local to
+    origin's copy. Never loses work (the check above), never touches a dirty holder, and moves
+    the ref only from the tip it checked (compare-and-swap). Returns (ok, words)."""
+    origin = ctx.run(["git", "rev-parse", "--verify", "-q", f"refs/remotes/origin/{branch}"]).stdout.strip()
+    tip = _tip(branch)
+    if not origin or not origin_has_local(branch):
+        return False, "local has work origin's copy lacks — not a conform"
+    holder = next((p for p, b in stage._worktrees() if b == branch), None)
+    if holder:
+        if stage._dirty(holder):
+            return False, f"{holder} holds {branch} with uncommitted changes — commit or stash first"
+        if ctx.run(["git", "-C", holder, "rev-parse", "HEAD"]).stdout.strip() != tip:
+            return False, "branch moved while checking — reload and retry"
+        r = ctx.run(["git", "-C", holder, "reset", "--hard", origin])
+    else:
+        r = ctx.run(["git", "update-ref", f"refs/heads/{branch}", origin, tip])
+    if r.returncode != 0:
+        return False, "branch moved while checking — reload and retry"
+    n = ctx.run(["git", "rev-list", "--count", f"{origin}..{tip}"]).stdout.strip() or "0"
+    return True, (f"took origin's copy — it was rewritten upstream (e.g. GitHub rebased it) and already "
+                  f"carries everything local had; {n} old local commit{'' if n == '1' else 's'} retired")
+
+
 def prep_push(req, raw):
     """POST /prep-push {branch} — route by state and land on 'voiced outgoing commits' (a WIP
     tail is sealed into one; deliberate voiced commits go out as they are):
@@ -955,7 +993,16 @@ def prep_push(req, raw):
     tip_before = _tip(branch)
     routed = []
 
-    if not v["ff"]:
+    if not v["ff"] and origin_has_local(branch):
+        # someone rewrote origin's copy and local holds nothing it lacks: conform, never a
+        # catch-up merge on top of stale shapes and never a Claude reconcile
+        ctx.run(["git", "fetch", "--quiet", "origin", branch])
+        ok, words = conform_to_origin(branch)
+        if not ok:
+            return req._send(200, json.dumps({"ok": False, "err": words}))
+        routed.append(words)
+        v = _origin_verdict(branch)
+    elif not v["ff"]:
         if not published:
             # not mechanically routable — the omni sync reads this flag and puts Claude in
             # the middle (the /reconcile eject) instead of stopping at a refusal

@@ -90,6 +90,12 @@ def _route(branch):
               "body": {"branch": branch, "action": "include | stash"}},
              dirty=h["dirty"], dirtyWorktree=h.get("dirtyWorktree", ""))
 
+    if up.get("diverged") and push.origin_has_local(branch):
+        return send("conform",
+             "origin's copy was rewritten upstream (e.g. GitHub rebased it) and already carries "
+             "everything local has — take origin's copy",
+             {"method": "POST", "path": "/prep-push", "body": {"branch": branch}})
+
     if up.get("diverged") and h.get("published"):
         vehicle = f"{branch}-additive"
         if ctx.run(["git", "rev-parse", "--verify", "--quiet",
