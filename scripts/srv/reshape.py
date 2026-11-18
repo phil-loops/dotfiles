@@ -207,6 +207,13 @@ def _in_main(branch):
     return r.returncode == 0 and r.stdout.split("\n", 1)[0].strip() == mtree
 
 
+def _merged_on_github(branch):
+    """GitHub merged this branch's PR at exactly its local tip: the ground truth for a squash
+    merge, which a content check misses once main moves past it (cite-what-ses-saw, 2026-11-18)."""
+    pr = sync._pr_state_map().get(branch) or {}
+    return pr.get("state") == "MERGED" and pr.get("head") == _sha(branch)
+
+
 def contract(branch):
     _need(branch)
     parent = catchup.parent(branch) or "main"
@@ -214,7 +221,7 @@ def contract(branch):
     empty = _git("diff", "--quiet", f"{base}...{branch}").returncode == 0
     merged = bool(_sha("origin/main")) and (
         _git("merge-base", "--is-ancestor", branch, "origin/main").returncode == 0
-        or _in_main(branch))
+        or _in_main(branch)) or _merged_on_github(branch)
     if not (empty or merged):
         raise Refused(f"{branch} still carries changes {parent} lacks — not empty, not merged; nothing to contract")
     holder = sync._worktree_of(branch)
