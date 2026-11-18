@@ -44,9 +44,7 @@ public struct ShipStripView: View {
     }
 
     /// dirt and the prep route are read per branch, re-read when the branch moves or a sync ends
-    private func readKey(_ b: Branch, _ m: SyncMotion?) -> String {
-        "\(b.repo)|\(b.name)|\(b.tip)|\(b.pushed.rawValue)|\(b.ahead)|\(b.behind)|\(b.drifted)|\(m?.phase.rawValue ?? "")"
-    }
+    private func readKey(_ b: Branch, _ m: SyncMotion?) -> String { ShipState.factsKey(b, m) }
 
     @ViewBuilder private func line(_ b: Branch, _ m: SyncMotion?, _ rows: [GateRow], _ progress: GateProgress?, now: Double, detailed: Bool = false) -> some View {
         let ship = ShipState.of(app)
@@ -57,7 +55,8 @@ public struct ShipStripView: View {
         let acts = route == "branch.gates.run" || route == "branch.gates.quick" || route == "branch.push.arm" || route == "branch.push.confirm"
             || route == "branch.catchup" || route == "branch.conform" || forcing
         let waiting = route == "branch.gates.next"
-        let control = ShipControlState.push(b, route: route, contextKnown: app.forestModel.branchView(branchID) != nil)
+        let control = ShipControlState.push(b, route: route, contextKnown: app.forestModel.branchView(branchID) != nil,
+                                            checking: b.diverged && !ship.prepFresh(branchID))
         let running = rows.first { $0.state == .running }
         let red = rows.filter { $0.state == .red }
         let waived = rows.filter { $0.state == .waived }
@@ -81,9 +80,14 @@ public struct ShipStripView: View {
             if let doing = m.flatMap({ $0.phase == .running ? $0.steps.first { $0.state == .run } : nil }) {
                 Text("\(doing.label)…").foregroundStyle(theme.goldLeaf)
             } else if m == nil {
-                let needs = Syncing.needs(b, facts: ship.factsOf(branchID), prep: ship.prepOf(branchID))
+                // the last answer stays while the branch's new one is read, dimmed: it describes
+                // a tree the branch has left (A5)
+                let last = ship.lastReads(branchID)
+                let needs = Syncing.needs(b, facts: last.facts, prep: last.prep)
                 if !needs.isEmpty {
-                    Text(needs.joined(separator: " · ")).foregroundStyle(theme.inkFaint)
+                    Text(needs.joined(separator: " · ") + (last.stale ? " …" : "")).foregroundStyle(theme.inkFaint)
+                        .opacity(last.stale ? 0.5 : 1)
+                        .explains("ship|needs", last.stale ? "read for the branch before it moved — re-reading" : "what this branch needs before it can push")
                 }
             }
             if (acts || waiting) && live == nil && !sidebar {
