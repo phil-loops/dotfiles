@@ -17,48 +17,77 @@ struct ReviewPage: View {
     }
 
     var body: some View {
+        GeometryReader { geometry in page(width: geometry.size.width) }
+    }
+
+    private func page(width: CGFloat) -> some View {
         let pg = ReviewPageState.of(app)
-        VStack(alignment: .leading, spacing: 0) {
+        let sidebar = width >= 900 && pg.showsTree && pg.tab == "files" && pg.integration == nil
+        let columnWidth = sidebar ? max(250, pg.treeWidth) : pg.treeWidth
+        return VStack(alignment: .leading, spacing: 0) {
             if pg.target == nil {
                 Text("no branch in the address").foregroundStyle(theme.inkFaint).padding(16)
             } else {
-                ReviewHeader()
+                ReviewHeader(shippingInSidebar: sidebar)
                 switch pg.tab {
                 case "conversation":
                     ConversationPanel(branchID: pg.id).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 case "evidence":
                     if let t = pg.target { EvidencePanel(target: t) }
                 default:
-                    if pg.integration == nil { StretchWords(branchID: pg.id).padding(.horizontal, 16).padding(.bottom, 6) }
+                    if pg.integration == nil && !sidebar { StretchWords(branchID: pg.id).padding(.horizontal, 16).padding(.bottom, 6) }
                     HStack(alignment: .top, spacing: 0) {
-                        if pg.showsTree { Color.clear.frame(width: pg.treeWidth) }
-                        // the windows: columns of C-w v, each a stack of C-w s
-                        HStack(alignment: .top, spacing: 0) {
-                            ForEach(Array(pg.columns.enumerated()), id: \.offset) { c, col in
-                                if c > 0 { theme.vellumEdge.frame(width: 1) }
-                                VStack(spacing: 0) {
-                                    ForEach(Array(col.enumerated()), id: \.element.id) { r, w in
-                                        if r > 0 { theme.vellumEdge.frame(height: 1) }
-                                        WindowView(window: w).frame(maxWidth: .infinity, maxHeight: .infinity)
+                        if pg.showsTree { Color.clear.frame(width: columnWidth) }
+                        VStack(alignment: .leading, spacing: 0) {
+                            if sidebar { StretchWords(branchID: pg.id).padding(.horizontal, 12).padding(.bottom, 6) }
+                            // the windows: columns of C-w v, each a stack of C-w s
+                            HStack(alignment: .top, spacing: 0) {
+                                ForEach(Array(pg.columns.enumerated()), id: \.offset) { c, col in
+                                    if c > 0 { theme.vellumEdge.frame(width: 1) }
+                                    VStack(spacing: 0) {
+                                        ForEach(Array(col.enumerated()), id: \.element.id) { r, w in
+                                            if r > 0 { theme.vellumEdge.frame(height: 1) }
+                                            WindowView(window: w).frame(maxWidth: .infinity, maxHeight: .infinity)
+                                        }
                                     }
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                                 }
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
                             }
+                            // no window shows the diff: it waits, scrolled where it was
+                            .background { if pg.diffWindow == nil { DiffWindow().opacity(0).allowsHitTesting(false) } }
+                            .frame(minHeight: 0, maxHeight: .infinity, alignment: .top)
                         }
-                        // no window shows the diff: it waits, scrolled where it was
-                        .background { if pg.diffWindow == nil { DiffWindow().opacity(0).allowsHitTesting(false) } }
-                        .frame(minHeight: 0, maxHeight: .infinity, alignment: .top)
                         .padding(.leading, pg.showsTree ? 0 : 12)
                     }
                     .overlay(alignment: .topLeading) {
                         if pg.showsTree {
-                            FileTree()
-                                .font(Theme.text(12))
-                                .padding(.leading, 6)
-                                .frame(width: pg.treeWidth)
-                                .frame(maxHeight: .infinity, alignment: .top)
-                                .background(theme.vellumNight)
-                                .overlay(alignment: .trailing) { theme.vellumEdge.frame(width: 1) }
+                            GeometryReader { column in
+                                VStack(alignment: .leading, spacing: 0) {
+                                    if sidebar {
+                                        HStack {
+                                            Text("changed files").foregroundStyle(theme.inkFaint)
+                                            Spacer()
+                                            Text("\(pg.views.count)").foregroundStyle(theme.inkFaint)
+                                        }
+                                        .font(Theme.text(10.5)).padding(.horizontal, 16).padding(.vertical, 8)
+                                    }
+                                    FileTree().font(Theme.text(12)).padding(.leading, 6)
+                                    if sidebar {
+                                        theme.rule.frame(height: 1)
+                                        ViewThatFits(in: .vertical) {
+                                            ShipStripView(branchID: pg.id, sidebar: true).padding(12)
+                                                .fixedSize(horizontal: false, vertical: true)
+                                            ScrollView { ShipStripView(branchID: pg.id, sidebar: true).padding(12) }
+                                        }
+                                        .frame(maxHeight: max(0, column.size.height - 128), alignment: .top)
+                                        .clipped()
+                                    }
+                                }
+                            }
+                            .frame(width: columnWidth)
+                            .frame(maxHeight: .infinity, alignment: .top)
+                            .background(theme.vellumNight)
+                            .overlay(alignment: .trailing) { theme.vellumEdge.frame(width: 1) }
                         }
                     }
                     .overlay(alignment: .topLeading) {
@@ -86,6 +115,7 @@ struct ReviewPage: View {
 private struct ReviewHeader: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme
+    var shippingInSidebar = false
 
     var body: some View {
         let pg = ReviewPageState.of(app)
@@ -124,7 +154,7 @@ private struct ReviewHeader: View {
                 }
                 if pg.integration == nil, let t = pg.target { EvidenceChip(target: t) }
             }
-            if pg.integration == nil { ShipStripView(branchID: pg.id) }
+            if pg.integration == nil && !shippingInSidebar { ShipStripView(branchID: pg.id) }
             if pg.tab == "files", pg.integration == nil { BranchLine().padding(.top, 4) }
             if pg.integration == nil, let b { WorkContextView(subject: .branch(project: b.project, name: b.name), compact: true, showsMissing: true) }
             if pg.integration == nil, let b { BenchSummaryView(subject: .branch(repo: b.repo, name: b.name)) }
