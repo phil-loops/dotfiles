@@ -2,6 +2,17 @@ import CanopyCore
 import Foundation
 
 @MainActor enum EditorRecovery {
+    struct Entry: Decodable {
+        let path: String
+        let line: Int
+        let col: Int
+
+        var valid: Bool {
+            line > 0 && col > 0 && !path.isEmpty && path.split(separator: "/", omittingEmptySubsequences: false)
+                .allSatisfy { !["", ".", ".."].contains(String($0)) }
+        }
+    }
+
     struct Workspace: Decodable {
         let session: String
         let branch: String
@@ -11,11 +22,18 @@ import Foundation
         let sha: String?
         let message: String?
         let retryable: Bool
+        let resumable: Bool?
+        let entry: Entry?
 
         func matches(_ source: BranchSource) -> Bool {
             retryable && branch == source.name && UUID(uuidString: session) != nil
                 && operation.flatMap(UUID.init(uuidString:)) != nil && HelixLanding.fullObject(expectedTip)
                 && HelixLanding.fullObject(baseSha) && sha.map(HelixLanding.fullObject) == true
+        }
+
+        func canResume(_ source: BranchSource, base: String) -> Bool {
+            resumable == true && !retryable && branch == source.name && expectedTip == source.tip && baseSha == base
+                && UUID(uuidString: session) != nil && entry?.valid == true
         }
     }
 
@@ -32,15 +50,18 @@ import Foundation
     }
 
     static func install(_ app: AppModel) {
-        app.registry.register(Command(id: "review.helix.recover", title: "Recover a saved Helix edit", scope: .review,
-            budget: .gitWrite, available: { [weak app] _ in
-                guard let app else { return false }
-                let page = ReviewPageState.of(app)
-                return page.helix == nil && !page.scoped && page.integration == nil && page.target != nil
-            }, local: { [weak app] _, _ in
-                guard let app else { return }
-                choose(app)
-            }))
+        for (id, title, resuming) in [("review.helix.recover", "Recover a saved Helix edit", false),
+                                      ("review.helix.resume", "Resume a Helix workspace", true)] {
+            app.registry.register(Command(id: id, title: title, scope: .review,
+                budget: .gitWrite, available: { [weak app] _ in
+                    guard let app else { return false }
+                    let page = ReviewPageState.of(app)
+                    return page.helix == nil && !page.scoped && page.integration == nil && page.target != nil
+                }, local: { [weak app] _, _ in
+                    guard let app else { return }
+                    choose(app, resuming: resuming)
+                }))
+        }
         app.registry.register(Command(id: "review.helix.recover.commit", title: "Finish the selected saved Helix edit", scope: .global,
             budget: .gitWrite, needsArg: true, quiet: true, write: { [weak app] id, arg in
                 guard let app, let request = arg as? Request, id == request.source.id,
@@ -77,10 +98,11 @@ import Foundation
             }))
     }
 
-    static func choose(_ app: AppModel) {
+    static func choose(_ app: AppModel, resuming: Bool = false) {
         let page = ReviewPageState.of(app)
         guard let source = BranchSource.current(app, page.id),
-              let command = app.registry.command("review.helix.recover.commit"), app.runner.refusal?(command) == nil else { return }
+              let command = app.registry.command(resuming ? "review.helix.land" : "review.helix.recover.commit"),
+              app.runner.refusal?(command) == nil else { return }
         page.editorRecoveryIntent &+= 1
         let intent = page.editorRecoveryIntent, reader = ReaderContext(app)
         page.editorRecoveryTask = Task { @MainActor [weak app, weak page] in
@@ -90,16 +112,23 @@ import Foundation
             guard page.editorRecoveryIntent == intent, reader.isCurrent(app), app.store.epoch == source.epoch,
                   BranchSource.current(app, source.id)?.sameBranch(as: source) == true else { return }
             guard let answer, answer.ok, answer.epoch == source.epoch else { return app.runner.say("couldn't read saved Helix edits") }
-            let workspaces = answer.workspaces.filter { $0.matches(source) }
-            guard !workspaces.isEmpty else { return app.runner.say("no saved Helix commits to recover") }
+            let workspaces = answer.workspaces.filter { resuming ? $0.canResume(source, base: page.baseSha) : $0.matches(source) }
+            guard !workspaces.isEmpty else { return app.runner.say(resuming ? "no idle Helix workspaces to resume" : "no saved Helix commits to recover") }
             var picker: ReaderContext?
-            app.nav.pick("saved Helix edits", workspaces.map {
-                PickItem(label: $0.message ?? "saved edit", text: "\($0.expectedTip.prefix(8)) → \(($0.sha ?? "").prefix(8))")
+            app.nav.pick(resuming ? "Helix workspaces" : "saved Helix edits", workspaces.map {
+                PickItem(label: resuming ? ($0.entry?.path ?? "workspace") : ($0.message ?? "saved edit"),
+                         text: resuming ? "saved editor files on \(source.name)" : "\($0.expectedTip.prefix(8)) → \(($0.sha ?? "").prefix(8))")
             }) { [weak app, weak page] index in
                 MainActor.assumeIsolated {
                     guard let app, let page, page.editorRecoveryIntent == intent, picker?.isCurrentAfterPickerChoice(app) == true,
                           workspaces.indices.contains(index), app.store.epoch == source.epoch,
                           BranchSource.current(app, source.id)?.sameBranch(as: source) == true else { return }
+                    if resuming {
+                        let workspace = workspaces[index]
+                        guard workspace.canResume(source, base: page.baseSha), let entry = workspace.entry else { return }
+                        page.openHelix(app, branch: source.name, path: entry.path, line: entry.line, col: entry.col, whole: true, workspace: workspace.session)
+                        return
+                    }
                     app.runner.dispatch("review.helix.recover.commit", via: .key, target: source.id,
                         arg: Request(workspace: workspaces[index], source: source, reader: ReaderContext(app)))
                 }

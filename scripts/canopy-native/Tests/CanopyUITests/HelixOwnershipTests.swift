@@ -21,7 +21,9 @@ import Testing
 
     func answer(_ page: ReviewPageState, sha: String? = nil, dir: String = "/tmp/owned.diffbase") throws -> String {
         let body: JSONObject = ["ok": true, "sha": .string(sha ?? page.tip), "dir": .string(dir),
-                                "session": "11111111-2222-3333-4444-555555555555", "baseSha": .string(page.baseSha), "epoch": .string(page.app!.store.epoch)]
+                                "session": "11111111-2222-3333-4444-555555555555", "baseSha": .string(page.baseSha), "epoch": .string(page.app!.store.epoch),
+                                "attachment": ["script": "/tmp/canopy-editor", "record": "/tmp/canopy-edits/11111111-2222-3333-4444-555555555555/session.json",
+                                               "token": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"]]
         return String(decoding: try JSONEncoder().encode(body), as: UTF8.self)
     }
 
@@ -64,6 +66,22 @@ import Testing
         let open = try #require(page.helix)
         #expect(open.dir == "/tmp/owned.diffbase")
         return open
+    }
+
+    @Test(arguments: ["missing", "script", "record", "token"]) func malformedAttachmentsCannotStartAnEditor(_ change: String) async throws {
+        let (app, port) = try await app(), page = ReviewPageState.of(app)
+        var body = try JSONDecoder().decode(JSONValue.self, from: Data(answer(page).utf8)).object!
+        if change == "missing" { body.removeValue(forKey: "attachment") }
+        else {
+            var attachment = body["attachment"]!.object!
+            attachment[change] = "another-attachment"
+            body["attachment"] = .object(attachment)
+        }
+        ShipStub.answer(port, "POST", path, String(decoding: try JSONEncoder().encode(body), as: UTF8.self))
+        app.keys.handle("o")
+        await page.helixTask?.value
+        #expect(page.helix == nil)
+        #expect(!ShipStub.posts(port).contains { $0.path == commitPath })
     }
 
     @Test func preparationNeverStartsAfterTheReaderLeaves() async throws {

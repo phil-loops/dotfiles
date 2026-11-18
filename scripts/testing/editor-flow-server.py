@@ -9,7 +9,7 @@ import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS))
@@ -178,6 +178,12 @@ def main():
                                                         "count": int(git("rev-list", "--count", "main.." + branch)),
                                                         "text": git("show", f"{branch}:a.txt"), "requests": requests,
                                                         "parkedTip": json.loads((repo / ".git/canopy-edits/ready.json").read_text()).get("tip") if (repo / ".git/canopy-edits/ready.json").exists() else None}))
+                if u.path == "/test/workspace":
+                    _, directory = edits._root(parse_qs(u.query)["session"][0])
+                    saved = edits._load(directory)
+                    checkout = edits._checkout(directory, saved)
+                    return self._send(200, json.dumps({"dir": str(checkout), "inode": checkout.stat().st_ino,
+                                                       "text": (checkout / "a.txt").read_text()}))
                 if u.path == "/review-requests":
                     return self._send(200, "[]")
                 return self._send(200, "{}")

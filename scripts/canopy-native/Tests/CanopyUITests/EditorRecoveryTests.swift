@@ -21,6 +21,13 @@ import Testing
                 "message": "edit a.ts", "retryable": true]
     }
 
+    func resumable(_ app: AppModel) -> JSONObject {
+        let page = ReviewPageState.of(app)
+        return ["session": .string(session), "branch": .string(page.target!.name), "expectedTip": .string(page.tip),
+                "baseSha": .string(page.baseSha), "state": "editing", "retryable": false, "resumable": true,
+                "entry": ["path": "a.ts", "line": 2, "col": 1]]
+    }
+
     func catalog(_ app: AppModel, row: JSONObject? = nil) throws -> String {
         try encoded(["ok": true, "epoch": .string(app.store.epoch), "workspaces": [.object(row ?? workspace(app))]])
     }
@@ -117,6 +124,56 @@ import Testing
         app.runner.refusal = { command in command.write != nil ? "read only" : nil }
         await open(app)
         #expect(!ShipStub.posts(port).contains { [catalogPath, recoveryPath].contains($0.path) })
+    }
+
+    @Test func resumingSelectsTheOriginalWorkspaceAndRequestsANewAttachment() async throws {
+        let (app, port) = try await HelixOwnershipTests().app()
+        let page = ReviewPageState.of(app)
+        ShipStub.answer(port, "POST", catalogPath, try catalog(app, row: resumable(app)))
+        ShipStub.answer(port, "POST", "/loops/edit-session", try HelixOwnershipTests().answer(page))
+        app.runner.dispatch("review.helix.resume", via: .key, target: page.id)
+        await page.editorRecoveryTask?.value
+        #expect(app.nav.picker?.title == "Helix workspaces")
+        app.nav.choose(0)
+        await page.helixTask?.value
+        let open = try #require(page.helix)
+        #expect(open.lease == session && open.attachment?.token == operation)
+        #expect(open.session.uuidString.lowercased() != session)
+        #expect(open.path == "a.ts" && open.line == 2 && open.whole)
+        let post = try #require(ShipStub.posts(port).last { $0.path == "/loops/edit-session" })
+        #expect(post.body["session"] == .string(session) && post.body["leaseProtocol"] == 1)
+        #expect(post.body["entry"]?["path"] == "a.ts")
+    }
+
+    @Test(arguments: ["live", "tip", "base", "path"]) func unsafeWorkspacesNeverBecomeResumeRequests(_ change: String) async throws {
+        let (app, port) = try await HelixOwnershipTests().app()
+        let page = ReviewPageState.of(app)
+        var row = resumable(app)
+        switch change {
+        case "live": row["resumable"] = false
+        case "tip": row["expectedTip"] = .string(sha)
+        case "base": row["baseSha"] = .string(sha)
+        default: row["entry"] = ["path": "../outside", "line": 1, "col": 1]
+        }
+        ShipStub.answer(port, "POST", catalogPath, try catalog(app, row: row))
+        app.runner.dispatch("review.helix.resume", via: .key, target: page.id)
+        await page.editorRecoveryTask?.value
+        #expect(app.nav.picker == nil && page.helix == nil)
+        #expect(!ShipStub.posts(port).contains { $0.path == "/loops/edit-session" })
+    }
+
+    @Test func aDelayedResumePickerCannotAttachAfterNavigation() async throws {
+        let (app, port) = try await HelixOwnershipTests().app()
+        let page = ReviewPageState.of(app), response = try catalog(app, row: resumable(app))
+        HeldLookupStub.hold(port, catalogPath)
+        app.runner.dispatch("review.helix.resume", via: .key, target: page.id)
+        let task = page.editorRecoveryTask
+        await until("the held workspace list") { HeldLookupStub.waiting(port, catalogPath) }
+        app.router.navigate(.machine)
+        app.runner.say("newer feedback")
+        HeldLookupStub.release(port, catalogPath, response)
+        await task?.value
+        #expect(app.nav.picker == nil && page.helix == nil && app.runner.note == "newer feedback")
     }
 
     @Test(arguments: ["epoch", "tip"]) func queuedRecoveryRechecksItsSourceBeforeSending(_ change: String) async throws {

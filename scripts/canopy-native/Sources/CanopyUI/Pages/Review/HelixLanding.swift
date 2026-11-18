@@ -24,10 +24,11 @@ struct HelixLanding {
                 let page = ReviewPageState.of(app)
                 guard page.helixLandingPermits.remove(landing.open.session) != nil else { return nil }
                 let source = landing.open.source
-                guard app.store.epoch == source.epoch, let lease = landing.open.lease else { return nil }
+                guard app.store.epoch == source.epoch, let lease = landing.open.lease, let attachment = landing.open.attachment else { return nil }
                 var write = Write(path: app.transport.atRepo(source.repo, "/edit-commit"),
                     body: ["branch": .string(source.name), "session": .string(lease), "expectedTip": .string(source.tip),
-                           "operation": .string(landing.open.session.uuidString.lowercased()), "epoch": .string(source.epoch)],
+                           "operation": .string(landing.open.session.uuidString.lowercased()), "epoch": .string(source.epoch),
+                           "attachment": .string(attachment.token)],
                     settled: { true }, failed: "the edit didn't commit · saved in \(landing.dir)",
                     answered: { ok, body in
                         landing.open.log(ok ? "commit answered" : "commit refused or failed")
