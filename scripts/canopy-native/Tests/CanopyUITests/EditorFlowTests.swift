@@ -51,13 +51,6 @@ import Testing
             page.editorWarmRepos.insert("initial|loops")
             page.editorWarmRepos.insert("\(try #require(info["epoch"]?.string))|loops")
         }
-        let loading = Date()
-        app.start()
-        defer { app.stream.stop() }
-        try await wait("the real diff and history") { page.diffCurrent && BranchHistory.of(app).rows(page.id) != nil }
-        let reviewMs = Date().timeIntervalSince(loading) * 1000
-        app.focus(pane: reviewDiffPane)
-        page.setCursor("l|a.txt|R:1")
         let size = NSSize(width: 1100, height: 800)
         let window = NSWindow(contentRect: NSRect(origin: NSPoint(x: -20000, y: -20000), size: size), styleMask: .borderless, backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
@@ -66,6 +59,14 @@ import Testing
         host.sizingOptions = []
         window.contentView = host
         defer { window.contentView = nil; window.close() }
+        let loading = Date()
+        app.start()
+        defer { app.stream.stop() }
+        try await wait("the real diff and history") { page.diffCurrent && BranchHistory.of(app).rows(page.id) != nil }
+        host.layoutSubtreeIfNeeded()
+        let reviewMs = Date().timeIntervalSince(loading) * 1000
+        app.focus(pane: reviewDiffPane)
+        page.setCursor("l|a.txt|R:1")
         var finalTip = page.tip
         for (index, text) in ["after edit transaction", "after the second edit"].enumerated() {
             let initial = page.tip
@@ -80,6 +81,7 @@ import Testing
                 return (0..<t.rows).contains { t.getLine(row: $0)?.translateToString(trimRight: true).contains("NOR") == true }
             }
             let openMs = Date().timeIntervalSince(opening) * 1000
+            let entryToEditorMs = Date().timeIntervalSince(loading) * 1000
             terminal.send(source: terminal, data: Array("ggxc".utf8)[...])
             try await Task.sleep(nanoseconds: 100_000_000)
             terminal.send(source: terminal, data: Array("\u{1b}[200~\(text)\n\u{1b}[201~".utf8)[...])
@@ -105,9 +107,9 @@ import Testing
             #expect(result["tip"]?.string == page.tip)
             #expect(result["text"]?.string == text)
             #expect(app.runner.runOf("review.helix.land", page.id)?.state == .done)
-            let timing: JSONValue = ["prewarm": .bool(prewarm), "reviewMs": .number(reviewMs), "openMs": .number(openMs), "saveToPaintMs": .number(paintMs), "tip": .string(page.tip)]
+            let timing: JSONValue = ["prewarm": .bool(prewarm), "reviewMs": .number(reviewMs), "entryToEditorMs": .number(entryToEditorMs), "openMs": .number(openMs), "saveToPaintMs": .number(paintMs), "tip": .string(page.tip)]
             try JSONEncoder().encode(timing).write(to: root.appendingPathComponent("timings-\(index).json"))
-            print("editor-flow prewarm=\(prewarm) \(index == 0 ? "first" : "repeat"): \(root.path) · review \(Int(reviewMs)) ms · open \(Int(openMs)) ms · save to paint \(Int(paintMs)) ms")
+            print("editor-flow prewarm=\(prewarm) \(index == 0 ? "first" : "repeat"): \(root.path) · review \(Int(reviewMs)) ms · open \(Int(openMs)) ms · entry to editor \(Int(entryToEditorMs)) ms · save to paint \(Int(paintMs)) ms")
             finalTip = page.tip
             if index == 0 {
                 var parked = false
