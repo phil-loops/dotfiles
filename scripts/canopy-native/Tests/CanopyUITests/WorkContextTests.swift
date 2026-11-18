@@ -333,4 +333,27 @@ import Testing
         item.work?.latest?.sourceTime = "yesterday afternoon"
         #expect(WorkInputView.label(WorkContext.direction(item), item.work) == "Your latest instruction · sent at \"yesterday afternoon\" (time not understood)")
     }
+
+    @Test func doingNowIsTheFirstNextStepElseTheWhy() {
+        let steps = "Native ownership is done.\n\n## Next steps\n\n- [ ] Mint a **per-editor** `lease`.\n- Prove ownership.\n\n## Done\n\n- old"
+        #expect(WorkContext.doingNow(TodoItem(id: "a", why: "why it matters", body: steps)) == "Mint a per-editor lease.")
+        #expect(WorkContext.doingNow(TodoItem(id: "b", why: "why it matters", body: "## Next steps\n\nprose only\n## Done\n- x")) == "why it matters")
+        #expect(WorkContext.doingNow(TodoItem(id: "c", why: "  ")) == nil)
+    }
+
+    @MainActor @Test func workLandsOnTheOneBranchItNames() throws {
+        let base = try ShipControlTests().branch()
+        func b(_ id: String, _ name: String, _ project: String) -> Branch { var x = base; x.id = id; x.name = name; x.project = project; return x }
+        let branches = [b("r:a", "feat/a", "r:fx"), b("r:dup1", "dup", "r:fx"), b("s:dup2", "dup", "s:fy"), b("s:a2", "feat/b", "s:fy")]
+        let items = [TodoItem(id: "viewer", state: .doing, solved_by: "feat/a"),
+                     TodoItem(id: "forest", state: .doing, project: "r:fx", solved_by: "feat/a"),
+                     TodoItem(id: "wrong-forest", state: .doing, project: "r:other", solved_by: "feat/a"),
+                     TodoItem(id: "ambiguous", state: .doing, solved_by: "dup"),
+                     TodoItem(id: "scoped", state: .doing, project: "s:fy", solved_by: "dup"),
+                     TodoItem(id: "unbound", state: .doing)]
+        let placed = WorkContext.onBranches(items, branches)
+        #expect(placed["r:a"]?.map(\.id) == ["viewer", "forest"])
+        #expect(placed["s:dup2"]?.map(\.id) == ["scoped"])
+        #expect(placed.count == 2)
+    }
 }

@@ -2,6 +2,8 @@
 
 Canopy reads work status from the existing todo records. The home page's In progress pane shows items marked `doing`, across lists. Return opens the exact item on its list. Forest and branch context uses only explicitly linked items: `project` is the full `<repo>:<forest>` ID, and `solved_by` is the complete branch name.
 
+In-progress work whose `solved_by` names a branch of a forest the home lists is shown on that forest's row instead: the branch's dot is ringed, and a line under the row names the branch, what the work is doing now (its first next step, else its why) and the session that claimed it. `canopy-todo claim` records the checked-out branch as `solved_by` when it belongs to a forest and the item has none, for a viewer item or an item on that forest's own list. Work with no such branch keeps its line in the In progress pane.
+
 An assignment is a reported claim, not a working-process heartbeat. `updated` is the tracker's recorded day, not the last code edit or tool call. Canopy keeps that precision and says when the date is absent. It does not infer activity from an open PR, a file modification time or a running process.
 
 ## Recording your input

@@ -227,6 +227,42 @@ struct WorkContext {
         }
     }
 
+    /// What the work is doing now, in its own words: the first of its next steps, else why it exists.
+    static func doingNow(_ item: TodoItem) -> String? {
+        let lines = item.body.components(separatedBy: .newlines)
+        if let head = lines.firstIndex(of: "## Next steps") {
+            for line in lines[(head + 1)...] {
+                if line.hasPrefix("## ") { break }
+                let t = line.trimmingCharacters(in: .whitespaces)
+                if let r = t.range(of: #"^([-*]|\d+[.)])\s+(\[[ x]\]\s+)?"#, options: .regularExpression) {
+                    let step = String(t[r.upperBound...]).replacingOccurrences(of: "**", with: "").replacingOccurrences(of: "`", with: "")
+                    if !step.isEmpty { return step }
+                }
+            }
+        }
+        let why = item.why.trimmingCharacters(in: .whitespacesAndNewlines)
+        return why.isEmpty ? nil : why
+    }
+
+    /// In-progress items by the forest branch they record solving (`solved_by`), keyed by branch id. An item on a
+    /// forest's own list only lands on that forest's branch; a viewer item lands on the one branch with its name.
+    static func onBranches(_ items: [TodoItem], _ branches: [Branch]) -> [String: [TodoItem]] {
+        var out: [String: [TodoItem]] = [:]
+        for item in items {
+            guard let name = item.solved_by else { continue }
+            let hits = branches.filter { $0.name == name && (item.project == nil || item.project == $0.project) }
+            if hits.count == 1 { out[hits[0].id, default: []].append(item) }
+        }
+        return out
+    }
+
+    /// The owner's short session id and the tracker's day, the facts a working line can state.
+    @MainActor static func workedBy(_ item: TodoItem, _ store: Store) -> String {
+        let owner = store.rawView("todo", item.id)?["owner"]?.string.flatMap { $0.isEmpty ? nil : "session \($0)" }
+        let since = day(item.updated).map { "updated \(String($0.dropFirst(5)))" }
+        return [owner, since].compactMap { $0 }.joined(separator: " · ")
+    }
+
     static func updateLabel(_ value: String?) -> String {
         day(value).map { "tracker updated \($0)" } ?? "update date not recorded"
     }

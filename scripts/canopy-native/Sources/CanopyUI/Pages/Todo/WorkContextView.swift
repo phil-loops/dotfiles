@@ -100,8 +100,21 @@ struct WorkInProgressView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme
 
-    @MainActor static func items(_ app: AppModel) -> [TodoItem] {
+    @MainActor static func all(_ app: AppModel) -> [TodoItem] {
         app.forestModel.readyOnly ? [] : app.store.trackerItems().filter { $0.state == .doing || WorkContext.reopened($0) }.sorted(by: Tracker.byQueue)
+    }
+
+    /// In-progress work on a branch of a forest the home lists: it reads on that forest's row, at its dot.
+    @MainActor static func placed(_ app: AppModel) -> [String: [TodoItem]] {
+        let m = app.forestModel, p = m.projects(), fs = m.forests()
+        let listed = (p.focus + p.workbench + (m.showArchive ? p.archive : [])).compactMap { fs[$0.id] }.filter { !$0.closed }
+        return WorkContext.onBranches(all(app), listed.flatMap { $0.branches.map(\.b) })
+    }
+
+    /// The rest: work no listed branch carries, so it keeps its own line at the top.
+    @MainActor static func items(_ app: AppModel) -> [TodoItem] {
+        let onDots = Set(placed(app).values.flatMap { $0.map(\.id) })
+        return all(app).filter { !onDots.contains($0.id) }
     }
 
     @MainActor static func visible(_ app: AppModel) -> Bool {
@@ -120,19 +133,48 @@ struct WorkInProgressView: View {
                 }
                 ForEach(items, id: \.id) { item in
                     CursorRow(pane: "work", key: RowKey.todo(item.id)) { on in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(item.title).font(Theme.display(16)).foregroundStyle(on ? theme.goldLeaf : theme.ink).lineLimit(2)
-                            Text([WorkContext.status(item), WorkContext.owner(item, app.store), WorkContext.updateLabel(item.updated)]
-                                .compactMap { $0 }.joined(separator: " · "))
-                                .font(Theme.text(11)).foregroundStyle(theme.inkFaint)
-                            WorkInputView(item: item, lines: 2)
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                                Text(item.title).font(Theme.display(15)).foregroundStyle(on ? theme.goldLeaf : theme.ink).lineLimit(1)
+                                Spacer(minLength: 0)
+                                Text(WorkContext.workedBy(item, app.store)).font(Theme.text(11)).foregroundStyle(theme.inkFaint).fixedSize()
+                            }
+                            if let now = WorkContext.doingNow(item) {
+                                Text("→ \(now)").font(Theme.text(12)).foregroundStyle(theme.inkDim).lineLimit(on ? 3 : 1)
+                            }
+                            if WorkContext.direction(item) != nil || item.work != nil { WorkInputView(item: item, lines: 1) }
                         }
-                        .padding(.leading, 44).padding(.trailing, 16).padding(.vertical, 8)
+                        .padding(.leading, 44).padding(.trailing, 16).padding(.vertical, 6)
                     }
                     .labelTarget(pane: "work", key: RowKey.todo(item.id), title: item.title)
                 }
             }
             .cursorMarks("work").paneRing("work").padding(.bottom, 22)
         }
+    }
+}
+
+/// Work in progress on one of a forest's branches, under the forest's row: the branch, what it's doing now, who holds it.
+struct BranchWorkLine: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.theme) private var theme
+    let branch: Branch
+    let item: TodoItem
+
+    var body: some View {
+        Button { app.runner.dispatch("todo.show", via: .click, arg: item.id) } label: {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("◉").foregroundStyle(theme.goldLeaf)
+                Text(leaf(branch.name)).foregroundStyle(theme.ink).fixedSize()
+                Text(WorkContext.doingNow(item).map { "→ \($0)" } ?? item.title).foregroundStyle(theme.inkDim).lineLimit(1)
+                Spacer(minLength: 0)
+                Text(WorkContext.workedBy(item, app.store)).foregroundStyle(theme.inkFaint).fixedSize()
+            }
+            .font(Theme.text(12))
+        }
+        .buttonStyle(.plain)
+        .help(item.title)
+        .labelTarget(pane: "work-context", key: "dot:\(branch.id):\(item.id)", title: item.title, run: RouteTo("todo.show", arg: item.id))
+        .padding(.leading, 44).padding(.trailing, 16).padding(.vertical, 2)
     }
 }
