@@ -17,12 +17,19 @@ struct EditReceipt: Decodable {
     let incremental: Bool?
 
     @MainActor func apply(_ app: AppModel, open: HelixOpen, wrote: Int) -> Bool {
-        let source = open.source
-        guard epoch == source.epoch, session == open.lease, operation == open.session.uuidString.lowercased(), repo == source.repo,
-              branch == source.name, expectedTip == source.tip, baseSha == open.editBase,
+        apply(app, source: open.source, lease: open.lease ?? "", operation: open.session.uuidString.lowercased(),
+              expectedTip: open.source.tip, baseSha: open.editBase ?? "", wrote: wrote)
+    }
+
+    @MainActor func apply(_ app: AppModel, source: BranchSource, lease: String, operation: String,
+                          expectedTip: String, baseSha: String, wrote: Int) -> Bool {
+        guard epoch == source.epoch, app.store.epoch == source.epoch, session == lease, self.operation == operation, repo == source.repo,
+              branch == source.name, self.expectedTip == expectedTip, self.baseSha == baseSha,
               HelixLanding.fullObject(sha), sha != expectedTip, HelixLanding.fullObject(tree), history.sha == sha,
               history.own, Set(files.map(\.path)).count == files.count,
               Set(files.map(\.path)).isSubset(of: Set(paths)) else { return false }
+        if source.tip == sha { return app.store.view(Branch.self, source.id)?.tip == sha }
+        guard source.tip == expectedTip else { return false }
         let page = ReviewPageState.of(app)
         let previous = page.id == source.id && page.tip == expectedTip && page.diffCurrent && page.baseSha == baseSha && !page.scoped
             ? page.payload?.data : nil

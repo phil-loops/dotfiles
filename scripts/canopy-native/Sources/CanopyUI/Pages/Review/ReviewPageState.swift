@@ -251,6 +251,8 @@ public final class ReviewPageState: ShipHost {
     @ObservationIgnored var helixLandingPermits: Set<UUID> = []
     @ObservationIgnored var editorWarmRepos: Set<String> = []
     @ObservationIgnored var editorWarmEnabled = false
+    @ObservationIgnored var editorRecoveryTask: Task<Void, Never>?
+    @ObservationIgnored var editorRecoveryIntent = 0
     /// The half of the split the cursor reads, kept as it moves up and down; `h` / `l` switch it.
     public var column: Side = .right {
         didSet { if column != oldValue { sourceGeneration &+= 1 } }

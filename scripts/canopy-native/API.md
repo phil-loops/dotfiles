@@ -71,6 +71,12 @@ or a foreign/changed lock also stop recovery. Only a lock with the recorded inod
 is reclaimed; a partially overwritten lock remains for inspection. A completed receipt can replay
 without the private editor checkout, and subsequent local edits are never recaptured.
 
+The command palette's **Recover a saved Helix edit** reads frozen saves for the current branch and
+offers an explicit retry. Catalog/picker replies retain their reader and source; queued recovery
+rechecks the server epoch and observed branch tip. The response must match the selected workspace,
+operation, base and frozen commit before the native store accepts it. Neither discovery nor retry
+creates a new save from an open editor. Machine routes are refused in the sandbox; native discovery
+and recovery also respect read-only sessions.
 Recovery is on demand; a server restart does not automatically move branches. Unsaved workspaces
 are listed by the protocol but are not automatically attached or deleted.
 
