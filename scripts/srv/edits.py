@@ -1,6 +1,7 @@
 """Owned editor checkouts, frozen saves, and revision-qualified commit receipts."""
 import fcntl
 from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import nullcontext
 import json
 import os
 from pathlib import Path
@@ -10,7 +11,7 @@ import subprocess
 import threading
 import uuid
 
-from . import ctx, editprojection, ghreview, push, reviewdesk
+from . import ctx, editlease, editprojection, ghreview, push, reviewdesk
 
 _ROOTS = {}
 _VALID_BRANCHES = set()
@@ -83,18 +84,7 @@ def _root(session):
     return common, common / "canopy-edits" / session
 
 
-def _save(path, data):
-    temporary = path.with_suffix(".tmp")
-    with temporary.open("w") as out:
-        json.dump(data, out)
-        out.flush()
-        os.fsync(out.fileno())
-    os.replace(temporary, path)
-    fd = os.open(path.parent, os.O_RDONLY)
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
+_save = editlease.write_record
 
 
 def _transition(root, session, state):
@@ -147,6 +137,28 @@ def prepare(req, data):
     return _prepare(req, data)
 
 
+def _prepared(req, root, saved, data):
+    if saved.get("leaseProtocol") != data.get("leaseProtocol"):
+        raise ghreview.Refused("that workspace has a different attachment protocol; its files are preserved")
+    if saved.get("leaseProtocol") == 1 and _text("rev-parse", f"refs/heads/{saved['branch']}") != saved["expectedTip"]:
+        raise ghreview.Refused("the branch moved since that workspace opened; its files are preserved")
+    attachment = editlease.issue(root, saved, save=_save)
+    body = {"ok": True, "epoch": _epoch(), "session": saved["session"], "dir": str(_checkout(root, saved)),
+            "sha": saved["expectedTip"], "baseSha": saved["baseSha"]}
+    if attachment:
+        body["attachment"] = attachment
+    return reviewdesk._send(req, 200, body)
+
+
+def _entry(data):
+    entry = data.get("entry")
+    if (not isinstance(entry, dict) or not isinstance(entry.get("path"), str)
+            or any(part in ("", ".", "..") for part in entry["path"].split("/"))
+            or any(type(entry.get(key)) is not int or entry[key] <= 0 for key in ("line", "col"))):
+        raise ghreview.Refused("the editor needs a file position inside its workspace")
+    return {key: entry[key] for key in ("path", "line", "col")}
+
+
 def _prepare(req, data, cache=False):
     _require_epoch(data)
     session = data.get("session")
@@ -169,8 +181,9 @@ def _prepare(req, data, cache=False):
                 raise ghreview.Refused("that edit session already owns a frozen save")
             if saved.get("state") == "preparing":
                 raise ghreview.Refused(f"workspace preparation was interrupted; its files are preserved in {_checkout(root, saved)}")
-            _validate(common, root, saved)
-            return reviewdesk._send(req, 200, {"ok": True, "epoch": _epoch(), "session": session, "dir": str(_checkout(root, saved)), "sha": tip, "baseSha": base})
+            with editlease.available(root, saved):
+                _validate(common, root, saved)
+            return _prepared(req, root, saved, data)
         if not tip or not base:
             raise ghreview.Refused("the edit needs its full tip and comparison revision")
         revisions = _text("rev-parse", "--revs-only", "--end-of-options", f"refs/heads/{branch}", f"{base}^{{commit}}").splitlines()
@@ -182,6 +195,10 @@ def _prepare(req, data, cache=False):
         saved = {"workspaceVersion": 1, "state": "preparing", "session": session, "kind": "cache" if cache else "editor",
                  "checkout": str(checkout), "openedEpoch": _epoch(), "repo": str(common), "identity": _identity(common),
                  "repoName": ctx.repo_name(), "branch": branch, "expectedTip": tip, "baseSha": base}
+        if not cache and data.get("leaseProtocol") is not None:
+            if type(data["leaseProtocol"]) is not int or data["leaseProtocol"] != 1:
+                raise ghreview.Refused("unsupported editor attachment protocol")
+            saved.update(leaseProtocol=1, entry=_entry(data))
         _save(root / "session.json", saved)
         priming = None
         reserved = False
@@ -221,7 +238,7 @@ def _prepare(req, data, cache=False):
                      gitdir=gitdir, gitdirIdentity=_identity(gitdir), expectedTree=expected_tree, parentSha=parent_sha,
                      indexStamp=_stamp(Path(gitdir) / "index"))
         _transition(root, saved, "cached" if cache else "editing")
-        reviewdesk._send(req, 200, {"ok": True, "epoch": _epoch(), "session": session, "dir": str(checkout), "sha": tip, "baseSha": base})
+        _prepared(req, root, saved, data)
     if not cache:
         _warm_later(root)
 
@@ -601,7 +618,8 @@ def _cleanup(repo, root):
                 return
             session = _load(root)
             if session.get("state") == "committed" and not session.get("checkoutState") and _checkout(root, session).is_dir():
-                _park(root, session)
+                with editlease.available(root, session):
+                    _park(root, session)
     except (ghreview.Refused, OSError) as error:
         ctx.log(f"edit session {root.name}: checkout preserved: {error}")
     finally:
@@ -647,16 +665,20 @@ def _commit(req, data, frozen=False):
             raise ghreview.Refused("that session already owns a frozen save")
         if frozen and not session.get("receipt"):
             raise ghreview.Refused("that workspace has no frozen save to recover")
-        if session.get("state") == "committed":
-            receipt = session["receipt"]
-        else:
-            receipt = session.get("receipt")
-            if not receipt:
-                _validate(common, root, session)
-                receipt = _freeze(root, session, operation)
-            if not receipt.get("nothing"):
-                _advance(session)
-            _transition(root, session, "committed")
+        if session.get("leaseProtocol") == 1 and not session.get("receipt"):
+            if data.get("attachment") != session.get("attachment", {}).get("token"):
+                raise ghreview.Refused("that attachment was superseded; the current editor workspace is preserved")
+        with (nullcontext() if session.get("receipt") else editlease.available(root, session)):
+            if session.get("state") == "committed":
+                receipt = session["receipt"]
+            else:
+                receipt = session.get("receipt")
+                if not receipt:
+                    _validate(common, root, session)
+                    receipt = _freeze(root, session, operation)
+                if not receipt.get("nothing"):
+                    _advance(session)
+                _transition(root, session, "committed")
         reviewdesk._send(req, 200, {**receipt, "epoch": _epoch()})
     _cleanup_later(root)
 
@@ -681,7 +703,8 @@ def workspaces(req, data):
                            "baseSha": session["baseSha"], "state": phase, "dir": str(_checkout(root.parent, session)),
                            "operation": session.get("operation"), "sha": session.get("receipt", {}).get("sha"),
                            "message": session.get("receipt", {}).get("message"),
-                           "projection": session.get("projection", {}).get("phase"), "retryable": bool(session.get("receipt"))})
+                           "projection": session.get("projection", {}).get("phase"), "retryable": bool(session.get("receipt")),
+                           "resumable": editlease.resumable(root.parent, session), "entry": session.get("entry")})
         except (ghreview.Refused, OSError, KeyError) as error:
             ctx.log(f"editor workspace unavailable: {root.parent}: {error}")
     return reviewdesk._send(req, 200, {"ok": True, "epoch": _epoch(), "workspaces": result})

@@ -12,9 +12,9 @@ The native editor uses repo-prefixed POSTs (`srv/edits.py`):
 | Route | Request | Response |
 | --- | --- | --- |
 | `/edit-warm` | `{branch, epoch?, expectedTip?}` | `{ok}` acknowledges background preparation |
-| `/edit-session` | `{epoch, session: UUID, branch, expectedTip, baseSha}` | `{ok, epoch, session, dir, sha, baseSha}` |
-| `/edit-commit` | `{epoch, session, operation: UUID, branch, expectedTip}` | `{ok, epoch, session, operation, repo, branch, expectedTip, baseSha, sha, tree, paths, files, history, incremental}` or `{ok, nothing: true, …}` |
-| `/edit-workspaces` | `{epoch, branch?, completed?: Bool}` | `{ok, epoch, workspaces: [{session, branch, expectedTip, baseSha, state, dir, operation?, sha?, message?, projection?, retryable}]}` |
+| `/edit-session` | `{epoch, session: UUID, branch, expectedTip, baseSha, leaseProtocol?: 1, entry?: {path, line, col}}` | `{ok, epoch, session, dir, sha, baseSha, attachment?: {script, record, token}}` |
+| `/edit-commit` | `{epoch, session, operation: UUID, branch, expectedTip, attachment?: UUID}` | `{ok, epoch, session, operation, repo, branch, expectedTip, baseSha, sha, tree, paths, files, history, incremental}` or `{ok, nothing: true, …}` |
+| `/edit-workspaces` | `{epoch, branch?, completed?: Bool}` | `{ok, epoch, workspaces: [{session, branch, expectedTip, baseSha, state, dir, operation?, sha?, message?, projection?, retryable, resumable, entry?}]}` |
 | `/edit-recover` | `{epoch, session, operation, branch, expectedTip}` | the original frozen commit receipt; refuses a workspace without a frozen save |
 
 For editor sessions and commits, the server checks the request's epoch before accepting work and stamps its own epoch on the reply;
@@ -55,6 +55,22 @@ Preparation writes its record before creating or transferring a checkout. Interr
 is discoverable and preserved; it is never silently restarted over existing files. Legacy records
 without a version remain readable, while unknown versions are refused.
 
+New native editors request `leaseProtocol: 1` and a relative file position. Preparation issues a
+fresh attachment ticket only while the workspace's kernel lock is free and its recorded editor
+process has exited. Process birth identity distinguishes a reused PID from the original editor;
+an unavailable liveness probe preserves the workspace. Neither elapsed time nor a server epoch
+proves abandonment. Legacy workspaces remain supported but are not offered for resumption because
+their editors never opted into attachment leases.
+
+`canopy-editor` validates the ticket, repository, checkout and comparison HEAD under the workspace
+lock, acquires `editor.lock`, durably records its process identity, and execs Helix with the lock
+descriptor inherited. The process identity also prevents reattachment if Helix closes inherited
+descriptors. Lease file replacement or disappearance is refused. A second launch cannot acquire
+the lease, and a ticket replaced before launch cannot start an editor. Unfrozen leased saves must
+name the current ticket and acquire the same lease before capture; an old queued exit callback
+cannot freeze a later attachment's files. Frozen operation replay remains independent of the old
+attachment file and process.
+
 An attached checkout is a recoverable projection of the frozen commit. Its journal records the
 checkout/Git-directory identities, before/after index trees, immutable index snapshots and owned
 lock token. A prepared Git ref transaction and the real checkout's `index.lock` exclude cooperating
@@ -78,7 +94,9 @@ operation, base and frozen commit before the native store accepts it. Neither di
 creates a new save from an open editor. Machine routes are refused in the sandbox; native discovery
 and recovery also respect read-only sessions.
 Recovery is on demand; a server restart does not automatically move branches. Unsaved workspaces
-are listed by the protocol but are not automatically attached or deleted.
+are not automatically attached or deleted.
+Catalog availability is advisory; preparation rechecks the kernel lease and process before issuing
+the ticket. Resumption does not recover editor buffers that were never written to files.
 
 Index cache preparation runs while Helix is open. Validation uses the lease's filesystem identity
 and unchanged index fingerprint, with Git verification after an index change. Frozen index copies

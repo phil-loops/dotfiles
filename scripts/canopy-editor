@@ -1,0 +1,13 @@
+#!/usr/bin/env python3
+"""Run Helix while holding its private Canopy workspace attachment."""
+import sys
+
+from srv import editlease, ghreview
+
+try:
+    if len(sys.argv) != 4:
+        raise ghreview.Refused("usage: canopy-editor <session.json> <attachment> <path:line:col>")
+    editlease.launch(*sys.argv[1:])
+except (ghreview.Refused, OSError, ValueError, KeyError) as error:
+    print(f"Canopy: {error}", file=sys.stderr)
+    raise SystemExit(75)
