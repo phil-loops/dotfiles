@@ -17,6 +17,7 @@ import json
 from collections import namedtuple
 
 from . import evidence   # own line: the big import below is contested across sessions
+from . import ctx, forestlock
 from . import (actor, chat, integrate, lsp, outbox, outline, packet, picker, preview, push, queue, restack,
                review, reviewdesk, reviews, sync, syntax, todo, tutor, usage, verdicts, viewed)
 
@@ -130,4 +131,29 @@ def post(req, path, raw):
     why = refusal(route, req)
     if why:
         return req._send(403, json.dumps({"ok": False, "err": why}))
-    return route.handler(req, raw)
+    key = _forest_key(route, path, raw)
+    if not key:
+        return route.handler(req, raw)
+    try:
+        with forestlock.hold(ctx.repo_cwd(), key, f"canopy {path}", wait=30, export=False):
+            return route.handler(req, raw)
+    except forestlock.Held as e:
+        return req._send(409, json.dumps({"ok": False, "err": str(e), "held": True}))
+
+
+# /restack only queues: the drainer's stack-restack takes the forest lock itself (holding it here
+# would make that child wait on its own server)
+_UNLOCKED = {"/restack"}
+
+
+def _forest_key(route, path, raw):
+    """One writer per forest (srv/forestlock.py): a route that moves a branch or changes origin
+    holds the forest of the branch it names. No branch named: nothing to key on, so no lock."""
+    if path in _UNLOCKED or not route.effects & {"history", "outward"}:
+        return ""
+    try:
+        d = json.loads(raw or "{}")
+    except ValueError:
+        return ""
+    branch = d.get("branch") if isinstance(d, dict) and isinstance(d.get("branch"), str) else ""
+    return forestlock.key_for(ctx.repo_cwd(), branch=branch) if branch else ""

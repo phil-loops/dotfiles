@@ -18,7 +18,7 @@ import subprocess
 import threading
 import time
 
-from . import ctx, openprs, repostate, restack, sync, watch
+from . import ctx, forestlock, openprs, repostate, restack, sync, watch
 
 POLL_S = 90
 _lock = threading.Lock()
@@ -127,18 +127,26 @@ def _ff_main(tip):
         ctx.log(f"focus-sync: local main fast-forwarded in {wt} {cur[:9]} → {tip[:9]}")
 
 
+def _held(project):
+    """Why focus-sync leaves a forest alone this tick: another writer holds its lock (an agent's
+    reshape, a click in canopy). Skipped, never waited on (tooling-doctor P2)."""
+    rec = forestlock.held(ctx.repo_cwd(), forestlock.key_for(ctx.repo_cwd(), project=project))
+    return f"being changed by {forestlock.describe(rec)}" if rec else ""
+
+
 def _restack(project, hold=(), merged=None):
     """merged ({branch: the head GitHub merged}) runs --contract-only instead of the walk."""
     wt = restack.worktree()
     _git("-C", wt, "checkout", "--detach")
-    env = None
+    # a writer that took the forest after _held() looked: stack-restack skips, never waits
+    env = {**os.environ, "STACK_RESTACK_FOREST_WAIT": "0"}
     with open(os.path.join(ctx.ROOT, "restack.log"), "ab") as lf:
         cmd = [os.path.join(ctx.SCRIPTS, "stack-restack"), project, "--no-claude"]
         if hold:
             cmd.append("--hold=" + ",".join(hold))
         if merged is not None:
             cmd.append("--contract-only")
-            env = {**os.environ, "STACK_RESTACK_MERGED_HEADS": "\n".join(f"{b} {h or '-'}" for b, h in sorted(merged.items())),
+            env = {**env, "STACK_RESTACK_MERGED_HEADS": "\n".join(f"{b} {h or '-'}" for b, h in sorted(merged.items())),
                    "STACK_RESTACK_OPEN_PR_HEADS": f" {' '.join(sorted(openprs.heads()))} "}
         rc = subprocess.run(cmd, cwd=wt, stdout=lf, stderr=lf, env=env).returncode
     parked, current = restack._parked()
@@ -183,7 +191,7 @@ def _sync_project(project, st, cwds):
             st["projects"][project] = {"state": "refused", "sig": sig, "at": now, "branch": r,
                                        "why": f"{r} looks merged locally but GitHub has no merged PR for it"}
             return True
-    why = _busy(branches, cwds)
+    why = _busy(branches, cwds) or _held(project)
     if why:
         st["projects"][project] = {"state": "waiting", "why": why}
         return False
@@ -215,6 +223,8 @@ def _contract_project(project, merged, st, cwds):
     landed = [b for b in members if b in merged]
     if not landed or st["contracted"].get(project) == sig(members):
         return False
+    if _held(project):
+        return False   # someone is changing this forest: contract it next tick
     held = [b for b in landed if _busy([b], cwds)]
     if len(held) == len(landed):
         return False   # nothing to drop until a worktree frees
