@@ -67,6 +67,28 @@ with open(os.environ["CANOPY_WORK_JOURNAL"], "r+b") as f:
 got = chats.entities()["chat"][BOUND]
 check("an unreadable journal says so instead of reading unbound", got["works"] is None and "unreadable" in got.get("bindingError", ""), got)
 
+# round 28: the branches a chat acted on — its own edits and commits, recent, never a replay
+import time as _time  # noqa: E402
+now = _time.time()
+presence(BOUND, acted={"loops:feat/edited": {"edit": now - 60}, "loops:feat/stale": {"edit": now - 3 * 3600}})
+usage_repo = os.path.join(TMP, "usage-repo")
+subprocess.run(["git", "init", "-q", "-b", "main", usage_repo], check=True)
+from srv import ctx as _ctx  # noqa: E402
+_ctx.REPOS = {"loops": usage_repo}
+with open(os.path.join(usage_repo, ".git", "stack-usage.jsonl"), "w") as f:
+    for e in [{"type": "commit", "branch": "feat/committed", "actor": "claude", "session": BOUND[:8], "ts": now - 30},
+              {"type": "commit", "branch": "feat/replayed", "actor": "claude", "session": BOUND[:8], "replay": "rebase", "ts": now - 20},
+              {"type": "commit", "branch": "feat/by-server", "actor": "server", "session": None, "ts": now - 10},
+              {"type": "commit", "branch": "feat/old", "actor": "claude", "session": BOUND[:8], "ts": now - 3 * 3600},
+              {"type": "commit", "branch": "feat/other-chat", "actor": "claude", "session": "deadbeef", "ts": now - 5}]:
+        f.write(json.dumps(e) + "\n")
+acted = chats.entities()["chat"][BOUND]["acted"]
+check("a chat is on the branches it edited or committed to lately, newest first, each with its evidence",
+      [(a["branch"], a["how"]) for a in acted] == [("loops:feat/committed", "commit"), ("loops:feat/edited", "edit")], acted)
+check("a replay, a server's commit, another chat's, or anything past two hours is no evidence",
+      not {"loops:feat/replayed", "loops:feat/by-server", "loops:feat/old", "loops:feat/stale", "loops:feat/other-chat"} & {a["branch"] for a in acted})
+_ctx.REPOS = {}
+
 # POST /chat-bind: Phil's click, decided from the generation his view showed (round 27, P7)
 import json as _json  # noqa: E402
 from srv import ctx  # noqa: E402

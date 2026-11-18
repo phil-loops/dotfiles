@@ -10,6 +10,9 @@ full session id:
   at         where it stands: the presence record's repo name and branch, for the unbound list
   pane       its tmux pane, to focus; absent outside tmux
   activeAt   its last tool call; live vs idle is the reader's call, and an ended chat is absent
+  acted      the branches it acted on within ACTED_WITHIN, newest first: {branch: "<repo>:<name>",
+             how: edit | commit, at} — an edit from its presence record (resolved at the edit), a
+             commit from the repo's usage log when the chat made it and it wasn't a replay (round 28)
 
 Liveness is the presence record's process (pid + start time); the journal is read read-only and
 never created. A journal that can't be read says so on every chat (`works: null`) rather than
@@ -19,10 +22,63 @@ import glob
 import json
 import os
 import re
+import subprocess
+import time
 
-from . import agents, workfresh, workjournal as wj
+from . import agents, ctx, workfresh, workjournal as wj
 
 SOURCE = wj.CLAUDE_CODE_SOURCE
+ACTED_WITHIN = 2 * 3600
+USAGE_TAIL = 512 * 1024
+_COMMON = {}   # repo path -> its git common dir
+
+
+def _usage_logs():
+    """{repo name: its stack-usage.jsonl} for every repo the viewer serves."""
+    out = {}
+    for name, path in (ctx.REPOS or {}).items():
+        if path not in _COMMON:
+            r = subprocess.run(["git", "-C", path, "rev-parse", "--path-format=absolute", "--git-common-dir"], capture_output=True, text=True)
+            _COMMON[path] = r.stdout.strip() if r.returncode == 0 else ""
+        if _COMMON[path]:
+            out[name] = os.path.join(_COMMON[path], "stack-usage.jsonl")
+    return out
+
+
+def _commits(since):
+    """[(session prefix, '<repo>:<branch>', ts)] for commits a chat made since `since`, replays
+    excluded: only the log's tail is read, never its history."""
+    out = []
+    for name, log in _usage_logs().items():
+        try:
+            with open(log, "rb") as f:
+                start = max(0, os.path.getsize(log) - USAGE_TAIL)
+                f.seek(start)
+                lines = f.read().decode("utf-8", "replace").splitlines()[1 if start else 0:]
+        except OSError:
+            continue
+        for line in lines:
+            try:
+                e = json.loads(line)
+            except ValueError:
+                continue
+            if (e.get("type") == "commit" and e.get("actor") == "claude" and e.get("session") and not e.get("replay")
+                    and e.get("branch") and (e.get("ts") or 0) >= since):
+                out.append((e["session"], f"{name}:{e['branch']}", e["ts"]))
+    return out
+
+
+def _acted(r, commits, now):
+    since = now - ACTED_WITHIN
+    best = {}
+    for branch, ev in (r.get("acted") or {}).items():
+        at = (ev or {}).get("edit") or 0
+        if at >= since:
+            best[branch] = {"branch": branch, "how": "edit", "at": at}
+    for prefix, branch, at in commits:
+        if r["session_id"].startswith(prefix) and at >= best.get(branch, {}).get("at", 0):
+            best[branch] = {"branch": branch, "how": "commit", "at": at}
+    return sorted(best.values(), key=lambda a: -a["at"])
 
 
 def presence_dir():
@@ -60,7 +116,16 @@ def fingerprint():
         except OSError:
             continue
         out.append((os.path.basename(f), st.st_mtime_ns))
-    return tuple(out) + tuple((r.get("session_id"), _running(r.get("pid"))) for r in _records())
+    logs = []
+    for log in _usage_logs().values():
+        try:
+            st = os.stat(log)
+            logs.append((st.st_size, st.st_mtime_ns))
+        except OSError:
+            logs.append(None)
+    # links fade with time alone, so the minute moves it too
+    return (tuple(out) + tuple((r.get("session_id"), _running(r.get("pid"))) for r in _records())
+            + tuple(logs) + (int(time.time() // 60),))
 
 
 def bind(req, raw):
@@ -112,6 +177,8 @@ def entities():
             bound, error = {}, e
         finally:
             j.close()
+    now = time.time()
+    commits = _commits(now - ACTED_WITHIN)
     chats = {}
     for r in live:
         sid = r["session_id"]
@@ -119,5 +186,6 @@ def entities():
         chats[sid] = {"id": sid, "works": None if error else b["works"], "generation": b["generation"],
                       "at": {"repo": r.get("repo_name") or "", "branch": r.get("branch") or ""},
                       "pane": r.get("tmux_pane") or None, "activeAt": r.get("last_active") or 0,
+                      "acted": _acted(r, commits, now),
                       **({"bindingError": f"work journal unreadable: {type(error).__name__}"} if error else {})}
     return {"chat": chats}
