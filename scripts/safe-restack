@@ -110,12 +110,12 @@ for b in $order; do
   if [ "$p" = "main" ] || [ "$p" = "origin/main" ]; then onto="$OM"; cut=$(git merge-base "$b" "$OM"); else onto=$(git rev-parse "$p"); cut=$(snap_of "$p"); fi
   w=$(wt_of "$b"); tmp=""
   if [ -z "$w" ]; then tmp="/tmp/sr-${b//\//_}"; rm -rf "$tmp"; git worktree add "$tmp" "$b" >/dev/null 2>&1; w="$tmp"; fi
-  if ( cd "$w" && git rebase --onto "$onto" "$cut" >/dev/null 2>&1 ); then
+  # rebase-guarded: a death mid-rebase leaves an owner record the next guarded run heals
+  if "$(cd "$(dirname "$0")" && pwd -P)/rebase-guarded" -C "$w" --onto "$onto" "$cut" >/dev/null 2>&1; then
     echo "  ✓ $b -> $(sha "$b")"
     [ -n "$tmp" ] && git worktree remove --force "$tmp" >/dev/null 2>&1
   else
-    ( cd "$w" && git rebase --abort >/dev/null 2>&1 )
-    [ -n "$tmp" ] && git worktree remove --force "$tmp" >/dev/null 2>&1
+    [ -n "$tmp" ] && git worktree remove --force "$tmp" >/dev/null 2>&1   # the guard already aborted
     echo "  ✗ $b CONFLICT — real semantic clash, not auto-resolving."
     rollback; rm -f "$snapfile"; exit 3
   fi

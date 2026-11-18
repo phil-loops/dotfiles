@@ -295,14 +295,17 @@ def default_fixes(cwd, branch, borrowed=False):
         # Detached scratch: a bare rebase moves only the detached HEAD, and stack-open's
         # post-commit follow-hook force-moves the branch at EVERY replayed commit — so pin
         # the outcome explicitly: branch → rebased tip on success, restored tip on abort.
+        # rebase-guarded: /queue-kill SIGKILLs the group, so the `|| abort` below never runs;
+        # the guard's owner record lets the next guarded run abort the stranded rebase
+        rg = shlex.quote(os.path.join(self_dir, "rebase-guarded"))
         fixes["fresh"] = (
             f'old=$(git rev-parse "refs/heads/{branch}") && git fetch origin main -q && '
-            f'git rebase origin/main && git branch -f "{branch}" HEAD '
-            f'|| {{ git rebase --abort 2>/dev/null; git branch -f "{branch}" "$old"; exit 1; }}'
+            f'{rg} -C . origin/main && git branch -f "{branch}" HEAD '
+            f'|| {{ git branch -f "{branch}" "$old"; exit 1; }}'
         )
     elif parent in ("", "main"):
-        fixes["fresh"] = ("git fetch origin main -q && git rebase origin/main "
-                          "|| { git rebase --abort 2>/dev/null; exit 1; }")
+        rg = shlex.quote(os.path.join(self_dir, "rebase-guarded"))
+        fixes["fresh"] = (f"git fetch origin main -q && {rg} -C . origin/main || exit 1")
     project = (gconf(f"branch.{branch}.stack-project", cwd)) if branch else ""
     if project and os.path.exists(os.path.join(self_dir, "stack-fmt")):
         fixes["format"] = f"{self_dir}/stack-fmt {project}"
