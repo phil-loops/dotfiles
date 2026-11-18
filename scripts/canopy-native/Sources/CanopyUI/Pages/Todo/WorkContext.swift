@@ -256,6 +256,40 @@ struct WorkContext {
         return out
     }
 
+    /// A live Claude Code chat and the work its binding names (srv/chats.py, DESIGN.md round 27).
+    struct Chat: Decodable, Equatable {
+        struct Work: Decodable, Equatable { var work: String; var todo: String? }
+        var id: String
+        /// nil when the journal couldn't be read: unknown, never unbound
+        var works: [Work]?
+        var generation: Int
+        var pane: String?
+        var activeAt: Double
+    }
+
+    /// A chat reads idle after this long without a tool call; an ended chat isn't served at all.
+    static let idleAfter: Double = 150
+
+    static func live(_ c: Chat, now: Double) -> Bool { now - c.activeAt < idleAfter }
+
+    /// The bound chats on each branch, keyed by branch id: a chat whose binding names the branch's own
+    /// work (`branchWork`, from branch.<n>.stack-work), or an item the home placed on that branch.
+    /// Never a chat's cwd or name: an unbound chat is on no branch (P1).
+    static func chatsOnBranches(_ chats: [Chat], branchWork: [String: String], placed: [String: [TodoItem]]) -> [String: [Chat]] {
+        var out: [String: [Chat]] = [:]
+        let branches = Set(branchWork.keys).union(placed.keys)
+        for b in branches.sorted() {
+            let items = Set((placed[b] ?? []).map(\.id))
+            let on = chats.filter { c in (c.works ?? []).contains { $0.work == branchWork[b] || $0.todo.map(items.contains) == true } }
+            if !on.isEmpty { out[b] = on.sorted { $0.id < $1.id } }
+        }
+        return out
+    }
+
+    static func chatsLine(_ chats: [Chat], now: Double) -> String {
+        chats.map { "chat \($0.id.prefix(8)) \(live($0, now: now) ? "live" : "idle")" }.joined(separator: " · ")
+    }
+
     /// The owner's short session id and the tracker's day, the facts a working line can state.
     @MainActor static func workedBy(_ item: TodoItem, _ store: Store) -> String {
         let owner = store.rawView("todo", item.id)?["owner"]?.string.flatMap { $0.isEmpty ? nil : "session \($0)" }

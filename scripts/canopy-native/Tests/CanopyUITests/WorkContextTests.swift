@@ -356,4 +356,18 @@ import Testing
         #expect(placed["s:dup2"]?.map(\.id) == ["scoped"])
         #expect(placed.count == 2)
     }
+
+    @Test func aChatIsOnABranchOnlyThroughItsBinding() {
+        typealias C = WorkContext.Chat
+        let byBranch = C(id: "aaaaaaaa-1", works: [.init(work: "w_a", todo: nil)], generation: 1, pane: "%1", activeAt: 1000)
+        let byItem = C(id: "bbbbbbbb-2", works: [.init(work: "w_item", todo: "item")], generation: 2, pane: nil, activeAt: 0)
+        let loose = C(id: "cccccccc-3", works: [], generation: 0, pane: "%3", activeAt: 1000)
+        let unknown = C(id: "dddddddd-4", works: nil, generation: 0, pane: nil, activeAt: 1000)
+        let on = WorkContext.chatsOnBranches([byBranch, byItem, loose, unknown], branchWork: ["r:a": "w_a", "r:b": "w_b"],
+                                             placed: ["r:b": [TodoItem(id: "item", state: .doing, solved_by: "b")]])
+        #expect(on["r:a"] == [byBranch], "the branch's own work names it")
+        #expect(on["r:b"] == [byItem], "an item placed on the branch brings its chats")
+        #expect(on.count == 2, "an unbound chat, or one whose journal can't be read, is on no branch")
+        #expect(WorkContext.chatsLine([byBranch, byItem], now: 1100) == "chat aaaaaaaa live · chat bbbbbbbb idle")
+    }
 }

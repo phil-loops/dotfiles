@@ -111,6 +111,19 @@ struct WorkInProgressView: View {
         return WorkContext.onBranches(all(app), listed.flatMap { $0.branches.map(\.b) })
     }
 
+    /// The bound chats on each listed branch, by its own work or an item placed on it.
+    @MainActor static func chatsPlaced(_ app: AppModel, _ placed: [String: [TodoItem]]) -> [String: [WorkContext.Chat]] {
+        let chats = app.store.rawAll("chat").values.compactMap { try? JSONValue.object($0).decode(WorkContext.Chat.self) }
+        guard !chats.isEmpty else { return [:] }
+        let m = app.forestModel, p = m.projects(), fs = m.forests()
+        let listed = (p.focus + p.workbench + (m.showArchive ? p.archive : [])).compactMap { fs[$0.id] }.filter { !$0.closed }
+        var work: [String: String] = [:]
+        for v in listed.flatMap(\.branches) {
+            if let w = app.store.rawView("branch", v.b.id)?["work"]?.string { work[v.b.id] = w }
+        }
+        return WorkContext.chatsOnBranches(chats, branchWork: work, placed: placed)
+    }
+
     /// The rest: work no listed branch carries, so it keeps its own line at the top.
     @MainActor static func items(_ app: AppModel) -> [TodoItem] {
         let onDots = Set(placed(app).values.flatMap { $0.map(\.id) })
@@ -155,6 +168,27 @@ struct WorkInProgressView: View {
 }
 
 /// Work in progress on one of a forest's branches, under the forest's row: the branch, what it's doing now, who holds it.
+/// The chats bound to a branch, apart from who is assigned its items (round 27, P2).
+struct BranchChatsLine: View {
+    @Environment(\.theme) private var theme
+    let branch: Branch
+    let chats: [WorkContext.Chat]
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 30)) { ctx in
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("◌").foregroundStyle(theme.goldLeaf)
+                Text(leaf(branch.name)).foregroundStyle(theme.ink).fixedSize()
+                Text(WorkContext.chatsLine(chats, now: ctx.date.timeIntervalSince1970)).foregroundStyle(theme.inkDim).lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .font(Theme.text(12))
+        }
+        .help("the Claude Code chats bound to this branch's work")
+        .padding(.leading, 44).padding(.trailing, 16).padding(.vertical, 2)
+    }
+}
+
 struct BranchWorkLine: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme
