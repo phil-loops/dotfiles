@@ -499,14 +499,22 @@ cache_insert(){
   else ( cache insert "$@" </dev/null >/dev/null 2>&1 7>&- 8>&- 9>&- & ); fi
 }
 mark_restored(){ printf '%s\n' "${2%% *}" > "$1/.gen/.seed-gen-restored"; }
-# A gate (SEED_GEN_CACHE=audit) takes no types from the cache — not even ones an earlier sync of this
-# tree restored, which would otherwise read as current. It rebuilds those from scratch: without the
-# tsbuildinfo, since an incremental emit over restored outputs re-emits nothing and proves nothing.
+# A gate (SEED_GEN_CACHE=audit) takes no unconfirmed types from the cache — not even ones an earlier
+# sync of this tree restored, which would otherwise read as current. It rebuilds those from scratch:
+# without the tsbuildinfo, since an incremental emit over restored outputs re-emits nothing and proves
+# nothing.
 distrust_restored(){
-  [[ "${SEED_GEN_CACHE:-}" == audit && -f "$1/.gen/.seed-gen-restored" && ! -L "$1/.gen" ]] \
-    && rm -f "$1/.gen/.seed-gen-inputs" "$1/.gen/trpc-types.tsbuildinfo" "$1/.gen/.seed-gen-restored"
-  return 0
+  [[ "${SEED_GEN_CACHE:-}" == audit || "${SEED_GEN_CACHE:-}" == rebuild ]] || return 0
+  [[ -f "$1/.gen/.seed-gen-restored" && ! -L "$1/.gen" ]] || return 0
+  cache trusted "$(cat "$1/.gen/.seed-gen-restored")" && return 0
+  rm -f "$1/.gen/.seed-gen-inputs" "$1/.gen/trpc-types.tsbuildinfo" "$1/.gen/.seed-gen-restored"
 }
+# A gate restores only confirmed entries; one gate sync in ten rebuilds anyway, so an entry two
+# builds once agreed on keeps being checked against new builds (a key that misses an input shows
+# up as poison, with both sides kept).
+rebuild_one_in=${SEED_GEN_REBUILD_ONE_IN:-10}   # 0 = never (tests)
+[[ "${SEED_GEN_CACHE:-}" == audit ]] && (( rebuild_one_in > 0 && RANDOM % rebuild_one_in == 0 )) \
+  && export SEED_GEN_CACHE=rebuild
 
 # --check <worktree>: are the generated types AND the borrowed dependencies this tree reads
 # trustworthy FOR THE BRANCH IT IS ON?

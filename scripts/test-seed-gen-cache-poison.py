@@ -37,6 +37,12 @@ with tempfile.TemporaryDirectory() as t:
     check("line order and map mappings stay the emit's own nondeterminism",
           C.canon_files(stored)["a.d.ts"] == C.canon_files(built)["a.d.ts"])
     check("the digest agrees with the per-file view", (C.canon_digest(stored) == C.canon_digest(built)) == (differ == []))
+    ro = tree(os.path.join(t, "ro"), {"v.d.ts": "{\n    readonly errorMessage?: undefined;\n    readonly ok: true;\n}\n"})
+    rw = tree(os.path.join(t, "rw"), {"v.d.ts": "{\n    errorMessage?: undefined;\n    readonly ok: true;\n}\n"})
+    real = tree(os.path.join(t, "real"), {"v.d.ts": "{\n    errorMessage?: undefined;\n    ok: true;\n}\n"})
+    check("readonly on a synthesized `?: undefined` member is the emit's own nondeterminism",
+          C.canon_files(ro) == C.canon_files(rw))
+    check("readonly on any other member still counts", C.canon_files(rw) != C.canon_files(real))
     many = tree(os.path.join(t, "many"), {f"f{i}.d.ts": str(i) for i in range(C.POISON_KEEP + 5)})
     none = tree(os.path.join(t, "none"), {"keep.d.ts": ""})
     w2 = os.path.join(t, "poison", "many")
