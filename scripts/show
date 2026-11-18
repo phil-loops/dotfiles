@@ -67,7 +67,15 @@ build_held() {
   fi
   echo "show: building…" >&2
   mkdir -p "$app/Contents/MacOS"
+  # SwiftPM reuses its build plan unless a manifest changes, so a file added to canopy-native compiled as missing
+  # (ShipSlot.swift, 2026-11-18, four failed builds); a changed set of source paths drops the plan and re-plans
+  local files
+  files="$(cd "$src" && find show-app canopy-native/Sources -name '*.swift' -not -path '*/.build/*' | sort | shasum -a 256 | cut -d' ' -f1)"
+  if [[ "$(cat "$cache/source-files.sha" 2>/dev/null)" != "$files" ]]; then
+    rm -f "$src/show-app/.build/release.yaml" "$src/show-app/.build"/*/release/description.json
+  fi
   (cd "$src/show-app" && swiftbuild --product Show >&2)
+  echo "$files" > "$cache/source-files.sha"
   local out
   out="$(cd "$src/show-app" && swiftbuild --show-bin-path)"
   mkdir -p "$app/Contents/Resources"
