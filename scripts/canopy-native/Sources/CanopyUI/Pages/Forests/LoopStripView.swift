@@ -20,12 +20,16 @@ public struct LoopStripView: View {
         if let v = app.forestModel.branchView(branchID) {
             let steps = Loop.steps(v.b, v.pr, v.st, words: words)
             HStack(alignment: .center, spacing: 4) {
-                ForEach(steps, id: \.id) { s in
-                    if s.state == .now || s.flag == true { named(s).padding(.horizontal, 4) }
-                }
-                if steps.allSatisfy({ $0.state == .done }) {
-                    Text("merged").foregroundStyle(theme.patina).padding(.leading, 4)
-                        .explains("loop|\(branchID)", ShipStage.landed.term.with(word: "merged"))
+                if v.b.gates == .running {
+                    ForestGateProgressView(branch: v.b).padding(.horizontal, 4)
+                } else {
+                    ForEach(steps, id: \.id) { s in
+                        if s.state == .now || s.flag == true { named(s).padding(.horizontal, 4) }
+                    }
+                    if steps.allSatisfy({ $0.state == .done }) {
+                        Text("merged").foregroundStyle(theme.patina).padding(.leading, 4)
+                            .explains("loop|\(branchID)", ShipStage.landed.term.with(word: "merged"))
+                    }
                 }
             }
             .font(Theme.text(size))
