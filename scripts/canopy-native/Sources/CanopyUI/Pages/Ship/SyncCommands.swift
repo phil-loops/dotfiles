@@ -53,6 +53,9 @@ enum SyncCommands {
              failed: "the rebase didn't run", title: "Rebase it onto origin/main (or say its forest needs a restack)", budget: .slowIO, v1: "sync")
         step("branch.sync.restack", path: "/restack", body: { _, a in ["project": a?.extra["project"] ?? .null] },
              failed: "the restack didn't start", title: "Queue its forest's restack onto origin/main", budget: .gitWrite, v1: "restack")
+        step("branch.sync.catchup", path: "/catch-up", body: { b, _ in ["branch": .string(b.name)] },
+             failed: "the catch-up didn't run", title: "Catch the chain up to its moved ancestors — rebase drafts, catch-up merge for published ones",
+             budget: .gitWrite, v1: "catch-up")
         step("branch.sync.prep", path: "/prep-push", body: { b, _ in ["branch": .string(b.name)] },
              failed: "prep failed", title: "Shape the outgoing commits — seal placeholders into one voiced commit", budget: .slowIO, v1: "prep-push")
         step("branch.sync.reconcile", path: "/reconcile", body: { b, _ in ["branch": .string(b.name)] },
@@ -189,7 +192,7 @@ struct SyncMotionDriver {
             ship.patch(id) { $0.phase = .stopped }
             return
         }
-        ship.motions[id] = SyncMotion(steps: Syncing.planSteps(drifted: b.drifted, facts: f), phase: .running, stashed: false, tip: b.tip)
+        ship.motions[id] = SyncMotion(steps: Syncing.planSteps(drifted: b.drifted || b.owes != nil, facts: f), phase: .running, stashed: false, tip: b.tip)
         if !f.dirty.isEmpty {
             ship.setStep(id, .dirt, .fail, "\(f.dirty.count) uncommitted in \(f.dirtyWorktree.isEmpty ? "the holding worktree" : f.dirtyWorktree) — fold them into the commit, stash them for the run, or stop")
             ship.patch(id) { $0.phase = .dirt; $0.dirt = (f.dirty, f.dirtyRows ?? [], f.dirtyWorktree) }
@@ -226,12 +229,13 @@ struct SyncMotionDriver {
 
         if has(.reseat) {
             ship.setStep(id, .reseat, .run)
-            let r = await step("review.reseat", id, via)
-            if !r.ok {
+            let r = await step("branch.sync.catchup", id, via)
+            if !r.ok || r.body["ok"]?.bool == false {
                 ship.setStep(id, .reseat, .fail, reseatWhy(r.body))
                 return await finish(id, via: via, .stopped)
             }
-            ship.setStep(id, .reseat, .ok, "back on \(b.parent)'s tip")
+            let moved = (r.body["moved"]?.array ?? []).compactMap { $0["branch"]?.string }.map(shipLeaf)
+            ship.setStep(id, .reseat, .ok, moved.isEmpty ? "already on \(b.parent)'s tip" : "caught up \(moved.joined(separator: ", "))")
         }
 
         if has(.rebase) && Syncing.rebases(f) {

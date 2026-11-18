@@ -92,6 +92,8 @@ public enum Syncing {
         let dirty = facts?.dirty.count ?? 0
         if dirty > 0 { out.append("\(dirty) uncommitted") }
         if b.drifted { out.append("off \(b.parent)'s tip") }
+        // a branch above it moved: its own parent may be current, but its chain isn't
+        else if let o = b.owes, o != b.name { out.append("\(o) is behind its parent — sync catches the chain up") }
         if let f = facts, f.behind > 0, f.syncable || f.restack { out.append("\(f.behind) behind main") }
         if prep?.route == "squash" { out.append("not one voiced commit") }
         // origin was rewritten upstream (GitHub's update-branch, or its rebase after a base PR
@@ -105,7 +107,8 @@ public enum Syncing {
     /// The motion's steps, in v1's order: only the repairs this branch needs, then shape, gates, tests.
     public static func planSteps(drifted: Bool, facts: SyncFacts) -> [SyncStep] {
         var s = [SyncStep(id: .dirt, label: "working tree", state: .idle)]
-        if drifted { s.append(SyncStep(id: .reseat, label: "reseat", state: .idle)) }
+        // the chain onto its moved ancestors (/catch-up): this branch's own drift, or one above it
+        if drifted { s.append(SyncStep(id: .reseat, label: "catch up", state: .idle)) }
         if rebases(facts) { s.append(SyncStep(id: .rebase, label: facts.restack ? "restack" : "rebase", state: .idle)) }
         s.append(contentsOf: [SyncStep(id: .prep, label: "commit shape", state: .idle), SyncStep(id: .gates, label: "gates", state: .idle),
                               SyncStep(id: .tests, label: "tests", state: .idle)])
