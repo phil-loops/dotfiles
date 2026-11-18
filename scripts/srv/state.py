@@ -35,7 +35,8 @@
 #   todo    todo                   the viewer's own feature tracker (srv/todo.py, ~/.dotfiles/canopy/todo),
 #                                  global rather than per repo; rebuilt when a file's stat moves or the
 #                                  work journal changes. An item with journal work carries `work`: its
-#                                  bounded freshness summary (srv/workfresh.py), read read-only
+#                                  bounded freshness summary (srv/workfresh.py), read read-only;
+#           chat                   each live Claude Code chat and the work it is bound to (srv/chats.py)
 # A write the client sends (X-Stack-Write) is answered with `wrote: N`; a domain's `asOf` (on each
 # patch, and per domain in /state) is the write count its inputs were read at, so the client holds
 # its optimistic change until asOf reaches N — never until some older read happens to look equal.
@@ -54,7 +55,7 @@ import threading
 import time
 from urllib.parse import parse_qs
 
-from . import ctx, outbox, push, repostate, reviewdesk, sync, todo, viewed, watch, workfresh
+from . import chats, ctx, outbox, push, repostate, reviewdesk, sync, todo, viewed, watch, workfresh
 
 EPOCH = f"{os.getpid():x}{int(time.time()):x}"
 DOMAINS = ("git", "remote", "review", "todo")
@@ -259,6 +260,8 @@ def _git_entities(name, snap, jobs):
             "order": order.get(b, 999), "holdUntil": snap.branch_key(b, "hold-until") or None,
             # stack-proof's mark: an e2e/smoke branch that rides the forest and never merges
             "role": snap.branch_key(b, "role") or None,
+            # its work identity (branch.<b>.stack-work): a chat bound to it names this id (round 27)
+            "work": snap.branch_key(b, "work") or None,
             "behind": behind.get(b, 0),
             "drifted": bool(tip) and not rooted and not _is_ancestor(graph, snap.local(parent), tip),
             "upstream": up, "upstreamBad": up_bad, "diverged": diverged,
@@ -400,8 +403,8 @@ def refresh():
         _commit("remote", _merge(remote.values(), ("pr", "landed", "warm")), None, tick)
         review = _each_repo(lambda n: {**reviewdesk.entities(n), **viewed.entities(n)})
         _commit("review", _merge(review.values(), REVIEW_TYPES), None, tick)
-        tfp = (todo.fingerprint(), workfresh.fingerprint())
-        _commit("todo", {"todo": workfresh.attach(todo.entities()["todo"])} if tfp != _D["todo"].fp else None, tfp, tick)
+        tfp = (todo.fingerprint(), workfresh.fingerprint(), chats.fingerprint())
+        _commit("todo", {"todo": workfresh.attach(todo.entities()["todo"]), **chats.entities()} if tfp != _D["todo"].fp else None, tfp, tick)
         _each_repo(lambda n: reviewdesk.release_due())
 
 
