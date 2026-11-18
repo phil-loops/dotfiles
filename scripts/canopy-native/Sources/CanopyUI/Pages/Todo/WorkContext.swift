@@ -260,8 +260,9 @@ struct WorkContext {
     struct Chat: Decodable, Equatable {
         struct Work: Decodable, Equatable { var work: String; var todo: String? }
         struct At: Decodable, Equatable { var repo: String; var branch: String }
-        /// a branch it acted on lately (round 28): "edit" or "commit", at when
-        struct Acted: Decodable, Equatable { var branch: String; var how: String; var at: Double }
+        /// a branch it acted on lately (round 28): "edit" or "commit", at when, and the branch's work id
+        /// when the edit saw one — a recreated branch of the same name has another
+        struct Acted: Decodable, Equatable { var branch: String; var how: String; var at: Double; var work: String? }
         var id: String
         /// nil when the journal couldn't be read: unknown, never unbound
         var works: [Work]?
@@ -286,7 +287,7 @@ struct WorkContext {
         for b in branches {
             let items = Set((placed[b] ?? []).map(\.id))
             let on = chats.filter { c in
-                (c.acted ?? []).contains { $0.branch == b }
+                (c.acted ?? []).contains { $0.branch == b && ($0.work == nil || branchWork[b] == nil || $0.work == branchWork[b]) }
                     || (c.works ?? []).contains { $0.work == branchWork[b] || $0.todo.map(items.contains) == true }
             }
             if !on.isEmpty { out[b] = on.sorted { $0.id < $1.id } }
