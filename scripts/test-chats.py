@@ -80,13 +80,15 @@ with open(os.path.join(usage_repo, ".git", "stack-usage.jsonl"), "w") as f:
               {"type": "commit", "branch": "feat/replayed", "actor": "claude", "session": BOUND[:8], "replay": "rebase", "ts": now - 20},
               {"type": "commit", "branch": "feat/by-server", "actor": "server", "session": None, "ts": now - 10},
               {"type": "commit", "branch": "feat/old", "actor": "claude", "session": BOUND[:8], "ts": now - 3 * 3600},
-              {"type": "commit", "branch": "feat/other-chat", "actor": "claude", "session": "deadbeef", "ts": now - 5}]:
+              {"type": "commit", "branch": "feat/other-chat", "actor": "claude", "session": "deadbeef", "ts": now - 5},
+              {"type": "commit", "branch": "feat/same-prefix", "actor": "claude", "session": BOUND[:8], "sessionId": BOUND[:-1] + "9", "ts": now - 4}]:
         f.write(json.dumps(e) + "\n")
 acted = chats.entities()["chat"][BOUND]["acted"]
 check("a chat is on the branches it edited or committed to lately, newest first, each with its evidence",
       [(a["branch"], a["how"]) for a in acted] == [("loops:feat/committed", "commit"), ("loops:feat/edited", "edit")], acted)
 check("a replay, a server's commit, another chat's, or anything past two hours is no evidence",
-      not {"loops:feat/replayed", "loops:feat/by-server", "loops:feat/old", "loops:feat/stale", "loops:feat/other-chat"} & {a["branch"] for a in acted})
+      not {"loops:feat/replayed", "loops:feat/by-server", "loops:feat/old", "loops:feat/stale", "loops:feat/other-chat", "loops:feat/same-prefix"} & {a["branch"] for a in acted},
+      "and a full id names exactly one chat, even one sharing its prefix")
 _ctx.REPOS = {}
 
 # POST /chat-bind: Phil's click, decided from the generation his view showed (round 27, P7)

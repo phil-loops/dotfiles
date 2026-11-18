@@ -372,6 +372,9 @@ import Testing
         #expect(on["r:b"] == [byItem], "an item placed on the branch brings its chats")
         #expect(on["r:c"] == [acting], "a chat that acted on a branch is on it, unbound")
         #expect(on.count == 3, "a chat that neither acted on nor is bound to a listed branch is on none")
+        let earlier = C(id: "ffffffff-6", works: [], generation: 0, pane: nil, activeAt: 1000, acted: [.init(branch: "r:a", how: "edit", at: 990, work: "w_old")])
+        #expect(WorkContext.chatsOnBranches([earlier], branches: ["r:a"], branchWork: ["r:a": "w_a"], placed: [:]).isEmpty,
+                "an edit on an earlier branch of the same name isn't on today's")
         #expect(WorkContext.chatsLine([acting], on: "r:c", now: 1000) == "chat eeeeeeee live · edited 1m ago", "its latest action there, in words")
         #expect(WorkContext.chatLabel(byItem, on: "r:b", now: 1100) == "chat bbbbbbbb idle · bound")
         let onDots = Set(on.values.flatMap { $0.map(\.id) })

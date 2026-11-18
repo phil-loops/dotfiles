@@ -46,8 +46,8 @@ def _usage_logs():
 
 
 def _commits(since):
-    """[(session prefix, '<repo>:<branch>', ts)] for commits a chat made since `since`, replays
-    excluded: only the log's tail is read, never its history."""
+    """[(full session id or its prefix, '<repo>:<branch>', ts)] for commits a chat made since `since`,
+    replays excluded: only the log's tail is read, never its history."""
     out = []
     for name, log in _usage_logs().items():
         try:
@@ -64,7 +64,7 @@ def _commits(since):
                 continue
             if (e.get("type") == "commit" and e.get("actor") == "claude" and e.get("session") and not e.get("replay")
                     and e.get("branch") and (e.get("ts") or 0) >= since):
-                out.append((e["session"], f"{name}:{e['branch']}", e["ts"]))
+                out.append((e.get("sessionId") or e["session"], f"{name}:{e['branch']}", e["ts"]))
     return out
 
 
@@ -74,9 +74,10 @@ def _acted(r, commits, now):
     for branch, ev in (r.get("acted") or {}).items():
         at = (ev or {}).get("edit") or 0
         if at >= since:
-            best[branch] = {"branch": branch, "how": "edit", "at": at}
-    for prefix, branch, at in commits:
-        if r["session_id"].startswith(prefix) and at >= best.get(branch, {}).get("at", 0):
+            best[branch] = {"branch": branch, "how": "edit", "at": at, **({"work": ev["work"]} if ev.get("work") else {})}
+    for who, branch, at in commits:
+        # a full id matches exactly; an older row's eight-character prefix is the best it recorded
+        if (r["session_id"] == who if len(who) > 8 else r["session_id"].startswith(who)) and at >= best.get(branch, {}).get("at", 0):
             best[branch] = {"branch": branch, "how": "commit", "at": at}
     return sorted(best.values(), key=lambda a: -a["at"])
 
