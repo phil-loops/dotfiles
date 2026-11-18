@@ -209,27 +209,17 @@ def norm(obj, root):
 
 
 def gen_canon(tree):
-    import hashlib as h
+    """The tree's emit by seed-gen-cache's own canonical digest — one definition of "the same emit"."""
+    import importlib.machinery
+    import importlib.util
     out = os.path.join(tree, ".gen", "trpc-types")
     if not os.path.isdir(out):
         return ""
-    d = h.sha256()
-    for dp, _dns, fns in sorted(os.walk(out)):
-        for f in sorted(fns):
-            p = os.path.join(dp, f)
-            d.update(os.path.relpath(p, out).encode() + b"\0")
-            raw = open(p, "rb").read()
-            if f.endswith(".map"):
-                try:
-                    j = json.loads(raw)
-                    j.pop("mappings", None)
-                    raw = json.dumps(j, sort_keys=True).encode()
-                except ValueError:
-                    pass
-            else:
-                raw = b"\n".join(sorted(raw.split(b"\n")))
-            d.update(raw + b"\0")
-    return d.hexdigest()
+    path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "seed-gen-cache")
+    loader = importlib.machinery.SourceFileLoader("seed_gen_cache", path)
+    mod = importlib.util.module_from_spec(importlib.util.spec_from_loader("seed_gen_cache", loader))
+    loader.exec_module(mod)
+    return mod.canon_digest(out)
 
 
 def order_only(a, b):

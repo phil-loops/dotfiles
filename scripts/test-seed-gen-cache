@@ -18,6 +18,9 @@ private store (SEED_GEN_CACHE_DIR under --work); nothing touches another tree or
   moved       an input touched after the build began: insert refuses the emit
   race        eight concurrent inserts of one emit: one entry, complete, no temp left behind
   evict       an entry evicted after restore cloned it: the restore still completes
+  gate        a gate (SEED_GEN_CACHE=audit) distrusts types restored from an unconfirmed entry and
+              rebuilds; that build's equal audit confirms the entry; the next gate restores it and a
+              later gate sync keeps it; SEED_GEN_CACHE=rebuild still builds over a confirmed entry
   gc          a small budget keeps the most recently used entries
   off         SEED_GEN_CACHE=0: no lookup, no insert, a build
 
@@ -544,6 +547,31 @@ def run_hit(repo, work, tree, store):
     return other
 
 
+def run_gate(repo, work, tree, other, store):
+    print("\n gate")
+    gate = dict(SEED_GEN_CACHE="audit", SEED_GEN_REBUILD_ONE_IN="0")
+    k = open(os.path.join(other, ".gen/.seed-gen-restored")).read().strip()
+    check("gate: the hit restored an entry nobody has confirmed", not C.confirmed(k))
+    rc, out = sync(other, **gate)
+    check("gate: types restored from an unconfirmed entry are rebuilt", rc == 0 and "rebuilt" in out, out.splitlines()[-1] if out else "")
+    for _ in range(40):                     # the insert that audits may still be finishing
+        if C.confirmed(k):
+            break
+        time.sleep(0.5)
+    check("gate: that build's equal audit confirms the entry", C.confirmed(k),
+          next((ln for ln in reversed(store_log(store)) if k[:12] in ln), ""))
+    fresh = new_tree(repo, work, "gate/fresh", git(tree, "rev-parse", "HEAD").strip())
+    rc, out = sync(fresh, **gate)
+    check("gate: a fresh tree restores the confirmed entry", rc == 0 and "restored" in out, out.splitlines()[-1] if out else "")
+    check("gate: canonically equal to the build", gen_canon(fresh) == gen_canon(tree))
+    rc, out = sync(fresh, **gate)
+    check("gate: a later gate sync keeps confirmed restored types", rc == 0 and "rebuilt" not in out and "restored" not in out,
+          out.splitlines()[-1] if out else "")
+    rc, out = sync(fresh, SEED_GEN_CACHE="rebuild")
+    check("gate: rebuild mode builds over a confirmed entry", rc == 0 and "rebuilt" in out, out.splitlines()[-1] if out else "")
+    return fresh
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--repo", default=os.path.expanduser("~/coding/loops"))
@@ -567,6 +595,8 @@ def main():
     try:
         other = run_hit(repo, work, tree, store)
         trees.append(other)
+        if not only or "gate" in only:
+            trees.append(run_gate(repo, work, tree, other, store))
         run_parts(tree, store, only)
         run_adversarial(tree, other, store, only)
     finally:

@@ -16,9 +16,11 @@
 
 seed-gen calls restore before its emit and insert after a stamped build, so every consumer (gates,
 the viewer's type trees, review scratch trees, worktrees, the donor) shares one store. Off with
-SEED_GEN_CACHE=0; SEED_GEN_CACHE=audit never restores, builds, and checks what it built against
-any entry for the same key (a mismatch evicts the entry and leaves a report in poison/) — the push
-gates run this way. The store lives in SEED_GEN_CACHE_DIR (default ~/Library/Caches/seed-gen/gen),
+SEED_GEN_CACHE=0. The push gates run SEED_GEN_CACHE=audit: they restore only a confirmed entry (one
+a second build reproduced), and build anything else, checking the build against any entry for the
+same key — equal confirms it, different evicts it and leaves both sides in poison/. seed-gen turns
+one gate sync in ten into SEED_GEN_CACHE=rebuild (never restore, always build and check), so
+confirmed entries keep being re-checked. The store lives in SEED_GEN_CACHE_DIR (default ~/Library/Caches/seed-gen/gen),
 bounded by SEED_GEN_CACHE_MB (default 3072) and SEED_GEN_CACHE_DAYS unused (default 14).
 
 The key is everything the emit reads, as the compiler itself recorded it (the tsbuildinfo and the
@@ -87,10 +89,15 @@ def _sha_or_dash(path):
         return "-"
 
 
+SYNTH_READONLY = re.compile(rb"^(\s*)readonly (\w+\?: undefined;)$", re.M)
+
+
 def canon_bytes(path):
     """One emitted file up to TS7's own nondeterminism: two builds of one tree differ in the order of
-    synthesized `?: undefined` members (4-7 of ~2,600 files), so a declaration counts as its sorted
-    lines and a map without its `mappings` — the bar test-lsp-differential holds .gen to."""
+    synthesized `?: undefined` members (4-7 of ~2,600 files) and in whether one carries `readonly`
+    (taken from whichever literal the checker met first; readonly never changes assignability), so a
+    declaration counts as its sorted lines with that modifier dropped, and a map without its
+    `mappings` — the bar test-lsp-differential holds .gen to."""
     raw = open(path, "rb").read()
     if path.endswith(".map"):
         try:
@@ -99,7 +106,7 @@ def canon_bytes(path):
             return json.dumps(j, sort_keys=True).encode()
         except ValueError:
             return raw
-    return b"\n".join(sorted(raw.split(b"\n")))
+    return b"\n".join(sorted(SYNTH_READONLY.sub(rb"\1\2", raw).split(b"\n")))
 
 
 def canon_files(out):
@@ -695,12 +702,24 @@ def verify(stage, manifest):
     return None
 
 
-def restore(root, compiler):
+CONFIRMED = "confirmed"
+
+
+def confirmed(k):
+    """An entry a second, independent build reproduced (an audit came out equal): the only entries
+    a gate restores."""
+    return bool(k) and os.path.exists(store("entries", k, CONFIRMED))
+
+
+def restore(root, compiler, confirmed_only=False):
     t0 = time.time()
     k, graph = lookup(root, compiler)
     t1 = time.time()
     if not k:
         log(f"miss {root} ({t1 - t0:.2f}s)")
+        return 1
+    if confirmed_only and not confirmed(k):
+        log(f"unconfirmed {k[:12]} {root}: building to audit it")
         return 1
     entry = store("entries", k)
     gen = os.path.join(root, ".gen")
@@ -740,7 +759,7 @@ def restore(root, compiler):
             pass
     shutil.rmtree(stage, ignore_errors=True)
     log(f"hit {k[:12]} {root} lookup {t1 - t0:.2f}s apply {time.time() - t1:.2f}s ({changed} files changed)")
-    print(f"{k[:12]} {changed}")
+    print(f"{k} {changed}")
     return 0
 
 
@@ -839,7 +858,6 @@ def _insert(root, compiler, since):
             shutil.rmtree(tmp, ignore_errors=True)
             log(f"skip {root}: {why} changed during the build")
             return 2
-        canon = canon_digest(os.path.join(tmp, "out"))
         files, size = {}, 0
         for dp, _dns, fns in os.walk(tmp):
             for f in fns:
@@ -849,7 +867,7 @@ def _insert(root, compiler, since):
                     files[os.path.relpath(p, os.path.join(tmp, "out"))] = file_sha(p)
                     os.chmod(p, 0o444)
         write_graph(gpath, graph)
-        manifest = {"key": k, "graph": gid, "files": files, "canon": canon, "tsbuildinfo": sha(blob), "bytes": size + (256 << 10),
+        manifest = {"key": k, "graph": gid, "files": files, "tsbuildinfo": sha(blob), "bytes": size + (256 << 10),
                     "created": time.time(), "head": _head(root), "tree": root}
         write_atomic(os.path.join(tmp, "manifest.json"), json.dumps(manifest).encode())
         # an entry appears whole or not at all; a concurrent writer of the same key loses the rename
@@ -895,10 +913,11 @@ def audit(root, entry, k, keyer, graph, since, gpath):
     except (OSError, ValueError):
         evict(entry, "unreadable manifest")
         return 0
-    mine = canon_digest(os.path.join(root, OUT))
-    if man.get("canon") == mine:
+    # both sides from their files: a digest stored at insert would freeze the canonicalization of its day
+    if canon_digest(os.path.join(entry, "out")) == canon_digest(os.path.join(root, OUT)):
         _touch(gpath)
         _touch(os.path.join(entry, "manifest.json"))
+        write_atomic(os.path.join(entry, CONFIRMED), json.dumps({"tree": root, "head": _head(root), "at": time.time()}).encode())
         log(f"audit {k[:12]} {root}: equal")
         return 0
     os.makedirs(store("poison"), exist_ok=True)
@@ -1064,10 +1083,12 @@ def main(argv):
     if mode == "0":
         return 2
     try:
-        if argv[:1] == ["restore"] and len(argv) == 3 and mode == "audit":
+        if argv[:1] == ["trusted"] and len(argv) == 2:
+            return 0 if mode != "rebuild" and (mode != "audit" or confirmed(argv[1])) else 1
+        if argv[:1] == ["restore"] and len(argv) == 3 and mode == "rebuild":
             return 2
         if argv[:1] == ["restore"] and len(argv) == 3:
-            return restore(os.path.realpath(argv[1]), argv[2])
+            return restore(os.path.realpath(argv[1]), argv[2], confirmed_only=mode == "audit")
         if argv[:1] == ["insert"] and len(argv) == 4:
             return insert(os.path.realpath(argv[1]), argv[2], argv[3])
     except (LookupError, OSError, ValueError, KeyError, subprocess.CalledProcessError) as e:
