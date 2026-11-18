@@ -1,7 +1,7 @@
 +++
 title = "Keep the gates strip on screen from p until the run ends"
 kind = "fix"
-state = "open"
+state = "done"
 area = "gates"
 size = "S"
 why = "after p the whole strip (push key, stage, gates rows) vanishes until the run finishes, so a live run shows nothing"
@@ -26,3 +26,6 @@ One gate-progress reader per branch, shared: the detail strip renders the same `
 2. `GatesRun.waiting` — with `inFlight`, a progress that already holds a `result` is the previous run: say "gates starting", don't return nil.
 3. Remove the `withKnownIssue` wrappers in `GatesStripRegressionTests.swift`; both tests must then pass plainly.
 Done when: from `p` to the last gate the strip always says something, and the two regression tests pass without `withKnownIssue`.
+
+## Done
+2026-11-17 — 04140b65 server pushes a gaterun entity per branch (git domain, journal-mtime fingerprint); 8299c740 strip/row/door read it via GateRuns, only the current tree's run counts, GateProgressRead retired, the two known-issue tests now plain passes (858 native tests)
