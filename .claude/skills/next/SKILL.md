@@ -64,6 +64,31 @@ invariants, and say which ones govern:
   See the viewer-grammar memories.
 - **Simple over generic; no churn for purity.**
 
+The misses that recur (2026-11-18 audit: each one shipped, passed its tests, and misled Phil later).
+Check every pick against all six. A tracker item carries the open gap for each one that has no enforcer yet:
+
+- **Say facts, not requests.** A confirmation, ✓, step state or banner comes from what the server or git
+  recorded, never from having asked. A route that only starts or queues work says "started" or "queued",
+  and its step stays live until a fact lands. (✓ on tests that couldn't run · "✓ gates" for a started run ·
+  "didn't push — network" for a push that landed · "claude window ready" for an unchecked launch.)
+- **A derived value names every input.** A cache key, memo, fingerprint or metric is keyed on, or
+  invalidated by, everything it is computed from, including the base's tip, worktree dirt, PR state,
+  config and time. A client key reuses the server's read stamp rather than re-deriving a narrower one. A
+  time is measured where the event happened, not where it arrived. (The diff cache missed the parent ·
+  reversals were measured on the batch's arrival second.)
+- **Built means delivered.** A new entity type, field or record has a round-trip test from producer to
+  reader, not a test of the producer alone. (`gaterun` was built for a day and dropped by the merge.)
+- **Tests state the invariant, never the clock.** No assertion races a real timer: inject the scheduler.
+  No shared statics, real preferences or the machine's git config: isolate them. Copy is pinned in one
+  pure test, with its reason. (A 4 s note expiry flaked under load · 1,699 leaked preference files ·
+  fixture commits signed with Phil's key.)
+- **Design a decision before building it.** List the options against these invariants and pick the
+  principled one, not the literal wording. (Push-before-green shipped as a waiver; an hour later it
+  became the queue.) Grep recent commits and the tracker in the area first, because another session
+  may have built it already.
+- **Done means live.** A server change restarts the server, and a client change says it needs a rebuild.
+  Verify the change on the running server, not only in tests.
+
 If the straightforward build breaks one of these, the first next step is the design change. If two
 invariants conflict, write that down as a `decide` item for Phil instead of picking quietly.
 
