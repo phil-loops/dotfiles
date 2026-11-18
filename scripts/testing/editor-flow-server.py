@@ -63,7 +63,7 @@ def main():
     os.environ["STACK_OPEN_NO_GEN_SYNC"] = "1"
     os.environ["STACK_REVIEW_GH_FAKE"] = str(root / "github.json")
     (root / "github.json").write_text('{"viewer":"editor-flow","prs":{}}')
-    from srv import ctx, edits, repostate, review, routes, state
+    from srv import ctx, editartifacts, edits, repostate, review, routes, state
     ctx.CWD = ctx.MAIN_WT = str(repo)
     ctx.SCRIPTS = str(SCRIPTS)
     ctx.REPOS = {"loops": str(repo)}
@@ -89,6 +89,19 @@ def main():
                                   "ms": (time.perf_counter() - started) * 1000})
 
     subprocess.run = measured
+
+    def index_artifact_bytes():
+        total = 0
+        for directory in (repo / ".git/canopy-edits").glob("*"):
+            if not directory.is_dir():
+                continue
+            for file in directory.iterdir():
+                if file.name in editartifacts.FILES or file.name.startswith(editartifacts.PREFIX):
+                    try:
+                        total += file.lstat().st_size
+                    except FileNotFoundError:
+                        pass
+        return total
 
     def branch_entity():
         tip = git("rev-parse", branch)
@@ -176,6 +189,7 @@ def main():
                     (root / "git-calls.json").write_text(json.dumps(git_calls, indent=2))
                     return self._send(200, json.dumps({"tip": git("rev-parse", branch), "initial": initial,
                                                         "count": int(git("rev-list", "--count", "main.." + branch)),
+                                                        "indexArtifactBytes": index_artifact_bytes(),
                                                         "text": git("show", f"{branch}:a.txt"), "requests": requests,
                                                         "parkedTip": json.loads((repo / ".git/canopy-edits/ready.json").read_text()).get("tip") if (repo / ".git/canopy-edits/ready.json").exists() else None}))
                 if u.path == "/test/workspace":

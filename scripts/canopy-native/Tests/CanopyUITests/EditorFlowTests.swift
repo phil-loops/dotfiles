@@ -199,6 +199,13 @@ import Testing
         let saveMs = Date().timeIntervalSince(saving) * 1000
         let result: JSONValue = try await app.transport.getJSON("/test/result")
         #expect(result["text"]?.string == savedText && result["count"]?.int == 4)
+        var retired = result["indexArtifactBytes"]?.int == 0
+        for _ in 0..<100 where !retired {
+            try await Task.sleep(nanoseconds: 20_000_000)
+            let collected: JSONValue = try await app.transport.getJSON("/test/result")
+            retired = collected["indexArtifactBytes"]?.int == 0
+        }
+        #expect(retired, "completed saves keep their receipts without retaining generated index copies")
         let timing: JSONValue = ["resumeMs": .number(resumeMs), "saveToPaintMs": .number(saveMs)]
         try JSONEncoder().encode(timing).write(to: root.appendingPathComponent("timings-resume.json"))
         print("editor-resume prewarm=\(prewarm): \(root.path) · resume \(Int(resumeMs)) ms · save to paint \(Int(saveMs)) ms")

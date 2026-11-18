@@ -13,18 +13,20 @@ import uuid
 from . import editprojection, ghreview
 
 
-def write_record(path, data):
-    temporary = path.with_suffix(".tmp")
-    with temporary.open("w") as out:
-        json.dump(data, out)
-        out.flush()
-        os.fsync(out.fileno())
-    os.replace(temporary, path)
-    fd = os.open(path.parent, os.O_RDONLY)
+def write_record(path, data, *, directory_fd=None):
+    temporary = path.with_suffix(".tmp").name
+    fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY) if directory_fd is None else directory_fd
     try:
+        out_fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o666, dir_fd=fd)
+        with os.fdopen(out_fd, "w") as out:
+            json.dump(data, out)
+            out.flush()
+            os.fsync(out.fileno())
+        os.replace(temporary, path.name, src_dir_fd=fd, dst_dir_fd=fd)
         os.fsync(fd)
     finally:
-        os.close(fd)
+        if directory_fd is None:
+            os.close(fd)
 
 
 @lru_cache(maxsize=1)
