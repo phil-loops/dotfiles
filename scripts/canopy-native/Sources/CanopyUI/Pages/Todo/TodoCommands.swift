@@ -17,6 +17,12 @@ final class TrackerUI {
 }
 
 /// What `todo.state` puts back (the inverse of start/done/drop).
+/// A chat to bind and the binding generation the view showed it at (round 27, P7).
+struct ChatBindArg {
+    var session: String
+    var generation: Int
+}
+
 struct TodoStateArg {
     var state: String
     var rank: Int?
@@ -75,6 +81,24 @@ enum TodoCommands {
                                DispatchQueue.global(qos: .userInitiated).async {
                                    if let failed = ChatJump.run(session) { DispatchQueue.main.async { app.runner.say(failed) } }
                                }
+                           }))
+        r.register(Command(id: "chat.bind", title: "Bind a chat to a branch's work", scope: .global, needsArg: true, quiet: true,
+                           local: { [weak app] _, arg in
+                               guard let app, let chat = arg as? WorkContext.Chat else { throw Refusal("no such chat") }
+                               let branches = WorkInProgressView.listedBranches(app)
+                               guard !branches.isEmpty else { throw Refusal("no forest branch is listed to bind it to") }
+                               app.nav.pick("bind chat \(chat.id.prefix(8)) to", branches.map { PickItem(label: leaf($0.name), text: $0.description) }) { [weak app] i in
+                                   app?.runner.dispatch("chat.bind.to", via: .key, target: branches[i].id,
+                                                        arg: ChatBindArg(session: chat.id, generation: chat.generation))
+                               }
+                           }))
+        r.register(Command(id: "chat.bind.to", title: "Bind the picked chat to this branch's work", scope: .branch, budget: .configWrite, needsArg: true, quiet: true,
+                           write: { [weak app] id, arg in
+                               guard let app, let a = arg as? ChatBindArg, let b = app.store.view(Branch.self, id) else { return nil }
+                               return Write(path: app.transport.atRepo(b.repo, "/chat-bind"),
+                                            body: ["session": .string(a.session), "branch": .string(b.name), "generation": .number(Double(a.generation))],
+                                            settled: { true }, said: "chat \(a.session.prefix(8)) is on \(leaf(b.name))",
+                                            failed: "chat \(a.session.prefix(8)) wasn't bound — its binding changed since you looked, or the branch is gone")
                            }))
         r.register(Command(id: "todo.show", title: "Show an item on its list", scope: .global, needsArg: true, quiet: true,
                            local: { [weak app, weak ui] _, arg in
