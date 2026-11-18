@@ -27,7 +27,9 @@ Commit bodies carry no generated forest text, and PR bodies don't by default eit
 
 `git checkout <parent> && git checkout -b <name>`; an independent base forks from `origin/main` with `--no-track`. Squash within a branch: `git reset --soft <base-sha> && git commit` — use the branch's REAL base SHA, never a `main`/`origin/main` ref that may have moved mid-session (2026-08-04: a soft-reset onto a just-advanced ref silently baked a revert of other people's merged work). PR bases: nearest ancestor with an open PR, else main; record "Stacked on: #N" in the body. PR text is Phil's voice (2026-10-25, his hand-typed PRs on main): a title ≤ 40 chars after `type(scope):`, a body of 0–3 casual lowercase lines of why above the repo's Traffic Cop template — `stack-pr-body <b>` drafts just that why; the viewer's words editor flags anything longer.
 
-## Restacking after a merge — raw git, no wrapper
+## Restacking after a merge — raw git, under the forest's lock
+
+Every raw-git move of a forest's branches (this walk, a reshape, a reforest) runs under `forest-lock <project> -- <cmd>` (a whole reshape as one `-- bash -c '…'`): canopy's background restack, a click in canopy and an agent never rewrite one forest at once, and a 75 exit means someone else holds it — wait, don't work around it.
 
 1. `git fetch origin main && git branch -f main origin/main` — refresh main BEFORE diagnosing or diffing anything.
 2. Snapshot every branch's SHA first — descendants need the pre-rebase parent SHA as the cut point.

@@ -93,7 +93,7 @@ Explicit approval on the plan before any branch/commit surgery.
 
 ## 5 · Execute (on approval)
 
-All surgery in a `git worktree`, never the user's main checkout. Walk branches in dependency
+All surgery in a `git worktree`, never the user's main checkout, and under `forest-lock <project> -- bash -c '…'` (claude/forests.md) so canopy's background restack can't move the forest mid-reshape. Walk branches in dependency
 order; per branch:
 
 - Fork from the intended parent (`git checkout <parent> && git checkout -b <branch>`), move its

@@ -8,7 +8,7 @@ description: Land an already-built stacked-PR forest — the shipping motion tha
 `/reforest` builds the forest; this lands it. **Restack mechanics, contraction, and config hygiene
 live in `claude/forests.md` (*Restacking after a merge*) — apply them, don't restate them here.**
 This skill sequences them across a whole forest and drains it to zero. Tools it orchestrates:
-`stack-merge-rank` (canonical order), `stack-pr-body` (PR bodies), raw git.
+`stack-merge-rank` (canonical order), `stack-pr-body` (PR bodies), raw git — always under `forest-lock <project> -- …`.
 
 ## When to use
 
