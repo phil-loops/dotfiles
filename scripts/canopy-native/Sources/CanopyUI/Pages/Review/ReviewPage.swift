@@ -147,6 +147,13 @@ private struct ReviewHeader: View {
                 .padding(.horizontal, 4).padding(.vertical, 1)
                 .background(RoundedRectangle(cornerRadius: 3).fill(onTitle(pg, c) ? theme.goldLeaf.opacity(0.14) : .clear))
                 .padding(.horizontal, -4)
+                if pg.integration == nil, let pr = app.store.view(Pr.self, pg.id), let url = URL(string: pr.url) {
+                    Link(destination: url) {
+                        Text("#\(pr.number)\(pr.draft ? " · draft" : "")")
+                            .font(Theme.text(12)).foregroundStyle(theme.inkFaint)
+                    }
+                    .explains("branch|pr|\(pg.id)", RowName(word: "#\(pr.number)", meaning: "the branch's GitHub pull request"))
+                }
                 Spacer(minLength: 16)
                 if pg.tab == "files", pg.integration == nil {
                     KeyButton(title: ReviewGuide.summary(app), id: "review.guide", target: pg.id)
