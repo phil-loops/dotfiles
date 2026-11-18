@@ -100,6 +100,10 @@ public struct Branch: Entity {
     public var role: String?
     /// client-only: an optimistic write in flight ("pushing")
     public var pending: String?
+    /// a push Phil queued for when the gates go green, standing for this tree (srv/pushintent.py)
+    public var pushQueued: Bool?
+    /// what the last queued push came to, for an hour after it did
+    public var pushSaid: String?
 }
 
 public struct Pr: Entity {

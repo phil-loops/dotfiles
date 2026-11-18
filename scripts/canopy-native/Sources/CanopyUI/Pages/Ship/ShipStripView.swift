@@ -147,6 +147,7 @@ public struct ShipStripView: View {
                     .explains("ship|gates", "a follow-up onto an open PR: env, fresh, format and tests here — typecheck and lint left to CI, which runs them on the push")
             }
             if live == .failed, let err = push?.run.err { Text(err).foregroundStyle(theme.ember).lineLimit(2) }
+            if live == nil, let said = b.pushSaid { Text(said).foregroundStyle(said.hasPrefix("pushed") ? theme.inkFaint : theme.ember).lineLimit(2) }
             if live == nil, slot != .guards, b.diverged, case .some(.some(let s)) = ship.forceScopeOf(app, branchID), !s.eligible,
                !s.guards.allSatisfy({ $0.ok || $0.k == "gates" }), let bad = s.guards.first(where: { !$0.ok }) {
                 Text("diverged · ✗ \(bad.label)").foregroundStyle(theme.ember)
@@ -198,7 +199,8 @@ public struct ShipStripView: View {
             }()
             return "\(app.registry.keyOf("review.push")) again · force-with-lease over origin's \(lease)"
         case "branch.force.arm": return "diverged · replace origin?"
-        case "branch.push.early.arm": return "push before the gates answer?"
+        case "branch.push.queue": return "push when the gates go green"
+        case "branch.push.early.arm": return "queued — pushes when green · \(app.registry.keyOf("review.push")) ships it now?"
         case "branch.push.early": return "\(app.registry.keyOf("review.push")) again · ships this code without the gates — the door says it was your call"
         case "branch.push.confirm":
             // the second press says what the push carries when its gates only advise (P5)

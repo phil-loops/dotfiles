@@ -23,6 +23,7 @@ enum BranchCommands {
         case "branch.force.arm": return app.runner.armed == forceArm(id) ? "branch.force.confirm" : next
         case "branch.conform", "branch.catchup", "branch.gates.run", "branch.gates.next", "branch.proof": return next
         case "branch.push.early.arm": return app.runner.armed == earlyArm(id) ? "branch.push.early" : next
+        case "branch.push.queue": return next
         default: return nil
         }
     }
@@ -61,8 +62,8 @@ enum BranchCommands {
         [pushArm(id), forceArm(id), earlyArm(id)].contains(app.runner.armed)
     }
 
-    /// The gates are still running on a branch nothing else holds back (its Stand says so): Phil may
-    /// ship it before they answer, with a second press, and the door records the waiver as his call.
+    /// A push is queued for green on a branch nothing else holds back (its Stand says so): Phil may
+    /// ship it before the gates answer, with a second press, and the door records the waiver as his call.
     static func canPushEarly(_ v: BranchView) -> Bool { v.st.next == "branch.push.early.arm" }
 
     /// The branch whose description is being typed, if any.
@@ -179,6 +180,32 @@ enum BranchCommands {
                     settled: { true },
                     said: "gates waived for this code — p pushes it",
                     failed: "the waiver didn't take", alone: true)
+            }))
+        r.register(Command(
+            id: "branch.push.queue", title: "Push when the gates go green — starts them if nothing is running (u takes it back)",
+            scope: .branch, budget: .configWrite, quiet: true,
+            available: { id in m.branchView(id)?.st.next == "branch.push.queue" },
+            write: { id, _ in
+                guard let v = m.branchView(id) else { return nil }
+                return Write(
+                    ops: [Op(type: .branch, id: id, fields: ["pushQueued": true])],
+                    path: t.atRepo(v.b.repo, "/push-when-green"), body: ["branch": .string(v.b.name)],
+                    settled: { s.table(Branch.self)[id].map { $0.pushQueued == true || $0.pushed == .synced } ?? true },
+                    said: "pushes when the gates go green · \(app.registry.keyOf("branch.push")) again ships it now",
+                    failed: "\(leaf(v.b.name)) isn't queued",
+                    inverse: { _ in Inverse(id: "branch.push.unqueue", target: id) })
+            }))
+        r.register(Command(
+            id: "branch.push.unqueue", title: "Take back the push queued for green", scope: .branch, budget: .configWrite, quiet: true,
+            available: { id in m.branchView(id)?.b.pushQueued == true },
+            write: { id, _ in
+                guard let v = m.branchView(id) else { return nil }
+                return Write(
+                    ops: [Op(type: .branch, id: id, fields: ["pushQueued": false])],
+                    path: t.atRepo(v.b.repo, "/push-when-green"), body: ["branch": .string(v.b.name), "cancel": true],
+                    settled: { s.table(Branch.self)[id]?.pushQueued != true },
+                    said: "the queued push is taken back", failed: "the queued push wasn't taken back",
+                    inverse: { _ in Inverse(id: "branch.push.queue", target: id) })
             }))
         r.register(Command(
             id: "branch.push.early.arm", title: "Ready a push before the gates answer (the next press waives them for this code and sends it)",
