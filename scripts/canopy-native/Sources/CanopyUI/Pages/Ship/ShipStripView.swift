@@ -22,16 +22,18 @@ public struct ShipStripView: View {
                 let previous = ship.previousOf(branchID)
                 let before = GatesRun.previousRows(current: progress, previous: previous,
                                                    inFlight: b.gates == .running || GatesRun.isRunning(progress), now: ctx.date.timeIntervalSince1970)
+                let guards: ForceScope? = { if m == nil, b.diverged, case .some(.some(let s)) = ship.forceScopeOf(app, branchID) { return s }; return nil }()
+                let slot = ShipSlot.pick(facts(b, m, rows, progress, shown, before, guards: guards != nil, ship))
                 VStack(alignment: .leading, spacing: 4) {
-                    line(b, m, rows, progress, now: ctx.date.timeIntervalSince1970, detailed: m == nil && stripShown(rows, progress, shown, ship))
-                    if let m { StepsStrip(branchID: branchID, motion: m, vertical: sidebar) }
-                    else if stripShown(rows, progress, shown, ship) || sidebar && b.gates == .running && before.isEmpty {
-                        GatesStrip(branchID: branchID, rows: rows, progress: progress, shown: shown, vertical: sidebar)
-                    } else if !before.isEmpty && !ship.gatesHidden.contains(branchID) {
-                        // the left tree's checks while the new tree's run readies: history, dimmed and said so
-                        GatesStrip(branchID: branchID, rows: before, progress: previous, shown: nil, vertical: sidebar, previous: true)
+                    line(b, m, rows, progress, now: ctx.date.timeIntervalSince1970, slot: slot)
+                    switch slot {
+                    case .motion: if let m { StepsStrip(branchID: branchID, motion: m, vertical: sidebar) }
+                    case .gates: GatesStrip(branchID: branchID, rows: rows, progress: progress, shown: shown, vertical: sidebar)
+                    // the left tree's checks while the new tree's run readies: history, dimmed and said so
+                    case .previousGates: GatesStrip(branchID: branchID, rows: before, progress: previous, shown: nil, vertical: sidebar, previous: true)
+                    case .guards: if let guards { GuardStrip(guards: guards.guards, vertical: sidebar) }
+                    case .none: EmptyView()
                     }
-                    if m == nil, b.diverged, case .some(.some(let s)) = ship.forceScopeOf(app, branchID) { GuardStrip(guards: s.guards, vertical: sidebar) }
                     if ship.inspecting == branchID { DivergenceView(branch: b) }
                     if app.keys.layer == .address, ship.addressing != nil { AddressSheet(branchID: branchID) }
                 }
@@ -44,15 +46,23 @@ public struct ShipStripView: View {
         }
     }
 
-    /// the gates strip shows while a run is live, after a red, or when a gate's output was asked for
-    private func stripShown(_ rows: [GateRow], _ progress: GateProgress?, _ shown: String?, _ ship: ShipState) -> Bool {
-        !rows.isEmpty && !ship.gatesHidden.contains(branchID) && (GatesRun.isRunning(progress) || rows.contains(where: { $0.state == .red || $0.state == .stopped }) || shown != nil)
+    private func facts(_ b: Branch, _ m: SyncMotion?, _ rows: [GateRow], _ progress: GateProgress?, _ shown: String?, _ before: [GateRow],
+                       guards: Bool, _ ship: ShipState) -> ShipSlot.Facts {
+        let gates = !rows.isEmpty && !ship.gatesHidden.contains(branchID)
+        return ShipSlot.Facts(
+            motion: m?.phase,
+            gatesAsked: gates && shown != nil,
+            gatesFailed: gates && rows.contains { $0.state == .red || $0.state == .stopped },
+            gatesRunning: gates && GatesRun.isRunning(progress) || sidebar && b.gates == .running && before.isEmpty,
+            guards: guards,
+            previousGates: !before.isEmpty && !ship.gatesHidden.contains(branchID))
     }
 
     /// dirt and the prep route are read per branch, re-read when the branch moves or a sync ends
     private func readKey(_ b: Branch, _ m: SyncMotion?) -> String { ShipState.factsKey(b, m) }
 
-    @ViewBuilder private func line(_ b: Branch, _ m: SyncMotion?, _ rows: [GateRow], _ progress: GateProgress?, now: Double, detailed: Bool = false) -> some View {
+    @ViewBuilder private func line(_ b: Branch, _ m: SyncMotion?, _ rows: [GateRow], _ progress: GateProgress?, now: Double, slot: ShipSlot) -> some View {
+        let detailed = slot == .gates
         let ship = ShipState.of(app)
         let route = ReviewCommands.pushRoute(app, branchID)
         let push = latestPush()
@@ -68,7 +78,7 @@ public struct ShipStripView: View {
         let red = rows.filter { $0.state == .red }
         let waived = rows.filter { $0.state == .waived }
         let syncButton = KeyButton(title: "⟲ sync", id: "review.sync", target: branchID, busy: m?.phase == .running)
-            .disabled(b.tip.isEmpty || m?.phase == .dirt)
+            .disabled(b.tip.isEmpty || m?.phase == .dirt || m == nil && ship.syncNeeds(b)?.isEmpty == true)
             .explains("ship|sync", "sync: the branch is behind its parent or main, or has dirt — it rebases and tidies")
         let label = acts || waiting || live != nil ? pushLabel(b, route: route, live: live, forced: push?.forced ?? false) : "push"
         let pushButton = KeyButton(title: label, id: "review.push", target: branchID,
@@ -84,7 +94,7 @@ public struct ShipStripView: View {
                     VStack(alignment: .leading, spacing: 6) { pushButton; syncButton }
                 }
             } else { syncButton }
-            if let doing = m.flatMap({ $0.phase == .running ? $0.steps.first { $0.state == .run } : nil }) {
+            if slot != .motion, let doing = m.flatMap({ $0.phase == .running ? $0.steps.first { $0.state == .run } : nil }) {
                 Text("\(doing.label)…").foregroundStyle(theme.goldLeaf)
             } else if m == nil {
                 // the last answer stays while the branch's new one is read, dimmed: it describes
@@ -110,7 +120,8 @@ public struct ShipStripView: View {
                 } else if !red.isEmpty {
                     Text("gates ✗").foregroundStyle(theme.ember)
                         .explains("ship|gates", "a gate failed on this tree: , g shows its output, skip waives it for this code")
-                    ForEach(red, id: \.name) { g in Text(g.name).foregroundStyle(theme.ember) }
+                    // the strip beneath lists them when it shows; the line names them only when it doesn't
+                    if !detailed { ForEach(red, id: \.name) { g in Text(g.name).foregroundStyle(theme.ember) } }
                     KeyButton(title: "skip", id: "review.gates.skip", target: branchID)
                 } else if rows.contains(where: { $0.state == .stopped }) {
                     Text("gates stopped").foregroundStyle(theme.inkDim)
@@ -135,7 +146,7 @@ public struct ShipStripView: View {
                     .explains("ship|gates", "a follow-up onto an open PR: env, fresh, format and tests here — typecheck and lint left to CI, which runs them on the push")
             }
             if live == .failed, let err = push?.run.err { Text(err).foregroundStyle(theme.ember).lineLimit(2) }
-            if live == nil, b.diverged, case .some(.some(let s)) = ship.forceScopeOf(app, branchID), !s.eligible,
+            if live == nil, slot != .guards, b.diverged, case .some(.some(let s)) = ship.forceScopeOf(app, branchID), !s.eligible,
                !s.guards.allSatisfy({ $0.ok || $0.k == "gates" }), let bad = s.guards.first(where: { !$0.ok }) {
                 Text("diverged · ✗ \(bad.label)").foregroundStyle(theme.ember)
                 Text("· sync carries it on top").foregroundStyle(theme.inkFaint)
