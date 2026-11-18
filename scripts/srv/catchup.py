@@ -52,18 +52,14 @@ def off_parent(b):
     return _git("merge-base", "--is-ancestor", f"refs/heads/{p}", f"refs/heads/{b}").returncode != 0
 
 
+_MOVER = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "stack-move-branch")
+
+
 def _move(b, old, new):
-    """Move refs/heads/<b> old → new: reset a clean holding worktree in place, else CAS the ref."""
-    holder = sync._worktree_of(b)
-    if holder:
-        if not sync._clean(holder):
-            return f"{holder} holds {b} with uncommitted changes — commit or stash first"
-        if _git("-C", holder, "rev-parse", "HEAD").stdout.strip() != old:
-            return f"{b} moved while catching up — retry"
-        r = _git("-C", holder, "reset", "--hard", new)
-    else:
-        r = _git("update-ref", f"refs/heads/{b}", new, old)
-    return "" if r.returncode == 0 else f"{b} moved while catching up — retry"
+    """Move refs/heads/<b> old → new by compare-and-swap (stack-move-branch): a clean worktree
+    holding it moves with it, a dirty one is named and nothing moves."""
+    r = ctx.run([_MOVER, b, new, old])
+    return "" if r.returncode == 0 else (r.stderr or f"{b} moved while catching up — retry").strip().replace("stack-move-branch: ", "")
 
 
 def catch_up_one(b, wt=None):

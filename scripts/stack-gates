@@ -15,9 +15,12 @@ config, falls back to auto-detected defaults (repo-local tsc if a tsconfig exist
 oxfmt --check on changed *.ts/*.tsx if oxfmt is present).
 
   stack-gates [<branch> | --branch <b>] [--fix] [--skip <gate>]… [--quick] [--full] [--progress <file>]
-                                       run in the worktree of <b>; if none exists, materialize
-                                       its stack-open scratch checkout (detached at the tip) —
-                                       never gates an unrelated tree. Unrecognized arguments
+                                       run in <b>'s stack-open scratch checkout, detached at the
+                                       tip — even when a worktree holds <b>: a run never pins the
+                                       branch to a path (one once re-created a deleted worktree
+                                       and blocked the next restack) nor gates a holder's
+                                       uncommitted bytes. A --fix moves the branch through
+                                       stack-move-branch. Never gates an unrelated tree. Unrecognized arguments
                                        are an error (a silently-dropped branch arg once gated
                                        the caller's cwd and recorded verdicts for it).
 
@@ -89,26 +92,13 @@ def gate_argv(name, cmd):
     return [turn, "--class", "gates", *batch, "--", *argv]
 
 
-def worktree_of(branch, cwd):
-    """Path of the worktree holding <branch>, or None if it isn't checked out anywhere."""
-    if not branch:
-        return None
-    path = None
-    out = run(["git", "worktree", "list", "--porcelain"], cwd).stdout
-    for ln in out.splitlines():
-        if ln.startswith("worktree "):
-            path = ln[len("worktree "):]
-        elif ln == f"branch refs/heads/{branch}" and path:
-            return path
-    return None
-
-
 def scratch_checkout(branch, cwd):
     """Materialize <branch> in its stack-open scratch worktree (detached at the tip,
     node_modules symlinked, .gen seeded) and return (path, err). Gating cwd's tree
     instead would verify whatever bytes the caller's checkout happens to hold — a
     verdict recorded against a branch that was never actually checked."""
     stack_open = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stack-open")
+    os.environ["STACK_OPEN_DETACHED"] = "1"   # a scratch copy even when a worktree holds the branch
     r = run([stack_open, "--path", branch], cwd)
     lines = [ln.strip() for ln in (r.stdout or "").splitlines() if ln.strip()]
     path = lines[-1] if lines else ""
@@ -369,19 +359,21 @@ def default_fixes(cwd, branch, borrowed=False):
     formatting only the leaf leaves its drifted ancestors red); a standalone branch folds
     an oxfmt pass into a fresh commit. --no-verify keeps a pre-commit formatter from re-firing."""
     self_dir = os.path.dirname(os.path.abspath(__file__))
+    mover = shlex.quote(os.path.join(self_dir, "stack-move-branch"))
     fixes = {}
     parent = (gconf(f"branch.{branch}.stack-parent", cwd)) if branch else ""
     if parent in ("", "main") and borrowed:
         # Detached scratch: a bare rebase moves only the detached HEAD, and stack-open's
-        # post-commit follow-hook force-moves the branch at EVERY replayed commit — so pin
-        # the outcome explicitly: branch → rebased tip on success, restored tip on abort.
+        # post-commit follow-hook force-moves the branch at EVERY replayed commit (when no
+        # worktree holds it) — so pin the outcome explicitly through stack-move-branch, which
+        # also moves a clean holder: branch → rebased tip on success, restored tip on abort.
         # rebase-guarded: /queue-kill SIGKILLs the group, so the `|| abort` below never runs;
         # the guard's owner record lets the next guarded run abort the stranded rebase
         rg = shlex.quote(os.path.join(self_dir, "rebase-guarded"))
         fixes["fresh"] = (
             f'old=$(git rev-parse "refs/heads/{branch}") && git fetch origin main -q && '
-            f'{rg} -C . origin/main && git branch -f "{branch}" HEAD '
-            f'|| {{ git branch -f "{branch}" "$old"; exit 1; }}'
+            f'{rg} -C . origin/main && {mover} "{branch}" HEAD '
+            f'|| {{ {mover} "{branch}" "$old"; exit 1; }}'
         )
     elif parent in ("", "main"):
         rg = shlex.quote(os.path.join(self_dir, "rebase-guarded"))
@@ -399,6 +391,7 @@ def default_fixes(cwd, branch, borrowed=False):
             f'echo "$files" | xargs {oxfmt} --write; '
             'echo "$files" | xargs git add; '
             'git commit -q -m "style: oxfmt" --no-verify'
+            + (f' && {mover} {shlex.quote(branch)} HEAD' if borrowed and branch else '')
         )
     return fixes
 
@@ -605,19 +598,17 @@ def main():
     cwd = os.getcwd()
     borrowed = False
     if branch:
-        wt = worktree_of(branch, cwd)
+        emit({"event": "setup", "step": "checkout", "ts": time.time()})
+        wt, err = scratch_checkout(branch, cwd)
+        borrowed = True
         if not wt:
-            emit({"event": "setup", "step": "checkout", "ts": time.time()})
-            wt, err = scratch_checkout(branch, cwd)
-            borrowed = True
-            if not wt:
-                verdict = {"ok": False, "gates": [
-                    {"name": "worktree", "ok": False, "ms": 0,
-                     "summary": f"no checkout holds {branch} — {err}"}]}
-                emit({"event": "plan", "gates": ["worktree"]})
-                emit({"event": "result", **verdict})
-                print(json.dumps(verdict))
-                return 0
+            verdict = {"ok": False, "gates": [
+                {"name": "worktree", "ok": False, "ms": 0,
+                 "summary": f"no scratch checkout of {branch} — {err}"}]}
+            emit({"event": "plan", "gates": ["worktree"]})
+            emit({"event": "result", **verdict})
+            print(json.dumps(verdict))
+            return 0
         cwd = wt
     gates = configured_gates(cwd) or default_gates(cwd, branch)
     picked_note, not_needed = "", set()

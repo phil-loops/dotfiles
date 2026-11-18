@@ -402,7 +402,11 @@ open_log(){
 
 ensure_worktree(){   # echo a checkout dir for <branch> (real worktree, else scratch)
   local b="$1" ex dir
-  ex=$(existing_worktree "$b"); if [[ -n "$ex" ]]; then echo "$ex"; return; fi
+  # STACK_OPEN_DETACHED: the scratch copy even when a worktree holds the branch (stack-gates — a
+  # gate run gates the branch's tip, never a holder's uncommitted bytes, and never pins a path)
+  if [[ -z "${STACK_OPEN_DETACHED:-}" ]]; then
+    ex=$(existing_worktree "$b"); if [[ -n "$ex" ]]; then echo "$ex"; return; fi
+  fi
   mkdir -p "$SCRATCH"; dir="$SCRATCH/${b//\//_}"
   # Zombie: the dir survived but its .git gitfile didn't (prune racing a background --prepare).
   # Every `git -C "$dir"` below then fails into /dev/null and the marker write resolves to

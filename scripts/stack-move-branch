@@ -1,0 +1,77 @@
+#!/usr/bin/env python3
+"""stack-move-branch <branch> <new> [<old>] — move an unpublished branch without a checkout of its own.
+
+The commits are already made (git replay, commit-tree, a rebase in a detached scratch); this only
+moves the ref, by compare-and-swap from <old> (default: its tip now). No worktree is borrowed to do
+it — a restack used to rebase inside whatever checkout held each branch (Phil's main checkout,
+twice on 2026-11-18). A worktree that HOLDS the branch moves with it only when it is clean:
+`reset --keep` between the repo's pre-rebase and post-rewrite hooks, exactly the hooks a rebase
+there would have run; a dirty one stops the move and is named. A worktree whose directory is gone
+holds nothing (a gate run once re-created such a path and pinned the branch to it).
+
+Exit: 0 moved, or already at <new>; 1 refused (stderr says why); 2 usage."""
+import os
+import subprocess
+import sys
+
+
+def git(*a, cwd=None, stdin=None):
+    return subprocess.run(["git", *a], capture_output=True, text=True, cwd=cwd, input=stdin)
+
+
+def sha(ref):
+    return git("rev-parse", "--verify", "-q", f"{ref}^{{commit}}").stdout.strip()
+
+
+def holder(branch):
+    """The live worktree holding refs/heads/<branch>, or ""."""
+    path, out = "", git("worktree", "list", "--porcelain").stdout
+    for block in out.split("\n\n"):
+        lines = block.splitlines()
+        path = next((ln[len("worktree "):] for ln in lines if ln.startswith("worktree ")), "")
+        if f"branch refs/heads/{branch}" in lines and not any(ln.startswith("prunable") for ln in lines) \
+                and os.path.isdir(path):
+            return path
+    return ""
+
+
+def main(argv):
+    if len(argv) not in (2, 3) or argv[0].startswith("-"):
+        print(__doc__.strip(), file=sys.stderr)
+        return 2
+    branch, new = argv[0], sha(argv[1])
+    cur = sha(f"refs/heads/{branch}")
+    old = sha(argv[2]) if len(argv) == 3 else cur
+    if not cur or not new:
+        print(f"stack-move-branch: no {'branch ' + branch if not cur else argv[1]}", file=sys.stderr)
+        return 1
+    if cur == new:
+        return 0
+    if cur != old:
+        print(f"stack-move-branch: {branch} moved since it was read ({old[:10]} → {cur[:10]}) — nothing moved", file=sys.stderr)
+        return 1
+    wt = holder(branch)
+    if not wt:
+        r = git("update-ref", "-m", f"stack-move-branch: {old[:10]} → {new[:10]}", f"refs/heads/{branch}", new, old)
+        if r.returncode != 0:
+            print(f"stack-move-branch: {branch}: {r.stderr.strip()}", file=sys.stderr)
+            return 1
+        return 0
+    if git("status", "--porcelain", "--untracked-files=no", cwd=wt).stdout.strip():
+        print(f"stack-move-branch: {wt} holds {branch} with uncommitted changes — commit or stash there; nothing moved",
+              file=sys.stderr)
+        return 1
+    if git("rev-parse", "HEAD", cwd=wt).stdout.strip() != old:
+        print(f"stack-move-branch: {wt} isn't at {branch}'s tip — nothing moved", file=sys.stderr)
+        return 1
+    git("hook", "run", "--ignore-missing", "pre-rebase", "--", new, branch, cwd=wt)
+    r = git("reset", "-q", "--keep", new, cwd=wt)
+    git("hook", "run", "--ignore-missing", "post-rewrite", "--", "rebase", cwd=wt, stdin="")
+    if r.returncode != 0:
+        print(f"stack-move-branch: {wt} refused the move: {r.stderr.strip()[:300]}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

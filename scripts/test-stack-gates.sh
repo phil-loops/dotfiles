@@ -3,6 +3,7 @@
 set -uo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 gates="$here/stack-gates"
+export STACK_OPEN_DIR="$(mktemp -d)"   # branch runs gate a scratch copy: keep it out of the real cache
 
 pass=0; fail=0
 ok()  { printf '  ✓ %s\n' "$1"; pass=$((pass+1)); }
@@ -62,7 +63,8 @@ mkstack() {   # → repo with main, a "published" parent (origin/<p> exists) and
   git -C "$d" init -q -b main
   git -C "$d" config user.email t@t.t; git -C "$d" config user.name t
   git -C "$d" config commit.gpgsign false
-  echo x > "$d/x"; git -C "$d" add .; git -C "$d" commit -qm init
+  # a branch gates in its detached scratch copy, whose node_modules is a symlink — ignored, as in loops
+  echo x > "$d/x"; echo node_modules > "$d/.gitignore"; git -C "$d" add .; git -C "$d" commit -qm init
   git -C "$d" checkout -q -b parent
   echo p > "$d/p"; git -C "$d" add .; git -C "$d" commit -qm parent
   git -C "$d" checkout -q -b child
