@@ -847,6 +847,8 @@ if [[ "$MODE" == "diagnose" ]]; then
   # NOT continue the rebase. We capture the real staged diff into the artifact; the
   # human reviews it, then Autosolve-with-this-plan is just a plain `rebase --continue`.
   load_state || exit 1
+  # the paused rebase is one this walk chose to make: its finish may rewrite a pushed draft
+  export STACK_REWRITE_PUBLISHED="${CURRENT:-}"
   if [[ -z "${CURRENT:-}" ]]; then
     echo "Nothing paused to diagnose (no CURRENT in saved state)." >&2
     exit 1
@@ -896,6 +898,8 @@ if [[ "$MODE" == "discard" ]]; then
   # (conflict markers + unmerged index) from the pre-stage snapshot. The rebase stays
   # paused — the human is back to square one, free to autosolve, hand-edit, or abort.
   load_state || exit 1
+  # the paused rebase is one this walk chose to make: its finish may rewrite a pushed draft
+  export STACK_REWRITE_PUBLISHED="${CURRENT:-}"
   if [[ -z "${CURRENT:-}" ]]; then
     echo "Nothing paused — nothing to discard." >&2
     exit 1
@@ -928,6 +932,8 @@ if [[ "$MODE" == "handoff" ]]; then
   # resolve. Re-run the resolver at the full-judgment bar on the still-paused rebase,
   # then fall through into the normal cascade (the main loop below picks up PENDING).
   load_state || exit 1
+  # the paused rebase is one this walk chose to make: its finish may rewrite a pushed draft
+  export STACK_REWRITE_PUBLISHED="${CURRENT:-}"
   RESOLVE_BAR=full
   if [[ -z "${CURRENT:-}" ]]; then
     echo "Nothing paused to hand off (no CURRENT in saved state). Use --continue." >&2
@@ -968,6 +974,8 @@ fi
 
 if [[ "$MODE" == "continue" ]]; then
   load_state || exit 1
+  # the paused rebase is one this walk chose to make: its finish may rewrite a pushed draft
+  export STACK_REWRITE_PUBLISHED="${CURRENT:-}"
   if [[ -n "${CURRENT:-}" ]]; then
     # Verify rebase is finished (no in-progress markers in any worktree we might
     # have used). Cheap heuristic: check the current repo + branch worktree.
@@ -1301,6 +1309,9 @@ while (( ${#PENDING[@]} > 0 )); do
   save_state
 
   echo "→ Rebasing ${BRANCH} onto ${PARENT_NAME}"
+  # This walk decided BRANCH may move (no open PR): tell the reference-transaction hook, which
+  # otherwise refuses any rewrite of a branch origin has (hooks/loops-reference-transaction).
+  export STACK_REWRITE_PUBLISHED="$BRANCH"
 
   # The object store first: no checkout is borrowed for a move that needs no resolving.
   replay_move "$BRANCH" "$PARENT_NAME" "$REBASE_CUT"; _moved=$?
