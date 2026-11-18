@@ -348,6 +348,32 @@ rebase_dir_for() {
   if [[ -n "$wt" ]]; then echo "$wt"; else git rev-parse --show-toplevel; fi
 }
 
+# Move an unpublished branch onto $2 from cut $3 in the object store — `git replay`, then
+# stack-move-branch's compare-and-swap — so no checkout is borrowed: a clean one holding the branch
+# moves with it, a dirty one is named and nothing moves. Returns 0 moved; 2 not moved (a dirty
+# holder, or the tip moved: MOVE_ERR says which); 1 when the in-place rebase must do it instead —
+# a conflict to resolve, a merge in the range, a commit that would become empty (rebase drops
+# those, replay keeps them), or a footprint the sanity check rejects (the rebase path escalates).
+MOVE_ERR=""
+replay_move() {
+  local branch="$1" onto="$2" cut="$3" old new c empties=0 was=0
+  MOVE_ERR=""
+  old=$(git rev-parse -q --verify "refs/heads/${branch}") || return 1
+  new=$(git replay --onto "$onto" "${cut}..refs/heads/${branch}" 2>/dev/null \
+        | awk -v r="refs/heads/${branch}" '$1 == "update" && $2 == r { print $3 }') || return 1
+  [[ -n "$new" ]] || return 1
+  for c in $(git rev-list "${onto}..${new}" 2>/dev/null); do
+    [[ "$(git rev-parse "${c}^{tree}")" == "$(git rev-parse -q --verify "${c}^^{tree}" 2>/dev/null)" ]] && empties=$((empties+1))
+  done
+  for c in $(git rev-list "${cut}..${old}" 2>/dev/null); do
+    [[ "$(git rev-parse "${c}^{tree}")" == "$(git rev-parse -q --verify "${c}^^{tree}" 2>/dev/null)" ]] && was=$((was+1))
+  done
+  (( empties > was )) && return 1
+  restack_sanity_check "." "$new" "$onto" "${OLD_PARENT_SHA:-}" "$old" 2>/dev/null || return 1
+  MOVE_ERR=$("${SELF_DIR}/stack-move-branch" "$branch" "$new" "$old" 2>&1) && return 0
+  return 2
+}
+
 # True while a rebase is paused/in-progress in $1.
 rebase_in_progress() {
   local gitdir
@@ -1275,6 +1301,24 @@ while (( ${#PENDING[@]} > 0 )); do
   save_state
 
   echo "→ Rebasing ${BRANCH} onto ${PARENT_NAME}"
+
+  # The object store first: no checkout is borrowed for a move that needs no resolving.
+  replay_move "$BRANCH" "$PARENT_NAME" "$REBASE_CUT"; _moved=$?
+  if (( _moved == 0 )); then
+    echo "    moved in the object store (no checkout touched)"
+    NEW_BASE=$(git rev-parse "$PARENT_NAME" 2>/dev/null || true)
+    [[ -n "$NEW_BASE" ]] && stack_cfg_set "$BRANCH" base "$NEW_BASE"
+    CURRENT=""
+    COMPLETED+=("$BRANCH")
+    save_state
+    continue
+  elif (( _moved == 2 )); then
+    echo "  ⚠ ${BRANCH} not moved — ${MOVE_ERR#stack-move-branch: }"
+    FAILED_REBASE+=("$BRANCH")
+    CURRENT=""
+    save_state
+    continue
+  fi
 
   # Kick off the rebase. Don't gate on the pipeline exit code (piping through
   # sed would mask git's status); detect conflicts via the on-disk rebase
