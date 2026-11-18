@@ -266,6 +266,13 @@ for proj in $projects; do
     if [ "$role" = "proof" ]; then proof_members+="$b"$'\n'; else shippable_alive=1; fi
     parent=$(git config "branch.$b.stack-parent" 2>/dev/null || echo main)
     glyph="✓"; detail=""
+    # a parent that no longer exists: the branch that deleted it didn't re-point its children
+    # (2026-11-17: let-disable-take-a-suspicious-activity merged and was deleted with its
+    # children still naming it). Re-point to the parent's own parent, or main once it merged.
+    if [ "$parent" != "main" ] && [ "$parent" != "origin/main" ] && ! git rev-parse --verify -q "refs/heads/$parent" >/dev/null; then
+      glyph="✗"; detail="PARENT GONE — '$parent' no longer exists; re-point stack-parent (main if it merged)"
+      proj_problem=1
+    fi
     # orphan check: only when parent is a real, existing branch (not main/origin/main)
     if [ "$parent" != "main" ] && [ "$parent" != "origin/main" ] && git rev-parse --verify -q "$parent" >/dev/null; then
       if ! git merge-base --is-ancestor "$parent" "$b" 2>/dev/null; then
