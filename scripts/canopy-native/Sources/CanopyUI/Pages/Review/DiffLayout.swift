@@ -76,10 +76,13 @@ enum DiffLayout {
         var offsets: [Int]
     }
 
+    /// The hunks that render split: every hunk of a file that removes AND adds lines anywhere —
+    /// a block moved from one hunk to another stays old-left/new-right, never one column mixing
+    /// both numberings (2026-11-18). A wholly one-sided file (+N −0, or a deletion) has no other
+    /// side to show, so none of its hunks split.
     static func pairedHunks(_ rows: [DiffRow]) -> Set<Int> {
-        let removed = Set(rows.filter { $0.left?.kind == .del }.map(\.hunk))
-        let added = Set(rows.filter { $0.right?.kind == .add }.map(\.hunk))
-        return removed.intersection(added)
+        guard rows.contains(where: { $0.left?.kind == .del }), rows.contains(where: { $0.right?.kind == .add }) else { return [] }
+        return Set(rows.map(\.hunk))
     }
 
     static func rows(_ row: DiffRow, columns: Int, paired: Bool) -> [DiffDisplayRow] {

@@ -20,14 +20,54 @@ import Testing
      tail
     """
 
-    @Test func eachHunkUsesOnlyTheSidesItsChangesNeed() {
+    @Test func everyHunkOfATwoSidedFileSplits() {
         let source = splitRows(parsePatch("a.ts", mixed))
         let paired = DiffLayout.pairedHunks(source)
-        #expect(paired == [1])
+        #expect(paired == [0, 1, 2])
+        for row in source {
+            #expect(DiffLayout.rows(row, columns: 100, paired: paired.contains(row.hunk)).allSatisfy { $0.divider > 0 })
+        }
+    }
+
+    @Test func aBlockMovedBetweenHunksRendersOldLeftAndNewRight() {
+        let moved = """
+        @@ -54,6 +54,3 @@
+         keep
+        -moved1
+        -moved2
+        -moved3
+         keep
+        @@ -80,2 +77,5 @@
+         keep
+        +moved1
+        +moved2
+        +moved3
+         keep
+        """
+        let source = splitRows(parsePatch("team.ts", moved))
+        let paired = DiffLayout.pairedHunks(source)
         for row in source {
             let display = DiffLayout.rows(row, columns: 100, paired: paired.contains(row.hunk))
-            #expect(display.allSatisfy { row.hunk == 1 ? $0.divider > 0 : $0.divider == 0 })
-            if row.hunk != 1 { #expect(display.allSatisfy { $0.pieces.count == 1 }) }
+            #expect(display.allSatisfy { $0.divider > 0 })
+            for d in display {
+                for piece in d.pieces where piece.line.kind == .del { #expect(piece.side == .left) }
+                for piece in d.pieces where piece.line.kind == .add { #expect(piece.side == .right) }
+            }
+        }
+    }
+
+    @Test func aWhollyOneSidedFileStaysOneColumn() {
+        let added = """
+        @@ -0,0 +1,2 @@
+        +one
+        +two
+        """
+        let source = splitRows(parsePatch("new.ts", added))
+        let paired = DiffLayout.pairedHunks(source)
+        #expect(paired.isEmpty)
+        for row in source {
+            let display = DiffLayout.rows(row, columns: 100, paired: paired.contains(row.hunk))
+            #expect(display.allSatisfy { $0.divider == 0 && $0.pieces.count == 1 })
         }
     }
 
