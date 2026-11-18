@@ -370,4 +370,15 @@ import Testing
         #expect(on.count == 2, "an unbound chat, or one whose journal can't be read, is on no branch")
         #expect(WorkContext.chatsLine([byBranch, byItem], now: 1100) == "chat aaaaaaaa live · chat bbbbbbbb idle")
     }
+
+    @Test func aChatOnNoWorkSaysWhereItStandsAndNothingMore() {
+        typealias C = WorkContext.Chat
+        let bound = C(id: "aaaaaaaa-1", works: [.init(work: "w_a", todo: nil)], generation: 1, pane: nil, activeAt: 900, at: .init(repo: "loops-wt-1", branch: "wt-1"))
+        let loose = C(id: "bbbbbbbb-2", works: [], generation: 0, pane: nil, activeAt: 1000, at: .init(repo: "loops-wt-2", branch: "feat/x"))
+        let unread = C(id: "cccccccc-3", works: nil, generation: 0, pane: nil, activeAt: 0, at: .init(repo: ".dotfiles", branch: ""))
+        let none = WorkContext.onNoWork([bound, unread, loose])
+        #expect(none == [loose, unread], "the bound chat is on its dot; the rest list most recent first")
+        #expect(WorkContext.whereItStands(loose, now: 1100) == "chat bbbbbbbb live · in loops-wt-2 · feat/x")
+        #expect(WorkContext.whereItStands(unread, now: 1100) == "chat cccccccc idle · in .dotfiles · binding unreadable")
+    }
 }

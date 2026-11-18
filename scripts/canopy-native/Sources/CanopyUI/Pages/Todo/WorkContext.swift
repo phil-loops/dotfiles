@@ -259,12 +259,15 @@ struct WorkContext {
     /// A live Claude Code chat and the work its binding names (srv/chats.py, DESIGN.md round 27).
     struct Chat: Decodable, Equatable {
         struct Work: Decodable, Equatable { var work: String; var todo: String? }
+        struct At: Decodable, Equatable { var repo: String; var branch: String }
         var id: String
         /// nil when the journal couldn't be read: unknown, never unbound
         var works: [Work]?
         var generation: Int
         var pane: String?
         var activeAt: Double
+        /// where it stands (its checkout), said only for a chat on no work — never read as what it works on
+        var at: At?
     }
 
     /// A chat reads idle after this long without a tool call; an ended chat isn't served at all.
@@ -284,6 +287,16 @@ struct WorkContext {
             if !on.isEmpty { out[b] = on.sorted { $0.id < $1.id } }
         }
         return out
+    }
+
+    /// Live chats whose binding names no work, or whose binding can't be read: none of them is on a dot.
+    static func onNoWork(_ chats: [Chat]) -> [Chat] {
+        chats.filter { ($0.works ?? []).isEmpty }.sorted { $0.activeAt == $1.activeAt ? $0.id < $1.id : $0.activeAt > $1.activeAt }
+    }
+
+    static func whereItStands(_ c: Chat, now: Double) -> String {
+        let place = c.at.map { $0.branch.isEmpty ? $0.repo : "\($0.repo) · \($0.branch)" } ?? "place unknown"
+        return "chat \(c.id.prefix(8)) \(live(c, now: now) ? "live" : "idle") · in \(place)\(c.works == nil ? " · binding unreadable" : "")"
     }
 
     static func chatsLine(_ chats: [Chat], now: Double) -> String {
