@@ -376,7 +376,7 @@ Phil asked how canopy can show what each Claude Code chat is working on. The par
 | 2. The journal is the one authority for who is on what; tracker `owner` is a projection | **Two authorities would appear on first bind.** `claim` writes `owner`, and the native line reads it | `scripts/canopy-todo` claim, `WorkContext.swift:261` |
 | 3. Binding, liveness and capture are separate observations | Presence liveness is pid + lstart; capture coverage for Claude Code is absent, so freshness reads unknown | `scripts/srv/agents.py:20`, `WORK-CONTEXT.md` |
 | 4. Binding rides the motion that starts the work | **Unenforced.** `claim` records `solved_by` but not a binding; `stack-reshape new` records nothing about the session | `scripts/canopy-todo`, `scripts/stack-reshape` |
-| 5. Liveness belongs to the conversation, not the process | **Wrong today.** Presence keeps one record per pid, newest activity wins, and deletes the rest: a subagent or `/clear` sharing the process erases the other conversation's record, so a bound session can read ended while it works | `scripts/claude-sessions` `load_live` |
+| 5. Liveness belongs to the conversation, not the process | **Holds, by one code path.** A record per session id; only a `SessionStart` under a new id in the same process (`/clear`, `/resume`) ends the previous one. A subagent carries its parent's id and starts no record (probed). `test-session-presence.py` | `scripts/claude-session-track` `gc_stale` |
 
 ### Proposed design
 
@@ -405,7 +405,7 @@ An own pass and an independent pass, briefed with the principles and not these c
 
 **Confirmed: a stale decision silently replaces a newer one.** `bind` increments the generation unconditionally (`workjournal.py:487`). Canopy shows generation 7 bound to A; the chat switches to B (8); Phil's click from the older view binds C (9), erasing B unseen. A client-side `--add` that reads the set and writes the union loses a concurrent click the same way.
 
-**Confirmed: the conversation key conflates a chat with its subagents.** Presence keys on the hook's `session_id` and drops `agent_id` (`claude-session-track:103`); `canopy-todo me()` truncates to eight characters (`canopy-todo:50`). A subagent's command that switched the binding would re-point its parent; one that adds is true, since the chat Phil talks to directs both.
+**Confirmed: the conversation key conflates a chat with its subagents.** Presence keys on the hook's `session_id` and drops `agent_id` (`claude-session-track:103`); `canopy-todo me()` truncates to eight characters (`canopy-todo:50`). A subagent's command that switched the binding would re-point its parent; one that adds is true, since the chat Phil talks to directs both. A probe confirmed it: a subagent's `$CLAUDE_CODE_SESSION_ID` is its parent's full id, and it writes no presence record of its own.
 
 **Confirmed: Show's reader assumes one work per conversation** (`srv/showingest.py:51`, `works[0]`) while capture records the whole frozen generation. `--add` must never reach a Show conversation. The frozen generation itself is sound: a probe with Show's submission code showed a reply accepted before an `--add` still targets only its original work.
 
@@ -422,7 +422,7 @@ An own pass and an independent pass, briefed with the principles and not these c
 
 ### Revised encoding order
 
-1. `presence-per-conversation`: a presence record per full session id; `/clear` ends the previous one, a subagent never erases its parent's.
+1. `presence-per-conversation`: done — the behavior already held; the docstrings that said otherwise were corrected and it is now tested (`test-session-presence.py`).
 2. `branch-work-identity`: `stack-reshape new` mints the branch's work and writes `branch.<n>.stack-work`; `stack-doctor --prune` retires work no branch names.
 3. `bind-add`: `canopy-work bind --add` with the union in-transaction, `--expect-generation` on every view-made decision, and the `claude-code` source; refused for a Show conversation.
 4. `claim-binds-session`: `claim` keeps the exclusive `owner` and adds a binding of the full session id to the item's work.
