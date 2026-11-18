@@ -11,6 +11,7 @@ import tempfile
 import threading
 from urllib.parse import parse_qs
 
+from . import rebaseguard
 from . import ctx
 from . import openprs
 from . import prompts
@@ -426,9 +427,8 @@ def _direct_rebase(branch):
         own = True
     else:
         return "skip", ""
-    reb = ctx.run(["git", "-C", target, "rebase", "origin/main"])
+    reb = rebaseguard.run(target, ["origin/main"])   # aborts itself; a death mid-run is healed next time
     if reb.returncode != 0:
-        ctx.run(["git", "-C", target, "rebase", "--abort"])
         if own:
             ctx.run(["git", "-C", target, "checkout", "--detach"])
         return "conflict", ""
@@ -507,7 +507,7 @@ def _rebase_onto(branch, onto, cut):
         return "skip", "it's checked out in the main worktree"
     else:
         return "skip", f"its worktree is dirty ({wt})"
-    reb = ctx.run(["git", "-C", target, "rebase", "--onto", onto, cut, branch])
+    reb = rebaseguard.run(target, ["--onto", onto, cut, branch], abort=False)   # reads the conflicts, then aborts below
     if reb.returncode != 0:
         conflicted = ctx.run(["git", "-C", target, "diff", "--name-only", "--diff-filter=U"]).stdout.strip()
         ctx.run(["git", "-C", target, "rebase", "--abort"])

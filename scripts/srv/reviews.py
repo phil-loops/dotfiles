@@ -13,6 +13,7 @@ import time
 from urllib.parse import parse_qs, quote, unquote, urlencode
 
 from srv import ctx
+from . import rebaseguard
 from . import stackcfg
 from . import watch
 from . import openprs
@@ -535,7 +536,7 @@ def _rebase_onto(child, parent, cut):
             r = ctx.run(["git", "worktree", "add", "--quiet", "--force", tmp, child])
             if r.returncode != 0:
                 return False, (r.stderr or "worktree add failed").strip()[:300]
-        r = ctx.run(["git", "-C", wt, "rebase", "--onto", parent, cut, child])
+        r = rebaseguard.run(wt, ["--onto", parent, cut, child])
         if r.returncode != 0:
             ctx.run(["git", "-C", wt, "rebase", "--abort"])
             return False, (r.stderr or "rebase failed").strip()[-300:]
