@@ -8,7 +8,8 @@ list, plus a todo list per forest (items with --project <repo>:<stack-project>, 
   canopy-todo ls [--all] [--json] [--project P|all]   open work in rank order (--all adds done/dropped)
   canopy-todo show <id>
   canopy-todo claim <id>                take it before building: state=doing, owner=this session; refused while
-                                        another live session owns it (--force takes it over)
+                                        another live session owns it (--force takes it over). Claimed from a
+                                        forest's branch, it records that branch as solved_by, so the home marks its dot
   canopy-todo set <id> key=value …      e.g. state=doing size=M blocked_by=a,b, or solved_by=<branch> on a
                                         forest's item (the forest page shows that branch's PR beside it)
   canopy-todo done <id> [note] [--attempt A --packet P]
@@ -67,6 +68,18 @@ def project_id(name):
     except (OSError, subprocess.CalledProcessError):
         raise ValueError(f"--project {name}: not in a git repo, so say <repo>:{name}")
     return f"{os.path.basename(out.splitlines()[0].removeprefix('worktree '))}:{name}"
+
+
+def forest_branch():
+    """The checked-out branch and its <repo>:<stack-project> when it belongs to a forest, else None."""
+    import subprocess
+
+    def git(*a):
+        r = subprocess.run(["git", *a], capture_output=True, text=True)
+        return r.stdout.strip() if r.returncode == 0 else ""
+    name = git("symbolic-ref", "--quiet", "--short", "HEAD")
+    proj = name and git("config", f"branch.{name}.stack-project")
+    return (name, project_id(proj)) if proj else None
 
 
 def in_list(it, project):
@@ -166,7 +179,9 @@ def main():
             owner = it.get("owner")
             if owner and owner != session and it.get("state") == "doing" and alive(owner) and not args.force:
                 raise ValueError(f"{args.id} is owned by live session {owner} — `claude-say {owner} \"…\"` to coordinate, or --force")
-            return {"state": "doing", "owner": session}
+            here = forest_branch()
+            on = here and not it.get("solved_by") and (it.get("project") or here[1]) == here[1]
+            return {"state": "doing", "owner": session, **({"solved_by": here[0]} if on else {})}
         print(line(todo.update(args.id, edit=take)))
     elif args.cmd == "set":
         fields = {}

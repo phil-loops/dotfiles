@@ -14,7 +14,8 @@ An item is TOML frontmatter between `+++` lines, then a markdown body (context; 
   blocked_by ids of items that must land first
   links      memory files, commits, artifacts
   rank       position in the open queue, set by /next (lower first; unset = unranked)
-  solved_by  on a forest's list, the branch that solves the item (a ticket's ask → the PR covering it)
+  solved_by  the forest branch that solves the item (a ticket's ask → the PR covering it); claim records the
+             branch it was taken on, and the home marks that branch's dot while the item is in progress
   incarnation  minted once when the record is created and never changed: the work journal links to an
              item by id and incarnation, so a deleted item recreated under the same id inherits nothing
   created / updated   dates
