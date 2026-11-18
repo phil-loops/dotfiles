@@ -729,6 +729,8 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
         ShipStub.answer(port, "POST", "/loops/sync", #"{"ok":true,"rebased":true,"summary":"replayed 3 commits"}"#)
         ShipStub.answer(port, "POST", "/loops/prep-push", #"{"ok":true,"routed":["3 voiced commits — pushed as they are"]}"#)
         ShipStub.answer(port, "POST", "/loops/delta-tests", #"{"ok":true,"ran":true,"passed":2}"#)
+        // the gates post is answered too: unanswered, its 404 note raced the motion's
+        ShipStub.answer(port, "POST", "/loops/gates", #"{"ok":true}"#)
         a.keys.handle("s")
         let ship = ShipState.of(a)
         await until("the motion to finish") { ship.motionOf(Self.branch)?.phase == .done }
@@ -738,7 +740,10 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
         #expect(steps[1].note == "replayed 3 commits" && steps[4].note == "2 ✓")
         // the gates post on the FIFO queue, the delta tests beside it (`alone`): either may land first
         #expect(Set(ShipStub.posts(port).map(\.path)) == ["/loops/sync", "/loops/prep-push", "/loops/gates", "/loops/delta-tests"])
-        #expect(a.runner.note == "synced add-hankles-limited-label")
+        // the motion's note and the gates write's are two concurrent writes' (FIFO queue vs
+        // `alone`): either may be the last said — asserting one was the 1-in-3 flake
+        #expect(["synced add-hankles-limited-label", "running the gates — p pushes once they're green"].contains(a.runner.note ?? ""),
+                "\(a.runner.note ?? "nil")")
         a.runner.dispatch("review.sync.dismiss", via: .key)
         #expect(ship.motionOf(Self.branch) == nil)
     }

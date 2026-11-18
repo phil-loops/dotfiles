@@ -126,9 +126,19 @@ public enum ShipRules {
         ship == .green ? .push : [.pushed, .review, .approved].contains(ship) ? .pr : .open
     }
 
-    /// Whether `p` can push the branch: commits origin doesn't have, and green gates on this tip —
-    /// a first push and follow-ups onto an open PR alike. The server's wards still decide.
-    public static func canPush(_ b: Branch, _ pr: Pr?) -> Bool { b.gates == .green && pushableButGates(b, pr) }
+    /// Whether `p` can push the branch: commits origin doesn't have, and green gates on this tip
+    /// for a first push. A follow-up onto an open PR pushes with its gates advising (gate the
+    /// merge, not the push — tooling-doctor P5): CI checks every push to a PR. The server's wards
+    /// still decide; a red squawk refuses there.
+    public static func canPush(_ b: Branch, _ pr: Pr?) -> Bool {
+        (b.gates == .green || gatesAdvise(b, pr)) && pushableButGates(b, pr)
+    }
+
+    /// The gates only advise: an additive push onto a PR that's open — origin has the branch,
+    /// local only adds to it, and CI runs every gate on what arrives.
+    public static func gatesAdvise(_ b: Branch, _ pr: Pr?) -> Bool {
+        pr?.state == "OPEN" && b.pushed == .ahead && !b.diverged
+    }
 
     /// Everything a push needs except green gates — where `p` runs them instead.
     public static func pushableButGates(_ b: Branch, _ pr: Pr?) -> Bool {

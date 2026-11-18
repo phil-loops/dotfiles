@@ -122,7 +122,8 @@ public struct ShipStripView: View {
             if live != .sending && live != .landing, let reason = control.reason, !waiting {
                 Text(reason).foregroundStyle(theme.inkFaint)
             }
-            if route == "branch.gates.run" && live == nil && app.store.view(Pr.self, branchID) != nil {
+            if live == nil && app.store.view(Pr.self, branchID) != nil
+                && (route == "branch.gates.run" || route == "branch.push.arm" && b.gates != .green && b.gates != .running) {
                 KeyButton(title: "quick", id: "review.gates.quick", target: branchID)
                     .explains("ship|gates", "a follow-up onto an open PR: env, fresh, format and tests here — typecheck and lint left to CI, which runs them on the push")
             }
@@ -149,6 +150,15 @@ public struct ShipStripView: View {
         return p.map { ($0, false) }
     }
 
+    /// What the gates say about a push they only advise on (P5): the reds by name, never a bare badge.
+    private func gatesAdvice(_ b: Branch) -> String {
+        if b.gates == .running { return "gates running" }
+        let reds = GatesRun.rows(ShipState.of(app).progressOf(branchID), now: Date().timeIntervalSince1970)
+            .filter { $0.state == .red }.map(\.name)
+        if !reds.isEmpty { return "gates ✗ \(reds.joined(separator: ", "))" }
+        return b.gates == .red ? "gates ✗" : "gates not run"
+    }
+
     private func pushLabel(_ b: Branch, route: String?, live: Run.State?, forced: Bool) -> String {
         switch live {
         case .sending: return forced ? "replacing origin…" : "pushing…"
@@ -169,8 +179,13 @@ public struct ShipStripView: View {
             }()
             return "\(app.registry.keyOf("review.push")) again · force-with-lease over origin's \(lease)"
         case "branch.force.arm": return "diverged · replace origin?"
-        case "branch.push.confirm": return "\(app.registry.keyOf("review.push")) again to push"
-        default: return "push \(b.pushed == .local ? b.commits : b.ahead)"
+        case "branch.push.confirm":
+            // the second press says what the push carries when its gates only advise (P5)
+            let again = "\(app.registry.keyOf("review.push")) again to push"
+            return b.gates == .green ? again : "\(again) · \(gatesAdvice(b)) — CI checks it"
+        default:
+            let n = "push \(b.pushed == .local ? b.commits : b.ahead)"
+            return b.gates == .green || route != "branch.push.arm" ? n : "\(n) · \(gatesAdvice(b))"
         }
     }
 }

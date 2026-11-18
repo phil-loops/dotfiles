@@ -85,9 +85,9 @@ import Testing
     @Test func aRunningGateKeepsItsPriorityAction() async throws {
         let subject = ShipTests()
         let (app, port) = try subject.app { state in
+            // a first push: its gates hold the door (a follow-up's only advise, and push)
             subject.entity(&state, "branch", ShipTests.branch) { branch in
-                branch["pushed"] = "ahead"
-                branch["ahead"] = 2
+                branch["pushed"] = "local"
                 branch["gates"] = "running"
             }
         }
