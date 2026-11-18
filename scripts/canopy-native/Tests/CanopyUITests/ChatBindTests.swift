@@ -17,4 +17,16 @@ import Testing
         #expect(post.body["branch"] == "add-hankles-limited-label")
         #expect(post.body["generation"] == 3)
     }
+
+    @Test func dismissPostsTheChatAndTheBranchId() async throws {
+        let (app, port) = try ShipTests().app { _ in }
+        ShipStub.answer(port, "POST", "/loops/chat-dismiss", #"{"ok":true}"#)
+        let session = "aaaaaaaa-0000-4000-8000-000000000001"
+        app.runner.dispatch("chat.dismiss", via: .key, target: ShipTests.branch, arg: session)
+        await until("the dismiss request") { !ShipStub.posts(port).isEmpty }
+        let post = try #require(ShipStub.posts(port).first)
+        #expect(post.path == "/loops/chat-dismiss")
+        #expect(post.body["session"] == .string(session))
+        #expect(post.body["branch"] == .string(ShipTests.branch))
+    }
 }

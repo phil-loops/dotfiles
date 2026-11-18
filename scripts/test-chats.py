@@ -89,6 +89,25 @@ check("a chat is on the branches it edited or committed to lately, newest first,
 check("a replay, a server's commit, another chat's, or anything past two hours is no evidence",
       not {"loops:feat/replayed", "loops:feat/by-server", "loops:feat/old", "loops:feat/stale", "loops:feat/other-chat", "loops:feat/same-prefix"} & {a["branch"] for a in acted},
       "and a full id names exactly one chat, even one sharing its prefix")
+os.environ["CANOPY_CHAT_DISMISSALS"] = os.path.join(TMP, "dismissals.json")
+
+
+class _Req:
+    def _send(self, code, body):
+        self.code = code
+
+
+r = _Req()
+chats.dismiss(r, json.dumps({"session": BOUND, "branch": "loops:feat/committed"}))
+acted = chats.entities()["chat"][BOUND]["acted"]
+check("a dismissed link is hidden, the chat's other branches kept",
+      r.code == 200 and [a["branch"] for a in acted] == ["loops:feat/edited"], acted)
+with open(os.path.join(usage_repo, ".git", "stack-usage.jsonl"), "a") as f:
+    f.write(json.dumps({"type": "commit", "branch": "feat/committed", "actor": "claude", "session": BOUND[:8], "sessionId": BOUND, "ts": _time.time() + 1}) + "\n")
+check("acting there again brings it back", "loops:feat/committed" in [a["branch"] for a in chats.entities()["chat"][BOUND]["acted"]])
+r = _Req()
+chats.dismiss(r, json.dumps({"session": "short", "branch": "loops:x"}))
+check("a malformed dismiss is refused", r.code == 400)
 _ctx.REPOS = {}
 
 # POST /chat-bind: Phil's click, decided from the generation his view showed (round 27, P7)

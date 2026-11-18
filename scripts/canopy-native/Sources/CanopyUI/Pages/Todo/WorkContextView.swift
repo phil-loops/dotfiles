@@ -226,8 +226,9 @@ struct ChatButton<Label: View>: View {
     }
 }
 
-/// The chats bound to a branch, apart from who is assigned its items (round 27, P2).
+/// The chats on a branch, apart from who is assigned its items (rounds 27–28).
 struct BranchChatsLine: View {
+    @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme
     let branch: Branch
     let chats: [WorkContext.Chat]
@@ -239,6 +240,11 @@ struct BranchChatsLine: View {
                 Text(leaf(branch.name)).foregroundStyle(theme.ink).fixedSize()
                 ForEach(chats, id: \.id) { c in
                     ChatButton(chat: c) { Text(WorkContext.chatLabel(c, on: branch.id, now: ctx.date.timeIntervalSince1970)).foregroundStyle(theme.inkDim) }
+                    if WorkContext.inferred(c, on: branch.id) {
+                        Button("×") { app.runner.dispatch("chat.dismiss", via: .click, target: branch.id, arg: c.id) }
+                            .buttonStyle(.plain).foregroundStyle(theme.inkFaint)
+                            .help("this chat isn't on this branch — hide it until it edits or commits here again")
+                    }
                 }
                 Spacer(minLength: 0)
             }
