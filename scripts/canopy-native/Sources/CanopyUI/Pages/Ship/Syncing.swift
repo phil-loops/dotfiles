@@ -94,7 +94,10 @@ public enum Syncing {
         if b.drifted { out.append("off \(b.parent)'s tip") }
         if let f = facts, f.behind > 0, f.syncable || f.restack { out.append("\(f.behind) behind main") }
         if prep?.route == "squash" { out.append("not one voiced commit") }
-        if prep?.route == "additive" { out.append("diverged from its PR") }
+        // origin was rewritten upstream (GitHub's update-branch, or its rebase after a base PR
+        // merged) and already has everything local has: sync takes origin's copy (/prep-push)
+        if prep?.route == "conform" { out.append("origin rewrote it — sync takes origin's copy") }
+        else if prep?.route == "additive" { out.append("diverged from its PR") }
         else if b.diverged { out.append("diverged from origin") }
         return out
     }
