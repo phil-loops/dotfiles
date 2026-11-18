@@ -326,6 +326,42 @@ final class Ctx: CommandContext {
         #expect(store.ops.isEmpty)
     }
 
+    /// The server stamps `ts` with the second a 3 s batch arrived, so a gap between two keys is
+    /// measurable only from the press itself: every command event carries it (`at`, ms).
+    @Test func aCommandEventCarriesThePressTime() async throws {
+        let store = Store()
+        store.hydrate(try Snapshot.decode(fixture("state.json")))
+        let tel = Telemetry(transport: transport, enabled: true)
+        let runner = Runner(registry: CommandRegistry(), store: store, transport: transport, telemetry: tel)
+        runner.context = Ctx()
+        runner.registry.register(Command(id: "t.press", title: "P", scope: .global, local: { _, _ in }))
+        Stub.answers["/track"] = .init(status: 200, body: #"{"ok":true}"#)
+        Stub.lock.withLock { Stub.seen.removeAll() }
+        let before = Date().timeIntervalSince1970 * 1000
+        runner.dispatch("t.press", via: .key)
+        let after = Date().timeIntervalSince1970 * 1000
+        try await Task.sleep(nanoseconds: 50_000_000)
+        tel.flush()
+        var at: Double?
+        for _ in 0..<50 where at == nil {
+            try await Task.sleep(nanoseconds: 20_000_000)
+            let bodies = Stub.lock.withLock { Stub.seen.filter { $0.url?.path == "/track" }.compactMap { r -> Data? in
+                if let b = r.httpBody { return b }
+                guard let s = r.httpBodyStream else { return nil }
+                s.open(); defer { s.close() }
+                var d = Data(); var buf = [UInt8](repeating: 0, count: 4096)
+                while s.hasBytesAvailable { let n = s.read(&buf, maxLength: buf.count); if n <= 0 { break }; d.append(buf, count: n) }
+                return d
+            } }
+            for b in bodies {
+                let events = (try? JSONDecoder().decode(JSONValue.self, from: b))?.object?["events"]?.array ?? []
+                at = events.compactMap(\.object).first { $0["id"] == .string("t.press") }?["at"]?.number
+            }
+        }
+        let got = try #require(at)
+        #expect(got >= before.rounded(.down) - 1 && got <= after.rounded(.up) + 1, "\(got) not in [\(before), \(after)]")
+    }
+
     /// 2026-11-18: a push landed but its answer was lost, and the page said it didn't push. A lost
     /// answer is an unknown: the write's own check decides, once a read comes back.
     @Test func aLostAnswerIsSettledByTheWritesOwnCheck() async throws {
