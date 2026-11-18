@@ -16,29 +16,26 @@ enum BranchCommands {
     /// What `p` does: arm, then send — or, when only the gates stand in the way, run them. A branch
     /// diverged from origin can't push; inside the force scope `p` arms a force-with-lease instead.
     static func pushRoute(_ id: String?, _ app: AppModel) -> String? {
-        let m = app.forestModel
-        guard let id, let v = m.branchView(id) else { return nil }
-        if v.b.role == "proof" { return v.b.gates == .running ? runningRoute(id, app) : v.b.gates == .green ? "branch.proof" : "branch.gates.run" }
-        if v.b.diverged {
-            // origin was rewritten upstream (GitHub's rebase) and already has everything local has:
-            // origin wins — never a force, never a refusal (tooling-doctor P7, A1)
-            // only on the prep route read for this very tip: an answer from before the branch moved
-            // routes nothing, and p waits for the current one (A5)
-            let ship = ShipState.of(app)
-            if ship.prepOf(id)?.route == "conform", v.b.pending == nil { return "branch.conform" }
-            if !ship.prepFresh(id) { return nil }
-            guard let s = forceScope(id, app), v.b.pending == nil else { return nil }
-            if s.eligible { return app.runner.armed == forceArm(id) ? "branch.force.confirm" : "branch.force.arm" }
-            if !s.guards.allSatisfy({ $0.ok || $0.k == "gates" }) { return nil }
-            return v.b.gates == .running ? runningRoute(id, app) : "branch.gates.run"
+        guard let id, let v = app.forestModel.branchView(id) else { return nil }
+        let next = situation(v, app).next
+        switch next {
+        case "branch.push.arm": return app.runner.armed == pushArm(id) ? "branch.push.confirm" : next
+        case "branch.force.arm": return app.runner.armed == forceArm(id) ? "branch.force.confirm" : next
+        case "branch.conform", "branch.catchup", "branch.gates.run", "branch.gates.next", "branch.proof": return next
+        default: return nil
         }
-        // a branch above it moved: the push would be refused (its PR wouldn't stack), so p's next
-        // step is the catch-up, named on the key (A1) — never "retry the push"
-        if v.b.owes != nil, v.b.pending == nil { return "branch.catchup" }
-        if ShipRules.canPush(v.b, v.pr) { return app.runner.armed == pushArm(id) ? "branch.push.confirm" : "branch.push.arm" }
-        if !ShipRules.pushableButGates(v.b, v.pr) { return nil }
-        // a follow-up onto an open PR pushes above (its gates advise); what's left needs them
-        return v.b.gates == .running ? runningRoute(id, app) : "branch.gates.run"
+    }
+
+    /// The branch's situation with every read the branch page has made for this tip.
+    static func situation(_ v: BranchView, _ app: AppModel) -> Stand {
+        let ship = ShipState.of(app), id = v.b.id
+        let scope = forceScope(id, app)
+        let reads = SituationReads(
+            prepRoute: ship.prepOf(id)?.route, prepRead: ship.prepFresh(id),
+            force: scope.map { ($0.eligible, !$0.guards.allSatisfy { $0.ok || $0.k == "gates" }) },
+            gatesCanPutNext: GatesRun.canPutNext(GatesRun.setup(ship.progressOf(id))),
+            agent: v.st.actor.agentItem)
+        return ShipRules.stand(v.b, v.pr, app.forestModel.parentStand(of: v.b), now: app.forestModel.now, reads: reads)
     }
 
     /// `p` while the gates run: put the run next when anything waits ahead of it — otherwise the

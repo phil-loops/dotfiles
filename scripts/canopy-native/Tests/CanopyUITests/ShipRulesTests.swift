@@ -211,12 +211,12 @@ func shipBranch(_ f: (inout Branch) -> Void = { _ in }) -> Branch {
         #expect(Syncing.needs(shipBranch(), facts: SyncFacts(dirty: ["a.ts", "b.ts"])) == ["2 uncommitted"])
         #expect(Syncing.needs(shipBranch { $0.drifted = true }) == ["off f/a's tip"])
         // its own parent is current but a branch above it moved: the chain owes a catch-up
-        #expect(Syncing.needs(shipBranch { $0.owes = "f/up" }) == ["f/up is behind its parent — sync catches the chain up"])
+        #expect(Syncing.needs(shipBranch { $0.owes = "f/up" }) == [], "p catches the chain up: one remedy")
         #expect(Syncing.needs(shipBranch(), facts: SyncFacts(behind: 3, restack: true)) == ["3 behind main"])
         #expect(Syncing.needs(shipBranch(), prep: PrepRoute(route: "squash")) == ["not one voiced commit"])
         #expect(Syncing.needs(shipBranch(), prep: PrepRoute(route: "additive")) == ["diverged from its PR"])
         // a GitHub-side rewrite with nothing local lacks is a conform, never "diverged"
-        #expect(Syncing.needs(shipBranch { $0.diverged = true }, prep: PrepRoute(route: "conform")) == ["origin rewrote it — sync takes origin's copy"])
+        #expect(Syncing.needs(shipBranch { $0.diverged = true }, prep: PrepRoute(route: "conform")) == [], "p takes origin's copy: one remedy")
         #expect(Syncing.needs(shipBranch { $0.diverged = true }, prep: PrepRoute(route: "ready")) == ["diverged from origin"])
     }
 

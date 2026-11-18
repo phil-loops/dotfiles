@@ -63,7 +63,8 @@ public enum Loop {
         }
         let merged = st.ship == .landed
         let done: [LoopStep.ID: Bool] = [
-            .gates: b.gates == .green || (st.ship != .local && b.pushed != .ahead),
+            // a follow-up onto an open PR pushes with its gates advising (P5): they're not the step in the way
+            .gates: b.gates == .green || (st.ship != .local && b.pushed != .ahead) || ShipRules.gatesAdvise(b, pr),
             .push: st.ship != .local && st.ship != .green && b.pushed != .ahead,
             .pr: pr != nil,
             .review: st.ship == .approved || merged,
