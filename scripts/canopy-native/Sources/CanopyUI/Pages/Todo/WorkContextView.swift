@@ -112,22 +112,12 @@ struct WorkInProgressView: View {
     }
 
     /// Every branch of a forest the home lists, in its forest's merge order.
-    @MainActor static func listedBranches(_ app: AppModel) -> [Branch] {
+    @MainActor static func listedViews(_ app: AppModel) -> [BranchView] {
         let m = app.forestModel, p = m.projects(), fs = m.forests()
-        return (p.focus + p.workbench + (m.showArchive ? p.archive : [])).compactMap { fs[$0.id] }.filter { !$0.closed }.flatMap { $0.branches.map(\.b) }
+        return (p.focus + p.workbench + (m.showArchive ? p.archive : [])).compactMap { fs[$0.id] }.filter { !$0.closed }.flatMap(\.branches)
     }
 
-    /// The bound chats on each listed branch, by its own work or an item placed on it.
-    @MainActor static func chatsPlaced(_ app: AppModel, _ placed: [String: [TodoItem]]) -> [String: [WorkContext.Chat]] {
-        let chats = chats(app)
-        guard !chats.isEmpty else { return [:] }
-        let listed = listedBranches(app)
-        var work: [String: String] = [:]
-        for b in listed {
-            if let w = app.store.rawView("branch", b.id)?["work"]?.string { work[b.id] = w }
-        }
-        return WorkContext.chatsOnBranches(chats, branches: listed.map(\.id), branchWork: work, placed: placed)
-    }
+    @MainActor static func listedBranches(_ app: AppModel) -> [Branch] { listedViews(app).map(\.b) }
 
     @MainActor static func chats(_ app: AppModel) -> [WorkContext.Chat] {
         app.store.rawAll("chat").values.compactMap { try? JSONValue.object($0).decode(WorkContext.Chat.self) }
@@ -135,7 +125,7 @@ struct WorkInProgressView: View {
 
     /// Live chats no dot shows.
     @MainActor static func noDot(_ app: AppModel) -> [WorkContext.Chat] {
-        let onDots = Set(chatsPlaced(app, placed(app)).values.flatMap { $0.map(\.id) })
+        let onDots = Set(listedViews(app).flatMap { $0.chats.map(\.id) })
         return WorkContext.onNoWork(chats(app), onDots: onDots)
     }
 
