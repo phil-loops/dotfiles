@@ -209,7 +209,8 @@ public final class ShipState {
             let got = try? await t.getJSON(path, as: GateProgress.self)
             guard let self, self.progress[b.id]?.key == key else { return }
             self.progress[b.id] = (key, got)
-            guard got?.running == true else { return }
+            // the tail is read on demand while the run goes; the run's state comes pushed
+            guard got?.running == true || app.flatMap({ GateRuns.progress($0, b.id) })?.running == true else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self, weak app] in
                 guard let self, let app, self.progress[b.id]?.key == key, let now = app.store.view(Branch.self, b.id) else { return }
                 self.progress[b.id] = ("", self.progress[b.id]?.value)
@@ -218,7 +219,13 @@ public final class ShipState {
         }
     }
 
-    public func progressOf(_ id: String) -> GateProgress? { progress[id]?.value }
+    /// The run as the server pushed it (GateRuns), with the output tail from the on-demand read;
+    /// the read alone only for a server that doesn't push runs yet.
+    public func progressOf(_ id: String) -> GateProgress? {
+        guard let app, var pushed = GateRuns.progress(app, id) else { return progress[id]?.value }
+        pushed.tail = progress[id]?.value?.tail
+        return pushed
+    }
     public func factsOf(_ id: String) -> SyncFacts? { facts[id]?.value }
     public func prepOf(_ id: String) -> PrepRoute? { prep[id]?.value }
 
