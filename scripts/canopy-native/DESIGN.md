@@ -524,3 +524,9 @@ Phil, looking at the home: "this UI is not usable". Five idle chats led the page
 3. `name-chats-claude`: the situation, the forest's chat words and the loose list say "Claude", with the id on hover.
 4. `quiet-below`: the in-progress and loose-chats pane draws after the forests, before the archive.
 5. `dismiss-under-cursor`: the forest row shows `×` only under the cursor.
+
+### Built, and what the render showed
+
+All five encodings are in. The home was rendered offscreen from a live `/state` snapshot: eight forests at your move, one waiting, then in-progress work, loose chats and the archive.
+
+**Open, P4: one chat's idle turn is said on every forest it touched.** Chat 59fa0cc0 acted on branches in three forests, so all three read "reply to Claude" and sit at your move, though one reply answers all three. The fix belongs in the derivation, not the view. Either a chat's handback counts at the forest it is bound to, or the home lists the chat once with its forests beneath. That choice is Phil's.
