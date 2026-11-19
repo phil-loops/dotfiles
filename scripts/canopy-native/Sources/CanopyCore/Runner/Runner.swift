@@ -63,6 +63,11 @@ public final class Runner {
     @ObservationIgnored public var onRun: ((String) -> Void)?
     /// A session can refuse a command before routing, jump recording or any effect.
     @ObservationIgnored public var refusal: ((Command) -> String?)?
+    /// A page's say over whether a command may act on what it shows yet, before routing or its
+    /// availability: throw `Hold` to keep the key until `releaseHeld` (its target resolved again
+    /// then, and a routed one's dropped: it named a row of what was shown), `Refusal` to refuse.
+    /// Undo's put-backs name their own subject and skip it.
+    @ObservationIgnored public var gate: ((Command) throws -> Void)?
     @ObservationIgnored public let telemetry: Telemetry
     @ObservationIgnored public weak var context: CommandContext?
     /// Refetch the whole store (the event stream's resync): what a write the server never shows waits on.
@@ -153,6 +158,14 @@ public final class Runner {
             armed = nil
             say(why)
             return echo(named, via, false, explained: true)
+        }
+        if !undoing, let gate {
+            do { try gate(cmd) } catch {
+                armed = nil
+                if error is Hold { held = (id, from == nil ? explicit : nil, arg) }
+                say(String(describing: error))
+                return echo(named, via, false, explained: true)
+            }
         }
         let opens = opening || cmd.verbs.contains(.main)
         if let route = cmd.route {

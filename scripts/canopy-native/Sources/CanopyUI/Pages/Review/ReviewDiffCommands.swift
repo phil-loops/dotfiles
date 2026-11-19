@@ -33,6 +33,7 @@ enum DiffCommands {
     static func install(_ app: AppModel) {
         let r = app.registry
         let pg = ReviewPageState.of(app)
+        app.runner.gate = { [weak pg] cmd in try pg?.gate(cmd) }
 
         let onFiles: (String?) -> Bool = { [weak pg] _ in pg?.tab == "files" && app.keys.layer != .map }
         let onDiff: (String?) -> Bool = { [weak pg] _ in

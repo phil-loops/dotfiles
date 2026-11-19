@@ -40,10 +40,16 @@ public protocol ShipHost: AnyObject {
     func clearMark()
     /// `i` with no comment open: open Helix on the new-half line under the cursor; false: nothing to edit here.
     func beginEdit(_ app: AppModel) -> Bool
+    /// What a line on `side` was read at — the tip for the new side, the tip and its base for the old —
+    /// while the diff shown is the current read; nil while an older read (or none) shows. A line
+    /// comment keeps this from when it was started and acts only while it's unchanged.
+    func lineRead(_ side: Side) -> String?
 }
 
 public extension ShipHost {
     func beginEdit(_ app: AppModel) -> Bool { false }
+    /// A host with no diff of its own: its lines never go out of date.
+    func lineRead(_ side: Side) -> String? { "" }
     /// A host with no line to read: the scope, when it names one commit.
     var loneCommit: String? { commitScope.flatMap { $0.contains("..") ? nil : $0 } }
 }

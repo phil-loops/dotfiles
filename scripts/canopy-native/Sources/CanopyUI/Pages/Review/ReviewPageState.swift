@@ -290,7 +290,16 @@ public final class ReviewPageState: ShipHost {
     public private(set) var loadErr: String?
     /// bumped whenever a diff lands (the memos key on it)
     private(set) var payloadGen = 0
+    /// Diffs read, by key: at most `cacheLimit`, the least recently put first in `cacheOrder`. What's
+    /// shown and each branch's last read go last; an older tip goes as soon as a newer one replaces it.
     @ObservationIgnored private var cache: [String: NodePayload] = [:]
+    @ObservationIgnored private var cacheOrder: [String] = []
+    static let cacheLimit = 24
+    /// Each branch's last diff landed here, per base, as its key in `cache`: what the page shows,
+    /// dimmed, on coming back to a branch whose diff has moved, until the current one is read.
+    @ObservationIgnored private var lastRead: [String: String] = [:]
+    /// A commit stretch's read that failed: which stretch, and why.
+    public private(set) var commitErr: (sha: String, err: String)?
     @ObservationIgnored private var loading: Set<String> = []
     @ObservationIgnored private var prepared = ""
 
@@ -309,12 +318,17 @@ public final class ReviewPageState: ShipHost {
     @ObservationIgnored var pendingRow: (id: String, row: Int)?
     @ObservationIgnored var pendingHelixReturn: HelixReturn?
     @ObservationIgnored var pendingFlag: (id: String, flag: Flag)?
+    /// where a flag landed on an older read: the current read re-lands it only if the cursor is still there
+    @ObservationIgnored var flagShownAt: String?
     /// Helix's cursor as its status line last showed it, while it's open.
     @ObservationIgnored var helixAt: (path: String, line: Int)?
     /// The branch the page last showed (a new one starts fresh).
     @ObservationIgnored private var shownID = ""
     /// This branch's diff is here (not the last page's, still showing while this one comes).
     var diffHere: Bool { payload != nil && shownID == id }
+    /// What's shown is an older read of this branch's diff (an earlier tip, base or parent), kept up
+    /// while the current one is read: it draws dimmed, and keys that act on its lines wait (`gate`).
+    var diffStale: Bool { diffHere && commitScope == nil && payload?.key != keyOf }
     var diffCurrent: Bool {
         if let scope = commitScope { return commitFiles?.sha == scope }
         return payload?.key == keyOf
@@ -451,6 +465,7 @@ public final class ReviewPageState: ShipHost {
         let key = keyOf
         if payload?.key == key { return }
         if let hit = cache[key] { return land(key, hit) }
+        loadErr = nil
         guard !loading.contains(key) else { return }
         loading.insert(key)
         let b = baseRef(t.name)
@@ -460,12 +475,156 @@ public final class ReviewPageState: ShipHost {
             defer { self.loading.remove(key) }
             do {
                 let data = try await app.transport.getJSON(path, as: NodePayload.self)
-                if self.cache[key] == nil { self.cache[key] = data }
+                if self.cache[key] == nil { self.put(key, data) }
                 if self.keyOf == key, let current = self.cache[key] { self.land(key, current) }
             } catch {
-                if self.keyOf == key { self.loadErr = String(describing: error) }
+                self.failed(key, error, app)
             }
         }
+    }
+
+    private func put(_ key: String, _ data: NodePayload) {
+        cache[key] = data
+        cacheOrder.removeAll { $0 == key }
+        cacheOrder.append(key)
+        let kept = Set(lastRead.values).union([key, payload?.key ?? ""])
+        while cache.count > Self.cacheLimit,
+              let old = cacheOrder.first(where: { !kept.contains($0) }) ?? cacheOrder.first(where: { $0 != key && $0 != payload?.key }) {
+            evict(old)
+        }
+    }
+
+    private func evict(_ key: String) {
+        cache[key] = nil
+        cacheOrder.removeAll { $0 == key }
+        lastRead = lastRead.filter { $0.value != key }
+    }
+
+    /// How many diffs are kept, and whether one is (tests).
+    var cachedCount: Int { cache.count }
+    func isCached(_ key: String) -> Bool { cache[key] != nil }
+
+    /// A read of `key` failed: when it's the diff the page waits on, say so, and a key held for it
+    /// won't run (on a commit stretch the held key waits on the commit's read instead).
+    private func failed(_ key: String, _ error: Error, _ app: AppModel) {
+        guard keyOf == key, payload?.key != key else { return }
+        loadErr = String(describing: error)
+        if commitScope == nil { dropHeldKey(app) }
+    }
+
+    /// The read the page waits on failed: a key held for it won't run.
+    private func dropHeldKey(_ app: AppModel) {
+        if let h = app.runner.held, Self.actsOnDiff.contains(h.id) { app.runner.dropHeld(h.id, because: "couldn't read the current diff — that key didn't run") }
+    }
+
+    /// The commands that act on the diff's lines or on the tip they were read at: marking, commenting,
+    /// opening Helix or GitHub at a line, renaming, revealing hidden lines, function and finding
+    /// motions, and the code lookups. Motions, scrolling and search only read what's shown, so they
+    /// keep working on an older read.
+    static let actsOnDiff = lookups.union([
+        "review.viewed", "review.unviewed", "review.flag", "review.viewed.file",
+        "review.comment", "review.gutter", "review.compose.edit", "review.open", "review.rename",
+        "review.github.main", "review.github.branch", "review.expand",
+        "review.function.next", "review.function.prev", "review.type.next", "review.type.prev",
+        "review.finding.next", "review.finding.prev", "review.finding.last", "review.finding.first", "review.findings",
+    ])
+    /// Ship's keys that take their line from its host, which is this page only on the review page.
+    static let shipLines: Set<String> = ["review.comment", "review.gutter", "review.compose.edit"]
+    /// The code lookups: from a file window they read that window's commit, not the diff.
+    static let lookups: Set<String> = [
+        "review.types", "review.definition", "review.type-definition", "review.implementation", "review.references",
+        "review.symbols", "review.workspace.symbols", "symbol",
+    ]
+
+    /// Of those, the ones that never wait to run later: a mark is kept by the change's content, so one
+    /// replayed on a new read would mark code the reader never saw; a revealed gap would be another gap.
+    /// Each refuses, saying what to do, until the current read is in.
+    static let refusesOnOlder: [String: String] = [
+        "review.viewed": "mark it", "review.unviewed": "take the mark off", "review.flag": "flag it",
+        "review.viewed.file": "mark the file", "review.expand": "show the hidden lines",
+    ]
+
+    /// Every other command on the review page, each with why it needs no rule: a new one must land in
+    /// this list or in `actsOnDiff` (`StaleDiffTests` checks every one is named).
+    static let actsOnItsOwn: [String: String] = [
+        "review.viewed.set": "undo's put-back: names its own branch and block keys",
+        "review.compose.send": "a line comment refuses once what its line was read at changed (`ShipState.composerReads`)",
+        "review.compose.draft": "as review.compose.send",
+        "review.compose.suggest": "as review.compose.send; a reply's suggestion needs the current read",
+        "review.apply": "applies the thread's suggestion on the server, by thread, at the server's tip",
+        "review.unapply": "undo's put-back: names its commit",
+        "review.files": "a picker over the shown files: refuses until the current read is in (Round 3)",
+        "review.guide.go": "a return entry: refuses until the current read is in (Round 3)",
+        "review.requires": "refuses until the current read is in",
+        "review.compose.cancel": "drops the comment's words; no line",
+        "review.compose.recover": "moves older words into the open comment; no line",
+        "review.pending.remove": "a saved draft, by its key", "review.pending.discard": "undo's put-back: a draft, by its key",
+        "review.pending.restore": "undo's put-back: a draft as it was saved",
+        "review.send": "sends saved drafts, their lines fixed when saved", "review.send.all": "as review.send",
+        "review.address.claude": "by thread, on the server", "review.address.helix": "opens the thread's line at the server's tip",
+        "review.address.pick": "by thread and the commit picked", "review.address.reply": "by thread, on the server",
+        "review.address.undo": "undo's put-back: names its key", "review.address.cancel": "undo's put-back: names its key",
+        "review.reseat": "the branch, not its lines", "review.upstream.detach": "the branch, not its lines",
+    ].merging(readingKeys.flatMap { reason, ids in ids.map { ($0, reason) } }, uniquingKeysWith: { a, _ in a })
+    /// The rest of the review page's keys, by why none needs the rule.
+    private static let readingKeys: [(String, [String])] = [
+        ("moves the cursor or the view through what's shown; reads, never acts", [
+            "review.down", "review.up", "review.top", "review.bottom", "review.hunk.next", "review.hunk.prev",
+            "review.unviewed.next", "review.unviewed.prev", "review.file.next", "review.file.prev", "review.test.next", "review.test.prev",
+            "review.comment.next", "review.comment.prev", "review.githunk.next", "review.githunk.prev", "review.conversation.next", "review.conversation.prev",
+            "review.cursor.set", "review.file.go", "review.extend", "review.left", "review.right", "review.search.word",
+            "review.word.next", "review.word.previous", "review.word.end", "review.longword.next", "review.longword.previous", "review.longword.end",
+            "review.line.start", "review.line.end", "review.line.first", "review.find.char", "review.till.char", "review.find.back",
+            "review.till.back", "review.seek.again", "review.change.last", "review.change.first", "review.view.center", "review.view.top",
+            "review.view.bottom", "review.scroll.down", "review.scroll.up", "review.match", "review.side.extend", "review.filter",
+            "review.map", "review.map.down", "review.map.up",
+        ]),
+        ("changes what's shown or where (page, tab, base, stretch, window); never a line", [
+            "review.in", "review.branch.next", "review.branch.prev", "review.parent", "review.child", "review.root",
+            "review.tip", "review.map.open", "review.map.page", "review.map.go", "review.leave", "review.back",
+            "review.tab", "review.tab.conversation", "review.tab.files", "review.outdated", "review.conversation", "review.guide",
+            "review.thread.show", "evidence.open", "review.window.right", "review.window.below", "review.window.close", "review.window.only",
+            "review.base.parent", "review.base.main", "review.base.outgoing", "review.base.next", "review.line", "review.commit.next",
+            "review.commit.prev", "review.commits.retry",
+        ]),
+        ("the branch or its checkout as a whole, by name and tip; not the shown lines", [
+            "bench.open.review", "review.sync", "review.sync.fold", "review.sync.stash", "review.sync.stop", "review.sync.dirt.show",
+            "review.sync.dismiss", "review.diverged.inspect", "review.push", "review.words", "review.finish", "review.preview",
+            "review.preview.pr", "review.github", "review.gates.show", "review.gates.skip", "review.gates.quick", "review.helix.recover",
+            "review.helix.resume",
+        ]),
+        ("an editor session commits to the source it was opened on, checked against its exact head (HelixLanding)", [
+            "review.helix.land", "review.helix.recover.commit",
+        ]),
+        ("a thread, by its id, on the server's copy", [
+            "review.address", "review.address.pick.list", "review.address.pick.1", "review.address.pick.2", "review.address.pick.3", "review.address.pick.4",
+            "review.address.pick.5", "review.address.pick.6", "review.address.pick.7", "review.address.pick.8", "review.address.pick.9", "review.reply",
+            "review.note.insert", "review.fold", "review.note.toggle", "review.resolve",
+        ]),
+        ("a commit's own inline diff, by its sha", [
+            "inline.expand", "inline.fold",
+        ]),
+    ]
+
+    /// Why the read the page waits on isn't here: the commit stretch's, else the branch diff's.
+    var readErr: String? {
+        guard let scope = commitScope else { return loadErr }
+        return commitErr?.sha == scope ? commitErr?.err : nil
+    }
+
+    /// The one rule for those commands (the runner's gate): they act only on the diff read at what the
+    /// page is on now. While an older read (or none) shows, the key waits and runs when the current one
+    /// lands — or, for `refusesOnOlder`, refuses; once that read has failed, every one refuses.
+    func gate(_ cmd: Command) throws {
+        guard let app, case .review = app.router.route, Self.actsOnDiff.contains(cmd.id), !diffCurrent else { return }
+        let ship = ShipState.of(app)
+        if Self.shipLines.contains(cmd.id), ship.host !== self { return }
+        // `i` with a comment open goes back to its words, not to a line
+        if cmd.id == "review.compose.edit", ship.composer != nil { return }
+        if Self.lookups.contains(cmd.id), code != nil { return }
+        if let e = readErr { throw Refusal("couldn't read the current diff — \(e)") }
+        if let what = Self.refusesOnOlder[cmd.id] { throw Refusal("reading the current diff — \(what) once it's in") }
+        throw Hold("reading the current diff — this key runs when it's in")
     }
 
     /// The page is on a new branch: start it fresh, once, whichever comes first — the view's sync or
@@ -480,6 +639,8 @@ public final class ReviewPageState: ShipHost {
     /// The repo list moved: a diff read before it may have come from the wrong repo, so read again.
     public func forgetDiffs() {
         cache = [:]
+        cacheOrder = []
+        lastRead = [:]
         payload = nil
         sync()
     }
@@ -488,6 +649,7 @@ public final class ReviewPageState: ShipHost {
     public func land(_ key: String, _ data: NodePayload, preservingFiles: Bool = false) {
         arrive()
         let previous = payload
+        let place = previous.flatMap { $0.key != key && diffHere ? placeOnScreen() : nil }
         let oldParsed = parsed
         let oldFiles = Dictionary((previous?.data.files ?? []).map { ($0.path, $0) }, uniquingKeysWith: { _, last in last })
         let unchanged = preservingFiles ? Set(data.files.filter { oldFiles[$0.path] == $0 }.map(\.path)) : []
@@ -499,7 +661,11 @@ public final class ReviewPageState: ShipHost {
                 blocks["\(key)|\(path)"] = blockCache["\(previous.key)|\(path)"]
             }
         }
-        cache[key] = data
+        put(key, data)
+        if key == keyOf {
+            let older = lastRead.updateValue(key, forKey: readSlot)
+            if let older, older != key, !lastRead.values.contains(older) { evict(older) }
+        }
         payload = (key, data)
         payloadGen &+= 1
         if let oldParsed, oldParsed.key == previous?.key, preservingFiles {
@@ -513,30 +679,63 @@ public final class ReviewPageState: ShipHost {
         blockCache = blocks
         loadErr = nil
         prepareTypes()
+        let moved = cursorMoved
         settleCursor()
+        if let place, cursorMoved == moved { keep(place) }
         warmNeighbours()
         if let app { warmEditor(app) }
         app?.runner.releaseHeld()
     }
 
+    /// Where `lastRead` keeps this page's branch and base.
+    private var readSlot: String { "\(id)|\(baseRef(target?.name ?? ""))" }
+
     private func resetForNewBranch(_ newID: String) {
         cancelHelixPreparation()
         pendingHelixReturn = nil
         pickedLine = nil
-        payload = nil
+        payload = cache[keyOf] != nil ? nil : lastRead[readSlot].flatMap { k in cache[k].map { (k, $0) } }
+        payloadGen &+= 1
         loadErr = nil
         mark = nil
         guideContext = nil
         guideReturnPane = nil
         shownStretch = ""
         commitFiles = nil
+        commitErr = nil
         windows = [ReviewWindow(id: 1, column: 0)]
         if let c = carry, c.id == newID { tab = c.tab } else { carry = nil; tab = "files" }
         guard let app else { return }
+        if payload != nil { return settleOnOlder(app) }
         // a jumplist entry being restored already put its cursor
         if pendingCursor?.id == newID || pendingLoc?.id == newID || pendingFlag?.id == newID { return }
         app.focus(pane: reviewDiffPane)
         app.setCursor(nil)
+    }
+
+    /// An older read went up on arriving: a hop or a jumplist entry lands on it now, so the current
+    /// read, when it comes, only keeps where the reader has since moved (`keep`). A flag shows on it
+    /// too but lands again on the current read by its block, which file and line can't follow; an
+    /// address's tip line waits for the current read, since only it can place one.
+    private func settleOnOlder(_ app: AppModel) {
+        if let p = pendingFlag, p.id == id, let k = stopOf(block: p.flag.key, in: p.flag.path) {
+            flagShownAt = k
+            return setCursor(k)
+        }
+        if let c = carry, c.id == id {
+            carry = nil
+            let path = c.path.flatMap { stopIndex["f|\($0)"] != nil ? $0 : nil } ?? stopFiles.first
+            if let k = path.flatMap(landing(file:)) ?? stops.first?.key { setCursor(k) }
+            return
+        }
+        if let p = pendingCursor, p.id == id, stopIndex[p.key] != nil {
+            pendingCursor = nil
+            setCursor(p.key, focus: false)
+            return takePendingRow()
+        }
+        if pendingCursor?.id == id || pendingLoc?.id == id || pendingFlag?.id == id { return }
+        app.focus(pane: reviewDiffPane)
+        app.setCursor(stopFiles.first.flatMap(landing(file:)) ?? stops.first?.key)
     }
 
     /// Once a diff is here: put the cursor where a J/K hop or a jumplist entry wants it, or on the
@@ -546,8 +745,15 @@ public final class ReviewPageState: ShipHost {
         if let c = commitScope, commitFiles?.sha != c, pendingCursor?.id == id || pendingLoc?.id == id { return }
         let s = stops
         if let app, takeHelixReturn(app) { return }
+        if let p = pendingFlag, p.id == id, let shown = flagShownAt, diffCursor != shown {
+            // the reader moved on from where the flag landed on the older read: keep their place
+            pendingFlag = nil
+            flagShownAt = nil
+            return
+        }
         if let p = pendingFlag, p.id == id, let k = stopOf(block: p.flag.key, in: p.flag.path) ?? stopNear(path: p.flag.path, line: p.flag.line) {
             pendingFlag = nil
+            flagShownAt = nil
             return setCursor(k)
         }
         if let c = carry, c.id == id {
@@ -572,6 +778,32 @@ public final class ReviewPageState: ShipHost {
         else if fresh { app?.focus(pane: reviewDiffPane) }
     }
 
+    /// The diff cursor's stop, its line and where it sits on screen: what a newer read of the same
+    /// branch keeps when it replaces the one shown.
+    struct ScreenPlace { var stop: Stop; var line: Int?; var row: Int? }
+
+    private func placeOnScreen() -> ScreenPlace? {
+        guard let k = diffCursor, let i = stopIndex[k] else { return nil }
+        let s = stops[i]
+        return ScreenPlace(stop: s, line: tipLineNear(s), row: diffCanvas.canvas.viewportRow(of: k))
+    }
+
+    /// After a newer read replaced the shown diff: the cursor stays on its stop when the new diff has
+    /// it (a line's key is its file and line), else goes to the nearest line of its file, and keeps its
+    /// row on screen. Called only when no restore, hop or Helix return placed the cursor instead.
+    private func keep(_ p: ScreenPlace) {
+        guard diffCursor == p.stop.key else { return }
+        let k = stopIndex[p.stop.key] != nil ? p.stop.key
+            : p.line.flatMap { stopNear(path: p.stop.path, line: $0) } ?? landing(file: p.stop.path) ?? stops.first?.key
+        guard let k else { return }
+        if word?.key == p.stop.key, k != p.stop.key || stops[stopIndex[k]!].row != p.stop.row { word = nil }
+        if k != p.stop.key { setCursor(k, focus: false) }
+        if let row = p.row, diffWindow != nil {
+            anchor(row: row)
+            cursorMoved &+= 1
+        }
+    }
+
     /// Move the type trees to this tip (and the diff's base) while it's read, so the first K is warm.
     private func prepareTypes() {
         guard let app, let t = target, !tip.isEmpty else { return }
@@ -593,8 +825,14 @@ public final class ReviewPageState: ShipHost {
         let path = app.transport.atRepo(repo, "/node?branch=\(name.uriComponent)")
         Task { @MainActor [weak self] in
             defer { self?.loading.remove(key) }
-            guard let self, let d = try? await app.transport.getJSON(path, as: NodePayload.self) else { return }
-            self.cache[key] = d
+            let d: NodePayload
+            do { d = try await app.transport.getJSON(path, as: NodePayload.self) } catch {
+                // the page may have moved here while this was in flight: its sync() waited on this read
+                self?.failed(key, error, app)
+                return
+            }
+            guard let self else { return }
+            self.put(key, d)
             // the page may have moved here while this was in flight, and sync() skips a key that's loading
             if self.keyOf == key, self.payload?.key != key { self.land(key, d) }
         }
@@ -635,12 +873,20 @@ public final class ReviewPageState: ShipHost {
         let here = commitScope.map { commitFiles?.sha == $0 } ?? (payload?.key == keyOf)
         if !waiting, here, let k = stopFiles.first.flatMap(landing(file:)) { setCursor(k, focus: false) }
         guard let sha = commitScope, commitFiles?.sha != sha, let app else { return }
+        commitErr = nil
         let ends = ReviewLine.ends(sha)
         let path = repoPath("/commit-diff?sha=\(ends.to.uriComponent)" + (ends.from.map { "&from=\($0.uriComponent)" } ?? ""))
         Task { @MainActor [weak self] in
             struct CommitDiff: Decodable { var sha: String?; var files: [NodeFile] }
-            guard let got = try? await app.transport.getJSON(path, as: CommitDiff.self), let self, self.commitScope == sha else { return }
+            let got: CommitDiff
+            do { got = try await app.transport.getJSON(path, as: CommitDiff.self) } catch {
+                guard let self, self.commitScope == sha else { return }
+                self.commitErr = (sha, String(describing: error))
+                return self.dropHeldKey(app)
+            }
+            guard let self, self.commitScope == sha else { return }
             self.commitFiles = (sha, got.files)
+            defer { app.runner.releaseHeld() }
             if self.pendingCursor?.id == self.id || self.pendingLoc?.id == self.id { return self.settleCursor() }
             if let k = self.stopFiles.first.flatMap(self.landing(file:)) { self.setCursor(k, focus: false) }
         }
@@ -955,11 +1201,14 @@ public final class ReviewPageState: ShipHost {
     /// Put the cursor on a flagged change: on its block when the diff still has it, else the nearest
     /// line to where it was; on a page still loading, once its diff is here.
     public func land(flag f: Flag) {
-        if diffHere, let k = stopOf(block: f.key, in: f.path) ?? stopNear(path: f.path, line: f.line) {
-            pendingFlag = nil
+        if diffHere, let k = stopOf(block: f.key, in: f.path) ?? (diffStale ? nil : stopNear(path: f.path, line: f.line)) {
+            // on an older read the flag lands again, by its block, on the current one
+            pendingFlag = diffStale ? (id, f) : nil
+            flagShownAt = diffStale ? k : nil
             return setCursor(k)
         }
         pendingFlag = (id, f)
+        flagShownAt = nil
     }
 
     /// The mark on the change a stop sits on; nil off a changed line.
@@ -1202,7 +1451,7 @@ public final class ReviewPageState: ShipHost {
     public func open(_ l: Loc) {
         if l.sha.isEmpty, l.repo == target?.repo {
             // an address's line: on the tip, which only the diff can place
-            guard diffHere, !tip.isEmpty else { pendingLoc = (id, l); return }
+            guard diffHere, !diffStale, !tip.isEmpty else { pendingLoc = (id, l); return }
             var at = l
             at.sha = tip
             return open(at)
@@ -1249,7 +1498,8 @@ public final class ReviewPageState: ShipHost {
             let line = (w === focusedWindow ? RowKey.id(app?.selected, "s").flatMap(Int.init) : nil) ?? s.line
             return Loc(repo: s.repo, sha: s.sha, path: s.path, line: line, asFile: true)
         }
-        guard let h = here, h.kind == .line, let row = h.row, let t = target else { return nil }
+        // an older read's line numbers aren't the tip's
+        guard !diffStale, let h = here, h.kind == .line, let row = h.row, let t = target else { return nil }
         return Loc(repo: t.repo, sha: tip, path: h.path, line: row.right?.new ?? row.left?.old ?? 1, diffKey: h.key)
     }
 
@@ -1272,6 +1522,10 @@ public extension ReviewPageState {
         return commitScope.flatMap { $0.contains("..") ? nil : $0 }
     }
     func clearMark() { mark = nil }
+    func lineRead(_ side: Side) -> String? {
+        guard diffCurrent else { return nil }
+        return side == .right ? "\(id)@\(at)" : "\(id)@\(at)|\(baseSha)"
+    }
 
     func beginEdit(_ app: AppModel) -> Bool {
         guard helix == nil, diffCurrent, app.pane?.id == reviewDiffPane, !scoped, integration == nil, let t = target,

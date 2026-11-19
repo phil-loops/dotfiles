@@ -364,14 +364,25 @@ private struct DiffPane: View {
 
     var body: some View {
         let pg = ReviewPageState.of(app)
-        let loaded = pg.payload != nil && app.store.ready
+        let loaded = pg.diffHere && app.store.ready
         Group {
             if !loaded && !pg.scoped {
                 Text(pg.loadErr.map { "couldn't read the diff — \($0)" } ?? "reading the diff…").foregroundStyle(theme.inkFaint).padding(16)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             } else if pg.files.isEmpty {
-                Text(pg.scoped ? "reading the commit…" : empty).foregroundStyle(theme.inkFaint).padding(16)
+                Text(pg.scoped ? pg.readErr.map { "couldn't read the commit — \($0)" } ?? "reading the commit…" : pg.diffStale ? older(pg) : empty).foregroundStyle(theme.inkFaint).padding(16)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            } else if pg.diffStale {
+                canvas(pg).opacity(0.5)
+                    .overlay(alignment: .topTrailing) {
+                        Text(older(pg)).font(Theme.text(11)).foregroundStyle(pg.loadErr == nil ? theme.inkDim : theme.ink)
+                            .lineLimit(1).truncationMode(.middle)
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(theme.vellumRaise)
+                            .padding(6)
+                            .allowsHitTesting(false)
+                            .explains("review|older", "the diff as last read here, shown while the current one is read · keys that act on its lines wait for it")
+                    }
             } else {
                 canvas(pg)
             }
@@ -379,6 +390,12 @@ private struct DiffPane: View {
         .paneRing(reviewDiffPane)
         .overlay(alignment: .topLeading) { pop(pg) }
         .overlay(alignment: .topLeading) { helix(pg) }
+    }
+
+    /// What an older read of the diff says while it shows: still reading, or why the current one isn't here.
+    private func older(_ pg: ReviewPageState) -> String {
+        pg.loadErr.map { "couldn't read the current diff — \($0) · this is the previous one" }
+            ?? "the previous diff — reading the current one…"
     }
 
     /// Helix over the diff: `o` covers it all; `i` starts where the split puts the new half, so the

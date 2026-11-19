@@ -75,6 +75,8 @@ public final class ShipState {
 
     // ── the review ledger ──
     private var composers: [String: ShipComposer] = [:]
+    /// What each line comment's line was read at when it was started (`ShipHost.lineRead`), by composer key.
+    @ObservationIgnored var composerReads: [String: String] = [:]
     private var composerVersions: [String: Int] = [:]
     private var textVersions: [String: Int] = [:]
     @ObservationIgnored private weak var app: AppModel?

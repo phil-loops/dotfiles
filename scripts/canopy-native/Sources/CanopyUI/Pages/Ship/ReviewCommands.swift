@@ -157,6 +157,7 @@ enum ReviewCommands {
         }
         let compose = { (c: ShipComposer?) in
             guard let c else { throw Refusal("no line under the cursor") }
+            if case .line(_, _, let side, _, _, nil) = c, let read = ship.host.lineRead(side) { ship.composerReads[c.key] = read }
             ship.composer = c
             weakApp?.beginInsert(composeField, lines: .multi)
         }
@@ -174,6 +175,23 @@ enum ReviewCommands {
                                if let r = arg as? ShipLineRange, let s = ship.host as? StandInHost { s.range = r }
                                try compose(lineComposer())
                            }))
+
+        /// A comment's line is the code it was started on: once what that line was read at changes (the
+        /// tip, or for an old-side line its base too) it neither posts nor quotes it; starting it again on
+        /// the line brings its words back.
+        let onItsRead = { (c: ShipComposer) throws in
+            switch c {
+            case .line(_, _, let side, _, _, nil):
+                guard let now = ship.host.lineRead(side) else { throw Refusal("reading the current diff — this comment waits for it") }
+                if let then = ship.composerReads[c.key], then != now {
+                    throw Refusal("this comment's line changed since it was started · comment on the line again — the words come back")
+                }
+            case .reply:
+                if ship.host.lineRead(.right) == nil { throw Refusal("reading the current diff — this comment waits for it") }
+            case .line:
+                return
+            }
+        }
 
         let unpushedNamed = { (body: String) -> [String] in Ledger.unpushedIn(body, conv()?.unpushed ?? []) }
 
@@ -196,6 +214,7 @@ enum ReviewCommands {
             guard let c = ship.composer, let id = page(), let d = draft() else { return nil }
             let body = ship.text(c.key).trimmingCharacters(in: .whitespacesAndNewlines)
             if body.isEmpty { throw Refusal("write something first") }
+            if case .line = c { try onItsRead(c) }
             let waits = unpushedNamed(body)
             let key = Ledger.rid()
             let state = waits.isEmpty ? (send ? "sending" : "draft") : "waiting"
@@ -287,6 +306,7 @@ enum ReviewCommands {
             available: { _ in ship.composer != nil && !noting() },
             local: { _, _ in
                 guard let app = weakApp, let c = ship.composer else { return }
+                try onItsRead(c)
                 var lines: [String] = []
                 switch c {
                 case .line(_, let path, _, let line, let startLine, _):

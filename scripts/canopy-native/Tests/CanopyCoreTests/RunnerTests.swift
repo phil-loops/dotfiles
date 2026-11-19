@@ -80,6 +80,26 @@ final class Ctx: CommandContext {
         #expect(effects == 2 && counted == 1)
     }
 
+    @Test func aGateHoldsAKeyAndARoutedHoldForgetsTheRowItNamed() throws {
+        let (runner, _, ctx) = try setup()
+        var ran: [String?] = []
+        var ready = false
+        runner.registry.register(Command(id: "g.act", title: "Act", scope: .row, local: { t, _ in ran.append(t) }))
+        runner.registry.register(Command(id: "g.open", title: "Open", scope: .global, route: { _ in RouteTo("g.act", target: "row-then") }))
+        runner.gate = { cmd in if cmd.id == "g.act", !ready { throw Hold("not yet") } }
+        runner.dispatch("g.act", via: .key, target: "named")
+        #expect(runner.held?.id == "g.act" && runner.held?.target == "named" && runner.note == "not yet" && ran.isEmpty)
+        runner.dispatch("g.open", via: .key)
+        #expect(runner.held?.id == "g.act" && runner.held?.target == nil, "a routed hold re-reads its row when it runs")
+        ctx.targets[.row] = "row-now"
+        ready = true
+        runner.releaseHeld()
+        #expect(ran == ["row-now"])
+        runner.gate = { _ in throw Refusal("no") }
+        runner.dispatch("g.act", via: .key)
+        #expect(runner.held == nil && runner.note == "no" && ran.count == 1)
+    }
+
     @Test func aConfirmLastsOneCommandAndRetNeverArmsOrSends() throws {
         let (runner, _, ctx) = try setup()
         let r = runner.registry
