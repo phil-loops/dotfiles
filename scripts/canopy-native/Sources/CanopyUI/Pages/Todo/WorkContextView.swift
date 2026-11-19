@@ -123,10 +123,15 @@ struct WorkInProgressView: View {
         app.store.rawAll("chat").values.compactMap { try? JSONValue.object($0).decode(WorkContext.Chat.self) }
     }
 
-    /// Live chats no dot shows.
+    /// Chats no dot shows that did something lately; a stale one is never listed.
     @MainActor static func noDot(_ app: AppModel) -> [WorkContext.Chat] {
         let onDots = Set(listedViews(app).flatMap { $0.chats.map(\.id) })
-        return WorkContext.onNoWork(chats(app), onDots: onDots)
+        return WorkContext.onNoWork(chats(app), onDots: onDots, now: app.forestModel.now.timeIntervalSince1970)
+    }
+
+    /// The work pane's rows: each in-progress item, then the one line for chats on no branch.
+    @MainActor static func rows(_ app: AppModel) -> [String] {
+        items(app).map { RowKey.todo($0.id) } + (noDot(app).isEmpty ? [] : [RowKey.looseChats])
     }
 
     /// The rest: work no listed branch carries, so it keeps its own line at the top.
@@ -149,54 +154,64 @@ struct WorkInProgressView: View {
                         .font(Theme.text(12)).foregroundStyle(theme.inkFaint)
                         .padding(.leading, 44).padding(.vertical, 8)
                 }
+                // one line each: the title and who holds it; its next step and latest direction are ↵ away, on the item
                 ForEach(items, id: \.id) { item in
                     CursorRow(pane: "work", key: RowKey.todo(item.id)) { on in
-                        VStack(alignment: .leading, spacing: 3) {
-                            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                                Text(item.title).font(Theme.display(15)).foregroundStyle(on ? theme.goldLeaf : theme.ink).lineLimit(1)
-                                Spacer(minLength: 0)
-                                Text(WorkContext.workedBy(item, app.store)).font(Theme.text(11)).foregroundStyle(theme.inkFaint).fixedSize()
-                            }
-                            if let now = WorkContext.doingNow(item) {
-                                Text("→ \(now)").font(Theme.text(12)).foregroundStyle(theme.inkDim).lineLimit(on ? 3 : 1)
-                            }
-                            if WorkContext.direction(item) != nil || item.work != nil { WorkInputView(item: item, lines: 1) }
+                        HStack(alignment: .firstTextBaseline, spacing: 12) {
+                            Text(item.title).font(Theme.display(15)).foregroundStyle(on ? theme.goldLeaf : theme.ink).lineLimit(1)
+                            Spacer(minLength: 0)
+                            Text(WorkContext.workedBy(item, app.store)).font(Theme.text(11)).foregroundStyle(theme.inkFaint).fixedSize()
                         }
+                        .help(WorkContext.doingNow(item).map { "next: \($0)" } ?? item.title)
                         .padding(.leading, 44).padding(.trailing, 16).padding(.vertical, 6)
                     }
                     .labelTarget(pane: "work", key: RowKey.todo(item.id), title: item.title)
                 }
-                UnboundChatsList(chats: Self.noDot(app))
+                LooseChatsLine(chats: Self.noDot(app))
             }
             .cursorMarks("work").paneRing("work").padding(.bottom, 22)
         }
     }
 }
 
-/// Live chats on no branch: where each stands, never a guess at what it's doing (rounds 27–28).
-struct UnboundChatsList: View {
+/// Chats on no branch: one quiet line that ↵ (or a click) opens into where each stands, never a guess at what
+/// it's doing (rounds 27–28). A chat idle past `WorkContext.staleAfter` isn't counted or listed.
+struct LooseChatsLine: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme
     let chats: [WorkContext.Chat]
 
     var body: some View {
         if !chats.isEmpty {
+            let open = app.forestModel.showLooseChats
             TimelineView(.periodic(from: .now, by: 30)) { ctx in
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("On no branch · \(chats.count)").font(Theme.text(11)).foregroundStyle(theme.inkFaint)
-                    ForEach(chats, id: \.id) { c in
-                        HStack(spacing: 10) {
-                            ChatButton(chat: c) {
-                                Text(WorkContext.whereItStands(c, now: ctx.date.timeIntervalSince1970)).foregroundStyle(theme.inkDim).lineLimit(1)
+                    CursorRow(pane: "work", key: RowKey.looseChats) { on in
+                        Button { app.runner.dispatch("chats.loose.toggle", via: .click) } label: {
+                            Text("\(open ? "▾" : "▸") \(WorkContext.looseLine(chats, now: ctx.date.timeIntervalSince1970))")
+                                .font(Theme.text(11)).foregroundStyle(on ? theme.goldLeaf : theme.inkFaint)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Claude Code chats that edited, committed or bound to no listed branch, active in the last two hours")
+                        .padding(.leading, 44).padding(.trailing, 16).padding(.vertical, 4)
+                    }
+                    .labelTarget(pane: "work", key: RowKey.looseChats, title: "chats on no branch", run: RouteTo("chats.loose.toggle"))
+                    if open {
+                        ForEach(chats, id: \.id) { c in
+                            HStack(spacing: 10) {
+                                ChatButton(chat: c) {
+                                    Text(WorkContext.whereItStands(c, now: ctx.date.timeIntervalSince1970)).foregroundStyle(theme.inkDim).lineLimit(1)
+                                }
+                                Button("bind…") { app.runner.dispatch("chat.bind", via: .click, arg: c) }
+                                    .buttonStyle(.plain).font(Theme.text(11)).foregroundStyle(theme.inkFaint)
+                                    .help("bind this chat to a branch's work")
                             }
-                            Button("bind…") { app.runner.dispatch("chat.bind", via: .click, arg: c) }
-                                .buttonStyle(.plain).font(Theme.text(11)).foregroundStyle(theme.inkFaint)
-                                .help("bind this chat to a branch's work")
+                            .padding(.leading, 58).padding(.trailing, 16)
                         }
                     }
                 }
-                .help("live Claude Code chats that edited or committed on no listed branch in the last two hours")
-                .padding(.leading, 44).padding(.trailing, 16).padding(.top, 10)
+                .padding(.top, 6)
             }
         }
     }
@@ -216,32 +231,36 @@ struct ChatButton<Label: View>: View {
     }
 }
 
-/// The chats on a branch, apart from who is assigned its items (rounds 27–28).
-struct BranchChatsLine: View {
+/// A forest's chats, each once, on the forest's own line (rounds 27–28): its id and whether it's live, its evidence
+/// branch by branch on hover. A chat the forest's situation already names isn't said twice; × hides a chat that only
+/// evidence put on the forest, from every branch it put it on, until it acts there again.
+struct ForestChats: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme
-    let branch: Branch
-    let chats: [WorkContext.Chat]
+    let f: ForestView
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 30)) { ctx in
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text("◌").foregroundStyle(theme.goldLeaf)
-                Text(leaf(branch.name)).foregroundStyle(theme.ink).fixedSize()
-                ForEach(chats, id: \.id) { c in
-                    ChatButton(chat: c) { Text(WorkContext.chatLabel(c, on: branch.id, now: ctx.date.timeIntervalSince1970)).foregroundStyle(theme.inkDim) }
-                    if WorkContext.inferred(c, on: branch.id) {
-                        Button("×") { app.runner.dispatch("chat.dismiss", via: .click, target: branch.id, arg: c.id) }
-                            .buttonStyle(.plain).foregroundStyle(theme.inkFaint)
-                            .help("this chat isn't on this branch — hide it until it edits or commits here again")
+        let chats = WorkContext.onForest(f.branches)
+        if !chats.isEmpty {
+            TimelineView(.periodic(from: .now, by: 30)) { ctx in
+                let now = ctx.date.timeIntervalSince1970
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    ForEach(chats, id: \.id) { c in
+                        if let label = WorkContext.forestChatLabel(c, says: f.says, now: now) {
+                            ChatButton(chat: c) { Text(label).font(Theme.text(11)).foregroundStyle(theme.inkFaint) }
+                                .help(WorkContext.forestChatEvidence(c, f.branches, now: now))
+                            let inferred = f.branches.filter { $0.chats.contains { $0.id == c.id } && WorkContext.inferred(c, on: $0.b.id) }
+                            if !inferred.isEmpty {
+                                Button("×") { for v in inferred { app.runner.dispatch("chat.dismiss", via: .click, target: v.b.id, arg: c.id) } }
+                                    .buttonStyle(.plain).font(Theme.text(11)).foregroundStyle(theme.inkFaint)
+                                    .help("this chat isn't on this forest — hide it until it edits or commits here again")
+                            }
+                        }
                     }
                 }
-                Spacer(minLength: 0)
+                .fixedSize()
             }
-            .font(Theme.text(12))
         }
-        .help("the Claude Code chats on this branch: each one edited or committed here lately, or is bound to its work")
-        .padding(.leading, 44).padding(.trailing, 16).padding(.vertical, 2)
     }
 }
 

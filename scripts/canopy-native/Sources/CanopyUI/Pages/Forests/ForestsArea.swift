@@ -27,13 +27,13 @@ struct ForestsSurface: SurfaceProvider {
 
     func panes(_ app: AppModel) -> [Pane] {
         var panes = [Pane(id: "main", rows: rows(app), row: 1)]
-        let work = WorkInProgressView.items(app).map { RowKey.todo($0.id) }
-        if WorkInProgressView.visible(app) { panes.append(Pane(id: "work", title: "in progress", rows: work, row: 0)) }
+        if WorkInProgressView.visible(app) { panes.append(Pane(id: "work", title: "in progress", rows: WorkInProgressView.rows(app), row: 0)) }
         return panes
     }
 
     func primary(for row: String, _ app: AppModel) -> RouteTo? {
         if let id = RowKey.id(row, "t") { return RouteTo("todo.show", arg: id) }
+        if row == RowKey.looseChats { return RouteTo("chats.loose.toggle") }
         return ForestNav.primary(for: row, app)
     }
 
@@ -56,6 +56,7 @@ struct ForestsSurface: SurfaceProvider {
         if let id = RowKey.id(row, "t"), let t = app.store.trackerItem(id) { return "\(t.title) \(WorkContext.status(t))" }
         if let id = RowKey.id(row, "b"), let b = app.store.view(Branch.self, id) { return "\(leaf(b.name)) \(b.description)" }
         if let r = app.forestModel.reviewRequest(row) { return "#\(r.number) \(r.title)" }
+        if row == RowKey.looseChats { return "chats on no branch" }
         return app.guessTitle(row)
     }
 }
@@ -78,6 +79,7 @@ struct ForestSurface: SurfaceProvider {
 
     func primary(for row: String, _ app: AppModel) -> RouteTo? {
         if let id = RowKey.id(row, "t") { return RouteTo("todo.show", arg: id) }
+        if row == RowKey.looseChats { return RouteTo("chats.loose.toggle") }
         return ForestNav.primary(for: row, app)
     }
 

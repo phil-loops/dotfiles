@@ -268,6 +268,9 @@ enum ProjectCommands {
             available: { _ in !m.readyOnly },
             local: { _, _ in m.showArchive.toggle() }))
         r.register(Command(
+            id: "chats.loose.toggle", title: "Open or fold the chats on no branch", scope: .forests,
+            local: { _, _ in m.showLooseChats.toggle() }))
+        r.register(Command(
             id: "forest.launch", title: "Launch the whole forest", scope: .project, leader: LocalKey(",l"), label: "launch", v1: ["launch"],
             available: { id in !(m.forest(id)?.unopened.isEmpty ?? true) },
             local: { [unowned app] id, _ in
