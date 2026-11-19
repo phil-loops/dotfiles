@@ -1,5 +1,7 @@
 import CanopyCore
+import AppKit
 import Foundation
+import SwiftUI
 import Testing
 @testable import CanopyUI
 
@@ -378,7 +380,7 @@ import Testing
         #expect(WorkContext.chatsLine([acting], on: "r:c", now: 1000) == "chat eeeeeeee live · edited 1m ago", "its latest action there, in words")
         #expect(WorkContext.chatLabel(byItem, on: "r:b", now: 1100) == "chat bbbbbbbb idle · bound")
         let onDots = Set(on.values.flatMap { $0.map(\.id) })
-        #expect(WorkContext.onNoWork([byBranch, byItem, acting, loose, unknown], onDots: onDots).map(\.id) == ["cccccccc-3", "dddddddd-4"])
+        #expect(WorkContext.onNoWork([byBranch, byItem, acting, loose, unknown], onDots: onDots, now: 1000).map(\.id) == ["cccccccc-3", "dddddddd-4"])
     }
 
     @Test func focusingAChatRunsClaudeJumpWithItsFullId() throws {
@@ -399,8 +401,73 @@ import Testing
         typealias C = WorkContext.Chat
         let loose = C(id: "bbbbbbbb-2", works: [], generation: 0, pane: nil, activeAt: 1000, at: .init(repo: "loops-wt-2", branch: "feat/x"))
         let unread = C(id: "cccccccc-3", works: nil, generation: 0, pane: nil, activeAt: 0, at: .init(repo: ".dotfiles", branch: ""))
-        #expect(WorkContext.onNoWork([unread, loose], onDots: []) == [loose, unread], "most recent first")
+        #expect(WorkContext.onNoWork([unread, loose], onDots: [], now: 1100) == [loose, unread], "most recent first")
         #expect(WorkContext.whereItStands(loose, now: 1100) == "chat bbbbbbbb live · in loops-wt-2 · feat/x")
         #expect(WorkContext.whereItStands(unread, now: 1100) == "chat cccccccc idle · in .dotfiles · binding unreadable")
     }
+}
+
+/// The home, one line per forest (cut-the-home-page-down-to-one-line-per-forest-name-purpose-i).
+@MainActor @Suite(.serialized) struct HomeOneLineTests {
+    func chat(_ id: String, activeAt: Double, acted: [(String, String, Double)] = [], at: (String, String)? = nil) -> [String: Any] {
+        var c: [String: Any] = ["id": id, "works": [], "generation": 0, "pane": "%1", "activeAt": activeAt,
+                                "acted": acted.map { ["branch": $0.0, "how": $0.1, "at": $0.2] }]
+        if let at { c["at"] = ["repo": at.0, "branch": at.1] }
+        return c
+    }
+
+    @Test func aStaleChatOnNoBranchIsNeverListedOrCounted() {
+        let now = world().forestModel.now.timeIntervalSince1970
+        let app = world(chats: [
+            "aaaaaaaa-1": chat("aaaaaaaa-1", activeAt: now - 60, at: (".dotfiles", "main")),
+            "bbbbbbbb-2": chat("bbbbbbbb-2", activeAt: now - 145 * 3600, at: ("loops", "")),
+        ])
+        #expect(WorkInProgressView.noDot(app).map(\.id) == ["aaaaaaaa-1"], "145h without a tool call is stale")
+        #expect(WorkContext.looseLine(WorkInProgressView.noDot(app), now: now) == "1 chat on no branch · 1 live")
+    }
+
+    @Test func chatsOnNoBranchAreOneRowThatReturnOpens() {
+        let now = world().forestModel.now.timeIntervalSince1970
+        let app = world(chats: ["aaaaaaaa-1": chat("aaaaaaaa-1", activeAt: now - 600), "cccccccc-3": chat("cccccccc-3", activeAt: now - 60)])
+        #expect(app.panes.map(\.id) == ["main", "work"])
+        #expect(app.panes.last?.rows == [RowKey.looseChats], "one row for every chat on no branch, never a row each")
+        #expect(WorkContext.looseLine(WorkInProgressView.noDot(app), now: now) == "2 chats on no branch · 1 live")
+        app.keys.handle("C-w"); app.keys.handle("k")
+        #expect(app.pane?.id == "work" && app.selected == RowKey.looseChats)
+        #expect(!app.forestModel.showLooseChats)
+        app.keys.handle("ret")
+        #expect(app.forestModel.showLooseChats, "↵ opens the list")
+        app.keys.handle("ret")
+        #expect(!app.forestModel.showLooseChats, "and folds it again")
+    }
+
+    @Test func aForestSaysItsChatOnceAndGrowsNoLineForIt() throws {
+        let now = world().forestModel.now.timeIntervalSince1970
+        let app = world(chats: ["59fa0cc0-1": chat("59fa0cc0-1", activeAt: now - 30,
+                                                   acted: [("r:a", "commit", now - 180), ("r:c", "commit", now - 180), ("r:d", "edit", now - 60)])])
+        let f = try #require(app.forestModel.forests()["r:tree"])
+        #expect(f.branches.filter { !$0.chats.isEmpty }.count == 3, "the chat acted on three of its branches")
+        #expect(WorkContext.onForest(f.branches).map(\.id) == ["59fa0cc0-1"], "the forest names it once")
+        #expect(ForestsPage.workLines(f, [:]).isEmpty, "a chat alone puts no line under the forest")
+        #expect(WorkContext.forestChatEvidence(f.branches[0].chats[0], f.branches, now: now) == "committed 3m ago on a · committed 3m ago on c · edited 1m ago on d")
+        let c = f.branches[0].chats[0]
+        #expect(WorkContext.forestChatLabel(c, says: "push 2", now: now) == "chat 59fa0cc0 live")
+        #expect(WorkContext.forestChatLabel(c, says: "chat 59fa0cc0 is on it", now: now) == nil, "never said twice on one line")
+    }
+
+    @Test func anInProgressRowIsOneLineWhateverItsStepsAndDirection() {
+        func height(_ body: String) -> CGFloat {
+            var t = WorkContextNavigationTests().item("Cut the home down"); t["id"] = "home"; t["body"] = body
+            let app = world(todo: ["home": t])
+            _ = NSApplication.shared
+            let host = NSHostingView(rootView: WorkInProgressView().environment(app))
+            host.frame = NSRect(x: 0, y: 0, width: 900, height: 600)
+            host.layoutSubtreeIfNeeded()
+            return host.fittingSize.height
+        }
+        let bare = height("plain notes")
+        let full = height(WorkContextTests.body(notes: "## Next steps\n\n- drop the second line of every in-progress card"))
+        #expect(full == bare, "the next step and the latest direction are ↵ away, not a second line (\(bare) vs \(full))")
+    }
+
 }

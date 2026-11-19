@@ -107,6 +107,8 @@ public enum RowKey {
     /// an open PR awaiting my review, by number
     public static func reviewRequest(_ number: Int) -> String { "r:\(number)" }
     public static func todo(_ id: String) -> String { "t:\(id)" }
+    /// the home's one line for chats on no branch
+    public static let looseChats = "u:chats"
     public static func landed(_ id: String) -> String { "d:\(id)" }
     public static func server(_ id: String) -> String { "m:\(id)" }
     /// a Machine queue row: a ticket by its id, or un-queued heavy work by its pid ("o:<pid>")

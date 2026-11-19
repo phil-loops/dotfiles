@@ -295,10 +295,39 @@ struct WorkContext {
         return out
     }
 
-    /// Live chats no dot shows: they acted on no listed branch lately and aren't bound to one.
-    static func onNoWork(_ chats: [Chat], onDots: Set<String>) -> [Chat] {
-        chats.filter { !onDots.contains($0.id) }
+    /// A chat on no branch that did nothing this long is stale: the home never lists it (the ACTED_WITHIN window).
+    static let staleAfter: Double = 7200
+
+    /// Chats no dot shows that did something lately: they acted on no listed branch and aren't bound to one.
+    static func onNoWork(_ chats: [Chat], onDots: Set<String>, now: Double) -> [Chat] {
+        chats.filter { !onDots.contains($0.id) && now - $0.activeAt < staleAfter }
             .sorted { $0.activeAt == $1.activeAt ? $0.id < $1.id : $0.activeAt > $1.activeAt }
+    }
+
+    /// The home's one quiet line for them: how many, and how many are live.
+    static func looseLine(_ chats: [Chat], now: Double) -> String {
+        let live = chats.filter { Self.live($0, now: now) }.count
+        return "\(chats.count) chat\(chats.count == 1 ? "" : "s") on no branch" + (live > 0 ? " · \(live) live" : "")
+    }
+
+    /// The chats on a forest's branches, each once, newest first — what its one line names.
+    static func onForest(_ branches: [BranchView]) -> [Chat] {
+        var seen = Set<String>(), out: [Chat] = []
+        for v in branches { for c in v.chats where seen.insert(c.id).inserted { out.append(c) } }
+        return out.sorted { $0.activeAt == $1.activeAt ? $0.id < $1.id : $0.activeAt > $1.activeAt }
+    }
+
+    /// The forest line's chat words, or nil where its situation already names the chat ("chat 59fa0cc0 is on it").
+    static func forestChatLabel(_ c: Chat, says: String, now: Double) -> String? {
+        let name = "chat \(c.id.prefix(8))"
+        return says.contains(name) ? nil : "\(name) \(live(c, now: now) ? "live" : "idle")"
+    }
+
+    /// Where a chat is in a forest, branch by branch, in words: what its hover says.
+    static func forestChatEvidence(_ c: Chat, _ branches: [BranchView], now: Double) -> String {
+        branches.filter { $0.chats.contains { $0.id == c.id } }
+            .map { "\(evidence(c, on: $0.b.id, now: now)) on \(leaf($0.b.name))" }
+            .joined(separator: " · ")
     }
 
     /// What puts a chat on a branch, in words: its latest action there, else its binding (round 28, P2).

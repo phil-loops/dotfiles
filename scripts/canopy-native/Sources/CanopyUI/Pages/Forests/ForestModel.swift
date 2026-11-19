@@ -65,6 +65,8 @@ public final class ForestModel {
 
     // ── ui.ts ──
     public var showArchive = false
+    /// the home's chats-on-no-branch line, opened into its list
+    public var showLooseChats = false
     /// closed forests shown in the archive fold (display only — their state stays until archived)
     public var shelved: Set<String> = []
     /// forests whose last PR just landed: the "canopy closed" moment before they fold away

@@ -123,12 +123,10 @@ struct ForestsPage: View {
                     Text("empty").foregroundStyle(theme.inkFaint).padding(.leading, 44).padding(.vertical, 8)
                 }
                 ForEach(views, id: \.p.id) { f in
+                    // one line per forest: its chats ride that line; a branch gets its own line only for its own work in
+                    // progress, and the forest's tracker context is on the forest's page
                     ForestRowView(f: f, nameWidth: nameWidth, cursor: cursor == RowKey.project(f.p.id), selected: selection.contains(RowKey.project(f.p.id)))
-                    ForEach(f.branches.filter { working[$0.b.id] != nil || !$0.chats.isEmpty }, id: \.b.id) { v in
-                        ForEach(working[v.b.id] ?? [], id: \.id) { item in BranchWorkLine(branch: v.b, item: item) }
-                        if !v.chats.isEmpty { BranchChatsLine(branch: v.b, chats: v.chats) }
-                    }
-                    WorkContextView(subject: .forest(f.p.id), compact: true).padding(.leading, 44).padding(.trailing, 16)
+                    ForEach(Self.workLines(f, working), id: \.item.id) { l in BranchWorkLine(branch: l.branch, item: l.item) }
                     if m.launching == f.p.id { LaunchLine(f: f) }
                     let ids = m.readyOnly ? f.ready : m.expanded.contains(f.p.id) ? f.branches : []
                     ForEach(ids, id: \.b.id) { v in
@@ -138,6 +136,11 @@ struct ForestsPage: View {
             }
             .padding(.bottom, 28)
         }
+    }
+
+    /// The lines under a forest's row: one per item of work in progress on one of its branches, in merge order.
+    static func workLines(_ f: ForestView, _ working: [String: [TodoItem]]) -> [(branch: Branch, item: TodoItem)] {
+        f.branches.flatMap { v in (working[v.b.id] ?? []).map { (v.b, $0) } }
     }
 
     private func divergedKey(_ fs: [String: ForestView]) -> String {
@@ -278,10 +281,11 @@ private struct ForestRowView: View {
                     .explains("forest|line|\(p.id)", RowName(word: "the line", meaning: p.summaryBy == "phil" ? "your words for this forest"
                         : "\(p.summaryBy == "claude" ? "Claude's draft" : "its first branch's") · \(app.registry.keyOf("project.describe.edit")) writes your own"))
             }
-            // the forest's one line — its most urgent branch's situation — and, under the cursor, its counts
+            // the forest's one line — its most urgent branch's situation, the chats on it — and, under the cursor, its counts
             if !f.closed && !f.says.isEmpty {
                 Text(f.says).font(Theme.text(11)).foregroundStyle(f.move == .yours && f.p.state == .focus ? theme.ink : theme.inkFaint).lineLimit(1).fixedSize()
             }
+            if !f.closed { ForestChats(f: f) }
             if cursor, !meta(verdict).isEmpty { Text(meta(verdict)).font(Theme.text(11)).foregroundStyle(theme.inkFaint).fixedSize() }
             if !f.closed && !f.branches.isEmpty {
                 // one dot per branch in merge order: landed, ready to act on, still in the works; ringed while work is in progress on it
@@ -295,7 +299,7 @@ private struct ForestRowView: View {
                 }
                 .fixedSize()
                 .frame(minWidth: 60, alignment: .trailing)
-                .explains("forest|dots|\(p.id)", RowName(word: "● ● ●", meaning: "one dot per branch in merge order: green has landed, gold is ready for you, faint is still in the works; a ring marks work in progress or a chat bound to it, named on the lines below"))
+                .explains("forest|dots|\(p.id)", RowName(word: "● ● ●", meaning: "one dot per branch in merge order: green has landed, gold is ready for you, faint is still in the works; a ring marks work in progress or a chat on it: the chat is named on this line, the work on the line below"))
             }
         }
         .frame(height: 30)
