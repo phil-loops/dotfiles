@@ -490,3 +490,37 @@ Remaining limits: commits made through `commit-tree` or a foreign hook leave no 
 
 `record-branch-edits` (presence `acted`), `serve-chat-actions` (each chat's `acted`, two-hour window, usage-log tail), `draw-chat-actions` (rings and evidence words; the no-branch list holds every chat no dot shows), the three fixes above, and `dismiss-chat-link` (`/chat-dismiss`, Phil's click). Tests: `test-session-presence.py`, `test-chats.py`, `WorkContextTests`, `ChatBindTests`.
 
+
+## Round 29: the home says whose move it is, in words
+
+Phil, looking at the home: "this UI is not usable". Five idle chats led the page by hex id. One chat's id showed eight times. Four workbench forests waited on him outside "your move · 1". One forest's right edge was a sentence long enough to cut off its own description, and another's was sixteen dots. Each part followed a rule from an earlier round. Together they buried the one question the home answers.
+
+### Principles
+
+1. **The home answers "what is my next move, and where".** Forests group by whose move it is, across focus and the workbench. Focus orders forests within a group and is never a group of its own.
+2. **A forest is one line, and its right edge has a fixed shape**: the next step (a verb and a count, or who holds it) in a bounded column, then `landed/total`. Nothing on it grows with the forest or with a branch name.
+3. **Things are named by what they are to Phil, not by an id.** A chat is "Claude". Its id lives in the hover and on the detail pages, where telling two chats apart matters.
+4. **Each fact is said once on the page.**
+5. **What needs nothing from Phil sits below what does**: work in progress elsewhere, chats on no branch, the archive. A quiet thing never leads the page.
+6. **An unknown is not a home fact.** A read that isn't in yet says nothing on the home. The detail page states it.
+7. **A correction shows where Phil is looking.** A chat's dismiss appears on the row under the cursor, not as a glyph on every row.
+
+### Enforcers, against HEAD
+
+| Principle | Enforcer at HEAD | Gap |
+| --- | --- | --- |
+| 1 | `ForestModel.focusGroups` groups focus only; the workbench is one flat section | **Broken**: a workbench forest at your move reads as "workbench" |
+| 2 | `ShipRules.fold` joins "· N more for you · N moving"; `says` names the catch-up target; one dot per branch | **Broken**: unbounded on both counts |
+| 3 | `says` and `forestChatLabel` print `chat <8 hex>`; `whereItStands` too | **Broken** |
+| 4 | `forestChatLabel` skips a chat the line already names | Holds for one chat; two chats repeat "live/idle" per chat |
+| 5 | `WorkInProgressView` draws first on the home | **Broken**: chats on no branch lead the page |
+| 6 | The work context (`WorkContextView`) is drawn only on forest, branch and todo pages | Holds |
+| 7 | `ForestChats` draws `×` on every row with an inferred chat | **Broken** |
+
+### Encoding order
+
+1. `group-home-by-move`: `ForestModel.moveGroups` over focus then workbench. `homeRows` and the page read it, and the workbench section goes.
+2. `bound-forest-line`: `fold` says the first step and "· N more". The page gives that text a bounded column with the full line on hover, and `landed/total` replaces the dots.
+3. `name-chats-claude`: the situation, the forest's chat words and the loose list say "Claude", with the id on hover.
+4. `quiet-below`: the in-progress and loose-chats pane draws after the forests, before the archive.
+5. `dismiss-under-cursor`: the forest row shows `×` only under the cursor.

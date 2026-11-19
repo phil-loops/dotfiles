@@ -115,19 +115,14 @@ public enum Move: String, Sendable, CaseIterable {
 }
 
 extension ShipRules {
-    /// A forest's place and its one line: the first branch (in merge order) at the most urgent move, and who holds the rest.
+    /// A forest's place and its one line: the first branch (in merge order) at the most urgent move, and how many more
+    /// share that move — one step, never a list (round 29, P2); the branches' own lines say the rest.
     public static func fold(_ branches: [(st: Stand, says: String)]) -> (move: Move, says: String) {
         let live = branches.filter { !$0.st.done }
         guard !live.isEmpty else { return (branches.isEmpty ? .waiting : .done, branches.isEmpty ? "no branches" : "every branch landed") }
         let move = live.map { Move.of($0.st.actor) }.min { Move.allCases.firstIndex(of: $0)! < Move.allCases.firstIndex(of: $1)! }!
         let at = live.filter { Move.of($0.st.actor) == move }
-        var words = [at[0].says + (at.count > 1 ? " · \(at.count - 1) more for you" : "")]
-        if move != .yours { words = [at.map(\.says).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }.joined(separator: " · ")] }
-        else {
-            let others = live.filter { Move.of($0.st.actor) == .moving }.count
-            if others > 0 { words.append("\(others) moving") }
-        }
-        return (move, words.joined(separator: " · "))
+        return (move, at[0].says + (at.count > 1 ? " · \(at.count - 1) more" : ""))
     }
 }
 
@@ -295,7 +290,7 @@ public enum ShipRules {
     public static func says(_ st: Stand, _ b: Branch, _ pr: Pr?) -> String {
         switch st.actor {
         case .you:
-            if let a = st.awaiting { return "\(a.hasPrefix("chat ") ? a : "its agent") finished a turn — your reply" }
+            if let a = st.awaiting { return a.hasPrefix("chat ") ? "reply to Claude" : "reply to its agent" }
             switch st.next {
             case "branch.push.arm": return "push \(b.pushed == .ahead ? b.ahead : b.commits)"
             case "branch.conform": return "take origin's copy"
@@ -310,7 +305,7 @@ public enum ShipRules {
                 if pr?.draft == true { return "a draft — mark it ready" }
                 return "your move"
             }
-        case .agent(let a): return a.hasPrefix("chat ") ? "\(a) is on it" : "an agent is on it"
+        case .agent(let a): return a.hasPrefix("chat ") ? "Claude is on it" : "an agent is on it"
         case .gates: return "gates running"
         case .ci: return "waiting on required checks"
         case .reviewer: return "waiting on review"

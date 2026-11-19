@@ -94,9 +94,9 @@ private let NOW = iso("2026-10-22T18:00:00Z") // Thu 11:00 PT
     @Test func aForestSitsAtItsMostUrgentBranch() {
         func st(_ a: Actor, done: Bool = false) -> Stand { Stand(ship: .local, action: nil, waiting: [], held: false, actor: a, next: nil, done: done) }
         let mixed = ShipRules.fold([(st(.reviewer), "waiting on review"), (st(.you), "push 2"), (st(.gates), "gates running"), (st(.you), "merge it")])
-        #expect(mixed.move == .yours && mixed.says == "push 2 · 1 more for you · 2 moving")
+        #expect(mixed.move == .yours && mixed.says == "push 2 · 1 more", "one step and a count — the others' moves are their own lines")
         let others = ShipRules.fold([(st(.ci), "waiting on required checks"), (st(.reviewer), "waiting on review"), (st(.reviewer), "waiting on review")])
-        #expect(others.move == .moving && others.says == "waiting on required checks · waiting on review")
+        #expect(others.move == .moving && others.says == "waiting on required checks · 2 more", "never a list that grows with the forest")
         #expect(ShipRules.fold([(st(.building), "being built"), (st(.nobody, done: true), "landed")]).move == .waiting)
         #expect(ShipRules.fold([(st(.nobody, done: true), "landed")]).move == .done)
     }
@@ -213,7 +213,7 @@ private let NOW = iso("2026-10-22T18:00:00Z") // Thu 11:00 PT
 /// A small world: two focus forests (the first a fork: a → b, a → c, c → d), one on the workbench,
 /// one archived, one whose every PR landed.
 @MainActor
-func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = false, chats: [String: Any] = [:]) -> AppModel {
+func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = false, chats: [String: Any] = [:], branchOver: [String: [String: Any]] = [:]) -> AppModel {
     var c = AppConfig()
     c.route = route
     let a = testApp(config: c, port: 1)
@@ -224,7 +224,7 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = f
     func branch(_ name: String, _ proj: String, order: Int, parent: String? = nil, _ over: [String: Any] = [:]) -> (String, [String: Any]) {
         var o = brObj(["id": "r:\(name)", "name": name, "project": "r:\(proj)", "order": order, "description": "\(name) does it",
                        "parent": parent ?? "main", "parentId": parent.map { "r:\($0)" } as Any? ?? NSNull()])
-        for (k, v) in over { o[k] = v }
+        for (k, v) in over.merging(branchOver[name] ?? [:], uniquingKeysWith: { $1 }) { o[k] = v }
         return ("r:\(name)", o)
     }
     let projects = Dictionary(uniqueKeysWithValues: [
@@ -297,6 +297,16 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = f
         #expect(a.rows == ["p:r:tree", "p:r:solo", "p:r:bench", "p:r:done", "p:r:old"])
         #expect(ForestNav.primary(for: "p:r:old", a)?.id == "forest.page", "ret opens an archived forest; restoring is its own key")
         #expect(ForestNav.primary(for: "p:r:done", a)?.id == "forest.page")
+    }
+
+    /// Round 29, P1: the home groups by whose move it is across focus and the workbench, focus first inside a group —
+    /// a workbench forest waiting on you sits above a focus forest that's still being built.
+    @Test func aWorkbenchForestAtYourMoveSitsWithYourMoves() {
+        let a = world(branchOver: ["s": ["gates": "none"], "w": ["gates": "green"]])
+        a.forestModel.syncClosings()
+        #expect(a.forestModel.moveGroups().map { "\($0.move.title): \($0.projects.map(\.name).joined(separator: ","))" }
+                == ["your move: tree,bench", "waiting: solo"])
+        #expect(a.rows == ["p:r:tree", "p:r:bench", "p:r:solo"], "rows follow the groups the page draws")
     }
 
     /// Phil 2026-11-18: when all the work is done, the forest archives itself — through the archive

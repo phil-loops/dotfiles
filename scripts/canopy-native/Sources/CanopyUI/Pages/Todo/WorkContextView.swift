@@ -231,31 +231,32 @@ struct ChatButton<Label: View>: View {
     }
 }
 
-/// A forest's chats, each once, on the forest's own line (rounds 27–28): its id and whether it's live, its evidence
-/// branch by branch on hover. A chat the forest's situation already names isn't said twice; × hides a chat that only
-/// evidence put on the forest, from every branch it put it on, until it acts there again.
+/// A forest's chats in one phrase on the forest's own line (rounds 27–29): a click brings the newest one's pane forward,
+/// the hover names each by id with its evidence branch by branch. Under the cursor, × hides the chats only evidence put
+/// on the forest, from every branch it put them on, until they act there again.
 struct ForestChats: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme
     let f: ForestView
+    let cursor: Bool
 
     var body: some View {
         let chats = WorkContext.onForest(f.branches)
-        if !chats.isEmpty {
+        if let newest = chats.first {
             TimelineView(.periodic(from: .now, by: 30)) { ctx in
                 let now = ctx.date.timeIntervalSince1970
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    ForEach(chats, id: \.id) { c in
-                        if let label = WorkContext.forestChatLabel(c, says: f.says, now: now) {
-                            ChatButton(chat: c) { Text(label).font(Theme.text(11)).foregroundStyle(theme.inkFaint) }
-                                .help(WorkContext.forestChatEvidence(c, f.branches, now: now))
-                            let inferred = f.branches.filter { $0.chats.contains { $0.id == c.id } && WorkContext.inferred(c, on: $0.b.id) }
-                            if !inferred.isEmpty {
-                                Button("×") { for v in inferred { app.runner.dispatch("chat.dismiss", via: .click, target: v.b.id, arg: c.id) } }
-                                    .buttonStyle(.plain).font(Theme.text(11)).foregroundStyle(theme.inkFaint)
-                                    .help("this chat isn't on this forest — hide it until it edits or commits here again")
-                            }
-                        }
+                    if let label = WorkContext.forestChatsLabel(chats, says: f.says, now: now) {
+                        ChatButton(chat: newest) { Text(label).font(Theme.text(11)).foregroundStyle(theme.inkFaint) }
+                            .help(chats.map { "chat \($0.id.prefix(8)): \(WorkContext.forestChatEvidence($0, f.branches, now: now))" }.joined(separator: "\n"))
+                    }
+                    let inferred = chats.flatMap { c in
+                        f.branches.filter { $0.chats.contains { $0.id == c.id } && WorkContext.inferred(c, on: $0.b.id) }.map { (branch: $0.b.id, chat: c.id) }
+                    }
+                    if cursor && !inferred.isEmpty {
+                        Button("×") { for x in inferred { app.runner.dispatch("chat.dismiss", via: .click, target: x.branch, arg: x.chat) } }
+                            .buttonStyle(.plain).font(Theme.text(11)).foregroundStyle(theme.inkFaint)
+                            .help("these chats aren't on this forest — hide them until they edit or commit here again")
                     }
                 }
                 .fixedSize()

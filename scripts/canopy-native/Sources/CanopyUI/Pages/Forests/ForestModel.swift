@@ -230,11 +230,12 @@ public final class ForestModel {
         return s.landed.map { RowKey.landed($0.id) } + (s.inFlight + s.left).map { RowKey.branch($0.b.id) }
     }
 
-    /// The focus lane by whose move: each group keeps your hand order.
-    public func focusGroups() -> [(move: Move, projects: [Project])] {
+    /// Every live forest by whose move (round 29, P1): focus in your hand order, then the workbench by name, inside each.
+    public func moveGroups() -> [(move: Move, projects: [Project])] {
         let f = forests()
-        let focus = projects().focus
-        return Move.allCases.map { mv in (mv, focus.filter { (f[$0.id]?.move ?? .waiting) == mv }) }.filter { !$0.projects.isEmpty }
+        let p = projects()
+        let live = p.focus + p.workbench
+        return Move.allCases.map { mv in (mv, live.filter { (f[$0.id]?.move ?? .waiting) == mv }) }.filter { !$0.projects.isEmpty }
     }
 
     /// The home's rows: forests and the branches of open ones (or, filtered, only what's ready).
@@ -257,13 +258,14 @@ public final class ForestModel {
                 if expanded.contains(x.id) { out += (f[x.id]?.branches ?? []).map { RowKey.branch($0.b.id) } }
             }
         }
-        // the order ForestsPage draws: your move (then the PRs awaiting your review), moving, waiting, landed
-        for g in focusGroups() {
+        // the order ForestsPage draws: your move (then the PRs awaiting your review), moving, waiting, landed, the archive
+        let groups = moveGroups()
+        for g in groups {
             add(g.projects)
             if g.move == .yours { out += reviewRequests.map { RowKey.reviewRequest($0.number) } }
         }
-        if !focusGroups().contains(where: { $0.move == .yours }) { out += reviewRequests.map { RowKey.reviewRequest($0.number) } }
-        add(p.workbench + (showArchive ? p.archive : []))
+        if !groups.contains(where: { $0.move == .yours }) { out += reviewRequests.map { RowKey.reviewRequest($0.number) } }
+        add(showArchive ? p.archive : [])
         return out
     }
 

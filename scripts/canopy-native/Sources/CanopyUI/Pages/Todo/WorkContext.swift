@@ -317,10 +317,14 @@ struct WorkContext {
         return out.sorted { $0.activeAt == $1.activeAt ? $0.id < $1.id : $0.activeAt > $1.activeAt }
     }
 
-    /// The forest line's chat words, or nil where its situation already names the chat ("chat 59fa0cc0 is on it").
-    static func forestChatLabel(_ c: Chat, says: String, now: Double) -> String? {
-        let name = "chat \(c.id.prefix(8))"
-        return says.contains(name) ? nil : "\(name) \(live(c, now: now) ? "live" : "idle")"
+    /// The forest line's chat words, all its chats in one phrase (round 29, P3–P4): "Claude working", "2 chats · 1 working",
+    /// or nil where its situation already names the one chat ("Claude is on it"). Ids are the hover's.
+    static func forestChatsLabel(_ chats: [Chat], says: String, now: Double) -> String? {
+        guard let first = chats.first else { return nil }
+        let named = says.contains("Claude")
+        if chats.count == 1 { return named ? nil : "Claude \(live(first, now: now) ? "working" : "idle")" }
+        let working = chats.filter { live($0, now: now) }.count
+        return named || working == 0 ? "\(chats.count) chats" : "\(chats.count) chats · \(working) working"
     }
 
     /// Where a chat is in a forest, branch by branch, in words: what its hover says.
@@ -345,7 +349,7 @@ struct WorkContext {
 
     static func whereItStands(_ c: Chat, now: Double) -> String {
         let place = c.at.map { $0.branch.isEmpty ? $0.repo : "\($0.repo) · \($0.branch)" } ?? "place unknown"
-        return "chat \(c.id.prefix(8)) \(live(c, now: now) ? "live" : "idle") · in \(place)\(c.works == nil ? " · binding unreadable" : "")"
+        return "\(live(c, now: now) ? "working" : "idle") in \(place)\(c.works == nil ? " · binding unreadable" : "")"
     }
 
     static func chatsLine(_ chats: [Chat], on branch: String, now: Double) -> String {
@@ -358,7 +362,7 @@ struct WorkContext {
 
     /// The owner's short session id and the tracker's day, the facts a working line can state.
     @MainActor static func workedBy(_ item: TodoItem, _ store: Store) -> String {
-        let owner = store.rawView("todo", item.id)?["owner"]?.string.flatMap { $0.isEmpty ? nil : "session \($0)" }
+        let owner = store.rawView("todo", item.id)?["owner"]?.string.flatMap { $0.isEmpty ? nil : "Claude" }
         let since = day(item.updated).map { "updated \(String($0.dropFirst(5)))" }
         return [owner, since].compactMap { $0 }.joined(separator: " · ")
     }

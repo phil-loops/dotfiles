@@ -1,8 +1,8 @@
 import CanopyCore
 import SwiftUI
 
-/// Forests.tsx, the home: focus (hand-ordered), the workbench, and a quiet archive count. Each forest
-/// is one calm row that ↵ opens on its own page (the palette's "open or fold" unfolds its branch
+/// Forests.tsx, the home: every live forest grouped by whose move it is (focus first inside each), then the work
+/// elsewhere and a quiet archive count (round 29). Each forest is one calm row that ↵ opens on its own page (the palette's "open or fold" unfolds its branch
 /// spine inline, in merge order); each branch says where it stands in one glyph and word and does
 /// one thing on ↵. `, r` narrows it all to what's ready.
 struct ForestsPage: View {
@@ -28,7 +28,6 @@ struct ForestsPage: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         VStack(alignment: .leading, spacing: 0) {
-                            WorkInProgressView()
                             WindowLine(fs: fs, now: m.now)
                             if m.readyOnly {
                                 let n = fs.values.filter { $0.p.state != .archive }.reduce(0) { $0 + $1.ready.count }
@@ -41,21 +40,19 @@ struct ForestsPage: View {
                                     KeyHint(id: "ready.toggle")
                                 }
                                 .padding(.leading, 44).padding(.bottom, 20)
-                            }
-                            if m.readyOnly {
                                 section(.focus, p.focus, fs, working, nameWidth: nameWidth, cursor: cursor, selection: selection)
+                                section(.workbench, p.workbench, fs, working, nameWidth: nameWidth, cursor: cursor, selection: selection)
                             } else {
-                                // the focus lane by whose move, your hand order inside each; PRs awaiting your review are yours too
-                                let groups = m.focusGroups()
+                                // every live forest by whose move, focus first inside each; PRs awaiting your review are yours too
+                                let groups = m.moveGroups()
                                 ForEach(groups, id: \.move) { g in
                                     section(.focus, g.projects, fs, working, title: "\(g.move.title) · \(g.projects.count)", gold: g.move == .yours,
                                             nameWidth: nameWidth, cursor: cursor, selection: selection)
                                     if g.move == .yours { ReviewQueue(nameWidth: nameWidth, cursor: cursor, selection: selection) }
                                 }
                                 if !groups.contains(where: { $0.move == .yours }) { ReviewQueue(nameWidth: nameWidth, cursor: cursor, selection: selection) }
-                            }
-                            section(.workbench, p.workbench, fs, working, nameWidth: nameWidth, cursor: cursor, selection: selection)
-                            if !m.readyOnly {
+                                // what needs nothing from you sits below what does (round 29, P5)
+                                WorkInProgressView()
                                 if m.showArchive {
                                     section(.archive, p.archive, fs, working, nameWidth: nameWidth, cursor: cursor, selection: selection)
                                 } else if !p.archive.isEmpty {
@@ -281,25 +278,20 @@ private struct ForestRowView: View {
                     .explains("forest|line|\(p.id)", RowName(word: "the line", meaning: p.summaryBy == "phil" ? "your words for this forest"
                         : "\(p.summaryBy == "claude" ? "Claude's draft" : "its first branch's") · \(app.registry.keyOf("project.describe.edit")) writes your own"))
             }
-            // the forest's one line — its most urgent branch's situation, the chats on it — and, under the cursor, its counts
+            // the forest's one step, in a column that never grows (round 29, P2): the full line is on hover
             if !f.closed && !f.says.isEmpty {
-                Text(f.says).font(Theme.text(11)).foregroundStyle(f.move == .yours && f.p.state == .focus ? theme.ink : theme.inkFaint).lineLimit(1).fixedSize()
+                Text(f.says).font(Theme.text(11)).foregroundStyle(f.move == .yours ? theme.ink : theme.inkFaint)
+                    .lineLimit(1).truncationMode(.tail).frame(width: 220, alignment: .trailing).help(f.says)
             }
-            if !f.closed { ForestChats(f: f) }
+            Color.clear.frame(width: 120, height: 1)
+                .overlay(alignment: .leading) { if !f.closed { ForestChats(f: f, cursor: cursor) } }
             if cursor, !meta(verdict).isEmpty { Text(meta(verdict)).font(Theme.text(11)).foregroundStyle(theme.inkFaint).fixedSize() }
             if !f.closed && !f.branches.isEmpty {
-                // one dot per branch in merge order: landed, ready to act on, still in the works; ringed while work is in progress on it
-                HStack(spacing: 4) {
-                    ForEach(f.branches, id: \.b.id) { v in
-                        Circle().fill(v.st.ship == .landed ? theme.patina : v.st.ready ? theme.goldLeaf : theme.inkFaint.opacity(0.45))
-                            .frame(width: 6, height: 6)
-                            .overlay { if v.worked { Circle().stroke(theme.goldLeaf, lineWidth: 1.25).frame(width: 11, height: 11) } }
-                            .padding(.horizontal, v.worked ? 2.5 : 0)
-                    }
-                }
-                .fixedSize()
-                .frame(minWidth: 60, alignment: .trailing)
-                .explains("forest|dots|\(p.id)", RowName(word: "● ● ●", meaning: "one dot per branch in merge order: green has landed, gold is ready for you, faint is still in the works; a ring marks work in progress or a chat on it: the chat is named on this line, the work on the line below"))
+                let merging = f.branches.filter { $0.b.role != "proof" }
+                let landed = merging.filter { $0.st.ship == .landed }.count
+                Text("\(landed)/\(merging.count)").font(Theme.text(11)).monospacedDigit().foregroundStyle(theme.inkFaint)
+                    .frame(width: 40, alignment: .trailing)
+                    .explains("forest|count|\(p.id)", RowName(word: "\(landed)/\(merging.count)", meaning: "branches landed of the branches it merges"))
             }
         }
         .frame(height: 30)
@@ -309,7 +301,7 @@ private struct ForestRowView: View {
 
     private func meta(_ verdict: IntegrationVerdict?) -> String {
         if f.p.state == .archive || f.branches.isEmpty { return "" }
-        var parts = ["\(f.branches.count) branch\(f.branches.count == 1 ? "" : "es")"]
+        var parts: [String] = []
         if f.unopened.count > 1 { parts.append("\(f.unopened.count) without a PR") }
         if verdict?.state == .clean { parts.append("merges clean") } else if verdict?.state == .conflicts { parts.append("doesn't merge") }
         if let t = f.p.ticket { parts.append(t) }

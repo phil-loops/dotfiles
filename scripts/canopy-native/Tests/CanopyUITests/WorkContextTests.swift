@@ -402,8 +402,8 @@ import Testing
         let loose = C(id: "bbbbbbbb-2", works: [], generation: 0, pane: nil, activeAt: 1000, at: .init(repo: "loops-wt-2", branch: "feat/x"))
         let unread = C(id: "cccccccc-3", works: nil, generation: 0, pane: nil, activeAt: 0, at: .init(repo: ".dotfiles", branch: ""))
         #expect(WorkContext.onNoWork([unread, loose], onDots: [], now: 1100) == [loose, unread], "most recent first")
-        #expect(WorkContext.whereItStands(loose, now: 1100) == "chat bbbbbbbb live · in loops-wt-2 · feat/x")
-        #expect(WorkContext.whereItStands(unread, now: 1100) == "chat cccccccc idle · in .dotfiles · binding unreadable")
+        #expect(WorkContext.whereItStands(loose, now: 1100) == "working in loops-wt-2 · feat/x")
+        #expect(WorkContext.whereItStands(unread, now: 1100) == "idle in .dotfiles · binding unreadable")
     }
 }
 
@@ -451,8 +451,11 @@ import Testing
         #expect(ForestsPage.workLines(f, [:]).isEmpty, "a chat alone puts no line under the forest")
         #expect(WorkContext.forestChatEvidence(f.branches[0].chats[0], f.branches, now: now) == "committed 3m ago on a · committed 3m ago on c · edited 1m ago on d")
         let c = f.branches[0].chats[0]
-        #expect(WorkContext.forestChatLabel(c, says: "push 2", now: now) == "chat 59fa0cc0 live")
-        #expect(WorkContext.forestChatLabel(c, says: "chat 59fa0cc0 is on it", now: now) == nil, "never said twice on one line")
+        #expect(WorkContext.forestChatsLabel([c], says: "push 2", now: now) == "Claude working", "named by what it is, not its id")
+        #expect(WorkContext.forestChatsLabel([c], says: "Claude is on it", now: now) == nil, "never said twice on one line")
+        var idle = c; idle.id = "aaaaaaaa-2"; idle.activeAt = now - 600
+        #expect(WorkContext.forestChatsLabel([c, idle], says: "push 2", now: now) == "2 chats · 1 working", "two chats are one phrase")
+        #expect(WorkContext.forestChatsLabel([c, idle], says: "Claude is on it", now: now) == "2 chats")
     }
 
     @Test func anInProgressRowIsOneLineWhateverItsStepsAndDirection() {
