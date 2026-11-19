@@ -2,6 +2,7 @@
 """The server's branch-base record against a throwaway repo: a forward rebase by the sync path
 records the base it produced, and the reseat walk's cut point comes from stack-base's one rule
 (a record the child was rebased past is replaced, a parent rewritten backwards keeps it)."""
+import testenv  # noqa: F401,E402 — git here ignores the machine's config (testenv.py)
 import os
 import subprocess
 import sys

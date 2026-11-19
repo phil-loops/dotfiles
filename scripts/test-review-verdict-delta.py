@@ -3,6 +3,7 @@
 tip stands as "tree"; after main advances and the branch is rebased forward it stands as "delta"
 (the diff the reviewer read is byte-identical) and its flags still show; a finished run harvests
 across a forward rebase; a new commit lapses it; a run that recorded no delta never carries."""
+import testenv  # noqa: F401,E402 — git here ignores the machine's config (testenv.py)
 import json
 import os
 import subprocess

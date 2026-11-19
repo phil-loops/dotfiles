@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """srv/push.py's outgoing range: a stacked branch counts past its parent, a root past main or
 every remote, and a re-push past origin's copy — the pure range builder, then one real repo."""
+import testenv  # noqa: F401,E402 — git here ignores the machine's config (testenv.py)
 import os
 import subprocess
 import sys

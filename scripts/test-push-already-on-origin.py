@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """srv/push.py's already_on_origin: p on a branch origin already holds is a push that already
 happened, not a failure — true only when origin's copy is exactly the local tip."""
+import testenv  # noqa: F401,E402 — git here ignores the machine's config (testenv.py)
 import os
 import subprocess
 import sys

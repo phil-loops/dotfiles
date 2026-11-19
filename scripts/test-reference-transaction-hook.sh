@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+. "$(dirname "$0")/testenv.sh"   # git here ignores the machine's config
 # test-reference-transaction-hook.sh — hooks/loops-reference-transaction refuses any move of a
 # published branch (origin/<b> exists) that drops commits origin already has, for every tool and raw
 # git alike (2026-11-18: a raw rebase script rewrote cite-what-ses-saw, #11659). Fast-forwards,

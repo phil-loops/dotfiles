@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+. "$(dirname "$0")/testenv.sh"   # git here ignores the machine's config
 # test-stack-doctor-parent.sh — stack-doctor flags a branch whose stack-parent no longer exists
 # (2026-11-17: a merged parent was deleted with its children still naming it). A temp repo with
 # no remote: nothing is fetched or pushed.

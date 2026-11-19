@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+. "$(dirname "$0")/testenv.sh"   # git here ignores the machine's config
 # test-stack-reword.sh — throwaway-repo harness for scripts/stack-reword.
 # Builds main → a (3 commits) → b (1 commit) with forest config and a bare origin,
 # then asserts: trees never change, the target message changes, descendants reseat,

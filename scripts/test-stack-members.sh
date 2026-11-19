@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+. "$(dirname "$0")/testenv.sh"   # git here ignores the machine's config
 # test-stack-members.sh — a forest's members are the branches tagged into it (branch.<b>.stack-project),
 # the registry list is only their order, and stack-registry is its one checked, logged writer.
 # 2026-11-18: cite-what-ses-saw fell out of disable-evidence's registry (a re-add hit .git/config's

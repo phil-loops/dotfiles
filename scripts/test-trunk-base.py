@@ -2,6 +2,7 @@
 """One trunk spelling (srv/repostate.py trunk/diff_base): with local main behind origin's, a
 root branch's own diff and a commit stretch lit from main both start at origin's copy, so
 origin's newer commits never read as the branch's."""
+import testenv  # noqa: F401,E402 — git here ignores the machine's config (testenv.py)
 import json
 import os
 import subprocess

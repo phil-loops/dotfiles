@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Endpoint evidence: request scenes, path predictions, the JSON path diff and its findings (no server)."""
+import testenv  # noqa: F401,E402 — git here ignores the machine's config (testenv.py)
 import json
 import os
 import subprocess

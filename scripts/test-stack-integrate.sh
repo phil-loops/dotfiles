@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+. "$(dirname "$0")/testenv.sh"   # git here ignores the machine's config
 # test-stack-integrate.sh — throwaway-repo harness for scripts/stack-integrate.
 # The forest from goal-flip-converter (2026-11-17): base `a` edits a file and later
 # gets a fix elsewhere; `d` builds on a; `b` carries a's first commit (requires) and then

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+. "$(dirname "$0")/testenv.sh"   # git here ignores the machine's config
 # test-prepush-todo-guard.sh — exercise the TODO push guard in a throwaway repo.
 #
 # Builds a repo whose origin URL looks like the shared one, commits TODOs on a

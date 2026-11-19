@@ -3,6 +3,7 @@
 through the door on green, cancelled on red, on moved code, or by another ward; quiet when origin
 already has it. Temp repo for the records; the gates run, the verdict and the push are stand-ins, so
 nothing is spawned or pushed."""
+import testenv  # noqa: F401,E402 — git here ignores the machine's config (testenv.py)
 import contextlib
 import os
 import subprocess

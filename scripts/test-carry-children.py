@@ -3,6 +3,7 @@
 child catches up by a merge and is pushed through the door, an unpublished one is rebased, the
 walk goes on down, and a child whose push is refused stops only its own subtree. Temp repo; the
 push is a stand-in, so nothing is pushed or fetched."""
+import testenv  # noqa: F401,E402 — git here ignores the machine's config (testenv.py)
 import os
 import subprocess
 import sys

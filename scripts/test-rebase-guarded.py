@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """rebase-guarded / srv/rebaseguard.py: a canopy rebase killed with -9 mid-run is aborted by
 the next guarded run; a person's rebase in progress is never touched. Temp repos, no remote."""
+import testenv  # noqa: F401,E402 — git here ignores the machine's config (testenv.py)
 import os
 import signal
 import subprocess

@@ -2,6 +2,7 @@
 """srv/catchup.py: a chain falls behind from above and catches up top-down — published links by a
 catch-up merge (append-only, the parent's tip becomes an ancestor), unpublished links by a rebase.
 Temp repo; origin refs written with update-ref, so nothing is pushed or fetched."""
+import testenv  # noqa: F401,E402 — git here ignores the machine's config (testenv.py)
 import os
 import subprocess
 import sys

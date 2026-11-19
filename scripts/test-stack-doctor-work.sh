@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+. "$(dirname "$0")/testenv.sh"   # git here ignores the machine's config
 # test-stack-doctor-work.sh — stack-doctor --prune retires branch work whose branch is gone (DESIGN.md round 27, P6),
 # never an item's work, another repo's, or one a branch still names. A temp repo and journal; nothing fetched or pushed.
 set -u

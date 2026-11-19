@@ -2,6 +2,7 @@
 """stack-reshape (srv/reshape.py, tooling-doctor B5): each verb keeps refs and forest config
 consistent in one motion, never rewrites a published branch, and waits on the forest's lock.
 Runs the real CLI in a temp repo; origin's refs are written with update-ref, nothing is pushed."""
+import testenv  # noqa: F401,E402 — git here ignores the machine's config (testenv.py)
 import json
 import os
 import subprocess

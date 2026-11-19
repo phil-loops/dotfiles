@@ -2,6 +2,7 @@
 """test-review-threads — the branch page's review rules: following a thread's line from the PR head
 to the local tip, suggestion blocks, GitHub's PR shape, the fake GitHub, and the write guards.
 Run: ./test-review-threads"""
+import testenv  # noqa: F401,E402 — git here ignores the machine's config (testenv.py)
 import json
 import os
 import subprocess

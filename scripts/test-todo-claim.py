@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """canopy-todo claim records the forest branch it was claimed from as solved_by, so the home can mark that
 branch's dot. Runs against a temp tracker and a throwaway repo, never ~/.dotfiles/canopy/todo."""
+import testenv  # noqa: F401,E402 — git here ignores the machine's config (testenv.py)
 import os
 import subprocess
 import sys

@@ -5,6 +5,7 @@ Throwaway repo: `dep` adds x; `b` (parent main) carries dep's commit via `requir
 own_base must fold the carried commit into the base so the reviewed diff is y alone; a branch with
 no requires keeps its plain base.
 """
+import testenv  # noqa: F401,E402 — git here ignores the machine's config (testenv.py)
 import importlib.machinery
 import importlib.util
 import os

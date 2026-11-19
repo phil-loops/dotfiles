@@ -3,6 +3,7 @@
 already carries everything local has, local takes origin's copy (tooling-doctor P6/P7). Both of
 2026-11-17's GitHub rewrites, built as real commits — origin's refs are written with update-ref,
 so nothing is pushed or fetched."""
+import testenv  # noqa: F401,E402 — git here ignores the machine's config (testenv.py)
 import os
 import subprocess
 import sys

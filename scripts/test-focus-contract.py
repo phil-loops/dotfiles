@@ -2,6 +2,7 @@
 """srv/focus.py sheds landed members from every shown forest: a merged leaf goes, a merged parent
 under a live child stays, a busy one is held, an archived forest isn't touched, and a pass that
 dropped nothing isn't repeated until the forest changes. Runs the real stack-restack."""
+import testenv  # noqa: F401,E402 — git here ignores the machine's config (testenv.py)
 import os
 import subprocess
 import sys

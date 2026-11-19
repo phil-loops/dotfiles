@@ -2,6 +2,7 @@
 """test-second-reader — the second reader's pure parts and its server hook, no claude and no
 GitHub: answer parsing, note cleaning, the idempotency key, and when the hook queues a run.
 Run: ./test-second-reader"""
+import testenv  # noqa: F401,E402 — git here ignores the machine's config (testenv.py)
 import importlib.machinery
 import importlib.util
 import json

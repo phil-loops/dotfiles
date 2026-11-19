@@ -3,6 +3,7 @@
 advising — the door names what's red and lets it go — while a first push still needs them and a
 red squawk blocks either way. A temp repo; origin's refs are written with update-ref and the open
 PR set and the gate run are stand-ins, so nothing is pushed, fetched or asked of GitHub."""
+import testenv  # noqa: F401,E402 — git here ignores the machine's config (testenv.py)
 import os
 import subprocess
 import sys

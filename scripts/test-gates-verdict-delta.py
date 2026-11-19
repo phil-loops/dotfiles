@@ -3,6 +3,7 @@
 stands as "tree"; after main advances and the branch is rebased forward it stands as "delta"
 (the branch's own hunks are byte-identical); a new commit, or main landing inside a hunk's
 context, lapses it; a harvested green for an older tree carries no delta."""
+import testenv  # noqa: F401,E402 — git here ignores the machine's config (testenv.py)
 import os
 import subprocess
 import sys

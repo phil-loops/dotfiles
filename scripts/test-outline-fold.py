@@ -2,6 +2,7 @@
 """srv/outline.py's fold: a commit absorbed into the one below it — one commit with the upper's
 tree, the lower's author and both messages, the commits above rebuilt on it, the tip's tree
 unchanged (the gates verdict stands), and the same journal entry undone by /outline-undo."""
+import testenv  # noqa: F401,E402 — git here ignores the machine's config (testenv.py)
 import json
 import os
 import subprocess

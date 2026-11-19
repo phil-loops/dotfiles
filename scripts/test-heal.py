@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """srv/heal.py (stack-doctor --heal): pre-P1 leftovers are cleaned up and a person's own work is
 never touched. Temp repos; the "origin" is a hand-written remote-tracking ref, no remote, no push."""
+import testenv  # noqa: F401,E402 — git here ignores the machine's config (testenv.py)
 import json
 import os
 import subprocess

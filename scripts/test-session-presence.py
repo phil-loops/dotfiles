@@ -2,6 +2,7 @@
 """Presence is per conversation (DESIGN.md round 27, principle 5): a subagent's tool calls land on
 its parent's record, a new conversation in the same process (/clear, /resume) ends the previous
 one, and a record whose process is gone is reaped."""
+import testenv  # noqa: F401,E402 — git here ignores the machine's config (testenv.py)
 import json
 import os
 import subprocess

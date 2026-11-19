@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+. "$(dirname "$0")/testenv.sh"   # git here ignores the machine's config
 # test-stack-restack-hold.sh — a forest with two roots: --hold=<root> leaves that root and its
 # child where they are while the other root moves onto fresh main (focus sync holds a published
 # root instead of skipping the whole forest).

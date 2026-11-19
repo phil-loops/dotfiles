@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """srv/focus.py's sync decision with a published root: the restack runs with that root's subtree
 held while the other root moves; when only the held subtree is behind, the forest is skipped."""
+import testenv  # noqa: F401,E402 — git here ignores the machine's config (testenv.py)
 import os
 import subprocess
 import sys

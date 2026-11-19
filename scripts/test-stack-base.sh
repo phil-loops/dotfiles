@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+. "$(dirname "$0")/testenv.sh"   # git here ignores the machine's config
 # test-stack-base.sh — throwaway-repo harness for scripts/stack-base.
 # Asserts the recorded base wins only while it is still the branch's fork point: a branch
 # rebased forward past its recorded base gets the new fork point (a stale base would let a

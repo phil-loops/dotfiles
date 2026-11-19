@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+. "$(dirname "$0")/testenv.sh"   # git here ignores the machine's config
 # test-stack-restack-contract-only.sh — --contract-only drops the members that landed (a merged PR
 # whose head holds the tip) with nothing live on them, and moves nothing: a landed parent under an
 # unmerged child stays, a landed branch GitHub doesn't call merged stays, a held one stays.

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """srv/viewed.py against a throwaway git repo: viewed and flagged marks, unmarking across branches,
 version-1 migration, marks following `git branch -m`, and a deleted branch's marks pruned."""
+import testenv  # noqa: F401,E402 — git here ignores the machine's config (testenv.py)
 import json
 import os
 import subprocess

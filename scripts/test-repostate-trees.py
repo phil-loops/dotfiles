@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """srv/repostate.py tree lookups: a branch tip's tree reads every head in one spawn, a new
 snapshot (any config write) reads none, and only a moved tip pays again."""
+import testenv  # noqa: F401,E402 — git here ignores the machine's config (testenv.py)
 import os
 import subprocess
 import sys

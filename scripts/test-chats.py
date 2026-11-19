@@ -2,6 +2,7 @@
 """srv/chats.py (DESIGN.md round 27): each live chat with the work its binding names, matched by work
 id; an unbound chat reads unbound, an ended one is absent, an unreadable journal never reads unbound.
 A temp presence registry and journal; never ~/.claude/session-presence or the live journal."""
+import testenv  # noqa: F401,E402 — git here ignores the machine's config (testenv.py)
 import json
 import os
 import subprocess

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+. "$(dirname "$0")/testenv.sh"   # git here ignores the machine's config
 # test-stack-move-branch.sh — unpublished forest branches move in the object store, never by
 # borrowing a checkout (2026-11-18: a restack rebased inside Phil's main checkout twice, and inside
 # a stray checkout a gate run had re-created at a deleted path). stack-move-branch is the one mover;

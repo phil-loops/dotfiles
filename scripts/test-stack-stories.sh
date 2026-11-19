@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+. "$(dirname "$0")/testenv.sh"   # git here ignores the machine's config
 # test-stack-stories.sh — throwaway-repo harness for scripts/stack-stories.
 # Builds main → q → m (a two-branch forest), then asserts: each line starts from the branch's
 # description, a branch with only a legacy story shows it as the fallback, a filled line writes

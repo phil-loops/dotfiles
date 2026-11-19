@@ -1,4 +1,5 @@
 #!/bin/zsh
+. "$(dirname "$0")/testenv.sh"   # git here ignores the machine's config
 # test-stack-facts.sh — pin the invariants of the forest's self-description.
 #
 # Every one of these was verified BY HAND once and would otherwise rot silently. They are the
