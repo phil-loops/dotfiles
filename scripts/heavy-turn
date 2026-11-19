@@ -37,6 +37,13 @@ budget. A holder whose pid is gone is reaped on the next look, so a killed calle
 wedge the queue. A command run under a held slot exports HEAVY_TURN_HELD, and a nested
 heavy-turn inside it runs straight through — the outer slot already counts it.
 
+A granted command runs at nice HEAVY_TURN_NICE (10), and so does everything it starts: the slots
+cap how much heavy work runs, the nice keeps what does run from slowing what's interactive. Under
+two looping typechecks the viewer's /node build went from p50 2.2s / p90 4.0s to 0.95s / 1.1s
+(2026-11-18; idle 0.34s). Disk priority (taskpolicy -d utility) bought nothing on top, and never
+taskpolicy -b, which also throttles disk and pins to efficiency cores. --acquire holders start their
+own work and set their own priority.
+
 The budget shrinks to one slot while the box is under memory pressure (the kernel's
 kern.memorystatus_level, the number `memory_pressure` prints, below HEAVY_TURN_MEM_FLOOR,
 default 30%). The slots exist to keep heavy work out of swap, and two queued 5GB typechecks
@@ -49,7 +56,7 @@ granted, class, pid, wait s, run s (awake seconds: sleep is not counted), exit, 
 it take" outlives the process.
 
 Env: HEAVY_TURN_SLOTS (2), HEAVY_TURN_DIR (/tmp/heavy-turn), HEAVY_TURN_MEM_FLOOR (30),
-HEAVY_TURN_MAX_HOLD (1800),
+HEAVY_TURN_MAX_HOLD (1800), HEAVY_TURN_NICE (10; 0 runs at the caller's priority),
 HEAVY_TURN_JOURNAL, HEAVY_TURN_MEM_LEVEL (forces the measured level; tests).
 """
 import fcntl
@@ -67,6 +74,7 @@ ROOT = Path(os.environ.get("HEAVY_TURN_DIR", "/tmp/heavy-turn"))
 SLOTS = int(os.environ.get("HEAVY_TURN_SLOTS", "2"))
 MEM_FLOOR = int(os.environ.get("HEAVY_TURN_MEM_FLOOR", "30"))
 MAX_HOLD = float(os.environ.get("HEAVY_TURN_MAX_HOLD", "1800"))
+NICE = int(os.environ.get("HEAVY_TURN_NICE", "10"))
 JOURNAL = Path(os.environ.get("HEAVY_TURN_JOURNAL",
                               os.path.expanduser("~/.cache/heavy-turn/journal.tsv")))
 CLASS_CAPS = {"gates": 1, "clone": 1, "preview": 1, "review-warm": 1}
@@ -323,7 +331,7 @@ def run(cls, batch, cmd, key=None, unless=None):
             rc = "unneeded"
             return 0
         env = dict(os.environ, HEAVY_TURN_HELD=t["id"])
-        child = subprocess.Popen(cmd, env=env)
+        child = subprocess.Popen(cmd, env=env, preexec_fn=(lambda: os.nice(NICE)) if NICE else None)
         while True:
             try:
                 rc = child.wait()

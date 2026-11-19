@@ -3,7 +3,7 @@
 # Asserts: the slot budget caps concurrency, class caps hold, a killed holder is reaped,
 # interactive waiters go before batch ones, nested calls pass straight through,
 # --acquire/--release hold a slot for another pid, memory pressure shrinks the budget to one,
-# and every finished ticket lands in the journal.
+# every finished ticket lands in the journal, and a granted command runs niced.
 set -uo pipefail
 
 SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -229,7 +229,12 @@ sleep 0.5
 [[ ! -e "$WORK/second-long" ]] && ok "bound: an overstayer still holds its class cap" || bad "bound: an overstayer still holds its class cap" "second ran"
 wait
 
-# 15. the audit names a class that breaks either rule
+# 15. a granted command runs niced (default 10), and HEAVY_TURN_NICE=0 leaves it at the caller's
+base=$(ps -o nice= -p $$ | tr -d ' ')
+assert_eq "granted command runs at nice +10" "$((base + 10))" "$("$HT" -- sh -c 'ps -o nice= -p $$' | tr -d ' ')"
+assert_eq "HEAVY_TURN_NICE=0 keeps the caller's priority" "$base" "$(HEAVY_TURN_NICE=0 "$HT" -- sh -c 'ps -o nice= -p $$' | tr -d ' ')"
+
+# 16. the audit names a class that breaks either rule
 aj="$WORK/audit.tsv"; day=2020-01-01
 for i in $(seq 1 12); do printf '%sT00:00:%02d\tnoop batch\t1\t5\t1\t0\t90\t/\tx\n' $day $i; done > "$aj"
 printf '%sT01:00:00\tforever\t1\t0\t4000\t0\t90\t/\tx\n' $day >> "$aj"
