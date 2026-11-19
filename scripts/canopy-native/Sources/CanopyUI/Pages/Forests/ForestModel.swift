@@ -264,7 +264,9 @@ public final class ForestModel {
                 if expanded.contains(x.id) { out += (f[x.id]?.branches ?? []).map { RowKey.branch($0.b.id) } }
             }
         }
-        // the order ForestsPage draws: your move (then the PRs awaiting your review), moving, waiting, landed, the archive
+        // the order ForestsPage draws: open PRs, the PRs awaiting your review, then your move (with the chats owed a
+        // reply), moving, waiting, landed, the archive
+        out += openPRs().map { RowKey.openPR($0.b.id) } + reviewRequests.map { RowKey.reviewRequest($0.number) }
         let groups = moveGroups()
         for g in groups {
             add(g.projects)
@@ -295,8 +297,19 @@ public final class ForestModel {
         return replies().first { $0.chat.id == id }
     }
 
-    /// Your move's rows beyond its forests: the chats waiting on a reply, then the PRs awaiting your review.
-    func yoursExtras() -> [String] { replies().map { RowKey.reply($0.chat.id) } + reviewRequests.map { RowKey.reviewRequest($0.number) } }
+    /// Your move's rows beyond its forests: the chats waiting on a reply.
+    func yoursExtras() -> [String] { replies().map { RowKey.reply($0.chat.id) } }
+
+    /// Every open PR on a live forest, the home's first rows (round 29, P8): the ones waiting on you, then the ones
+    /// others hold, then those still waiting, drafts last; focus forests before the workbench, merge order inside.
+    func openPRs() -> [BranchView] {
+        let p = projects(), f = forests()
+        let all = (p.focus + p.workbench).compactMap { f[$0.id] }.filter { !$0.closed }.flatMap(\.branches).filter { $0.pr?.state == "OPEN" }
+        func rank(_ v: BranchView) -> Int { v.pr?.draft == true ? Move.allCases.count : Move.allCases.firstIndex(of: Move.of(v.st.actor))! }
+        return all.enumerated().sorted { rank($0.element) != rank($1.element) ? rank($0.element) < rank($1.element) : $0.offset < $1.offset }.map(\.element)
+    }
+
+    func openPR(_ row: String?) -> BranchView? { RowKey.id(row, "pr").flatMap { branchView($0) } }
 
     public func reviewRequest(_ row: String?) -> ReviewRequest? {
         guard let n = RowKey.id(row, "r").flatMap(Int.init) else { return nil }

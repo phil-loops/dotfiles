@@ -34,6 +34,7 @@ public enum Verb: String, CaseIterable, Sendable, Comparable {
     case nextFunction = "next-function", previousFunction = "previous-function", nextType = "next-type", previousType = "previous-type"
     case nextFinding = "next-finding", previousFinding = "previous-finding", firstChange = "first-change", lastChange = "last-change"
     case nextCommit = "next-commit", previousCommit = "previous-commit"
+    case nextOpenPR = "next-open-pr", previousOpenPR = "previous-open-pr"
     case repeatMotion = "repeat-motion", viewCenter = "view-center", viewTop = "view-top", viewBottom = "view-bottom"
     case searchWord = "search-word"
     case type, definition, typeDefinition = "type-definition", implementations, references, symbols
@@ -111,7 +112,7 @@ public enum KeySection: String, CaseIterable, Sendable {
              .nextFinding, .previousFinding, .firstFinding, .lastFinding, .nextGitHunk, .previousGitHunk,
              .firstChange, .lastChange, .nextCommit, .previousCommit:
             return .review
-        case .root, .tip, .nextSibling, .previousSibling, .out:
+        case .root, .tip, .nextSibling, .previousSibling, .out, .nextOpenPR, .previousOpenPR:
             return .stack
         case .wordsTitle, .wordsWhy, .wordsDescription, .wordsCommit, .wordsFold:
             return .words
@@ -220,6 +221,8 @@ public enum Verbs {
         v(.previousFinding, .nav, ["[ d"], "the previous finding (Helix [d)"),
         v(.lastFinding, .nav, ["] D"], "the last finding (Helix ]D)"),
         v(.firstFinding, .nav, ["[ D"], "the first finding (Helix [D)"),
+        v(.nextOpenPR, .nav, ["] o"], jump: true, "the next open PR's review, in the home's order — from any page"),
+        v(.previousOpenPR, .nav, ["[ o"], jump: true, "the previous open PR's review"),
         v(.nextCommit, .nav, ["] h"], jump: true, "the diff covers the next commit alone (from the whole branch: its first)"),
         v(.previousCommit, .nav, ["[ h"], jump: true, "the diff covers the previous commit alone (from the whole branch: its last)"),
         v(.firstChange, .nav, ["[ G"], jump: true, "the branch's first change (Helix [G)"),

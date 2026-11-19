@@ -247,7 +247,10 @@ enum KeyLessons {
             KeyStep("{previous-sibling} (or [ b) steps back.", [.previousSibling], check: { P.onBranch($0, S.header) }),
             KeyStep("{tip}: the tip of the stack.", [.tip], check: { P.onBranch($0, S.banner) }),
             KeyStep("{root}: the root of the stack.", [.root], check: { P.onBranch($0, S.root) }),
-        ], recap: "{next-sibling} / {previous-sibling}, and ] b / [ b, walk merge order — the only next. Ancestry is named, not stepped: {command} parent, child or requires; {root} and {tip} jump to the stack's ends. All are jumps."),
+            KeyStep("Open PRs lead the home. {next-open-pr} reviews the next one from any page — add-greeting is the one open here.",
+                    [.nextOpenPR], setup: P.review(S.header), check: { P.onBranch($0, S.root) }),
+            KeyStep("{previous-open-pr} walks them the other way; with one open, it's the same PR.", [.previousOpenPR], check: { P.onBranch($0, S.root) }),
+        ], recap: "{next-sibling} / {previous-sibling}, and ] b / [ b, walk merge order — the only next. Ancestry is named, not stepped: {command} parent, child or requires; {root} and {tip} jump to the stack's ends. {next-open-pr} / {previous-open-pr} walk the open PRs across every forest. All are jumps."),
 
         KeyLesson(id: "jumps", title: "Pickers and the jumplist", steps: [
             KeyStep("{branches} finds any branch, the ones you visit most first.", [.branches],

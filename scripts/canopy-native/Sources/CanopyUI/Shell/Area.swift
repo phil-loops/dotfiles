@@ -107,6 +107,8 @@ public enum RowKey {
     /// an open PR awaiting my review, by number
     public static func reviewRequest(_ number: Int) -> String { "r:\(number)" }
     public static func todo(_ id: String) -> String { "t:\(id)" }
+    /// one of your open PRs at the top of the home, by its branch id
+    public static func openPR(_ branch: String) -> String { "pr:\(branch)" }
     /// a chat whose turn ended and waits on your reply, by its session id
     public static func reply(_ chat: String) -> String { "y:\(chat)" }
     /// the home's one line for chats on no branch

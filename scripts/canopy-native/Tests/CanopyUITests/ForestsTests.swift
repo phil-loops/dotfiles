@@ -213,7 +213,7 @@ private let NOW = iso("2026-10-22T18:00:00Z") // Thu 11:00 PT
 /// A small world: two focus forests (the first a fork: a → b, a → c, c → d), one on the workbench,
 /// one archived, one whose every PR landed.
 @MainActor
-func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = false, chats: [String: Any] = [:], branchOver: [String: [String: Any]] = [:]) -> AppModel {
+func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = false, chats: [String: Any] = [:], branchOver: [String: [String: Any]] = [:], extraPRs: [String: Any] = [:]) -> AppModel {
     var c = AppConfig()
     c.route = route
     let a = testApp(config: c, port: 1)
@@ -249,7 +249,7 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = f
     let prs: [String: Any] = [
         "r:a": prObj(["id": "r:a", "branch": "a", "project": "r:tree", "number": 11]),
         "r:x": prObj(["id": "r:x", "branch": "x", "project": "r:done", "number": 12, "state": "MERGED"]),
-    ]
+    ].merging(extraPRs, uniquingKeysWith: { $1 })
     let landed: [String: Any] = ["r:tree#9": ["id": "r:tree#9", "repo": "r", "project": "r:tree", "pr": 9, "title": "feat: the ground", "branch": "z", "at": "2026-10-01T10:00:00Z"]]
     let state: [String: Any] = [
         "epoch": "e", "versions": ["git": 1, "remote": 1, "review": 1, "todo": 1],
@@ -292,9 +292,9 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = f
         let a = world()
         a.forestModel.syncClosings()
         // `done` is closed (every PR landed), so it's shelved into the archive fold
-        #expect(a.rows == ["p:r:tree", "p:r:solo", "p:r:bench"])
+        #expect(a.rows == ["pr:r:a", "p:r:tree", "p:r:solo", "p:r:bench"], "the open PR leads")
         a.keys.handle(","); a.keys.handle("a")
-        #expect(a.rows == ["p:r:tree", "p:r:solo", "p:r:bench", "p:r:done", "p:r:old"])
+        #expect(a.rows == ["pr:r:a", "p:r:tree", "p:r:solo", "p:r:bench", "p:r:done", "p:r:old"])
         #expect(ForestNav.primary(for: "p:r:old", a)?.id == "forest.page", "ret opens an archived forest; restoring is its own key")
         #expect(ForestNav.primary(for: "p:r:done", a)?.id == "forest.page")
     }
@@ -306,7 +306,28 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = f
         a.forestModel.syncClosings()
         #expect(a.forestModel.moveGroups().map { "\($0.move.title): \($0.projects.map(\.name).joined(separator: ","))" }
                 == ["your move: tree,bench", "waiting: solo"])
-        #expect(a.rows == ["p:r:tree", "p:r:bench", "p:r:solo"], "rows follow the groups the page draws")
+        #expect(a.rows == ["pr:r:a", "p:r:tree", "p:r:bench", "p:r:solo"], "rows follow what the page draws: open PRs, then the groups")
+    }
+
+    /// Round 29, P8: open PRs lead the home — yours to act on before the ones a reviewer holds, drafts last — and
+    /// ] o / [ o walk them from any page, wrapping, from a PR's own review to the next.
+    @Test func openPRsLeadTheHomeAndBracketOWalksThem() {
+        let a = world(branchOver: ["s": ["pushed": "synced"], "w": ["pushed": "synced"]], extraPRs: [
+            "r:w": prObj(["id": "r:w", "branch": "w", "project": "r:bench", "number": 14, "draft": true]),
+            "r:s": prObj(["id": "r:s", "branch": "s", "project": "r:solo", "number": 13, "review": "CHANGES_REQUESTED"]),
+        ])
+        a.forestModel.syncClosings()
+        #expect(Array(a.rows.prefix(3)) == ["pr:r:s", "pr:r:a", "pr:r:w"], "changes requested (yours), then a reviewer's, then the draft")
+        #expect(ForestNav.primary(for: "pr:r:a", a)?.id == "branch.open")
+        a.setCursor("pr:r:s")
+        a.keys.handle("]"); a.keys.handle("o")
+        #expect(a.router.route == .review(repo: "r", branch: "a"), "] o reviews the next open PR")
+        a.keys.handle("]"); a.keys.handle("o")
+        #expect(a.router.route == .review(repo: "r", branch: "w"), "from inside a review, the one after it")
+        a.keys.handle("]"); a.keys.handle("o")
+        #expect(a.router.route == .review(repo: "r", branch: "s"), "and wraps")
+        a.keys.handle("["); a.keys.handle("o")
+        #expect(a.router.route == .review(repo: "r", branch: "w"))
     }
 
     /// Phil 2026-11-18: when all the work is done, the forest archives itself — through the archive
@@ -340,14 +361,14 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = f
         #expect(a.forestModel.branchView("r:c")?.b.tip == "saved-in-helix")
     }
 
-    @Test func prsAwaitingReviewSitBetweenFocusAndTheWorkbenchAndRetOpensThem() {
+    @Test func prsAwaitingReviewFollowYourOpenPRsAndRetOpensThem() {
         let a = world()
         a.forestModel.syncClosings()
         a.forestModel.setReviewRequests([
             ReviewRequest(number: 7, title: "compile footer lmx", author: "someone", url: "https://github.com/o/r/pull/7", imported: true),
             ReviewRequest(number: 9, title: "fix a thing", author: "someone", url: "https://github.com/o/r/pull/9", imported: false),
         ])
-        #expect(a.rows == ["p:r:tree", "p:r:solo", "r:7", "r:9", "p:r:bench"])
+        #expect(a.rows == ["pr:r:a", "r:7", "r:9", "p:r:tree", "p:r:solo", "p:r:bench"], "your open PRs, then the ones awaiting you, then the forests")
         #expect(ForestNav.primary(for: "r:9", a)?.id == "forests.review.open")
         #expect(ForestNav.primary(for: "r:9", a)?.target == "9")
         #expect(a.provider?.title(for: "r:7", a) == "#7 compile footer lmx")
@@ -357,6 +378,7 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = f
 
     @Test func retOpensTheForestsPageAndMinusFoldsAnOpenSpine() {
         let a = world()
+        a.setCursor("p:r:tree")
         a.keys.handle("ret")
         #expect(a.router.route == .forest(repo: "r", project: "tree"), "one ret goes straight in")
         #expect(a.selected == "b:r:a")
@@ -369,6 +391,7 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = f
 
     @Test func retDoesTheRowsThing() {
         let a = world()
+        a.setCursor("p:r:tree")
         a.keys.handle("ret")
         #expect(a.router.route == .forest(repo: "r", project: "tree"))
         a.keys.handle("-")

@@ -43,14 +43,17 @@ struct ForestsPage: View {
                                 section(.focus, p.focus, fs, working, nameWidth: nameWidth, cursor: cursor, selection: selection)
                                 section(.workbench, p.workbench, fs, working, nameWidth: nameWidth, cursor: cursor, selection: selection)
                             } else {
-                                // every live forest by whose move, focus first inside each; chats owed a reply and PRs awaiting your review are yours too
+                                // open PRs lead (round 29, P8), then the PRs awaiting your review; then every live forest by whose
+                                // move, focus first inside each, with the chats owed a reply in your move
+                                OpenPRList(nameWidth: nameWidth, cursor: cursor, selection: selection)
+                                ReviewQueue(nameWidth: nameWidth, cursor: cursor, selection: selection)
                                 let groups = m.moveGroups()
                                 ForEach(groups, id: \.move) { g in
                                     section(.focus, g.projects, fs, working, title: "\(g.move.title) · \(g.projects.count + (g.move == .yours ? m.replies().count : 0))", gold: g.move == .yours,
                                             nameWidth: nameWidth, cursor: cursor, selection: selection)
-                                    if g.move == .yours { ReplyQueue(nameWidth: nameWidth, cursor: cursor, selection: selection); ReviewQueue(nameWidth: nameWidth, cursor: cursor, selection: selection) }
+                                    if g.move == .yours { ReplyQueue(nameWidth: nameWidth, cursor: cursor, selection: selection) }
                                 }
-                                if !groups.contains(where: { $0.move == .yours }) { ReplyQueue(nameWidth: nameWidth, cursor: cursor, selection: selection); ReviewQueue(nameWidth: nameWidth, cursor: cursor, selection: selection) }
+                                if !groups.contains(where: { $0.move == .yours }) { ReplyQueue(nameWidth: nameWidth, cursor: cursor, selection: selection) }
                                 // what needs nothing from you sits below what does (round 29, P5)
                                 WorkInProgressView()
                                 if m.showArchive {
@@ -155,6 +158,47 @@ struct ForestsPage: View {
         while !Task.isCancelled {
             m.now = Date()
             try? await Task.sleep(nanoseconds: 30_000_000_000)
+        }
+    }
+}
+
+/// Your open PRs, first on the home (round 29, P8): the PR's title and number, the forest it's in, where it stands in
+/// one step. ↵ reviews it; `] o` / `[ o` walk them from any page.
+private struct OpenPRList: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.theme) private var theme
+    let nameWidth: CGFloat
+    let cursor: String?
+    let selection: Set<String>
+
+    var body: some View {
+        let m = app.forestModel
+        let prs = m.openPRs()
+        if !prs.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("open PRs · \(prs.count)").font(Theme.text(11)).foregroundStyle(theme.goldLeaf)
+                    .padding(.leading, 44).padding(.bottom, 4)
+                ForEach(prs, id: \.b.id) { v in
+                    let key = RowKey.openPR(v.b.id)
+                    let here = cursor == key
+                    let yours = v.st.actor == .you && v.pr?.draft != true
+                    let says = v.pr?.draft == true ? "draft" : ShipRules.says(v.st, v.b, v.pr)
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        Text(v.st.ship.glyph).foregroundStyle(yours ? theme.goldLeaf : theme.inkFaint).frame(width: 12)
+                        Text(v.pr?.title ?? v.b.description).font(Theme.display(17))
+                            .foregroundStyle(here ? theme.goldLeaf : v.pr?.draft == true ? theme.inkDim : theme.ink)
+                            .lineLimit(1).truncationMode(.tail).frame(maxWidth: .infinity, alignment: .leading)
+                        Text(verbatim: "#\(v.pr?.number ?? 0) · \(m.forest(v.b.project)?.p.name ?? "")").font(Theme.text(11)).foregroundStyle(theme.inkFaint)
+                            .lineLimit(1).frame(width: 260, alignment: .leading)
+                        Text(says).font(Theme.text(11)).foregroundStyle(yours ? theme.ink : theme.inkFaint)
+                            .lineLimit(1).truncationMode(.tail).frame(width: 220, alignment: .trailing).help(says)
+                    }
+                    .frame(height: 30)
+                    .padding(.horizontal, 16)
+                    .rowChrome(key, cursor: here, selected: selection.contains(key))
+                }
+            }
+            .padding(.bottom, 28)
         }
     }
 }

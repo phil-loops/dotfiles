@@ -49,13 +49,14 @@ struct ForestsSurface: SurfaceProvider {
     func target(for scope: Scope, _ app: AppModel) -> String? {
         guard scope == .project else { return nil }
         if let p = RowKey.id(app.selected, "p") { return p }
-        return RowKey.id(app.selected, "b").flatMap { app.store.view(Branch.self, $0)?.project }
+        return (RowKey.id(app.selected, "b") ?? RowKey.id(app.selected, "pr")).flatMap { app.store.view(Branch.self, $0)?.project }
     }
 
     func title(for row: String, _ app: AppModel) -> String? {
         if let id = RowKey.id(row, "t"), let t = app.store.trackerItem(id) { return "\(t.title) \(WorkContext.status(t))" }
         if let id = RowKey.id(row, "b"), let b = app.store.view(Branch.self, id) { return "\(leaf(b.name)) \(b.description)" }
         if let r = app.forestModel.reviewRequest(row) { return "#\(r.number) \(r.title)" }
+        if let v = app.forestModel.openPR(row) { return "#\(v.pr?.number ?? 0) \(v.pr?.title ?? v.b.description)" }
         if let r = app.forestModel.reply(row) { return "reply to Claude · \(r.forests.map(\.name).joined(separator: ", "))" }
         if row == RowKey.looseChats { return "chats on no branch" }
         return app.guessTitle(row)

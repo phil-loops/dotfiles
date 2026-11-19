@@ -13,6 +13,7 @@ enum ForestNav {
             return m.branchView(id) == nil ? nil : RouteTo("branch.open", target: id)
         }
         if let r = m.reviewRequest(row) { return RouteTo("forests.review.open", target: String(r.number)) }
+        if let v = m.openPR(row) { return RouteTo("branch.open", target: v.b.id) }
         if let r = m.reply(row) { return RouteTo("chat.focus", arg: r.chat.id) }
         if let d = RowKey.id(row, "d"), app.store.view(Landed.self, d) != nil {
             return RouteTo("story.why", arg: RowKey.landed(d))
@@ -50,6 +51,22 @@ enum ForestNav {
         })
 
         let onBranch: (String?) -> Bool = { _ in here(app) != nil }
+
+        // ] o / [ o: the open PRs in the home's order, from any page — from one of them, the one after it
+        func hopPR(_ step: Int) throws {
+            let prs = m.openPRs()
+            guard !prs.isEmpty else { throw Refusal("no open PRs") }
+            var here: String?
+            if case .review(let repo, let branch, _) = app.router.route { here = prs.first { $0.b.repo == repo && $0.b.name == branch }?.b.id }
+            here = here ?? m.openPR(app.selected)?.b.id ?? RowKey.id(app.selected, "b")
+            let at = here.flatMap { id in prs.firstIndex { $0.b.id == id } }
+            let next = at.map { ($0 + step + prs.count) % prs.count } ?? (step > 0 ? 0 : prs.count - 1)
+            app.go(.review(repo: prs[next].b.repo, branch: prs[next].b.name))
+        }
+        r.register(Command(id: "forests.pr.next", title: "Review the next open PR", scope: .global, verb: .nextOpenPR, label: "open PR",
+                           pair: "forests.pr.prev", recordsJump: true, available: { _ in !m.openPRs().isEmpty }, local: { _, _ in try hopPR(1) }))
+        r.register(Command(id: "forests.pr.prev", title: "Review the previous open PR", scope: .global, verb: .previousOpenPR, label: "open PR",
+                           recordsJump: true, available: { _ in !m.openPRs().isEmpty }, local: { _, _ in try hopPR(-1) }))
 
         r.register(Command(
             id: "forest.branch.next", title: "Next branch in merge order", scope: .forest, verb: .nextSibling, label: "branch", pair: "forest.branch.prev",
@@ -181,6 +198,7 @@ enum ForestNav {
                 if let id = RowKey.id(row, "b"), let v = m.branchView(id) { return PickItem(label: v.b.name, text: v.b.description) }
                 if let id = RowKey.id(row, "p"), let p = app.store.view(Project.self, id) { return PickItem(label: p.name, text: p.summary) }
                 if let r = m.reviewRequest(row) { return PickItem(label: "#\(r.number)", text: r.title) }
+                if let v = m.openPR(row) { return PickItem(label: "#\(v.pr?.number ?? 0)", text: v.pr?.title ?? v.b.description) }
                 return PickItem(label: app.provider?.title(for: row, app) ?? row)
             }
             app.nav.pick(title, items) { i in app.jump { app.setCursor(rows[i]) } }

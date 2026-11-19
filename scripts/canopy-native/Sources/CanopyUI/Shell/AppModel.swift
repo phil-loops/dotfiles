@@ -440,6 +440,7 @@ public final class AppModel: CommandContext {
     public func guessTitle(_ row: String) -> String {
         if let id = RowKey.id(row, "b") { return store.view(Branch.self, id)?.name ?? id }
         if let id = RowKey.id(row, "p") { return store.view(Project.self, id)?.name ?? id }
+        if let id = RowKey.id(row, "pr") { return store.view(Branch.self, id)?.name ?? id }
         if let i = row.firstIndex(of: ":") { return String(row[row.index(after: i)...]) }
         return row
     }
