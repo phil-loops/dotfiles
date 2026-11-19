@@ -43,14 +43,14 @@ struct ForestsPage: View {
                                 section(.focus, p.focus, fs, working, nameWidth: nameWidth, cursor: cursor, selection: selection)
                                 section(.workbench, p.workbench, fs, working, nameWidth: nameWidth, cursor: cursor, selection: selection)
                             } else {
-                                // every live forest by whose move, focus first inside each; PRs awaiting your review are yours too
+                                // every live forest by whose move, focus first inside each; chats owed a reply and PRs awaiting your review are yours too
                                 let groups = m.moveGroups()
                                 ForEach(groups, id: \.move) { g in
-                                    section(.focus, g.projects, fs, working, title: "\(g.move.title) · \(g.projects.count)", gold: g.move == .yours,
+                                    section(.focus, g.projects, fs, working, title: "\(g.move.title) · \(g.projects.count + (g.move == .yours ? m.replies().count : 0))", gold: g.move == .yours,
                                             nameWidth: nameWidth, cursor: cursor, selection: selection)
-                                    if g.move == .yours { ReviewQueue(nameWidth: nameWidth, cursor: cursor, selection: selection) }
+                                    if g.move == .yours { ReplyQueue(nameWidth: nameWidth, cursor: cursor, selection: selection); ReviewQueue(nameWidth: nameWidth, cursor: cursor, selection: selection) }
                                 }
-                                if !groups.contains(where: { $0.move == .yours }) { ReviewQueue(nameWidth: nameWidth, cursor: cursor, selection: selection) }
+                                if !groups.contains(where: { $0.move == .yours }) { ReplyQueue(nameWidth: nameWidth, cursor: cursor, selection: selection); ReviewQueue(nameWidth: nameWidth, cursor: cursor, selection: selection) }
                                 // what needs nothing from you sits below what does (round 29, P5)
                                 WorkInProgressView()
                                 if m.showArchive {
@@ -155,6 +155,41 @@ struct ForestsPage: View {
         while !Task.isCancelled {
             m.now = Date()
             try? await Task.sleep(nanoseconds: 30_000_000_000)
+        }
+    }
+}
+
+/// Chats whose turn ended, each once with the forests it's on (round 29): ↵ brings its pane forward.
+private struct ReplyQueue: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.theme) private var theme
+    let nameWidth: CGFloat
+    let cursor: String?
+    let selection: Set<String>
+
+    var body: some View {
+        let replies = app.forestModel.replies()
+        if !replies.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(replies, id: \.chat.id) { r in
+                    let key = RowKey.reply(r.chat.id)
+                    let here = cursor == key
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        Text("").frame(width: 12)
+                        Text("reply to Claude").font(Theme.display(17)).foregroundStyle(here ? theme.goldLeaf : theme.ink)
+                            .lineLimit(1).frame(width: nameWidth, alignment: .leading)
+                        Text(r.forests.map(\.name).joined(separator: ", ")).foregroundStyle(theme.inkDim).lineLimit(1)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Text("idle \(WorkContext.ago(app.forestModel.now.timeIntervalSince1970 - r.chat.activeAt).replacingOccurrences(of: " ago", with: ""))")
+                            .font(Theme.text(11)).foregroundStyle(theme.inkFaint).fixedSize()
+                            .help("chat \(r.chat.id.prefix(8)) · ↵ brings its pane forward")
+                    }
+                    .frame(height: 30)
+                    .padding(.horizontal, 16)
+                    .rowChrome(key, cursor: here, selected: selection.contains(key))
+                }
+            }
+            .padding(.bottom, 28)
         }
     }
 }

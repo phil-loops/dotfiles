@@ -416,6 +416,20 @@ import Testing
         return c
     }
 
+    /// Round 29: one idle chat on two forests is one reply on the home, with both forests named; neither forest moves for it.
+    @Test func anIdleChatIsOneReplyNotOneMovePerForest() throws {
+        let now = world().forestModel.now.timeIntervalSince1970
+        let app = world(chats: ["c": chat("cafe0000-1", activeAt: now - 600, acted: [("r:c", "commit", now - 900), ("r:w", "edit", now - 700)])])
+        let m = app.forestModel
+        app.forestModel.syncClosings()
+        #expect(m.replies().map { "\($0.chat.id): \($0.forests.map(\.name).joined(separator: ","))" } == ["cafe0000-1: tree,bench"])
+        #expect(m.forests()["r:bench"]?.move == .waiting, "the bench forest sits where its own branch puts it, not at your move")
+        #expect(app.rows.contains(RowKey.reply("cafe0000-1")))
+        #expect(ForestNav.primary(for: RowKey.reply("cafe0000-1"), app)?.id == "chat.focus", "ret brings the chat's pane forward")
+        let live = world(chats: ["c": chat("cafe0000-1", activeAt: now - 10, acted: [("r:c", "commit", now - 20)])])
+        #expect(live.forestModel.replies().isEmpty, "a chat whose turn is running owes no reply")
+    }
+
     @Test func aStaleChatOnNoBranchIsNeverListedOrCounted() {
         let now = world().forestModel.now.timeIntervalSince1970
         let app = world(chats: [

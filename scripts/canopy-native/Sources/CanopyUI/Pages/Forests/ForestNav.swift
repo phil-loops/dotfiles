@@ -13,6 +13,7 @@ enum ForestNav {
             return m.branchView(id) == nil ? nil : RouteTo("branch.open", target: id)
         }
         if let r = m.reviewRequest(row) { return RouteTo("forests.review.open", target: String(r.number)) }
+        if let r = m.reply(row) { return RouteTo("chat.focus", arg: r.chat.id) }
         if let d = RowKey.id(row, "d"), app.store.view(Landed.self, d) != nil {
             return RouteTo("story.why", arg: RowKey.landed(d))
         }

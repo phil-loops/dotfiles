@@ -172,15 +172,21 @@ public final class ForestModel {
 
     public func forest(_ pid: String?) -> ForestView? { pid.flatMap { forests()[$0] } }
 
-    /// Everything a branch's situation reads beyond the store: the tip's reads, and who is on it — an item's agent or a
-    /// chat bound to it or acting on it (rounds 27–28). Running if its turn runs or a chat on it is live; done with its
-    /// turn, and so waiting on you, once every chat on it has gone idle or the turn ended; unobserved otherwise.
+    /// Everything a branch's situation reads beyond the store: the tip's reads, and who is on it — an item's agent, or a
+    /// chat bound to it or acting on it while its turn runs (rounds 27–29). An item the journal doesn't observe still names
+    /// its agent; an ended turn or an idle chat names nobody — the reply it owes is the home's `replies()`.
     private func readsOf(_ b: Branch, _ item: TodoItem?, _ chats: [WorkContext.Chat]) -> SituationReads {
         var r = reads?(b) ?? SituationReads()
         let worker = item?.work?.worker?.state
-        let live = chats.contains { WorkContext.live($0, now: now.timeIntervalSince1970) }
-        r.agent = item?.id ?? chats.first.map { "chat \($0.id.prefix(8))" }
-        r.agentRunning = worker == "running" || live ? true : worker == "ended" || !chats.isEmpty ? false : nil
+        let live = chats.filter { WorkContext.live($0, now: now.timeIntervalSince1970) }
+        // a chat holds the branch only while its turn runs; once idle its reply is owed once, on the home's reply line
+        // (round 29), and the branch's own route decides where the forest sits
+        if worker == "running" || !live.isEmpty {
+            r.agent = item?.id ?? live.first.map { "chat \($0.id.prefix(8))" }
+            r.agentRunning = true
+        } else if let item, worker != "ended" {
+            r.agent = item.id
+        }
         return r
     }
 
@@ -262,12 +268,35 @@ public final class ForestModel {
         let groups = moveGroups()
         for g in groups {
             add(g.projects)
-            if g.move == .yours { out += reviewRequests.map { RowKey.reviewRequest($0.number) } }
+            if g.move == .yours { out += yoursExtras() }
         }
-        if !groups.contains(where: { $0.move == .yours }) { out += reviewRequests.map { RowKey.reviewRequest($0.number) } }
+        if !groups.contains(where: { $0.move == .yours }) { out += yoursExtras() }
         add(showArchive ? p.archive : [])
         return out
     }
+
+    /// Chats on a listed forest whose turn ended: each once, newest first, with the forests it's on (round 29). The
+    /// reply is owed to the chat, not to each forest it touched.
+    func replies() -> [(chat: WorkContext.Chat, forests: [Project])] {
+        let p = projects(), f = forests(), t = now.timeIntervalSince1970
+        var order: [String] = [], byChat: [String: (chat: WorkContext.Chat, forests: [Project])] = [:]
+        for x in p.focus + p.workbench {
+            guard let fv = f[x.id], !fv.closed else { continue }
+            for c in WorkContext.onForest(fv.branches) where !WorkContext.live(c, now: t) {
+                if byChat[c.id] == nil { order.append(c.id); byChat[c.id] = (c, []) }
+                byChat[c.id]!.forests.append(x)
+            }
+        }
+        return order.compactMap { byChat[$0] }.sorted { $0.chat.activeAt == $1.chat.activeAt ? $0.chat.id < $1.chat.id : $0.chat.activeAt > $1.chat.activeAt }
+    }
+
+    func reply(_ row: String?) -> (chat: WorkContext.Chat, forests: [Project])? {
+        guard let id = RowKey.id(row, "y") else { return nil }
+        return replies().first { $0.chat.id == id }
+    }
+
+    /// Your move's rows beyond its forests: the chats waiting on a reply, then the PRs awaiting your review.
+    func yoursExtras() -> [String] { replies().map { RowKey.reply($0.chat.id) } + reviewRequests.map { RowKey.reviewRequest($0.number) } }
 
     public func reviewRequest(_ row: String?) -> ReviewRequest? {
         guard let n = RowKey.id(row, "r").flatMap(Int.init) else { return nil }

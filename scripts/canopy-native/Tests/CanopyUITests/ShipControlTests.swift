@@ -178,8 +178,9 @@ import Testing
         #expect(try stand(chatIdleFor: 10).actor == .agent("chat c1abcdef"))
     }
 
-    @Test func anIdleChatHandsTheMoveBack() throws {
+    /// Round 29: an idle chat's reply is owed once, on the home's reply line — never by each branch it touched.
+    @Test func anIdleChatHandsNoBranchBack() throws {
         let st = try stand(chatIdleFor: 600)
-        #expect(st.actor == .you && st.awaiting == "chat c1abcdef")
+        #expect(st.awaiting == nil && st.actor == .building, "the branch's own route decides it again")
     }
 }
