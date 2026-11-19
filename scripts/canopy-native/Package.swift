@@ -20,12 +20,14 @@ let package = Package(
             resources: [.copy("Resources/Fonts")]
         ),
         .executableTarget(name: "Canopy", dependencies: ["CanopyCore", "CanopyUI"]),
+        // What every test shares: waiting without racing a clock, a port per app, nothing machine-wide.
+        .target(name: "CanopyTestSupport", dependencies: ["CanopyCore"], path: "Tests/CanopyTestSupport"),
         .testTarget(
             name: "CanopyCoreTests",
-            dependencies: ["CanopyCore", .product(name: "SwiftTerm", package: "SwiftTerm")],
+            dependencies: ["CanopyCore", "CanopyTestSupport", .product(name: "SwiftTerm", package: "SwiftTerm")],
             resources: [.copy("Fixtures")]
         ),
-        .testTarget(name: "CanopyUITests", dependencies: ["CanopyCore", "CanopyUI"]),
+        .testTarget(name: "CanopyUITests", dependencies: ["CanopyCore", "CanopyUI", "CanopyTestSupport"]),
     ],
     swiftLanguageModes: [.v5]
 )

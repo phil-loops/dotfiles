@@ -1,5 +1,6 @@
 import CanopyCore
 import Foundation
+import CanopyTestSupport
 import Testing
 @testable import CanopyUI
 
@@ -49,14 +50,13 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
 @MainActor @Suite struct ShipTests {
     static let branch = "loops:add-hankles-limited-label"
     static let thread = "loops:add-hankles-limited-label#PRRT_kwDOGSZuWM6xwpk_"
-    nonisolated(unsafe) static var nextPort = 41000
 
     /// A whole app on the review page, the store from the real /state fixture, every request stubbed.
     func app(port: Int? = nil, edit: (inout JSONObject) -> Void = { _ in }) throws -> (AppModel, Int) {
-        let p = port ?? { Self.nextPort += 1; return Self.nextPort }()
+        let p = port ?? TestPort.next()
         var c = AppConfig()
         c.route = .review(repo: "loops", branch: "add-hankles-limited-label")
-        let a = AppModel(config: c, port: p, telemetry: false, protocolClasses: [ShipStub.self])
+        let a = testApp(config: c, port: p, protocolClasses: [ShipStub.self])
         let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../CanopyCoreTests/Fixtures/state.json")
         var state = try JSONDecoder().decode(JSONValue.self, from: Data(contentsOf: url)).object!
         edit(&state)
@@ -619,9 +619,9 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
     }
 
     @Test func cWithNoPRSaysWhatWould() async throws {
-        Self.nextPort += 1
-        ShipStub.answer(Self.nextPort, "GET", "/loops/node", ReviewPageTests.payload)
-        let (a, _) = try app(port: Self.nextPort) { s in
+        let port = TestPort.next()
+        ShipStub.answer(port, "GET", "/loops/node", ReviewPageTests.payload)
+        let (a, _) = try app(port: port) { s in
             var ents = s["entities"]!.object!
             ents["conv"] = .object([:])
             s["entities"] = .object(ents)

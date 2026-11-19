@@ -7,7 +7,7 @@ import Testing
     func app() -> AppModel {
         var c = AppConfig()
         c.route = .forests
-        return AppModel(config: c, port: 1, telemetry: false)
+        return testApp(config: c, port: 1)
     }
 
     @Test func oneQuestionMarkIsWhereYouAreWhatsOnScreenAndEveryKey() {

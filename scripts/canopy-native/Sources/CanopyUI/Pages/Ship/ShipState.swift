@@ -100,7 +100,10 @@ public final class ShipState {
     /// Puts text on the clipboard (`y`). The keytutor's practice app swaps it.
     @ObservationIgnored public var copyText: (String) -> Void = { Clipboard.copy($0) }
 
-    public init(app: AppModel? = nil) { self.app = app }
+    public init(app: AppModel? = nil) {
+        self.app = app
+        if let app { defaults = app.defaults }
+    }
 
     public static func of(_ app: AppModel) -> ShipState { app.state { ShipState(app: app) } }
 

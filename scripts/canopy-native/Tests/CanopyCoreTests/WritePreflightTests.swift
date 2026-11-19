@@ -1,3 +1,4 @@
+import CanopyTestSupport
 import Foundation
 import Testing
 @testable import CanopyCore
@@ -30,11 +31,8 @@ final class HeldWritePreflightStub: URLProtocol, @unchecked Sendable {
 }
 
 @MainActor @Suite(.serialized) struct WritePreflightTests {
-    static var nextPort = 58000
-
     func setup() throws -> (Runner, Store, Int) {
-        Self.nextPort += 1
-        let port = Self.nextPort
+        let port = TestPort.next()
         let transport = Transport(base: URL(string: "http://stub.test:\(port)")!, protocolClasses: [HeldWritePreflightStub.self])
         let store = Store()
         store.hydrate(try Snapshot.decode(fixture("state.json")))

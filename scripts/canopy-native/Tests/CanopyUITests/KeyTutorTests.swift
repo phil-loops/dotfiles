@@ -1,19 +1,18 @@
 import CanopyCore
 import Foundation
+import CanopyTestSupport
 import Testing
 @testable import CanopyUI
 
 /// The keytutor, driven by keys through the host app the way KeyMonitor drives it. Every request the
 /// practice app makes is answered by KeyTutorStub; progress lives in memory.
 @MainActor @Suite(.serialized) struct KeyTutorTests {
-    nonisolated(unsafe) static var nextPort = 45_100
 
     /// A host app (its own requests stubbed too, so any would be seen), the keytutor open on it.
     func host(_ progress: KeyTutorProgress? = nil, keys: [String: [String]] = [:]) throws -> (AppModel, KeyTutor, Int) {
-        Self.nextPort += 1
-        let p = Self.nextPort
+        let p = TestPort.next()
         KeyTutorStub.open(p)
-        let a = AppModel(config: AppConfig(), port: p, telemetry: false, protocolClasses: [KeyTutorStub.self])
+        let a = testApp(config: AppConfig(), port: p, protocolClasses: [KeyTutorStub.self])
         if !keys.isEmpty { a.registry.applyUserKeys(keys) }
         let t = KeyTutor.of(a)
         t.store = MemoryProgress(progress)
@@ -157,8 +156,7 @@ import Testing
 
     @Test func progressResumesAndIsSavedAsYouGo() async throws {
         let store = MemoryProgress(KeyTutorProgress(lesson: "stack", step: 2, done: ["modes", "moving"]))
-        Self.nextPort += 1
-        let a = AppModel(config: AppConfig(), port: Self.nextPort, telemetry: false, protocolClasses: [KeyTutorStub.self])
+        let a = testApp(config: AppConfig(), port: TestPort.next(), protocolClasses: [KeyTutorStub.self])
         let t = KeyTutor.of(a)
         t.store = store
         try t.open(nil)
@@ -170,8 +168,7 @@ import Testing
 
     /// `:keytutor review` jumps (fuzzily) and comes from where you were; esc that cancels nothing leaves, back there.
     @Test func colonKeytutorJumpsAndEscLeavesBackToWhereYouWere() async throws {
-        Self.nextPort += 1
-        let a = AppModel(config: AppConfig(), port: Self.nextPort, telemetry: false, protocolClasses: [KeyTutorStub.self])
+        let a = testApp(config: AppConfig(), port: TestPort.next(), protocolClasses: [KeyTutorStub.self])
         KeyTutor.of(a).store = MemoryProgress()
         a.go(.todo)
         press(a, ":")

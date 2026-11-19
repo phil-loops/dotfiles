@@ -1,6 +1,7 @@
 import AppKit
 import CanopyCore
 import Foundation
+import CanopyTestSupport
 import Testing
 @testable import CanopyUI
 
@@ -216,7 +217,6 @@ import Testing
 
 @MainActor @Suite(.serialized) struct ReviewPageTests {
     static let branch = "loops:add-hankles-limited-label"
-    nonisolated(unsafe) static var nextPort = 43000
 
     static let patchA = ["@@ -1,4 +1,5 @@", " keep", "-old one", "+new one", "+new two", " mid", " tail",
                          "@@ -20,3 +21,3 @@ function far() {", " x", "-y", "+Y", " z"].joined(separator: "\n")
@@ -234,12 +234,11 @@ import Testing
     /// The review page on the fixture's branch, its diff answered by the stub, a second branch after
     /// it in merge order, an open thread on a.ts's new line 3.
     func app(_ payload: String? = nil, protocolClasses: [AnyClass] = [ShipStub.self]) async throws -> (AppModel, Int) {
-        Self.nextPort += 1
-        let p = Self.nextPort
+        let p = TestPort.next()
         ShipStub.answer(p, "GET", "/loops/node", payload ?? Self.payload)
         var c = AppConfig()
         c.route = .review(repo: "loops", branch: "add-hankles-limited-label")
-        let a = AppModel(config: c, port: p, telemetry: false, protocolClasses: protocolClasses)
+        let a = testApp(config: c, port: p, protocolClasses: protocolClasses)
         let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../CanopyCoreTests/Fixtures/state.json")
         var state = try JSONDecoder().decode(JSONValue.self, from: Data(contentsOf: url)).object!
         var ents = state["entities"]!.object!
@@ -1445,8 +1444,7 @@ import Testing
     /// A teammate's PR (review/pr-N) walks its stack with J / K, as GitHub chains it: the end says so, a
     /// step imports the neighbour through /open-url and opens it, and preview offers itself there too.
     @Test func jkWalkATeammatesStack() async throws {
-        Self.nextPort += 1
-        let p = Self.nextPort
+        let p = TestPort.next()
         ShipStub.answer(p, "GET", "/loops/node", Self.payload)
         ShipStub.answer(p, "GET", "/node", Self.payload)   // a read that goes out before the repo list is set
         ShipStub.answer(p, "GET", "/loops/foreign-stack", #"""
@@ -1457,7 +1455,7 @@ import Testing
         ShipStub.answer(p, "POST", "/loops/open-url", #"{"ok":true,"path":"/v2/b/loops/review/pr-10466"}"#)
         var c = AppConfig()
         c.route = .review(repo: "loops", branch: "review/pr-10468")
-        let a = AppModel(config: c, port: p, telemetry: false, protocolClasses: [ShipStub.self])
+        let a = testApp(config: c, port: p, protocolClasses: [ShipStub.self])
         let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../CanopyCoreTests/Fixtures/state.json")
         a.store.hydrate(try Snapshot.decode(Data(contentsOf: url)))
         a.transport.repos = ["loops"]

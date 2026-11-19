@@ -1,5 +1,6 @@
 import CanopyCore
 import Foundation
+import CanopyTestSupport
 import Testing
 @testable import CanopyUI
 
@@ -14,7 +15,7 @@ import Testing
 @MainActor struct DashboardTests {
     func app() -> (AppModel, DashboardState) {
         var config = AppConfig(); config.route = .dashboard
-        let app = AppModel(config: config, port: 1, telemetry: false)
+        let app = testApp(config: config, port: 1)
         return (app, app.state { DashboardState(app: app) })
     }
 

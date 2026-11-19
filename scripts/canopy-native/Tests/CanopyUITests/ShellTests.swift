@@ -9,7 +9,7 @@ import Testing
     func app(_ route: Route = .forests) -> AppModel {
         var c = AppConfig()
         c.route = route
-        return AppModel(config: c, port: 1, telemetry: false)
+        return testApp(config: c, port: 1)
     }
 
     @Test func everySurfaceHasAPage() {
@@ -109,7 +109,7 @@ import Testing
         defer { try? FileManager.default.removeItem(at: dir) }
         let native = dir.appendingPathComponent("keys-native.toml")
         try "# verbs\nput-away = \"Z\"\nleader = [\";\"]\n".write(to: native, atomically: true, encoding: .utf8)
-        let a = AppModel(config: AppConfig(), port: port, telemetry: false, protocolClasses: [ShipStub.self])
+        let a = testApp(config: AppConfig(), port: port, protocolClasses: [ShipStub.self])
         a.nativeKeysPath = native.path
         #expect(a.nativeKeysPath != KeysToml.nativePath)
         await a.loadBootstrap()
@@ -164,7 +164,7 @@ import Testing
     func app(_ route: Route = .todo) -> AppModel {
         var c = AppConfig()
         c.route = route
-        return AppModel(config: c, port: 1, telemetry: false)
+        return testApp(config: c, port: 1)
     }
 
     @Test func everyCommandIsReachableByKey() {

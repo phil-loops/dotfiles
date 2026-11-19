@@ -8,7 +8,7 @@ import Testing
     func app(_ route: Route) throws -> AppModel {
         var c = AppConfig()
         c.route = route
-        let a = AppModel(config: c, port: 1, telemetry: false)
+        let a = testApp(config: c, port: 1)
         let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../CanopyCoreTests/Fixtures/state.json")
         a.store.hydrate(try Snapshot.decode(Data(contentsOf: url)))
         return a

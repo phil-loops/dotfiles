@@ -1,3 +1,4 @@
+import CanopyTestSupport
 import Foundation
 import Testing
 @testable import CanopyCore
@@ -5,15 +6,20 @@ import Testing
 /// Answers every request from a per-path table, recording what was sent.
 final class Stub: URLProtocol, @unchecked Sendable {
     struct Answer { var status: Int; var body: String; var headers: [String: String] = [:]; var lost = false }
-    nonisolated(unsafe) static var answers: [String: Answer] = [:]
-    nonisolated(unsafe) static var seen: [URLRequest] = []
     static let lock = NSLock()
+    nonisolated(unsafe) private static var table: [String: Answer] = [:]
+    /// what each path answers — every read and write under the lock URLSession's threads read it with
+    static var answers: [String: Answer] {
+        get { lock.withLock { table } }
+        set { lock.withLock { table = newValue } }
+    }
+    nonisolated(unsafe) static var seen: [URLRequest] = []
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
         let path = request.url!.path
-        let a = Stub.lock.withLock { Stub.seen.append(request); return Stub.answers[path] } ?? Answer(status: 404, body: "{}")
+        let a = Stub.lock.withLock { Stub.seen.append(request); return Stub.table[path] } ?? Answer(status: 404, body: "{}")
         if a.lost { return client!.urlProtocol(self, didFailWithError: URLError(.networkConnectionLost)) }
         let resp = HTTPURLResponse(url: request.url!, statusCode: a.status, httpVersion: "HTTP/1.1", headerFields: a.headers)!
         client?.urlProtocol(self, didReceive: resp, cacheStoragePolicy: .notAllowed)
@@ -41,6 +47,7 @@ final class Ctx: CommandContext {
     let transport = Transport(base: URL(string: "http://stub.test")!, protocolClasses: [Stub.self])
 
     func setup() throws -> (Runner, Store, Ctx) {
+        Stub.answers = [:]   // a test answers its own paths: nothing carries over from the one before
         let store = Store()
         store.hydrate(try Snapshot.decode(fixture("state.json")))
         let reg = CommandRegistry()
@@ -111,13 +118,13 @@ final class Ctx: CommandContext {
         }))
         runner.registry.register(Command(id: "t.no", title: "N", scope: .global, task: { _, _ in throw Refusal("not here") }))
         runner.dispatch("t.slow", via: .key)
-        for _ in 0..<100 where go == nil { try await Task.sleep(nanoseconds: 1_000_000) }
+        await until("go == nil") { !(go == nil) }
         #expect(runner.runOf("t.slow", nil)?.state == .sending && runner.fired == nil, "running: no ok yet")
         go?.resume()
-        for _ in 0..<100 where runner.runOf("t.slow", nil)?.state == .sending { try await Task.sleep(nanoseconds: 1_000_000) }
+        await until("runner.runOf(t.slow, nil)?.state == .sending") { !(runner.runOf("t.slow", nil)?.state == .sending) }
         #expect(runner.runOf("t.slow", nil)?.state == .done && runner.fired?.ok == true && runner.note == "done", "ok once it finished")
         runner.dispatch("t.no", via: .key)
-        for _ in 0..<100 where runner.runOf("t.no", nil)?.state != .failed { try await Task.sleep(nanoseconds: 1_000_000) }
+        await until("runner.runOf(t.no, nil)?.state != .failed") { !(runner.runOf("t.no", nil)?.state != .failed) }
         #expect(runner.fired?.ok == false && runner.note == "not here", "a throw is the refusal")
     }
 
@@ -223,7 +230,7 @@ final class Ctx: CommandContext {
         runner.dispatch("t.write", via: .key, target: id)
         #expect(store.view(Branch.self, id)?.description == "new words")
         #expect(runner.runOf("t.write", id)?.state == .sending)
-        for _ in 0..<50 where runner.runOf("t.write", id)?.state == .sending { try await Task.sleep(nanoseconds: 20_000_000) }
+        await until("runner.runOf(t.write, id)?.state == .sending") { !(runner.runOf("t.write", id)?.state == .sending) }
         #expect(runner.runOf("t.write", id)?.state == .failed)
         #expect(store.ops.isEmpty)
         #expect(rolledBack)
@@ -242,7 +249,7 @@ final class Ctx: CommandContext {
         var undone = false
         runner.registry.register(Command(id: "t.undo", title: "U", scope: .branch, local: { _, _ in undone = true }))
         runner.dispatch("t.write2", via: .key, target: id)
-        for _ in 0..<50 where runner.runOf("t.write2", id)?.state == .sending { try await Task.sleep(nanoseconds: 20_000_000) }
+        await until("runner.runOf(t.write2, id)?.state == .sending") { !(runner.runOf("t.write2", id)?.state == .sending) }
         #expect(runner.runOf("t.write2", id)?.state == .landing)
         #expect(store.view(Branch.self, id)?.description == "new")
         settled = true
@@ -268,18 +275,18 @@ final class Ctx: CommandContext {
         runner.registry.register(Command(id: "t.back", title: "U", scope: .branch, local: { _, _ in }))
 
         runner.dispatch("t/moves-ok", via: .key, target: id)
-        for _ in 0..<50 where runner.runOf("t/moves-ok", id)?.state == .sending { try await Task.sleep(nanoseconds: 20_000_000) }
+        await until("runner.runOf(t/moves-ok, id)?.state == .sending") { !(runner.runOf("t/moves-ok", id)?.state == .sending) }
         #expect(ctx.at.cursorKey == "next")
         #expect(runner.undoLast())
         #expect(ctx.at.cursorKey == "a", "u puts the mark back and the cursor where it was made")
 
         runner.dispatch("t/moves-no", via: .key, target: id)
-        for _ in 0..<50 where runner.runOf("t/moves-no", id)?.state == .sending { try await Task.sleep(nanoseconds: 20_000_000) }
+        await until("runner.runOf(t/moves-no, id)?.state == .sending") { !(runner.runOf("t/moves-no", id)?.state == .sending) }
         #expect(ctx.at.cursorKey == "a", "a refused write takes its move back")
 
         runner.dispatch("t/moves-no", via: .key, target: id)
         ctx.at.cursorKey = "elsewhere"   // moved on before the refusal came back
-        for _ in 0..<50 where runner.runOf("t/moves-no", id)?.state == .sending { try await Task.sleep(nanoseconds: 20_000_000) }
+        await until("runner.runOf(t/moves-no, id)?.state == .sending") { !(runner.runOf("t/moves-no", id)?.state == .sending) }
         #expect(ctx.at.cursorKey == "elsewhere", "a late refusal never yanks the cursor away from where it went")
     }
 
@@ -301,7 +308,7 @@ final class Ctx: CommandContext {
                   settled: { store.table(Project.self)[target]?.rank == 1 }, failed: "no")
         }))
         runner.dispatch("t.rank", via: .key, target: id)
-        for _ in 0..<50 where runner.runOf("t.rank", id)?.state == .sending { try await Task.sleep(nanoseconds: 20_000_000) }
+        await until("runner.runOf(t.rank, id)?.state == .sending") { !(runner.runOf("t.rank", id)?.state == .sending) }
         #expect(runner.runOf("t.rank", id)?.state == .landing)
         #expect(!store.ops.isEmpty)
         #expect(store.applyPatch(try patch(v + 2, asOf: 5, rank: 2)) == .ok)
@@ -321,7 +328,7 @@ final class Ctx: CommandContext {
                   settled: { true }, failed: "no")
         }))
         runner.dispatch("t.old", via: .key, target: id)
-        for _ in 0..<50 where runner.runOf("t.old", id)?.state == .sending { try await Task.sleep(nanoseconds: 20_000_000) }
+        await until("runner.runOf(t.old, id)?.state == .sending") { !(runner.runOf("t.old", id)?.state == .sending) }
         #expect(runner.runOf("t.old", id)?.state == .done)
         #expect(store.ops.isEmpty)
     }
@@ -372,7 +379,7 @@ final class Ctx: CommandContext {
                   saidFrom: { $0["did"] == .string("pushed") ? "pushed — the gates were already green" : nil }, failed: "no")
         }))
         runner.dispatch("t.queue", via: .key, target: id)
-        for _ in 0..<50 where runner.runOf("t.queue", id)?.state == .sending { try await Task.sleep(nanoseconds: 20_000_000) }
+        await until("runner.runOf(t.queue, id)?.state == .sending") { !(runner.runOf("t.queue", id)?.state == .sending) }
         #expect(runner.note == "pushed — the gates were already green")
     }
 
@@ -389,7 +396,7 @@ final class Ctx: CommandContext {
             Write(path: "/push", body: [:], settled: { onServer }, said: "pushed", failed: "didn't push")
         }))
         runner.dispatch("t.push", via: .key, target: id)
-        for _ in 0..<50 where runner.runOf("t.push", id)?.state == .sending { try await Task.sleep(nanoseconds: 20_000_000) }
+        await until("runner.runOf(t.push, id)?.state == .sending") { !(runner.runOf("t.push", id)?.state == .sending) }
         #expect(runner.runOf("t.push", id)?.state == .checking, "a lost answer is being checked, never drawn as landed")
         #expect(runner.note == "no answer · checking whether it landed")
         #expect(resyncs == 1)
@@ -408,7 +415,7 @@ final class Ctx: CommandContext {
             Write(path: "/push", body: [:], settled: { false }, said: "pushed", failed: "didn't push")
         }))
         runner.dispatch("t.push2", via: .key, target: id)
-        for _ in 0..<50 where runner.runOf("t.push2", id)?.state != .failed { try await Task.sleep(nanoseconds: 20_000_000) }
+        await until("runner.runOf(t.push2, id)?.state != .failed") { !(runner.runOf("t.push2", id)?.state != .failed) }
         #expect(runner.runOf("t.push2", id)?.state == .failed)
         #expect(runner.note == "didn't push — no answer, and the server doesn't show it")
     }
@@ -421,7 +428,7 @@ final class Ctx: CommandContext {
             Write(path: "/next", body: [:], settled: { true }, failed: "the gates didn't queue")
         }))
         runner.dispatch("t.next", via: .key, target: id)
-        for _ in 0..<50 where runner.runOf("t.next", id)?.state != .failed { try await Task.sleep(nanoseconds: 20_000_000) }
+        await until("runner.runOf(t.next, id)?.state != .failed") { !(runner.runOf("t.next", id)?.state != .failed) }
         #expect(runner.note == "the gates didn't queue — no answer, so it may have landed — the page shows what the server has")
     }
 

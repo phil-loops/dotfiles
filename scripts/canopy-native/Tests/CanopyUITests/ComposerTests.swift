@@ -1,3 +1,4 @@
+import CanopyTestSupport
 import CanopyCore
 import Foundation
 import Testing
@@ -32,7 +33,6 @@ import Testing
         }
         let ship = ShipState.of(result.0)
         ship.host = Host()
-        ship.defaults = UserDefaults(suiteName: "canopy.composer-tests.\(UUID().uuidString)")!
         return result
     }
 

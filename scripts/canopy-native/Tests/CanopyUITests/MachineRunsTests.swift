@@ -39,7 +39,7 @@ final class LocalDocumentFiles: @unchecked Sendable {
     }
     func app(_ files: LocalDocumentFiles) async -> (AppModel, MachineRuns) {
         var config = AppConfig(); config.route = .machine
-        let app = AppModel(config: config, port: 1, telemetry: false)
+        let app = testApp(config: config, port: 1)
         let runs = MachineRuns.of(app); runs.io = files.io
         await runs.refresh()
         app.focus(pane: "queue")

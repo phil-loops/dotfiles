@@ -1,3 +1,4 @@
+import CanopyTestSupport
 import Foundation
 import Testing
 @testable import CanopyCore
@@ -41,7 +42,7 @@ final class StateLoadStub: URLProtocol, @unchecked Sendable {
         }
         stream.connect()
         defer { stream.stop() }
-        for _ in 0..<200 where timings["state"] == nil { try await Task.sleep(nanoseconds: 10_000_000) }
+        await until("timings[state] == nil") { !(timings["state"] == nil) }
         #expect(store.ready)
         #expect(!store.raw.isEmpty)
         #expect(order == ["state-fetch", "state-decode", "state-hydrate", "state"])
@@ -56,7 +57,7 @@ final class StateLoadStub: URLProtocol, @unchecked Sendable {
         let stream = EventStream(transport: StateLoadStub.transport(Data("{}".utf8)), store: store)
         stream.connect()
         defer { stream.stop() }
-        for _ in 0..<200 where stream.stats["reconnect"] == nil { try await Task.sleep(nanoseconds: 10_000_000) }
+        await until("stream.stats[reconnect] == nil") { !(stream.stats["reconnect"] == nil) }
         #expect(stream.stats["reconnect"] == 1)
         #expect(!store.ready)
         #expect(stream.stats["state"] == nil)

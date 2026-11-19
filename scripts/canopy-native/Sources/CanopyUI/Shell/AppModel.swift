@@ -11,6 +11,8 @@ import Observation
 public final class AppModel: CommandContext {
     @ObservationIgnored public let config: AppConfig
     @ObservationIgnored public let transport: Transport
+    /// Where what survives a launch is kept (unsent words); a test's app keeps it in memory.
+    @ObservationIgnored public let defaults: UserDefaults
     @ObservationIgnored public let telemetry: Telemetry
     @ObservationIgnored public let stream: EventStream
     @ObservationIgnored public let pulse: Pulse
@@ -68,8 +70,10 @@ public final class AppModel: CommandContext {
     @ObservationIgnored public private(set) var closers: [(isOpen: () -> Bool, close: () -> Void)] = []
 
     /// `protocolClasses` lets a test answer the app's requests with a URLProtocol stub.
-    public init(config: AppConfig, port: Int, telemetry enabled: Bool = true, protocolClasses: [AnyClass]? = nil) {
+    public init(config: AppConfig, port: Int, telemetry enabled: Bool = true, protocolClasses: [AnyClass]? = nil,
+                defaults: UserDefaults = .standard) {
         self.config = config
+        self.defaults = defaults
         transport = Transport(base: URL(string: "http://127.0.0.1:\(port)")!, protocolClasses: protocolClasses)
         telemetry = Telemetry(transport: transport, enabled: enabled)
         store = Store()

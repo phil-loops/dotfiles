@@ -1,3 +1,4 @@
+import CanopyTestSupport
 import CanopyCore
 import Foundation
 import Testing

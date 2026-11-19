@@ -14,7 +14,7 @@ import Testing
     func app() throws -> AppModel {
         var c = AppConfig()
         c.route = .todo
-        let a = AppModel(config: c, port: 1, telemetry: false)
+        let a = testApp(config: c, port: 1)
         a.store.hydrate(try Snapshot.decode(Data(MachineFixtures.todoState.utf8)))
         return a
     }
@@ -161,7 +161,7 @@ import Testing
     func listsApp() throws -> AppModel {
         var c = AppConfig()
         c.route = .todo
-        let a = AppModel(config: c, port: 1, telemetry: false)
+        let a = testApp(config: c, port: 1)
         a.store.hydrate(try Snapshot.decode(Data(Self.lists.utf8)))
         return a
     }

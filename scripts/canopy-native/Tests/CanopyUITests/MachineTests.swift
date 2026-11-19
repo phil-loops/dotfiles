@@ -10,7 +10,7 @@ import Testing
     func app(_ route: Route = .machine) throws -> (AppModel, Workstation) {
         var c = AppConfig()
         c.route = route
-        let a = AppModel(config: c, port: 1, telemetry: false)
+        let a = testApp(config: c, port: 1)
         let m = a.state { Workstation(app: a) }
         m.take(try JSONDecoder().decode(Previews.self, from: Data(MachineFixtures.previews.utf8)))
         return (a, m)
@@ -205,7 +205,7 @@ import Testing
     @Test func dashboardDecodesItsOneTable() throws {
         var c = AppConfig()
         c.route = .dashboard
-        let a = AppModel(config: c, port: 1, telemetry: false)
+        let a = testApp(config: c, port: 1)
         let d = a.state { DashboardState(app: a) }
         let s = try JSONDecoder().decode(Summary.self, from: Data(MachineFixtures.summary.utf8))
         d.take(s)
@@ -219,7 +219,7 @@ import Testing
     @Test func dashboardRangeCycles() throws {
         var c = AppConfig()
         c.route = .dashboard
-        let a = AppModel(config: c, port: 1, telemetry: false)
+        let a = testApp(config: c, port: 1)
         let d = a.state { DashboardState(app: a) }
         #expect(d.days == 30)
         a.keys.handle(","); a.keys.handle("r")

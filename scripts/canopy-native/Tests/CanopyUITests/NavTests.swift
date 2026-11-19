@@ -258,7 +258,7 @@ import Testing
     func app(_ route: Route = .forests) throws -> AppModel {
         var c = AppConfig()
         c.route = route
-        let a = AppModel(config: c, port: 1, telemetry: false)
+        let a = testApp(config: c, port: 1)
         let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../CanopyCoreTests/Fixtures/state.json")
         var j = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]
         var e = j["entities"] as! [String: Any]
@@ -387,7 +387,7 @@ import Testing
     @Test func slotsFoldIntoOneRow() {
         var c = AppConfig()
         c.route = .forests
-        let a = AppModel(config: c, port: 1, telemetry: false)
+        let a = testApp(config: c, port: 1)
         a.keys.handle("g")
         let rows = a.keys.whichKeyRows()
         #expect(rows.contains { $0.key == "1–9" && $0.what == "go to focus forest N" })

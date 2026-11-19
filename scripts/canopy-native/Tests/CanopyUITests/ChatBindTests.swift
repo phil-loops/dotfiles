@@ -1,3 +1,4 @@
+import CanopyTestSupport
 import CanopyCore
 import Testing
 @testable import CanopyUI

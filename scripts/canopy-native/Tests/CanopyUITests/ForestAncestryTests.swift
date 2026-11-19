@@ -1,5 +1,6 @@
 import CanopyCore
 import Foundation
+import CanopyTestSupport
 import Testing
 @testable import CanopyUI
 
@@ -8,12 +9,11 @@ import Testing
     let reply = #"{"branch":"f5","requires":["f2","f3"],"files":[]}"#
 
     func app() throws -> (AppModel, Int) {
-        ShipTests.nextPort += 1
-        let port = ShipTests.nextPort
+        let port = TestPort.next()
         let seed = world(.forest(repo: "r", project: "fan"), fanIn: true)
         var config = AppConfig()
         config.route = seed.router.route
-        let app = AppModel(config: config, port: port, telemetry: false, protocolClasses: [HeldLookupStub.self, ShipStub.self])
+        let app = testApp(config: config, port: port, protocolClasses: [HeldLookupStub.self, ShipStub.self])
         let body: JSONObject = ["epoch": .string(seed.store.epoch),
                                 "versions": .object(seed.store.versions.mapValues { .number(Double($0)) }),
                                 "entities": .object(seed.store.raw.mapValues { .object($0) })]

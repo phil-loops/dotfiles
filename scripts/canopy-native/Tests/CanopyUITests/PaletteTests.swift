@@ -108,7 +108,7 @@ import Testing
     func app(_ route: Route = .forests) -> AppModel {
         var c = AppConfig()
         c.route = route
-        return AppModel(config: c, port: 1, telemetry: false)
+        return testApp(config: c, port: 1)
     }
 
     /// A key is never shown without what it does, nor an action without its key: every button and every

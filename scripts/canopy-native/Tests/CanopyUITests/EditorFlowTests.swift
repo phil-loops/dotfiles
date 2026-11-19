@@ -45,7 +45,7 @@ import Testing
         var config = AppConfig()
         config.repo = try #require(info["repo"]?.string)
         config.route = .review(repo: "loops", branch: "editor-flow")
-        let app = AppModel(config: config, port: port, telemetry: false)
+        let app = testApp(config: config, port: port)
         app.nativeKeysPath = root.appendingPathComponent("no-key-overrides.toml").path
         let page = ReviewPageState.of(app)
         let size = NSSize(width: 1100, height: 800)

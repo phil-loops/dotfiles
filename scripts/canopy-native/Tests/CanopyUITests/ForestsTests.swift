@@ -216,7 +216,7 @@ private let NOW = iso("2026-10-22T18:00:00Z") // Thu 11:00 PT
 func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = false, chats: [String: Any] = [:]) -> AppModel {
     var c = AppConfig()
     c.route = route
-    let a = AppModel(config: c, port: 1, telemetry: false)
+    let a = testApp(config: c, port: 1)
     func project(_ name: String, _ state: String, rank: Int? = nil) -> (String, [String: Any]) {
         ("r:\(name)", ["id": "r:\(name)", "repo": "r", "name": name, "state": state, "rank": rank as Any? ?? NSNull(), "ticket": NSNull(),
                        "summary": "\(name) summary", "size": 1])
