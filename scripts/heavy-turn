@@ -42,7 +42,8 @@ cap how much heavy work runs, the nice keeps what does run from slowing what's i
 two looping typechecks the viewer's /node build went from p50 2.2s / p90 4.0s to 0.95s / 1.1s
 (2026-11-18; idle 0.34s). Disk priority (taskpolicy -d utility) bought nothing on top, and never
 taskpolicy -b, which also throttles disk and pins to efficiency cores. --acquire holders start their
-own work and set their own priority.
+own work, so they apply the same nice themselves to what runs under the slot (show-autobuild,
+loops-preview), never to anything serving interactive requests (a preview's next dev).
 
 The budget shrinks to one slot while the box is under memory pressure (the kernel's
 kern.memorystatus_level, the number `memory_pressure` prints, below HEAVY_TURN_MEM_FLOOR,
