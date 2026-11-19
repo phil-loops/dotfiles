@@ -133,6 +133,16 @@ final class CanvasTextView: NSTextView {
     // never the keyboard's: the KeyMonitor drives the cursor
     override var acceptsFirstResponder: Bool { true }
 
+    // a copy (or a drag) takes the selection's code, not its gutters: CanvasCopy
+    override var writablePasteboardTypes: [NSPasteboard.PasteboardType] { [.string] }
+
+    override func writeSelection(to pboard: NSPasteboard, type: NSPasteboard.PasteboardType) -> Bool {
+        guard type == .string, let storage = textStorage, let text = CanvasCopy.text(storage, selectedRange()) else {
+            return super.writeSelection(to: pboard, type: type)
+        }
+        return pboard.setString(text, forType: .string)
+    }
+
     func info(at charIndex: Int) -> RowInfo? {
         guard let ts = textStorage, charIndex >= 0, charIndex < ts.length else { return nil }
         return ts.attribute(.rvRow, at: charIndex, effectiveRange: nil) as? RowInfo
@@ -412,7 +422,7 @@ final class Canvas: NSObject {
 
     override init() {
         let storage = NSTextStorage()
-        let lm = NSLayoutManager()
+        let lm = CanvasLayoutManager()
         lm.allowsNonContiguousLayout = true
         lm.backgroundLayoutEnabled = true
         storage.addLayoutManager(lm)
