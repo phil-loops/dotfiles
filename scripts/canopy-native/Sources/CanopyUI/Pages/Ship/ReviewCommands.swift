@@ -217,7 +217,7 @@ enum ReviewCommands {
             ship.host.clearMark()
             let existing = (store.rawView("draft", id)?["items"]?.array) ?? []
             let restore = {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                (weakApp?.scheduler ?? MainScheduler()).after(0.4) {
                     if store.table(Draft.self)[id]?.items.contains(where: { $0.key == key }) == true { return }
                     ship.restoreComposer(recovery)
                 }

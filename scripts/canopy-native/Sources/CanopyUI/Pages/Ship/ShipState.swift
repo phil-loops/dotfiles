@@ -236,7 +236,7 @@ public final class ShipState {
             self.progress[b.id] = (key, got)
             // the tail is read on demand while the run goes; the run's state comes pushed
             guard got?.running == true || app.flatMap({ GateRuns.progress($0, b.id) })?.running == true else { return }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self, weak app] in
+            app?.scheduler.after(2) { [weak self, weak app] in
                 guard let self, let app, self.progress[b.id]?.key == key, let now = app.store.view(Branch.self, b.id) else { return }
                 self.progress[b.id] = ("", self.progress[b.id]?.value)
                 self.readProgress(app, now, key: key, gate: gate)
@@ -308,7 +308,7 @@ public final class ShipState {
             self.forceScopes[id] = (key, .some(got?.forceScope))
             let early = b.gates == .green && got?.forceScope?.guards.contains { $0.k == "gates" && !$0.ok } == true
             if early && tries < 4 {
-                DispatchQueue.main.asyncAfter(deadline: .now() + Double(tries + 1)) { [weak self, weak app] in
+                app.scheduler.after(Double(tries + 1)) { [weak self, weak app] in
                     guard let self, let app else { return }
                     self.readForceScope(app, id, tries: tries + 1)
                 }

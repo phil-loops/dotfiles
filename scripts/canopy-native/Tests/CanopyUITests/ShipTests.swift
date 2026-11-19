@@ -167,7 +167,8 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
         ship.setText("r|\(Self.thread)", "words")
         a.keys.handle("esc"); a.keys.handle(","); a.keys.handle("d")   // stop writing, save as a draft
         #expect(ship.composer == nil)
-        await until("the words back") { ship.composer != nil }
+        // the words come back a beat after the refusal: time passes while the test waits
+        await until("the words back") { a.clock.advance(by: 0.1); return ship.composer != nil }
         #expect(ship.text("r|\(Self.thread)") == "words")
         #expect(a.store.view(Draft.self, Self.branch)?.items.isEmpty == true)
         ship.setText("r|\(Self.thread)", "")

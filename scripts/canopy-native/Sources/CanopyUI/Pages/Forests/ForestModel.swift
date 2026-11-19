@@ -103,8 +103,10 @@ public final class ForestModel {
     @ObservationIgnored var reads: ((Branch) -> SituationReads)?
     @ObservationIgnored var readsVersion: (() -> Int)?
 
-    init(store: Store, router: Router, transport: Transport) {
-        self.store = store; self.router = router; self.transport = transport
+    @ObservationIgnored let scheduler: Scheduler
+
+    init(store: Store, router: Router, transport: Transport, scheduler: Scheduler = MainScheduler()) {
+        self.store = store; self.router = router; self.transport = transport; self.scheduler = scheduler
     }
 
     // ── model.ts ──
@@ -294,7 +296,7 @@ public final class ForestModel {
         if shelved.contains(where: { !closed.contains($0) }) { shelved = shelved.filter { closed.contains($0) } }
         for id in closed where !was.contains(id) {
             closing.insert(id)
-            DispatchQueue.main.asyncAfter(deadline: .now() + after) { [weak self] in
+            scheduler.after(after) { [weak self] in
                 guard let self else { return }
                 self.closing.remove(id)
                 self.shelved.insert(id)
@@ -375,7 +377,7 @@ public extension AppModel {
     /// The forests area's state (ForestModel), made once per window.
     var forestModel: ForestModel {
         state {
-            let m = ForestModel(store: store, router: router, transport: transport)
+            let m = ForestModel(store: store, router: router, transport: transport, scheduler: scheduler)
             m.reads = { [weak self] b in self.map { ShipState.of($0).situationReads($0, b) } ?? SituationReads() }
             m.readsVersion = { [weak self] in self.map { ShipState.of($0).readsVersion } ?? 0 }
             m.archive = { [weak self] id in self?.runner.dispatch("project.archive", via: .auto, target: id) }

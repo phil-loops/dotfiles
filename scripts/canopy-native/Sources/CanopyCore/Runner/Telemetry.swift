@@ -37,7 +37,10 @@ public final class Telemetry {
         return e
     }
 
-    public init(transport: Transport, enabled: Bool = true) {
+    private let scheduler: Scheduler
+
+    public init(transport: Transport, enabled: Bool = true, scheduler: Scheduler = MainScheduler()) {
+        self.scheduler = scheduler
         self.transport = transport
         self.enabled = enabled
     }
@@ -50,7 +53,7 @@ public final class Telemetry {
         if timer == nil {
             let w = DispatchWorkItem { [weak self] in self?.flush() }
             timer = w
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: w)
+            scheduler.after(3) { if !w.isCancelled { w.perform() } }
         }
     }
 

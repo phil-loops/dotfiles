@@ -81,7 +81,12 @@ public final class Runner {
     @ObservationIgnored private var opening = false
     public static let settleWait: TimeInterval = 5
 
-    public init(registry: CommandRegistry, store: Store, transport: Transport, telemetry: Telemetry) {
+    /// the clock every wait here goes through (a note's expiry, the settle give-up)
+    public let scheduler: Scheduler
+
+    public init(registry: CommandRegistry, store: Store, transport: Transport, telemetry: Telemetry,
+                scheduler: Scheduler = MainScheduler()) {
+        self.scheduler = scheduler
         self.registry = registry
         self.store = store
         self.transport = transport
@@ -97,7 +102,7 @@ public final class Runner {
         note = text
         noteGen += 1
         let g = noteGen
-        DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
+        scheduler.after(4) { [weak self] in
             if self?.noteGen == g { self?.note = nil }
         }
     }
@@ -132,7 +137,7 @@ public final class Runner {
         fired = (id, ok, at)
         firedGen += 1
         let g = firedGen
-        DispatchQueue.main.asyncAfter(deadline: .now() + (ok ? 0.6 : 1.4)) { [weak self] in
+        scheduler.after(ok ? 0.6 : 1.4) { [weak self] in
             if self?.firedGen == g { self?.fired = nil }
         }
         if !ok && !explained { say("\(glyph(registry.command(id)?.keys.first ?? "")) · nothing here") }
@@ -343,14 +348,14 @@ public final class Runner {
             onDone()
         }
         awaiting[s] = (landed, done)
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.settleWait) { [weak self] in
+        scheduler.after(Self.settleWait) { [weak self] in
             guard let self, !finished else { return }
             guard wrote != nil, let resync = self.resync else { return done() }
             let h = store.hydrations
             self.awaiting[s] = ({ landed() || store.hydrations > h }, done)
             self.say("not confirmed yet · resyncing")
             resync()
-            DispatchQueue.main.asyncAfter(deadline: .now() + Self.settleWait) { done() }
+            self.scheduler.after(Self.settleWait) { done() }
         }
     }
 
@@ -370,7 +375,7 @@ public final class Runner {
         }
         awaiting[k] = ({ w.settled() || store.hydrations > h }, { end(w.settled()) })
         resync?()
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.settleWait) { end(w.settled()) }
+        scheduler.after(Self.settleWait) { end(w.settled()) }
     }
 
     /// The latest run of command `id` on `target` this launch.

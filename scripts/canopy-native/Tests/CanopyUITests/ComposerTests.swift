@@ -66,7 +66,7 @@ import Testing
         a.runner.dispatch("review.compose.draft", via: .key, target: ShipTests.branch)
         a.router.navigate(.review(repo: "loops", branch: "another-branch"))
         let other = try comment(a, text: "second branch")
-        await until("the original words recovered") { ship.text(original.key) == "first branch" }
+        await until("the original words recovered") { a.clock.advance(by: 0.1); return ship.text(original.key) == "first branch" }
         #expect(ship.composer == other && ship.text(other.key) == "second branch")
         a.router.navigate(.review(repo: "loops", branch: "add-hankles-limited-label"))
         #expect(ship.composer == original)

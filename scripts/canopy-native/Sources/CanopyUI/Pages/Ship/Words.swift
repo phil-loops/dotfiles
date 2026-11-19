@@ -297,7 +297,7 @@ public final class WordsState {
                 for waiter in owned where waiter.current() { waiter.run() }
                 if outline.draft?.bodyPending == true, !pendingPoll.contains(id) {
                     pendingPoll.insert(id)
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self, weak app] in
+                    app.scheduler.after(1.5) { [weak self, weak app] in
                         guard let self, let app else { return }
                         self.pendingPoll.remove(id)
                         if self.reading[id] == source { self.load(app, id, force: true) }

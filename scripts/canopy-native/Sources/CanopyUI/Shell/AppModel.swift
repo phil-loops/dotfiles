@@ -13,6 +13,8 @@ public final class AppModel: CommandContext {
     @ObservationIgnored public let transport: Transport
     /// Where what survives a launch is kept (unsent words); a test's app keeps it in memory.
     @ObservationIgnored public let defaults: UserDefaults
+    /// The one clock every delayed thing waits on; a test's app advances it by hand.
+    @ObservationIgnored public let scheduler: Scheduler
     @ObservationIgnored public let telemetry: Telemetry
     @ObservationIgnored public let stream: EventStream
     @ObservationIgnored public let pulse: Pulse
@@ -71,15 +73,16 @@ public final class AppModel: CommandContext {
 
     /// `protocolClasses` lets a test answer the app's requests with a URLProtocol stub.
     public init(config: AppConfig, port: Int, telemetry enabled: Bool = true, protocolClasses: [AnyClass]? = nil,
-                defaults: UserDefaults = .standard) {
+                defaults: UserDefaults = .standard, scheduler: Scheduler = MainScheduler()) {
         self.config = config
         self.defaults = defaults
+        self.scheduler = scheduler
         transport = Transport(base: URL(string: "http://127.0.0.1:\(port)")!, protocolClasses: protocolClasses)
-        telemetry = Telemetry(transport: transport, enabled: enabled)
+        telemetry = Telemetry(transport: transport, enabled: enabled, scheduler: scheduler)
         store = Store()
         router = Router(config.route, query: config.query)
         registry = CommandRegistry()
-        runner = Runner(registry: registry, store: store, transport: transport, telemetry: telemetry)
+        runner = Runner(registry: registry, store: store, transport: transport, telemetry: telemetry, scheduler: scheduler)
         keys = KeyEngine(registry: registry, runner: runner)
         nav = CodeNav()
         stream = EventStream(transport: transport, store: store)

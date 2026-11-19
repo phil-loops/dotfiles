@@ -44,7 +44,7 @@ import Testing
         try await Task.sleep(nanoseconds: 30_000_000)
         #expect(ShipStub.posts(port).filter { $0.path == path }.count == 1)
         #expect(app.selected == cursor && app.pane?.id == focus)
-        #expect([nil, "keep this feedback"].contains(app.runner.note), "the warmup writes no note of its own; ours may have expired under load")
+        #expect(app.runner.note == "keep this feedback", "the warmup writes no note of its own (the test clock never expires ours)")
         #expect(page.helix == nil)
         #expect(page.editorPreparation === preparation)
         let body = try #require(ShipStub.posts(port).first { $0.path == path }?.body)
