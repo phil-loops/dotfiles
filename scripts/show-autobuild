@@ -9,7 +9,8 @@ canopy-native's Package.swift + Sources, since Show links canopy) plus canopy-na
 builds as last committed, so an uncommitted canopy edit wakes it but builds nothing (an `unchanged` row), and
 the commit that lands it is what builds. A change waits until
 nothing has moved for QUIET seconds — other sessions save files in bursts — then runs `show --build`
-under a heavy-turn slot; the running Show sees the new build stamp and lights Update, and Phil
+under a heavy-turn slot at heavy-turn's nice (HEAVY_TURN_NICE, 10) — the build only, so this
+watcher's polls stay prompt; the running Show sees the new build stamp and lights Update, and Phil
 chooses when to relaunch into it. Launches (`show`, `show <deck>`) never build, so this agent is
 what keeps Show current. A build that
 fails because a file moved mid-build waits for quiet again; a real compile error waits for the
@@ -35,6 +36,7 @@ QUIET = float(os.environ.get("SHOW_AUTOBUILD_QUIET", "4"))
 POLL = 1.0
 KEEP = 50
 DRAG = 2.0   # a build this many times the recent median is dragging
+NICE = int(os.environ.get("HEAVY_TURN_NICE", "10"))
 
 
 def watched():
@@ -76,7 +78,8 @@ def build(trigger):
     t1 = time.monotonic()
     env = dict(os.environ, HEAVY_TURN_HELD="1") if ticket else os.environ
     with open(log_path, "w") as log:
-        proc = subprocess.run([os.path.join(SCRIPTS, "show"), "--build"], stdout=log, stderr=subprocess.STDOUT, env=env)
+        proc = subprocess.run([os.path.join(SCRIPTS, "show"), "--build"], stdout=log, stderr=subprocess.STDOUT, env=env,
+                              preexec_fn=(lambda: os.nice(NICE)) if NICE else None)
     built = time.monotonic() - t1
     if ticket:
         subprocess.run(["heavy-turn", "--release", ticket], capture_output=True)
