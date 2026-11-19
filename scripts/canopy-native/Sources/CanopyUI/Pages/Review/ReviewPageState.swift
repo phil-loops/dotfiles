@@ -383,11 +383,14 @@ public final class ReviewPageState: ShipHost {
 
     /// What a diff was read from: the tip, the base asked for, and — read against the parent — which
     /// parent, since a contract or reparent moves the base without moving the tip.
-    static func diffKey(id: String, at: String, ref: String, parent: String) -> String {
-        "\(id)@\(at)|\(ref)" + (ref.isEmpty ? "<\(parent)" : "")
+    /// `stamp`: the branch's readStamp — the base's tip (the parent's, origin's copy) moves it.
+    static func diffKey(id: String, at: String, ref: String, parent: String, stamp: String) -> String {
+        "\(id)@\(at)|\(ref)" + (ref.isEmpty ? "<\(parent)" : "") + "#\(stamp)"
     }
 
-    public var keyOf: String { Self.diffKey(id: id, at: at, ref: baseRef(target?.name ?? ""), parent: branch?.parent ?? "") }
+    public var keyOf: String {
+        Self.diffKey(id: id, at: at, ref: baseRef(target?.name ?? ""), parent: branch?.parent ?? "", stamp: branch?.readStamp ?? "")
+    }
     public var baseSha: String { payload?.data.baseSha ?? "" }
     public var scoped: Bool { commitScope != nil }
     /// the commit the scoped diff ends on: its new side is that commit's tree
@@ -582,8 +585,9 @@ public final class ReviewPageState: ShipHost {
     }
 
     /// Prefetch a branch's diff so opening it paints at once (page.ts warm).
-    public func warm(repo: String, name: String, at: String, parent: String) {
-        let key = Self.diffKey(id: "\(repo):\(name)", at: at, ref: "", parent: parent)
+    public func warm(_ b: Branch) {
+        let (repo, name) = (b.repo, b.name)
+        let key = Self.diffKey(id: b.id, at: b.tip, ref: "", parent: b.parent, stamp: b.readStamp ?? "")
         guard cache[key] == nil, !loading.contains(key), let app else { return }
         loading.insert(key)
         let path = app.transport.atRepo(repo, "/node?branch=\(name.uriComponent)")
@@ -598,7 +602,7 @@ public final class ReviewPageState: ShipHost {
 
     private func warmNeighbours() {
         guard base == .parent else { return }
-        for d in [1, -1] { if let b = neighbour(d) { warm(repo: b.repo, name: b.name, at: b.tip, parent: b.parent) } }
+        for d in [1, -1] { if let b = neighbour(d) { warm(b) } }
     }
 
     /// The branch `d` steps along this one's forest in merge order (J/K), or nil at an end.

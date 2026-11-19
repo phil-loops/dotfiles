@@ -37,7 +37,9 @@ final class ReviewFlags {
     static func of(_ app: AppModel) -> ReviewFlags { app.state { ReviewFlags(app) } }
 
     func source(_ id: String) -> Source {
-        let tip = app?.store.view(Branch.self, id)?.tip ?? app?.store.view(Conv.self, id)?.tip ?? ""
+        // the flags are recorded in the branch's config by a review run: the readStamp moves with them
+        let b = app?.store.view(Branch.self, id)
+        let tip = b.map { "\($0.tip)|\($0.readStamp ?? "")" } ?? app?.store.view(Conv.self, id)?.tip ?? ""
         if let source = tracked[id], source.tip == tip { return source }
         let source = Source(id: id, tip: tip, generation: (tracked[id]?.generation ?? 0) + 1)
         tracked[id] = source

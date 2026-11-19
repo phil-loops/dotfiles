@@ -268,6 +268,11 @@ def _git_entities(name, snap, jobs):
             "behind": behind.get(b, 0),
             "drifted": bool(tip) and not rooted and not _is_ancestor(graph, snap.local(parent), tip),
             "upstream": up, "upstreamBad": up_bad, "diverged": diverged,
+            # what every read about this branch is derived from — its, its parent's and its requires'
+            # refs (each copy, origin's included) and config blocks, the trunk: the server's own read
+            # keys use these inputs, so a client key on this stamp moves exactly when a read could
+            # change (a push, a parent's seal, a review run's flags). Dirt is the one input it lacks.
+            "readStamp": snap.inputs_fingerprint([b, parent, *snap.branch_key_all(b, "requires")])[:16],
             # a push Phil queued for when its gates go green (srv/pushintent.py), and what it came to
             "pushQueued": pushintent.queued(b, snap, tree), "pushSaid": pushintent.said(b, snap),
         }

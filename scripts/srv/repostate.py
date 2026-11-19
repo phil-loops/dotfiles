@@ -129,13 +129,25 @@ class RepoState:
     def published(self, branch):
         return branch in self.pr_heads()
 
+    def branch_cfg(self, branch):
+        """The branch's own config block as sorted "key=value" lines — indexed once per snapshot, so a
+        fingerprint per branch costs its own block, not a scan of every key (929 ms for 509 branches)."""
+        idx = self._memo.get("cfg-by-branch")
+        if idx is None:
+            idx = {}
+            for k, vs in sorted(self.cfg.items()):
+                if k.startswith("branch.") and "." in k[len("branch."):]:
+                    idx.setdefault(k[len("branch."):k.rindex(".")], []).extend(f"{k}={v}" for v in vs)
+            self._memo["cfg-by-branch"] = idx
+        return idx.get(branch, [])
+
     def branch_fingerprint(self, branch):
         """Everything a single-branch verdict reads: its refs (every remote's copy), its parent's,
         origin/main, its config block, and open-PR membership. Cheap — no spawn."""
         sp = self.parent(branch)
         parts = [self.local(branch), self.remote(branch), self.local(sp), self.remote(sp), self.remote(self.main()),
                  self.track(branch)[1], str(self.published(branch))]
-        parts += [f"{k}={v}" for k, vs in sorted(self.cfg.items()) if k.startswith(f"branch.{branch}.") for v in vs]
+        parts += self.branch_cfg(branch)
         parts += [self.sha.get(r, "") for r in sorted(self.sha) if r.startswith("refs/remotes/") and r.endswith(f"/{branch}")]
         return hashlib.sha1("\x1f".join(parts).encode()).hexdigest()
 
@@ -154,7 +166,7 @@ class RepoState:
         parts = [main, self.ref_any(main), *extra]
         for b in branches:
             parts += [b, self.ref_any(b)]
-            parts += [f"{k}={v}" for k, vs in sorted(self.cfg.items()) if k.startswith(f"branch.{b}.") for v in vs]
+            parts += self.branch_cfg(b)
         return hashlib.sha1(repr(parts).encode()).hexdigest()
 
     def remote_tips(self, remote="origin"):

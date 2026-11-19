@@ -320,6 +320,16 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = f
         #expect(archived.isEmpty)
     }
 
+    /// A saved edit's receipt changes a branch's tip with no stream version moving: the forest view,
+    /// memoised over the store, sees it (it keyed on versions + ops and showed the old tip, 2026-11-18).
+    @Test func aBranchReceiptReachesTheForestView() throws {
+        let a = world()
+        let before = try #require(a.forestModel.branchView("r:c")?.b.tip)
+        #expect(a.store.acceptBranchReceipt("r:c", epoch: a.store.epoch, expectedTip: before,
+                                            fields: ["tip": "saved-in-helix", "tree": "saved-tree"], wrote: 1_000_000))
+        #expect(a.forestModel.branchView("r:c")?.b.tip == "saved-in-helix")
+    }
+
     @Test func prsAwaitingReviewSitBetweenFocusAndTheWorkbenchAndRetOpensThem() {
         let a = world()
         a.forestModel.syncClosings()
@@ -449,7 +459,7 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = f
         try move { $0["diverged"] = true }
         #expect(BranchCommands.pushRoute("r:a", a) == nil, "diverged with no prep read for this tip: p waits for it")
         let b = try #require(a.store.view(Branch.self, "r:a"))
-        ship.putReads("r:a", key: ShipState.factsKey(b, nil), facts: nil, prep: PrepRoute(route: "conform"))
+        ship.putReads("r:a", key: ShipState.factsKey(b, nil, a.store.view(Pr.self, "r:a")), facts: nil, prep: PrepRoute(route: "conform"))
         #expect(BranchCommands.pushRoute("r:a", a) == "branch.conform")
         #expect(ship.lastReads("r:a").stale == false)
         // the branch moves under the answer: it no longer routes, and draws as stale

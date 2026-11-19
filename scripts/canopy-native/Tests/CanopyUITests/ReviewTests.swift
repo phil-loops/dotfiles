@@ -287,6 +287,19 @@ import Testing
         await until("the reread diff") { pg.baseSha == "new-parent" }
     }
 
+    /// The base moved and the tip didn't (a push moves origin's copy; a parent's seal moves the merge-base):
+    /// the branch's readStamp changes, so the diff is read again.
+    @Test func aMovedBaseRereadsTheDiff() async throws {
+        let (a, p) = try await app()
+        let pg = ReviewPageState.of(a)
+        ShipStub.answer(p, "GET", "/loops/node", #"{"branch":"add-hankles-limited-label","baseSha":"moved-base","files":[]}"#)
+        var changed = try #require(a.store.raw["branch"]?[Self.branch]?.object)
+        changed["readStamp"] = "after-the-push"
+        let version = try #require(a.store.versions[Domain.git])
+        #expect(a.store.applyPatch(try Patch.make(domain: Domain.git, version: version + 1, upserts: ["branch": [Self.branch: .object(changed)]])) == .ok)
+        await until("the reread diff") { pg.baseSha == "moved-base" }
+    }
+
     func keys(_ a: AppModel, _ ks: String...) { for k in ks { a.keys.handle(k) } }
 
     @Test func theDiffLandsWithTheCursorOnItsFirstChange() async throws {
@@ -1086,7 +1099,7 @@ import Testing
         let (a, _) = try await app()
         keys(a, ",", "b", "m")
         #expect(a.router.route == .review(repo: "loops", branch: "add-hankles-limited-label", stretch: "main"))
-        #expect(ReviewPageState.of(a).keyOf.hasSuffix("|main"))
+        #expect(ReviewPageState.of(a).keyOf.contains("|main#"), "the diff is keyed on the base it was read against")
     }
 
     /// ↵ on a gap shows all of it in one press — reading the function around a change is the point

@@ -90,13 +90,13 @@ struct ForestsPage: View {
         .task(id: divergedKey(fs)) {
             let ship = ShipState.of(app)
             for v in fs.values.flatMap(\.branches) where v.b.diverged && v.st.ship != .landed {
-                ship.readFacts(app, v.b, key: ShipState.factsKey(v.b, ship.motionOf(v.b.id)))
+                ship.readFacts(app, v.b, key: ShipState.factsKey(v.b, ship.motionOf(v.b.id), v.pr))
                 ship.readForceScope(app, v.b.id)
             }
         }
         // the cursor landing on a branch warms its review page's diff (Forests.tsx warmSelected)
         .onChange(of: cursor, initial: true) { _, k in
-            if let b = RowKey.id(k, "b").flatMap({ app.store.view(Branch.self, $0) }) { ReviewPageState.of(app).warm(repo: b.repo, name: b.name, at: b.tip, parent: b.parent) }
+            if let b = RowKey.id(k, "b").flatMap({ app.store.view(Branch.self, $0) }) { ReviewPageState.of(app).warm(b) }
         }
         // the cursor resting on a forest asks whether it merges — a second of git, so only the one you stop on
         .task(id: cursor) {

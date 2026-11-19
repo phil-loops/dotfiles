@@ -59,6 +59,9 @@ public final class Store {
     @ObservationIgnored private var listeners: [Int: () -> Void] = [:]
     /// Bumped by every write (hydrate, patch, op): what `list`'s copies are good for.
     @ObservationIgnored private var revision = 0
+    /// Moves on every change the store's reads can see — a patch, a hydrate, an op, a receipt. A memo
+    /// over `view`/`list` keys on this, never on a subset of what changes it (versions + ops missed receipts).
+    public var changeCount: Int { revision }
     @ObservationIgnored private var lists: [EntityType: (revision: Int, value: Any)] = [:]
     @ObservationIgnored private var nextListener = 0
 

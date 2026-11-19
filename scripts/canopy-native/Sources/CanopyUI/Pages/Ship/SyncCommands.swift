@@ -73,9 +73,20 @@ enum SyncCommands {
             available: { id in branch(id).map { !$0.tip.isEmpty } == true && !running(id) && !deciding(id) },
             local: { [weak app] id, _ in
                 guard let app, let id else { return }
-                if let b = branch(id), ship.syncNeeds(b)?.isEmpty == true { throw Refusal("nothing to sync — it's on its parent and main, clean and in shape") }
                 let via: Via = .key
-                Task { @MainActor in await SyncMotionDriver(app: app).start(id, via: via) }
+                guard let b = branch(id), ship.syncNeeds(b)?.isEmpty == true else {
+                    Task { @MainActor in await SyncMotionDriver(app: app).start(id, via: via) }
+                    return
+                }
+                // "nothing to sync" is a decision, and uncommitted work is the one input the cached read
+                // can't see change — so it's made on a fresh read, never the strip's last one
+                Task { @MainActor in
+                    let driver = SyncMotionDriver(app: app)
+                    guard let fresh = try? await driver.facts(b), Syncing.needs(b, facts: fresh, prep: ship.prepOf(id)).isEmpty else {
+                        return await driver.start(id, via: via)
+                    }
+                    app.runner.say("nothing to sync — it's on its parent and main, clean and in shape")
+                }
             }))
         r.register(Command(
             id: "review.sync", title: "Sync this branch — fold or stash dirt, reseat, rebase, shape the commits, then gates and tests", scope: .review,

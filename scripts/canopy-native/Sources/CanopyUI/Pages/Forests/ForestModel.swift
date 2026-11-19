@@ -125,7 +125,7 @@ public final class ForestModel {
     /// Every forest with its branches in merge order, each knowing where it stands. Built once per
     /// store change: the cursor alone asks for it dozens of times a keypress.
     public func forests() -> [String: ForestView] {
-        let key = ForestsKey(epoch: store.epoch, versions: store.versions, ops: store.ops.map(\.seq), now: now, reads: readsVersion?() ?? 0)
+        let key = ForestsKey(epoch: store.epoch, store: store.changeCount, now: now, reads: readsVersion?() ?? 0)
         if let memo = forestsMemo, memo.key == key { return memo.value }
         let value = buildForests()
         forestsMemo = (key, value)
@@ -133,7 +133,7 @@ public final class ForestModel {
     }
 
     private struct ForestsKey: Equatable {
-        var epoch: String, versions: Versions, ops: [Int], now: Date, reads: Int
+        var epoch: String, store: Int, now: Date, reads: Int
     }
     @ObservationIgnored private var forestsMemo: (key: ForestsKey, value: [String: ForestView])?
 

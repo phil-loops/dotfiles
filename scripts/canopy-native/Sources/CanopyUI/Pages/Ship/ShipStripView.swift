@@ -42,7 +42,7 @@ public struct ShipStripView: View {
             .font(Theme.text(11))
             .task(id: readKey(b, m)) { ship.readFacts(app, b, key: readKey(b, m)) }
             .task(id: "\(b.tip)|\(b.gates.rawValue)|\(shown ?? "")") { ship.readProgress(app, b, key: "\(b.tip)|\(b.gates.rawValue)|\(shown ?? "")", gate: shown) }
-            .task(id: "\(b.diverged)|\(ShipState.scopeKey(b))") { if b.diverged { ship.readForceScope(app, branchID) } }
+            .task(id: "\(b.diverged)|\(ShipState.scopeKey(b, app.store.view(Pr.self, branchID)))") { if b.diverged { ship.readForceScope(app, branchID) } }
             .task(id: ship.inspecting) { if ship.inspecting == branchID { ship.readDivergence(app, b) } }
         }
     }
@@ -60,7 +60,7 @@ public struct ShipStripView: View {
     }
 
     /// dirt and the prep route are read per branch, re-read when the branch moves or a sync ends
-    private func readKey(_ b: Branch, _ m: SyncMotion?) -> String { ShipState.factsKey(b, m) }
+    private func readKey(_ b: Branch, _ m: SyncMotion?) -> String { ShipState.factsKey(b, m, app.store.view(Pr.self, b.id)) }
 
     @ViewBuilder private func line(_ b: Branch, _ m: SyncMotion?, _ rows: [GateRow], _ progress: GateProgress?, now: Double, slot: ShipSlot) -> some View {
         let detailed = slot == .gates
@@ -479,7 +479,7 @@ struct DivergenceView: View {
     let branch: Branch
 
     var body: some View {
-        let d = ShipState.of(app).divergence[branch.id]
+        let d = ShipState.of(app).divergenceOf(branch)
         VStack(alignment: .leading, spacing: 3) {
             switch d {
             case .none: Text("…").foregroundStyle(theme.inkFaint)

@@ -47,7 +47,7 @@ public final class ShipState {
     public var host: ShipHost = StandInHost()
 
     // ── ⟲ sync ──
-    public var motions: [String: SyncMotion] = [:]
+    public var motions: [String: SyncMotion] = [:] { didSet { readsVersion &+= 1 } }
     /// the dirty file whose change is open under the dirt decision — "<branch id>|<path>"
     public var dirtOpen: String?
     /// the branch whose divergence is being inspected
@@ -62,7 +62,12 @@ public final class ShipState {
     public private(set) var forceScopes: [String: (key: String, value: ForceScope??)] = [:] { didSet { readsVersion &+= 1 } }
     /// moves with every read above: a branch's situation is derived from them, so its memo keys on this
     public private(set) var readsVersion = 0
-    public private(set) var divergence: [String: DivergedDetail?] = [:]
+    private var divergenceRead: [String: (stamp: String, value: DivergedDetail?)] = [:]
+    /// The per-side divergence for the branch as it stands now: nil until read for these refs.
+    public func divergenceOf(_ b: Branch) -> DivergedDetail?? {
+        guard let d = divergenceRead[b.id], d.stamp == "\(b.tip)|\(b.readStamp ?? "")" else { return nil }
+        return .some(d.value)
+    }
     /// the gate whose output the strip shows instead of the running one's — "<branch id> <gate>"
     public var gateShown: String?
     /// branches whose gates strip `, g` put away, even while their gates run
@@ -188,8 +193,8 @@ public final class ShipState {
 
     /// What the strip's reads depend on: the branch's tip, push state, drift and the motion's
     /// phase. An answer read under another key describes a tree the branch has left (A5).
-    static func factsKey(_ b: Branch, _ m: SyncMotion?) -> String {
-        "\(b.repo)|\(b.name)|\(b.tip)|\(b.pushed.rawValue)|\(b.ahead)|\(b.behind)|\(b.drifted)|\(m?.phase.rawValue ?? "")"
+    static func factsKey(_ b: Branch, _ m: SyncMotion?, _ pr: Pr?) -> String {
+        "\(b.repo)|\(b.name)|\(b.tip)|\(b.readStamp ?? "")|\(pr?.state ?? "")|\(b.pushed.rawValue)|\(b.ahead)|\(b.behind)|\(b.drifted)|\(m?.phase.rawValue ?? "")"
     }
 
     /// GET /sync and /prep-route for the strip, once per `key` (factsKey). The last answer stays
@@ -220,7 +225,7 @@ public final class ShipState {
     /// The key the branch's reads must carry to describe it now; nil when the branch is gone.
     private func currentKey(_ id: String) -> String? {
         guard let app, let b = app.store.view(Branch.self, id) else { return nil }
-        return Self.factsKey(b, motionOf(id))
+        return Self.factsKey(b, motionOf(id), app.store.view(Pr.self, id))
     }
 
     /// GET /gates-progress, re-read every 2s while the run is going (as v2 polls it). The app
@@ -283,11 +288,14 @@ public final class ShipState {
                               gatesCanPutNext: GatesRun.canPutNext(GatesRun.setup(progressOf(b.id))))
     }
 
-    static func scopeKey(_ b: Branch) -> String { "\(b.tip)|\(b.ahead)|\(b.gates.rawValue)" }
+    /// The force scope reads the PR's draft flag, reviews and head as well as the refs.
+    static func scopeKey(_ b: Branch, _ pr: Pr?) -> String {
+        "\(b.tip)|\(b.readStamp ?? "")|\(b.ahead)|\(b.gates.rawValue)|\(pr.map { "\($0.draft)|\($0.review ?? "")|\($0.headSha ?? "")" } ?? "")"
+    }
 
     /// The force scope read for this tip — nil until read, .some(nil) when it couldn't be.
     public func forceScopeOf(_ app: AppModel, _ id: String?) -> ForceScope?? {
-        guard let id, let b = app.store.view(Branch.self, id), let s = forceScopes[id], s.key == Self.scopeKey(b) else { return nil }
+        guard let id, let b = app.store.view(Branch.self, id), let s = forceScopes[id], s.key == Self.scopeKey(b, app.store.view(Pr.self, id)) else { return nil }
         return s.value
     }
 
@@ -296,7 +304,7 @@ public final class ShipState {
     /// read again, a few times.
     public func readForceScope(_ app: AppModel, _ id: String, tries: Int = 0) {
         guard let b = app.store.view(Branch.self, id) else { return }
-        let key = Self.scopeKey(b)
+        let key = Self.scopeKey(b, app.store.view(Pr.self, id))
         if tries == 0 && forceScopes[id]?.key == key { return }
         if tries == 0 { forceScopes[id] = (key, nil) }
         struct Answer: Decodable { var forceScope: ForceScope? }
@@ -304,7 +312,7 @@ public final class ShipState {
         let path = t.atRepo(b.repo, "/force-scope?branch=\(b.name.uriComponent)")
         Task { @MainActor [weak self, weak app] in
             let got = try? await t.getJSON(path, as: Answer.self)
-            guard let self, let app, let now = app.store.view(Branch.self, id), Self.scopeKey(now) == key else { return }
+            guard let self, let app, let now = app.store.view(Branch.self, id), Self.scopeKey(now, app.store.view(Pr.self, id)) == key else { return }
             self.forceScopes[id] = (key, .some(got?.forceScope))
             let early = b.gates == .green && got?.forceScope?.guards.contains { $0.k == "gates" && !$0.ok } == true
             if early && tries < 4 {
@@ -319,20 +327,21 @@ public final class ShipState {
     /// Put a force scope in place (the server's answer to a refused force carries the fresh one).
     public func putForceScope(_ app: AppModel, _ id: String, _ s: ForceScope?) {
         guard let b = app.store.view(Branch.self, id) else { return }
-        forceScopes[id] = (Self.scopeKey(b), .some(s))
+        forceScopes[id] = (Self.scopeKey(b, app.store.view(Pr.self, id)), .some(s))
     }
 
     public func readDivergence(_ app: AppModel, _ b: Branch) {
-        guard divergence[b.id] == nil else { return }
+        let stamp = "\(b.tip)|\(b.readStamp ?? "")"
+        guard divergenceRead[b.id]?.stamp != stamp else { return }
         let t = app.transport
         let path = t.atRepo(b.repo, "/diverged-detail?branch=\(b.name.uriComponent)")
         Task { @MainActor [weak self] in
             let got = try? await t.getJSON(path, as: DivergedDetail.self)
-            self?.divergence[b.id] = .some(got)
+            self?.divergenceRead[b.id] = (stamp, got)
         }
     }
 
-    public func forgetDivergence(_ id: String) { divergence[id] = nil }
+    public func forgetDivergence(_ id: String) { divergenceRead[id] = nil }
 
     // ── the history list (GET /commits) ──
 

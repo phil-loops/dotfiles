@@ -785,12 +785,28 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
         ShipStub.answer(port, "GET", "/loops/prep-route", #"{"route":"push","why":""}"#)
         let ship = ShipState.of(a)
         let b = try #require(a.store.view(Branch.self, Self.branch))
-        ship.readFacts(a, b, key: ShipState.factsKey(b, nil))
+        ship.readFacts(a, b, key: ShipState.factsKey(b, nil, a.store.view(Pr.self, b.id)))
         await until("the reads") { ship.syncNeeds(b) != nil }
         #expect(ship.syncNeeds(b) == [])
         a.runner.dispatch("branch.sync", via: .key, target: Self.branch)
-        #expect(a.runner.note?.hasPrefix("nothing to sync") == true, "\(a.runner.note ?? "nil")")
+        await until("the fresh read's answer") { a.runner.note?.hasPrefix("nothing to sync") == true }
         #expect(ship.motionOf(Self.branch) == nil && ShipStub.posts(port).isEmpty)
+    }
+
+    /// The strip's last read said clean; an agent has since edited the worktree. "Nothing to sync" is a
+    /// decision, so it's made on a fresh read — and the fresh read's dirt starts the motion instead.
+    @Test func nothingToSyncIsDecidedOnAFreshRead() async throws {
+        let (a, port) = try app()
+        ShipStub.answer(port, "GET", "/loops/sync", #"{"behind":0,"syncable":false,"dirty":[]}"#)
+        ShipStub.answer(port, "GET", "/loops/prep-route", #"{"route":"push","why":""}"#)
+        let ship = ShipState.of(a)
+        let b = try #require(a.store.view(Branch.self, Self.branch))
+        ship.readFacts(a, b, key: ShipState.factsKey(b, nil, a.store.view(Pr.self, b.id)))
+        await until("the reads") { ship.syncNeeds(b) == [] }
+        ShipStub.answer(port, "GET", "/loops/sync", #"{"behind":0,"syncable":false,"dirty":["a.ts"],"dirtyWorktree":"/wt"}"#)
+        a.runner.dispatch("branch.sync", via: .key, target: Self.branch)
+        await until("the motion") { ship.motionOf(Self.branch) != nil }
+        #expect(a.runner.note?.hasPrefix("nothing to sync") != true)
     }
 
     @Test func aFailedStepKeepsTheMotionInView() async throws {

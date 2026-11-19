@@ -102,6 +102,9 @@ public struct Branch: Entity {
     public var pending: String?
     /// a push Phil queued for when the gates go green, standing for this tree (srv/pushintent.py)
     public var pushQueued: Bool?
+    /// what every server read about this branch is derived from (its, its parent's and requires' refs
+    /// and config, the trunk): a client key on it moves exactly when such a read could change
+    public var readStamp: String?
     /// what the last queued push came to, for an hour after it did
     public var pushSaid: String?
 }
