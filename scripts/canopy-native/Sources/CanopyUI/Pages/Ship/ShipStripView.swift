@@ -22,7 +22,8 @@ public struct ShipStripView: View {
                 let previous = ship.previousOf(branchID)
                 let before = GatesRun.previousRows(current: progress, previous: previous,
                                                    inFlight: b.gates == .running || GatesRun.isRunning(progress), now: ctx.date.timeIntervalSince1970)
-                let guards: ForceScope? = { if m == nil, b.diverged, case .some(.some(let s)) = ship.forceScopeOf(app, branchID) { return s }; return nil }()
+                let forceNext = ["branch.force.arm", "branch.force.confirm"].contains(ReviewCommands.pushRoute(app, branchID))
+                let guards: ForceScope? = { if m == nil, b.diverged, forceNext, case .some(.some(let s)) = ship.forceScopeOf(app, branchID) { return s }; return nil }()
                 let slot = ShipSlot.pick(facts(b, m, rows, progress, shown, before, guards: guards != nil, ship))
                 VStack(alignment: .leading, spacing: 4) {
                     line(b, m, rows, progress, now: ctx.date.timeIntervalSince1970, slot: slot)
