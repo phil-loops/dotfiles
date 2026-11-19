@@ -105,8 +105,14 @@ public struct Branch: Entity {
     /// what every server read about this branch is derived from (its, its parent's and requires' refs
     /// and config, the trunk): a client key on it moves exactly when such a read could change
     public var readStamp: String?
-    /// what the last queued push came to, for an hour after it did
+    /// what the last queued push came to, and when (epoch seconds) — shown for an hour on the client's clock
     public var pushSaid: String?
+    public var pushSaidAt: Double?
+    /// The queued push's outcome while it's news: within an hour of `now`.
+    public func pushSaidNow(_ now: Date) -> String? {
+        guard let s = pushSaid, let at = pushSaidAt, now.timeIntervalSince1970 - at < 3600 else { return nil }
+        return s
+    }
 }
 
 public struct Pr: Entity {

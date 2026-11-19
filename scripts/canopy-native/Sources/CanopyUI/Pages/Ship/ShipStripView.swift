@@ -151,7 +151,7 @@ public struct ShipStripView: View {
                     .explains("ship|gates", "a follow-up onto an open PR: env, fresh, format and tests here — typecheck and lint left to CI, which runs them on the push")
             }
             if live == .failed, let err = push?.run.err { Text(err).foregroundStyle(theme.ember).lineLimit(2) }
-            if live == nil, let said = b.pushSaid { Text(said).foregroundStyle(said.hasPrefix("pushed") ? theme.inkFaint : theme.ember).lineLimit(2) }
+            if live == nil, let said = b.pushSaidNow(app.scheduler.now) { Text(said).foregroundStyle(said.hasPrefix("pushed") ? theme.inkFaint : theme.ember).lineLimit(2) }
             if live == nil, slot != .guards, b.diverged, case .some(.some(let s)) = ship.forceScopeOf(app, branchID), !s.eligible,
                !s.guards.allSatisfy({ $0.ok || $0.k == "gates" }), let bad = s.guards.first(where: { !$0.ok }) {
                 Text("diverged · ✗ \(bad.label)").foregroundStyle(theme.ember)

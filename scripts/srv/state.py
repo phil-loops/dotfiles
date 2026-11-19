@@ -274,7 +274,9 @@ def _git_entities(name, snap, jobs):
             # change (a push, a parent's seal, a review run's flags). Dirt is the one input it lacks.
             "readStamp": snap.inputs_fingerprint([b, parent, *snap.branch_key_all(b, "requires")])[:16],
             # a push Phil queued for when its gates go green (srv/pushintent.py), and what it came to
-            "pushQueued": pushintent.queued(b, snap, tree), "pushSaid": pushintent.said(b, snap),
+            "pushQueued": pushintent.queued(b, snap, tree),
+            # the client shows it for an hour from `pushSaidAt` on its own clock (no clock in a fingerprint)
+            **dict(zip(("pushSaid", "pushSaidAt"), pushintent.said_at(b, snap))),
         }
     # what each branch owes: the highest link in its chain that is off its parent's tip (its own
     # parent may not have moved at all — a grandparent did). /catch-up walks the chain from there.
@@ -505,7 +507,7 @@ def _refresher():
                 ctx.log(f"state: reply release failed: {e!r}")
             continue
         try:
-            sync.pulse_freshen()   # the remote world converges while a v2 tab is open, as v1's pulse does
+            _each_repo(lambda n: sync.pulse_freshen())   # every served repo's remote world converges while a tab is open
             refresh()
         except Exception as e:
             ctx.log(f"state: refresh failed: {e!r}")

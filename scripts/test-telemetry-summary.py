@@ -112,5 +112,22 @@ except Exception as e:
 check("a fold past 256 launches forgets the quiet ones instead of raising", folded is True, folded)
 check("…and keeps the live ones", 0 < len(many["last"]) <= 300, len(many.get("last", {})))
 
+# the rollup's version is derived from the rules baked into stored days: change a rule, refold
+was = telemetry.ROLLUP_V
+telemetry.REVERSE_S = 2
+importlib.reload(telemetry)   # reload restores the module's own rules…
+check("the rollup's version comes from its rules", telemetry.ROLLUP_V == was)
+import hashlib  # noqa: E402
+other = f"{telemetry.ROLLUP_SHAPE}-" + hashlib.sha1(repr((sorted(telemetry.HUMAN_ACTORS, key=str), telemetry.COLD_MS,
+                                                         telemetry.UNDO_SOON_S, 2, sorted(telemetry.REVERSES))).encode()).hexdigest()[:8]
+check("…(a REVERSE_S of 2 would be another version)", other != telemetry.ROLLUP_V, other)
+
+# events with no launch id pair with nothing — they used to share one slot across launches
+nopl = {"days": {}, "registry": None}
+for cid, at in (("review.down", 0), ("review.up", 0.2)):
+    telemetry.fold(nopl, {"schema": 2, "app": "native", "type": "cmd", "id": cid, "ts": int(now), "at": (now + at) * 1000,
+                          "actor": actor, "budget": "local", "via": "key", "outcome": "ok", "feedbackMs": 5})
+check("no launch id: never paired into a reversal", telemetry.summarize(nopl, days=30, now=now)["sessions"]["native"]["reversed"] == 0)
+
 print(f"\n{'OK' if not failures else 'FAIL'} — {failures} failure(s)")
 sys.exit(1 if failures else 0)

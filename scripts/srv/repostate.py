@@ -52,7 +52,6 @@ class RepoState:
         # every 2s — goes through this object's fingerprint. Eager loading made /sig take 6s on a
         # cold server. Refs and config identify a snapshot; PR membership is its own TTL'd cache
         # in sync, consulted on first use, and the pulse's world_sig already carries PR flips.
-        self._pr_heads = None
         self._memo = {}
 
     # ── config ────────────────────────────────────────────────────────────
@@ -121,10 +120,10 @@ class RepoState:
         return self.upstream.get(branch, ("", ""))
 
     def pr_heads(self, fresh=False):
-        if self._pr_heads is None or fresh:
-            from . import openprs
-            self._pr_heads = openprs.heads(fresh=fresh)
-        return self._pr_heads
+        """The open-PR heads as the listing has them now — never pinned for the snapshot's life, which
+        kept a PR opened on GitHub out of every fingerprint until a ref or config moved (2026-11-18)."""
+        from . import openprs
+        return openprs.heads(fresh=fresh)
 
     def published(self, branch):
         return branch in self.pr_heads()

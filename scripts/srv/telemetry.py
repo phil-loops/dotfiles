@@ -13,13 +13,14 @@
 # prints the same summary from the same code.
 import datetime as dt
 import gzip
+import hashlib
 import json
 import os
 import re
 import threading
 import time
 
-ROLLUP_V = 6   # 3: per-command surface and cold splits; 4: per-launch session stats (refusals, undo-soon, reversed motions); 5: the previous command per launch lives in the cache; 6: gaps read the press time (`at`), not the batch's receipt second
+ROLLUP_SHAPE = 6   # the cache's layout: 3 surface and cold splits; 4 per-launch session stats; 5 the previous command per launch in the cache; 6 gaps on press time (`at`)
 # Only Phil's own browser counts: Claude's curls, the extension and headless checks would skew
 # the timings this dashboard exists to steer by.
 HUMAN_ACTORS = {"browser", None}
@@ -30,6 +31,10 @@ REVERSE_S = 1      # j then k (or the like) this close is a motion that overshot
 REVERSES = {("cursor.down", "cursor.up"), ("cursor.up", "cursor.down"), ("review.down", "review.up"), ("review.up", "review.down"),
             ("history.next", "history.prev"), ("history.prev", "history.next"), ("review.file.next", "review.file.prev"),
             ("review.file.prev", "review.file.next"), ("review.hunk.next", "review.hunk.prev"), ("review.hunk.prev", "review.hunk.next")}
+# the stored days bake these rules in: the cache's version is derived from them, so changing a rule
+# refolds the history instead of mixing old and new counts (a hand-bumped number was the only guard)
+ROLLUP_V = f"{ROLLUP_SHAPE}-" + hashlib.sha1(repr((sorted(HUMAN_ACTORS, key=str), COLD_MS, UNDO_SOON_S, REVERSE_S,
+                                                  sorted(REVERSES))).encode()).hexdigest()[:8]
 LIVE_MAX = 8 * 1024 * 1024
 DEFAULT_BUDGETS = {
     "local": {"feedbackMs": 16.7, "settledMs": None},
@@ -133,7 +138,7 @@ def _fold(days, reg, last, e):
         s["cmds"] += 1
         if e.get("outcome") == "refused":
             s["refused"] += 1
-        prev = last.get(pl)
+        prev = last.get(pl) if pl else None   # no launch id: nothing to pair it with
         ts, cid, at = e.get("ts", 0), e.get("id") or "?", e.get("at")
         if prev:
             at0 = prev[2] if len(prev) > 2 else None
@@ -147,7 +152,8 @@ def _fold(days, reg, last, e):
         if len(last) > 256:   # a launch's pairs only reach back seconds: forget the long-quiet ones
             for k in [k for k, v in last.items() if ts - v[0] > 600]:
                 del last[k]
-        last[pl] = (ts, cid, at, e.get("outcome") == "refused")
+        if pl:
+            last[pl] = (ts, cid, at, e.get("outcome") == "refused")
         k = f"{app}|{e.get('id') or '?'}"
         c = d["cmd"].setdefault(k, {"budget": e.get("budget") or "local", "n": 0, "via": {}, "out": {}, "err": {}, "fb": [], "st": [],
                                     "surf": {}, "cold": [], "warm": []})

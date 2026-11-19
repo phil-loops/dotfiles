@@ -175,9 +175,6 @@ def get_one(req, u):
     req._send(200, json.dumps(state_cached(parse_qs(u.query).get("branch", [""])[0], with_patches=True)))
 
 
-_TRUNK_FETCH_AT = 0.0
-_TRUNK_FETCH_LOCK = threading.Lock()
-
 # `stack-forest --pr-state` is a live `gh pr list --state all --limit 300` — ~5s over a few hundred
 # PRs, and health_many runs it on EVERY forest open (its cost grows with total PR count, not the
 # forest's node count). PR state drifts on the order of minutes, so cache it stale-while-revalidate
@@ -249,17 +246,25 @@ def _trunk(main):
     return main
 
 
-_FRESH = {"okAt": 0.0, "failing": False}   # last successful trunk fetch + whether the latest attempt failed
+_FRESH = {}   # repo -> {"okAt": last successful trunk fetch, "failing": whether the latest attempt failed}
 
 
-def _fetch_trunk(main):
+def _fresh(repo=None):
+    return _FRESH.setdefault(repo or ctx.repo_cwd(), {"okAt": 0.0, "failing": False})
+
+
+def _fetch_trunk(main, repo=None):
+    """Fetch the trunk for `repo` — a thread has no repo of its own, so it is bound here."""
+    if repo:
+        ctx.set_repo(repo)
     ok = ctx.run(["git", "fetch", "origin", main]).returncode == 0
+    f = _fresh(repo)
     if ok:
-        _FRESH["okAt"] = time.time()
-    _FRESH["failing"] = not ok
+        f["okAt"] = time.time()
+    f["failing"] = not ok
 
 
-_PULSE_FRESHEN_AT = [0.0]
+_PULSE_FRESHEN_AT = {}   # repo -> when its remote world was last freshened
 
 
 def pulse_freshen():
@@ -267,15 +272,14 @@ def pulse_freshen():
     # an open /events stream) calls this every tick; at most one freshen per 90s. An open tab
     # converges on a merge without any client polling — prwatch's poke is an accelerant, not
     # a dependency (2026-07-23: sweep dead → merged branch rendered live indefinitely).
-    now = time.time()
-    if now - _PULSE_FRESHEN_AT[0] < 90:
+    # Per repo: the pulse calls this once for each repo the server serves (state._each_repo), and one
+    # repo's freshen must not stand in for another's (only loops' trunk was fetched, 2026-11-18).
+    now, repo = time.time(), ctx.repo_cwd()
+    if now - _PULSE_FRESHEN_AT.get(repo, 0.0) < 90:
         return
-    _PULSE_FRESHEN_AT[0] = now
+    _PULSE_FRESHEN_AT[repo] = now
     main = ctx.run(["git", "config", "stack.main-branch"]).stdout.strip() or "main"
-    global _TRUNK_FETCH_AT
-    with _TRUNK_FETCH_LOCK:
-        _TRUNK_FETCH_AT = now
-    threading.Thread(target=_fetch_trunk, args=(main,), daemon=True).start()
+    threading.Thread(target=_fetch_trunk, args=(main, repo), daemon=True).start()
     _pr_state_map()
 
 
@@ -295,13 +299,14 @@ def world_sig():
             for b, p in data.items()
         )
     return hashlib.sha1(
-        json.dumps([tip, states, _FRESH["failing"]], default=str).encode()
+        json.dumps([tip, states, _fresh()["failing"]], default=str).encode()
     ).hexdigest()
 
 
 def fresh_state():
     # (failing, seconds since the last successful trunk fetch; -1 = never fetched)
-    return _FRESH["failing"], (time.time() - _FRESH["okAt"] if _FRESH["okAt"] else -1)
+    f = _fresh()
+    return f["failing"], (time.time() - f["okAt"] if f["okAt"] else -1)
 
 
 def _upstream_state(branch, main):

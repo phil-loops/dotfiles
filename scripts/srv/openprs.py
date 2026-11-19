@@ -94,10 +94,20 @@ def listing(fresh=False):
     return _store(repo, _sweep(_slugs()))
 
 
+_heads = {}   # repo -> (the listing it was built from, its head names)
+
+
 def heads(fresh=False):
     """Branch names with an open PR on either remote — a fork's head too: for a guard against
-    rewriting published work, a name counted published by mistake is the safe error."""
-    return {p["headRefName"] for p in listing(fresh)}
+    rewriting published work, a name counted published by mistake is the safe error. Built once
+    per listing, so a reader may ask per branch and still see a new listing the moment it lands."""
+    prs = listing(fresh)
+    repo = ctx.repo_cwd()
+    got = _heads.get(repo)
+    if got is None or got[0] is not prs:
+        got = (prs, frozenset(p["headRefName"] for p in prs))
+        _heads[repo] = got
+    return got[1]
 
 
 def failed():

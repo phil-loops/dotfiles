@@ -364,7 +364,8 @@ def commits(req, u):
     branch = parse_qs(u.query).get("branch", [""])[0]
     snap = repostate.snapshot()
     parent = snap.diff_base(branch)
-    key = (ctx.repo_cwd(), branch, snap.branch_fingerprint(branch))
+    # the `carried` flag reads each requires dep's tip (git cherry), so their refs are in the key too
+    key = (ctx.repo_cwd(), branch, snap.branch_fingerprint(branch), snap.inputs_fingerprint(snap.branch_key_all(branch, "requires")))
     hit = _COMMITS_CACHE.get(key)
     if hit is not None:
         return req._send(200, hit)

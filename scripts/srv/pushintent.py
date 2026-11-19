@@ -32,14 +32,21 @@ def queued(branch, snap=None, tree=None):
     return bool(at) and at == (tree or snap.tree(snap.local(branch)))
 
 
-def said(branch, snap=None, now=None):
-    """What the last queued push came to, for an hour after it did; else None."""
+def said_at(branch, snap=None):
+    """(what the last queued push came to, when) — or (None, None). The reader decides how long it
+    shows: a time-bounded field computed here would go stale on a fingerprint that has no clock."""
     snap = snap or repostate.snapshot()
     text, _, at = (snap.branch_key(branch, SAID) or "").rpartition("|")
     try:
-        return text if text and (now or time.time()) - float(at) < SAID_FOR_S else None
+        return (text, float(at)) if text else (None, None)
     except ValueError:
-        return None
+        return None, None
+
+
+def said(branch, snap=None, now=None):
+    """What the last queued push came to, for an hour after it did; else None."""
+    text, at = said_at(branch, snap)
+    return text if text and (now or time.time()) - at < SAID_FOR_S else None
 
 
 def _settle(branch, text):
