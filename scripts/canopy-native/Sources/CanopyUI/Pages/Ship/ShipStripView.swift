@@ -87,7 +87,7 @@ public struct ShipStripView: View {
         let label = stepping ? (route == "branch.conform" ? "taking origin's copy…" : "catching up…")
             : acts || waiting || live != nil ? pushLabel(b, route: route, live: live, forced: push?.forced ?? false) : "push"
         let pushButton = KeyButton(title: label, id: "review.push", target: branchID,
-                                   gold: control.enabled, busy: stepping || live == .sending || live == .landing, failed: live == .failed)
+                                   gold: control.enabled, busy: stepping || live == .sending || live == .landing || live == .checking, failed: live == .failed)
             .disabled(!control.enabled)
             .settles(label, reduced: reduced)
             .explains("ship|push", "p: this branch's next step — run the gates, then push to origin")
@@ -187,6 +187,7 @@ public struct ShipStripView: View {
         switch live {
         case .sending: return forced ? "replacing origin…" : "pushing…"
         case .landing: return forced ? "✓ replaced" : "✓ pushed"
+        case .checking: return "no answer — checking whether it landed…"
         case .failed: return forced ? "retry the force" : "retry the push"
         default: break
         }

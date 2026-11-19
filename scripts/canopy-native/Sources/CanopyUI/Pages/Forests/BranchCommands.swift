@@ -107,6 +107,11 @@ enum BranchCommands {
                 settled: { answeredCached || s.table(Branch.self)[id]?.gates != was },
                 said: !skip.isEmpty ? "skipping \(skip.joined(separator: ", ")) for this code — the rest re-run"
                     : quick ? "running the quick gates — typecheck and lint left to CI" : "running the gates — p pushes once they're green",
+                saidFrom: { body in
+                    if body["cached"] == true { return "these gates already passed on this code — nothing re-ran" }
+                    if body["already"] == true { return "a gates run is already going on this code" }
+                    return nil
+                },
                 failed: "the gates didn't start",
                 answered: { ok, body in if ok, body["cached"] == true { answeredCached = true } })
         }
@@ -116,7 +121,7 @@ enum BranchCommands {
             available: { id in m.branchView(id)?.b.owes != nil },
             write: { id, _ in
                 guard let v = m.branchView(id) else { return nil }
-                if app.runner.runOf("branch.catchup", id)?.state == .sending { throw Refusal("still catching up — the strip says when it lands") }
+                if app.runner.runOf("branch.catchup", id)?.inFlight == true { throw Refusal("still catching up — the strip says when it lands") }
                 return Write(path: t.atRepo(v.b.repo, "/catch-up"), body: ["branch": .string(v.b.name)], settled: { true },
                              said: "caught the chain up — p pushes next",
                              failed: "the catch-up stopped — a conflict to resolve by hand, or the forest is busy", alone: true)
@@ -127,9 +132,10 @@ enum BranchCommands {
             available: { id in id.map { ShipState.of(app).prepOf($0)?.route == "conform" } ?? false },
             write: { id, _ in
                 guard let v = m.branchView(id) else { return nil }
-                if app.runner.runOf("branch.conform", id)?.state == .sending { throw Refusal("still taking origin's copy — the strip says when it lands") }
-                return Write(path: t.atRepo(v.b.repo, "/prep-push"), body: ["branch": .string(v.b.name)], settled: { true },
+                if app.runner.runOf("branch.conform", id)?.inFlight == true { throw Refusal("still taking origin's copy — the strip says when it lands") }
+                return Write(path: t.atRepo(v.b.repo, "/prep-push"), body: ["branch": .string(v.b.name), "expect": "conform"], settled: { true },
                              said: "took origin's copy — local matches the PR again",
+                             saidFrom: { body in body["routed"]?.array?.compactMap(\.string).joined(separator: " · ").shipNonEmpty },
                              failed: "couldn't take origin's copy — local moved, or its worktree has uncommitted changes", alone: true)
             }))
         r.register(Command(
@@ -159,7 +165,7 @@ enum BranchCommands {
                     path: t.atRepo(v.b.repo, "/gates"), body: ["branch": .string(v.b.name), "next": true],
                     settled: { true },
                     said: "these gates go next — p pushes once they're green",
-                    failed: "the gates are running — p pushes once they're green", alone: true)
+                    failed: "couldn't move the run up", alone: true)
             }))
         r.register(Command(
             id: "branch.review.run", title: "Review this branch's diff — the findings land as review flags for this code",
@@ -194,6 +200,13 @@ enum BranchCommands {
                     path: t.atRepo(v.b.repo, "/push-when-green"), body: ["branch": .string(v.b.name)],
                     settled: { s.table(Branch.self)[id].map { $0.pushQueued == true || $0.pushed == .synced } ?? true },
                     said: "pushes when the gates go green · \(app.registry.keyOf("branch.push")) again ships it now",
+                    saidFrom: { body in
+                        switch body["did"]?.string {
+                        case "pushed": return "pushed — the gates were already green"
+                        case "pushed already": return "origin already has this — nothing to push"
+                        default: return nil
+                        }
+                    },
                     failed: "\(leaf(v.b.name)) isn't queued",
                     inverse: { _ in Inverse(id: "branch.push.unqueue", target: id) })
             }))
@@ -240,6 +253,7 @@ enum BranchCommands {
                     path: t.atRepo(v.b.repo, "/push-origin"), body: ["branch": .string(v.b.name), "stay": true],
                     settled: { s.table(Branch.self)[id]?.pushed == .synced },
                     said: v.pr.map { "pushed \(v.b.ahead) follow-up\(v.b.ahead == 1 ? "" : "s") onto #\($0.number)" },
+                    saidFrom: { body in body["already"] == true ? "origin already has this — nothing to push" : nil },
                     failed: "\(leaf(v.b.name)) didn't push",
                     answered: { ok, body in
                         // the children the push carried (P7) are said right after the push's own line

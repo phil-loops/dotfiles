@@ -118,7 +118,7 @@ struct MachinePage: View {
 
 @MainActor private func busy(_ app: AppModel, _ id: String, _ target: String) -> Bool {
     let s = app.runner.runOf(id, target)?.state
-    return s == .sending || s == .landing
+    return s == .sending || s == .landing || s == .checking
 }
 
 private struct Servers: View {

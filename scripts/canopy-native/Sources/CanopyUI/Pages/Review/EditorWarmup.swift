@@ -52,7 +52,7 @@ extension ReviewPageState {
 
     func warmEditor(_ app: AppModel) {
         let source = BranchSource.current(app, id)
-        let saving = app.runner.runOf("review.helix.land", id).map { $0.state == .sending || $0.state == .landing } == true
+        let saving = app.runner.runOf("review.helix.land", id).map(\.inFlight) == true
         let permitted = editorWarmEnabled && app.router.route.surfaceID == "review" && integration == nil && !scoped
             && !saving
             && app.registry.command("review.helix.land").map { app.runner.refusal?($0) == nil } == true

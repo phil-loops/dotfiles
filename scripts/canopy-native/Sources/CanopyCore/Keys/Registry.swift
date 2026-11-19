@@ -100,6 +100,9 @@ public struct Write {
     public var settled: () -> Bool
     /// one quiet line after it lands (undo hint)
     public var said: String?
+    /// the line worded from the server's answer — what the route says it did ("queued", "cached",
+    /// the route it took); nil falls back to `said`. A route that only starts work says so.
+    public var saidFrom: ((JSONObject) -> String?)?
     /// the line if it's refused
     public var failed: String
     /// the command that puts it back — or a function of the server's answer when only it knows
@@ -115,10 +118,11 @@ public struct Write {
     /// Refuse immediately before posting, after any queued predecessor finishes.
     public var refuseBeforeSend: (() -> String?)? = nil
 
-    public init(ops: [Op] = [], path: String, body: JSONValue, settled: @escaping () -> Bool, said: String? = nil, failed: String,
+    public init(ops: [Op] = [], path: String, body: JSONValue, settled: @escaping () -> Bool, said: String? = nil,
+                saidFrom: ((JSONObject) -> String?)? = nil, failed: String,
                 inverse: ((JSONObject) -> Inverse?)? = nil, rollback: (() -> Void)? = nil,
                 answered: ((Bool, JSONObject) -> Void)? = nil, silent: Bool = false, alone: Bool = false) {
-        self.ops = ops; self.path = path; self.body = body; self.settled = settled; self.said = said; self.failed = failed
+        self.ops = ops; self.path = path; self.body = body; self.settled = settled; self.said = said; self.saidFrom = saidFrom; self.failed = failed
         self.inverse = inverse; self.rollback = rollback; self.answered = answered; self.silent = silent; self.alone = alone
     }
 }

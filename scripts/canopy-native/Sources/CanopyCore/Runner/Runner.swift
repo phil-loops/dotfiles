@@ -27,8 +27,11 @@ public extension CommandContext {
 
 /// A write's live state, for a button that becomes its own status (runner.ts Run).
 public struct Run: Equatable, Sendable {
-    public enum State: String, Sendable { case sending, landing, done, failed }
+    /// `checking`: the answer was lost, and the server's next read decides whether it landed
+    public enum State: String, Sendable { case sending, landing, checking, done, failed }
     public var state: State
+    /// still in flight: sent, landing or being checked
+    public var inFlight: Bool { state == .sending || state == .landing || state == .checking }
     public var t0: Date
     public var t1: Date?
     public var err: String?
@@ -271,7 +274,8 @@ public final class Runner {
             w.answered?(r.ok, r.body ?? ["err": .string(r.err ?? "")])
             if r.ok {
                 if let inv = w.inverse?(r.body ?? [:]), !undoing { self.undo.append((inv, before)) }
-                if let said = w.said, !w.silent { self.say(said) }
+                // what the server says it did, when it says; else the press-time line
+                if let said = w.saidFrom?(r.body ?? [:]) ?? w.said, !w.silent { self.say(said) }
                 self.runs[runKey] = Run(state: .landing, t0: started)
                 self.reconcile(s, w, wrote: r.body?["wrote"]?.int) { self.runs[runKey] = Run(state: .done, t0: started, t1: Date()) }
             } else {
@@ -289,7 +293,7 @@ public final class Runner {
                     // no answer: the server may have done it, so its next read says which
                     guard tellsLanding else { return fail("no answer, so it may have landed — the page shows what the server has") }
                     if !w.silent { self.say("no answer · checking whether it landed") }
-                    self.runs[runKey] = Run(state: .landing, t0: started)
+                    self.runs[runKey] = Run(state: .checking, t0: started)
                     self.confirmLost(w) { landed in
                         guard landed else { return fail("no answer, and the server doesn't show it") }
                         if let said = w.said, !w.silent { self.say(said) }

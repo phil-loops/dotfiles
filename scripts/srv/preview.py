@@ -650,14 +650,26 @@ def kill(req, raw):
     argv = [_script(), dirp or "/", "--kill"]
     if port:
         argv += ["--port", port]
-    subprocess.run(argv, capture_output=True, text=True)
+    r = subprocess.run(argv, capture_output=True, text=True)
     _list_invalidate()
+    # killed is a fact about the port, not the script's intent: it answers ok only once nothing listens
+    still = port.isdigit() and _listening(int(port))
+    for _ in range(6):   # a dying server can hold its socket a beat past the kill script
+        if not still:
+            break
+        time.sleep(0.5)
+        still = _listening(int(port))
+    if still or r.returncode != 0:
+        return req._send(200, json.dumps({"ok": False, "err": f":{port} is still listening" if still
+                                          else _ANSI.sub("", (r.stderr or "the kill failed").strip())[:200]}))
     req._send(200, json.dumps({"ok": True}))
 
 
 def reap(req, raw):
     p = subprocess.run([_script(), "--reap"], capture_output=True, text=True)
     _list_invalidate()
+    if p.returncode != 0:
+        return req._send(200, json.dumps({"ok": False, "err": _ANSI.sub("", (p.stderr or p.stdout or "the reap failed").strip())[:200]}))
     req._send(200, json.dumps({"ok": True, "out": (p.stdout or "").strip()}))
 
 

@@ -197,5 +197,22 @@ check("four resolvers at once: exactly one push", world["pushes"] == 1 and resul
 reset(green=True)
 check("nothing queued: nothing happens", pushintent.resolve("b") is None and world["pushes"] == 0)
 
+
+class Req:
+    def _send(self, code, body):
+        self.code, self.body = code, __import__("json").loads(body)
+
+
+reset(green=True, push_ok=False)
+r = Req()
+pushintent.post(r, '{"branch": "b"}')
+check("a press whose push was tried at once and refused answers as a failure, never 'queued'",
+      r.body.get("ok") is False and r.body.get("did") == "refused" and "didn't go" in r.body.get("err", ""), r.body)
+
+reset(green=True)
+r = Req()
+pushintent.post(r, '{"branch": "b"}')
+check("…and one that went says it pushed", r.body.get("ok") is True and r.body.get("did") == "pushed", r.body)
+
 print(f"\n{'OK' if not failures else 'FAILED'} — {failures} failure(s)")
 sys.exit(1 if failures else 0)

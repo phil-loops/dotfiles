@@ -362,6 +362,20 @@ final class Ctx: CommandContext {
         #expect(got >= before.rounded(.down) - 1 && got <= after.rounded(.up) + 1, "\(got) not in [\(before), \(after)]")
     }
 
+    /// A route that reports what it did words the line: the press-time `said` is only the fallback.
+    @Test func theLineIsWordedFromWhatTheServerSaysItDid() async throws {
+        let (runner, _, _) = try setup()
+        Stub.answers["/queue"] = .init(status: 200, body: #"{"ok":true,"did":"pushed"}"#)
+        let id = "loops:add-hankles-limited-label"
+        runner.registry.register(Command(id: "t.queue", title: "Q", scope: .branch, write: { _, _ in
+            Write(path: "/queue", body: [:], settled: { true }, said: "pushes when the gates go green",
+                  saidFrom: { $0["did"] == .string("pushed") ? "pushed — the gates were already green" : nil }, failed: "no")
+        }))
+        runner.dispatch("t.queue", via: .key, target: id)
+        for _ in 0..<50 where runner.runOf("t.queue", id)?.state == .sending { try await Task.sleep(nanoseconds: 20_000_000) }
+        #expect(runner.note == "pushed — the gates were already green")
+    }
+
     /// 2026-11-18: a push landed but its answer was lost, and the page said it didn't push. A lost
     /// answer is an unknown: the write's own check decides, once a read comes back.
     @Test func aLostAnswerIsSettledByTheWritesOwnCheck() async throws {
@@ -376,7 +390,7 @@ final class Ctx: CommandContext {
         }))
         runner.dispatch("t.push", via: .key, target: id)
         for _ in 0..<50 where runner.runOf("t.push", id)?.state == .sending { try await Task.sleep(nanoseconds: 20_000_000) }
-        #expect(runner.runOf("t.push", id)?.state == .landing)
+        #expect(runner.runOf("t.push", id)?.state == .checking, "a lost answer is being checked, never drawn as landed")
         #expect(runner.note == "no answer · checking whether it landed")
         #expect(resyncs == 1)
         onServer = true

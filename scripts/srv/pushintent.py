@@ -167,4 +167,6 @@ def post(req, raw):
     did = resolve(branch, locked=True)
     repostate.invalidate()
     ctx.bump_pulse()
+    if did in ("refused", "cancelled"):   # the gates had answered already and the push couldn't go: say why
+        return req._send(200, json.dumps({"ok": False, "err": said(branch) or "the push didn't go", "did": did}))
     req._send(200, json.dumps({"ok": True, "queued": did is None, "did": did}))

@@ -805,12 +805,17 @@ def address_prompt(branch, pr, t, note=None):
 
 def _launch_claude(branch, prompt):
     """A fresh Claude in the branch's worktree with `prompt` typed into its composer, never sent
-    (stack-claude's draft mode) — Phil reads and sends it."""
+    (stack-claude's draft mode) — Phil reads and sends it. stack-claude returns once the window
+    exists (the draft goes in on its own), so its exit says whether there is a window to send it
+    in: a launch that failed refuses, and nothing that depends on it is saved."""
     env = dict(os.environ, STACK_CLAUDE_DRAFT="1")
-    p = subprocess.Popen([os.path.join(ctx.SCRIPTS, "stack-claude"), branch], stdin=subprocess.PIPE, env=env,
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=ctx.repo_cwd(), start_new_session=True)
-    p.stdin.write(prompt.encode())
-    p.stdin.close()
+    try:
+        r = subprocess.run([os.path.join(ctx.SCRIPTS, "stack-claude"), branch], input=prompt, text=True, env=env,
+                           capture_output=True, cwd=ctx.repo_cwd(), timeout=30)
+    except subprocess.TimeoutExpired:
+        raise ghreview.Refused("the Claude window didn't open within 30 s")
+    if r.returncode != 0:
+        raise ghreview.Refused((r.stderr or r.stdout or "the Claude window didn't open").strip().splitlines()[-1])
 
 
 @_guarded

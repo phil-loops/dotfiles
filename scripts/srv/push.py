@@ -159,7 +159,9 @@ def gates(req, raw):
         old = gate_run(branch)
         tier = gate_queue.waiting_tier(_queue_file(old)) if old and old.alive() else None
         if tier is None:
-            return req._send(200, json.dumps({"ok": False, "err": "the gates are running — p pushes once they're green"}))
+            why = ("its run is already next — nothing waits ahead of it" if old and old.alive()
+                   else "no gates run is waiting — they finished; the page shows how")
+            return req._send(200, json.dumps({"ok": False, "err": why}))
         gate_queue.promote(_queue_file(old))
         return req._send(200, json.dumps({"ok": True, "next": True}))
     quick = d.get("mode") == "quick"
@@ -1106,6 +1108,9 @@ def prep_push(req, raw):
     published = branch in openprs.heads(fresh=True)
     tip_before = _tip(branch)
     routed = []
+    # a press made for one route says so: if the branch no longer takes it, refuse rather than take another
+    if d.get("expect") == "conform" and (v["ff"] or conform_plan(branch) is None):
+        return req._send(200, json.dumps({"ok": False, "err": "origin's copy changed — taking it is no longer the move; read the page again"}))
 
     if not v["ff"] and conform_plan(branch) is not None:
         # someone rewrote origin's copy and local only adds commits on top of what it carries:
@@ -1194,10 +1199,12 @@ def prep_push(req, raw):
                 return req._send(200, json.dumps({
                     "ok": False, "err": f"{holder} holds {branch} with uncommitted changes — commit or stash first"}))
             if holder:
-                ctx.run(["git", "-C", holder, "reset", "--hard", sha])
+                moved = ctx.run(["git", "-C", holder, "reset", "--hard", sha])
             else:
-                ctx.run(["git", "branch", "-f", branch, sha])
+                moved = ctx.run(["git", "branch", "-f", branch, sha])
             ctx.run(["git", "branch", "-D", res["vehicle"]])
+            if moved.returncode != 0:
+                return req._send(200, json.dumps({"ok": False, "err": f"{branch} didn't move onto the PR head — {(moved.stderr or '').strip()[:200] or 'reload and retry'}"}))
             ctx.run(["git", "config", "--remove-section", f"branch.{res['vehicle']}"])
             routed.append("carried your rework onto the PR head as one additive commit")
     else:

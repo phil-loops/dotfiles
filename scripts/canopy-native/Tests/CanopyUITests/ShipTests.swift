@@ -753,8 +753,10 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
         a.runner.dispatch("branch.gates.run", via: .key, target: Self.branch)
         #expect(a.store.view(Branch.self, Self.branch)?.gates == .running)
         await until("the cached answer to settle the overlay") { a.runner.runOf("branch.gates.run", Self.branch)?.state == .done }
-        // settled on the answer: the runner never reached its "not confirmed yet · resyncing" give-up
-        #expect(a.runner.note == "running the gates — p pushes once they're green")
+        // settled on the answer: the runner never reached its "not confirmed yet · resyncing" give-up,
+        // and the line says what the server did — nothing ran — not what the press asked for
+        #expect(a.runner.note?.hasPrefix("not confirmed") != true)
+        #expect(a.runner.note == "these gates already passed on this code — nothing re-ran")
         #expect(a.store.view(Branch.self, Self.branch)?.gates == .green)
     }
 

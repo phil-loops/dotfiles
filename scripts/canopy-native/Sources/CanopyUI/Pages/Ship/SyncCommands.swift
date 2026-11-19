@@ -128,6 +128,10 @@ enum SyncCommands {
                     path: tr.atRepo(b.repo, "/reseat-children"), body: ["branch": .string(b.parent)],
                     settled: { store.table(Branch.self)[id]?.drifted == false },
                     said: "reseated \(shipLeaf(b.name)) on \(shipLeaf(b.parent))",
+                    saidFrom: { body in
+                        let held = (body["held"]?.array ?? []).compactMap { $0["branch"]?.string }
+                        return held.contains(b.name) ? "\(shipLeaf(b.name)) has an open PR — left as it is; sync catches it up with a merge" : nil
+                    },
                     failed: "\(shipLeaf(b.name)) didn't reseat — a conflict; the forest's restack resolves it"))
             }))
         r.register(Command(

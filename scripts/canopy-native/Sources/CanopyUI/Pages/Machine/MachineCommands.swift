@@ -34,7 +34,9 @@ enum MachineCommands {
                            write: { [weak m] id, _ in
                                guard let s = m?.server(id) else { return nil }
                                return Write(path: "/preview-restart", body: ["dir": .string(s.dir), "port": .string(s.port)], settled: { true },
-                                            said: "restarted \(s.label) on :\(s.port)", failed: "\(s.label) didn't restart")
+                                            said: "restarted \(s.label) on :\(s.port)",
+                                            saidFrom: { body in body["port"]?.number.map { "restarted \(s.label) on :\(Int($0))" } },
+                                            failed: "\(s.label) didn't restart")
                            }))
 
         r.register(Command(id: "machine.swap", title: "Swap the port to the branch's parent build, or back", scope: .server, budget: .slowIO,
