@@ -223,7 +223,12 @@ struct SyncMotionDriver {
         }
         ship.patch(id) { $0.dirt = nil; $0.stashed = action == "stash" }
         guard let b = branch(id) else { return }
-        let f = (try? await facts(b)) ?? SyncFacts()
+        let f: SyncFacts
+        do { f = try await facts(b) } catch {
+            // a failed read isn't "nothing behind": stop, and the stash (if any) comes back
+            ship.setStep(id, .dirt, .fail, "couldn't read the branch after the \(action) — \(error)")
+            return await finish(id, via: via, .stopped)
+        }
         await run(id, via: via, facts: f, dirt: action == "stash" ? "stashed for the run" : "folded into the commit")
     }
 
@@ -255,7 +260,7 @@ struct SyncMotionDriver {
                 }
                 let queued = Syncing.truthy(q.body["queued"])
                 let behind = q.body["behind"].flatMap { Syncing.truthy($0) ? ($0.string ?? $0.number.map { String(Int($0)) }) : nil } ?? "the running restack"
-                ship.setStep(id, .rebase, .ok, queued ? "queued behind \(behind)" : "restacking \(project)")
+                ship.setStep(id, .rebase, .run, queued ? "queued behind \(behind)" : "restacking \(project)")
                 return await finish(id, via: via, .restacking)
             case .contract:
                 ship.setStep(id, .rebase, .fail, "already merged into origin/main — the restack walk drops it")
@@ -263,6 +268,12 @@ struct SyncMotionDriver {
             case .conflict:
                 ship.setStep(id, .rebase, .fail, "conflict — Claude is rebasing it in its worktree")
                 return await finish(id, via: via, .conflict)
+            case .ejected:
+                ship.setStep(id, .rebase, .fail, "handed to Claude — its worktree isn't safe to rebase in place (uncommitted changes, or the main checkout)")
+                return await finish(id, via: via, .claude)
+            case .failed(let note):
+                ship.setStep(id, .rebase, .fail, note)
+                return await finish(id, via: via, .stopped)
             case .rebased(let note):
                 ship.setStep(id, .rebase, .ok, note)
             case .refused(let note):
@@ -278,7 +289,7 @@ struct SyncMotionDriver {
             ship.setStep(id, .prep, .fail, note)
             let c = await step("branch.sync.reconcile", id, via)
             if !c.ok { ship.setStep(id, .prep, .fail, "\(note)\nClaude didn't start — \(c.body["err"]?.string.flatMap { $0.isEmpty ? nil : $0 } ?? "refused")") }
-            return await finish(id, via: via, .claude)
+            return await finish(id, via: via, c.ok ? .claude : .stopped)
         case .fail(let note):
             ship.setStep(id, .prep, .fail, note)
             return await finish(id, via: via, .stopped)

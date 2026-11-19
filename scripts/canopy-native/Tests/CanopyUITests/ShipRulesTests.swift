@@ -237,6 +237,12 @@ func shipBranch(_ f: (inout Branch) -> Void = { _ in }) -> Branch {
         #expect(Syncing.rebaseOf(true, ["contract": true]) == .contract)
         #expect(Syncing.rebaseOf(true, ["ejected": true, "conflict": true, "stream": "rebase:f/b"]) == .conflict)
         if case .refused = Syncing.rebaseOf(false, ["err": "has an open PR"]) {} else { Issue.record("not refused") }
+        // 2026-11-18: the answer says what happened — a hand-off that couldn't launch or no answer at all
+        // is a failure, never a skip; a hand-off without a conflict is an unsafe worktree, not a conflict
+        #expect(Syncing.rebaseOf(false, ["ok": false, "ejected": false, "conflict": true, "err": "could not launch rebase session"])
+                == .failed(note: "could not launch rebase session"))
+        #expect(Syncing.rebaseOf(false, ["err": "network"]) == .failed(note: "network"))
+        #expect(Syncing.rebaseOf(true, ["ejected": true, "conflict": false, "stream": "rebase:f/b"]) == .ejected)
     }
 
     @Test func aPrepPushAnswer() {
@@ -262,6 +268,14 @@ func shipBranch(_ f: (inout Branch) -> Void = { _ in }) -> Branch {
         let unrun = Syncing.testsOf(["ran": false, "summary": "no test database"])
         #expect(unrun.state == .fail && unrun.note == "no test database")
         #expect(Syncing.testsOf(["noTests": true]).state == .ok)
+    }
+
+    /// Queuing a restack isn't having restacked: the step reads the branch's own facts.
+    @Test func aQueuedRestackIsLiveUntilTheBranchIsCurrent() {
+        #expect(Syncing.restackShown(.run, behind: 3, drifted: false) == .run)
+        #expect(Syncing.restackShown(.run, behind: 0, drifted: true) == .run)
+        #expect(Syncing.restackShown(.run, behind: 0, drifted: false) == .ok)
+        #expect(Syncing.restackShown(.ok, behind: 3, drifted: false) == .ok, "a rebase that ran is what it said")
     }
 
     /// Starting the gates isn't passing them: the step reads the branch's live gates.

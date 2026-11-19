@@ -277,7 +277,9 @@ struct StepsStrip: View {
             let layout = vertical ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6)) : AnyLayout(HStackLayout(spacing: 12))
             layout {
                 ForEach(motion.steps, id: \.id) { s in
-                    let shown = s.id == .gates ? Syncing.gatesShown(s.state, live: app.store.view(Branch.self, branchID)?.gates ?? .none) : s.state
+                    let live = app.store.view(Branch.self, branchID)
+                    let shown = s.id == .gates ? Syncing.gatesShown(s.state, live: live?.gates ?? .none)
+                        : s.id == .rebase ? Syncing.restackShown(s.state, behind: live?.behind ?? 1, drifted: live?.drifted ?? false) : s.state
                     Text("\(stepIcon[shown] ?? "·") \(s.label)").foregroundStyle(stepColor(shown, theme))
                 }
                 if !vertical { Spacer(minLength: 0) }

@@ -122,15 +122,31 @@ public enum Syncing {
 
     /// What a POST /sync answer means for the motion.
     public enum Rebase: Equatable, Sendable {
-        case rebased(note: String?), restack(project: String), contract, conflict, refused(note: String)
+        case rebased(note: String?), restack(project: String), contract, conflict, ejected, refused(note: String), failed(note: String)
     }
 
+    /// What a POST /sync answer means — read from what the server says happened, never assumed:
+    /// a refusal (not syncable) is a skip the shape step handles; a hand-off that couldn't launch, or
+    /// no answer at all, is a failure; a hand-off without a conflict is an unsafe worktree, not a conflict.
     public static func rebaseOf(_ ok: Bool, _ body: JSONObject) -> Rebase {
-        if !ok { return .refused(note: "refused (\(str(body["err"]).shipNonEmpty ?? "stacked, or an open PR")) — the commit shape step handles it") }
+        if !ok {
+            let err = str(body["err"])
+            if body["ejected"] != nil || err == "network" || err.hasPrefix("http-5") {
+                return .failed(note: err.shipNonEmpty ?? "the rebase couldn't run")
+            }
+            return .refused(note: "refused (\(err.shipNonEmpty ?? "stacked, or an open PR")) — the commit shape step handles it")
+        }
         if truthy(body["restack"]) { return .restack(project: str(body["project"])) }
         if truthy(body["contract"]) { return .contract }
-        if !truthy(body["rebased"]) { return .conflict }
-        return .rebased(note: str(body["summary"]).shipNonEmpty)
+        if truthy(body["rebased"]) { return .rebased(note: str(body["summary"]).shipNonEmpty) }
+        return truthy(body["conflict"]) ? .conflict : .ejected
+    }
+
+    /// The rebase step while a restack it queued runs: the branch's own facts, not a mark of its own —
+    /// queuing a restack is not having restacked.
+    public static func restackShown(_ step: StepState, behind: Int, drifted: Bool) -> StepState {
+        guard step == .run else { return step }
+        return behind == 0 && !drifted ? .ok : .run
     }
 
     /// What a POST /prep-push answer means: a state (nothing to push, a built vehicle) is not a failure.
