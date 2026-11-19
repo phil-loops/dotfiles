@@ -295,6 +295,8 @@ heavy_release() {
   [ -n "$HEAVY_TICKET" ] && "$HEAVY_TURN" --release "$HEAVY_TICKET"
   HEAVY_TICKET=""
 }
+# what runs under the slot runs at heavy-turn's nice, as `heavy-turn -- <cmd>` would; next dev doesn't
+heavy_nice() { nice -n "${HEAVY_TURN_NICE:-10}" "$@"; }
 # a quarantine-flagged ancestor (e.g. Chrome-launched viewer) stamps EVERY file it clones, so one
 # canary tells whether the tree is tainted; Gatekeeper only blocks Mach-O dlopen/exec, so a tainted
 # clone needs its ~1.3k executables stripped, never a full xattr walk of the ~310k-file tree
@@ -484,7 +486,7 @@ else
     else
       cyan "cloning node_modules from $MAIN (no pool entry for lock ${want:0:8}; ~30s)"
       heavy_slot
-      cp -Rc "$MAIN/node_modules" "$staging" 2>/dev/null || rm -rf "$staging"
+      heavy_nice cp -Rc "$MAIN/node_modules" "$staging" 2>/dev/null || rm -rf "$staging"
     fi
     if [ -d "$staging" ]; then
       strip_quarantine "$staging"
@@ -545,7 +547,7 @@ done
 if [ -n "$unbuilt" ]; then
   cyan "building unbuilt workspace package(s):$(printf '%s\n' $unbuilt | xargs -n1 dirname | xargs -n1 basename | tr '\n' ' ' | sed 's/ $//')"
   heavy_slot
-  (cd "$DIR" && npx tsc -b --force $unbuilt) || err "workspace package build failed — pages importing them will 500"
+  (cd "$DIR" && heavy_nice npx tsc -b --force $unbuilt) || err "workspace package build failed — pages importing them will 500"
 fi
 # A dist BORROWED above is MAIN's build of MAIN's sources, and `cp -Rc` preserves MAIN's mtimes —
 # so when this branch edits packages/**, a plain `tsc -b` compares its older sources against those
@@ -561,7 +563,7 @@ if [ -n "$borrowed_cfgs" ]; then
   if [ -z "$main_head" ] || ! git -C "$DIR" diff --quiet "$main_head" -- packages/ 2>/dev/null; then
     cyan "rebuilding borrowed workspace package(s) against this branch:$(printf '%s\n' $borrowed_cfgs | xargs -n1 dirname | xargs -n1 basename | tr '\n' ' ' | sed 's/ $//')"
     heavy_slot
-    (cd "$DIR" && npx tsc -b --force $borrowed_cfgs --pretty false) \
+    (cd "$DIR" && heavy_nice npx tsc -b --force $borrowed_cfgs --pretty false) \
       || err "workspace package rebuild failed — this branch's packages/** changes are NOT compiled; the preview is serving MAIN's build"
   fi
 fi
@@ -573,7 +575,7 @@ if [ ! -L "$DIR/node_modules" ] && [ -d "$DIR/node_modules" ]; then
   if owed="$("$HOME/.dotfiles/scripts/npm-owed" "$DIR" 2>/dev/null)"; then
     cyan "clone is behind this branch's package-lock.json ($owed) — npm install in $DIR"
     heavy_slot
-    "$HOME/.dotfiles/scripts/npm-owed" --install "$DIR" >/dev/null \
+    heavy_nice "$HOME/.dotfiles/scripts/npm-owed" --install "$DIR" >/dev/null \
       || err "npm install failed in $DIR — pages importing the missing packages will 500"
     (cd "$DIR" && git diff --quiet -- package-lock.json 2>/dev/null) \
       || err "npm install rewrote package-lock.json in $DIR — the lockfile and package.json disagree on this branch"
@@ -593,7 +595,7 @@ if [ ! -L "$DIR/node_modules" ] && [ -f "$DIR/packages/prisma/schema.prisma" ] \
   && ! cmp -s "$DIR/node_modules/.prisma/client/schema.prisma" "$DIR/packages/prisma/schema.prisma"; then
   cyan "Prisma client was generated from a different schema — prisma generate in $DIR"
   heavy_slot
-  (cd "$DIR" && npx prisma generate >>"$SETUP_LOG" 2>&1) \
+  (cd "$DIR" && heavy_nice npx prisma generate >>"$SETUP_LOG" 2>&1) \
     || err "prisma generate failed in $DIR — queries will run against a stale client"
 fi
 
