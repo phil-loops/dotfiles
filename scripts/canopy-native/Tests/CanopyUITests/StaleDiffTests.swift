@@ -240,7 +240,7 @@ import Testing
         await visitBThenA(app)
         HeldLookupStub.hold(port, "/loops/node")
         try move(app, Self.b, to: "moved-b")
-        pg.warm(repo: "loops", name: "hankles-next", at: "moved-b", parent: app.store.view(Branch.self, Self.b)?.parent ?? "")
+        pg.warm(try #require(app.store.view(Branch.self, Self.b)))
         await until("the prefetch") { HeldLookupStub.waiting(port, "/loops/node", query: "branch=hankles-next") }
         go(app, "hankles-next")
         #expect(pg.diffStale)
@@ -262,9 +262,9 @@ import Testing
         let moved = ["@@ -9,2 +9,2 @@", " a", "-b", "+B"].joined(separator: "\n")
         ShipStub.answer(port, "GET", "/loops/node", payload("hankles-next", baseSha: "b-base", b: moved))
         try move(app, Self.b, to: "moved-b")
-        let parent = app.store.view(Branch.self, Self.b)?.parent ?? ""
-        pg.warm(repo: "loops", name: "hankles-next", at: "moved-b", parent: parent)
-        await until("the prefetch") { pg.isCached(ReviewPageState.diffKey(id: Self.b, at: "moved-b", ref: "", parent: parent)) }
+        let moving = try #require(app.store.view(Branch.self, Self.b))
+        pg.warm(moving)
+        await until("the prefetch") { pg.isCached(ReviewPageState.diffKey(id: Self.b, at: "moved-b", ref: "", parent: moving.parent, stamp: moving.readStamp ?? "")) }
         pg.setCursor("l|b.ts|R:6")
         app.keys.handle("J")
         await until("B's current diff") { pg.diffCurrent && pg.payload?.key.hasPrefix("\(Self.b)@") == true }
@@ -331,7 +331,8 @@ import Testing
             HeldLookupStub.release(port, "/loops/node", "not json", query: "branch=add-hankles-limited-label")
             return pg.loadErr != nil
         }
-        pg.warm(repo: "loops", name: "add-hankles-limited-label", at: "tip3", parent: app.store.view(Branch.self, Self.a)?.parent ?? "")
+        var newer = try #require(app.store.view(Branch.self, Self.a)); newer.tip = "tip3"
+        pg.warm(newer)
         await until("the newer read") { HeldLookupStub.waiting(port, "/loops/node", query: "branch=add-hankles-limited-label") }
         try move(app, Self.a, to: "tip3")
         pg.sync()
