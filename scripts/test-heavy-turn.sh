@@ -233,6 +233,8 @@ wait
 base=$(ps -o nice= -p $$ | tr -d ' ')
 assert_eq "granted command runs at nice +10" "$((base + 10))" "$("$HT" -- sh -c 'ps -o nice= -p $$' | tr -d ' ')"
 assert_eq "HEAVY_TURN_NICE=0 keeps the caller's priority" "$base" "$(HEAVY_TURN_NICE=0 "$HT" -- sh -c 'ps -o nice= -p $$' | tr -d ' ')"
+assert_eq "an unreadable HEAVY_TURN_NICE falls back to +10" "$((base + 10))" "$(HEAVY_TURN_NICE=abc "$HT" -- sh -c 'ps -o nice= -p $$' | tr -d ' ')"
+assert_eq "a negative HEAVY_TURN_NICE runs at the caller's priority" "$base" "$(HEAVY_TURN_NICE=-5 "$HT" -- sh -c 'ps -o nice= -p $$' | tr -d ' ')"
 
 # 16. the audit names a class that breaks either rule
 aj="$WORK/audit.tsv"; day=2020-01-01

@@ -75,7 +75,16 @@ ROOT = Path(os.environ.get("HEAVY_TURN_DIR", "/tmp/heavy-turn"))
 SLOTS = int(os.environ.get("HEAVY_TURN_SLOTS", "2"))
 MEM_FLOOR = int(os.environ.get("HEAVY_TURN_MEM_FLOOR", "30"))
 MAX_HOLD = float(os.environ.get("HEAVY_TURN_MAX_HOLD", "1800"))
-NICE = int(os.environ.get("HEAVY_TURN_NICE", "10"))
+def nice_level(raw):
+    """HEAVY_TURN_NICE as a nice increment: 0..19 (a nice level's ceiling), and 10 for anything unreadable — a bad value
+    must not crash the queue or the jobs it starts (a negative one would fail in setpriority)."""
+    try:
+        return max(0, min(19, int(raw)))
+    except (TypeError, ValueError):
+        return 10
+
+
+NICE = nice_level(os.environ.get("HEAVY_TURN_NICE", "10"))
 JOURNAL = Path(os.environ.get("HEAVY_TURN_JOURNAL",
                               os.path.expanduser("~/.cache/heavy-turn/journal.tsv")))
 CLASS_CAPS = {"gates": 1, "clone": 1, "preview": 1, "review-warm": 1}

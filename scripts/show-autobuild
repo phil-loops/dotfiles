@@ -36,7 +36,16 @@ QUIET = float(os.environ.get("SHOW_AUTOBUILD_QUIET", "4"))
 POLL = 1.0
 KEEP = 50
 DRAG = 2.0   # a build this many times the recent median is dragging
-NICE = int(os.environ.get("HEAVY_TURN_NICE", "10"))
+def nice_level(raw):
+    """HEAVY_TURN_NICE as a nice increment: 0..19 (a nice level's ceiling), and 10 for anything unreadable — a bad value
+    must not crash the watcher or its builds (a negative one would fail in setpriority)."""
+    try:
+        return max(0, min(19, int(raw)))
+    except (TypeError, ValueError):
+        return 10
+
+
+NICE = nice_level(os.environ.get("HEAVY_TURN_NICE", "10"))
 
 
 def watched():

@@ -296,7 +296,12 @@ heavy_release() {
   HEAVY_TICKET=""
 }
 # what runs under the slot runs at heavy-turn's nice, as `heavy-turn -- <cmd>` would; next dev doesn't
-heavy_nice() { nice -n "${HEAVY_TURN_NICE:-10}" "$@"; }
+heavy_nice() {
+  local n="${HEAVY_TURN_NICE:-10}"
+  case $n in -[0-9]*) n=0 ;; ''|*[!0-9]*) n=10 ;; esac
+  (( 10#$n > 19 )) && n=19
+  nice -n "$n" "$@"
+}
 # a quarantine-flagged ancestor (e.g. Chrome-launched viewer) stamps EVERY file it clones, so one
 # canary tells whether the tree is tainted; Gatekeeper only blocks Mach-O dlopen/exec, so a tainted
 # clone needs its ~1.3k executables stripped, never a full xattr walk of the ~310k-file tree
