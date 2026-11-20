@@ -40,7 +40,7 @@ extension AppModel {
         default: s = p.route.surface.title.lowercased() + (p.arg.isEmpty ? "" : " \(p.arg)")
         }
         if let t = p.tab { s += " · \(t)" }
-        if let l = p.loc { s += " · \(l.path):\(l.line)" } else if let k = p.cursorKey, let pre = k.split(separator: ":").first, ["p", "pr", "b", "t", "d", "m", "w", "c", "s"].contains(pre) {
+        if let l = p.loc { s += " · \(l.path):\(l.line)" } else if let k = p.cursorKey, let pre = k.split(separator: ":").first, ["p", "pr", "gh", "b", "t", "d", "m", "w", "c", "s"].contains(pre) {
             s += " · \(guessTitle(k))"
         }
         return s

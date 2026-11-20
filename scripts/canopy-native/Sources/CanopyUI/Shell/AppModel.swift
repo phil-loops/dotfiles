@@ -441,6 +441,7 @@ public final class AppModel: CommandContext {
         if let id = RowKey.id(row, "b") { return store.view(Branch.self, id)?.name ?? id }
         if let id = RowKey.id(row, "p") { return store.view(Project.self, id)?.name ?? id }
         if let id = RowKey.id(row, "pr") { return store.view(Branch.self, id)?.name ?? id }
+        if let n = RowKey.id(row, "gh") { return "#\(n)" }
         if let i = row.firstIndex(of: ":") { return String(row[row.index(after: i)...]) }
         return row
     }

@@ -14,6 +14,7 @@ enum ForestNav {
         }
         if let r = m.reviewRequest(row) { return RouteTo("forests.review.open", target: String(r.number)) }
         if let v = m.openPR(row) { return RouteTo("branch.open", target: v.b.id) }
+        if let p = m.myPR(row) { return RouteTo("forests.mypr.open", target: String(p.number)) }
         if let r = m.reply(row) { return RouteTo("chat.focus", arg: r.chat.id) }
         if let d = RowKey.id(row, "d"), app.store.view(Landed.self, d) != nil {
             return RouteTo("story.why", arg: RowKey.landed(d))
@@ -54,19 +55,25 @@ enum ForestNav {
 
         // ] o / [ o: the open PRs in the home's order, from any page — from one of them, the one after it
         func hopPR(_ step: Int) throws {
-            let prs = m.openPRs()
-            guard !prs.isEmpty else { throw Refusal("no open PRs") }
-            var here: String?
-            if case .review(let repo, let branch, _) = app.router.route { here = prs.first { $0.b.repo == repo && $0.b.name == branch }?.b.id }
-            here = here ?? m.openPR(app.selected)?.b.id ?? RowKey.id(app.selected, "b")
-            let at = here.flatMap { id in prs.firstIndex { $0.b.id == id } }
-            let next = at.map { ($0 + step + prs.count) % prs.count } ?? (step > 0 ? 0 : prs.count - 1)
-            app.go(.review(repo: prs[next].b.repo, branch: prs[next].b.name))
+            let rows = m.openPRRows()
+            guard !rows.isEmpty else { throw Refusal("no open PRs") }
+            var at: Int?
+            if case .review(let repo, let branch, _) = app.router.route {
+                at = rows.firstIndex { r in
+                    if let v = r.branch { return v.b.repo == repo && v.b.name == branch }
+                    return r.mine.map { branch == $0.head || branch == "review/pr-\($0.number)" } ?? false
+                }
+            }
+            at = at ?? rows.firstIndex { $0.key == app.selected }
+                ?? RowKey.id(app.selected, "b").flatMap { id in rows.firstIndex { $0.branch?.b.id == id } }
+            let row = rows[at.map { ($0 + step + rows.count) % rows.count } ?? (step > 0 ? 0 : rows.count - 1)]
+            if let v = row.branch { app.go(.review(repo: v.b.repo, branch: v.b.name)) }
+            else if let p = row.mine { openOnGitHub(p.number, p.url) }
         }
         r.register(Command(id: "forests.pr.next", title: "Review the next open PR", scope: .global, verb: .nextOpenPR, label: "open PR",
-                           pair: "forests.pr.prev", recordsJump: true, available: { _ in !m.openPRs().isEmpty }, local: { _, _ in try hopPR(1) }))
+                           pair: "forests.pr.prev", recordsJump: true, available: { _ in !m.openPRRows().isEmpty }, local: { _, _ in try hopPR(1) }))
         r.register(Command(id: "forests.pr.prev", title: "Review the previous open PR", scope: .global, verb: .previousOpenPR, label: "open PR",
-                           recordsJump: true, available: { _ in !m.openPRs().isEmpty }, local: { _, _ in try hopPR(-1) }))
+                           recordsJump: true, available: { _ in !m.openPRRows().isEmpty }, local: { _, _ in try hopPR(-1) }))
 
         r.register(Command(
             id: "forest.branch.next", title: "Next branch in merge order", scope: .forest, verb: .nextSibling, label: "branch", pair: "forest.branch.prev",
@@ -173,6 +180,25 @@ enum ForestNav {
 
         // ↵ on a PR awaiting review: the same import + route the Chrome extension's ⌘⇧U asks for
         struct Opened: Decodable { var ok: Bool; var path: String?; var err: String? }
+        // a PR no forest carries opens through the server's /open-url: my own on its local branch, else fetched as review/pr-<N>
+        func openOnGitHub(_ number: Int, _ url: String) {
+            app.runner.say("opening #\(number)…")
+            let t = app.transport
+            Task { @MainActor in
+                let got = await t.ask("/open-url", ["url": url, "open": "viewer"], as: Opened.self)
+                guard let path = got?.path, got?.ok == true else {
+                    return app.runner.say("couldn't open #\(number): \(got?.err ?? "the server didn't answer")")
+                }
+                app.open(address: path)
+            }
+        }
+        r.register(Command(
+            id: "forests.mypr.open", title: "Open one of my PRs no forest carries", scope: .forests, needsArg: true, label: "open",
+            available: { m.myPR(RowKey.myPR(Int($0 ?? "") ?? -1)) != nil },
+            local: { n, _ in
+                guard let p = m.myPR(RowKey.myPR(Int(n ?? "") ?? -1)) else { return }
+                openOnGitHub(p.number, p.url)
+            }))
         r.register(Command(
             id: "forests.review.open", title: "Open a PR awaiting your review", scope: .forests, needsArg: true, label: "open",
             available: { m.reviewRequest(RowKey.reviewRequest(Int($0 ?? "") ?? -1)) != nil },
@@ -199,6 +225,7 @@ enum ForestNav {
                 if let id = RowKey.id(row, "p"), let p = app.store.view(Project.self, id) { return PickItem(label: p.name, text: p.summary) }
                 if let r = m.reviewRequest(row) { return PickItem(label: "#\(r.number)", text: r.title) }
                 if let v = m.openPR(row) { return PickItem(label: "#\(v.pr?.number ?? 0)", text: v.pr?.title ?? v.b.description) }
+                if let p = m.myPR(row) { return PickItem(label: "#\(p.number)", text: p.title) }
                 return PickItem(label: app.provider?.title(for: row, app) ?? row)
             }
             app.nav.pick(title, items) { i in app.jump { app.setCursor(rows[i]) } }

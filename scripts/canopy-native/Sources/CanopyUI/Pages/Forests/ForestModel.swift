@@ -44,6 +44,35 @@ public struct ReviewRequest: Decodable, Equatable {
     public var imported: Bool
 }
 
+/// One of my open PRs as GitHub lists it (GET /my-prs, the server's open-PR listing filtered to me): what the home
+/// shows for a PR no forest carries — LGTM's "My Pull Requests".
+public struct MyPR: Decodable, Equatable {
+    public var number: Int
+    public var title: String
+    public var url: String
+    public var draft: Bool
+    public var head: String
+    public var local: Bool
+    public var approvals: Int?
+    public var changesRequested: Bool?
+    public var mergeState: String?
+}
+
+/// A row of the home's open PRs: one of a forest's branches, or a PR of mine no forest carries.
+struct OpenPRRow: Equatable {
+    var key: String
+    var number: Int
+    var title: String
+    /// its forest's name, or where it lives when no forest carries it
+    var place: String
+    var says: String
+    var yours: Bool
+    var draft: Bool
+    var glyph: String
+    var branch: BranchView?
+    var mine: MyPR?
+}
+
 /// Whether the whole forest merges onto main (integrate.ts).
 public struct IntegrationVerdict: Equatable {
     public enum State: String { case checking, clean, conflicts, failed }
@@ -93,6 +122,7 @@ public final class ForestModel {
     public private(set) var verdicts: [String: IntegrationVerdict] = [:]
     /// open PRs awaiting my review, newest search first; empty until the first answer
     public private(set) var reviewRequests: [ReviewRequest] = []
+    public private(set) var myPRs: [MyPR] = []
     @ObservationIgnored var wasClosed: Set<String>?
     /// Archive a forest (the app dispatches `project.archive`, so `u` undoes it).
     @ObservationIgnored var archive: ((String) -> Void)?
@@ -266,7 +296,7 @@ public final class ForestModel {
         }
         // the order ForestsPage draws: open PRs, the PRs awaiting your review, then your move (with the chats owed a
         // reply), moving, waiting, landed, the archive
-        out += openPRs().map { RowKey.openPR($0.b.id) } + reviewRequests.map { RowKey.reviewRequest($0.number) }
+        out += openPRRows().map(\.key) + reviewRequests.map { RowKey.reviewRequest($0.number) }
         let groups = moveGroups()
         for g in groups {
             add(g.projects)
@@ -310,6 +340,43 @@ public final class ForestModel {
     }
 
     func openPR(_ row: String?) -> BranchView? { RowKey.id(row, "pr").flatMap { branchView($0) } }
+
+    /// The home's open-PR rows: the forests' open PRs and mine no forest carries, in one order — waiting on you, then
+    /// held by others, drafts last; a forest's before GitHub's at the same rank.
+    func openPRRows() -> [OpenPRRow] {
+        func rank(_ draft: Bool, _ move: Move) -> Int { draft ? Move.allCases.count : Move.allCases.firstIndex(of: move)! }
+        let carriedPRs = openPRs()
+        var rows: [(rank: Int, row: OpenPRRow)] = carriedPRs.map { v in
+            let draft = v.pr?.draft == true
+            return (rank(draft, Move.of(v.st.actor)), OpenPRRow(
+                key: RowKey.openPR(v.b.id), number: v.pr?.number ?? 0, title: v.pr?.title ?? v.b.description,
+                place: forest(v.b.project)?.p.name ?? "", says: draft ? "draft" : ShipRules.says(v.st, v.b, v.pr),
+                yours: v.st.actor == .you && !draft, draft: draft, glyph: v.st.ship.glyph, branch: v, mine: nil))
+        }
+        let carried = Set(carriedPRs.compactMap { $0.pr?.number })
+        for p in myPRs where !carried.contains(p.number) {
+            let merge = (p.approvals ?? 0) > 0 && p.mergeState == "CLEAN"
+            let move: Move = p.changesRequested == true || merge ? .yours : .moving
+            let says = p.draft ? "draft" : p.changesRequested == true ? "changes requested" : merge ? "merge it" : "waiting on review"
+            rows.append((rank(p.draft, move), OpenPRRow(
+                key: RowKey.myPR(p.number), number: p.number, title: p.title, place: p.local ? p.head : "on GitHub", says: says,
+                yours: move == .yours && !p.draft, draft: p.draft, glyph: p.draft ? "○" : "◇", branch: nil, mine: p)))
+        }
+        return rows.enumerated().sorted { $0.element.rank != $1.element.rank ? $0.element.rank < $1.element.rank : $0.offset < $1.offset }.map(\.element.row)
+    }
+
+    func myPR(_ row: String?) -> MyPR? {
+        guard let n = RowKey.id(row, "gh").flatMap(Int.init) else { return nil }
+        return myPRs.first { $0.number == n }
+    }
+
+    /// Re-read my open PRs (the server answers from its open-PR listing); a failed read keeps the last list.
+    public func loadMyPRs() async {
+        guard let got = try? await transport.getJSON("/my-prs", as: [MyPR].self) else { return }
+        if got != myPRs { myPRs = got }
+    }
+
+    func setMyPRs(_ ps: [MyPR]) { myPRs = ps }
 
     public func reviewRequest(_ row: String?) -> ReviewRequest? {
         guard let n = RowKey.id(row, "r").flatMap(Int.init) else { return nil }

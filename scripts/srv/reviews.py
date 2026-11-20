@@ -98,6 +98,40 @@ def requests(req):   # GET /review-requests — Home's review section: open PRs 
     req._send(200, payload)
 
 
+_login = [None]   # gh's viewer: who "mine" means; asked once a server life, retried while unknown
+
+
+def _my_login():
+    if _login[0] is None:
+        r = ctx.run(["gh", "api", "user", "--jq", ".login"], timeout=15)
+        if r.returncode == 0 and r.stdout.strip():
+            _login[0] = r.stdout.strip()
+    return _login[0]
+
+
+def mine(prs, detail, login, local):
+    """My open PRs from the open-PR listing (srv/openprs.py) — no search of its own — each with what GitHub says
+    about its review and whether its head is a local branch. Unknown login → none, never everyone's."""
+    out = []
+    for p in prs:
+        if not login or ((p.get("author") or {}).get("login") or "") != login:
+            continue
+        head = p.get("headRefName") or ""
+        d = detail.get(head) or {}
+        out.append({"number": p.get("number"), "title": p.get("title") or "", "url": p.get("url") or "",
+                    "draft": bool(p.get("isDraft")), "head": head,
+                    "local": not p.get("isCrossRepository") and bool(head) and local(head),
+                    "approvals": d.get("approvals", 0), "changesRequested": bool(d.get("changesRequested")),
+                    "mergeState": d.get("mergeState", ""), "createdAt": d.get("createdAt", "")})
+    return sorted(out, key=lambda r: -(r["number"] or 0))
+
+
+def my_prs(req):   # GET /my-prs — Home's open PRs that no forest carries (LGTM's "My Pull Requests")
+    rows = mine(openprs.listing(), openprs.detail(), _my_login(),
+                lambda h: ctx.run(["git", "show-ref", "--verify", "--quiet", f"refs/heads/{h}"]).returncode == 0)
+    req._send(200, json.dumps(rows))
+
+
 _WARM_EVERY = 300   # the review queue moves on human timescales; gh search is a ~1s network call
 _WARM_MAX = 5       # bound the git work — the queue is normally 1-2 PRs
 _warming = {}       # branch -> its prepare; a cold one outlives _WARM_EVERY, and re-firing stacked 3 per PR

@@ -142,6 +142,7 @@ def _fetch_detail(slug):
             "baseRef": p.get("baseRefName") or "",
             "createdAt": p.get("createdAt") or "",
             "approvals": len(approvals),
+            "changesRequested": any(rv.get("state") == "CHANGES_REQUESTED" for rv in p.get("latestReviews") or []),
             "approvedAt": max((rv.get("submittedAt") or "" for rv in approvals), default=""),
             "headSha": p.get("headRefOid") or "",
             "approvedSha": ((approved or {}).get("commit") or {}).get("oid") or "",

@@ -150,6 +150,7 @@ struct ForestsPage: View {
     private func pollReviews(_ m: ForestModel) async {
         while !Task.isCancelled {
             await m.loadReviewRequests()
+            await m.loadMyPRs()
             try? await Task.sleep(nanoseconds: 60_000_000_000)
         }
     }
@@ -162,8 +163,9 @@ struct ForestsPage: View {
     }
 }
 
-/// Your open PRs, first on the home (round 29, P8): the PR's title and number, the forest it's in, where it stands in
-/// one step. ↵ reviews it; `] o` / `[ o` walk them from any page.
+/// Your open PRs, first on the home (round 29, P8): every forest's, and mine no forest carries (GET /my-prs) — the
+/// PR's title and number, its forest (or where it lives), where it stands in one step. ↵ reviews it; `] o` / `[ o`
+/// walk them from any page.
 private struct OpenPRList: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme
@@ -172,30 +174,26 @@ private struct OpenPRList: View {
     let selection: Set<String>
 
     var body: some View {
-        let m = app.forestModel
-        let prs = m.openPRs()
-        if !prs.isEmpty {
+        let rows = app.forestModel.openPRRows()
+        if !rows.isEmpty {
             VStack(alignment: .leading, spacing: 0) {
-                Text("open PRs · \(prs.count)").font(Theme.text(11)).foregroundStyle(theme.goldLeaf)
+                Text("open PRs · \(rows.count)").font(Theme.text(11)).foregroundStyle(theme.goldLeaf)
                     .padding(.leading, 44).padding(.bottom, 4)
-                ForEach(prs, id: \.b.id) { v in
-                    let key = RowKey.openPR(v.b.id)
-                    let here = cursor == key
-                    let yours = v.st.actor == .you && v.pr?.draft != true
-                    let says = v.pr?.draft == true ? "draft" : ShipRules.says(v.st, v.b, v.pr)
+                ForEach(rows, id: \.key) { r in
+                    let here = cursor == r.key
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
-                        Text(v.st.ship.glyph).foregroundStyle(yours ? theme.goldLeaf : theme.inkFaint).frame(width: 12)
-                        Text(v.pr?.title ?? v.b.description).font(Theme.display(17))
-                            .foregroundStyle(here ? theme.goldLeaf : v.pr?.draft == true ? theme.inkDim : theme.ink)
+                        Text(r.glyph).foregroundStyle(r.yours ? theme.goldLeaf : theme.inkFaint).frame(width: 12)
+                        Text(r.title).font(Theme.display(17))
+                            .foregroundStyle(here ? theme.goldLeaf : r.draft ? theme.inkDim : theme.ink)
                             .lineLimit(1).truncationMode(.tail).frame(maxWidth: .infinity, alignment: .leading)
-                        Text(verbatim: "#\(v.pr?.number ?? 0) · \(m.forest(v.b.project)?.p.name ?? "")").font(Theme.text(11)).foregroundStyle(theme.inkFaint)
-                            .lineLimit(1).frame(width: 260, alignment: .leading)
-                        Text(says).font(Theme.text(11)).foregroundStyle(yours ? theme.ink : theme.inkFaint)
-                            .lineLimit(1).truncationMode(.tail).frame(width: 220, alignment: .trailing).help(says)
+                        Text(verbatim: "#\(r.number) · \(r.place)").font(Theme.text(11)).foregroundStyle(theme.inkFaint)
+                            .lineLimit(1).truncationMode(.tail).frame(width: 260, alignment: .leading)
+                        Text(r.says).font(Theme.text(11)).foregroundStyle(r.yours ? theme.ink : theme.inkFaint)
+                            .lineLimit(1).truncationMode(.tail).frame(width: 220, alignment: .trailing).help(r.says)
                     }
                     .frame(height: 30)
                     .padding(.horizontal, 16)
-                    .rowChrome(key, cursor: here, selected: selection.contains(key))
+                    .rowChrome(r.key, cursor: here, selected: selection.contains(r.key))
                 }
             }
             .padding(.bottom, 28)

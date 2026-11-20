@@ -425,6 +425,7 @@ class H(BaseHTTPRequestHandler):
         elif u.path == "/telemetry/summary": return telemetry.summary(self, u)   # command/surface latency vs budgets, from daily rollups
         elif u.path == "/ext-mtime":       return reviews.ext_mtime(self)
         elif u.path == "/review-requests": return reviews.requests(self)   # Home's review section
+        elif u.path == "/my-prs": return reviews.my_prs(self)   # Home's open PRs on no forest
         elif u.path == "/tutor-src":      return tutor.src(self, u)    # a pinned file for the code pane
         elif u.path == "/lsp/src":        return lsp.src(self, u)      # a definition target, at the commit its answer came from
         elif u.path == "/learning-state": return tutor.learning_state(self, u)   # the concept graph, depth + due derived

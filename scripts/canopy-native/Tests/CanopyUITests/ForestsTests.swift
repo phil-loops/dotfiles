@@ -330,6 +330,25 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = f
         #expect(a.router.route == .review(repo: "r", branch: "w"))
     }
 
+    /// My open PRs no forest carries (GET /my-prs) join the forests' in one order: changes requested is yours, a
+    /// reviewer's after it, drafts last — and a PR a forest carries is listed once, as the forest's.
+    @Test func myPRsNoForestCarriesJoinTheOpenPRs() {
+        let a = world()
+        a.forestModel.syncClosings()
+        func mine(_ n: Int, _ head: String, draft: Bool = false, changes: Bool = false, local: Bool = false) -> MyPR {
+            MyPR(number: n, title: "pr \(n)", url: "https://github.com/o/r/pull/\(n)", draft: draft, head: head, local: local,
+                 approvals: 0, changesRequested: changes, mergeState: "BLOCKED")
+        }
+        a.forestModel.setMyPRs([mine(21, "tweak", draft: true), mine(20, "fix/monitors", changes: true, local: true), mine(11, "a")])
+        #expect(Array(a.rows.prefix(3)) == ["gh:20", "pr:r:a", "gh:21"], "changes requested, then the reviewer's, then the draft")
+        #expect(!a.rows.contains("gh:11"), "#11 is the tree forest's: listed once")
+        let row = a.forestModel.openPRRows().first
+        #expect(row?.place == "fix/monitors" && row?.says == "changes requested" && row?.yours == true)
+        #expect(a.forestModel.openPRRows().last?.place == "on GitHub")
+        #expect(ForestNav.primary(for: "gh:20", a)?.id == "forests.mypr.open")
+        #expect(a.provider?.title(for: "gh:20", a) == "#20 pr 20")
+    }
+
     /// Phil 2026-11-18: when all the work is done, the forest archives itself — through the archive
     /// command, so u undoes it — and a forest with open items on its own list stays out.
     @Test func aForestWhoseWorkIsDoneArchivesItself() {

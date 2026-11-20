@@ -56,6 +56,7 @@ struct ForestsSurface: SurfaceProvider {
         if let id = RowKey.id(row, "t"), let t = app.store.trackerItem(id) { return "\(t.title) \(WorkContext.status(t))" }
         if let id = RowKey.id(row, "b"), let b = app.store.view(Branch.self, id) { return "\(leaf(b.name)) \(b.description)" }
         if let r = app.forestModel.reviewRequest(row) { return "#\(r.number) \(r.title)" }
+        if let p = app.forestModel.myPR(row) { return "#\(p.number) \(p.title)" }
         if let v = app.forestModel.openPR(row) { return "#\(v.pr?.number ?? 0) \(v.pr?.title ?? v.b.description)" }
         if let r = app.forestModel.reply(row) { return "reply to Claude · \(r.forests.map(\.name).joined(separator: ", "))" }
         if row == RowKey.looseChats { return "chats on no branch" }
