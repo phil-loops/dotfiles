@@ -110,15 +110,17 @@ def run_case(name, output, binary, runtime):
     for flag in {"write": ("hold-accept",), "write-quit": ("hold-accept",), "late-ack": ("hold-accept",),
                  "lost-response": ("drop-first-response",), "wrong-receipt": ("corrupt-response",),
                  "companion-crash": ("drop-first-response", "hold-successor"),
+                 "clean-buffer-refusal": ("corrupt-response",),
                  "unavailable": ("no-bridge",)}.get(name, ()):
         (root / flag).touch()
     editor = Editor(root, binary, runtime)
     try:
         editor.wait(lambda: editor.events("opened"), "language server ready")
-        editor.edit("RAW")
+        if name != "clean-buffer-refusal":
+            editor.edit("RAW")
         if name == "write-failure":
             (root / "files/main.probe").chmod(0o444)
-        editor.send(b":write other.probe\r" if name == "path-change" else b":wq\r" if name in ("write-quit", "wrong-receipt", "unavailable", "write-failure") else b":write\r")
+        editor.send(b":write other.probe\r" if name == "path-change" else b":wq\r" if name in ("write-quit", "wrong-receipt", "clean-buffer-refusal", "unavailable", "write-failure") else b":write\r")
         if name in ("write", "write-quit", "late-ack"):
             editor.wait(lambda: editor.events("accept-request"), "save request at acceptance barrier")
             assert journal_state(root) == (0, 0)
@@ -167,10 +169,14 @@ def run_case(name, output, binary, runtime):
             assert len(requests) == 3 and requests[0] == requests[1], requests
             assert requests[2]["expectedRevision"] == 1 and requests[2]["text"] == "NEW\n"
             assert journal_state(root) == (2, 2)
-        elif name == "wrong-receipt":
+        elif name in ("wrong-receipt", "clean-buffer-refusal"):
             editor.wait(lambda: "acknowledgement does not match" in editor.log(), "wrong receipt refused")
             assert journal_state(root) == (1, 1)
             assert not editor.events("saved") and not editor.exited
+            if name == "clean-buffer-refusal":
+                editor.send(b":q\r")
+                editor.wait(lambda: "unsaved buffer" in editor.log(), "failed acceptance keeps unchanged buffer dirty")
+                assert not editor.exited
             (root / "corrupt-response").unlink()
             editor.send(b":wq\r")
         elif name in ("unavailable", "path-change", "write-failure"):
@@ -215,7 +221,7 @@ if __name__ == "__main__":
     parser.add_argument("--show-job")
     args = parser.parse_args()
     args.output.mkdir()
-    cases = ("write", "write-quit", "lost-response", "late-ack", "wrong-receipt", "unavailable", "path-change", "write-failure", "companion-crash")
+    cases = ("write", "write-quit", "lost-response", "late-ack", "wrong-receipt", "unavailable", "path-change", "write-failure", "companion-crash", "clean-buffer-refusal")
     results = []
     try:
         for name in cases:

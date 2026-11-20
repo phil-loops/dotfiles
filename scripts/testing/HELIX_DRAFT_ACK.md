@@ -58,9 +58,10 @@ The patch includes two focused Rust tests; run `cargo test --locked --no-default
 Ten journal tests cover exact replay/restart, changed payload/mode, stale scans, immutable history,
 owner transfer, editor-held leases, journal replacement, copied projection refusal, and SIGKILL
 before/after atomic acceptance. Two Rust tests check exact receipt identity and snapshot capture
-before I/O while later edits stay dirty. Nine actual-editor scenarios cover held `:w`/`:wq`,
+before I/O while later edits stay dirty. Ten actual-editor scenarios cover held `:w`/`:wq`,
 lost response with newer edits, stale acknowledgements, corrupt receipts, missing bridges, changed
-destinations, failed file writes and a companion kill between replay and successor acceptance.
+destinations, failed file writes, a companion kill between replay and successor acceptance,
+and a refused acknowledgement keeping an unchanged buffer dirty.
 The stock installed editor fails the required-acceptance scenario: it writes the file without
 asking the journal to accept it.
 
