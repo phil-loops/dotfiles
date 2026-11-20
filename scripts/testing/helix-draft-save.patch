@@ -1,0 +1,423 @@
+diff --git a/helix-lsp/src/client.rs b/helix-lsp/src/client.rs
+index 2ce5c60..5c4142c 100644
+--- a/helix-lsp/src/client.rs
++++ b/helix-lsp/src/client.rs
+@@ -59,6 +59,7 @@ pub struct Client {
+     _process: Child,
+     server_tx: UnboundedSender<Payload>,
+     request_counter: AtomicU64,
++    draft_save: tokio::sync::Mutex<crate::draft_save::DraftSaveState>,
+     pub(crate) capabilities: OnceCell<lsp::ServerCapabilities>,
+     pub(crate) file_operation_interest: OnceLock<FileOperationsInterest>,
+     config: Option<Value>,
+@@ -259,6 +260,7 @@ pub fn start(
+             _process: process,
+             server_tx,
+             request_counter: AtomicU64::new(0),
++            draft_save: tokio::sync::Mutex::new(Default::default()),
+             capabilities: OnceCell::new(),
+             file_operation_interest: OnceLock::new(),
+             config,
+@@ -1131,6 +1133,88 @@ pub fn text_document_did_close(&self, text_document: lsp::TextDocumentIdentifier
+ 
+     // will_save / will_save_wait_until
+ 
++    pub fn draft_save_matches(&self, uri: &Url) -> bool {
++        self.capabilities
++            .get()
++            .and_then(|value| value.experimental.as_ref())
++            .and_then(|value| value.get("canopyDraftSave"))
++            .is_some_and(|value| {
++                value["protocol"].as_u64() == Some(1)
++                    && value["uri"].as_str() == Some(uri.as_str())
++                    && value["generation"].as_str().is_some()
++                    && value["revision"].as_u64().is_some()
++            })
++    }
++
++    pub async fn accept_draft_save(
++        &self,
++        uri: &Url,
++        text: &Rope,
++        document_version: i32,
++        mode: &str,
++    ) -> anyhow::Result<()> {
++        use crate::draft_save::{validate_receipt, AcceptDraftSave};
++        use serde_json::json;
++
++        anyhow::ensure!(
++            self.draft_save_matches(uri),
++            "draft save bridge is unavailable"
++        );
++        let config = &self
++            .capabilities
++            .get()
++            .unwrap()
++            .experimental
++            .as_ref()
++            .unwrap()["canopyDraftSave"];
++        let generation = config["generation"].as_str().unwrap();
++        let operation = format!("{generation}:{document_version}:{mode}:{}", uri.as_str());
++        let text = text.to_string();
++        let mut state = self.draft_save.lock().await;
++        if let Some(pending) = state.pending.clone() {
++            if pending["operation"].as_str() == Some(&operation) {
++                anyhow::ensure!(
++                    pending["text"] == text && pending["mode"] == mode,
++                    "the pending save operation changed"
++                );
++            }
++            let receipt = self.call::<AcceptDraftSave>(pending.clone()).await?;
++            state.revision = Some(validate_receipt(&pending, &receipt)?);
++            state.pending = None;
++            state.completed = Some(pending.clone());
++            if pending["operation"].as_str() == Some(&operation) {
++                return Ok(());
++            }
++        }
++        if let Some(completed) = state.completed.clone() {
++            if completed["operation"].as_str() == Some(&operation) {
++                anyhow::ensure!(
++                    completed["text"] == text && completed["mode"] == mode,
++                    "the completed save operation changed"
++                );
++                state.pending = Some(completed.clone());
++                let receipt = self.call::<AcceptDraftSave>(completed.clone()).await?;
++                state.revision = Some(validate_receipt(&completed, &receipt)?);
++                state.pending = None;
++                return Ok(());
++            }
++        }
++        let revision = *state
++            .revision
++            .get_or_insert(config["revision"].as_u64().unwrap());
++        let payload = json!({
++            "generation": generation, "operation": operation,
++            "expectedRevision": revision, "documentVersion": document_version,
++            "uri": uri, "text": text, "mode": mode,
++        });
++        state.pending = Some(payload.clone());
++        let receipt = self.call::<AcceptDraftSave>(payload.clone()).await?;
++        state.revision = Some(validate_receipt(&payload, &receipt)?);
++        state.pending = None;
++        state.completed = Some(payload);
++        Ok(())
++    }
++
+     pub fn text_document_did_save(
+         &self,
+         text_document: lsp::TextDocumentIdentifier,
+diff --git a/helix-lsp/src/draft_save.rs b/helix-lsp/src/draft_save.rs
+new file mode 100644
+index 0000000..1862876
+--- /dev/null
++++ b/helix-lsp/src/draft_save.rs
+@@ -0,0 +1,59 @@
++use crate::lsp;
++use serde_json::Value;
++
++#[derive(Debug, Default)]
++pub(crate) struct DraftSaveState {
++    pub revision: Option<u64>,
++    pub pending: Option<Value>,
++    pub completed: Option<Value>,
++}
++
++pub(crate) enum AcceptDraftSave {}
++
++impl lsp::request::Request for AcceptDraftSave {
++    type Params = Value;
++    type Result = Value;
++    const METHOD: &'static str = "canopy/draft/acceptSave";
++}
++
++pub(crate) fn validate_receipt(payload: &Value, receipt: &Value) -> anyhow::Result<u64> {
++    let revision = payload["expectedRevision"]
++        .as_u64()
++        .and_then(|value| value.checked_add(1))
++        .ok_or_else(|| anyhow::anyhow!("invalid draft save revision"))?;
++    if receipt["generation"] != payload["generation"]
++        || receipt["operation"] != payload["operation"]
++        || receipt["acceptedText"] != payload["text"]
++        || receipt["mode"] != payload["mode"]
++        || receipt["revision"].as_u64() != Some(revision)
++    {
++        anyhow::bail!("draft save acknowledgement does not match the submitted bytes");
++    }
++    Ok(revision)
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use serde_json::json;
++
++    #[test]
++    fn draft_save_receipt_requires_the_exact_operation_bytes_mode_and_revision() {
++        let payload = json!({"generation":"owner-a", "operation":"save-a", "expectedRevision":0,
++                             "text":"saved bytes", "mode":"100644"});
++        let receipt = json!({"generation":"owner-a", "operation":"save-a", "revision":1,
++                             "acceptedText":"saved bytes", "mode":"100644"});
++        assert_eq!(validate_receipt(&payload, &receipt).unwrap(), 1);
++        for (field, value) in [
++            ("generation", json!("old-owner")),
++            ("operation", json!("other")),
++            ("revision", json!(2)),
++            ("acceptedText", json!("other bytes")),
++            ("mode", json!("100755")),
++        ] {
++            let mut changed = receipt.clone();
++            changed[field] = value;
++            assert!(validate_receipt(&payload, &changed).is_err(), "{field}");
++        }
++    }
++}
+diff --git a/helix-lsp/src/lib.rs b/helix-lsp/src/lib.rs
+index d99014e..262dbd7 100644
+--- a/helix-lsp/src/lib.rs
++++ b/helix-lsp/src/lib.rs
+@@ -1,4 +1,5 @@
+ mod client;
++mod draft_save;
+ pub mod file_event;
+ mod file_operations;
+ pub mod jsonrpc;
+diff --git a/helix-term/src/application.rs b/helix-term/src/application.rs
+index ea969f8..e6c8b8b 100644
+--- a/helix-term/src/application.rs
++++ b/helix-term/src/application.rs
+@@ -592,6 +592,7 @@ pub fn handle_document_write(&mut self, doc_save_event: DocumentSavedEventResult
+         let doc_save_event = match doc_save_event {
+             Ok(event) => event,
+             Err(err) => {
++                self.editor.remember_unaccepted_draft_write(&err);
+                 self.editor.set_error(err.to_string());
+                 return;
+             }
+diff --git a/helix-view/src/document.rs b/helix-view/src/document.rs
+index 72aa97f..01910a6 100644
+--- a/helix-view/src/document.rs
++++ b/helix-view/src/document.rs
+@@ -120,6 +120,15 @@ pub struct DocumentSavedEvent {
+     pub text: Rope,
+ }
+ 
++#[derive(Debug, thiserror::Error)]
++#[error("draft acceptance failed: {source}")]
++pub(crate) struct DraftAcceptanceError {
++    pub doc_id: DocumentId,
++    pub path: PathBuf,
++    pub save_time: SystemTime,
++    pub source: anyhow::Error,
++}
++
+ pub type DocumentSavedEventResult = Result<DocumentSavedEvent, anyhow::Error>;
+ pub type DocumentSavedEventFuture = BoxFuture<'static, DocumentSavedEventResult>;
+ 
+@@ -200,6 +209,7 @@ pub struct Document {
+     last_saved_time: SystemTime,
+ 
+     last_saved_revision: usize,
++    draft_acceptance_failed: bool,
+     version: i32, // should be usize?
+     pub(crate) modified_since_accessed: bool,
+ 
+@@ -757,6 +767,7 @@ pub fn from(
+             savepoints: Vec::new(),
+             last_saved_time: SystemTime::now(),
+             last_saved_revision: 0,
++            draft_acceptance_failed: false,
+             modified_since_accessed: false,
+             language_servers: HashMap::new(),
+             diff_handle: None,
+@@ -1024,6 +1035,35 @@ impl Future<Output = Result<DocumentSavedEvent, anyhow::Error>> + 'static + Send
+ 
+         let identifier = self.path().map(|_| self.identifier());
+         let language_servers: Vec<_> = self.language_servers.values().cloned().collect();
++        let bridges: Vec<_> = language_servers
++            .iter()
++            .filter(|server| {
++                identifier
++                    .as_ref()
++                    .is_some_and(|id| server.draft_save_matches(&id.uri))
++            })
++            .cloned()
++            .collect();
++        if bridges.len() > 1 {
++            bail!("multiple draft save bridges claim this document");
++        }
++        let draft_bridge = bridges.into_iter().next();
++        if draft_bridge.is_some()
++            && identifier
++                .as_ref()
++                .and_then(|id| id.uri.to_file_path().ok())
++                .as_ref()
++                != Some(&path)
++        {
++            bail!("the draft save bridge does not allow changing the document path");
++        }
++        if std::env::var_os("HELIX_DRAFT_SAVE_REQUIRED").is_some() && draft_bridge.is_none() {
++            bail!("the required draft save bridge is not ready for this document");
++        }
++        if draft_bridge.is_some() && (self.encoding != encoding::UTF_8 || self.has_bom) {
++            bail!("the draft save bridge currently requires UTF-8 without a BOM");
++        }
++        let document_version = self.version;
+ 
+         // mark changes up to now as saved
+         let current_rev = self.get_current_revision();
+@@ -1077,6 +1117,7 @@ impl Future<Output = Result<DocumentSavedEvent, anyhow::Error>> + 'static + Send
+             }
+ 
+             // Assume it is a hardlink to prevent data loss if the metadata cant be read (e.g. on certain Windows configurations)
++            let draft_write_path = write_path.clone();
+             let is_hardlink = helix_stdx::faccess::hardlink_count(&write_path).unwrap_or(2) > 1;
+             let is_symlink = match tokio::fs::symlink_metadata(&write_path).await {
+                 Ok(meta) => meta.is_symlink(),
+@@ -1180,6 +1221,38 @@ impl Future<Output = Result<DocumentSavedEvent, anyhow::Error>> + 'static + Send
+ 
+             write_result?;
+ 
++            if let Some(server) = draft_bridge {
++                let metadata = fs::symlink_metadata(&draft_write_path).await?;
++                if !metadata.is_file() {
++                    bail!("the draft save projection is not a regular file");
++                }
++                #[cfg(unix)]
++                let executable = {
++                    use std::os::unix::fs::PermissionsExt;
++                    metadata.permissions().mode() & 0o111 != 0
++                };
++                #[cfg(not(unix))]
++                let executable = false;
++                let mode = if executable { "100755" } else { "100644" };
++                if let Err(source) = server
++                    .accept_draft_save(
++                        &identifier.as_ref().unwrap().uri,
++                        &text,
++                        document_version,
++                        mode,
++                    )
++                    .await
++                {
++                    return Err(DraftAcceptanceError {
++                        doc_id,
++                        path,
++                        save_time,
++                        source,
++                    }
++                    .into());
++                }
++            }
++
+             let event = DocumentSavedEvent {
+                 revision: current_rev,
+                 save_time,
+@@ -1839,7 +1912,9 @@ pub fn is_modified(&self) -> bool {
+             self.last_saved_revision,
+             current_revision
+         );
+-        current_revision != self.last_saved_revision || !self.changes.is_empty()
++        self.draft_acceptance_failed
++            || current_revision != self.last_saved_revision
++            || !self.changes.is_empty()
+     }
+ 
+     /// Save modifications to history, and so [`Self::is_modified`] will return false.
+@@ -1860,6 +1935,14 @@ pub fn set_last_saved_revision(&mut self, rev: usize, save_time: SystemTime) {
+         );
+         self.last_saved_revision = rev;
+         self.last_saved_time = save_time;
++        self.draft_acceptance_failed = false;
++    }
++
++    pub(crate) fn remember_unaccepted_write(&mut self, path: &Path, save_time: SystemTime) {
++        if self.path() == Some(path) {
++            self.last_saved_time = save_time;
++            self.draft_acceptance_failed = true;
++        }
+     }
+ 
+     /// Get the document's latest saved revision.
+@@ -2535,6 +2618,44 @@ mod test {
+ 
+     use super::*;
+ 
++    #[tokio::test]
++    async fn draft_save_snapshot_is_fixed_before_io_and_later_edits_stay_dirty() {
++        let root = std::env::temp_dir().join(format!(
++            "helix-save-snapshot-{}-{}",
++            std::process::id(),
++            SystemTime::now()
++                .duration_since(SystemTime::UNIX_EPOCH)
++                .unwrap()
++                .as_nanos()
++        ));
++        std::fs::create_dir(&root).unwrap();
++        let path = root.join("snapshot.txt");
++        std::fs::write(&path, "before\n").unwrap();
++        let mut doc = Document::from(
++            Rope::from("saved\n"),
++            None,
++            Arc::new(ArcSwap::new(Arc::new(Config::default()))),
++            Arc::new(ArcSwap::from_pointee(syntax::Loader::default())),
++        );
++        doc.set_path(Some(&path));
++        let mut view = View::new(doc.id(), Default::default());
++        doc.ensure_view_init(view.id);
++        let pending = doc.save(None::<PathBuf>, false).unwrap();
++        let change = Transaction::change(
++            doc.text(),
++            [(0, doc.text().len_chars(), Some("newer\n".into()))].into_iter(),
++        );
++        doc.apply(&change, view.id);
++        doc.append_changes_to_history(&mut view);
++        let saved = pending.await.unwrap();
++        assert_eq!(std::fs::read_to_string(&path).unwrap(), "saved\n");
++        assert_eq!(saved.text, "saved\n");
++        assert_eq!(doc.text(), "newer\n");
++        doc.set_last_saved_revision(saved.revision, saved.save_time);
++        assert!(doc.is_modified());
++        std::fs::remove_dir_all(root).unwrap();
++    }
++
+     #[test]
+     fn changeset_to_changes_ignore_line_endings() {
+         use helix_lsp::{lsp, Client, OffsetEncoding};
+diff --git a/helix-view/src/editor.rs b/helix-view/src/editor.rs
+index adced18..6fb30b2 100644
+--- a/helix-view/src/editor.rs
++++ b/helix-view/src/editor.rs
+@@ -2,7 +2,8 @@
+     annotations::diagnostics::{DiagnosticFilter, InlineDiagnosticsConfig},
+     clipboard::ClipboardProvider,
+     document::{
+-        DocumentOpenError, DocumentSavedEventFuture, DocumentSavedEventResult, Mode, SavePoint,
++        DocumentOpenError, DocumentSavedEventFuture, DocumentSavedEventResult,
++        DraftAcceptanceError, Mode, SavePoint,
+     },
+     events::{DocumentDidClose, DocumentDidOpen, DocumentFocusLost},
+     graphics::{CursorKind, Rect},
+@@ -2508,6 +2509,14 @@ pub async fn wait_event(&mut self) -> EditorEvent {
+         }
+     }
+ 
++    pub fn remember_unaccepted_draft_write(&mut self, error: &anyhow::Error) {
++        if let Some(failure) = error.downcast_ref::<DraftAcceptanceError>() {
++            if let Some(doc) = self.document_mut(failure.doc_id) {
++                doc.remember_unaccepted_write(&failure.path, failure.save_time);
++            }
++        }
++    }
++
+     pub async fn flush_writes(&mut self) -> anyhow::Result<()> {
+         while self.write_count > 0 {
+             if let Some(save_event) = self.save_queue.next().await {
+@@ -2516,6 +2525,7 @@ pub async fn flush_writes(&mut self) -> anyhow::Result<()> {
+                 let save_event = match save_event {
+                     Ok(event) => event,
+                     Err(err) => {
++                        self.remember_unaccepted_draft_write(&err);
+                         self.set_error(err.to_string());
+                         bail!(err);
+                     }
