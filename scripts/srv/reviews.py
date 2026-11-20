@@ -109,12 +109,13 @@ def _my_login():
     return _login[0]
 
 
-def mine(prs, detail, login, local):
-    """My open PRs from the open-PR listing (srv/openprs.py) — no search of its own — each with what GitHub says
-    about its review and whether its head is a local branch. Unknown login → none, never everyone's."""
+def mine(prs, detail, login, local, slug):
+    """My open PRs on origin from the open-PR listing (srv/openprs.py) — no search of its own — each with what GitHub
+    says about its review and whether its head is a local branch. Unknown login or origin → none, never everyone's;
+    the fork's PRs (the automation surface) are never mine to list."""
     out = []
     for p in prs:
-        if not login or ((p.get("author") or {}).get("login") or "") != login:
+        if not login or not slug or p.get("slug") != slug or ((p.get("author") or {}).get("login") or "") != login:
             continue
         head = p.get("headRefName") or ""
         d = detail.get(head) or {}
@@ -128,7 +129,8 @@ def mine(prs, detail, login, local):
 
 def my_prs(req):   # GET /my-prs — Home's open PRs that no forest carries (LGTM's "My Pull Requests")
     rows = mine(openprs.listing(), openprs.detail(), _my_login(),
-                lambda h: ctx.run(["git", "show-ref", "--verify", "--quiet", f"refs/heads/{h}"]).returncode == 0)
+                lambda h: ctx.run(["git", "show-ref", "--verify", "--quiet", f"refs/heads/{h}"]).returncode == 0,
+                openprs.origin_slug())
     req._send(200, json.dumps(rows))
 
 

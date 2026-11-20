@@ -79,6 +79,13 @@ def _refresh(repo, slugs):
         _busy.discard(("listing", repo))
 
 
+def origin_slug():
+    """The repo's own slug on origin — where Phil's real PRs live (the fork is the automation surface)."""
+    url = ctx.run(["git", "remote", "get-url", "origin"]).stdout.strip()
+    m = re.search(r"[:/]([^/:]+/[^/]+?)(?:\.git)?$", url) if url else None
+    return m.group(1) if m else None
+
+
 def listing(fresh=False):
     """Every open PR of the request's repo, each with its `slug`."""
     repo = ctx.repo_cwd()
