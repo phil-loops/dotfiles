@@ -32,9 +32,10 @@ _PEER_TTL = 600
 
 
 def classify(headers, path, ext_origins, client_port=None):
-    """→ (actor, sid). sid is a Claude session id prefix when one is known, else None."""
+    """→ (actor, sid). sid is the caller's full Claude session id when one is known, else None;
+    logs show its first eight characters."""
     explicit = (headers.get("X-Stack-Actor") or "").strip().lower()
-    sid = (headers.get("X-Stack-Session") or "").strip()[:8] or None
+    sid = (headers.get("X-Stack-Session") or "").strip() or None
     if explicit in ACTORS:
         return explicit, sid
     origin = headers.get("Origin") or ""
@@ -112,7 +113,7 @@ def _presence_sid(claude_pid):
         except Exception:
             continue
         if str(d.get("pid")) == claude_pid:
-            return (d.get("session_id") or "")[:8] or None
+            return d.get("session_id") or None
     return None
 
 
@@ -120,11 +121,11 @@ def _presence_sid(claude_pid):
 # hand it to every git child — the pre-push hook then knows a viewer push was Phil's click or a
 # Claude curl without any handler threading it through.
 def set_current(actor, sid=None):
-    _tl.actor, _tl.sid = actor, sid
+    _tl.actor, _tl.sid, _tl.initiator = actor, sid, None
 
 
 def clear_current():
-    _tl.actor, _tl.sid = None, None
+    _tl.actor, _tl.sid, _tl.initiator = None, None, None
 
 
 def current():
@@ -137,5 +138,27 @@ def child_env():
         return None
     env = dict(os.environ, STACK_ACTOR=a, STACK_VIA="viewer")
     if sid:
-        env["STACK_SESSION"] = sid
+        env["STACK_SESSION"] = sid[:8]
+    init = getattr(_tl, "initiator", None)
+    if init:
+        env["STACK_INITIATOR"] = init
     return env
+
+
+def initiator(req):
+    """Who asked for this request's write, as STACK_INITIATOR spells it: "phil" only on proof that the
+    caller is Phil's app, "claude:<full id>" for a Claude session, else "unknown" — never Phil by default."""
+    if is_phil(req):
+        return "phil"
+    sid = getattr(req, "_sid", None)
+    if getattr(req, "_actor", "") == "claude" and sid and len(sid) > 8:
+        return f"claude:{sid}"
+    return "unknown"
+
+
+def set_initiator(value):
+    _tl.initiator = value
+
+
+def current_initiator():
+    return getattr(_tl, "initiator", None)

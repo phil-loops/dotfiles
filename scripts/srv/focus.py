@@ -140,7 +140,7 @@ def _restack(project, hold=(), merged=None):
     wt = restack.worktree()
     _git("-C", wt, "checkout", "--detach")
     # a writer that took the forest after _held() looked: stack-restack skips, never waits
-    env = {**os.environ, "STACK_RESTACK_FOREST_WAIT": "0"}
+    env = {**os.environ, "STACK_RESTACK_FOREST_WAIT": "0", "STACK_INITIATOR": "maintenance:focus-sync"}
     with open(os.path.join(ctx.ROOT, "restack.log"), "ab") as lf:
         cmd = [os.path.join(ctx.SCRIPTS, "stack-restack"), project, "--no-claude"]
         if hold:

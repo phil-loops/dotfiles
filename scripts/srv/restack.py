@@ -13,7 +13,7 @@ import subprocess
 from urllib.parse import parse_qs
 
 from . import ctx
-from . import agents
+from . import actor, agents
 
 
 def _gitdir():
@@ -144,7 +144,9 @@ def _queue_path():
 
 
 def _queue_read():
-    # Lines of "<kind> <project>", kind ∈ {now, batch}. "now" entries are interactive
+    # Lines of "<kind> <project> [<initiator>]", kind ∈ {now, batch}; the initiator is who asked
+    # (STACK_INITIATOR's spelling), and a line written before it was recorded reads "unknown" —
+    # never Phil. "now" entries are interactive
     # (a sync click) and always sit ahead of "batch" ones; stack-restack-all also
     # splices "now" entries in between its own projects, so a sync never waits for a
     # whole sweep — only for the project currently mid-rebase.
@@ -155,8 +157,8 @@ def _queue_read():
     with open(qp) as fh:
         for line in fh:
             parts = line.split()
-            if len(parts) == 2 and parts[0] in ("now", "batch"):
-                entries.append((parts[0], parts[1]))
+            if len(parts) in (2, 3) and parts[0] in ("now", "batch"):
+                entries.append((parts[0], parts[1], parts[2] if len(parts) == 3 else "unknown"))
     return entries
 
 
@@ -166,24 +168,24 @@ def _queue_write(entries):
         return
     tmp = qp + ".tmp"
     with open(tmp, "w") as fh:
-        fh.writelines(f"{k} {p}\n" for k, p in entries)
+        fh.writelines(f"{k} {p} {i}\n" for k, p, i in entries)
     os.replace(tmp, qp)
 
 
 _queue_lock = threading.Lock()
 
 
-def _enqueue(project, kind="now"):
+def _enqueue(project, kind="now", initiator="unknown"):
     # Dedup by project (a re-click refreshes position, never doubles the work); "now"
     # entries go after existing "now"s but ahead of every "batch".
     with _queue_lock:
-        entries = [(k, p) for k, p in _queue_read() if p != project]
+        entries = [e for e in _queue_read() if e[1] != project]
         if kind == "now":
             head = [e for e in entries if e[0] == "now"]
             tail = [e for e in entries if e[0] != "now"]
-            entries = head + [("now", project)] + tail
+            entries = head + [("now", project, initiator)] + tail
         else:
-            entries = entries + [("batch", project)]
+            entries = entries + [("batch", project, initiator)]
         _queue_write(entries)
         return entries
 
@@ -207,11 +209,11 @@ def drain_forever():
                 entries = _queue_read()
                 if not entries:
                     continue
-                (kind, project), rest = entries[0], entries[1:]
+                (kind, project, initiator), rest = entries[0], entries[1:]
                 _queue_write(rest)
             wt = worktree()
             ctx.run(["git", "-C", wt, "checkout", "--detach"])
-            _spawn(cmd(project, wt), wt)
+            _spawn(cmd(project, wt), wt, initiator=initiator)
         except Exception:
             pass  # a transient (repo busy, disk hiccup) must never kill the drainer
 
@@ -260,10 +262,12 @@ def cmd(project, wt, action=None):
     return " ".join(parts) + f" && git -C {shlex.quote(wt)} checkout --detach >/dev/null 2>&1"
 
 
-def _spawn(chain, wt, register_kind=None, register_branch=""):
+def _spawn(chain, wt, register_kind=None, register_branch="", initiator=None):
     logpath = os.path.join(ctx.ROOT, "restack.log")
+    init = initiator or actor.current_initiator() or "unknown"
     with open(logpath, "ab") as lf:
-        proc = subprocess.Popen(["zsh", "-c", chain], cwd=wt, stdout=lf, stderr=lf)
+        proc = subprocess.Popen(["zsh", "-c", chain], cwd=wt, stdout=lf, stderr=lf,
+                                env=dict(os.environ, STACK_INITIATOR=init))
     # a resolver handoff spawns its claude with no tmux window, so it registers itself here — that's
     # how /processes surfaces the agent (the reaper walks this pid's tree to confirm it's live).
     if register_kind:
@@ -281,10 +285,10 @@ def restack(req, raw):
     if _running():
         # Don't refuse — queue it. The drainer (or a running stack-restack-all, at its
         # next project boundary) picks it up the moment the current project finishes.
-        entries = _enqueue(project, "now")
+        entries = _enqueue(project, "now", actor.current_initiator() or "unknown")
         ds = _drivers()
         behind = ds[0]["project"] if ds and ds[0].get("project") else "the running restack"
-        ahead = next(i for i, (_, p) in enumerate(entries) if p == project)
+        ahead = next(i for i, e in enumerate(entries) if e[1] == project)
         req._send(200, json.dumps({"ok": True, "project": project, "queued": True,
                                    "behind": behind, "ahead": ahead}))
         return

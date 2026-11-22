@@ -92,7 +92,7 @@ def request_line(method, path, status, ms, actor=None, refused=None, sid=None, r
     rid is the client's X-Request-Id, so a client-side timing joins this line."""
     tail = f" actor={actor}" if actor else ""
     if sid:
-        tail += f" sid={sid}"
+        tail += f" sid={sid[:8]}"
     if refused:
         tail += f" refused={refused}"
     if rid and _RID.match(rid):

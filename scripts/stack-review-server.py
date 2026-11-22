@@ -31,6 +31,9 @@ from srv import procsig   # own line: same reason
 from srv import actor, reqlog   # own line: same reason
 from srv import verdicts   # own line: same reason
 os.environ["STACK_VIA"] = "viewer"   # git hooks under this server attribute to it, not to whoever launched it
+# the server is never a chat, even when one started it: who asked for a write travels as STACK_INITIATOR
+for _k in ("CLAUDE_CODE_SESSION_ID", "STACK_INITIATOR"):
+    os.environ.pop(_k, None)
 from srv import pregate   # own line: same reason
 from srv import v1redirect   # own line: same reason
 from srv import tutor   # own line: same reason

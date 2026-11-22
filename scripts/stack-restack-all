@@ -106,17 +106,19 @@ pop_now() {  # pop the first interactive "now" entry from the shared restack que
   first="$(head -1 "$qf" 2>/dev/null)"
   [[ "$first" == now\ * ]] || return 1
   sed '1d' "$qf" > "$qf.tmp" && mv "$qf.tmp" "$qf"
-  print -r -- "${first#now }"
+  print -r -- "${first#now }"   # "<project> [<initiator>]" — the caller splits it
 }
 
 typeset -a problems
-typeset spliced
+typeset spliced entry asked
 problems=()
 for p in "${projects[@]}"; do
   # Interactive sync clicks jump in at project boundaries — they wait for ONE
   # mid-rebase project, never the whole sweep.
-  while spliced="$(pop_now)"; do
-    if "$SCRIPTS/stack-restack" "$spliced" "${rflags[@]}"; then
+  while entry="$(pop_now)"; do
+    spliced="${entry%% *}"
+    asked="unknown"; [[ "$entry" == *" "* ]] && asked="${entry#* }"
+    if STACK_INITIATOR="$asked" "$SCRIPTS/stack-restack" "$spliced" "${rflags[@]}"; then
       echo "✓ $spliced restacked (spliced ahead of the sweep)"
     else
       echo "⚠ $spliced parked on a conflict — aborting to continue with the rest"

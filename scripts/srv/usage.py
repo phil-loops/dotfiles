@@ -37,7 +37,8 @@ def track(req, raw):
                 # /track must not read as Phil
                 e["actor"] = getattr(req, "_actor", None) or "unknown"
                 if getattr(req, "_sid", None):
-                    e["session"] = req._sid
+                    e["session"] = req._sid[:8]
+                    e["sessionId"] = req._sid
                 lines.append(json.dumps(e) + "\n")
             if path and lines:
                 telemetry.rotate_usage(path)
