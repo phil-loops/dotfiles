@@ -8,11 +8,14 @@
 
 `check` sees only what lives on disk: uncommitted changes in the session's checkout, dirty
 files inside the dotfiles lanes it holds, canopy-todo items it still has `doing`, and
-patches written since it started that haven't landed. What only the conversation knows —
+patches written since it started that haven't landed. It then prints a handoff table — every
+branch this session made (its work-journal binding) with local vs origin, open PR and gates
+verdict, read fresh — which never affects the exit code: it is what a closing message quotes
+instead of recalling push state from the conversation. What only the conversation knows —
 running background tasks, a question awaiting Phil, a promised follow-up — is the
 /closeup skill's job to check before it calls `close`.
 """
-import json, os, subprocess, sys
+import json, os, subprocess, sys, urllib.request
 
 DOTFILES = os.path.expanduser("~/.dotfiles")
 PRESENCE = os.path.expanduser("~/.claude/session-presence")
@@ -99,6 +102,99 @@ def check(rec):
     return 1 if found else 0
 
 
+def repo_registry():
+    """name -> main worktree, the same registry the viewer server builds (stack.viewer-repos)."""
+    roots = sh(["git", "config", "--get-all", "stack.viewer-repos"]).split() or ["~/coding/loops", "~/coding/monotoad"]
+    reg = {}
+    for root in roots:
+        path = os.path.expanduser(root)
+        first = next((l[len("worktree "):] for l in sh(["git", "-C", path, "worktree", "list", "--porcelain"]).splitlines()
+                      if l.startswith("worktree ")), None)
+        if first:
+            reg[os.path.basename(path)] = first
+    return reg
+
+
+def session_branches(rec):
+    """[(repo, branch, project)] for the work bound to this session."""
+    sid = rec.get("session_id") or ""
+    if not sid:
+        return []
+    sys.path.insert(0, os.path.join(DOTFILES, "scripts/srv"))
+    try:
+        import workjournal
+        j = workjournal.Journal()
+        try:
+            binding = j.binding(workjournal.CLAUDE_CODE_SOURCE, sid) or {}
+            rows = []
+            for w in binding.get("works", []):
+                work = j.work(w if isinstance(w, str) else w.get("work_id")) or {}
+                if work.get("repo") and work.get("branch"):
+                    rows.append((work["repo"], work["branch"], work.get("project") or ""))
+            return rows
+        finally:
+            j.close()
+    except Exception as e:
+        print(f"(handoffs: work journal unreadable — {e})")
+        return []
+
+
+def handoffs(rec):
+    rows = session_branches(rec)
+    if not rows:
+        return
+    reg = repo_registry()
+    table = []
+    for repo in sorted({r for r, _, _ in rows}):
+        path = reg.get(repo)
+        mine = [(b, p) for r, b, p in rows if r == repo]
+        if not path:
+            table += [(b, "?", "?", "", "?", f"repo {repo} not in stack.viewer-repos") for b, _ in mine]
+            continue
+        remote = {}
+        for line in sh(["git", "-C", path, "ls-remote", "--heads", "origin"]).splitlines():
+            sha, _, ref = line.partition("\t")
+            remote[ref.removeprefix("refs/heads/")] = sha
+        prs = {}
+        try:
+            for pr in json.loads(sh(["gh", "pr", "list", "--state", "open", "--limit", "300", "--json", "number,headRefName"], cwd=path) or "[]"):
+                prs[pr["headRefName"]] = pr["number"]
+        except ValueError:
+            pass
+        port = sh(["stack-review-port", path]).strip()
+        try:
+            state = json.load(urllib.request.urlopen(f"http://localhost:{port}/state", timeout=5))
+            entities = state.get("entities", {}).get("branch", {})
+        except Exception:
+            entities = None
+        for branch, _ in mine:
+            local = sh(["git", "-C", path, "rev-parse", "--verify", "-q", f"refs/heads/{branch}"]).strip()
+            origin = remote.get(branch, "")
+            gates = "?" if entities is None else (entities.get(f"{repo}:{branch}", {}).get("gates") or "—")
+            if not local:
+                status = "deleted locally" + (" (still on origin)" if origin else "")
+            elif not origin:
+                status = "not pushed"
+            elif local == origin:
+                status = "pushed, nothing to push"
+            else:
+                ahead = sh(["git", "-C", path, "rev-list", "--count", f"{origin}..{local}"]).strip()
+                behind = sh(["git", "-C", path, "rev-list", "--count", f"{local}..{origin}"]).strip()
+                if not ahead and not behind:
+                    status = "origin moved (fetch to compare)"
+                elif behind == "0":
+                    status = f"{ahead} commit(s) to push"
+                else:
+                    status = f"diverged: {ahead} ahead, {behind} behind origin"
+            pr = f"#{prs[branch]}" if branch in prs else "—"
+            table.append((branch, local[:10] or "—", origin[:10] or "—", pr, gates, status))
+    width = max(len(r[0]) for r in table)
+    print("\nhandoffs (read now from git, origin, gh and the viewer — quote these, don't recall):")
+    print(f"  {'branch':<{width}}  {'local':<10}  {'origin':<10}  {'PR':<7}  {'gates':<6}  status")
+    for branch, local, origin, pr, gates, status in table:
+        print(f"  {branch:<{width}}  {local:<10}  {origin:<10}  {pr:<7}  {gates:<6}  {status}")
+
+
 def ancestors(pid):
     tree = {}
     for line in sh(["ps", "-axo", "pid=,ppid="]).splitlines():
@@ -134,7 +230,9 @@ if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else "check"
     rec = session()
     if cmd == "check":
-        sys.exit(check(rec))
+        code = check(rec)
+        handoffs(rec)
+        sys.exit(code)
     if cmd == "close":
         args = sys.argv[2:]
         close(rec, dry="--dry" in args, pane=next((a for a in args if a.startswith("%")), None))
