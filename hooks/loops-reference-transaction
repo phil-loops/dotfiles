@@ -13,6 +13,26 @@
 [ "$1" = prepared ] || exit 0
 zero=0000000000000000000000000000000000000000
 refused=""
+lines=$(cat)
+# One owning chat per forest (scripts/srv/forestowner.py): a move a chat makes, or one made for a
+# chat (STACK_INITIATOR), on a forest's branch is checked against the forest's owner — before the
+# exits below, so a deletion or a fast-forward is checked too. Warn mode only says so.
+if [ -n "$CLAUDE_CODE_SESSION_ID$STACK_INITIATOR" ]; then
+  owned=""
+  while read -r old new ref; do
+    case "$ref" in refs/heads/*) ;; *) continue ;; esac
+    case "$old$new" in *ref:*) continue ;; esac
+    b=${ref#refs/heads/}
+    [ -n "$(git config --get "branch.$b.stack-project" 2>/dev/null)" ] && owned="$owned --branch $b"
+  done <<EOF
+$lines
+EOF
+  if [ -n "$owned" ]; then
+    # shellcheck disable=SC2086
+    "$HOME/.dotfiles/scripts/forest-own" check $owned --op "ref update" --layer hook
+    [ $? -eq 3 ] && exit 1   # 3 is a deliberate refusal; any other failure never blocks a move
+  fi
+fi
 while read -r old new ref; do
   case "$ref" in refs/heads/*) ;; *) continue ;; esac
   case "$old$new" in *ref:*) continue ;; esac
@@ -30,7 +50,9 @@ while read -r old new ref; do
       break
     fi
   done
-done
+done <<EOF
+$lines
+EOF
 [ -z "$refused" ] && exit 0
 for b in $refused; do
   echo "refused: $b is published (origin/$b) and this move drops commits origin already has — a published" >&2

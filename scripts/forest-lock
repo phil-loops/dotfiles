@@ -15,7 +15,7 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from srv import forestlock  # noqa: E402
+from srv import forestlock, forestowner  # noqa: E402
 
 
 def main(argv):
@@ -55,9 +55,17 @@ def main(argv):
     if not cmd:
         print(__doc__.strip(), file=sys.stderr)
         return 2
+    owned = project or forestowner.project_of(cwd, branch)
+    if owned:
+        try:
+            forestowner.guard(cwd, owned, "forest-lock " + " ".join(cmd)[:120], "tool", branches=[branch] if branch else [])
+        except forestowner.Refused as e:
+            print(f"forest-lock: {e}", file=sys.stderr)
+            return 1
     try:
         with forestlock.hold(cwd, key, who, wait=wait):
-            return subprocess.run(cmd).returncode
+            env = dict(os.environ, **{forestowner.CHECKED: owned}) if owned else None
+            return subprocess.run(cmd, env=env).returncode
     except forestlock.Held as e:
         print(f"forest-lock: {e}", file=sys.stderr)
         return 75

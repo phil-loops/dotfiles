@@ -18,7 +18,7 @@ from collections import namedtuple
 
 from . import evidence   # own line: the big import below is contested across sessions
 from . import pushintent   # own line: the big import below is contested across sessions
-from . import catchup, ctx, edits, forestlock
+from . import catchup, ctx, edits, forestlock, forestowner
 from . import (actor, chat, chats, integrate, lsp, outbox, outline, packet, picker, preview, push, queue, restack,
                review, reviewdesk, reviews, sync, syntax, todo, tutor, usage, verdicts, viewed)
 
@@ -142,6 +142,9 @@ def post(req, path, raw):
     why = refusal(route, req)
     if why:
         return req._send(403, json.dumps({"ok": False, "err": why}))
+    why = _owner_refusal(route, req, path, raw)
+    if why:
+        return req._send(403, json.dumps({"ok": False, "err": why, "owner": True}))
     key = _forest_key(route, path, raw)
     if not key:
         return route.handler(req, raw)
@@ -155,6 +158,54 @@ def post(req, path, raw):
 # /restack only queues: the drainer's stack-restack takes the forest lock itself (holding it here
 # would make that child wait on its own server)
 _UNLOCKED = {"/restack"}
+
+
+def _owner_refusal(route, req, path, raw):
+    """One owning chat per forest (srv/forestowner.py): a route that changes a forest's history checks
+    who asked against the forest's owner before it runs, and hands that initiator to what it spawns.
+    Warn mode only records it; "" means go ahead."""
+    if not route.effects & {"history"} and not (path == "/gates" and _wants_fix(raw)):
+        return ""
+    init = actor.initiator(req)
+    actor.set_initiator(init)
+    project = _project_named(raw)
+    if not project:
+        return ""
+    kind, _, ident = init.partition(":")
+    try:
+        forestowner.guard(ctx.repo_cwd(), project, f"canopy {path}", "server", branches=_branches_named(raw),
+                          who=(kind, ident or None), out=ctx.log)
+    except forestowner.Refused as e:
+        return str(e)
+    return ""
+
+
+def _body(raw):
+    try:
+        d = json.loads(raw or "{}")
+    except ValueError:
+        return {}
+    return d if isinstance(d, dict) else {}
+
+
+def _wants_fix(raw):
+    return bool(_body(raw).get("fix"))
+
+
+def _branches_named(raw):
+    d = _body(raw)
+    names = [d.get("branch")] + list(d.get("branches") or [])
+    return [b for b in names if isinstance(b, str) and b]
+
+
+def _project_named(raw):
+    d = _body(raw)
+    for b in _branches_named(raw):
+        p = forestowner.project_of(ctx.repo_cwd(), b)
+        if p:
+            return p
+    p = d.get("project")
+    return p if isinstance(p, str) and p not in ("", "whole forest", "--all") else ""
 
 
 def _forest_key(route, path, raw):

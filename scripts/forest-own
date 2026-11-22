@@ -1,0 +1,203 @@
+#!/usr/bin/env python3
+"""forest-own — who owns a forest, and the deliberate ways ownership changes (srv/forestowner.py).
+
+  forest-own who [<project> | --branch <b>]     the owner, live or ended, and the mode
+  forest-own adopt <project>                   this chat takes a forest with no live owner
+  forest-own give <project> <session-id>       the owner (or Phil) hands it to another live chat
+  forest-own release <project>                 the owner lets it go
+  forest-own check (--project <p> | --branch <b>…) --op <what> [--layer <where>]
+                                               the guard tools and the ref hook call: exit 0 to
+                                               allow (warn mode always), 3 to refuse (enforce)
+  forest-own observations [<project>]          what warn mode would have refused
+
+Changes run under the forest's lock with the generation read just before. One forest has one
+owning chat; others contribute by proposal. `stack-reshape new` assigns the owner when a chat
+starts a forest. Exit: 0 done; 1 refused (stderr says why); 75 the forest is held; 2 usage."""
+import json
+import os
+import subprocess
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+from srv import forestlock, forestowner as fo  # noqa: E402
+
+REFUSED = 3   # check's deliberate refusal; the ref hook refuses only on this, so a crash never blocks a move
+
+
+def top():
+    r = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True)
+    if not r.stdout.strip():
+        print("forest-own: not in a git repo", file=sys.stderr)
+        sys.exit(2)
+    return r.stdout.strip()
+
+
+def who(cwd, args):
+    if args[:1] == ["--branch"] and len(args) == 2:
+        project = fo.project_of(cwd, args[1])
+        if not project:
+            print(f"{args[1]} isn't in a forest")
+            return 0
+    elif len(args) == 1:
+        project = args[0]
+    else:
+        return usage()
+    rec = fo.owner(cwd, project)
+    if not rec:
+        print(f"{project}: no owner · mode {fo.mode(cwd)}")
+        return 0
+    state = "live" if fo.live(rec["session"]) else "ended"
+    print(f"{project}: {rec['session']} ({state}) · generation {rec['generation']} · since {rec['at']} by {rec['by']} · mode {fo.mode(cwd)}")
+    return 0
+
+
+def change(cwd, project, fn):
+    try:
+        with forestlock.hold(cwd, forestlock.key_for(cwd, project=project), "forest-own", wait=30):
+            return fn()
+    except forestlock.Held as e:
+        print(f"forest-own: {e}", file=sys.stderr)
+        return 75
+    except fo.Refused as e:
+        print(f"forest-own: {e}", file=sys.stderr)
+        return 1
+
+
+def me():
+    kind, ident = fo.initiator()
+    if kind != "claude":
+        print("forest-own: only a Claude Code chat owns a forest — run this from the chat taking it", file=sys.stderr)
+        sys.exit(1)
+    return ident
+
+
+def adopt(cwd, project):
+    ident = me()
+
+    def go():
+        rec = fo.owner(cwd, project)
+        if rec and rec["session"] == ident and fo.live(ident):
+            print(f"{project}: already yours")
+            return 0
+        if rec and fo.live(rec["session"]):
+            raise fo.Refused(f"{project} is owned by live chat {rec['session'][:8]} — it can `forest-own give` it to you")
+        gen = fo.set_owner(cwd, project, ident, rec["generation"] if rec else fo.generation(cwd, project),
+                           f"adopt · claude:{ident}")
+        print(f"{project}: yours (generation {gen})")
+        return 0
+    return change(cwd, project, go)
+
+
+def give(cwd, project, to):
+    def go():
+        rec = fo.owner(cwd, project)
+        kind, ident = fo.initiator()
+        if kind == "claude" and not (rec and rec["session"] == ident and fo.live(ident)):
+            raise fo.Refused(f"only {project}'s live owner gives it away")
+        if kind not in ("claude", "phil"):
+            raise fo.Refused("only the owner, or Phil, gives a forest away")
+        if not fo.live(to):
+            raise fo.Refused(f"{to[:8]} isn't a live chat")
+        gen = fo.set_owner(cwd, project, to, rec["generation"] if rec else 0, f"give · {fo.initiator_text((kind, ident))}")
+        print(f"{project}: now {to[:8]}'s (generation {gen})")
+        return 0
+    return change(cwd, project, go)
+
+
+def release(cwd, project):
+    ident = me()
+
+    def go():
+        rec = fo.owner(cwd, project)
+        if not rec or rec["session"] != ident:
+            raise fo.Refused(f"{project} isn't yours to release")
+        gen = fo.set_owner(cwd, project, None, rec["generation"], f"release · claude:{ident}")
+        print(f"{project}: released (generation {gen})")
+        return 0
+    return change(cwd, project, go)
+
+
+def check(cwd, args):
+    projects, branches, op, layer = [], [], "", "tool"
+    i = 0
+    while i < len(args):
+        flag, value = args[i], args[i + 1] if i + 1 < len(args) else None
+        if value is None:
+            return usage()
+        if flag == "--project":
+            projects.append(value)
+        elif flag == "--branch":
+            branches.append(value)
+        elif flag == "--op":
+            op = value
+        elif flag == "--layer":
+            layer = value
+        else:
+            return usage()
+        i += 2
+    by_project = {}
+    for p in projects:
+        by_project.setdefault(p, [])
+    for b in branches:
+        p = fo.project_of(cwd, b)
+        if p:
+            by_project.setdefault(p, []).append(b)
+    refused = []
+    for p, bs in by_project.items():
+        if os.environ.get(fo.CHECKED) == p:
+            continue
+        try:
+            fo.guard(cwd, p, op or "write", layer, branches=bs)
+        except fo.Refused as e:
+            refused.append(str(e))
+    for why in refused:
+        print(f"forest-own: refused — {why}", file=sys.stderr)
+    return REFUSED if refused else 0
+
+
+def observations(cwd, args):
+    path = fo._observations(cwd)
+    if not path or not os.path.exists(path):
+        print("no observations yet")
+        return 0
+    with open(path) as f:
+        for line in f:
+            try:
+                r = json.loads(line)
+            except ValueError:
+                continue
+            if args and r.get("project") != args[0]:
+                continue
+            print(f"{r['at']} {r['verdict']:8} {r['project']} · {r['op']} ({r['layer']}) · {r['initiator'][:15]} · {r['why']}")
+    return 0
+
+
+def usage():
+    print(__doc__.strip(), file=sys.stderr)
+    return 2
+
+
+def main(argv):
+    if not argv or argv[0] in ("-h", "--help"):
+        print(__doc__.strip())
+        return 0 if argv else 2
+    verb, rest = argv[0], argv[1:]
+    cwd = top()
+    if verb == "who":
+        return who(cwd, rest)
+    if verb == "adopt" and len(rest) == 1:
+        return adopt(cwd, rest[0])
+    if verb == "give" and len(rest) == 2:
+        return give(cwd, rest[0], rest[1])
+    if verb == "release" and len(rest) == 1:
+        return release(cwd, rest[0])
+    if verb == "check":
+        return check(cwd, rest)
+    if verb == "observations":
+        return observations(cwd, rest)
+    return usage()
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

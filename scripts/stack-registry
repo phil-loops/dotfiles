@@ -70,6 +70,15 @@ def main(argv):
         print(__doc__.strip(), file=sys.stderr)
         return 2
     project, branch = args
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from srv import forestowner
+    if os.environ.get(forestowner.CHECKED) != project:
+        top = git("rev-parse", "--show-toplevel").stdout.strip() or os.getcwd()
+        try:
+            forestowner.guard(top, project, f"stack-registry {op}", "tool", branches=[branch])
+        except forestowner.Refused as e:
+            print(f"stack-registry: {e}", file=sys.stderr)
+            return 1
     key = f"stack-project.{project}.branch"
     listed = git("config", "--get-all", key).stdout.split()
     if op == "add":

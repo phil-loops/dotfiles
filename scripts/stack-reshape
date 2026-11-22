@@ -22,7 +22,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from srv import ctx, forestlock  # noqa: E402
+from srv import ctx, forestlock, forestowner  # noqa: E402
 
 _SCRUB = ("GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE", "GIT_PREFIX")
 
@@ -33,8 +33,9 @@ def _setup():
     if not top:
         print("stack-reshape: not in a git repo", file=sys.stderr)
         sys.exit(2)
-    ctx.run = lambda argv, timeout=None, **kw: subprocess.run(argv, capture_output=True, text=True, env=env,
-                                                             cwd=kw.get("cwd", top), timeout=timeout)
+    ctx.run = lambda argv, timeout=None, **kw: subprocess.run(
+        argv, capture_output=True, text=True, cwd=kw.get("cwd", top), timeout=timeout,
+        env={k: v for k, v in os.environ.items() if k not in _SCRUB})
     listing = ctx.run(["git", "worktree", "list", "--porcelain"]).stdout
     ctx.CWD = top
     ctx.MAIN_WT = next((ln[len("worktree "):] for ln in listing.splitlines() if ln.startswith("worktree ")), top)
@@ -78,10 +79,23 @@ def main(argv):
     who = f"claude {sid[:8]} · stack-reshape {verb}" if sid else f"stack-reshape {verb}"
     try:
         with forestlock.hold(top, key, who, wait=float(opt.get("wait", 60))):
+            rec = forestowner.owner(top, project) if verb == "new" else None
+            if verb != "new" or (rec and forestowner.live(rec["session"])):
+                forestowner.guard(top, project, f"stack-reshape {verb}", "tool", branches=pos)
+            os.environ[forestowner.CHECKED] = project
             res = calls[verb][1]()
+            if verb == "new" and res.get("ok"):
+                try:
+                    res["owner"] = forestowner.assign_if_unowned(top, project)
+                except forestowner.Refused as e:
+                    res["owner"] = f"not assigned: {e}"
     except forestlock.Held as e:
         print(f"stack-reshape: {e}", file=sys.stderr)
         return 75
+    except forestowner.Refused as e:
+        print(json.dumps({"ok": False, "err": str(e)}))
+        print(f"stack-reshape {verb}: {e}", file=sys.stderr)
+        return 1
     except reshape.Refused as e:
         print(json.dumps({"ok": False, "err": str(e)}))
         print(f"stack-reshape {verb}: {e}", file=sys.stderr)
