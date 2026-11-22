@@ -8,7 +8,7 @@
 
 `check` sees only what lives on disk: uncommitted changes in the session's checkout, dirty
 files inside the dotfiles lanes it holds, canopy-todo items it still has `doing`, and
-patches written since it started that haven't landed. It then prints a handoff table — every
+patches it wrote (claude-session-track records each) that haven't landed. It then prints a handoff table — every
 branch this session made (its work-journal binding) with local vs origin, open PR and gates
 verdict, read fresh — which never affects the exit code: it is what a closing message quotes
 instead of recalling push state from the conversation. What only the conversation knows —
@@ -89,11 +89,9 @@ def check(rec):
         found.append("canopy-todo still doing: " + ", ".join(mine))
 
     pdir = os.path.join(DOTFILES, "patches")
-    since = rec.get("started_at") or 0
-    fresh = [f for f in sorted(os.listdir(pdir)) if f.endswith(".patch")
-             and os.path.getmtime(os.path.join(pdir, f)) >= since] if since and os.path.isdir(pdir) else []
+    fresh = [f for f in rec.get("patches", []) if os.path.exists(os.path.join(pdir, f))]
     if fresh:
-        found.append("patches written this session, not landed: " + ", ".join(fresh))
+        found.append("patches this session wrote, not landed: " + ", ".join(fresh))
 
     for f in found:
         print("• " + f)

@@ -13,11 +13,13 @@ WARN-ONLY / NEVER BLOCKS: always exits 0 and swallows every error — a presence
 tracker must never break a tool call. Each session owns its own file, so concurrent
 sessions never contend on a write.
 """
-import sys, os, json, subprocess, time, glob, fcntl
+import sys, os, json, subprocess, time, glob, fcntl, re
 
 DIR = os.environ.get("CLAUDE_SESSION_PRESENCE_DIR") or os.path.expanduser("~/.claude/session-presence")
 FILES_CAP = 8       # keep only the most-recent N touched files
 ACTED_CAP = 20      # branches a chat acted on, newest kept (DESIGN.md round 28)
+PATCHES_CAP = 20    # dotfiles patches this session wrote, newest kept (closeup counts only these)
+PATCH_WRITE = re.compile(r">\s*['\"]?(\S*?/patches/[\w.-]+\.patch)")
 GIT_TTL = 20        # re-resolve repo/branch/purpose at most once per N seconds (keeps PostToolUse cheap)
 
 
@@ -166,6 +168,12 @@ def main():
     if event == "PostToolUse":
         rec["last_tool"] = d.get("tool_name", "")
         fp = (d.get("tool_input") or {}).get("file_path", "")
+        written = [m.group(1) for m in PATCH_WRITE.finditer((d.get("tool_input") or {}).get("command", ""))]
+        if rec["last_tool"] == "Write" and re.search(r"/patches/[\w.-]+\.patch$", fp):
+            written.append(fp)
+        if written:
+            names = [os.path.basename(os.path.expanduser(w)) for w in written]
+            rec["patches"] = ([x for x in rec.get("patches", []) if x not in names] + names)[-PATCHES_CAP:]
         repo = rec.get("repo", "")
         if fp:
             rel = fp[len(repo) + 1:] if repo and fp.startswith(repo) else fp
