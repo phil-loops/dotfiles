@@ -151,6 +151,7 @@ struct ForestsPage: View {
         while !Task.isCancelled {
             await m.loadReviewRequests()
             await m.loadMyPRs()
+            await m.loadPRSignals()
             try? await Task.sleep(nanoseconds: 60_000_000_000)
         }
     }
@@ -186,6 +187,8 @@ private struct OpenPRList: View {
                         Text(r.title).font(Theme.display(17))
                             .foregroundStyle(here ? theme.goldLeaf : r.draft ? theme.inkDim : theme.ink)
                             .lineLimit(1).truncationMode(.tail).frame(maxWidth: .infinity, alignment: .leading)
+                        PRSignalStrip(signals: r.signals)
+                            .frame(width: 210, alignment: .trailing)
                         Text(verbatim: "#\(r.number) · \(r.place)").font(Theme.text(11)).foregroundStyle(theme.inkFaint)
                             .lineLimit(1).truncationMode(.tail).frame(width: 260, alignment: .leading)
                         Text(r.says).font(Theme.text(11)).foregroundStyle(r.yours ? theme.ink : theme.inkFaint)
@@ -198,6 +201,64 @@ private struct OpenPRList: View {
             }
             .padding(.bottom, 28)
         }
+    }
+}
+
+/// One open PR's GitHub signals as GitHub's checks summary draws them — passed, failed, running and queued
+/// checks, then unresolved threads, comments, approvals or changes requested, conflicts; a zero draws nothing.
+struct PRSignalStrip: View {
+    @Environment(\.theme) private var theme
+    let signals: PRSignals?
+
+    struct Mark: Equatable {
+        var symbol: String
+        var count: Int?
+        var tone: Tone
+        var help: String
+    }
+    enum Tone { case pass, fail, running, quiet, note }
+
+    static func marks(_ s: PRSignals) -> [Mark] {
+        var out: [Mark] = []
+        func add(_ n: Int, _ symbol: String, _ tone: Tone, _ help: String) {
+            if n > 0 { out.append(Mark(symbol: symbol, count: n, tone: tone, help: "\(n) \(help)")) }
+        }
+        if s.conflicts { out.append(Mark(symbol: "exclamationmark.triangle.fill", count: nil, tone: .fail, help: "conflicts with its base")) }
+        add(s.checks.pass, "checkmark.circle.fill", .pass, "checks passed")
+        add(s.checks.fail, "xmark.circle.fill", .fail, "checks failed")
+        add(s.checks.running, "clock", .running, "checks running")
+        add(s.checks.queued, "circle.dashed", .quiet, "checks queued")
+        add(s.threads, "text.bubble.fill", .note, s.threads == 1 ? "unresolved thread" : "unresolved threads")
+        add(s.comments, "bubble.left", .quiet, s.comments == 1 ? "comment" : "comments")
+        if s.changesRequested {
+            out.append(Mark(symbol: "hand.raised.fill", count: nil, tone: .fail, help: "changes requested"))
+        } else {
+            add(s.approvals, "person.fill.checkmark", .pass, s.approvals == 1 ? "approval" : "approvals")
+        }
+        return out
+    }
+
+    private func color(_ t: Tone) -> Color {
+        switch t {
+        case .pass: theme.add
+        case .fail: theme.del
+        case .running: theme.goldLeaf
+        case .quiet: theme.inkFaint
+        case .note: theme.ink
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 9) {
+            ForEach(signals.map(Self.marks) ?? [], id: \.symbol) { m in
+                HStack(spacing: 3) {
+                    Image(systemName: m.symbol).font(.system(size: 11, weight: .semibold)).foregroundStyle(color(m.tone))
+                    if let n = m.count { Text(verbatim: "\(n)").font(Theme.text(11)).foregroundStyle(theme.inkDim) }
+                }
+                .help(m.help)
+            }
+        }
+        .lineLimit(1)
     }
 }
 

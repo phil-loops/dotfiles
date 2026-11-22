@@ -58,6 +58,24 @@ public struct MyPR: Decodable, Equatable {
     public var mergeState: String?
 }
 
+/// What GitHub says about one of my open PRs beyond its state (GET /pr-signals): its row's icons on the home.
+public struct PRSignals: Decodable, Equatable {
+    public struct Checks: Decodable, Equatable {
+        public var pass: Int
+        public var fail: Int
+        public var running: Int
+        public var queued: Int
+    }
+    public var checks: Checks
+    /// unresolved review threads
+    public var threads: Int
+    /// top-level conversation comments
+    public var comments: Int
+    public var approvals: Int
+    public var changesRequested: Bool
+    public var conflicts: Bool
+}
+
 /// A row of the home's open PRs: one of a forest's branches, or a PR of mine no forest carries.
 struct OpenPRRow: Equatable {
     var key: String
@@ -71,6 +89,7 @@ struct OpenPRRow: Equatable {
     var glyph: String
     var branch: BranchView?
     var mine: MyPR?
+    var signals: PRSignals?
 }
 
 /// Whether the whole forest merges onto main (integrate.ts).
@@ -123,6 +142,8 @@ public final class ForestModel {
     /// open PRs awaiting my review, newest search first; empty until the first answer
     public private(set) var reviewRequests: [ReviewRequest] = []
     public private(set) var myPRs: [MyPR] = []
+    /// my open PRs' row icons by number; empty until the first answer
+    public private(set) var prSignals: [Int: PRSignals] = [:]
     @ObservationIgnored var wasClosed: Set<String>?
     /// Archive a forest (the app dispatches `project.archive`, so `u` undoes it).
     @ObservationIgnored var archive: ((String) -> Void)?
@@ -351,7 +372,8 @@ public final class ForestModel {
             return (rank(draft, Move.of(v.st.actor)), OpenPRRow(
                 key: RowKey.openPR(v.b.id), number: v.pr?.number ?? 0, title: v.pr?.title ?? v.b.description,
                 place: forest(v.b.project)?.p.name ?? "", says: draft ? "draft" : ShipRules.says(v.st, v.b, v.pr),
-                yours: v.st.actor == .you && !draft, draft: draft, glyph: v.st.ship.glyph, branch: v, mine: nil))
+                yours: v.st.actor == .you && !draft, draft: draft, glyph: v.st.ship.glyph, branch: v, mine: nil,
+                signals: v.pr.flatMap { prSignals[$0.number] }))
         }
         let carried = Set(carriedPRs.compactMap { $0.pr?.number })
         for p in myPRs where !carried.contains(p.number) {
@@ -360,7 +382,7 @@ public final class ForestModel {
             let says = p.draft ? "draft" : p.changesRequested == true ? "changes requested" : merge ? "merge it" : "waiting on review"
             rows.append((rank(p.draft, move), OpenPRRow(
                 key: RowKey.myPR(p.number), number: p.number, title: p.title, place: p.local ? p.head : "on GitHub", says: says,
-                yours: move == .yours && !p.draft, draft: p.draft, glyph: p.draft ? "○" : "◇", branch: nil, mine: p)))
+                yours: move == .yours && !p.draft, draft: p.draft, glyph: p.draft ? "○" : "◇", branch: nil, mine: p, signals: prSignals[p.number])))
         }
         return rows.enumerated().sorted { $0.element.rank != $1.element.rank ? $0.element.rank < $1.element.rank : $0.offset < $1.offset }.map(\.element.row)
     }
@@ -377,6 +399,15 @@ public final class ForestModel {
     }
 
     func setMyPRs(_ ps: [MyPR]) { myPRs = ps }
+
+    /// Re-read my open PRs' row icons; a failed read keeps the last ones.
+    public func loadPRSignals() async {
+        guard let got = try? await transport.getJSON("/pr-signals", as: [String: PRSignals].self) else { return }
+        let byNumber = Dictionary(uniqueKeysWithValues: got.compactMap { k, v in Int(k).map { ($0, v) } })
+        if byNumber != prSignals { prSignals = byNumber }
+    }
+
+    func setPRSignals(_ s: [Int: PRSignals]) { prSignals = s }
 
     public func reviewRequest(_ row: String?) -> ReviewRequest? {
         guard let n = RowKey.id(row, "r").flatMap(Int.init) else { return nil }

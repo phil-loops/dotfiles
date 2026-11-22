@@ -349,6 +349,32 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = f
         #expect(a.provider?.title(for: "gh:20", a) == "#20 pr 20")
     }
 
+    /// GitHub's signals (GET /pr-signals) ride every open-PR row by number — a forest's PR and one no forest carries.
+    @Test func prSignalsRideTheOpenPRRowsByNumber() throws {
+        let a = world()
+        a.forestModel.syncClosings()
+        a.forestModel.setMyPRs([MyPR(number: 20, title: "pr 20", url: "u", draft: false, head: "fix/monitors", local: false)])
+        let forestPR = try #require(a.forestModel.openPRRows().first { $0.branch != nil })
+        let quiet = PRSignals(checks: .init(pass: 3, fail: 0, running: 0, queued: 0), threads: 0, comments: 0, approvals: 0, changesRequested: false, conflicts: false)
+        var loud = quiet
+        loud.checks.fail = 1
+        loud.threads = 2
+        a.forestModel.setPRSignals([forestPR.number: loud, 20: quiet])
+        let rows = a.forestModel.openPRRows()
+        #expect(rows.first { $0.key == forestPR.key }?.signals == loud)
+        #expect(rows.first { $0.key == "gh:20" }?.signals == quiet)
+    }
+
+    /// The strip draws GitHub's checks summary order and skips zeros; changes requested replaces the approval count.
+    @Test func prSignalStripDrawsOnlyWhatIsThere() {
+        let s = PRSignals(checks: .init(pass: 2, fail: 1, running: 1, queued: 0), threads: 1, comments: 0, approvals: 2, changesRequested: false, conflicts: true)
+        #expect(PRSignalStrip.marks(s).map(\.symbol) == ["exclamationmark.triangle.fill", "checkmark.circle.fill", "xmark.circle.fill", "clock", "text.bubble.fill", "person.fill.checkmark"])
+        #expect(PRSignalStrip.marks(s).first { $0.symbol == "text.bubble.fill" }?.help == "1 unresolved thread")
+        var blocked = s
+        blocked.changesRequested = true
+        #expect(PRSignalStrip.marks(blocked).last?.symbol == "hand.raised.fill")
+    }
+
     /// Phil 2026-11-18: when all the work is done, the forest archives itself — through the archive
     /// command, so u undoes it — and a forest with open items on its own list stays out.
     @Test func aForestWhoseWorkIsDoneArchivesItself() {
