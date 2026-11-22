@@ -292,9 +292,9 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = f
         let a = world()
         a.forestModel.syncClosings()
         // `done` is closed (every PR landed), so it's shelved into the archive fold
-        #expect(a.rows == ["pr:r:a", "p:r:tree", "p:r:solo", "p:r:bench"], "the open PR leads")
+        #expect(a.rows == ["p:r:tree", "p:r:solo", "p:r:bench"], "the forest carrying the open PR leads; its PR rides its row")
         a.keys.handle(","); a.keys.handle("a")
-        #expect(a.rows == ["pr:r:a", "p:r:tree", "p:r:solo", "p:r:bench", "p:r:done", "p:r:old"])
+        #expect(a.rows == ["p:r:tree", "p:r:solo", "p:r:bench", "p:r:done", "p:r:old"])
         #expect(ForestNav.primary(for: "p:r:old", a)?.id == "forest.page", "ret opens an archived forest; restoring is its own key")
         #expect(ForestNav.primary(for: "p:r:done", a)?.id == "forest.page")
     }
@@ -306,10 +306,10 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = f
         a.forestModel.syncClosings()
         #expect(a.forestModel.moveGroups().map { "\($0.move.title): \($0.projects.map(\.name).joined(separator: ","))" }
                 == ["your move: tree,bench", "waiting: solo"])
-        #expect(a.rows == ["pr:r:a", "p:r:tree", "p:r:bench", "p:r:solo"], "rows follow what the page draws: open PRs, then the groups")
+        #expect(a.rows == ["p:r:tree", "p:r:bench", "p:r:solo"], "rows follow what the page draws: the groups, each item once")
     }
 
-    /// Round 29, P8: open PRs lead the home — yours to act on before the ones a reviewer holds, drafts last — and
+    /// Round 29, P8 (round 30: on their forests' rows): open PRs lead the home — yours to act on before the ones a reviewer holds, drafts last — and
     /// ] o / [ o walk them from any page, wrapping, from a PR's own review to the next.
     @Test func openPRsLeadTheHomeAndBracketOWalksThem() {
         let a = world(branchOver: ["s": ["pushed": "synced"], "w": ["pushed": "synced"]], extraPRs: [
@@ -317,11 +317,12 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = f
             "r:s": prObj(["id": "r:s", "branch": "s", "project": "r:solo", "number": 13, "review": "CHANGES_REQUESTED"]),
         ])
         a.forestModel.syncClosings()
-        #expect(Array(a.rows.prefix(3)) == ["pr:r:s", "pr:r:a", "pr:r:w"], "changes requested (yours), then a reviewer's, then the draft")
+        #expect(!a.rows.contains { $0.hasPrefix("pr:") }, "a forest's open PR rides its forest's row, never a row of its own")
+        #expect(a.forestModel.openPRRows().map(\.key) == ["pr:r:s", "pr:r:a", "pr:r:w"], "changes requested (yours), then a reviewer's, then the draft")
         #expect(ForestNav.primary(for: "pr:r:a", a)?.id == "branch.open")
-        a.setCursor("pr:r:s")
+        a.setCursor("p:r:tree")
         a.keys.handle("]"); a.keys.handle("o")
-        #expect(a.router.route == .review(repo: "r", branch: "a"), "] o reviews the next open PR")
+        #expect(a.router.route == .review(repo: "r", branch: "a"), "on a forest's row, ] o reviews its own PR")
         a.keys.handle("]"); a.keys.handle("o")
         #expect(a.router.route == .review(repo: "r", branch: "w"), "from inside a review, the one after it")
         a.keys.handle("]"); a.keys.handle("o")
@@ -340,7 +341,8 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = f
                  approvals: 0, changesRequested: changes, mergeState: "BLOCKED")
         }
         a.forestModel.setMyPRs([mine(21, "tweak", draft: true), mine(20, "fix/monitors", changes: true, local: true), mine(11, "a")])
-        #expect(Array(a.rows.prefix(3)) == ["gh:20", "pr:r:a", "gh:21"], "changes requested, then the reviewer's, then the draft")
+        #expect(Array(a.rows.prefix(3)) == ["p:r:tree", "gh:20", "p:r:solo"], "your move: the forest carrying a PR, then my PR with changes requested")
+        #expect(a.forestModel.homeGroups().first { $0.items.contains { $0.key == "gh:21" } }?.move == .waiting, "the draft waits")
         #expect(!a.rows.contains("gh:11"), "#11 is the tree forest's: listed once")
         let row = a.forestModel.openPRRows().first
         #expect(row?.place == "fix/monitors" && row?.says == "changes requested" && row?.yours == true)
@@ -413,7 +415,7 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = f
             ReviewRequest(number: 7, title: "compile footer lmx", author: "someone", url: "https://github.com/o/r/pull/7", imported: true),
             ReviewRequest(number: 9, title: "fix a thing", author: "someone", url: "https://github.com/o/r/pull/9", imported: false),
         ])
-        #expect(a.rows == ["pr:r:a", "r:7", "r:9", "p:r:tree", "p:r:solo", "p:r:bench"], "your open PRs, then the ones awaiting you, then the forests")
+        #expect(a.rows == ["p:r:tree", "r:7", "r:9", "p:r:solo", "p:r:bench"], "the forest carrying your open PR, then the PRs awaiting you, then the other forests")
         #expect(ForestNav.primary(for: "r:9", a)?.id == "forests.review.open")
         #expect(ForestNav.primary(for: "r:9", a)?.target == "9")
         #expect(a.provider?.title(for: "r:7", a) == "#7 compile footer lmx")

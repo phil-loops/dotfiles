@@ -66,7 +66,8 @@ enum ForestNav {
             }
             at = at ?? rows.firstIndex { $0.key == app.selected }
                 ?? RowKey.id(app.selected, "b").flatMap { id in rows.firstIndex { $0.branch?.b.id == id } }
-            let row = rows[at.map { ($0 + step + rows.count) % rows.count } ?? (step > 0 ? 0 : rows.count - 1)]
+            let forestsOwnPR = at == nil ? RowKey.id(app.selected, "p").flatMap { pid in rows.firstIndex { $0.branch?.b.project == pid } } : nil
+            let row = rows[forestsOwnPR ?? at.map { ($0 + step + rows.count) % rows.count } ?? (step > 0 ? 0 : rows.count - 1)]
             if let v = row.branch { app.go(.review(repo: v.b.repo, branch: v.b.name)) }
             else if let p = row.mine { openOnGitHub(p.number, p.url) }
         }

@@ -1,8 +1,9 @@
 import CanopyCore
 import SwiftUI
 
-/// Forests.tsx, the home: every live forest grouped by whose move it is (focus first inside each), then the work
-/// elsewhere and a quiet archive count (round 29). Each forest is one calm row that ↵ opens on its own page (the palette's "open or fold" unfolds its branch
+/// Forests.tsx, the home: one list of everything that can need Phil — forests, PRs of mine no forest carries, PRs
+/// awaiting my review, chats owed a reply — each once, grouped by whose move it is (round 30), then the work
+/// elsewhere and a quiet archive count. Each forest is one calm row that ↵ opens on its own page (the palette's "open or fold" unfolds its branch
 /// spine inline, in merge order); each branch says where it stands in one glyph and word and does
 /// one thing on ↵. `, r` narrows it all to what's ready.
 struct ForestsPage: View {
@@ -43,17 +44,9 @@ struct ForestsPage: View {
                                 section(.focus, p.focus, fs, working, nameWidth: nameWidth, cursor: cursor, selection: selection)
                                 section(.workbench, p.workbench, fs, working, nameWidth: nameWidth, cursor: cursor, selection: selection)
                             } else {
-                                // open PRs lead (round 29, P8), then the PRs awaiting your review; then every live forest by whose
-                                // move, focus first inside each, with the chats owed a reply in your move
-                                OpenPRList(nameWidth: nameWidth, cursor: cursor, selection: selection)
-                                ReviewQueue(nameWidth: nameWidth, cursor: cursor, selection: selection)
-                                let groups = m.moveGroups()
-                                ForEach(groups, id: \.move) { g in
-                                    section(.focus, g.projects, fs, working, title: "\(g.move.title) · \(g.projects.count + (g.move == .yours ? m.replies().count : 0))", gold: g.move == .yours,
-                                            nameWidth: nameWidth, cursor: cursor, selection: selection)
-                                    if g.move == .yours { ReplyQueue(nameWidth: nameWidth, cursor: cursor, selection: selection) }
+                                ForEach(m.homeGroups(), id: \.move) { g in
+                                    HomeGroup(move: g.move, items: g.items, fs: fs, working: working, nameWidth: nameWidth, cursor: cursor, selection: selection)
                                 }
-                                if !groups.contains(where: { $0.move == .yours }) { ReplyQueue(nameWidth: nameWidth, cursor: cursor, selection: selection) }
                                 // what needs nothing from you sits below what does (round 29, P5)
                                 WorkInProgressView()
                                 if m.showArchive {
@@ -107,15 +100,12 @@ struct ForestsPage: View {
     }
 
     @ViewBuilder
-    private func section(_ state: ProjectState, _ projects: [Project], _ fs: [String: ForestView], _ working: [String: [TodoItem]], title: String? = nil, gold: Bool = false, nameWidth: CGFloat, cursor: String?, selection: Set<String>) -> some View {
+    private func section(_ state: ProjectState, _ projects: [Project], _ fs: [String: ForestView], _ working: [String: [TodoItem]], nameWidth: CGFloat, cursor: String?, selection: Set<String>) -> some View {
         let m = app.forestModel
         let views = projects.compactMap { fs[$0.id] }.filter { !m.readyOnly || !$0.ready.isEmpty }
         if !m.readyOnly || !views.isEmpty {
             VStack(alignment: .leading, spacing: 0) {
-                if let title {
-                    Text(title).font(Theme.text(11)).foregroundStyle(gold ? theme.goldLeaf : theme.inkFaint)
-                        .padding(.leading, 44).padding(.bottom, 4)
-                } else if state != .focus {
+                if state != .focus {
                     TermText("lane|\(state.rawValue)", state).font(Theme.text(11)).foregroundStyle(theme.inkFaint)
                         .padding(.leading, 44).padding(.bottom, 4)
                 }
@@ -164,43 +154,120 @@ struct ForestsPage: View {
     }
 }
 
-/// Your open PRs, first on the home (round 29, P8): every forest's, and mine no forest carries (GET /my-prs) — the
-/// PR's title and number, its forest (or where it lives), where it stands in one step. ↵ reviews it; `] o` / `[ o`
-/// walk them from any page.
-private struct OpenPRList: View {
+/// One group of the home (round 30): its head, then each item once, every row in the one shape `HomeLine` draws.
+private struct HomeGroup: View {
     @Environment(AppModel.self) private var app
-    @Environment(\.theme) private var theme
+    let move: Move
+    let items: [HomeItem]
+    let fs: [String: ForestView]
+    let working: [String: [TodoItem]]
     let nameWidth: CGFloat
     let cursor: String?
     let selection: Set<String>
 
     var body: some View {
-        let rows = app.forestModel.openPRRows()
-        if !rows.isEmpty {
-            VStack(alignment: .leading, spacing: 0) {
-                Text("open PRs · \(rows.count)").font(Theme.text(11)).foregroundStyle(theme.goldLeaf)
-                    .padding(.leading, 44).padding(.bottom, 4)
-                ForEach(rows, id: \.key) { r in
-                    let here = cursor == r.key
-                    HStack(alignment: .firstTextBaseline, spacing: 12) {
-                        Text(r.glyph).foregroundStyle(r.yours ? theme.goldLeaf : theme.inkFaint).frame(width: 12)
-                        Text(r.title).font(Theme.display(17))
-                            .foregroundStyle(here ? theme.goldLeaf : r.draft ? theme.inkDim : theme.ink)
-                            .lineLimit(1).truncationMode(.tail).frame(maxWidth: .infinity, alignment: .leading)
-                        PRSignalStrip(signals: r.signals)
-                            .frame(width: 210, alignment: .trailing)
-                        Text(verbatim: "#\(r.number) · \(r.place)").font(Theme.text(11)).foregroundStyle(theme.inkFaint)
-                            .lineLimit(1).truncationMode(.tail).frame(width: 260, alignment: .leading)
-                        Text(r.says).font(Theme.text(11)).foregroundStyle(r.yours ? theme.ink : theme.inkFaint)
-                            .lineLimit(1).truncationMode(.tail).frame(width: 220, alignment: .trailing).help(r.says)
+        let m = app.forestModel
+        VStack(alignment: .leading, spacing: 0) {
+            SectionHead(text: "\(move.title) · \(items.count)", gold: move == .yours).padding(.leading, 44).padding(.bottom, 4)
+            ForEach(items, id: \.key) { item in
+                switch item {
+                case .forest(let p):
+                    if let f = fs[p.id] {
+                        ForestRowView(f: f, nameWidth: nameWidth, cursor: cursor == item.key, selected: selection.contains(item.key))
+                        ForEach(ForestsPage.workLines(f, working), id: \.item.id) { l in BranchWorkLine(branch: l.branch, item: l.item) }
+                        if m.launching == f.p.id { LaunchLine(f: f) }
+                        ForEach(m.expanded.contains(f.p.id) ? f.branches : [], id: \.b.id) { v in
+                            BranchRowView(v: v, summary: f.p.summary, cursor: cursor == RowKey.branch(v.b.id), selected: selection.contains(RowKey.branch(v.b.id)))
+                        }
                     }
-                    .frame(height: 30)
-                    .padding(.horizontal, 16)
-                    .rowChrome(r.key, cursor: here, selected: selection.contains(r.key))
+                case .myPR(let p):
+                    HomeLine(key: item.key, nameWidth: nameWidth, cursor: cursor, selection: selection, yours: move == .yours,
+                             name: p.local ? p.head : "#\(p.number)", line: p.title, pr: PRCell(number: p.number, signals: m.prSignals[p.number]),
+                             step: m.openPRRows().first { $0.mine?.number == p.number }?.says ?? "")
+                case .review(let r):
+                    HomeLine(key: item.key, nameWidth: nameWidth, cursor: cursor, selection: selection, yours: true,
+                             name: "#\(r.number)", line: r.title, pr: PRCell(number: nil, note: r.author), step: "review",
+                             stepHelp: r.imported ? "its head is local as review/pr-\(r.number): ↵ opens it at once" : "↵ fetches its head first, a second or two")
+                case .reply(let chat, let forests):
+                    HomeLine(key: item.key, nameWidth: nameWidth, cursor: cursor, selection: selection, yours: true,
+                             name: "reply to Claude", line: forests.map(\.name).joined(separator: ", "), pr: PRCell(number: nil),
+                             step: "idle \(WorkContext.ago(m.now.timeIntervalSince1970 - chat.activeAt).replacingOccurrences(of: " ago", with: ""))",
+                             stepHelp: "chat \(chat.id.prefix(8)) · ↵ brings its pane forward")
                 }
             }
-            .padding(.bottom, 28)
         }
+        .padding(.bottom, 28)
+    }
+}
+
+/// The home's one row shape: name, its line, the PR column, the step. The right two columns are fixed-width on every
+/// row, so they line up down the page whatever the row is.
+enum HomeColumns {
+    static let pr: CGFloat = 230
+    static let step: CGFloat = 190
+}
+
+private struct HomeLine: View {
+    @Environment(\.theme) private var theme
+    let key: String
+    let nameWidth: CGFloat
+    let cursor: String?
+    let selection: Set<String>
+    let yours: Bool
+    let name: String
+    let line: String
+    let pr: PRCell
+    let step: String
+    var stepHelp: String?
+
+    var body: some View {
+        let here = cursor == key
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text("").frame(width: 12)
+            Text(verbatim: name).font(Theme.display(17)).foregroundStyle(here ? theme.goldLeaf : theme.ink)
+                .lineLimit(1).truncationMode(.tail).frame(width: nameWidth, alignment: .leading)
+            Text(verbatim: line).foregroundStyle(theme.inkDim).lineLimit(1).truncationMode(.tail).frame(maxWidth: .infinity, alignment: .leading)
+            pr
+            StepText(step: step, yours: yours, here: here).help(stepHelp ?? step)
+        }
+        .frame(height: 30)
+        .padding(.horizontal, 16)
+        .rowChrome(key, cursor: here, selected: selection.contains(key))
+    }
+}
+
+/// A row's PR column: its number (and how many more the forest has open) with GitHub's signals, or a quiet note.
+struct PRCell: View {
+    @Environment(\.theme) private var theme
+    let number: Int?
+    var more = 0
+    var signals: PRSignals?
+    var note = ""
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 9) {
+            if let number {
+                Text(verbatim: "#\(number)\(more > 0 ? " +\(more)" : "")").font(Theme.text(11)).monospacedDigit().foregroundStyle(theme.inkFaint)
+                    .help(more > 0 ? "\(more) more open in this forest" : "")
+                PRSignalStrip(signals: signals)
+            } else if !note.isEmpty {
+                Text(verbatim: note).font(Theme.text(11)).foregroundStyle(theme.inkFaint).lineLimit(1)
+            }
+        }
+        .frame(width: HomeColumns.pr, alignment: .leading)
+    }
+}
+
+/// A row's one step. Most rows say "push", so the step stays quiet until the cursor rests on its row.
+private struct StepText: View {
+    @Environment(\.theme) private var theme
+    let step: String
+    let yours: Bool
+    let here: Bool
+
+    var body: some View {
+        Text(verbatim: step).font(Theme.text(11)).foregroundStyle(here ? theme.ink : yours ? theme.inkDim : theme.inkFaint)
+            .lineLimit(1).truncationMode(.tail).frame(width: HomeColumns.step, alignment: .trailing)
     }
 }
 
@@ -416,21 +483,12 @@ private struct ForestRowView: View {
                     .explains("forest|line|\(p.id)", RowName(word: "the line", meaning: p.summaryBy == "phil" ? "your words for this forest"
                         : "\(p.summaryBy == "claude" ? "Claude's draft" : "its first branch's") · \(app.registry.keyOf("project.describe.edit")) writes your own"))
             }
-            // the forest's one step, in a column that never grows (round 29, P2): the full line is on hover
-            if !f.closed && !f.says.isEmpty {
-                Text(f.says).font(Theme.text(11)).foregroundStyle(f.move == .yours ? theme.ink : theme.inkFaint)
-                    .lineLimit(1).truncationMode(.tail).frame(width: 220, alignment: .trailing).help(f.says)
-            }
-            Color.clear.frame(width: 120, height: 1)
-                .overlay(alignment: .leading) { if !f.closed { ForestChats(f: f, cursor: cursor) } }
             if cursor, !meta(verdict).isEmpty { Text(meta(verdict)).font(Theme.text(11)).foregroundStyle(theme.inkFaint).fixedSize() }
-            if !f.closed && !f.branches.isEmpty {
-                let merging = f.branches.filter { $0.b.role != "proof" }
-                let landed = merging.filter { $0.st.ship == .landed }.count
-                Text("\(landed)/\(merging.count)").font(Theme.text(11)).monospacedDigit().foregroundStyle(theme.inkFaint)
-                    .frame(width: 40, alignment: .trailing)
-                    .explains("forest|count|\(p.id)", RowName(word: "\(landed)/\(merging.count)", meaning: "branches landed of the branches it merges"))
-            }
+            if !f.closed { ForestChats(f: f, cursor: cursor).fixedSize() }
+            let pr = m.forestPR(f)
+            PRCell(number: pr?.v.pr?.number, more: pr?.more ?? 0, signals: pr?.v.pr.flatMap { m.prSignals[$0.number] })
+            // the forest's one step, in a column that never grows (round 29, P2): the full line is on hover
+            StepText(step: f.closed ? "" : f.says, yours: f.move == .yours, here: cursor).help(f.says)
         }
         .frame(height: 30)
         .padding(.horizontal, 16)
@@ -443,6 +501,8 @@ private struct ForestRowView: View {
         if f.unopened.count > 1 { parts.append("\(f.unopened.count) without a PR") }
         if verdict?.state == .clean { parts.append("merges clean") } else if verdict?.state == .conflicts { parts.append("doesn't merge") }
         if let t = f.p.ticket { parts.append(t) }
+        let merging = f.branches.filter { $0.b.role != "proof" }
+        parts.append("\(merging.filter { $0.st.ship == .landed }.count)/\(merging.count) landed")
         return parts.joined(separator: " · ")
     }
 }

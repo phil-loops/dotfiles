@@ -92,6 +92,23 @@ struct OpenPRRow: Equatable {
     var signals: PRSignals?
 }
 
+/// One line on the home: a forest, a PR of mine no forest carries, a PR awaiting my review, or a chat owed a reply.
+enum HomeItem: Equatable {
+    case forest(Project)
+    case myPR(MyPR)
+    case review(ReviewRequest)
+    case reply(WorkContext.Chat, [Project])
+
+    var key: String {
+        switch self {
+        case .forest(let p): RowKey.project(p.id)
+        case .myPR(let p): RowKey.myPR(p.number)
+        case .review(let r): RowKey.reviewRequest(r.number)
+        case .reply(let c, _): RowKey.reply(c.id)
+        }
+    }
+}
+
 /// Whether the whole forest merges onto main (integrate.ts).
 public struct IntegrationVerdict: Equatable {
     public enum State: String { case checking, clean, conflicts, failed }
@@ -295,7 +312,8 @@ public final class ForestModel {
         return Move.allCases.map { mv in (mv, live.filter { (f[$0.id]?.move ?? .waiting) == mv }) }.filter { !$0.projects.isEmpty }
     }
 
-    /// The home's rows: forests and the branches of open ones (or, filtered, only what's ready).
+    /// The home's rows: each group's items in the order the page draws them, an open forest's branches under it, then
+    /// the archive (or, filtered, only what's ready).
     public func homeRows() -> [String] {
         let p = projects()
         let f = forests()
@@ -315,17 +333,44 @@ public final class ForestModel {
                 if expanded.contains(x.id) { out += (f[x.id]?.branches ?? []).map { RowKey.branch($0.b.id) } }
             }
         }
-        // the order ForestsPage draws: open PRs, the PRs awaiting your review, then your move (with the chats owed a
-        // reply), moving, waiting, landed, the archive
-        out += openPRRows().map(\.key) + reviewRequests.map { RowKey.reviewRequest($0.number) }
-        let groups = moveGroups()
-        for g in groups {
-            add(g.projects)
-            if g.move == .yours { out += yoursExtras() }
+        for g in homeGroups() {
+            for item in g.items {
+                if case .forest(let x) = item { add([x]) } else { out.append(item.key) }
+            }
         }
-        if !groups.contains(where: { $0.move == .yours }) { out += yoursExtras() }
         add(showArchive ? p.archive : [])
         return out
+    }
+
+    /// The home as one list (round 30): every thing that can need Phil, each once, grouped by whose move. Inside a
+    /// group, forests carrying an open PR lead (P8), then my PRs no forest carries, then the PRs awaiting my review,
+    /// then the other forests, then the chats owed a reply.
+    func homeGroups() -> [(move: Move, items: [HomeItem])] {
+        let f = forests()
+        let reviews = reviewRequests.map { HomeItem.review($0) }
+        let replies = replies().map { HomeItem.reply($0.chat, $0.forests) }
+        let loose = openPRRows().compactMap { r -> (Move, HomeItem)? in
+            guard let p = r.mine else { return nil }
+            return (p.draft ? .waiting : r.yours ? .yours : .moving, .myPR(p))
+        }
+        return Move.allCases.compactMap { mv in
+            let projects = moveGroups().first { $0.move == mv }?.projects ?? []
+            let withPR = projects.filter { f[$0.id].flatMap(forestPR) != nil }
+            let rest = projects.filter { f[$0.id].flatMap(forestPR) == nil }
+            var items = withPR.map(HomeItem.forest) + loose.filter { $0.0 == mv }.map(\.1)
+            if mv == .yours { items += reviews }
+            items += rest.map(HomeItem.forest)
+            if mv == .yours { items += replies }
+            return items.isEmpty ? nil : (mv, items)
+        }
+    }
+
+    /// The open PR a forest's home row carries: the first at the forest's own move, else its first, and how many
+    /// more it has open.
+    func forestPR(_ f: ForestView) -> (v: BranchView, more: Int)? {
+        let open = f.closed ? [] : f.branches.filter { $0.pr?.state == "OPEN" }
+        guard let first = open.first(where: { Move.of($0.st.actor) == f.move }) ?? open.first else { return nil }
+        return (first, open.count - 1)
     }
 
     /// Chats on a listed forest whose turn ended: each once, newest first, with the forests it's on (round 29). The
@@ -347,9 +392,6 @@ public final class ForestModel {
         guard let id = RowKey.id(row, "y") else { return nil }
         return replies().first { $0.chat.id == id }
     }
-
-    /// Your move's rows beyond its forests: the chats waiting on a reply.
-    func yoursExtras() -> [String] { replies().map { RowKey.reply($0.chat.id) } }
 
     /// Every open PR on a live forest, the home's first rows (round 29, P8): the ones waiting on you, then the ones
     /// others hold, then those still waiting, drafts last; focus forests before the workbench, merge order inside.
