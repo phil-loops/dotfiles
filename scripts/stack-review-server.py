@@ -39,6 +39,7 @@ from srv import v1redirect   # own line: same reason
 from srv import tutor   # own line: same reason
 from srv import outbox   # own line: same reason
 from srv import outline   # own line: same reason
+from srv import prsignals   # own line: same reason
 from srv import lsp   # own line: same reason
 from srv import syntax   # own line: same reason
 from srv import packet   # own line: same reason
@@ -429,6 +430,7 @@ class H(BaseHTTPRequestHandler):
         elif u.path == "/ext-mtime":       return reviews.ext_mtime(self)
         elif u.path == "/review-requests": return reviews.requests(self)   # Home's review section
         elif u.path == "/my-prs": return reviews.my_prs(self)   # Home's open PRs on no forest
+        elif u.path == "/pr-signals": return prsignals.get(self)   # Home's open-PR icons: checks, threads, approvals
         elif u.path == "/tutor-src":      return tutor.src(self, u)    # a pinned file for the code pane
         elif u.path == "/lsp/src":        return lsp.src(self, u)      # a definition target, at the commit its answer came from
         elif u.path == "/learning-state": return tutor.learning_state(self, u)   # the concept graph, depth + due derived
