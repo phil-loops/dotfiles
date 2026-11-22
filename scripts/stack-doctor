@@ -133,7 +133,7 @@ prune() {
   live_projects=$'\n'
   while IFS= read -r key; do
     [ -n "$key" ] || continue
-    branch="${${key#branch.}%.stack-project}"
+    name="${key#branch.}"; branch="${name%.stack-project}"
     alive "$branch" || continue
     v=$(git config "branch.$branch.stack-project" 2>/dev/null || true)
     [ -n "$v" ] && live_projects+="$v"$'\n'
