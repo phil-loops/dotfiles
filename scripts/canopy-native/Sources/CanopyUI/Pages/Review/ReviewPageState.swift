@@ -670,7 +670,7 @@ public final class ReviewPageState: ShipHost {
         payloadGen &+= 1
         if let oldParsed, oldParsed.key == previous?.key, preservingFiles {
             let byPath = Dictionary(oldParsed.files.map { ($0.path, $0) }, uniquingKeysWith: { _, last in last })
-            parsed = (key, data.files.map { file in
+            parsed = (key, ReadingOrder.sorted(data.files).map { file in
                 if unchanged.contains(file.path), let cached = byPath[file.path] { return cached }
                 return Self.parse([file])[0]
             })
@@ -1024,7 +1024,7 @@ public final class ReviewPageState: ShipHost {
     @ObservationIgnored private var stopsMemo: (sig: StopsSig, stops: [Stop], index: [String: Int], keys: [String])?
 
     private static func parse(_ fs: [NodeFile]) -> [FileDiff] {
-        fs.map { f in var d = parsePatch(f.path, f.patch); d.add = f.add; d.del = f.del; return d }
+        ReadingOrder.sorted(fs).map { f in var d = parsePatch(f.path, f.patch); d.add = f.add; d.del = f.del; return d }
     }
 
     /// The whole branch's files, whichever commit the diff is showing — what the header counts.
