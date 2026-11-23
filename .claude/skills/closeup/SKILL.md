@@ -45,9 +45,13 @@ Go over this session yourself — the script can't see these:
   §1 table — that's the last thing Phil reads from this pane), then:
 
 ```bash
-~/.dotfiles/scripts/closeup close
+~/.dotfiles/scripts/closeup close --note - <<'EOF'
+<the closing message's handoffs, as markdown>
+EOF
 ```
 
-It releases this session's `own` lanes and kills the session's own tmux pane a second later. It
+It posts the note to Show's Inbox, followed by the handoff table with each branch as a canopy link,
+so the handoff outlives the pane. A failed post closes nothing. Then it releases this session's
+`own` lanes and kills the session's own tmux pane a second later. It
 refuses unless the pane's process is an ancestor of this session's claude process, so it can't
 close another session's pane. Outside tmux it says so and closes nothing.
