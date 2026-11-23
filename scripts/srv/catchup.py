@@ -8,9 +8,11 @@ the top ancestor down to `branch`; each link off its parent's tip catches up bef
 
   unpublished (no origin copy)  rebased onto the parent's tip — local history is a draft
   published (origin has it)     a catch-up merge: one commit whose tree is the branch replayed on
-                                the parent's tip and whose parents are the branch's tip and the
-                                parent's tip — append-only, so a plain push fast-forwards the PR
-                                and the PR's diff is its own change again (CLAUDE.md *History*)
+                                the parent's tip and whose parents are origin's copy and the
+                                parent's tip, with the branch's unpushed commits replayed on top
+                                (_under_unpushed) — append-only, so a plain push fast-forwards
+                                the PR and the PR's diff is its own change again (CLAUDE.md
+                                *History*)
 
 The new tree is computed by a guarded rebase on a DETACHED checkout, so no branch moves until its
 result is known; each ref then moves by compare-and-swap. The first conflict stops the walk with
@@ -62,6 +64,70 @@ def _move(b, old, new):
     return "" if r.returncode == 0 else (r.stderr or f"{b} moved while catching up — retry").strip().replace("stack-move-branch: ", "")
 
 
+def unpushed(b, tip=None):
+    """(own, merges) on `b`'s first-parent line past origin's copy, oldest first: its own unpushed
+    commits, and the merges among them. ([], []) when origin has no copy or isn't under the tip."""
+    o = _sha(f"refs/remotes/origin/{b}")
+    tip = tip or _sha(f"refs/heads/{b}")
+    if not o or not tip or o == tip or _git("merge-base", "--is-ancestor", o, tip).returncode != 0:
+        return [], []
+    rows = [ln.split() for ln in _git("rev-list", "--first-parent", "--reverse", "--parents", f"{o}..{tip}").stdout.splitlines()]
+    return [r[0] for r in rows if len(r) == 2], [r[0] for r in rows if len(r) > 2]
+
+
+def _pick(onto, c):
+    """Cherry-pick `c` onto `onto` in the object store, its author and message kept; "" on conflict."""
+    r = _git("merge-tree", "--write-tree", f"--merge-base={c}^", onto, c)
+    tree = r.stdout.split("\n", 1)[0].strip()
+    meta = _git("log", "-1", "--format=%an%x1f%ae%x1f%aI%x1f%B", c).stdout.split("\x1f", 3)
+    if r.returncode != 0 or not tree or len(meta) != 4:
+        return ""
+    sign = ["-S"] if _git("config", "--get", "commit.gpgsign").stdout.strip() == "true" else []
+    return ctx.run(["env", f"GIT_AUTHOR_NAME={meta[0]}", f"GIT_AUTHOR_EMAIL={meta[1]}", f"GIT_AUTHOR_DATE={meta[2]}",
+                    "git", "commit-tree", *sign, tree, "-p", onto, "-m", meta[3].strip()]).stdout.strip()
+
+
+def _under_unpushed(b, tip, second, tree, msg, caught_up):
+    """The catch-up for a published branch that is ahead of origin, in the one shape the push door
+    takes (push.py `catchup`): a single merge, the oldest outgoing commit, its first parent
+    origin's copy. A merge on the local tip sits on top of the unpushed commits, and a second one
+    before a push makes two, so canopy's own catch-up built what its own door refused (2026-11-19,
+    2026-11-23). Here the merge goes on origin's copy (its tree: caught_up(origin's copy)), earlier
+    unpushed catch-ups of `second`'s line fold into it, and the branch's unpushed commits are
+    replayed on top. The result must end on `tree`, the tree a merge on the local tip would have:
+    only ancestry changes, never content. Returns the new tip, or "" when there is nothing
+    unpushed or that tree can't be reached this way (an unpushed merge of something else, a
+    replay that conflicts) — the caller then merges on the local tip, which loses nothing."""
+    own, merges = unpushed(b, tip)
+    if not own and not merges:
+        return ""
+    if any(_git("merge-base", "--is-ancestor", f"{m}^2", second).returncode != 0 for m in merges):
+        ctx.log(f"catch-up: {b} has an unpushed merge of something other than its base — merging on its local tip")
+        return ""
+    under = caught_up(_sha(f"refs/remotes/origin/{b}"))
+    new = _git("commit-tree", under, "-p", _sha(f"refs/remotes/origin/{b}"), "-p", second, "-m", msg).stdout.strip() if under else ""
+    for c in own:
+        new = new and _pick(new, c)
+    if not new or _git("rev-parse", f"{new}^{{tree}}").stdout.strip() != tree:
+        ctx.log(f"catch-up: {b}'s unpushed commits didn't replay onto a merge of origin's copy to the same tree — merging on its local tip")
+        return ""
+    return new
+
+
+def _replayed(wt, rev, onto):
+    """`rev`'s commits past its merge base with `onto`, rebased onto `onto` in the detached scratch
+    checkout; the rebased tip, or "" on conflict. No branch moves."""
+    cut = _git("merge-base", rev, onto).stdout.strip()
+    _git("-C", wt, "checkout", "-q", "--detach", rev)
+    r = rebaseguard.run(wt, ["--onto", onto, cut]) if cut else None
+    if r is None or r.returncode != 0:
+        _git("-C", wt, "checkout", "-q", "--detach", rev)
+        return ""
+    rebased = _git("-C", wt, "rev-parse", "HEAD").stdout.strip()
+    _git("-C", wt, "checkout", "-q", "--detach")
+    return rebased
+
+
 def catch_up_one(b, wt=None):
     """(how, err): how is 'rebased' or 'merged'; err non-empty stops the walk. `wt` is the
     detached scratch checkout to compute in (default: the server's own)."""
@@ -74,20 +140,21 @@ def catch_up_one(b, wt=None):
     state = rebaseguard.heal(wt)
     if state in ("person", "live"):
         return "", f"the scratch checkout {wt} has a rebase in progress — finish or abort it"
-    _git("-C", wt, "checkout", "-q", "--detach", tip)
-    r = rebaseguard.run(wt, ["--onto", ptip, cut])
-    if r.returncode != 0:
-        _git("-C", wt, "checkout", "-q", "--detach", tip)
+    rebased = _replayed(wt, tip, ptip)
+    if not rebased:
         return "", f"{b} conflicts with {p}'s new commits — resolve it by hand (nothing was moved)"
-    rebased = _git("-C", wt, "rev-parse", "HEAD").stdout.strip()
-    _git("-C", wt, "checkout", "-q", "--detach")
     published = bool(_sha(f"refs/remotes/origin/{b}"))
     if not published:
         err = _move(b, tip, rebased)
         return ("rebased", err)
     tree = _git("rev-parse", f"{rebased}^{{tree}}").stdout.strip()
     msg = f"catch up to {p}\n\nVia: /catch-up (stack-review-server)"
-    carrier = ctx.run(["git", "commit-tree", tree, "-p", tip, "-p", ptip, "-m", msg]).stdout.strip()
+
+    def caught_up(rev):
+        r = _replayed(wt, rev, ptip)
+        return r and _git("rev-parse", f"{r}^{{tree}}").stdout.strip()
+    carrier = (_under_unpushed(b, tip, ptip, tree, msg, caught_up)
+               or ctx.run(["git", "commit-tree", tree, "-p", tip, "-p", ptip, "-m", msg]).stdout.strip())
     if not carrier:
         return "", f"couldn't build {b}'s catch-up merge"
     return ("merged", _move(b, tip, carrier))
@@ -115,7 +182,13 @@ def land_plan(c, ptip, wt=None):
         if r.returncode != 0 or not tree:
             return "", "", f"{c} overlaps main beyond its parent's landed change — a real conflict; resolve it by hand (nothing was moved)"
         msg = f"catch up to main\n\nits parent landed; merged against the tip {c} was built on ({base[:10]})"
-        carrier = _git("commit-tree", tree, "-p", tip, "-p", main, "-m", msg).stdout.strip()
+
+        def caught_up(rev):
+            b0 = _git("merge-base", rev, ptip).stdout.strip()
+            r = _git("merge-tree", "--write-tree", f"--merge-base={b0}", rev, main) if b0 else None
+            return r.stdout.split("\n", 1)[0].strip() if r is not None and r.returncode == 0 else ""
+        carrier = (_under_unpushed(c, tip, main, tree, msg, caught_up)
+                   or _git("commit-tree", tree, "-p", tip, "-p", main, "-m", msg).stdout.strip())
         return ("merged", carrier, "") if carrier else ("", "", f"couldn't build {c}'s catch-up merge")
     wt = wt or sync._scratch_wt()
     if rebaseguard.heal(wt) in ("person", "live"):
@@ -154,7 +227,9 @@ def carry(branch, push_one=None, wt=None):
     """A parent's push carries its children (tooling-doctor P7, A4): after `branch` went out, each
     child off its tip catches up — a published child by a catch-up merge then a plain push through
     push_one(child) → (ok, err), an unpublished one by a local rebase — and the walk goes on down.
-    push_one=None catches up locally only (an agent's reshape: Phil pushes).
+    A published child with unpushed commits of its own catches up and stays local, its subtree too:
+    the press was for the parent. push_one=None catches up locally only (an agent's reshape: Phil
+    pushes).
     A stop (conflict, a dirty holder, a door that refuses) is reported for that child and its own
     children are left as they were; siblings still go. Callers hold the forest lock."""
     out = []
@@ -162,10 +237,17 @@ def carry(branch, push_one=None, wt=None):
         if not off_parent(c):
             out += carry(c, push_one, wt)   # caught up already (an earlier press): its children may not be
             continue
+        own = len(unpushed(c)[0])
         how, err = catch_up_one(c, wt)
         rec = {"branch": c, "how": how}
         if err:
             out.append({**rec, "err": err})
+            continue
+        if how == "merged" and push_one and own:
+            # the press was for the parent: the child's own unpushed commits wait for their own,
+            # and nothing below it can go out before it does
+            out.append({**rec, "unpushed": own})
+            out += carry(c, None, wt)
             continue
         if how == "merged" and push_one:
             ok, perr = push_one(c)

@@ -745,6 +745,7 @@ def _origin_verdict(branch):
 
     commit = None
     voiced = said_why = not_merge = catchup = False
+    parent_first = ""
     if outgoing:
         # the tip carries the body the reviewer reads first; the oldest outgoing commit is the
         # only place a catch-up merge can sit (its first parent must be origin's head)
@@ -767,6 +768,11 @@ def _origin_verdict(branch):
                    and parents[0] == snap.remote(branch)
                    and any(snap.is_ancestor(parents[1], b) for b in bases)
                    and not any(c["merge"] for c in outgoing[:-1]))
+        # the same shape, but what it merges is the stack parent's local tip: right once that is on origin
+        if (not catchup and has_remote and len(parents) == 2 and parents[0] == snap.remote(branch)
+                and sp and sp not in ("main", "master") and snap.exists(sp)
+                and snap.is_ancestor(parents[1], sp) and not any(c["merge"] for c in outgoing[:-1])):
+            parent_first = sp
         if len(outgoing) == 1:
             commit = {"sha": sha, "subject": subject, "body": body}
     n_out = len(outgoing)
@@ -800,6 +806,7 @@ def _origin_verdict(branch):
              else f"{n_out} follow-up commits" if followup else f"{n_out} commits",
              has_outgoing and (not_merge or catchup),
              "nothing to push — origin already has this" if not outgoing
+             else f"its catch-up merges commits of {parent_first} that origin doesn't have yet — push {parent_first} first" if parent_first
              else "outgoing includes a merge that isn't a catch-up of this branch's base"),
         ward("voiced", "voiced subjects" if n_out > 1 else "voiced subject", voiced and has_outgoing,
              "" if not has_outgoing
