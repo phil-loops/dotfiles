@@ -404,6 +404,11 @@ import Testing
         #expect(WorkContext.onNoWork([unread, loose], onDots: [], now: 1100) == [loose, unread], "most recent first")
         #expect(WorkContext.whereItStands(loose, now: 1100) == "working in loops-wt-2 · feat/x")
         #expect(WorkContext.whereItStands(unread, now: 1100) == "idle in .dotfiles · binding unreadable")
+        var labelled = loose
+        labelled.label = "canopy · chat labels"
+        #expect(WorkContext.whereItStands(labelled, now: 1100) == "working on canopy · chat labels", "its label says what it's on, in place of its checkout")
+        let decoded = try? JSONDecoder().decode(C.self, from: Data(#"{"id":"d","works":[],"generation":0,"activeAt":0,"label":"delete-user"}"#.utf8))
+        #expect(decoded?.label == "delete-user", "the server's label decodes")
     }
 }
 

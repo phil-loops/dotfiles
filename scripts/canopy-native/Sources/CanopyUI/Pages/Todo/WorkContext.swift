@@ -272,6 +272,8 @@ struct WorkContext {
         /// where it stands (its checkout), said only for a chat on no work — never read as what it works on
         var at: At?
         var acted: [Acted]?
+        /// what the chat says it's working on: its tmux pane's label (`chat-label`)
+        var label: String? = nil
     }
 
     /// A chat reads idle after this long without a tool call; an ended chat isn't served at all.
@@ -348,8 +350,9 @@ struct WorkContext {
     }
 
     static func whereItStands(_ c: Chat, now: Double) -> String {
-        let place = c.at.map { $0.branch.isEmpty ? $0.repo : "\($0.repo) · \($0.branch)" } ?? "place unknown"
-        return "\(live(c, now: now) ? "working" : "idle") in \(place)\(c.works == nil ? " · binding unreadable" : "")"
+        let place = c.label.map { "on \($0)" }
+            ?? "in " + (c.at.map { $0.branch.isEmpty ? $0.repo : "\($0.repo) · \($0.branch)" } ?? "place unknown")
+        return "\(live(c, now: now) ? "working" : "idle") \(place)\(c.works == nil ? " · binding unreadable" : "")"
     }
 
     static func chatsLine(_ chats: [Chat], on branch: String, now: Double) -> String {
