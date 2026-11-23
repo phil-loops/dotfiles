@@ -1,6 +1,6 @@
 #!/usr/bin/env swift
-// show-icon/make.swift <out.icns> — draws Show's app icon on canopy's night vellum: a gold card, a second
-// peeking out behind, with a fork drawn on it in dark ink and ember. Re-run after changing the drawing; the
+// show-icon/make.swift <out.icns> — draws Show's app icon on canopy's night vellum: a fork, one branch
+// splitting into two, in gold leaf and ember. Re-run after changing the drawing; the
 // build copies the committed AppIcon.icns into Show.app.
 import AppKit
 
@@ -17,12 +17,6 @@ func tile(_ ctx: CGContext, _ top: CGColor = edge, _ bottom: CGColor = night) {
     ctx.drawLinearGradient(CGGradient(colorsSpace: nil, colors: [top, bottom] as CFArray, locations: [0, 1])!, start: CGPoint(x: 512, y: 924), end: CGPoint(x: 512, y: 100), options: [])
     ctx.restoreGState()
 }
-func card(_ ctx: CGContext, _ r: CGRect, _ top: CGColor, _ bottom: CGColor) {
-    let p = CGPath(roundedRect: r, cornerWidth: 64, cornerHeight: 64, transform: nil)
-    ctx.saveGState(); ctx.addPath(p); ctx.clip()
-    ctx.drawLinearGradient(CGGradient(colorsSpace: nil, colors: [top, bottom] as CFArray, locations: [0, 1])!, start: CGPoint(x: r.midX, y: r.maxY), end: CGPoint(x: r.midX, y: r.minY), options: [])
-    ctx.restoreGState()
-}
 func fork(_ ctx: CGContext, center c: CGPoint, scale s: CGFloat, ink: CGColor, accent: CGColor) {
     func P(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: c.x + x * s, y: c.y + y * s) }
     let a = P(-150, -110), f = P(-30, 0), up = P(150, 110), down = P(150, -80)
@@ -34,13 +28,12 @@ func fork(_ ctx: CGContext, center c: CGPoint, scale s: CGFloat, ink: CGColor, a
     line(a, f, ink); line(f, up, ink); line(f, down, accent)
     dot(a, 54, ink); dot(up, 60, ink); dot(down, 56, accent)
 }
-/// The icon: one gold card, straight, the fork in dark ink on it; a second card peeks out behind.
+/// The icon: the fork alone, large, in gold leaf and ember on the night tile.
 let icon: Mark = { ctx in
     tile(ctx)
-    card(ctx, CGRect(x: 290, y: 330, width: 500, height: 400), color(0x8A7036), goldDeep)
-    card(ctx, CGRect(x: 234, y: 274, width: 500, height: 400), goldHi, gold)
-    fork(ctx, center: CGPoint(x: 484, y: 474), scale: 1, ink: night, accent: color(0x8A3E12))
+    fork(ctx, center: CGPoint(x: 512, y: 512), scale: 1.55, ink: gold, accent: ember)
 }
+
 func render(_ px: Int) -> Data {
     let ctx = CGContext(data: nil, width: px, height: px, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
                         bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
