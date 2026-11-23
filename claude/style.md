@@ -5,3 +5,4 @@
 Only rules no repo doc carries live here:
 
 - **Inline object-parameter type literals in function signatures** — `function update(input: { id: string; name?: string })`, never a standalone `type UpdateInput = { … }` alias readers must scroll to resolve. Inlining keeps the contract at the call site, even with 5+ fields; `Deps<typeof fn>` / `Parameters<typeof fn>` extract from the function itself, so tests don't break. Don't refactor pre-existing aliases unless asked.
+- **A reviewer's "why" goes in the PR body or the branch description, never a code comment**; a `/** */` block above an import or a const is not JSDoc.

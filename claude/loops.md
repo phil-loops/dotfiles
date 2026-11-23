@@ -60,3 +60,17 @@ Never `tsconfig.runtime.json`: it checks every file under nodenext resolution, w
 Every typecheck goes through the machine-wide queue (`heavy-turn`: 2 slots, 1 while the box is under memory pressure). An interactive zsh routes `tsc`, `npx tsc` and the `task lint*`/`*:types` tasks there by itself; from a script or `bash -lc`, prefix `tsc-turn <cmd>` (2026-07-06: seven concurrent tscs flattened the machine; 2026-10-19: two *queued* 5GB tscs beside an unqueued 4.6GB job did too — hence the memory floor). `heavy-turn --status` names who holds a slot and why you wait; `~/.cache/heavy-turn/journal.tsv` says who ran what, how long it waited and ran. `oxlint --type-aware` and `oxfmt` are lints and formatting, NOT typecheckers.
 
 **Caveat — the tRPC client type is a generated artifact.** Stale/missing generated types flood `tsc` with hundreds of `.tsx` errors tracing to one collapsed type (`TS2339` "…collides with a built-in method…" + cascading implicit-`any` params) — noise from un-built types, not your change. Filter to what you touched (`… --noEmit 2>&1 | grep <your-file>`) or build the types first (`task trpc:types`).
+
+## Domain facts
+
+Instances of the principles that only this repo carries — each a bug someone already shipped once.
+
+- **Paid vs free** is `onFreeTier(team)` (`getTierLimits` for limits), never raw `subscriptionActive` — comped accounts misclassify.
+- **Model writes** go through queries: models never touch Prisma, not even `tx.model.*`; each write query takes a trailing `tx: Pick<typeof prisma, "<model>"> = prisma` and the model forwards `tx` into each dep call. A model outcome the caller branches on returns `Ok<T, {code}>` (`types/result.ts`); throw only for a broken invariant or to abort a transaction. A switch over a union tag ends `default: return assertNever(x)` (`lib/assert-never.ts`).
+- **Tests for anything under `pages/`** live in `testing/pages/` (flat route name), never beside the route — Next routes every file under `pages/` and `next build` fails (team decision 2026-06-09, not yet in `AGENTS.md`).
+- **A save, focus or lifecycle-timing change** is tested on every consumer of that lifecycle: multi-character typing, switching between two same-type entities, blur/Enter boundaries (#9361).
+- **ClickHouse**: never run `count()` in parallel with the same heavy GROUP BY — each builds its own hash table; take the total from stats already fetched, or `LIMIT n+1` + hasMore (2026-05-10: OOM-killed CH).
+- **S3 deletes** are a plain `deleteFromStorage`; permanence is the bucket's monotoad lifecycle rule, and app code never walks object versions (#11387).
+- **Datadog monitors and dashboards** live in Terraform (`terraform/loops-monitors/`), never script-runner. Workflow label changes use `gh api` REST issues-labels as `code-review.yml` does, never `gh pr edit`.
+- **Prompt and eval research** iterates on 10–20 sharp items with per-item diffs, one change per run; a 200-item run only confirms a winner (2026-10-31).
+- **A UI or rendering bug** is proven end to end: data in through the API, rendered through the in-app endpoint, measured and screenshotted with Playwright.

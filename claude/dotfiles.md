@@ -26,3 +26,7 @@ Land when the file goes quiet, or hand the `.patch` to the session that owns the
 `claude-say <who> "<note>"` sends to another Claude tmux session by default. A NEW session you hand work to starts with `claude-spawn <dir> <name> "<prompt>"` (detached tmux session `agents`), never a window in Phil's own sessions. Use `--draft` only for text a human must finish; the helper refuses non-Claude panes and leaves a draft when the target composer already holds text.
 
 For Codex replies, use `/codex-reply` or `~/.dotfiles/scripts/codex-pane-say`: Phil runs Codex in the CLI, and the helper submits a signed note into the one tmux pane titled for the chat, refusing if its composer holds text. Phil authorized attributed Opus research replies to the chat titled **Review override cases**; tests go only to a throwaway Codex pane Phil names. (The GUI IPC bridge `codex-say` was retired 2026-10-22 after a desktop update broke its build pin.)
+
+## Building canopy and Show
+
+Commit and `patch-land` with `CANOPY_TEST_SKIP=1` only with the reason in the body; never push, even to fixture remotes; validate on frozen fixtures (`--shoot-fixture`), never live `/state` or `/v2/events`, which can release queued GitHub replies. Browser or UI probes that click mutating controls drive `test-forest-fixture`, never the live forest, select rows by name, and log the prior value before any unavoidable write (2026-09-09: a probe erased a real story).
