@@ -1,0 +1,11 @@
+#!/bin/sh
+# chat-label <text…>      name what this chat is working on; tmux shows it on the pane's border
+# chat-label --clear      drop the label (the border falls back to the pane title)
+# chat-label -t %N <text> label another pane by its id
+# The label is the pane's own tmux option @chat_label, so it dies with the pane.
+pane=${TMUX_PANE:-}
+if [ "$1" = "-t" ]; then pane=$2; shift 2; fi
+if [ -z "$pane" ]; then echo "chat-label: not in a tmux pane (no TMUX_PANE; pass -t %N)" >&2; exit 1; fi
+if [ $# -eq 0 ]; then tmux show-options -pqv -t "$pane" @chat_label; exit; fi
+if [ "$1" = "--clear" ]; then exec tmux set-option -pu -t "$pane" @chat_label; fi
+exec tmux set-option -p -t "$pane" @chat_label "$*"
