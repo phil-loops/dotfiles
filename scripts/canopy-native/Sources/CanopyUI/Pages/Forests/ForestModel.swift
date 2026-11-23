@@ -109,6 +109,31 @@ enum HomeItem: Equatable {
     }
 }
 
+/// What a home group asks of Phil, in the order the home draws them.
+enum HomeVerb: CaseIterable {
+    case merge, review, reply, step, push, moving, waiting, done
+
+    var isYours: Bool { [.merge, .review, .reply, .step, .push].contains(self) }
+
+    var title: String {
+        switch self {
+        case .merge: "merge"
+        case .review: "review"
+        case .reply: "reply"
+        case .step: "your move"
+        case .push: "push"
+        case .moving: "others hold"
+        case .waiting: "waiting"
+        case .done: "landed"
+        }
+    }
+}
+
+struct HomeSection {
+    var verb: HomeVerb
+    var items: [HomeItem]
+}
+
 /// Whether the whole forest merges onto main (integrate.ts).
 public struct IntegrationVerdict: Equatable {
     public enum State: String { case checking, clean, conflicts, failed }
@@ -333,35 +358,54 @@ public final class ForestModel {
                 if expanded.contains(x.id) { out += (f[x.id]?.branches ?? []).map { RowKey.branch($0.b.id) } }
             }
         }
-        for g in homeGroups() {
-            for item in g.items {
-                if case .forest(let x) = item { add([x]) } else { out.append(item.key) }
-            }
+        let home = homeSections()
+        for item in [home.lead].compactMap({ $0 }) + home.sections.flatMap(\.items) {
+            if case .forest(let x) = item { add([x]) } else { out.append(item.key) }
         }
         add(showArchive ? p.archive : [])
         return out
     }
 
-    /// The home as one list (round 30): every thing that can need Phil, each once, grouped by whose move. Inside a
-    /// group, forests carrying an open PR lead (P8), then my PRs no forest carries, then the PRs awaiting my review,
-    /// then the other forests, then the chats owed a reply.
-    func homeGroups() -> [(move: Move, items: [HomeItem])] {
+    /// The home (round 31): the one most valuable move, set apart, then every other item once, grouped by the verb it
+    /// asks of Phil — merge, review, reply, the other steps that are his, push — then what others hold, then what can't
+    /// move yet. Inside a group, forests carrying an open PR lead (P8).
+    func homeSections() -> (lead: HomeItem?, sections: [HomeSection]) {
         let f = forests()
-        let reviews = reviewRequests.map { HomeItem.review($0) }
-        let replies = replies().map { HomeItem.reply($0.chat, $0.forests) }
-        let loose = openPRRows().compactMap { r -> (Move, HomeItem)? in
-            guard let p = r.mine else { return nil }
-            return (p.draft ? .waiting : r.yours ? .yours : .moving, .myPR(p))
+        var carrying: [HomeVerb: [HomeItem]] = [:], loose: [HomeVerb: [HomeItem]] = [:], rest: [HomeVerb: [HomeItem]] = [:]
+        for g in moveGroups() {
+            for p in g.projects {
+                let v = f[p.id].map(verb) ?? .waiting
+                if (f[p.id].map(forestPRs) ?? []).isEmpty { rest[v, default: []].append(.forest(p)) } else { carrying[v, default: []].append(.forest(p)) }
+            }
         }
-        return Move.allCases.compactMap { mv in
-            let projects = moveGroups().first { $0.move == mv }?.projects ?? []
-            let withPR = projects.filter { !(f[$0.id].map(forestPRs) ?? []).isEmpty }
-            let rest = projects.filter { (f[$0.id].map(forestPRs) ?? []).isEmpty }
-            var items = withPR.map(HomeItem.forest) + loose.filter { $0.0 == mv }.map(\.1)
-            if mv == .yours { items += reviews }
-            items += rest.map(HomeItem.forest)
-            if mv == .yours { items += replies }
-            return items.isEmpty ? nil : (mv, items)
+        for r in openPRRows() {
+            guard let p = r.mine else { continue }
+            let v: HomeVerb = p.draft ? .waiting : !r.yours ? .moving : r.says == "merge it" ? .merge : .step
+            loose[v, default: []].append(.myPR(p))
+        }
+        var by: [HomeVerb: [HomeItem]] = [:]
+        for v in HomeVerb.allCases { by[v] = (carrying[v] ?? []) + (loose[v] ?? []) + (rest[v] ?? []) }
+        by[.review] = reviewRequests.map { HomeItem.review($0) }
+        by[.reply] = replies().map { HomeItem.reply($0.chat, $0.forests) }
+        let lead = HomeVerb.allCases.filter(\.isYours).lazy.compactMap { by[$0]?.first }.first
+        let sections = HomeVerb.allCases.compactMap { v -> HomeSection? in
+            let items = (by[v] ?? []).filter { $0 != lead }
+            return items.isEmpty ? nil : HomeSection(verb: v, items: items)
+        }
+        return (lead, sections)
+    }
+
+    /// The verb a forest asks of Phil, from the branch its line is about: the first live branch at its move.
+    func verb(_ f: ForestView) -> HomeVerb {
+        switch f.move {
+        case .moving: return .moving
+        case .waiting: return .waiting
+        case .done: return .done
+        case .yours:
+            guard let v = f.branches.first(where: { !$0.st.done && Move.of($0.st.actor) == .yours }) else { return .step }
+            if v.st.next == "branch.pr" && v.st.ship != .pushed && (v.st.waiting.first?.kind ?? .merge) == .merge { return .merge }
+            if ["branch.push.arm", "branch.push.queue", "branch.push.early.arm"].contains(v.st.next ?? "") { return .push }
+            return .step
         }
     }
 

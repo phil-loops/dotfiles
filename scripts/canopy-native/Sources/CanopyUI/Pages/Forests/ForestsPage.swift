@@ -44,8 +44,16 @@ struct ForestsPage: View {
                                 section(.focus, p.focus, fs, working, nameWidth: nameWidth, cursor: cursor, selection: selection)
                                 section(.workbench, p.workbench, fs, working, nameWidth: nameWidth, cursor: cursor, selection: selection)
                             } else {
-                                ForEach(m.homeGroups(), id: \.move) { g in
-                                    HomeGroup(move: g.move, items: g.items, fs: fs, working: working, nameWidth: nameWidth, cursor: cursor, selection: selection)
+                                let home = m.homeSections()
+                                if let lead = home.lead {
+                                    LeadMove(item: lead, fs: fs, cursor: cursor, selection: selection)
+                                }
+                                ForEach(home.sections, id: \.verb) { sec in
+                                    if sec.verb == .push {
+                                        PushChips(items: sec.items, fs: fs, cursor: cursor, selection: selection)
+                                    } else {
+                                        HomeGroup(verb: sec.verb, items: sec.items, fs: fs, working: working, nameWidth: nameWidth, cursor: cursor, selection: selection)
+                                    }
                                 }
                                 // what needs nothing from you sits below what does (round 29, P5)
                                 WorkInProgressView()
@@ -154,10 +162,10 @@ struct ForestsPage: View {
     }
 }
 
-/// One group of the home (round 30): its head, then each item once, every row in the one shape `HomeLine` draws.
+/// One group of the home (rounds 30–31): its verb as the head, then each item once, every row in the one shape `HomeLine` draws.
 private struct HomeGroup: View {
     @Environment(AppModel.self) private var app
-    let move: Move
+    let verb: HomeVerb
     let items: [HomeItem]
     let fs: [String: ForestView]
     let working: [String: [TodoItem]]
@@ -168,7 +176,7 @@ private struct HomeGroup: View {
     var body: some View {
         let m = app.forestModel
         VStack(alignment: .leading, spacing: 0) {
-            SectionHead(text: "\(move.title) · \(items.count)", gold: move == .yours).padding(.leading, 44).padding(.bottom, 4)
+            SectionHead(text: "\(verb.title) · \(items.count)", gold: verb.isYours).padding(.leading, 44).padding(.bottom, 4)
             ForEach(items, id: \.key) { item in
                 switch item {
                 case .forest(let p):
@@ -181,7 +189,7 @@ private struct HomeGroup: View {
                         }
                     }
                 case .myPR(let p):
-                    HomeLine(key: item.key, nameWidth: nameWidth, cursor: cursor, selection: selection, yours: move == .yours,
+                    HomeLine(key: item.key, nameWidth: nameWidth, cursor: cursor, selection: selection, yours: verb.isYours,
                              name: p.local ? p.head : "#\(p.number)", line: p.title, pr: PRCell(numbers: [p.number], state: PRState.of(p), signals: m.prSignals[p.number]),
                              step: m.openPRRows().first { $0.mine?.number == p.number }?.says ?? "")
                 case .review(let r):
@@ -197,6 +205,155 @@ private struct HomeGroup: View {
             }
         }
         .padding(.bottom, 28)
+    }
+}
+
+/// The home's lead (round 31): the one most valuable move, set apart in large type — the verb, what it acts on, the
+/// line that says what that is, and its PR's state. Every other item sits in the groups below it.
+private struct LeadMove: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.theme) private var theme
+    let item: HomeItem
+    let fs: [String: ForestView]
+    let cursor: String?
+    let selection: Set<String>
+
+    struct Face {
+        var verb: String
+        var name: String
+        var line: String
+        var pr = PRCell()
+        var place = ""
+    }
+
+    var body: some View {
+        let here = cursor == item.key
+        let f = face
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 14) {
+                Text(verbatim: f.verb.uppercased()).font(Theme.display(30)).tracking(1.5).foregroundStyle(theme.goldLeaf)
+                Text(verbatim: f.name).font(Theme.display(30)).foregroundStyle(here ? theme.goldLeaf : theme.ink).lineLimit(1)
+            }
+            Text(verbatim: f.line).font(Theme.text(16)).foregroundStyle(theme.ink).lineLimit(2)
+                .frame(maxWidth: 760, alignment: .leading)
+            HStack(alignment: .firstTextBaseline, spacing: 14) {
+                f.pr
+                if !f.place.isEmpty { Text(verbatim: f.place).font(Theme.text(11)).foregroundStyle(theme.inkFaint) }
+            }
+        }
+        .padding(.leading, 28).padding(.vertical, 18).padding(.trailing, 16)
+        .rowChrome(item.key, cursor: here, selected: selection.contains(item.key))
+        .padding(.bottom, 24)
+    }
+
+    private var face: Face {
+        let m = app.forestModel
+        switch item {
+        case .forest(let p):
+            let fv = fs[p.id]
+            let prs = fv.map(m.forestPRs) ?? []
+            let lead = prs.first?.pr
+            let verb = fv.map(m.verb) ?? .step
+            let pr = PRCell(numbers: prs.compactMap { $0.pr?.number }, state: lead.map(PRState.of), signals: lead.flatMap { m.prSignals[$0.number] }, column: false)
+            if verb == .merge, let lead {
+                return Face(verb: "merge", name: "#\(lead.number)", line: lead.title ?? p.summary, pr: pr, place: p.name)
+            }
+            let step = fv?.says ?? ""
+            return Face(verb: verb == .push ? "push" : step, name: p.name, line: p.summary, pr: pr,
+                        place: verb == .push ? step : "")
+        case .myPR(let p):
+            let says = m.openPRRows().first { $0.mine?.number == p.number }?.says ?? ""
+            return Face(verb: says == "merge it" ? "merge" : says, name: "#\(p.number)", line: p.title,
+                        pr: PRCell(numbers: [p.number], state: PRState.of(p), signals: m.prSignals[p.number], column: false), place: p.local ? p.head : "on GitHub")
+        case .review(let r):
+            return Face(verb: "review", name: "#\(r.number)", line: r.title, pr: PRCell(note: r.author, column: false))
+        case .reply(_, let forests):
+            return Face(verb: "reply", name: "Claude", line: forests.map(\.name).joined(separator: ", "))
+        }
+    }
+}
+
+/// The push group (round 31): every forest whose next step is a push, as one wrapping run of chips — the name and how
+/// many of its branches wait to go. ↵ on a chip opens its forest, where `p` sends them.
+private struct PushChips: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.theme) private var theme
+    let items: [HomeItem]
+    let fs: [String: ForestView]
+    let cursor: String?
+    let selection: Set<String>
+
+    static func waiting(_ f: ForestView) -> Int {
+        f.branches.filter { ["branch.push.arm", "branch.push.queue", "branch.push.early.arm"].contains($0.st.next ?? "") }.count
+    }
+
+    var body: some View {
+        let forests = items.compactMap { item -> (key: String, f: ForestView)? in
+            if case .forest(let p) = item, let f = fs[p.id] { return (item.key, f) }
+            return nil
+        }
+        let branches = forests.reduce(0) { $0 + Self.waiting($1.f) }
+        VStack(alignment: .leading, spacing: 10) {
+            SectionHead(text: "push · \(forests.count) \(forests.count == 1 ? "forest" : "forests") · \(branches) \(branches == 1 ? "branch" : "branches")", gold: true)
+                .padding(.leading, 44)
+            ChipFlow(spacing: 8) {
+                ForEach(forests, id: \.key) { c in
+                    let here = cursor == c.key
+                    let pr = app.forestModel.forestPRs(c.f).first?.pr
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        if let pr { Circle().fill(PRCell.color(PRState.of(pr).tone, theme)).frame(width: 6, height: 6).alignmentGuide(.firstTextBaseline) { $0[.bottom] } }
+                        Text(verbatim: c.f.p.name).font(Theme.text(13, weight: .medium)).foregroundStyle(here ? theme.goldLeaf : theme.ink)
+                        Text(verbatim: "\(Self.waiting(c.f))").font(Theme.text(11)).monospacedDigit().foregroundStyle(theme.inkFaint)
+                    }
+                    .padding(.horizontal, 10).padding(.vertical, 5)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(here ? theme.goldLeaf.opacity(0.14) : theme.vellumRaise))
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(here ? theme.goldLeaf.opacity(0.6) : theme.vellumEdge, lineWidth: 1))
+                    .contentShape(Rectangle())
+                    .onTapGesture { app.runner.dispatch("cursor.set", via: .click, target: c.key) }
+                    .labelTarget(pane: "main", key: c.key)
+                    .help(pr.map { "#\($0.number) \(PRState.of($0).word) · \(c.f.says)" } ?? c.f.says)
+                    .id(c.key)
+                }
+            }
+            .padding(.leading, 40).padding(.trailing, 16)
+        }
+        .padding(.bottom, 28)
+    }
+}
+
+/// Lays its children left to right, wrapping onto a new line when the next one won't fit.
+struct ChipFlow: Layout {
+    var spacing: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let rows = arrange(width: proposal.width ?? .infinity, subviews)
+        return CGSize(width: proposal.width ?? rows.map(\.width).max() ?? 0, height: rows.last.map { $0.y + $0.height } ?? 0)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        for row in arrange(width: bounds.width, subviews) {
+            for (i, x) in zip(row.items, row.xs) {
+                subviews[i].place(at: CGPoint(x: bounds.minX + x, y: bounds.minY + row.y), proposal: .unspecified)
+            }
+        }
+    }
+
+    private struct Row { var items: [Int] = []; var xs: [CGFloat] = []; var y: CGFloat = 0; var width: CGFloat = 0; var height: CGFloat = 0 }
+
+    private func arrange(width: CGFloat, _ subviews: Subviews) -> [Row] {
+        var rows: [Row] = [Row()]
+        for (i, v) in subviews.enumerated() {
+            let size = v.sizeThatFits(.unspecified)
+            if !rows[rows.count - 1].items.isEmpty && rows[rows.count - 1].width + spacing + size.width > width {
+                let last = rows[rows.count - 1]
+                rows.append(Row(y: last.y + last.height + spacing))
+            }
+            var r = rows[rows.count - 1]
+            let x = r.items.isEmpty ? 0 : r.width + spacing
+            r.items.append(i); r.xs.append(x); r.width = x + size.width; r.height = max(r.height, size.height)
+            rows[rows.count - 1] = r
+        }
+        return rows
     }
 }
 
@@ -243,6 +400,8 @@ struct PRCell: View {
     var state: PRState?
     var signals: PRSignals?
     var note = ""
+    /// false where the cell stands alone (the lead) rather than in the home's aligned column
+    var column = true
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 9) {
@@ -255,11 +414,13 @@ struct PRCell: View {
                 Text(verbatim: note).font(Theme.text(11)).foregroundStyle(theme.inkFaint).lineLimit(1)
             }
         }
-        .frame(width: HomeColumns.pr, alignment: .leading)
+        .frame(width: column ? HomeColumns.pr : nil, alignment: .leading)
         .clipped()
     }
 
-    private func color(_ t: PRState.Tone) -> Color {
+    private func color(_ t: PRState.Tone) -> Color { Self.color(t, theme) }
+
+    static func color(_ t: PRState.Tone, _ theme: Theme) -> Color {
         switch t {
         case .ready: theme.add
         case .blocked: theme.del

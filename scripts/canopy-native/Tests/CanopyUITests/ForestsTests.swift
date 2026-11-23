@@ -351,8 +351,9 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = f
                  approvals: 0, changesRequested: changes, mergeState: "BLOCKED")
         }
         a.forestModel.setMyPRs([mine(21, "tweak", draft: true), mine(20, "fix/monitors", changes: true, local: true), mine(11, "a")])
-        #expect(Array(a.rows.prefix(3)) == ["p:r:tree", "gh:20", "p:r:solo"], "your move: the forest carrying a PR, then my PR with changes requested")
-        #expect(a.forestModel.homeGroups().first { $0.items.contains { $0.key == "gh:21" } }?.move == .waiting, "the draft waits")
+        #expect(Array(a.rows.prefix(3)) == ["gh:20", "p:r:tree", "p:r:solo"], "my PR with changes requested leads: a step of yours outranks a push")
+        #expect(a.forestModel.homeSections().lead == .myPR(a.forestModel.myPRs.first { $0.number == 20 }!))
+        #expect(a.forestModel.homeSections().sections.first { $0.items.contains { $0.key == "gh:21" } }?.verb == .waiting, "the draft waits")
         #expect(!a.rows.contains("gh:11"), "#11 is the tree forest's: listed once")
         let row = a.forestModel.openPRRows().first
         #expect(row?.place == "fix/monitors" && row?.says == "changes requested" && row?.yours == true)
@@ -435,7 +436,7 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = f
             ReviewRequest(number: 7, title: "compile footer lmx", author: "someone", url: "https://github.com/o/r/pull/7", imported: true),
             ReviewRequest(number: 9, title: "fix a thing", author: "someone", url: "https://github.com/o/r/pull/9", imported: false),
         ])
-        #expect(a.rows == ["p:r:tree", "r:7", "r:9", "p:r:solo", "p:r:bench"], "the forest carrying your open PR, then the PRs awaiting you, then the other forests")
+        #expect(a.rows == ["r:7", "r:9", "p:r:tree", "p:r:solo", "p:r:bench"], "a review asked of you leads; the pushes follow")
         #expect(ForestNav.primary(for: "r:9", a)?.id == "forests.review.open")
         #expect(ForestNav.primary(for: "r:9", a)?.target == "9")
         #expect(a.provider?.title(for: "r:7", a) == "#7 compile footer lmx")

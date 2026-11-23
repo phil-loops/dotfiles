@@ -549,3 +549,11 @@ Phil, looking at the home: "the home page here is overloaded". Open PRs led the 
 
 4. **A checkout that origin already contains holds no work.** `ShipRules.staleCopyOfAnOpenPR`: when the prep route says `conform` and the PR is open, the situation is derived from origin's copy, so the PR's own state leads. `p` still takes origin's copy (`pushRoute`).
 5. **The PR column says the state in GitHub's words** (`PRState`: ready to merge, approved, waiting for review, changes requested, conflicts, draft) and lists every open PR number in the forest.
+
+## Round 31: the home leads with one move
+
+Phil, on round 30's home: "i find this uninspiring." Twelve rows of equal weight, seven ending in "push 1"; merging an approved PR read like any chore, and the PR column stood empty on most rows.
+
+1. **One move leads, set apart.** `ForestModel.homeSections().lead` is the first item of the first group that's Phil's — merge, review, reply, another step of his, push — drawn large (`LeadMove`): the verb, what it acts on, its line, its PR's state.
+2. **Everything else groups by the verb it asks** (`HomeVerb`, from the branch the forest's line is about), each item once; others' holds and what can't move yet follow.
+3. **A chore collapses.** The push group is one wrapping run of chips (`PushChips`, `ChipFlow`): a forest's name and how many of its branches wait, a dot in its open PR's state colour. ↵ opens the forest; there is no batch push — sending stays a per-branch arm and confirm.
