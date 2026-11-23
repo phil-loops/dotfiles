@@ -215,6 +215,7 @@ Every typecheck goes through the machine-wide queue (`heavy-turn`: 2 slots, 1 wh
 Instances of the principles that only this repo carries — each a bug someone already shipped once.
 
 - **Paid vs free** is `onFreeTier(team)` (`getTierLimits` for limits), never raw `subscriptionActive` — comped accounts misclassify.
+- **Wiring calls a model when there's logic** — combining tables, branching, mapping or reshaping rows. A route that passes input to one query and returns its rows untouched may call the query directly: `AGENTS.md`'s "calls models, not queries" is right about logic and overreaches about ceremony (Phil, 2026-11-22), so a review bot's "calls a query directly" on a pass-through is non-blocking.
 - **Model writes** go through queries: models never touch Prisma, not even `tx.model.*`; each write query takes a trailing `tx: Pick<typeof prisma, "<model>"> = prisma` and the model forwards `tx` into each dep call. A model outcome the caller branches on returns `Ok<T, {code}>` (`types/result.ts`); throw only for a broken invariant or to abort a transaction. A switch over a union tag ends `default: return assertNever(x)` (`lib/assert-never.ts`).
 - **Tests for anything under `pages/`** live in `testing/pages/` (flat route name), never beside the route — Next routes every file under `pages/` and `next build` fails (team decision 2026-06-09, not yet in `AGENTS.md`).
 - **A save, focus or lifecycle-timing change** is tested on every consumer of that lifecycle: multi-character typing, switching between two same-type entities, blur/Enter boundaries (#9361).
@@ -232,3 +233,4 @@ Only rules no repo doc carries live here:
 
 - **Inline object-parameter type literals in function signatures** — `function update(input: { id: string; name?: string })`, never a standalone `type UpdateInput = { … }` alias readers must scroll to resolve. Inlining keeps the contract at the call site, even with 5+ fields; `Deps<typeof fn>` / `Parameters<typeof fn>` extract from the function itself, so tests don't break. Don't refactor pre-existing aliases unless asked.
 - **A reviewer's "why" goes in the PR body or the branch description, never a code comment**; a `/** */` block above an import or a const is not JSDoc.
+- **A new finite-value field is a `String` column with `@default("…")`, never a Prisma `enum`** — the values live in TypeScript (`const X = [...] as const`) and are enforced at boundaries (`z.enum(X)`); a text field changes without a migration or a table lock. Existing enums stay (#10549 added one).

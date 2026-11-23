@@ -66,6 +66,7 @@ Every typecheck goes through the machine-wide queue (`heavy-turn`: 2 slots, 1 wh
 Instances of the principles that only this repo carries — each a bug someone already shipped once.
 
 - **Paid vs free** is `onFreeTier(team)` (`getTierLimits` for limits), never raw `subscriptionActive` — comped accounts misclassify.
+- **Wiring calls a model when there's logic** — combining tables, branching, mapping or reshaping rows. A route that passes input to one query and returns its rows untouched may call the query directly: `AGENTS.md`'s "calls models, not queries" is right about logic and overreaches about ceremony (Phil, 2026-11-22), so a review bot's "calls a query directly" on a pass-through is non-blocking.
 - **Model writes** go through queries: models never touch Prisma, not even `tx.model.*`; each write query takes a trailing `tx: Pick<typeof prisma, "<model>"> = prisma` and the model forwards `tx` into each dep call. A model outcome the caller branches on returns `Ok<T, {code}>` (`types/result.ts`); throw only for a broken invariant or to abort a transaction. A switch over a union tag ends `default: return assertNever(x)` (`lib/assert-never.ts`).
 - **Tests for anything under `pages/`** live in `testing/pages/` (flat route name), never beside the route — Next routes every file under `pages/` and `next build` fails (team decision 2026-06-09, not yet in `AGENTS.md`).
 - **A save, focus or lifecycle-timing change** is tested on every consumer of that lifecycle: multi-character typing, switching between two same-type entities, blur/Enter boundaries (#9361).
