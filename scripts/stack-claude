@@ -41,6 +41,17 @@ if [[ -n "$sid" && ! "$sid" =~ '^[A-Za-z0-9-]+$' ]]; then
 fi
 session_flag=""; [[ -n "$sid" ]] && session_flag="--session-id $sid "
 
+# Optional settings file (STACK_CLAUDE_SETTINGS): permission rules this session runs under — a
+# deny there refuses even with --dangerously-skip-permissions (canopy's asks deny pushes and GitHub
+# writes). A path baked into the command string, so a plain path charset only.
+settings="${STACK_CLAUDE_SETTINGS:-}"
+settings_flag=""
+if [[ -n "$settings" ]]; then
+  [[ "$settings" =~ '^[A-Za-z0-9._/-]+$' && -f "$settings" ]] \
+    || { print -u2 "stack-claude: no usable settings file '$settings'"; exit 1; }
+  settings_flag="--settings $settings "
+fi
+
 # Build (or refresh) the branch's worktree exactly the way file-open does, then resolve
 # its path the same way: a real worktree holding the branch wins, else the scratch dir.
 # || true: awk's early exit SIGPIPEs the still-writing producer (141 under pipefail).
@@ -111,9 +122,9 @@ win="claude:${branch##*/}"
 # out-of-repo reads, edits, and claude-say all work — Phil wants these sessions unrestricted.
 perm_flag="--dangerously-skip-permissions "
 if [[ -n "$draft" ]]; then
-  run="claude ${perm_flag}${model_flag}${session_flag}; exec \$SHELL"
+  run="claude ${perm_flag}${settings_flag}${model_flag}${session_flag}; exec \$SHELL"
 else
-  run="claude ${perm_flag}${model_flag}${session_flag}\"\$STACK_CLAUDE_PROMPT\"; exec \$SHELL"
+  run="claude ${perm_flag}${settings_flag}${model_flag}${session_flag}\"\$STACK_CLAUDE_PROMPT\"; exec \$SHELL"
 fi
 if [[ -n "${STACK_CLAUDE_DRY:-}" ]]; then
   print -r -- "DRY: dir=$dir place=$place draft=${draft:-0}"
