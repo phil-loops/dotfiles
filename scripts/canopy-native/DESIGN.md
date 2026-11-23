@@ -557,3 +557,11 @@ Phil, on round 30's home: "i find this uninspiring." Twelve rows of equal weight
 1. **One move leads, set apart.** `ForestModel.homeSections().lead` is the first item of the first group that's Phil's — merge, review, reply, another step of his, push — drawn large (`LeadMove`): the verb, what it acts on, its line, its PR's state.
 2. **Everything else groups by the verb it asks** (`HomeVerb`, from the branch the forest's line is about), each item once; others' holds and what can't move yet follow.
 3. **A chore collapses.** The push group is one wrapping run of chips (`PushChips`, `ChipFlow`): a forest's name and how many of its branches wait, a dot in its open PR's state colour. ↵ opens the forest; there is no batch push — sending stays a per-branch arm and confirm.
+
+## Round 32: a card per open PR, and keys for things side by side
+
+Phil, on round 31: "i have 4 open prs, i should get a headline card for each one", and "we totally need to rethink the keyboard nav with this layout" — `j` walked nine push chips one at a time though they sit in a row.
+
+1. **Every open PR of mine that isn't a draft is a card** (`homeSections().cards`, `PRCards`), in `openPRRows` order: what it asks (merge, in review, after its parent, fix), its number and title, GitHub's state and signals, where it lives. ↵ reviews it. A forest whose every live branch has a card is said by its cards; one with other branches keeps its row, so its page stays a ↵ away.
+2. **Rows drawn side by side are a strip** (`Pane.strips`, `Pane.lines`): `j`/`k` move by line, a strip counting as one and remembering where you were on it; `h`/`l` walk the strip and fall through to the pane that way at its end (`AppModel.moveAlongStrip`). `⌃h`/`⌃l` stay pane moves. Every other pane has no strips, so a line is a row and nothing else moves.
+

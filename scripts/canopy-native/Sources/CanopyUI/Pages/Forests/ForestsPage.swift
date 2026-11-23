@@ -45,8 +45,8 @@ struct ForestsPage: View {
                                 section(.workbench, p.workbench, fs, working, nameWidth: nameWidth, cursor: cursor, selection: selection)
                             } else {
                                 let home = m.homeSections()
-                                if let lead = home.lead {
-                                    LeadMove(item: lead, fs: fs, cursor: cursor, selection: selection)
+                                if !home.cards.isEmpty {
+                                    PRCards(cards: home.cards, cursor: cursor, selection: selection)
                                 }
                                 ForEach(home.sections, id: \.verb) { sec in
                                     if sec.verb == .push {
@@ -208,73 +208,72 @@ private struct HomeGroup: View {
     }
 }
 
-/// The home's lead (round 31): the one most valuable move, set apart in large type — the verb, what it acts on, the
-/// line that says what that is, and its PR's state. Every other item sits in the groups below it.
-private struct LeadMove: View {
+/// The home's first strip (round 32): a card for each of my open PRs that isn't a draft — what it asks (merge, in
+/// review, after its parent), its number and title, GitHub's state and signals, where it lives. `h`/`l` walk the cards;
+/// ↵ reviews one.
+private struct PRCards: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme
-    let item: HomeItem
-    let fs: [String: ForestView]
+    let cards: [OpenPRRow]
     let cursor: String?
     let selection: Set<String>
 
-    struct Face {
-        var verb: String
-        var name: String
-        var line: String
-        var pr = PRCell()
-        var place = ""
+    static let width: CGFloat = 372
+
+    /// The card's verb, and whether it's Phil's to do now.
+    static func ask(_ r: OpenPRRow) -> (word: String, yours: Bool) {
+        if let w = r.branch?.st.waiting.first, w.kind == .parent, let n = w.label.split(separator: " ").first(where: { $0.hasPrefix("#") }) {
+            return ("after \(n)", false)
+        }
+        if r.branch?.st.actor == .parent, let parent = r.branch?.b.parent { return ("after \(leaf(parent))", false) }
+        switch r.says {
+        case "merge it": return ("merge", true)
+        case "changes requested": return ("fix", true)
+        case "waiting on review": return ("in review", false)
+        case "waiting on required checks": return ("checks", false)
+        default: return (r.says, r.yours)
+        }
     }
 
     var body: some View {
-        let here = cursor == item.key
-        let f = face
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline, spacing: 14) {
-                Text(verbatim: f.verb.uppercased()).font(Theme.display(30)).tracking(1.5).foregroundStyle(theme.goldLeaf)
-                Text(verbatim: f.name).font(Theme.display(30)).foregroundStyle(here ? theme.goldLeaf : theme.ink).lineLimit(1)
-            }
-            Text(verbatim: f.line).font(Theme.text(16)).foregroundStyle(theme.ink).lineLimit(2)
-                .frame(maxWidth: 760, alignment: .leading)
-            HStack(alignment: .firstTextBaseline, spacing: 14) {
-                f.pr
-                if !f.place.isEmpty { Text(verbatim: f.place).font(Theme.text(11)).foregroundStyle(theme.inkFaint) }
-            }
+        ChipFlow(spacing: 12) {
+            ForEach(cards, id: \.key) { r in card(r) }
         }
-        .padding(.leading, 28).padding(.vertical, 18).padding(.trailing, 16)
-        .rowChrome(item.key, cursor: here, selected: selection.contains(item.key))
-        .padding(.bottom, 24)
+        .padding(.leading, 28).padding(.trailing, 16).padding(.top, 6).padding(.bottom, 30)
     }
 
-    private var face: Face {
-        let m = app.forestModel
-        switch item {
-        case .forest(let p):
-            let fv = fs[p.id]
-            let prs = fv.map(m.forestPRs) ?? []
-            let lead = prs.first?.pr
-            let verb = fv.map(m.verb) ?? .step
-            let pr = PRCell(numbers: prs.compactMap { $0.pr?.number }, state: lead.map(PRState.of), signals: lead.flatMap { m.prSignals[$0.number] }, column: false)
-            if verb == .merge, let lead {
-                return Face(verb: "merge", name: "#\(lead.number)", line: lead.title ?? p.summary, pr: pr, place: p.name)
+    private func card(_ r: OpenPRRow) -> some View {
+        let here = cursor == r.key
+        let ask = Self.ask(r)
+        let state = r.branch?.pr.map(PRState.of) ?? r.mine.map(PRState.of)
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(verbatim: ask.word.uppercased()).font(Theme.display(20)).tracking(1.2)
+                    .foregroundStyle(ask.yours ? theme.goldLeaf : theme.inkDim).lineLimit(1)
+                Spacer(minLength: 8)
+                Text(verbatim: "#\(r.number)").font(Theme.text(13, weight: .medium)).monospacedDigit().foregroundStyle(here ? theme.goldLeaf : theme.inkDim)
             }
-            let step = fv?.says ?? ""
-            return Face(verb: verb == .push ? "push" : step, name: p.name, line: p.summary, pr: pr,
-                        place: verb == .push ? step : "")
-        case .myPR(let p):
-            let says = m.openPRRows().first { $0.mine?.number == p.number }?.says ?? ""
-            return Face(verb: says == "merge it" ? "merge" : says, name: "#\(p.number)", line: p.title,
-                        pr: PRCell(numbers: [p.number], state: PRState.of(p), signals: m.prSignals[p.number], column: false), place: p.local ? p.head : "on GitHub")
-        case .review(let r):
-            return Face(verb: "review", name: "#\(r.number)", line: r.title, pr: PRCell(note: r.author, column: false))
-        case .reply(_, let forests):
-            return Face(verb: "reply", name: "Claude", line: forests.map(\.name).joined(separator: ", "))
+            Text(verbatim: r.title).font(Theme.text(14)).foregroundStyle(theme.ink).lineLimit(2, reservesSpace: true)
+            HStack(alignment: .firstTextBaseline, spacing: 9) {
+                if let state { Text(verbatim: state.word).font(Theme.text(11)).foregroundStyle(PRCell.color(state.tone, theme)) }
+                PRSignalStrip(signals: r.signals)
+            }
+            Text(verbatim: r.place).font(Theme.text(11)).foregroundStyle(theme.inkFaint).lineLimit(1)
         }
+        .padding(14)
+        .frame(width: Self.width, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 10).fill(here ? theme.goldLeaf.opacity(0.12) : theme.vellumRaise))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(here ? theme.goldLeaf.opacity(0.7) : ask.yours ? theme.goldDeep : theme.vellumEdge, lineWidth: here ? 1.5 : 1))
+        .contentShape(Rectangle())
+        .onTapGesture { app.runner.dispatch("cursor.set", via: .click, target: r.key) }
+        .labelTarget(pane: "main", key: r.key)
+        .help(r.says)
+        .id(r.key)
     }
 }
 
-/// The push group (round 31): every forest whose next step is a push, as one wrapping run of chips — the name and how
-/// many of its branches wait to go. ↵ on a chip opens its forest, where `p` sends them.
+/// The push group (rounds 31–32): every forest whose next step is a push, as one wrapping run of chips — the name and
+/// how many of its branches wait to go. `h`/`l` walk them; ↵ opens a forest, where `p` sends them.
 private struct PushChips: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme
@@ -299,9 +298,7 @@ private struct PushChips: View {
             ChipFlow(spacing: 8) {
                 ForEach(forests, id: \.key) { c in
                     let here = cursor == c.key
-                    let pr = app.forestModel.forestPRs(c.f).first?.pr
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        if let pr { Circle().fill(PRCell.color(PRState.of(pr).tone, theme)).frame(width: 6, height: 6).alignmentGuide(.firstTextBaseline) { $0[.bottom] } }
                         Text(verbatim: c.f.p.name).font(Theme.text(13, weight: .medium)).foregroundStyle(here ? theme.goldLeaf : theme.ink)
                         Text(verbatim: "\(Self.waiting(c.f))").font(Theme.text(11)).monospacedDigit().foregroundStyle(theme.inkFaint)
                     }
@@ -311,7 +308,7 @@ private struct PushChips: View {
                     .contentShape(Rectangle())
                     .onTapGesture { app.runner.dispatch("cursor.set", via: .click, target: c.key) }
                     .labelTarget(pane: "main", key: c.key)
-                    .help(pr.map { "#\($0.number) \(PRState.of($0).word) · \(c.f.says)" } ?? c.f.says)
+                    .help(c.f.says)
                     .id(c.key)
                 }
             }

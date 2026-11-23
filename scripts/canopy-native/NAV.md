@@ -64,7 +64,7 @@
 | next / previous | `j` `↓` / `k` `↑` (typing in `:`, the menu, a picker: `↓` `C-n` `C-j` `⇥` / `↑` `C-p` `C-k`) | the next / previous row, line or item |
 | first / last | `g g` / `G` | the first / last row (jumps) |
 | half-down / half-up | `C-d` / `C-u` | half a page |
-| left / right | `h` `←` / `l` `→` | a character in code (onto the old half of a removed line at the new half's start, and back); in a pane without code, the pane to that side |
+| left / right | `h` `←` / `l` `→` | a character in code (onto the old half of a removed line at the new half's start, and back); in a pane without code, the next thing along a **strip** — rows drawn side by side, which `j`/`k` step over as one line and return to where you were (the home's PR cards and push chips, round 32) — then, at the strip's end or off one, the pane to that side. `⌃h`/`⌃l` always go to the pane |
 | pane left / right | `⌃h` / `⌃l` | the pane to that side, from anywhere (also `⌃w h`/`⌃w l`, `⌥h`/`⌥l`) |
 | next / previous name | `w` / `b` | the next / previous name in the code, across lines; `g d`, `space k` and friends ask about it |
 | next / previous / end of a run | `W` / `B` / `E` | the next / previous run of non-blank characters, or this run's last character (Helix's WORDs) |

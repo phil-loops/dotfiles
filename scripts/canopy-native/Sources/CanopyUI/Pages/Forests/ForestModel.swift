@@ -359,54 +359,60 @@ public final class ForestModel {
             }
         }
         let home = homeSections()
-        for item in [home.lead].compactMap({ $0 }) + home.sections.flatMap(\.items) {
+        out += home.cards.map(\.key)
+        for item in home.sections.flatMap(\.items) {
             if case .forest(let x) = item { add([x]) } else { out.append(item.key) }
         }
         add(showArchive ? p.archive : [])
         return out
     }
 
-    /// The home (round 31): the one most valuable move, set apart, then every other item once, grouped by the verb it
-    /// asks of Phil — merge, review, reply, the other steps that are his, push — then what others hold, then what can't
-    /// move yet. Inside a group, forests carrying an open PR lead (P8).
-    func homeSections() -> (lead: HomeItem?, sections: [HomeSection]) {
+    /// The home (round 32): a card for each of my open PRs that isn't a draft, in `openPRRows` order (mine to act on
+    /// first), then every other item once, grouped by the verb it asks of Phil — review, reply, his other steps, push —
+    /// then what others hold and what can't move yet. A forest whose every live branch has a card is said by its cards.
+    func homeSections() -> (cards: [OpenPRRow], sections: [HomeSection]) {
         let f = forests()
-        var carrying: [HomeVerb: [HomeItem]] = [:], loose: [HomeVerb: [HomeItem]] = [:], rest: [HomeVerb: [HomeItem]] = [:]
+        let cards = openPRRows().filter { !$0.draft }
+        let carded = Set(cards.compactMap { $0.branch?.b.id })
+        var by: [HomeVerb: [HomeItem]] = [:]
         for g in moveGroups() {
             for p in g.projects {
-                let v = f[p.id].map(verb) ?? .waiting
-                if (f[p.id].map(forestPRs) ?? []).isEmpty { rest[v, default: []].append(.forest(p)) } else { carrying[v, default: []].append(.forest(p)) }
+                guard let fv = f[p.id] else { continue }
+                let live = fv.branches.filter { !$0.st.done && $0.b.role != "proof" }
+                if !live.isEmpty && live.allSatisfy({ carded.contains($0.b.id) }) { continue }
+                by[verb(fv), default: []].append(.forest(p))
             }
         }
-        for r in openPRRows() {
-            guard let p = r.mine else { continue }
-            let v: HomeVerb = p.draft ? .waiting : !r.yours ? .moving : r.says == "merge it" ? .merge : .step
-            loose[v, default: []].append(.myPR(p))
-        }
-        var by: [HomeVerb: [HomeItem]] = [:]
-        for v in HomeVerb.allCases { by[v] = (carrying[v] ?? []) + (loose[v] ?? []) + (rest[v] ?? []) }
+        for r in openPRRows() where r.draft { if let p = r.mine { by[.waiting, default: []].append(.myPR(p)) } }
         by[.review] = reviewRequests.map { HomeItem.review($0) }
         by[.reply] = replies().map { HomeItem.reply($0.chat, $0.forests) }
-        let lead = HomeVerb.allCases.filter(\.isYours).lazy.compactMap { by[$0]?.first }.first
-        let sections = HomeVerb.allCases.compactMap { v -> HomeSection? in
-            let items = (by[v] ?? []).filter { $0 != lead }
-            return items.isEmpty ? nil : HomeSection(verb: v, items: items)
-        }
-        return (lead, sections)
+        let sections = HomeVerb.allCases.compactMap { v in (by[v] ?? []).isEmpty ? nil : HomeSection(verb: v, items: by[v]!) }
+        return (cards, sections)
     }
 
-    /// The verb a forest asks of Phil, from the branch its line is about: the first live branch at its move.
+    /// The branch a forest's line is about: its first live branch at the forest's move.
+    func leadBranch(_ f: ForestView) -> BranchView? {
+        f.branches.first { !$0.st.done && Move.of($0.st.actor) == f.move }
+    }
+
+    /// The verb a forest asks of Phil, from the branch its line is about.
     func verb(_ f: ForestView) -> HomeVerb {
         switch f.move {
         case .moving: return .moving
         case .waiting: return .waiting
         case .done: return .done
         case .yours:
-            guard let v = f.branches.first(where: { !$0.st.done && Move.of($0.st.actor) == .yours }) else { return .step }
+            guard let v = leadBranch(f) else { return .step }
             if v.st.next == "branch.pr" && v.st.ship != .pushed && (v.st.waiting.first?.kind ?? .merge) == .merge { return .merge }
             if ["branch.push.arm", "branch.push.queue", "branch.push.early.arm"].contains(v.st.next ?? "") { return .push }
             return .step
         }
+    }
+
+    /// The home's strips — rows drawn side by side, which `h`/`l` walk: the PR cards and the push chips.
+    func homeStrips() -> [[String]] {
+        let home = homeSections()
+        return [home.cards.map(\.key), home.sections.first { $0.verb == .push }?.items.map(\.key) ?? []].filter { $0.count > 1 }
     }
 
     /// The open PRs a forest's home row carries, the one at the forest's own move first, then merge order.

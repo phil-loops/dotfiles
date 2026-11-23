@@ -95,8 +95,17 @@ enum ShellCommands {
                            local: { [weak app] id, _ in id.map { app?.focus(pane: $0) } }))
         for (d, verb) in [(Direction.left, Verb.paneLeft), (.down, .paneDown), (.up, .paneUp), (.right, .paneRight)] {
             r.register(Command(id: "pane.\(d.rawValue)", title: "Focus the pane \(d == .left || d == .right ? "to the \(d.rawValue)" : d == .up ? "above" : "below")",
-                               scope: .global, verbs: [verb] + (d == .left ? [.left] : d == .right ? [.right] : []), quiet: true,
+                               scope: .global, verb: verb, quiet: true,
                                local: { [weak app] _, _ in if app?.focus(d) != true { throw Refusal("no pane \(d.rawValue)") } }))
+        }
+        // h / l: along a strip of rows drawn side by side, then the pane to that side (C-h / C-l always go to the pane)
+        for (d, verb) in [(Direction.left, Verb.left), (.right, .right)] {
+            r.register(Command(id: "cursor.\(d.rawValue)", title: "The row to the \(d.rawValue), else the pane that way", scope: .global, verb: verb, quiet: true,
+                               local: { [weak app] _, _ in
+                                   guard let app else { return }
+                                   if app.moveAlongStrip(d == .left ? -1 : 1) { return }
+                                   if !app.focus(d) { throw Refusal("no pane \(d.rawValue)") }
+                               }))
         }
         r.register(Command(id: "pane.next", title: "Focus the next pane", scope: .global, verb: .paneNext, quiet: true,
                            local: { [weak app] _, _ in

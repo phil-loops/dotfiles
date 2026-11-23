@@ -26,7 +26,7 @@ struct ForestsSurface: SurfaceProvider {
     func rows(_ app: AppModel) -> [String] { app.forestModel.homeRows() }
 
     func panes(_ app: AppModel) -> [Pane] {
-        var panes = [Pane(id: "main", rows: rows(app), row: 1)]
+        var panes = [Pane(id: "main", rows: rows(app), row: 1, strips: app.forestModel.readyOnly ? [] : app.forestModel.homeStrips())]
         if WorkInProgressView.visible(app) { panes.append(Pane(id: "work", title: "in progress", rows: WorkInProgressView.rows(app), row: 0)) }
         return panes
     }

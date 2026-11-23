@@ -39,6 +39,8 @@ public final class AppModel: CommandContext {
     public private(set) var cursors: [String: String] = [:]
     public private(set) var cursorIdxs: [String: Int] = [:]
     public private(set) var anchors: [String: Int] = [:]
+    /// where the cursor last stood on each strip, by pane and the strip's first row
+    private var stripPlace: [String: String] = [:]
     @ObservationIgnored private var cursorGenerations: [String: Int] = [:]
 
     /// The label layer while it's up: what's labelled, and what's been typed of a label.
@@ -324,10 +326,28 @@ public final class AppModel: CommandContext {
         cursorIdx = n
     }
 
+    /// `j`/`k`: `by` lines down or up. A strip is one line; arriving on one lands where you last were in it.
     public func moveCursor(_ by: Int) {
         let r = rows
         guard !r.isEmpty else { return }
-        cursorTo((r.firstIndex(of: selected ?? r[0]) ?? 0) + by)
+        guard let lines = pane?.lines, lines.count != r.count else {
+            cursorTo((r.firstIndex(of: selected ?? r[0]) ?? 0) + by)
+            return
+        }
+        let here = lines.firstIndex { $0.contains(selected ?? r[0]) } ?? 0
+        if lines[here].count > 1, let k = selected { stripPlace[paneKey(pane?.id ?? "main") + "|" + lines[here][0]] = k }
+        let to = lines[max(0, min(lines.count - 1, here + by))]
+        let back = stripPlace[paneKey(pane?.id ?? "main") + "|" + to[0]]
+        setCursor(back.flatMap { to.contains($0) ? $0 : nil } ?? to[0])
+    }
+
+    /// `h`/`l` on a strip: the row beside the cursor; false at the strip's end or off a strip, so the move falls
+    /// through to the pane that way.
+    public func moveAlongStrip(_ by: Int) -> Bool {
+        guard let k = selected, let line = pane?.lines.first(where: { $0.contains(k) }), line.count > 1,
+              let i = line.firstIndex(of: k), line.indices.contains(i + by) else { return false }
+        setCursor(line[i + by])
+        return true
     }
 
     /// Drop the select anchor at the cursor (`v`).

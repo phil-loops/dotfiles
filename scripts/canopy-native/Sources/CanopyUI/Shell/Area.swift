@@ -138,9 +138,25 @@ public struct Pane: Identifiable, Equatable {
     public var row: Int
     /// rows `C-d` / `C-u` move
     public var pageSize: Int
+    /// Runs of `rows` drawn side by side, as one line: `j`/`k` step over a strip as a single line and `h`/`l` walk it.
+    /// A row in no strip is a line of its own.
+    public var strips: [[String]]
 
-    public init(id: String, title: String = "", rows: [String], column: Int = 0, row: Int = 0, pageSize: Int = 10) {
-        self.id = id; self.title = title; self.rows = rows; self.column = column; self.row = row; self.pageSize = pageSize
+    public init(id: String, title: String = "", rows: [String], column: Int = 0, row: Int = 0, pageSize: Int = 10, strips: [[String]] = []) {
+        self.id = id; self.title = title; self.rows = rows; self.column = column; self.row = row; self.pageSize = pageSize; self.strips = strips
+    }
+
+    /// The pane's rows as lines, top to bottom: each strip once, where its first row stands; every other row alone.
+    public var lines: [[String]] {
+        guard !strips.isEmpty else { return rows.map { [$0] } }
+        var stripOf: [String: Int] = [:]
+        for (i, s) in strips.enumerated() { for k in s { stripOf[k] = i } }
+        var out: [[String]] = [], placed = Set<Int>()
+        for k in rows {
+            guard let i = stripOf[k] else { out.append([k]); continue }
+            if placed.insert(i).inserted { out.append(strips[i].filter(rows.contains)) }
+        }
+        return out
     }
 }
 

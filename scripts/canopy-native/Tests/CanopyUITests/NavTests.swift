@@ -312,7 +312,7 @@ import Testing
         let a = try app()
         press(a, "g O"); press(a, "g M")
         press(a, "space j")
-        #expect(a.nav.shown.map(\.label) == ["todo · auto-archive-closed-forests", "forests · hankles-limited-label"], "a real page names its cursor row: the home leads with the forest carrying the open PR")
+        #expect(a.nav.shown.map(\.label) == ["todo · auto-archive-closed-forests", "forests · add-hankles-limited-label"], "a real page names its cursor row: the home leads with the open PR's card")
         a.nav.move(1)
         a.keys.handle("ret")
         #expect(a.router.route == .forests)
