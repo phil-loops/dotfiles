@@ -220,21 +220,6 @@ private struct PRCards: View {
 
     static let width: CGFloat = 372
 
-    /// The card's verb, and whether it's Phil's to do now.
-    static func ask(_ r: OpenPRRow) -> (word: String, yours: Bool) {
-        if let w = r.branch?.st.waiting.first, w.kind == .parent, let n = w.label.split(separator: " ").first(where: { $0.hasPrefix("#") }) {
-            return ("after \(n)", false)
-        }
-        if r.branch?.st.actor == .parent, let parent = r.branch?.b.parent { return ("after \(leaf(parent))", false) }
-        switch r.says {
-        case "merge it": return ("merge", true)
-        case "changes requested": return ("fix", true)
-        case "waiting on review": return ("in review", false)
-        case "waiting on required checks": return ("checks", false)
-        default: return (r.says, r.yours)
-        }
-    }
-
     var body: some View {
         ChipFlow(spacing: 12) {
             ForEach(Array(cards.enumerated()), id: \.element.key) { i, r in card(r, n: i + 1) }
@@ -244,16 +229,11 @@ private struct PRCards: View {
 
     private func card(_ r: OpenPRRow, n: Int) -> some View {
         let here = cursor == r.key
-        let ask = Self.ask(r)
-        let state = r.branch?.pr.map(PRState.of) ?? r.mine.map(PRState.of)
+        let ask = r.ask
+        let state = r.state
         return VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
-                if n <= 9 {
-                    Text(verbatim: "⌥\(n)").font(Theme.text(11, weight: .semibold)).monospacedDigit()
-                        .foregroundStyle(here ? theme.goldLeaf : theme.inkFaint)
-                        .padding(.horizontal, 5).padding(.vertical, 1)
-                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(here ? theme.goldLeaf.opacity(0.6) : theme.vellumEdge, lineWidth: 1))
-                }
+                if n <= 9 { OptionDigitBadge(n: n, lit: here) }
                 Text(verbatim: ask.word.uppercased()).font(Theme.display(20)).tracking(1.2)
                     .foregroundStyle(ask.yours ? theme.goldLeaf : theme.inkDim).lineLimit(1)
                 Spacer(minLength: 8)
@@ -442,6 +422,40 @@ struct PRCell: View {
     }
 }
 
+extension OpenPRRow {
+    /// What the PR asks of Phil, as its card's verb, and whether it's his to do now.
+    var ask: (word: String, yours: Bool) {
+        if let w = branch?.st.waiting.first, w.kind == .parent, let n = w.label.split(separator: " ").first(where: { $0.hasPrefix("#") }) {
+            return ("after \(n)", false)
+        }
+        if branch?.st.actor == .parent, let parent = branch?.b.parent { return ("after \(leaf(parent))", false) }
+        switch says {
+        case "merge it": return ("merge", true)
+        case "changes requested": return ("fix", true)
+        case "waiting on review": return ("in review", false)
+        case "waiting on required checks": return ("checks", false)
+        default: return (says, yours)
+        }
+    }
+
+    /// GitHub's state for it, in its PR list's words.
+    var state: PRState? { branch?.pr.map(PRState.of) ?? mine.map(PRState.of) }
+}
+
+/// A PR's `⌥n` badge: the key that reviews it from any page.
+struct OptionDigitBadge: View {
+    @Environment(\.theme) private var theme
+    let n: Int
+    var lit = false
+
+    var body: some View {
+        Text(verbatim: "⌥\(n)").font(Theme.text(11, weight: .semibold)).monospacedDigit()
+            .foregroundStyle(lit ? theme.goldLeaf : theme.inkFaint)
+            .padding(.horizontal, 5).padding(.vertical, 1)
+            .overlay(RoundedRectangle(cornerRadius: 4).stroke(lit ? theme.goldLeaf.opacity(0.6) : theme.vellumEdge, lineWidth: 1))
+    }
+}
+
 /// An open PR's state as GitHub's PR list words it: what the row's PR column says beside its number.
 struct PRState: Equatable {
     enum Tone { case ready, blocked, waiting, quiet }
@@ -595,7 +609,7 @@ private struct ReviewQueue: View {
                     let here = cursor == key
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
                         Text("").frame(width: 12)
-                        Text("#\(r.number)").font(Theme.display(17)).foregroundStyle(here ? theme.goldLeaf : theme.ink)
+                        Text(verbatim: "#\(r.number)").font(Theme.display(17)).foregroundStyle(here ? theme.goldLeaf : theme.ink)
                             .lineLimit(1).frame(width: nameWidth, alignment: .leading)
                         Text(r.title).foregroundStyle(theme.inkDim).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
                         Text(r.author).font(Theme.text(11)).foregroundStyle(theme.inkFaint).fixedSize()

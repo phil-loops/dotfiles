@@ -152,7 +152,8 @@ public struct ShipStripView: View {
             }
             if live == .failed, let err = push?.run.err { Text(err).foregroundStyle(theme.ember).lineLimit(2) }
             if live == nil, let said = b.pushSaidNow(app.scheduler.now) { Text(said).foregroundStyle(said.hasPrefix("pushed") ? theme.inkFaint : theme.ember).lineLimit(2) }
-            if live == nil, slot != .guards, b.diverged, case .some(.some(let s)) = ship.forceScopeOf(app, branchID), !s.eligible,
+            if live == nil, slot != .guards, b.diverged, ship.prepOf(branchID)?.route != "conform",
+               case .some(.some(let s)) = ship.forceScopeOf(app, branchID), !s.eligible,
                !s.guards.allSatisfy({ $0.ok || $0.k == "gates" }), let bad = s.guards.first(where: { !$0.ok }) {
                 Text("diverged · ✗ \(bad.label)").foregroundStyle(theme.ember)
                 Text("· sync catches it up here · then \(app.registry.keyOf("review.push")) pushes").foregroundStyle(theme.inkFaint)

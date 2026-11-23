@@ -122,7 +122,23 @@ private struct ReviewHeader: View {
         let c = pg.conv
         let b = pg.branch
         let ship = ShipState.of(app)
+        let cards = app.forestModel.homeSections().cards
+        let card = pg.integration == nil ? cards.firstIndex { $0.branch?.b.id == pg.id }.map { (n: $0 + 1, row: cards[$0]) } : nil
         VStack(alignment: .leading, spacing: 4) {
+            if let card {
+                // the PR as the home draws it (rounds 32–35): its key, what it asks, its number
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    if card.n <= 9 { OptionDigitBadge(n: card.n) }
+                    Text(verbatim: card.row.ask.word.uppercased()).font(Theme.display(20)).tracking(1.2)
+                        .foregroundStyle(card.row.ask.yours ? theme.goldLeaf : theme.inkDim)
+                    if let url = card.row.branch?.pr.flatMap({ URL(string: $0.url) }) {
+                        Link(destination: url) {
+                            Text(verbatim: "#\(card.row.number)").font(Theme.text(13, weight: .medium)).monospacedDigit().foregroundStyle(theme.inkDim)
+                        }
+                    }
+                }
+                .padding(.top, 6)
+            }
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 Group {
                     if let c {
@@ -142,14 +158,14 @@ private struct ReviewHeader: View {
                         Text(pg.target?.name ?? "")
                     }
                 }
-                .font(Theme.display(17)).foregroundStyle(theme.ink).lineLimit(1).layoutPriority(1)
+                .font(Theme.display(card == nil ? 17 : 22)).foregroundStyle(theme.ink).lineLimit(1).layoutPriority(1)
                 // the title is the words row it shows (the description, or an open PR's title): the words pane's cursor lands here
                 .padding(.horizontal, 4).padding(.vertical, 1)
                 .background(RoundedRectangle(cornerRadius: 3).fill(onTitle(pg, c) ? theme.goldLeaf.opacity(0.14) : .clear))
                 .padding(.horizontal, -4)
-                if pg.integration == nil, let pr = app.store.view(Pr.self, pg.id), let url = URL(string: pr.url) {
+                if card == nil, pg.integration == nil, let pr = app.store.view(Pr.self, pg.id), let url = URL(string: pr.url) {
                     Link(destination: url) {
-                        Text("#\(pr.number)\(pr.draft ? " · draft" : "")")
+                        Text(verbatim: "#\(pr.number)\(pr.draft ? " · draft" : "")")
                             .font(Theme.text(12)).foregroundStyle(theme.inkFaint)
                     }
                     .explains("branch|pr|\(pg.id)", RowName(word: "#\(pr.number)", meaning: "the branch's GitHub pull request"))
@@ -160,6 +176,14 @@ private struct ReviewHeader: View {
                         .labelTarget(pane: "review-guide-toggle", key: "return", title: "return to", run: RouteTo("review.guide"))
                 }
                 if pg.integration == nil, let t = pg.target { EvidenceChip(target: t) }
+            }
+            if let card {
+                HStack(alignment: .firstTextBaseline, spacing: 9) {
+                    if let state = card.row.state { Text(verbatim: state.word).font(Theme.text(12)).foregroundStyle(PRCell.color(state.tone, theme)) }
+                    PRSignalStrip(signals: card.row.signals)
+                    Text(verbatim: card.row.place).font(Theme.text(12)).foregroundStyle(theme.inkFaint)
+                }
+                .padding(.bottom, 6)
             }
             if pg.integration == nil && !shippingInSidebar { ShipStripView(branchID: pg.id) }
             if app.runner.runOf("review.helix.land", pg.id)?.state == .sending {

@@ -576,3 +576,11 @@ Phil, on round 32's cards: "the key press behavior is horrendous" — "it's gott
 1. **One order, whatever the state.** `openPRRows` sorts by PR number, oldest first, drafts last — a PR moving from "in review" to "ready to merge" no longer reshuffles the cards under the cursor or the walk `] o` takes.
 2. **A number per card, a modifier per number.** `⌥1`–`⌥9` (verbs `pr-1`…`pr-9`, `forests.pr.N`) review card n from any page, and each card wears its `⌥n`. A bare digit was tried first and dropped: it would mean "PR n" on the home and "a count" everywhere else, and the key engine would need a page-claims-a-digit exception — one key, two meanings. `⌘` belongs to the menu bar; `⌃`-digits are macOS Spaces'.
 
+## Round 35: a PR's review opens on its card
+
+Phil, on #11682's review after round 34: "this style feels adrift now … and also, the style." The header spoke an older language — a plain title with "#11,682" (number formatting again), and a strip saying "diverged · ✗ still a draft · sync catches it up here" about an approved PR whose checkout was only behind origin.
+
+1. **A PR's review opens with the card the home draws for it**: its `⌥n` (`OptionDigitBadge`), what it asks (`OpenPRRow.ask`, now shared), its number, then the title larger, then GitHub's state, signals and forest. A branch with no open PR keeps the plain title.
+2. **Numbers are text, never numbers to format** — `Text(verbatim:)` everywhere a PR number is drawn.
+3. **A force's guards speak only when a force is the question.** When origin holds everything the checkout has (prep route `conform`), the strip leaves the force-scope line out; `p` takes origin's copy.
+
