@@ -354,7 +354,7 @@ private struct HelixCover: View {
     var body: some View {
         let pg = ReviewPageState.of(app)
         VStack(spacing: 0) {
-            Text("Helix · \(open.source.repo)/\(open.source.name) @ \(open.source.tip.prefix(7))")
+            Text("Helix · \(open.source.repo)/\(open.source.name) @ \(open.sha.prefix(7))\(open.readOnly ? " · read-only" : "")")
                 .font(Theme.text(11)).foregroundStyle(theme.inkDim)
                 .lineLimit(1).truncationMode(.middle)
                 .padding(.horizontal, 10).padding(.vertical, 4)

@@ -1490,6 +1490,37 @@ import Testing
         await until("where it is said") { (a.runner.note ?? "").contains("1 of 2 in danrowden's stack") }
     }
 
+    /// `o` on a teammate's PR opens Helix read-only: the server's diff-view checkout, no edit lease,
+    /// and quitting commits nothing.
+    @Test func oOpensATeammatesPRReadOnly() async throws {
+        let p = TestPort.next()
+        let sha = String(repeating: "a", count: 40)
+        ShipStub.answer(p, "GET", "/loops/node", Self.payload)
+        ShipStub.answer(p, "GET", "/node", Self.payload)
+        ShipStub.answer(p, "POST", "/loops/review-helix", #"{"ok":true,"dir":"/tmp/pr-10468.diffbase","sha":"\#(sha)"}"#)
+        var c = AppConfig()
+        c.route = .review(repo: "loops", branch: "review/pr-10468")
+        let a = testApp(config: c, port: p, protocolClasses: [ShipStub.self])
+        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../CanopyCoreTests/Fixtures/state.json")
+        a.store.hydrate(try Snapshot.decode(Data(contentsOf: url)))
+        a.transport.repos = ["loops"]
+        let pg = ReviewPageState.of(a)
+        pg.sync()
+        await until("the diff") { pg.payload != nil && pg.diffCurrent }
+        a.focus(pane: reviewDiffPane)
+        pg.setCursor("l|a.ts|R:2")
+        #expect(pg.branch == nil)
+        a.keys.handle("o")
+        await pg.helixTask?.value
+        let open = try #require(pg.helix)
+        #expect(open.readOnly && open.whole && open.dir == "/tmp/pr-10468.diffbase" && open.sha == sha)
+        #expect(ShipStub.posts(p).last { $0.path == "/loops/review-helix" }?.body == ["branch": "review/pr-10468", "op": "where"])
+        #expect(!ShipStub.posts(p).contains { $0.path == "/loops/edit-session" })
+        pg.finishHelix(a, session: open.session, exitCode: 0)
+        #expect(pg.helix == nil && a.runner.note == "Helix closed · read-only, nothing committed")
+        #expect(!ShipStub.posts(p).contains { $0.path == "/loops/edit-commit" })
+    }
+
     /// The code beside the diff searches its text, not its line numbers, and lights its matches.
     @Test func slashSearchesTheCodeBesideTheDiff() async throws {
         let (a, p) = try await app()

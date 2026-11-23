@@ -21,6 +21,8 @@ public struct HelixOpen: Equatable {
     public var whole = false
     /// opened from the open file: quitting puts that pane back where Helix left off
     public var fromSide = false
+    /// a teammate's PR (review/pr-N): no lease, no attachment, and quitting commits nothing
+    public var readOnly = false
     public let session = UUID()
     let source: BranchSource
     let reader: ReaderContext
@@ -29,7 +31,7 @@ public struct HelixOpen: Equatable {
 
     public static func == (lhs: HelixOpen, rhs: HelixOpen) -> Bool {
         lhs.session == rhs.session && lhs.path == rhs.path && lhs.line == rhs.line && lhs.col == rhs.col &&
-            lhs.dir == rhs.dir && lhs.lease == rhs.lease && lhs.attachment == rhs.attachment && lhs.sha == rhs.sha && lhs.whole == rhs.whole && lhs.fromSide == rhs.fromSide && lhs.source == rhs.source
+            lhs.dir == rhs.dir && lhs.lease == rhs.lease && lhs.attachment == rhs.attachment && lhs.sha == rhs.sha && lhs.whole == rhs.whole && lhs.fromSide == rhs.fromSide && lhs.readOnly == rhs.readOnly && lhs.source == rhs.source
     }
 }
 
@@ -37,6 +39,9 @@ struct HelixWhere: Decodable { var ok: Bool; var dir: String?; var sha: String?;
 
 extension ReviewPageState {
     func openHelix(_ app: AppModel, branch: String, path: String, line: Int, col: Int, whole: Bool = false, fromSide: Bool = false, workspace: String? = nil) {
+        if self.branch == nil, workspace == nil, ForeignStacks.prNumber(target?.name) != nil {
+            return openReadOnlyHelix(app, path: path, line: line, col: col, whole: whole, fromSide: fromSide)
+        }
         guard helix == nil, diffCurrent, !scoped, integration == nil, let t = target, t.name == branch,
               let source = BranchSource.current(app, t.id), HelixLanding.fullObject(source.tip) else { return }
         guard let command = app.registry.command("review.helix.land"), app.runner.refusal?(command) == nil else {
@@ -104,6 +109,46 @@ extension ReviewPageState {
         }
     }
 
+    /// Helix over a teammate's PR: the diff-view checkout the server already makes for any local
+    /// branch (`/review-helix where`), opened without an edit lease. Nothing it saves is committed.
+    func openReadOnlyHelix(_ app: AppModel, path: String, line: Int, col: Int, whole: Bool, fromSide: Bool) {
+        guard helix == nil, diffCurrent, !scoped, integration == nil, let t = target else { return }
+        let source = BranchSource(repo: t.repo, name: t.name, tip: tip, parent: "", upstream: "", pushed: "", ahead: 0,
+                                  epoch: app.store.epoch, git: nil, remote: nil, hydration: 0)
+        let reader = ReaderContext(app)
+        var open = HelixOpen(path: path, line: line, col: col, sha: tip, whole: whole, fromSide: fromSide, source: source, reader: reader)
+        open.readOnly = true
+        helixTask?.cancel()
+        helixSession = open.session
+        pendingHelixReturn = nil
+        helixAt = nil
+        helix = open
+        open.log("preparing read-only checkout")
+        let checking = "checking \(t.repo)/\(t.name) out for a read-only Helix…"
+        app.runner.say(checking)
+        helixTask = Task { @MainActor in
+            @MainActor func current() -> Bool {
+                helix?.session == open.session && !Task.isCancelled && reader.isCurrent(app) && diffCurrent && target?.id == t.id
+            }
+            defer {
+                if helix?.session == open.session && helix?.dir == nil {
+                    helix = nil
+                    if app.runner.note == checking { app.runner.say("Helix didn't open — the view moved while it checked out · o opens it again") }
+                }
+            }
+            guard current() else { return }
+            let answer = await app.transport.ask(app.transport.atRepo(t.repo, "/review-helix"), ["branch": t.name, "op": "where"], as: HelixWhere.self)
+            guard current() else { return }
+            guard let answer, answer.ok, let dir = answer.dir, dir.hasPrefix("/"), let sha = answer.sha, HelixLanding.fullObject(sha) else {
+                return app.runner.say(answer?.err ?? "couldn't check \(t.name) out for Helix · try again")
+            }
+            helix?.sha = sha
+            helix?.dir = dir
+            open.log("checkout ready")
+            app.runner.say("Helix on \(t.repo)/\(t.name) · read-only — quitting commits nothing")
+        }
+    }
+
     @discardableResult func cancelHelixPreparation(session: UUID? = nil) -> Bool {
         guard let open = helix, open.dir == nil, session == nil || session == open.session else { return false }
         helixTask?.cancel()
@@ -162,6 +207,12 @@ extension ReviewPageState {
     func finishHelix(_ app: AppModel, session: UUID, exitCode: Int32?) {
         guard let open = helix, open.session == session else { return }
         open.log("process exited \(exitCode.map(String.init) ?? "unknown")")
+        if open.readOnly {
+            helix = nil
+            helixAt = nil
+            if id == open.source.id { app.runner.say("Helix closed · read-only, nothing committed") }
+            return
+        }
         guard exitCode == 0 else {
             helix = nil
             helixAt = nil
@@ -281,15 +332,17 @@ struct HelixHalf: NSViewRepresentable {
         terminal.cancelPreparation = cancelPreparation
         terminal.onPosition = moved
         terminal.onWriteQuit = { open.log("write-quit requested") }
-        guard let dir, let attachment = open.attachment, !context.coordinator.started else { return }
+        let position = "\(open.path):\(open.line):\(open.col)"
+        guard let dir, !context.coordinator.started,
+              let args = open.readOnly ? Zsh.arguments("exec hx -- \"$0\"", [position]) : open.attachment?.arguments(position: position)
+        else { return }
         context.coordinator.started = true
         terminal.preparing = false
         open.log("starting process")
         var env = ProcessInfo.processInfo.environment
         env["TERM"] = "xterm-256color"
         env["COLORTERM"] = "truecolor"
-        t.startProcess(executable: Zsh.path, args: attachment.arguments(position: "\(open.path):\(open.line):\(open.col)"),
-                       environment: env.map { "\($0)=\($1)" }, currentDirectory: dir)
+        t.startProcess(executable: Zsh.path, args: args, environment: env.map { "\($0)=\($1)" }, currentDirectory: dir)
     }
 
     final class Coordinator: NSObject, LocalProcessTerminalViewDelegate {
