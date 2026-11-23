@@ -222,7 +222,7 @@ Instances of the principles that only this repo carries — each a bug someone a
 - **ClickHouse**: never run `count()` in parallel with the same heavy GROUP BY — each builds its own hash table; take the total from stats already fetched, or `LIMIT n+1` + hasMore (2026-05-10: OOM-killed CH).
 - **S3 deletes** are a plain `deleteFromStorage`; permanence is the bucket's monotoad lifecycle rule, and app code never walks object versions (#11387).
 - **Datadog monitors and dashboards** live in Terraform (`terraform/loops-monitors/`), never script-runner. Workflow label changes use `gh api` REST issues-labels as `code-review.yml` does, never `gh pr edit`.
-- **Prompt and eval research** iterates on 10–20 sharp items with per-item diffs, one change per run; a 200-item run only confirms a winner (2026-10-31).
+- **Prompt and eval research** iterates on 10–20 sharp items with per-item diffs, one change per run; a 200-item run only confirms a winner (2026-10-31). A prompt fix is a deletion or a more general statement before it is an added clause, and a prompt tuned for an older model is not a baseline to preserve (2026-11-22).
 - **A UI or rendering bug** is proven end to end: data in through the API, rendered through the in-app endpoint, measured and screenshotted with Playwright.
 
 # Code Style
