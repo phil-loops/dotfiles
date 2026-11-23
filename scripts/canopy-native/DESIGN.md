@@ -562,7 +562,7 @@ Phil, on round 30's home: "i find this uninspiring." Twelve rows of equal weight
 
 Phil, on round 31: "i have 4 open prs, i should get a headline card for each one", and "we totally need to rethink the keyboard nav with this layout" — `j` walked nine push chips one at a time though they sit in a row.
 
-1. **Every open PR of mine that isn't a draft is a card** (`homeSections().cards`, `PRCards`), in `openPRRows` order: what it asks (merge, in review, after its parent, fix), its number and title, GitHub's state and signals, where it lives. ↵ reviews it. A forest whose every live branch has a card is said by its cards; one with other branches keeps its row, so its page stays a ↵ away.
+1. **Every open PR of mine is a card, drafts last** (`homeSections().cards`, `PRCards`), in `openPRRows` order: what it asks (merge, in review, after its parent, fix), its number and title, GitHub's state and signals, where it lives. ↵ reviews it. A forest whose every live branch has a card is said by its cards; one with other branches keeps its row, so its page stays a ↵ away.
 2. **Rows drawn side by side are a strip** (`Pane.strips`, `Pane.lines`): `j`/`k` move by line, a strip counting as one and remembering where you were on it; `h`/`l` walk the strip and fall through to the pane that way at its end (`AppModel.moveAlongStrip`). `⌃h`/`⌃l` stay pane moves. Every other pane has no strips, so a line is a row and nothing else moves.
 
 ## Round 33: push every green branch, from the home

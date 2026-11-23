@@ -327,7 +327,7 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = f
             "r:s": prObj(["id": "r:s", "branch": "s", "project": "r:solo", "number": 13, "review": "CHANGES_REQUESTED"]),
         ])
         a.forestModel.syncClosings()
-        #expect(a.rows.prefix(2) == ["pr:r:a", "pr:r:s"], "each open PR that isn't a draft is a card, leading the home")
+        #expect(a.rows.prefix(3) == ["pr:r:a", "pr:r:s", "pr:r:w"], "each open PR is a card, drafts last, leading the home")
         #expect(a.forestModel.openPRRows().map(\.key) == ["pr:r:a", "pr:r:s", "pr:r:w"], "#11, #13, then the draft — whatever each one waits on")
         #expect(ForestNav.primary(for: "pr:r:a", a)?.id == "branch.open")
         a.setCursor("p:r:tree")
@@ -353,9 +353,9 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = f
                  approvals: 0, changesRequested: changes, mergeState: "BLOCKED")
         }
         a.forestModel.setMyPRs([mine(21, "tweak", draft: true), mine(20, "fix/monitors", changes: true, local: true), mine(11, "a")])
-        #expect(Array(a.rows.prefix(3)) == ["pr:r:a", "gh:20", "p:r:tree"], "the cards lead, by number")
-        #expect(a.forestModel.homeSections().cards.map(\.key) == ["pr:r:a", "gh:20"], "a card for each open PR that isn't a draft")
-        #expect(a.forestModel.homeSections().sections.first { $0.items.contains { $0.key == "gh:21" } }?.verb == .waiting, "the draft waits")
+        #expect(Array(a.rows.prefix(4)) == ["pr:r:a", "gh:20", "gh:21", "p:r:tree"], "the cards lead, by number, drafts last")
+        #expect(a.forestModel.homeSections().cards.map(\.key) == ["pr:r:a", "gh:20", "gh:21"], "a card for each open PR, a draft too")
+        #expect(!a.forestModel.homeSections().sections.contains { $0.items.contains { $0.key == "gh:21" } }, "the draft is said by its card alone")
         #expect(!a.rows.contains("gh:11"), "#11 is the tree forest's: listed once")
         let row = a.forestModel.openPRRows().first { $0.key == "gh:20" }
         #expect(row?.place == "fix/monitors" && row?.says == "changes requested" && row?.yours == true)

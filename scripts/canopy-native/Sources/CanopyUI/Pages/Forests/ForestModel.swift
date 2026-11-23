@@ -372,7 +372,7 @@ public final class ForestModel {
     /// then what others hold and what can't move yet. A forest whose every live branch has a card is said by its cards.
     func homeSections() -> (cards: [OpenPRRow], sections: [HomeSection]) {
         let f = forests()
-        let cards = openPRRows().filter { !$0.draft }
+        let cards = openPRRows()
         let carded = Set(cards.compactMap { $0.branch?.b.id })
         var by: [HomeVerb: [HomeItem]] = [:]
         for g in moveGroups() {
@@ -383,7 +383,6 @@ public final class ForestModel {
                 by[verb(fv), default: []].append(.forest(p))
             }
         }
-        for r in openPRRows() where r.draft { if let p = r.mine { by[.waiting, default: []].append(.myPR(p)) } }
         by[.reply] = replies().map { HomeItem.reply($0.chat, $0.forests) }
         let sections = HomeVerb.allCases.compactMap { v in (by[v] ?? []).isEmpty ? nil : HomeSection(verb: v, items: by[v]!) }
         return (cards, sections)
