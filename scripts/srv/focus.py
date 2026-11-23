@@ -11,7 +11,8 @@
 #
 # Every forest the viewer shows, focus or not, also sheds what landed: a member with a merged PR
 # goes with stack-restack --contract-only, which drops it once nothing live sits on it and moves
-# no branch. A member whose worktree is busy is held until it frees.
+# no branch. A member whose worktree is busy is held until it frees. The merged set is read from
+# GitHub on the tick that sees trunk move, so a landed member goes within one poll of its merge.
 import json
 import os
 import subprocess
@@ -285,6 +286,9 @@ def tick():
                      cwd=ctx.MAIN_WT)
             st["tip"] = tip
             changed = True
+            # a squash-merge is a trunk move: read who merged now, or this tick contracts from a
+            # PR cache that predates the merge and the forest waits another poll
+            sync._refresh_pr_state()
         shown = _projects()
         st["contracted"] = {p: v for p, v in st.get("contracted", {}).items() if p in shown}
         merged = {b: pr.get("head") for b, pr in sync._pr_state_map().items() if pr.get("state") == "MERGED"}
