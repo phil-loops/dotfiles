@@ -18,6 +18,7 @@ from collections import namedtuple
 
 from . import evidence   # own line: the big import below is contested across sessions
 from . import pushintent   # own line: the big import below is contested across sessions
+from . import asks   # own line: the big import below is contested across sessions
 from . import catchup, ctx, edits, forestlock, forestowner
 from . import (actor, chat, chats, integrate, lsp, outbox, outline, packet, picker, preview, push, queue, restack,
                review, reviewdesk, reviews, sync, syntax, todo, tutor, usage, verdicts, viewed)
@@ -104,6 +105,7 @@ POST = {
     # ── the machine ──
     "/open": _r(picker.open_file, "machine"),            # a file in the warm review-nvim
     "/review-note": _r(reviewdesk.note, "machine"),      # a note handed to a fresh Claude pane
+    "/ask": _r(asks.ask, "repo", "machine", phil=True),  # ask Claude about a branch or one of its lines, in its chat
     "/preview": _r(preview.start, "machine"),
     "/preview-integration": _r(preview.start_integration, "machine"),
     "/preview-main": _r(preview.start_main, "machine"),
