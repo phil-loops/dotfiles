@@ -409,6 +409,15 @@ public final class ForestModel {
         }
     }
 
+    /// Every branch on a live forest whose next step is a push you can send now: gates green, its parent on origin, not
+    /// held — in the home's order. What `, p` readies and then sends.
+    func greenPushes() -> [BranchView] {
+        let f = forests(), p = projects()
+        return (p.focus + p.workbench).compactMap { f[$0.id] }.filter { !$0.closed }.flatMap(\.branches).filter {
+            $0.b.role != "proof" && $0.b.gates == .green && $0.st.actor == .you && $0.st.next == "branch.push.arm" && $0.b.pending == nil
+        }
+    }
+
     /// The home's strips — rows drawn side by side, which `h`/`l` walk: the PR cards and the push chips.
     func homeStrips() -> [[String]] {
         let home = homeSections()

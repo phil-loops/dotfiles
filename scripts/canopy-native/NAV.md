@@ -142,7 +142,7 @@
 
 | page | `,` keys |
 |---|---|
-| Forests (home) | `f` focus · `w` workbench · `i` the whole forest's diff · `l` launch · `b` / `B` hold / release · `r` only what's ready · `a` the archive |
+| Forests (home) | `f` focus · `w` workbench · `i` the whole forest's diff · `l` launch · `b` / `B` hold / release · `r` only what's ready · `a` the archive · `p` ready every green push, naming them — `p` again sends exactly those |
 | a forest | `f` · `w` · `i` · `l` · `b` / `B` (as home) · `n` next ready branch · `e` every branch's words |
 | Review | `o` outdated threads · `b p` / `b m` / `b o` diff against parent / main / origin · `h` the branch's line: `h`/`l` along it, `↵` `↵` picks the two ends of what the diff covers · `g` show or hide the gates strip · `q` quick gates (typecheck and lint left to CI) · `p` send every draft · `a` address a thread · `r` resolve · `n` the second reader's note · `d` save the comment as a draft · `S` insert a suggestion · in the address layer, `l` list the commits |
 | Tutor | `t` re-test · `q` wrap up · `s` stop the tutor's turn · `v` the session's evidence · `o` / `l` / `h` / `c` a credit's hit-miss / level / help / confidence |

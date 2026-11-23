@@ -293,8 +293,17 @@ private struct PushChips: View {
         }
         let branches = forests.reduce(0) { $0 + Self.waiting($1.f) }
         VStack(alignment: .leading, spacing: 10) {
-            SectionHead(text: "push · \(forests.count) \(forests.count == 1 ? "forest" : "forests") · \(branches) \(branches == 1 ? "branch" : "branches")", gold: true)
-                .padding(.leading, 44)
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                SectionHead(text: "push · \(forests.count) \(forests.count == 1 ? "forest" : "forests") · \(branches) \(branches == 1 ? "branch" : "branches")", gold: true)
+                let green = app.forestModel.greenPushes()
+                if !green.isEmpty {
+                    let armed = app.runner.armed?.hasPrefix("push green ") == true
+                    Text(verbatim: armed ? "\(green.count) ready to send — again to push" : "\(green.count) green")
+                        .font(Theme.text(11)).foregroundStyle(armed ? theme.goldLeaf : theme.inkFaint)
+                    KeyHint(id: "forests.push.green")
+                }
+            }
+            .padding(.leading, 44)
             ChipFlow(spacing: 8) {
                 ForEach(forests, id: \.key) { c in
                     let here = cursor == c.key
