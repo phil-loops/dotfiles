@@ -355,8 +355,8 @@ public final class ForestModel {
         }
         return Move.allCases.compactMap { mv in
             let projects = moveGroups().first { $0.move == mv }?.projects ?? []
-            let withPR = projects.filter { f[$0.id].flatMap(forestPR) != nil }
-            let rest = projects.filter { f[$0.id].flatMap(forestPR) == nil }
+            let withPR = projects.filter { !(f[$0.id].map(forestPRs) ?? []).isEmpty }
+            let rest = projects.filter { (f[$0.id].map(forestPRs) ?? []).isEmpty }
             var items = withPR.map(HomeItem.forest) + loose.filter { $0.0 == mv }.map(\.1)
             if mv == .yours { items += reviews }
             items += rest.map(HomeItem.forest)
@@ -365,12 +365,10 @@ public final class ForestModel {
         }
     }
 
-    /// The open PR a forest's home row carries: the first at the forest's own move, else its first, and how many
-    /// more it has open.
-    func forestPR(_ f: ForestView) -> (v: BranchView, more: Int)? {
+    /// The open PRs a forest's home row carries, the one at the forest's own move first, then merge order.
+    func forestPRs(_ f: ForestView) -> [BranchView] {
         let open = f.closed ? [] : f.branches.filter { $0.pr?.state == "OPEN" }
-        guard let first = open.first(where: { Move.of($0.st.actor) == f.move }) ?? open.first else { return nil }
-        return (first, open.count - 1)
+        return open.filter { Move.of($0.st.actor) == f.move } + open.filter { Move.of($0.st.actor) != f.move }
     }
 
     /// Chats on a listed forest whose turn ended: each once, newest first, with the forests it's on (round 29). The

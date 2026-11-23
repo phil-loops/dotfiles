@@ -85,6 +85,16 @@ private let NOW = iso("2026-10-22T18:00:00Z") // Thu 11:00 PT
         #expect(stand(diverged).actor == .unknown, "the force scope isn't read: unknown, never ready")
         #expect(ShipRules.stand(diverged, nil, nil, now: NOW, reads: SituationReads(prepRead: true, force: (false, true))).next == "branch.sync",
                 "origin can't be replaced: sync catches it up locally, the one remedy")
+        // #11682, 2026-11-22: a catch-up merge landed on origin; the checkout still had the commits origin already carries
+        let conform = SituationReads(prepRoute: "conform", prepRead: true)
+        let staleCopy = br(["gates": "green", "pushed": "ahead", "ahead": 3, "diverged": true])
+        let approved = pr(["review": "APPROVED", "approvals": 2, "mergeState": "CLEAN"])
+        let ready = ShipRules.stand(staleCopy, approved, nil, now: NOW, reads: conform)
+        #expect(ready.ship == .approved && ShipRules.says(ready, staleCopy, approved) == "merge it",
+                "a checkout only behind its open PR holds no work: the PR's state leads, not \"take origin's copy\"")
+        let inReview = ShipRules.stand(staleCopy, pr(), nil, now: NOW, reads: conform)
+        #expect(inReview.actor == .reviewer)
+        #expect(ShipRules.says(ShipRules.stand(staleCopy, nil, nil, now: NOW, reads: conform), staleCopy, nil) == "take origin's copy", "no PR: taking origin's copy is the step")
         let agentOn = { (running: Bool?) in ShipRules.stand(br(["gates": "stale"]), nil, nil, now: NOW, reads: SituationReads(agent: "t1", agentRunning: running)) }
         #expect(agentOn(true).actor == .agent("t1"))
         #expect(agentOn(nil).actor == .agent("t1"), "a claim the journal doesn't observe still names its agent")
@@ -365,6 +375,16 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = f
         let rows = a.forestModel.openPRRows()
         #expect(rows.first { $0.key == forestPR.key }?.signals == loud)
         #expect(rows.first { $0.key == "gh:20" }?.signals == quiet)
+    }
+
+    /// The PR column words an open PR as GitHub's PR list does.
+    @Test func thePRColumnWordsAPRAsGitHubDoes() {
+        #expect(PRState.of(pr(["review": "APPROVED", "approvals": 2, "mergeState": "CLEAN"])).word == "ready to merge")
+        #expect(PRState.of(pr(["review": "REVIEW_REQUIRED", "mergeState": "BLOCKED"])).word == "waiting for review")
+        #expect(PRState.of(pr(["draft": true, "review": "APPROVED"])).word == "draft")
+        #expect(PRState.of(pr(["review": "CHANGES_REQUESTED"])).word == "changes requested")
+        #expect(PRState.of(pr(["review": "APPROVED", "mergeState": "DIRTY"])).word == "conflicts")
+        #expect(PRState.of(MyPR(number: 1, title: "t", url: "u", draft: false, head: "h", local: false, approvals: 1, changesRequested: false, mergeState: "CLEAN")).word == "ready to merge")
     }
 
     /// The strip draws GitHub's checks summary order and skips zeros; changes requested replaces the approval count.

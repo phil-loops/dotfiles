@@ -221,6 +221,7 @@ public enum ShipRules {
     /// Everything the page shows about one branch, given its parent's standing and the reads made for its tip.
     /// `now` decides whether a hold has come due.
     public static func stand(_ b: Branch, _ pr: Pr?, _ parent: ParentStand?, now: Date, reads: SituationReads = SituationReads()) -> Stand {
+        let b = staleCopyOfAnOpenPR(b, pr, reads) ? originsCopy(b) : b
         let ship = shipOf(b, pr)
         let held = pr == nil && (b.holdUntil.flatMap(parseISO).map { $0 > now } ?? false)
         let waiting = ship == .approved && pr != nil ? waitingOn(pr!, parent) : []
@@ -229,6 +230,21 @@ public enum ShipRules {
         if case .agent(let id) = actor, reads.agentRunning == false { actor = .you; awaiting = id }
         if actor == .you, next == nil, awaiting == nil, b.diverged, reads.force?.blocked == true { next = "branch.sync" }
         return Stand(ship: ship, action: action(ship), waiting: waiting, held: held, actor: actor, next: next, done: done, awaiting: awaiting)
+    }
+
+    /// Origin holds every commit this checkout has (prep route "conform") and the branch's PR is open: the local copy
+    /// is only behind, so it holds no work and the PR's own state is the branch's situation. `p` still takes
+    /// origin's copy (`BranchCommands.pushRoute`).
+    static func staleCopyOfAnOpenPR(_ b: Branch, _ pr: Pr?, _ reads: SituationReads) -> Bool {
+        b.diverged && reads.prepRoute == "conform" && pr?.state == "OPEN"
+    }
+
+    static func originsCopy(_ b: Branch) -> Branch {
+        var o = b
+        o.diverged = false
+        o.pushed = .synced
+        o.ahead = 0
+        return o
     }
 
     /// Whose move it is and the one step that makes it, in priority order: a role that's done, a write in flight, an

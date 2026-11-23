@@ -182,15 +182,15 @@ private struct HomeGroup: View {
                     }
                 case .myPR(let p):
                     HomeLine(key: item.key, nameWidth: nameWidth, cursor: cursor, selection: selection, yours: move == .yours,
-                             name: p.local ? p.head : "#\(p.number)", line: p.title, pr: PRCell(number: p.number, signals: m.prSignals[p.number]),
+                             name: p.local ? p.head : "#\(p.number)", line: p.title, pr: PRCell(numbers: [p.number], state: PRState.of(p), signals: m.prSignals[p.number]),
                              step: m.openPRRows().first { $0.mine?.number == p.number }?.says ?? "")
                 case .review(let r):
                     HomeLine(key: item.key, nameWidth: nameWidth, cursor: cursor, selection: selection, yours: true,
-                             name: "#\(r.number)", line: r.title, pr: PRCell(number: nil, note: r.author), step: "review",
+                             name: "#\(r.number)", line: r.title, pr: PRCell(note: r.author), step: "review",
                              stepHelp: r.imported ? "its head is local as review/pr-\(r.number): ↵ opens it at once" : "↵ fetches its head first, a second or two")
                 case .reply(let chat, let forests):
                     HomeLine(key: item.key, nameWidth: nameWidth, cursor: cursor, selection: selection, yours: true,
-                             name: "reply to Claude", line: forests.map(\.name).joined(separator: ", "), pr: PRCell(number: nil),
+                             name: "reply to Claude", line: forests.map(\.name).joined(separator: ", "), pr: PRCell(),
                              step: "idle \(WorkContext.ago(m.now.timeIntervalSince1970 - chat.activeAt).replacingOccurrences(of: " ago", with: ""))",
                              stepHelp: "chat \(chat.id.prefix(8)) · ↵ brings its pane forward")
                 }
@@ -203,8 +203,8 @@ private struct HomeGroup: View {
 /// The home's one row shape: name, its line, the PR column, the step. The right two columns are fixed-width on every
 /// row, so they line up down the page whatever the row is.
 enum HomeColumns {
-    static let pr: CGFloat = 230
-    static let step: CGFloat = 190
+    static let pr: CGFloat = 360
+    static let step: CGFloat = 170
 }
 
 private struct HomeLine: View {
@@ -236,25 +236,62 @@ private struct HomeLine: View {
     }
 }
 
-/// A row's PR column: its number (and how many more the forest has open) with GitHub's signals, or a quiet note.
+/// A row's PR column: its open PRs' numbers, the lead PR's state in GitHub's words, and its signals — or a quiet note.
 struct PRCell: View {
     @Environment(\.theme) private var theme
-    let number: Int?
-    var more = 0
+    var numbers: [Int] = []
+    var state: PRState?
     var signals: PRSignals?
     var note = ""
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 9) {
-            if let number {
-                Text(verbatim: "#\(number)\(more > 0 ? " +\(more)" : "")").font(Theme.text(11)).monospacedDigit().foregroundStyle(theme.inkFaint)
-                    .help(more > 0 ? "\(more) more open in this forest" : "")
+            if !numbers.isEmpty {
+                Text(verbatim: numbers.map { "#\($0)" }.joined(separator: " ")).font(Theme.text(11)).monospacedDigit().foregroundStyle(theme.inkFaint)
+                    .fixedSize()
+                if let state { Text(verbatim: state.word).font(Theme.text(11)).foregroundStyle(color(state.tone)).fixedSize() }
                 PRSignalStrip(signals: signals)
             } else if !note.isEmpty {
                 Text(verbatim: note).font(Theme.text(11)).foregroundStyle(theme.inkFaint).lineLimit(1)
             }
         }
         .frame(width: HomeColumns.pr, alignment: .leading)
+        .clipped()
+    }
+
+    private func color(_ t: PRState.Tone) -> Color {
+        switch t {
+        case .ready: theme.add
+        case .blocked: theme.del
+        case .waiting: theme.goldLeaf
+        case .quiet: theme.inkFaint
+        }
+    }
+}
+
+/// An open PR's state as GitHub's PR list words it: what the row's PR column says beside its number.
+struct PRState: Equatable {
+    enum Tone { case ready, blocked, waiting, quiet }
+    var word: String
+    var tone: Tone
+
+    static func of(draft: Bool, review: String?, approvals: Int, changesRequested: Bool, mergeState: String?, mergeable: String? = nil) -> PRState {
+        let ms = (mergeState ?? "").uppercased()
+        if draft { return PRState(word: "draft", tone: .quiet) }
+        if changesRequested || review == "CHANGES_REQUESTED" { return PRState(word: "changes requested", tone: .blocked) }
+        if mergeable == "CONFLICTING" || ms == "DIRTY" { return PRState(word: "conflicts", tone: .blocked) }
+        if review == "APPROVED" || approvals > 0 {
+            return ms == "CLEAN" || ms == "HAS_HOOKS" ? PRState(word: "ready to merge", tone: .ready) : PRState(word: "approved", tone: .ready)
+        }
+        return PRState(word: "waiting for review", tone: .waiting)
+    }
+
+    static func of(_ pr: Pr) -> PRState {
+        of(draft: pr.draft, review: pr.review, approvals: pr.approvals ?? 0, changesRequested: false, mergeState: pr.mergeState, mergeable: pr.mergeable)
+    }
+
+    static func of(_ p: MyPR) -> PRState {
+        of(draft: p.draft, review: nil, approvals: p.approvals ?? 0, changesRequested: p.changesRequested == true, mergeState: p.mergeState)
     }
 }
 
@@ -485,8 +522,9 @@ private struct ForestRowView: View {
             }
             if cursor, !meta(verdict).isEmpty { Text(meta(verdict)).font(Theme.text(11)).foregroundStyle(theme.inkFaint).fixedSize() }
             if !f.closed { ForestChats(f: f, cursor: cursor).fixedSize() }
-            let pr = m.forestPR(f)
-            PRCell(number: pr?.v.pr?.number, more: pr?.more ?? 0, signals: pr?.v.pr.flatMap { m.prSignals[$0.number] })
+            let prs = m.forestPRs(f)
+            PRCell(numbers: prs.compactMap { $0.pr?.number }, state: prs.first?.pr.map(PRState.of),
+                   signals: prs.first?.pr.flatMap { m.prSignals[$0.number] })
             // the forest's one step, in a column that never grows (round 29, P2): the full line is on hover
             StepText(step: f.closed ? "" : f.says, yours: f.move == .yours, here: cursor).help(f.says)
         }

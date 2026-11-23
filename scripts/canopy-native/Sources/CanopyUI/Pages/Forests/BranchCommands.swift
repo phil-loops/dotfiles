@@ -17,6 +17,7 @@ enum BranchCommands {
     /// diverged from origin can't push; inside the force scope `p` arms a force-with-lease instead.
     static func pushRoute(_ id: String?, _ app: AppModel) -> String? {
         guard let id, let v = app.forestModel.branchView(id) else { return nil }
+        if v.b.diverged, ShipState.of(app).prepOf(id)?.route == "conform" { return "branch.conform" }
         let next = v.st.next
         switch next {
         case "branch.push.arm": return app.runner.armed == pushArm(id) ? "branch.push.confirm" : next
