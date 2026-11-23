@@ -42,12 +42,19 @@ def git(*a):
     return subprocess.run(["git", "-C", repo, *a], capture_output=True, text=True, env=env, check=True).stdout.strip()
 
 
+def publish(ref):
+    """What a push of `ref` leaves, without pushing: the fixture remote fetches it from here, and
+    this repo's remote-tracking ref follows. (Builds here never push, even to a fixture remote.)"""
+    subprocess.run(["git", "--git-dir", origin, "fetch", "-q", repo, f"{ref}:{ref}"], check=True, env=env, capture_output=True)
+    git("update-ref", f"refs/remotes/origin/{ref}", ref)
+
+
 git("remote", "add", "origin", origin)
 git("commit", "-q", "--allow-empty", "-m", "root")
 git("checkout", "-q", "-b", "b")
 git("commit", "-q", "--allow-empty", "-m", "b1")
 check("a branch never pushed is not on origin", not already_on_origin("b"))
-git("push", "-q", "origin", "b")
+publish("b")
 check("a branch whose tip origin holds is already on origin", already_on_origin("b"))
 git("commit", "-q", "--allow-empty", "-m", "b2")
 check("a branch with a commit origin lacks is not", not already_on_origin("b"))

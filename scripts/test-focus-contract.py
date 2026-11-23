@@ -43,6 +43,13 @@ def git(*a):
     return subprocess.run(["git", "-C", repo, *a], capture_output=True, text=True, env=env, check=True).stdout.strip()
 
 
+def publish(ref):
+    """What a push of `ref` leaves, without pushing: the fixture remote fetches it from here, and
+    this repo's remote-tracking ref follows. (Builds here never push, even to a fixture remote.)"""
+    subprocess.run(["git", "--git-dir", origin, "fetch", "-q", repo, f"{ref}:{ref}"], check=True, env=env, capture_output=True)
+    git("update-ref", f"refs/remotes/origin/{ref}", ref)
+
+
 def exists(b):
     return subprocess.run(["git", "-C", repo, "rev-parse", "-q", "--verify", f"refs/heads/{b}"],
                           capture_output=True, env=env).returncode == 0
@@ -63,11 +70,11 @@ def land(*bs):
         with open(os.path.join(repo, f"{b}.txt"), "w") as f:
             f.write(b)
         git("add", f"{b}.txt"); git("commit", "-q", "-m", f"squash {b}")
-    git("push", "-q", "origin", "main")
+    publish("main")
 
 
 git("remote", "add", "origin", origin)
-git("commit", "-q", "--allow-empty", "-m", "base"); git("push", "-q", "origin", "main")
+git("commit", "-q", "--allow-empty", "-m", "base"); publish("main")
 # proj: leaf (landed) · par (landed) → kid (live) · busy (landed, worktree busy) · old: arch (landed, archived)
 mk("leaf", "main"); mk("par", "main"); mk("kid", "par"); mk("busy", "main"); mk("arch", "main", "old")
 git("config", "stack-project.old.archived", "true")
@@ -127,7 +134,7 @@ check("the shipped forest leaves no keys", subprocess.run(["git", "-C", repo, "c
 # on main by a merge against the tip it was built on, its quick gates queue, and the root goes
 from srv import push  # noqa: E402
 mk("pr2", "main", "pub"); mk("pk", "pr2", "pub")
-git("push", "-q", "origin", "pk")
+publish("pk")
 land("pr2")
 pk_old, pr2_tip = git("rev-parse", "pk"), git("rev-parse", "pr2")
 sync._pr_state_map = lambda: {"pr2": {"state": "MERGED", "head": pr2_tip}}

@@ -19,7 +19,9 @@ unset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE
 git init -q --bare "$ROOT/origin.git"
 git init -q -b main "$ROOT/repo"; cd "$ROOT/repo"
 git remote add origin "$ROOT/origin.git"
-echo node_modules > .gitignore; echo base > f; git add .; git commit -qm base; git push -q origin main
+# what a push leaves, without pushing: the fixture remote fetches from here and the tracking ref follows
+publish() { git --git-dir="$ROOT/origin.git" fetch -q "$ROOT/repo" "$1:$1" && git update-ref "refs/remotes/origin/$1" "$1"; }
+echo node_modules > .gitignore; echo base > f; git add .; git commit -qm base; publish main
 mk() { git branch "$1" "$2"; git worktree add -q --detach "$ROOT/tmp-$1" "$1"
        echo "$1" > "$ROOT/tmp-$1/$1.txt"; git -C "$ROOT/tmp-$1" add "$1.txt"; git -C "$ROOT/tmp-$1" commit -qm "$1"
        git branch -f "$1" "$(git -C "$ROOT/tmp-$1" rev-parse HEAD)"; git worktree remove --force "$ROOT/tmp-$1"

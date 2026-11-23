@@ -19,7 +19,9 @@ unset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE
 git init -q --bare "$ROOT/origin.git"
 git init -q -b main "$ROOT/repo"; cd "$ROOT/repo"
 git remote add origin "$ROOT/origin.git"
-echo base > README; git add README; git commit -qm base; git push -q origin main
+# what a push leaves, without pushing: the fixture remote fetches from here and the tracking ref follows
+publish() { git --git-dir="$ROOT/origin.git" fetch -q "$ROOT/repo" "$1:$1" && git update-ref "refs/remotes/origin/$1" "$1"; }
+echo base > README; git add README; git commit -qm base; publish main
 mk() { git checkout -q -b "$1" "$2"; echo "$1" > "$1.txt"; git add "$1.txt"; git commit -qm "$1"
        git config "branch.$1.stack-parent" "$2"; git config "branch.$1.stack-project" proj; git config --add stack-project.proj.branch "$1"; }
 # a: landed leaf · b: landed, c (unmerged) on it · d → e: both landed (no head sha: the classify
@@ -34,9 +36,15 @@ for x in j k; do git checkout -q -b "$x" main; git config "branch.$x.stack-paren
 git checkout -q main
 for x in a b d e f g h i; do echo "$x" > "$x.txt"; git add "$x.txt"; git commit -qm "squash $x"; done   # the squash-merges
 echo later >> h.txt; git commit -qam "main moves on over h"
-git push -q origin main
+publish main
 git checkout -q -b l origin/main; git config branch.l.stack-parent main; git config --add stack-project.proj.branch l; git checkout -q main
 C0=$(git rev-parse c)
+# a (dropped) and b (kept) each carry a work identity in a journal of this test's own
+export CANOPY_WORK_JOURNAL="$ROOT/journal.sqlite3"
+journal() { python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); from srv import workjournal as wj; j = wj.Journal()
+print(j.mint_branch_work("repo", sys.argv[3]) if sys.argv[2] == "mint" else ("retired" if j.work(sys.argv[3])["retired_at"] else "live"))' "$SCRIPTS_DIR" "$@"; }
+WA=$(journal mint a); git config branch.a.stack-work "$WA"
+WB=$(journal mint b); git config branch.b.stack-work "$WB"
 heads() { for x in "$@"; do case $x in d|e) echo "$x -" ;; i) echo "i $I0" ;; l) echo "l $L0" ;; *) echo "$x $(git rev-parse "$x")" ;; esac; done; }
 
 out=$(STACK_RESTACK_MERGED_HEADS="$(heads a b d e g h i j l)" STACK_RESTACK_OPEN_PR_HEADS=" " \
@@ -48,6 +56,8 @@ assert_eq "e (landed leaf on d) is gone" no "$(exists e)"
 assert_eq "h (main touched its file since) is gone" no "$(exists h)"
 assert_eq "j (merged, no commits of its own) is gone" no "$(exists j)"
 assert_eq "b stays under its live child" yes "$(exists b)"
+assert_eq "a's work is retired with the branch" retired "$(journal state "$WA")"
+assert_eq "b's work stays live with it" live "$(journal state "$WB")"
 assert_eq "c didn't move" "$C0" "$(git rev-parse c)"
 assert_eq "c still sits on b" b "$(git config branch.c.stack-parent)"
 assert_eq "f stays without a merged PR" yes "$(exists f)"
@@ -58,7 +68,7 @@ assert_eq "l (a new branch under a merged PR's old name) stays" yes "$(exists l)
 assert_eq "the registry keeps the survivors" "b c f g i k l" "$(git config --get-all stack-project.proj.branch | sort | xargs)"
 
 # the rest lands: the forest ships and its keys go with it
-git checkout -q main; for x in c i; do git checkout -q "$x" -- "$x.txt"; git commit -qm "squash $x"; done; git push -q origin main
+git checkout -q main; for x in c i; do git checkout -q "$x" -- "$x.txt"; git commit -qm "squash $x"; done; publish main
 out=$(STACK_RESTACK_MERGED_HEADS="$(heads b c f g k; echo "l $(git rev-parse l)"; echo "i $(git rev-parse i)")" STACK_RESTACK_OPEN_PR_HEADS=" " \
       "$RESTACK" proj --contract-only --no-claude 2>&1); rc=$?
 assert_eq "second pass exits clean (rc)" 0 "$rc"

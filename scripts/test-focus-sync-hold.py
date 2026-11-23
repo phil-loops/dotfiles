@@ -42,6 +42,13 @@ def git(*a):
     return subprocess.run(["git", "-C", repo, *a], capture_output=True, text=True, env=env, check=True).stdout.strip()
 
 
+def publish(ref):
+    """What a push of `ref` leaves, without pushing: the fixture remote fetches it from here, and
+    this repo's remote-tracking ref follows. (Builds here never push, even to a fixture remote.)"""
+    subprocess.run(["git", "--git-dir", origin, "fetch", "-q", repo, f"{ref}:{ref}"], check=True, env=env, capture_output=True)
+    git("update-ref", f"refs/remotes/origin/{ref}", ref)
+
+
 def mk(b, parent):
     git("checkout", "-q", "-b", b, parent)
     with open(os.path.join(repo, f"{b}.txt"), "w") as f:
@@ -52,10 +59,10 @@ def mk(b, parent):
 
 
 git("remote", "add", "origin", origin)
-git("commit", "-q", "--allow-empty", "-m", "base"); git("push", "-q", "origin", "main")
+git("commit", "-q", "--allow-empty", "-m", "base"); publish("main")
 mk("a", "main"); mk("b", "main"); mk("c", "b")
-git("push", "-q", "origin", "b")
-git("checkout", "-q", "main"); git("commit", "-q", "--allow-empty", "-m", "m1"); git("push", "-q", "origin", "main")
+publish("b")
+git("checkout", "-q", "main"); git("commit", "-q", "--allow-empty", "-m", "m1"); publish("main")
 
 ctx.CWD = ctx.MAIN_WT = repo
 ctx.SCRIPTS = HERE

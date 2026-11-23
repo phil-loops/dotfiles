@@ -18,13 +18,15 @@ unset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE STACK_REWRITE_PUBLISHED
 git init -q --bare "$ROOT/origin.git"
 git init -q -b main "$ROOT/repo"; cd "$ROOT/repo"
 git remote add origin "$ROOT/origin.git"
+# what a push leaves, without pushing: the fixture remote fetches from here and the tracking ref follows
+publish() { git --git-dir="$ROOT/origin.git" fetch -q "$ROOT/repo" "$1:$1" && git update-ref "refs/remotes/origin/$1" "$1"; }
 ln -s "$HOOK" .git/hooks/reference-transaction
-echo base > f; git add f; git commit -qm base; git push -q origin main
+echo base > f; git add f; git commit -qm base; publish main
 mk() { git checkout -q -b "$1" "$2"; echo "$1" > "$1.txt"; git add "$1.txt"; git commit -qm "$1"
        git config "branch.$1.stack-parent" "$2"; git config "branch.$1.stack-project" proj; git config --add stack-project.proj.branch "$1"; }
-mk pr main; git push -q origin pr
+mk pr main; publish pr
 P0=$(git rev-parse pr)
-git checkout -q main; echo m1 > m1; git add m1; git commit -qm m1; git push -q origin main
+git checkout -q main; echo m1 > m1; git add m1; git commit -qm m1; publish main
 
 git checkout -q pr
 git rebase -q main >/dev/null 2>&1; rc=$?
@@ -46,8 +48,8 @@ git checkout -q main; git branch -D pr -q && ok "deleting a published branch (co
 git branch pr "$P0" && ok "creating a branch passes" || bad "create" ""
 
 # stack-restack: a pushed draft with no open PR still restacks; an open-PR branch is left alone
-mk draft main; git push -q origin draft
-git checkout -q main; echo m2 > m2; git add m2; git commit -qm m2; git push -q origin main
+mk draft main; publish draft
+git checkout -q main; echo m2 > m2; git add m2; git commit -qm m2; publish main
 git config branch.pr.stack-parent main; git config branch.pr.stack-project proj
 out=$("$S/stack-restack" proj --no-claude --no-classify 2>&1)
 git merge-base --is-ancestor origin/main draft && ok "stack-restack still restacks a pushed draft with no PR" || bad "draft restack" "$out"

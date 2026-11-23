@@ -51,9 +51,16 @@ def git(*a):
     return subprocess.run(["git", "-C", repo, *a], capture_output=True, text=True, env=env, check=True).stdout.strip()
 
 
+def publish(ref):
+    """What a push of `ref` leaves, without pushing: the fixture remote fetches it from here, and
+    this repo's remote-tracking ref follows. (Builds here never push, even to a fixture remote.)"""
+    subprocess.run(["git", "--git-dir", origin, "fetch", "-q", repo, f"{ref}:{ref}"], check=True, env=env, capture_output=True)
+    git("update-ref", f"refs/remotes/origin/{ref}", ref)
+
+
 git("remote", "add", "origin", origin)
 git("commit", "-q", "--allow-empty", "-m", "root")
-git("push", "-q", "origin", "main")
+publish("main")
 git("checkout", "-q", "-b", "p")
 git("commit", "-q", "--allow-empty", "-m", "p1")
 git("commit", "-q", "--allow-empty", "-m", "p2")

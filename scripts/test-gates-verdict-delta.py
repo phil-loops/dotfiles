@@ -42,6 +42,13 @@ def git(*a):
     return subprocess.run(["git", "-C", repo, *a], capture_output=True, text=True, env=env, check=True).stdout.strip()
 
 
+def publish(ref):
+    """What a push of `ref` leaves, without pushing: the fixture remote fetches it from here, and
+    this repo's remote-tracking ref follows. (Builds here never push, even to a fixture remote.)"""
+    subprocess.run(["git", "--git-dir", origin, "fetch", "-q", repo, f"{ref}:{ref}"], check=True, env=env, capture_output=True)
+    git("update-ref", f"refs/remotes/origin/{ref}", ref)
+
+
 def write(path, text):
     with open(os.path.join(repo, path), "w") as f:
         f.write(text)
@@ -61,7 +68,7 @@ def stands(b):
 git("remote", "add", "origin", origin)
 write("a.txt", "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nnine\nten\n")
 write("b.txt", "alpha\nbeta\n")
-git("add", "."); git("commit", "-q", "-m", "root"); git("push", "-q", "origin", "main")
+git("add", "."); git("commit", "-q", "-m", "root"); publish("main")
 
 # the branch changes one line of a.txt; its gates go green on the tip
 git("checkout", "-q", "-b", "feat")
@@ -75,7 +82,7 @@ check("…and records the delta beside it", git("config", "branch.feat.stack-gat
 
 # main moves in another file; the branch is rebased forward — its own hunk is unchanged
 git("checkout", "-q", "main")
-write("b.txt", "alpha\nbeta\ngamma\n"); git("commit", "-q", "-am", "main: gamma"); git("push", "-q", "origin", "main")
+write("b.txt", "alpha\nbeta\ngamma\n"); git("commit", "-q", "-am", "main: gamma"); publish("main")
 git("rebase", "-q", "main", "feat")
 check("a forward rebase keeps the verdict as delta", stands("feat") == "delta", stands("feat"))
 
@@ -100,7 +107,7 @@ check("the door's gates ward is green and says it was carried", gates_ward["ok"]
 
 # main lands inside the hunk's context: the id changes, the verdict lapses
 # (line six is three lines past the change: inside the hunk's context, outside the conflict zone)
-write("a.txt", "one\ntwo\nthree\nfour\nfive\nSIX\nseven\neight\nnine\nten\n"); git("commit", "-q", "-am", "main: six"); git("push", "-q", "origin", "main")
+write("a.txt", "one\ntwo\nthree\nfour\nfive\nSIX\nseven\neight\nnine\nten\n"); git("commit", "-q", "-am", "main: six"); publish("main")
 git("rebase", "-q", "main", "feat")
 check("main landing in the hunk's context lapses it", stands("feat") == "", stands("feat"))
 
