@@ -196,9 +196,19 @@ def dismiss(req, raw):
     return req._send(200, json.dumps({"ok": True}))
 
 
+def _is_live(r):
+    """The record's process is the one that wrote it: running, and started when the record says."""
+    return bool(r.get("session_id")) and _running(r.get("pid")) \
+        and agents._lstart(r["pid"]) == " ".join(str(r.get("start_time", "")).split())
+
+
+def live(session):
+    """The presence record of a live chat by its full session id, else None."""
+    return next((r for r in _records() if r.get("session_id") == session and _is_live(r)), None)
+
+
 def entities():
-    live = [r for r in _records() if r.get("session_id") and _running(r.get("pid"))
-            and agents._lstart(r["pid"]) == " ".join(str(r.get("start_time", "")).split())]
+    live = [r for r in _records() if _is_live(r)]
     bound, error = {}, None
     try:
         j = wj.Journal(readonly=True)
