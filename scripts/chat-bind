@@ -1,0 +1,117 @@
+#!/usr/bin/env python3
+"""chat-bind <pane> <name> — what chat-label runs: when <name> is exactly one forest, branch or tracker
+item, binds the chat in <pane> to its work and prints the label to show; prints nothing for a name that
+is none of them (a plain label). A name that is more than one refuses (exit 2) and says how to pick:
+forest:<name>, branch:<name> or todo:<id>. Run in the chat's checkout; the repo is that checkout's."""
+import glob
+import json
+import os
+import re
+import subprocess
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from srv import ctx, reshape, todo, workjournal as wj  # noqa: E402
+from stack_members import members  # noqa: E402
+
+SOURCE = wj.CLAUDE_CODE_SOURCE
+KINDS = ("forest", "branch", "todo")
+
+
+class Refused(Exception):
+    pass
+
+
+def _git(*a):
+    r = subprocess.run(["git", "-C", ctx.repo_cwd(), *a], capture_output=True, text=True)
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+
+def matches(name):
+    """Every kind of subject <name> names: {kind: label}."""
+    out = {}
+    if _git("config", "--get-regexp", rf"^stack-project\.{re.escape(name)}\.") or members(name, cwd=ctx.repo_cwd()):
+        out["forest"] = name
+    if _git("rev-parse", "--verify", "-q", f"refs/heads/{name}"):
+        out["branch"] = name
+    try:
+        if os.path.exists(todo.path(name)):
+            out["todo"] = todo.read(name).get("title") or name
+    except ValueError:
+        pass
+    return out
+
+
+def session_in(pane):
+    """The chat in <pane>: this process's own chat when it is that pane's, else the live presence record that names the pane."""
+    if os.environ.get("CLAUDE_CODE_SESSION_ID") and pane == os.environ.get("TMUX_PANE"):
+        return os.environ["CLAUDE_CODE_SESSION_ID"]
+    from srv import chats
+    found = [r["session_id"] for r in chats._records() if r.get("tmux_pane") == pane and chats._is_live(r)]
+    if len(found) != 1:
+        raise Refused(f"no one chat in pane {pane} to bind ({len(found)} found)")
+    return found[0]
+
+
+def works(kind, name):
+    if kind == "branch":
+        return [reshape.work_of(name)]
+    if kind == "forest":
+        branches = members(name, cwd=ctx.repo_cwd())
+        if not branches:
+            raise Refused(f"forest {name} has no branches to bind")
+        return [reshape.work_of(b) for b in branches]
+    it = todo.read(name)
+    j = wj.Journal()
+    try:
+        return [j.work_for_todo(name, it.get("incarnation"), create=True, project=it.get("project"),
+                                branch=it.get("solved_by"), title=it.get("title"))]
+    finally:
+        j.close()
+
+
+def resolve(pane, arg):
+    """The label to show for <arg>, binding the chat when it names a subject; None for a plain label."""
+    kind, sep, rest = arg.partition(":")
+    if sep and kind in KINDS:
+        found = {k: v for k, v in matches(rest).items() if k == kind}
+        if not found:
+            raise Refused(f"no {kind} named {rest}")
+        name = rest
+    else:
+        name, found = arg, matches(arg)
+    if not found:
+        return None
+    if len(found) > 1:
+        raise Refused(f"{name} is a {' and a '.join(found)} — say which: " + ", ".join(f"chat-label {k}:{name}" for k in found))
+    (kind, label), = found.items()
+    session = session_in(pane)
+    j = wj.Journal()
+    try:
+        if not j.db.execute("SELECT 1 FROM source WHERE source_id = ?", (SOURCE,)).fetchone():
+            j.register_source(SOURCE, adapter="claude-code", ordering="none")
+        j.bind_session(session, works(kind, name), by="chat-label")
+    finally:
+        j.close()
+    return label
+
+
+def main():
+    if len(sys.argv) != 3:
+        print(__doc__.strip(), file=sys.stderr)
+        return 2
+    here = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], capture_output=True, text=True).stdout.strip()
+    ctx.CWD = ctx.MAIN_WT = os.path.dirname(here) if here.endswith("/.git") else os.getcwd()
+    ctx.run = lambda argv, timeout=None, **kw: subprocess.run(argv, cwd=ctx.repo_cwd(), capture_output=True, text=True)
+    try:
+        label = resolve(sys.argv[1], " ".join(sys.argv[2].split()))
+    except (Refused, reshape.Refused, wj.JournalError, OSError) as e:
+        print(f"chat-label: {e}", file=sys.stderr)
+        return 2
+    if label:
+        print(label)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
