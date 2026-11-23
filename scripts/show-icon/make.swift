@@ -1,6 +1,6 @@
 #!/usr/bin/env swift
-// show-icon/make.swift <out.icns> — draws Show's app icon: a forest in gold leaf on canopy's night vellum,
-// one trunk forking into branches that each end in a node. Re-run after changing the drawing; the
+// show-icon/make.swift <out.icns> — draws Show's app icon on canopy's night vellum: a deck of two cards, the
+// front one carrying a fork in gold leaf and ember. Re-run after changing the drawing; the
 // build copies the committed AppIcon.icns into Show.app.
 import AppKit
 
@@ -8,7 +8,7 @@ func color(_ hex: UInt32, _ a: CGFloat = 1) -> CGColor {
     CGColor(srgbRed: CGFloat(hex >> 16 & 0xFF) / 255, green: CGFloat(hex >> 8 & 0xFF) / 255, blue: CGFloat(hex & 0xFF) / 255, alpha: a)
 }
 
-let gold = color(0xE6B64E), goldDeep = color(0x6E5A2C)
+let gold = color(0xE6B64E), goldDeep = color(0x6E5A2C), ember = color(0xD2732A)
 
 func draw(_ px: Int) -> Data {
     let s = CGFloat(px) / 1024
@@ -36,36 +36,33 @@ func draw(_ px: Int) -> Data {
     ctx.setLineWidth(6)
     ctx.strokePath()
 
-    // the forest: a trunk from the root node, forking twice; branches are curves, nodes are discs
-    let root = CGPoint(x: 512, y: 250), fork = CGPoint(x: 512, y: 470)
-    let mid = [CGPoint(x: 350, y: 620), CGPoint(x: 512, y: 660), CGPoint(x: 674, y: 620)]
-    let tips = [CGPoint(x: 280, y: 770), CGPoint(x: 420, y: 790), CGPoint(x: 604, y: 790), CGPoint(x: 744, y: 770)]
-    func branch(_ a: CGPoint, _ b: CGPoint, width: CGFloat) {
+    // a deck of two cards: the back one solid, turned and shifted so its corner shows; the front one edged
+    // in gold, carrying a fork — a branch and its two children, one in ember
+    func curve(_ a: CGPoint, _ b: CGPoint, _ w: CGFloat, _ c: CGColor) {
         ctx.move(to: a)
         ctx.addCurve(to: b, control1: CGPoint(x: a.x, y: a.y + (b.y - a.y) * 0.55), control2: CGPoint(x: b.x, y: b.y - (b.y - a.y) * 0.45))
-        ctx.setLineWidth(width)
-        ctx.setLineCap(.round)
-        ctx.setStrokeColor(gold)
-        ctx.strokePath()
+        ctx.setLineWidth(w); ctx.setLineCap(.round); ctx.setStrokeColor(c); ctx.strokePath()
     }
-    branch(root, fork, width: 30)
-    for m in mid { branch(fork, m, width: 22) }
-    branch(mid[0], tips[0], width: 16); branch(mid[0], tips[1], width: 16)
-    branch(mid[2], tips[2], width: 16); branch(mid[2], tips[3], width: 16)
-    func node(_ p: CGPoint, _ r: CGFloat, hollow: Bool = false) {
-        let rect = CGRect(x: p.x - r, y: p.y - r, width: 2 * r, height: 2 * r)
-        if hollow {
-            ctx.setFillColor(color(0x1A1B1E)); ctx.fillEllipse(in: rect)
-            ctx.setStrokeColor(gold); ctx.setLineWidth(10); ctx.strokeEllipse(in: rect.insetBy(dx: 5, dy: 5))
-        } else {
-            ctx.setFillColor(gold); ctx.fillEllipse(in: rect)
-        }
+    func disc(_ p: CGPoint, _ r: CGFloat, _ c: CGColor) {
+        ctx.setFillColor(c); ctx.fillEllipse(in: CGRect(x: p.x - r, y: p.y - r, width: 2 * r, height: 2 * r))
     }
-    node(root, 40)
-    node(fork, 26)
-    for m in mid { node(m, 26) }
-    for t in tips { node(t, 34) }
-    node(mid[1], 40, hollow: true)
+    func turned(_ angle: CGFloat, by shift: CGPoint, _ draw: () -> Void) {
+        ctx.saveGState()
+        ctx.translateBy(x: 512 + shift.x, y: 512 + shift.y); ctx.rotate(by: angle); ctx.translateBy(x: -512, y: -512)
+        draw()
+        ctx.restoreGState()
+    }
+    let card = CGPath(roundedRect: CGRect(x: 252, y: 292, width: 520, height: 440), cornerWidth: 56, cornerHeight: 56, transform: nil)
+    turned(0.16, by: CGPoint(x: 34, y: -34)) {
+        ctx.addPath(card); ctx.setFillColor(goldDeep); ctx.fillPath()
+    }
+    turned(-0.05, by: CGPoint(x: -14, y: 18)) {
+        ctx.addPath(card); ctx.setFillColor(color(0x1A1B1E)); ctx.fillPath()
+        ctx.addPath(card); ctx.setStrokeColor(gold); ctx.setLineWidth(30); ctx.strokePath()
+        let a = CGPoint(x: 360, y: 405), fork = CGPoint(x: 482, y: 508), up = CGPoint(x: 662, y: 626), down = CGPoint(x: 666, y: 424)
+        curve(a, fork, 42, gold); curve(fork, up, 42, gold); curve(fork, down, 42, ember)
+        disc(a, 52, gold); disc(fork, 36, gold); disc(up, 58, gold); disc(down, 54, ember)
+    }
 
     let rep = NSBitmapImageRep(cgImage: ctx.makeImage()!)
     return rep.representation(using: .png, properties: [:])!
