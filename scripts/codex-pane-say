@@ -29,7 +29,7 @@ def find_pane(title):
 
 def composer_empty(pane):
     lines = [l for l in tmux("capture-pane", "-p", "-t", pane).splitlines() if l.strip()]
-    prompt = [l for l in lines[-4:] if l.lstrip().startswith("›")]
+    prompt = [l for l in lines[-8:] if l.lstrip().startswith("›")]
     shown = prompt[-1].strip().lstrip("›").strip() if prompt else ""
     return PLACEHOLDER in shown or (len(shown) >= 12 and PLACEHOLDER.startswith(shown))
 
