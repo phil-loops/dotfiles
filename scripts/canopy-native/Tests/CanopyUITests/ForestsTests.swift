@@ -319,7 +319,7 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = f
         #expect(a.rows == ["pr:r:a", "p:r:tree", "p:r:bench", "p:r:solo"], "rows follow what the page draws: the cards, then the groups")
     }
 
-    /// Round 29, P8 (round 30: on their forests' rows): open PRs lead the home — yours to act on before the ones a reviewer holds, drafts last — and
+    /// Round 29, P8 (round 34: in one static order): open PRs lead the home — by number, oldest first, drafts last — and
     /// ] o / [ o walk them from any page, wrapping, from a PR's own review to the next.
     @Test func openPRsLeadTheHomeAndBracketOWalksThem() {
         let a = world(branchOver: ["s": ["pushed": "synced"], "w": ["pushed": "synced"]], extraPRs: [
@@ -327,22 +327,24 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = f
             "r:s": prObj(["id": "r:s", "branch": "s", "project": "r:solo", "number": 13, "review": "CHANGES_REQUESTED"]),
         ])
         a.forestModel.syncClosings()
-        #expect(a.rows.prefix(2) == ["pr:r:s", "pr:r:a"], "each open PR that isn't a draft is a card, leading the home")
-        #expect(a.forestModel.openPRRows().map(\.key) == ["pr:r:s", "pr:r:a", "pr:r:w"], "changes requested (yours), then a reviewer's, then the draft")
+        #expect(a.rows.prefix(2) == ["pr:r:a", "pr:r:s"], "each open PR that isn't a draft is a card, leading the home")
+        #expect(a.forestModel.openPRRows().map(\.key) == ["pr:r:a", "pr:r:s", "pr:r:w"], "#11, #13, then the draft — whatever each one waits on")
         #expect(ForestNav.primary(for: "pr:r:a", a)?.id == "branch.open")
         a.setCursor("p:r:tree")
         a.keys.handle("]"); a.keys.handle("o")
         #expect(a.router.route == .review(repo: "r", branch: "a"), "on a forest's row, ] o reviews its own PR")
         a.keys.handle("]"); a.keys.handle("o")
-        #expect(a.router.route == .review(repo: "r", branch: "w"), "from inside a review, the one after it")
+        #expect(a.router.route == .review(repo: "r", branch: "s"), "from inside a review, the one after it")
         a.keys.handle("]"); a.keys.handle("o")
-        #expect(a.router.route == .review(repo: "r", branch: "s"), "and wraps")
+        #expect(a.router.route == .review(repo: "r", branch: "w"))
+        a.keys.handle("]"); a.keys.handle("o")
+        #expect(a.router.route == .review(repo: "r", branch: "a"), "and wraps")
         a.keys.handle("["); a.keys.handle("o")
         #expect(a.router.route == .review(repo: "r", branch: "w"))
     }
 
-    /// My open PRs no forest carries (GET /my-prs) join the forests' in one order: changes requested is yours, a
-    /// reviewer's after it, drafts last — and a PR a forest carries is listed once, as the forest's.
+    /// My open PRs no forest carries (GET /my-prs) join the forests' in one order — by number, drafts last — and a PR a
+    /// forest carries is listed once, as the forest's.
     @Test func myPRsNoForestCarriesJoinTheOpenPRs() {
         let a = world()
         a.forestModel.syncClosings()
@@ -351,11 +353,11 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = f
                  approvals: 0, changesRequested: changes, mergeState: "BLOCKED")
         }
         a.forestModel.setMyPRs([mine(21, "tweak", draft: true), mine(20, "fix/monitors", changes: true, local: true), mine(11, "a")])
-        #expect(Array(a.rows.prefix(3)) == ["gh:20", "pr:r:a", "p:r:tree"], "the cards lead, mine to act on first")
-        #expect(a.forestModel.homeSections().cards.map(\.key) == ["gh:20", "pr:r:a"], "a card for each open PR that isn't a draft, yours first")
+        #expect(Array(a.rows.prefix(3)) == ["pr:r:a", "gh:20", "p:r:tree"], "the cards lead, by number")
+        #expect(a.forestModel.homeSections().cards.map(\.key) == ["pr:r:a", "gh:20"], "a card for each open PR that isn't a draft")
         #expect(a.forestModel.homeSections().sections.first { $0.items.contains { $0.key == "gh:21" } }?.verb == .waiting, "the draft waits")
         #expect(!a.rows.contains("gh:11"), "#11 is the tree forest's: listed once")
-        let row = a.forestModel.openPRRows().first
+        let row = a.forestModel.openPRRows().first { $0.key == "gh:20" }
         #expect(row?.place == "fix/monitors" && row?.says == "changes requested" && row?.yours == true)
         #expect(a.forestModel.openPRRows().last?.place == "on GitHub")
         #expect(ForestNav.primary(for: "gh:20", a)?.id == "forests.mypr.open")
@@ -395,16 +397,33 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = f
             "r:s": prObj(["id": "r:s", "branch": "s", "project": "r:solo", "number": 13, "review": "CHANGES_REQUESTED"]),
         ])
         a.forestModel.syncClosings()
-        #expect(a.forestModel.homeStrips().first == ["pr:r:s", "pr:r:a"])
-        a.setCursor("pr:r:s")
+        let cards = a.forestModel.homeStrips().first ?? []
+        #expect(cards.count == 2 && Set(cards) == ["pr:r:s", "pr:r:a"])
+        a.setCursor(cards[0])
         a.keys.handle("l")
-        #expect(a.selected == "pr:r:a", "l walks the cards")
+        #expect(a.selected == cards[1], "l walks the cards")
         a.keys.handle("j")
         #expect(a.selected == a.rows[2], "j leaves the strip for the line below it")
         a.keys.handle("k")
-        #expect(a.selected == "pr:r:a", "k comes back to where you were on the strip")
+        #expect(a.selected == cards[1], "k comes back to where you were on the strip")
         a.keys.handle("h"); a.keys.handle("h")
-        #expect(a.selected == "pr:r:s", "h at the strip's start doesn't wrap")
+        #expect(a.selected == cards[0], "h at the strip's start doesn't wrap")
+    }
+
+    /// Round 34: the cards keep one order — by PR number, oldest first — whatever their state, and ⌥n reviews card n
+    /// from any page; a bare digit stays a count.
+    @Test func optionDigitReviewsTheNumberedCardInAStaticOrder() {
+        let a = world(branchOver: ["s": ["pushed": "synced"], "w": ["pushed": "synced"]], extraPRs: [
+            "r:s": prObj(["id": "r:s", "branch": "s", "project": "r:solo", "number": 13, "review": "CHANGES_REQUESTED"]),
+        ])
+        a.forestModel.syncClosings()
+        let numbers = a.forestModel.homeSections().cards.map(\.number)
+        #expect(numbers == numbers.sorted(), "by number, not by whose move")
+        let second = a.forestModel.homeSections().cards[1]
+        a.keys.handle("A-2")
+        #expect(a.router.route == .review(repo: "r", branch: second.branch!.b.name), "⌥2 reviews card 2")
+        a.keys.handle("A-9")
+        #expect(a.runner.note?.contains("PR 9") == true || a.router.route == .review(repo: "r", branch: second.branch!.b.name), "no ninth PR: nothing moves")
     }
 
     /// The strip draws GitHub's checks summary order and skips zeros; changes requested replaces the approval count.

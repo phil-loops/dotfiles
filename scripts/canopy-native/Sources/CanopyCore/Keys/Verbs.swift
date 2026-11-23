@@ -45,6 +45,7 @@ public enum Verb: String, CaseIterable, Sendable, Comparable {
     case alternate
     case slot1 = "slot-1", slot2 = "slot-2", slot3 = "slot-3", slot4 = "slot-4", slot5 = "slot-5"
     case slot6 = "slot-6", slot7 = "slot-7", slot8 = "slot-8", slot9 = "slot-9"
+    case pr1 = "pr-1", pr2 = "pr-2", pr3 = "pr-3", pr4 = "pr-4", pr5 = "pr-5", pr6 = "pr-6", pr7 = "pr-7", pr8 = "pr-8", pr9 = "pr-9"
     case jumpBack = "jump-back", jumpForward = "jump-forward", saveJump = "save-jump"
     case branches, jumps, flags, findings, grep, lastPicker = "last-picker"
     case workspaceSymbols = "workspace-symbols"
@@ -72,6 +73,7 @@ public enum Verb: String, CaseIterable, Sendable, Comparable {
     public static func nth(_ n: Int) -> Verb { Verb(rawValue: "nth-\(n)")! }
     /// The Nth focus forest (1…9).
     public static func slot(_ n: Int) -> Verb { Verb(rawValue: "slot-\(n)")! }
+    public static func pr(_ n: Int) -> Verb { Verb(rawValue: "pr-\(n)")! }
 
     public var spec: VerbSpec { Verbs.byVerb[self]! }
     /// Its name as which-key, the `?` sheet and keys.toml say it.
@@ -112,7 +114,8 @@ public enum KeySection: String, CaseIterable, Sendable {
              .nextFinding, .previousFinding, .firstFinding, .lastFinding, .nextGitHunk, .previousGitHunk,
              .firstChange, .lastChange, .nextCommit, .previousCommit:
             return .review
-        case .root, .tip, .nextSibling, .previousSibling, .out, .nextOpenPR, .previousOpenPR:
+        case .root, .tip, .nextSibling, .previousSibling, .out, .nextOpenPR, .previousOpenPR,
+             .pr1, .pr2, .pr3, .pr4, .pr5, .pr6, .pr7, .pr8, .pr9:
             return .stack
         case .wordsTitle, .wordsWhy, .wordsDescription, .wordsCommit, .wordsFold:
             return .words
@@ -264,6 +267,11 @@ public enum Verbs {
         v(.slot1, .nav, ["g 1"], "focus forest 1"), v(.slot2, .nav, ["g 2"], "focus forest 2"), v(.slot3, .nav, ["g 3"], "focus forest 3"),
         v(.slot4, .nav, ["g 4"], "focus forest 4"), v(.slot5, .nav, ["g 5"], "focus forest 5"), v(.slot6, .nav, ["g 6"], "focus forest 6"),
         v(.slot7, .nav, ["g 7"], "focus forest 7"), v(.slot8, .nav, ["g 8"], "focus forest 8"), v(.slot9, .nav, ["g 9"], "focus forest 9"),
+        v(.pr1, .nav, ["A-1"], jump: true, "open PR 1's review from any page — the number on its card on the home, oldest PR first"),
+        v(.pr2, .nav, ["A-2"], jump: true, "open PR 2's review"), v(.pr3, .nav, ["A-3"], jump: true, "open PR 3's review"),
+        v(.pr4, .nav, ["A-4"], jump: true, "open PR 4's review"), v(.pr5, .nav, ["A-5"], jump: true, "open PR 5's review"),
+        v(.pr6, .nav, ["A-6"], jump: true, "open PR 6's review"), v(.pr7, .nav, ["A-7"], jump: true, "open PR 7's review"),
+        v(.pr8, .nav, ["A-8"], jump: true, "open PR 8's review"), v(.pr9, .nav, ["A-9"], jump: true, "open PR 9's review"),
         v(.jumpBack, .nav, ["C-o"], "jump back (the jumplist)"),
         v(.jumpForward, .nav, ["C-i"], "jump forward again"),
         v(.saveJump, .nav, ["C-s"], "save this spot to the jumplist"),

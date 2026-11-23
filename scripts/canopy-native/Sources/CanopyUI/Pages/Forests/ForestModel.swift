@@ -461,29 +461,28 @@ public final class ForestModel {
 
     func openPR(_ row: String?) -> BranchView? { RowKey.id(row, "pr").flatMap { branchView($0) } }
 
-    /// The home's open-PR rows: the forests' open PRs and mine no forest carries, in one order — waiting on you, then
-    /// held by others, drafts last; a forest's before GitHub's at the same rank.
+    /// The home's open-PR rows: the forests' open PRs and mine no forest carries, in one static order — by number, oldest
+    /// first, drafts last — so a PR keeps its place (and its ⌥ digit) while its state changes (round 34).
     func openPRRows() -> [OpenPRRow] {
-        func rank(_ draft: Bool, _ move: Move) -> Int { draft ? Move.allCases.count : Move.allCases.firstIndex(of: move)! }
         let carriedPRs = openPRs()
-        var rows: [(rank: Int, row: OpenPRRow)] = carriedPRs.map { v in
+        var rows: [OpenPRRow] = carriedPRs.map { v in
             let draft = v.pr?.draft == true
-            return (rank(draft, Move.of(v.st.actor)), OpenPRRow(
+            return OpenPRRow(
                 key: RowKey.openPR(v.b.id), number: v.pr?.number ?? 0, title: v.pr?.title ?? v.b.description,
                 place: forest(v.b.project)?.p.name ?? "", says: draft ? "draft" : ShipRules.says(v.st, v.b, v.pr),
                 yours: v.st.actor == .you && !draft, draft: draft, glyph: v.st.ship.glyph, branch: v, mine: nil,
-                signals: v.pr.flatMap { prSignals[$0.number] }))
+                signals: v.pr.flatMap { prSignals[$0.number] })
         }
         let carried = Set(carriedPRs.compactMap { $0.pr?.number })
         for p in myPRs where !carried.contains(p.number) {
             let merge = (p.approvals ?? 0) > 0 && p.mergeState == "CLEAN"
             let move: Move = p.changesRequested == true || merge ? .yours : .moving
             let says = p.draft ? "draft" : p.changesRequested == true ? "changes requested" : merge ? "merge it" : "waiting on review"
-            rows.append((rank(p.draft, move), OpenPRRow(
+            rows.append(OpenPRRow(
                 key: RowKey.myPR(p.number), number: p.number, title: p.title, place: p.local ? p.head : "on GitHub", says: says,
-                yours: move == .yours && !p.draft, draft: p.draft, glyph: p.draft ? "○" : "◇", branch: nil, mine: p, signals: prSignals[p.number])))
+                yours: move == .yours && !p.draft, draft: p.draft, glyph: p.draft ? "○" : "◇", branch: nil, mine: p, signals: prSignals[p.number]))
         }
-        return rows.enumerated().sorted { $0.element.rank != $1.element.rank ? $0.element.rank < $1.element.rank : $0.offset < $1.offset }.map(\.element.row)
+        return rows.sorted { $0.draft != $1.draft ? !$0.draft : $0.number < $1.number }
     }
 
     func myPR(_ row: String?) -> MyPR? {

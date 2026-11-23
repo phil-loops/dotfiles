@@ -71,6 +71,18 @@ enum ForestNav {
             if let v = row.branch { app.go(.review(repo: v.b.repo, branch: v.b.name)) }
             else if let p = row.mine { openOnGitHub(p.number, p.url) }
         }
+        // ⌥1–⌥9: open PR n's review from any page, by the number on its card
+        for n in 1...9 {
+            r.register(Command(id: "forests.pr.\(n)", title: "Review open PR \(n)", scope: .global, verb: .pr(n), label: "PR \(n)", recordsJump: true,
+                               available: { _ in m.homeSections().cards.count >= n },
+                               local: { _, _ in
+                                   let cards = m.homeSections().cards
+                                   guard cards.indices.contains(n - 1) else { throw Refusal("no open PR \(n)") }
+                                   let row = cards[n - 1]
+                                   if let v = row.branch { app.go(.review(repo: v.b.repo, branch: v.b.name)) }
+                                   else if let p = row.mine { openOnGitHub(p.number, p.url) }
+                               }))
+        }
         r.register(Command(id: "forests.pr.next", title: "Review the next open PR", scope: .global, verb: .nextOpenPR, label: "open PR",
                            pair: "forests.pr.prev", recordsJump: true, available: { _ in !m.openPRRows().isEmpty }, local: { _, _ in try hopPR(1) }))
         r.register(Command(id: "forests.pr.prev", title: "Review the previous open PR", scope: .global, verb: .previousOpenPR, label: "open PR",

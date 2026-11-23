@@ -153,6 +153,7 @@ enum KeyLessons {
         var out: [Verb: String] = [:]
         for n in 3...9 { out[.slot(n)] = "the same verb as slot-1 and slot-2 with another digit; the practice lane has two forests" }
         for n in 2...9 { out[.nth(n)] = "the same verb as nth-1 with another digit; the practice branch offers one commit to pick" }
+        for n in 1...9 { out[.pr(n)] = "jumps to the review ] o reaches, by its card's number; the practice home has one open PR, drilled as ] o" }
         out[.copyPlace] = "y's place written out for pasting; it puts nothing on screen to practice against"
         return out
     }()

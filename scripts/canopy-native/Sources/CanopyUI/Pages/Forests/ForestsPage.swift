@@ -237,17 +237,23 @@ private struct PRCards: View {
 
     var body: some View {
         ChipFlow(spacing: 12) {
-            ForEach(cards, id: \.key) { r in card(r) }
+            ForEach(Array(cards.enumerated()), id: \.element.key) { i, r in card(r, n: i + 1) }
         }
         .padding(.leading, 28).padding(.trailing, 16).padding(.top, 6).padding(.bottom, 30)
     }
 
-    private func card(_ r: OpenPRRow) -> some View {
+    private func card(_ r: OpenPRRow, n: Int) -> some View {
         let here = cursor == r.key
         let ask = Self.ask(r)
         let state = r.branch?.pr.map(PRState.of) ?? r.mine.map(PRState.of)
         return VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
+                if n <= 9 {
+                    Text(verbatim: "⌥\(n)").font(Theme.text(11, weight: .semibold)).monospacedDigit()
+                        .foregroundStyle(here ? theme.goldLeaf : theme.inkFaint)
+                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(here ? theme.goldLeaf.opacity(0.6) : theme.vellumEdge, lineWidth: 1))
+                }
                 Text(verbatim: ask.word.uppercased()).font(Theme.display(20)).tracking(1.2)
                     .foregroundStyle(ask.yours ? theme.goldLeaf : theme.inkDim).lineLimit(1)
                 Spacer(minLength: 8)

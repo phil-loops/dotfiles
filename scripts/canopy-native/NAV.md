@@ -72,6 +72,7 @@
 | cancel | `esc` | close the innermost transient thing — never changes page |
 | next-sibling / previous-sibling | `J` / `K`, and `] b` / `[ b` (one verb, both keys) | the next / previous branch in merge order — the forest's numbered list — staying on this kind of page and the same file when it's in the neighbour's diff (jumps); the only next |
 | next-open-pr / previous-open-pr | `] o` / `[ o` | the next / previous open PR's review, in the home's order (yours to act on first, drafts last), from any page; wraps (jumps) |
+| pr-1 … pr-9 | `⌥1` … `⌥9` | open PR n's review from any page — the number on its card on the home; PRs keep one order, by number, oldest first (jumps). A modifier, so a bare digit stays a count everywhere and a key means one thing on every page; `⌘` is the menu bar's and `⌃1`–`⌃9` are macOS Spaces' |
 | root / tip | `g K` / `g J` | the branch's stack's root, tip (jumps) |
 | ancestry, by name | `:parent` / `:child` / `:requires` | the branch's parent; its child (which one, at a fork); what it builds on — its parent or a requires dep (a picker at a fan-in). Named, not stepped (jumps) |
 | next-file / previous-file | `g n` / `g p` (`}` / `{`) | the next / previous file, at its first change, wrapping past the last — Helix's next / previous buffer (jumps) |

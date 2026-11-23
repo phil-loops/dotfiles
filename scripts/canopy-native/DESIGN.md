@@ -569,3 +569,10 @@ Phil, on round 31: "i have 4 open prs, i should get a headline card for each one
 
 Phil, on the push chips: "that would be sick" — one key for the pushes the home lists. `, p` (`forests.push.green`) readies every branch whose next step is a push you can send now — gates green, its parent on origin, not held (`ForestModel.greenPushes`) — and names them on the status line. The same keys again send exactly that set, each through its own `branch.push.confirm`, so every push keeps its own write, settle and line. The readied key is the set itself: if the set changed between the presses, the second press readies the new set and sends nothing (a confirmation is bound to what it showed). Branches whose gates only advise, or whose parent isn't on origin yet, wait for the next press.
 
+## Round 34: PRs keep their place and their number
+
+Phil, on round 32's cards: "the key press behavior is horrendous" — "it's gotta be that the PRs get labeled numbers — and has to be static ordering", then: "make this work in a principled way … maybe it needs a control or option."
+
+1. **One order, whatever the state.** `openPRRows` sorts by PR number, oldest first, drafts last — a PR moving from "in review" to "ready to merge" no longer reshuffles the cards under the cursor or the walk `] o` takes.
+2. **A number per card, a modifier per number.** `⌥1`–`⌥9` (verbs `pr-1`…`pr-9`, `forests.pr.N`) review card n from any page, and each card wears its `⌥n`. A bare digit was tried first and dropped: it would mean "PR n" on the home and "a count" everywhere else, and the key engine would need a page-claims-a-digit exception — one key, two meanings. `⌘` belongs to the menu bar; `⌃`-digits are macOS Spaces'.
+
