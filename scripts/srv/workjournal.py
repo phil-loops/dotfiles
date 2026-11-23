@@ -424,7 +424,7 @@ class Journal:
             if row and row["todo_incarnation"] == incarnation:
                 return row["work_id"]
             if row:
-                db.execute("UPDATE work SET retired_at = ? WHERE work_id = ?", (self.now(), row["work_id"]))
+                self._retire(db, row["work_id"])
             db.execute("""INSERT INTO work (work_id, todo_id, todo_incarnation, repo, project, branch, title, created_at)
                           VALUES (?,?,?,?,?,?,?,?)""", (work_id, todo_id, incarnation, links.get("repo"), links.get("project"),
                                                        links.get("branch"), links.get("title"), self.now()))
@@ -450,20 +450,21 @@ class Journal:
                           VALUES (?,?,?,?,?,?)""", (work_id, repo, project, branch, title, self.now()))
         return work_id
 
-    def retire_unbranched(self, repo, named, *, dry_run=False):
+    def retire_unbranched(self, repo, named, *, dry_run=False, min_age=0):
         """Retires `repo`'s branch work (work with no tracker item) that no branch names any more in
         `branch.<n>.stack-work`: its branch was deleted, so the identity ends as history. Returns
-        [{work_id, branch}] retired, or that would be."""
+        [{work_id, branch}] retired, or that would be. `min_age` (seconds) leaves a work minted
+        that recently alone: a branch's work is minted before the branch that will name it."""
         if not repo:
             raise JournalError("a branch is only a subject with its repository")
         with self.tx() as db:
-            gone = [dict(r) for r in db.execute(
-                "SELECT work_id, branch FROM work WHERE repo = ? AND todo_id IS NULL AND retired_at IS NULL ORDER BY created_at",
-                (repo,)) if r["work_id"] not in set(named)]
+            before = _iso(self.clock() - min_age)
+            gone = [{"work_id": r["work_id"], "branch": r["branch"]} for r in db.execute(
+                "SELECT work_id, branch, created_at FROM work WHERE repo = ? AND todo_id IS NULL AND retired_at IS NULL ORDER BY created_at",
+                (repo,)) if r["work_id"] not in set(named) and (not min_age or r["created_at"] <= before)]
             if not dry_run:
-                now = self.now()
                 for w in gone:
-                    db.execute("UPDATE work SET retired_at = ? WHERE work_id = ?", (now, w["work_id"]))
+                    self._retire(db, w["work_id"])
         return gone
 
     def relink(self, work_id, **links):
@@ -481,7 +482,28 @@ class Journal:
         """Ends a work identity (its branch was deleted, its item dropped). Never reused."""
         with self.tx() as db:
             self._live_work(db, work_id)
-            db.execute("UPDATE work SET retired_at = ? WHERE work_id = ?", (self.now(), work_id))
+            self._retire(db, work_id)
+
+    def _retire(self, db, work_id):
+        """Ends the work and, with it, every chat binding in force that names it: the chat moves to
+        a new generation bound to its works that are still live. Left bound, it could no longer
+        capture a message or take new work (both refuse a retired target), and kept naming a
+        branch that is gone. The generation it was bound under keeps its record. A Show section
+        is left as it is: it binds one work, and its reader says "replaced" from that work's
+        retirement until someone rebinds (showingest.bind)."""
+        now = self.now()
+        db.execute("UPDATE work SET retired_at = ? WHERE work_id = ?", (now, work_id))
+        for conv in db.execute("""SELECT c.conv_pk, c.binding_generation AS gen FROM conversation c
+                                  JOIN binding_work bw ON bw.conv_pk = c.conv_pk AND bw.generation = c.binding_generation
+                                  WHERE bw.work_id = ? AND c.source_id != ?""", (work_id, SHOW_SOURCE)).fetchall():
+            live = [r["work_id"] for r in db.execute(
+                """SELECT bw.work_id FROM binding_work bw JOIN work w ON w.work_id = bw.work_id
+                   WHERE bw.conv_pk = ? AND bw.generation = ? AND w.retired_at IS NULL ORDER BY bw.work_id""",
+                (conv["conv_pk"], conv["gen"]))]
+            db.execute("INSERT INTO binding VALUES (?,?,?,?)", (conv["conv_pk"], conv["gen"] + 1, now, f"retired {work_id}"))
+            for w in live:
+                db.execute("INSERT INTO binding_work VALUES (?,?,?)", (conv["conv_pk"], conv["gen"] + 1, w))
+            db.execute("UPDATE conversation SET binding_generation = ? WHERE conv_pk = ?", (conv["gen"] + 1, conv["conv_pk"]))
 
     def work(self, work_id):
         row = self.db.execute("SELECT * FROM work WHERE work_id = ?", (work_id,)).fetchone()

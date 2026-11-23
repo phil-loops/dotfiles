@@ -87,7 +87,17 @@ jj = workjournal.Journal(env["CANOPY_WORK_JOURNAL"])
 check("new: the chat that made the branch is bound to its work", rc == 0 and out.get("bound") == SID
       and jj.bound_works("claude-code", SID) == cfg("branch.made-by-chat.stack-work"), (rc, out, err))
 jj.close()
-reshape("contract", "made-by-chat")
+work_chat = cfg("branch.made-by-chat.stack-work")[0]
+rc, out, err = reshape("contract", "made-by-chat")
+jj = workjournal.Journal(env["CANOPY_WORK_JOURNAL"])
+check("contract: the branch's work is retired with it", rc == 0 and out.get("work") == work_chat
+      and bool(jj.work(work_chat)["retired_at"]), (rc, out, err))
+check("contract: the chat that was bound to it no longer lists it", jj.bound_works("claude-code", SID) == [],
+      jj.bound_works("claude-code", SID))
+check("contract: …and can still take work and capture a message",
+      jj.bind_session(SID, [work_a], by="t") > 0 and jj.bound_works("claude-code", SID) == [work_a]
+      and jj.capture(source="claude-code", conversation=SID, source_message_id="after-contract", text="go on")["works"].keys() == {work_a})
+jj.close()
 rc, out, _ = reshape("new", "x", "--parent", "main", "--project", "f")
 check("new: refused without a purpose", rc == 1 and "description" in out.get("err", ""), out)
 

@@ -378,5 +378,40 @@ b1.register_source("show", adapter="show")
 check("a Show section is never widened", raises(wj.JournalError, lambda: b1.bind("show", "deck#s", [X], by="t", add=True)) is not None)
 b1.close(); b2.close()
 
+# retirement ends the bindings in force that name the work: a chat is never left bound to what is gone
+j = fresh()
+j.register_source("claude-code", adapter="claude-code", ordering="none")
+j.register_source("show", adapter="show-composer")
+A, B = j.mint_branch_work("r", "a"), j.mint_branch_work("r", "b")
+g1 = j.bind("claude-code", "chat", [A, B], by="t")
+j.bind("claude-code", "other", [B], by="t")
+j.bind("show", "deck#s", [A], by="show")
+j.retire_work(A)
+now = j.binding("claude-code", "chat")
+check("retiring a work drops it from a chat's binding, as a new generation", now["works"] == [B] and now["generation"] == g1 + 1, now)
+check("…the generation it was bound under still says so", sorted(j.generation_works("claude-code", "chat", g1)) == sorted([A, B]))
+check("…a chat that never named it is untouched", j.binding("claude-code", "other")["generation"] == 1)
+check("…a Show section keeps naming it, so Show can say it was replaced", j.bound_works("show", "deck#s") == [A])
+check("…the chat still captures, to what is left", cap(j, "m1", "carry on", conv="chat", source="claude-code")["works"].keys() == {B})
+C = j.mint_branch_work("r", "c")
+check("…and still takes new work", j.bind("claude-code", "chat", [C], by="t", add=True) == g1 + 2
+      and sorted(j.bound_works("claude-code", "chat")) == sorted([B, C]))
+j.retire_work(B); j.retire_work(C)
+check("a chat whose every work is retired is bound to nothing, and captures unassigned",
+      j.bound_works("claude-code", "chat") == [] and cap(j, "m2", "anything", conv="chat", source="claude-code")["works"] == {})
+
+# the sweep for branches deleted outside the tools retires the same way, and leaves the newly minted alone
+clock = [1000.0]
+j = fresh(clock=lambda: clock[0])
+j.register_source("claude-code", adapter="claude-code", ordering="none")
+old_gone, kept = j.mint_branch_work("r", "gone"), j.mint_branch_work("r", "kept")
+j.bind("claude-code", "chat", [old_gone, kept], by="t")
+clock[0] += 3600
+fresh_work = j.mint_branch_work("r", "being-made")
+swept = j.retire_unbranched("r", {kept}, min_age=600)
+check("the sweep retires work no branch names", [w["work_id"] for w in swept] == [old_gone], swept)
+check("…ending its bindings too", j.bound_works("claude-code", "chat") == [kept])
+check("…and leaves a work minted moments ago, whose branch isn't made yet", not j.work(fresh_work)["retired_at"])
+
 print(f"\n{failures} failure(s)" if failures else "\nall passed")
 sys.exit(1 if failures else 0)

@@ -13,15 +13,20 @@
 # goes with stack-restack --contract-only, which drops it once nothing live sits on it and moves
 # no branch. A member whose worktree is busy is held until it frees. The merged set is read from
 # GitHub on the tick that sees trunk move, so a landed member goes within one poll of its merge.
+#
+# Each tick also retires the work of a branch that was deleted outside the tools (a raw
+# `git branch -D`): contract and stack-restack retire a branch's work as they delete it, and this
+# is the backstop, so no chat stays bound to a branch that is gone.
 import json
 import os
 import subprocess
 import threading
 import time
 
-from . import ctx, forestlock, openprs, repostate, restack, sync, watch
+from . import ctx, forestlock, openprs, repostate, restack, sync, watch, workjournal
 
 POLL_S = 90
+WORK_SETTLE_S = 600   # a branch's work is minted before the branch: the sweep leaves the newly minted alone
 _lock = threading.Lock()
 
 
@@ -271,6 +276,21 @@ def _contract_project(project, merged, st, cwds):
     return bool(gone)
 
 
+def _retire_gone_work():
+    """Retire this repo's branch work that no branch names in `branch.<b>.stack-work` any more.
+    A config read that names nothing is not believed: it would retire every branch's work."""
+    r = _git("config", "--get-regexp", r"^branch\..*\.stack-work$")
+    named = {ln.split()[-1] for ln in r.stdout.splitlines() if ln.strip()}
+    j = workjournal.open_existing() if r.returncode == 0 and named else None
+    if j is None:
+        return
+    try:
+        for w in j.retire_unbranched(ctx.repo_name(), named, min_age=WORK_SETTLE_S):
+            ctx.log(f"focus-sync: retired work {w['work_id']} (branch {w['branch'] or '?'} is gone)")
+    finally:
+        j.close()
+
+
 def tick():
     ctx.set_repo(ctx.CWD)
     _git("fetch", "-q", "origin", "main")
@@ -310,6 +330,7 @@ def tick():
         _save(st)
     if changed:
         ctx.bump_pulse()
+    _retire_gone_work()
 
 
 def sync_forever():

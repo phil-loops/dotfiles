@@ -267,6 +267,22 @@ def land(parent, only_published=False):
     return {"ok": True, "parent": parent, "landed": out, "carried": carried}
 
 
+def _retire_work(work):
+    """Ends a deleted branch's work in the same motion as the delete, so no chat stays bound to a
+    branch that is gone and no label names it. A journal that can't write doesn't undo the
+    contract: focus-sync's sweep retires what this leaves."""
+    if not work:
+        return None
+    j = workjournal.Journal()
+    try:
+        j.retire_work(work)
+        return work
+    except workjournal.JournalError as e:
+        return f"work not retired: {e}"
+    finally:
+        j.close()
+
+
 def contract(branch):
     _need(branch)
     parent = catchup.parent(branch) or "main"
@@ -287,9 +303,10 @@ def contract(branch):
     proj = project_of(branch)
     if proj:
         _registry("remove", proj, branch, "contract")
+    work = _git("config", f"branch.{branch}.stack-work").stdout.strip()
     _ok("branch", "-D", branch)   # git drops branch.<b>.* with it
     return {"ok": True, "contracted": branch, "why": "empty" if empty else "merged",
-            "children": kids, "parent": parent, "landed": landed}
+            "children": kids, "parent": parent, "landed": landed, "work": _retire_work(work)}
 
 
 def rename(old, new_name):
