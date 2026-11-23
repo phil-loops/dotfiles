@@ -28,6 +28,7 @@ public final class CanopyEmbed {
             }
         }
         m.start()
+        PaneStates.of(m).start(m)
         if let route { m.open(address: route) }
         model = m
         let host = NSHostingView(rootView: AnyView(RootView().environment(m).preferredColorScheme(.dark)))

@@ -421,6 +421,25 @@ import Testing
         return c
     }
 
+    /// A chat's forest, in the home's words, goes on its pane's border — written when it changes, cleared when it leaves.
+    @Test func aBoundChatsPaneSaysItsForest() throws {
+        let now = world().forestModel.now.timeIntervalSince1970
+        let app = world(chats: ["59fa0cc0-1": chat("59fa0cc0-1", activeAt: now - 30, acted: [("r:a", "commit", now - 180)])])
+        let m = app.forestModel
+        let f = try #require(m.forests()["r:tree"])
+        let want = PaneStates.states(Array(m.forests().values), verb: m.verb)
+        #expect(want == ["%1": [m.verb(f).title, f.says].filter { !$0.isEmpty }.joined(separator: " · ")])
+        let panes = PaneStates()
+        var calls: [[String]] = []
+        panes.tmux = { calls.append($0) }
+        panes.apply(want)
+        panes.apply(want)
+        #expect(calls == [["set-option", "-p", "-t", "%1", "@chat_state", want["%1"]!]], "written once, not on every pass")
+        panes.apply([:])
+        #expect(calls.last == ["set-option", "-pu", "-t", "%1", "@chat_state"], "a chat that left its forest is cleared")
+        #expect(PaneStates.states(Array(world().forestModel.forests().values), verb: m.verb).isEmpty, "no chat, no state")
+    }
+
     /// Round 29: one idle chat on two forests is one reply on the home, with both forests named; neither forest moves for it.
     @Test func anIdleChatIsOneReplyNotOneMovePerForest() throws {
         let now = world().forestModel.now.timeIntervalSince1970
