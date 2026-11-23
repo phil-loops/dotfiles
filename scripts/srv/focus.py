@@ -219,50 +219,80 @@ def _sync_project(project, st, cwds):
     return True
 
 
-def _land_published_children(project, landed, cwds):
+def _land_published_children(project, landed, merged, cwds):
     """A landed root's published children can't be rebased, and contract-only won't drop a parent
     under a live child, so the forest sat until someone merged main into the child by hand
     (disable-evidence, 47 min after #11659). Catch each up on main against the tip it was built
     on (reshape.land), under the forest's lock, then queue its quick gates: the merge is a new
-    tree its PR hasn't been checked on. A conflict there is a real overlap, logged and left."""
+    tree its PR hasn't been checked on. Returns {root: why} for each root whose published children
+    weren't caught up this pass; the caller says it and retries every tick."""
     from . import catchup, push, reshape
+    skips = {}
     for b in landed:
-        if _parent(b) != "main":
-            continue
         kids = [c for c in catchup.children(b) if _tip(f"refs/remotes/origin/{c}")]
-        if not kids or _busy(kids, cwds):
+        if not kids:
+            continue
+        if _parent(b) != "main":
+            skips[b] = f"{b} merged, but it sits on {_parent(b)}, not main"
+            continue
+        tip, head = _tip(f"refs/heads/{b}"), merged.get(b) or ""
+        if tip != head and not (head and _git("merge-base", "--is-ancestor", tip, head).returncode == 0):
+            skips[b] = (f"local {b} ({tip[:9]}) has commits GitHub didn't merge ({head[:9] or 'head unknown'}) — "
+                        f"catching {', '.join(kids)} up would carry them")
+            continue
+        why = _busy(kids, cwds)
+        if why:
+            skips[b] = why
             continue
         try:
             with forestlock.hold(ctx.repo_cwd(), forestlock.key_for(ctx.repo_cwd(), project=project),
                                  "focus-sync · land", wait=0, export=False):
                 res = reshape.land(b, only_published=True)
         except (forestlock.Held, reshape.Refused) as e:
-            ctx.log(f"focus-sync: {b}'s published children not caught up on main: {e}")
+            skips[b] = str(e)
             continue
         for r in res["landed"]:
             if r["how"] == "merged":
                 push._spawn_gates(r["branch"], background=True, quick=True)
         ctx.log(f"focus-sync: {b} landed — {', '.join(r['branch'] + ' ' + r['how'] for r in res['landed'])} on main")
+    return skips
+
+
+def _say_land_skips(project, skips, st):
+    """Logs a root's skip when its reason changes, and keeps the open ones in the state."""
+    seen = st.setdefault("landing", {})
+    prev = seen.get(project, {})
+    for b, why in skips.items():
+        if prev.get(b) != why:
+            ctx.log(f"focus-sync: {b} merged, but its published children weren't caught up on main: {why}")
+    if skips:
+        seen[project] = skips
+    else:
+        seen.pop(project, None)
 
 
 def _contract_project(project, merged, st, cwds):
     """Drop the members that landed. What a pass leaves (live children sit on it) isn't retried until
-    the forest's shape changes or another member lands; a held member is retried every tick."""
+    the forest's shape changes or another member lands; a held member is retried every tick, and so
+    is catching a landed root's published children up on main, which says why when it can't."""
     def sig(members):
         return " ".join(f"{b}={_tip('refs/heads/' + b)}<{_parent(b)}" for b in members if b in merged) \
             + " | " + " ".join(f"{b}<{_parent(b)}" for b in members)
 
     members = _members(project)
     landed = [b for b in members if b in merged]
-    if not landed or st["contracted"].get(project) == sig(members):
+    if not landed:
         return False
     if _held(project):
         return False   # someone is changing this forest: contract it next tick
     held = [b for b in landed if _busy([b], cwds)]
+    _say_land_skips(project, _land_published_children(project, [b for b in landed if b not in held], merged, cwds), st)
+    members = _members(project)
+    if st["contracted"].get(project) == sig(members):
+        return False
     if len(held) == len(landed):
         return False   # nothing to drop until a worktree frees
     tips = {b: _tip(f"refs/heads/{b}") for b in landed}
-    _land_published_children(project, [b for b in landed if b not in held and merged.get(b) == tips[b]], cwds)
     ctx.log(f"focus-sync: contracting {project} ({', '.join(landed)}{'; holding ' + ', '.join(held) if held else ''})")
     _restack(project, hold=held, merged=merged)
     members = _members(project)
@@ -311,6 +341,7 @@ def tick():
             sync._refresh_pr_state()
         shown = _projects()
         st["contracted"] = {p: v for p, v in st.get("contracted", {}).items() if p in shown}
+        st["landing"] = {p: v for p, v in st.get("landing", {}).items() if p in shown}
         merged = {b: pr.get("head") for b, pr in sync._pr_state_map().items() if pr.get("state") == "MERGED"}
         cwds = None
         for p in shown:
