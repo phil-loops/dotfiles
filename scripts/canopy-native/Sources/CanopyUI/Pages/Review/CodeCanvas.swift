@@ -428,6 +428,9 @@ final class Canvas: NSObject {
     /// The header held at the top while layout settles after that jump.
     private var leading: String?
     var app: AppModel?
+    /// the file under the top edge, each time it changes (nil above the first header)
+    var onTopFile: ((String?) -> Void)?
+    private var topFile: String?
     var theme: Theme = .dark
     private var layoutPending = false
 
@@ -461,6 +464,7 @@ final class Canvas: NSObject {
         scroll.drawsBackground = false
         scroll.scrollerStyle = .overlay
         pin.isHidden = true
+        pin.clipsToBounds = true
         scroll.addSubview(pin, positioned: .below, relativeTo: scroll.verticalScroller)
         super.init()
         NotificationCenter.default.addObserver(self, selector: #selector(boundsMoved), name: NSView.frameDidChangeNotification, object: text)
@@ -485,6 +489,7 @@ final class Canvas: NSObject {
         }
         // the top edge in the break above header i still reads the file before it
         if i > 0, let r = text.rect(for: headers[i].range), r.minY >= v.minY { i -= 1 }
+        reportTop(headers[i].path)
         guard let rect = text.rect(for: headers[i].range), rect.minY < v.minY else {
             pin.isHidden = true
             return
@@ -514,6 +519,13 @@ final class Canvas: NSObject {
             pin.needsDisplay = true
         }
         pin.isHidden = false
+    }
+
+    private func reportTop(_ path: String?) {
+        guard path != topFile else { return }
+        topFile = path
+        // updatePin runs inside SwiftUI's update; the page's state changes after it
+        if let cb = onTopFile { DispatchQueue.main.async { cb(path) } }
     }
 
     /// The last header at or before a character.
@@ -889,6 +901,7 @@ struct CanvasView: NSViewRepresentable {
     var onPointer: ((RowInfo, Int, Bool) -> Void)?
     /// a click on a file header's ☐ (in place or pinned): its path
     var onViewed: ((String) -> Void)?
+    var onTopFile: ((String?) -> Void)?
 
     func makeNSView(context: Context) -> NSScrollView {
         let c = handle.canvas
@@ -909,6 +922,7 @@ struct CanvasView: NSViewRepresentable {
         c.text.onClickAt = onClickAt
         c.text.onPointer = onPointer
         c.text.onViewed = onViewed
+        c.onTopFile = onTopFile
         c.apply(segments)
         c.updatePin()
         if let on = centerOn, handle.centered != on {

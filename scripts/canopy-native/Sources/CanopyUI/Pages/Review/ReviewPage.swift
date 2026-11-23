@@ -282,8 +282,8 @@ private struct FileTree: View {
     var body: some View {
         let pg = ReviewPageState.of(app)
         let views = Dictionary(pg.views.map { ($0.file.path, $0) }, uniquingKeysWith: { a, _ in a })
-        let current = pg.here?.path
-        PaneList(pane: reviewTreePane, rows: ReviewPage.treeRows(pg)) { key, _ in
+        let current = pg.onScreen.flatMap { views[$0] == nil ? nil : $0 } ?? pg.here?.path
+        PaneList(pane: reviewTreePane, rows: ReviewPage.treeRows(pg), follow: current.map { "f|\($0)" }) { key, _ in
             let path = String(key.dropFirst(2))
             if let v = views[path] {
                 HStack(spacing: 6) {
@@ -464,7 +464,8 @@ private struct DiffPane: View {
                           onViewed: { path in
                               app.focus(pane: reviewDiffPane)
                               app.runner.dispatch("review.viewed.file", via: .click, arg: path)
-                          })
+                          },
+                          onTopFile: { path in if pg.onScreen != path { pg.onScreen = path } })
             .background(GeometryReader { g in
                 Color.clear.onAppear { measure(pg, g.size.width) }.onChange(of: g.size.width) { _, w in measure(pg, w) }
             })

@@ -12,11 +12,13 @@ public struct PaneList<Row: View>: View {
     let row: (String, _ cursor: Bool) -> Row
     /// a quiet label drawn above a row, outside its cursor band (a group's name), else nil
     let header: (String) -> (any Term)?
+    /// a row kept on screen while the pane isn't focused (what another pane is showing)
+    let follow: String?
 
     /// `rows` must be the same keys (same order) the surface's `panes()` returns for `pane`.
-    public init(pane: String, rows: [String], header: @escaping (String) -> (any Term)? = { _ in nil },
+    public init(pane: String, rows: [String], header: @escaping (String) -> (any Term)? = { _ in nil }, follow: String? = nil,
                 @ViewBuilder row: @escaping (String, _ cursor: Bool) -> Row) {
-        self.pane = pane; self.rows = rows; self.header = header; self.row = row
+        self.pane = pane; self.rows = rows; self.header = header; self.follow = follow; self.row = row
     }
 
     public var body: some View {
@@ -44,6 +46,7 @@ public struct PaneList<Row: View>: View {
                 }
             }
             .onChange(of: cursor) { _, k in if let k { proxy.scrollTo(k) } }
+            .onChange(of: follow) { _, k in if let k, cursor == nil { proxy.scrollTo(k) } }
         }
         .labelPane(pane)
     }

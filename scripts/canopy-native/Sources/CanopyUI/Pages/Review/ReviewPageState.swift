@@ -183,6 +183,8 @@ public final class ReviewPageState: ShipHost {
 
     /// The diff's canvas and the side pane's, kept here so commands and the label layer can reach them.
     @ObservationIgnored let diffCanvas = CanvasHandle()
+    /// the file the diff is scrolled to (its header under the top edge), whichever file the cursor is in
+    public var onScreen: String?
     /// The focused file's canvas (else the first window's).
     var sideCanvas: CanvasHandle { (code ?? windows[0]).canvas }
 
