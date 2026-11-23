@@ -68,13 +68,14 @@ enum Para {
     private static var cache: [String: NSParagraphStyle] = [:]
 
     /// A row's paragraph: wrapped lines hang at `indent` columns; tabs every 4 columns.
-    static func row(indent: Int, spacing: CGFloat = 2) -> NSParagraphStyle {
+    static func row(indent: Int, spacing: CGFloat = 2, before: CGFloat = 0) -> NSParagraphStyle {
         let cw = DocFont.charWidth
-        let k = "\(indent)|\(spacing)|\(cw)"
+        let k = "\(indent)|\(spacing)|\(before)|\(cw)"
         if let p = cache[k] { return p }
         let p = NSMutableParagraphStyle()
         p.headIndent = CGFloat(indent) * cw
         p.lineSpacing = spacing
+        p.paragraphSpacingBefore = before
         p.defaultTabInterval = 4 * cw
         p.tabStops = []
         p.lineBreakMode = .byWordWrapping
@@ -147,10 +148,11 @@ enum ReviewDocument {
             return nil
         }()
         var out: [Segment] = []
-        for fv in pg.views {
+        for (n, fv) in pg.views.enumerated() {
             let path = fv.file.path
-            let hk = "h|\(path)|\(fv.viewed)|\(fv.seen > 0)|\(fv.flagged)|\(fv.file.add)|\(fv.file.del)|\(fv.file.status.rawValue)|\(pg.scoped)"
-            out.append(Segment(key: hk) { header(fv, scoped: pg.scoped, c) })
+            let first = n == 0
+            let hk = "h|\(path)|\(first)|\(fv.viewed)|\(fv.seen > 0)|\(fv.flagged)|\(fv.file.add)|\(fv.file.del)|\(fv.file.status.rawValue)|\(pg.scoped)"
+            out.append(Segment(key: hk) { header(fv, scoped: pg.scoped, first: first, c) })
             if fv.viewed {
                 out.append(Segment(key: "b|\(path)|viewed") { NSAttributedString() })
                 continue
@@ -178,7 +180,10 @@ enum ReviewDocument {
 
     static func base(_ c: CanvasColors) -> [NSAttributedString.Key: Any] { [.font: DocFont.font, .foregroundColor: c.ink] }
 
-    static func header(_ fv: FileView, scoped: Bool, _ c: CanvasColors) -> NSAttributedString {
+    /// The canvas ground left above every file's header but the first, so a file change reads as a break.
+    static let fileGap: CGFloat = 28
+
+    static func header(_ fv: FileView, scoped: Bool, first: Bool = true, _ c: CanvasColors) -> NSAttributedString {
         let b = DocBuilder()
         let path = fv.file.path
         if !scoped { b.put(fv.viewed ? "☑ " : fv.seen > 0 ? "◪ " : "☐ ", [.foregroundColor: fv.viewed ? c.patina : c.inkFaint]) }
@@ -188,7 +193,7 @@ enum ReviewDocument {
         if let o = fv.file.oldPath { b.put("  ← \(o)", [.foregroundColor: c.inkFaint]) }
         b.put("  +\(fv.file.add)", [.foregroundColor: c.add])
         b.put(" −\(fv.file.del)", [.foregroundColor: c.del])
-        b.endRow(RowInfo(kind: .file, stop: "f|\(path)", path: path), Para.row(indent: 2, spacing: 8))
+        b.endRow(RowInfo(kind: .file, stop: "f|\(path)", path: path), Para.row(indent: 2, spacing: 8, before: first ? 0 : fileGap))
         return b.build(base(c))
     }
 

@@ -204,6 +204,14 @@ final class CanvasTextView: NSTextView {
         return r
     }
 
+    /// The paragraph spacing above the row starting at `ci` (a file header's break): ground, not the row.
+    func gapAbove(_ ci: Int) -> CGFloat {
+        guard let ts = textStorage, ci < ts.length,
+              (ts.string as NSString).paragraphRange(for: NSRange(location: ci, length: 0)).location == ci,
+              let p = ts.attribute(.paragraphStyle, at: ci, effectiveRange: nil) as? NSParagraphStyle else { return 0 }
+        return p.paragraphSpacingBefore
+    }
+
     override func drawBackground(in rect: NSRect) {
         super.drawBackground(in: rect)
         guard let colors, let lm = layoutManager, let tc = textContainer, let ts = textStorage, ts.length > 0 else { return }
@@ -216,7 +224,8 @@ final class CanvasTextView: NSTextView {
         lm.enumerateLineFragments(forGlyphRange: glyphs) { frag, _, _, gr, _ in
             let ci = lm.characterIndexForGlyph(at: gr.location)
             guard let inf = ts.attribute(.rvRow, at: ci, effectiveRange: nil) as? RowInfo else { return }
-            let band = NSRect(x: 0, y: frag.minY + origin.y, width: w, height: frag.height)
+            let gap = self.gapAbove(ci)
+            let band = NSRect(x: 0, y: frag.minY + origin.y + gap, width: w, height: frag.height - gap)
             self.drawBand(inf, band, x0: x0, colors)
             if inf.kind == .line, !inf.leftHot.isEmpty || !inf.rightHot.isEmpty {
                 let line = (ts.string as NSString).paragraphRange(for: NSRange(location: ci, length: 0))
@@ -269,7 +278,9 @@ final class CanvasTextView: NSTextView {
         switch inf.kind {
         case .file:
             c.raise.setFill(); band.fill()
-            c.edge.setFill(); NSRect(x: 0, y: band.maxY - 1, width: band.width, height: 1).fill()
+            c.edge.setFill()
+            NSRect(x: 0, y: band.minY, width: band.width, height: 1).fill()
+            NSRect(x: 0, y: band.maxY - 1, width: band.width, height: 1).fill()
         case .gap:
             c.patina.withAlphaComponent(inf.stop == marks.cursor ? 0.12 : 0.06).setFill(); band.fill()
         case .extras:
@@ -468,18 +479,29 @@ final class Canvas: NSObject {
     func updatePin() {
         let v = scroll.contentView.bounds
         guard let lm = text.layoutManager, let tc = text.textContainer, let ts = text.textStorage, ts.length > 0,
-              let i = headerIndex(lm.characterIndexForGlyph(at: lm.glyphIndex(for: NSPoint(x: 0, y: max(0, v.minY - text.textContainerOrigin.y)), in: tc))),
-              let rect = text.rect(for: headers[i].range), rect.minY < v.minY else {
+              var i = headerIndex(lm.characterIndexForGlyph(at: lm.glyphIndex(for: NSPoint(x: 0, y: max(0, v.minY - text.textContainerOrigin.y)), in: tc))) else {
+            pin.isHidden = true
+            return
+        }
+        // the top edge in the break above header i still reads the file before it
+        if i > 0, let r = text.rect(for: headers[i].range), r.minY >= v.minY { i -= 1 }
+        guard let rect = text.rect(for: headers[i].range), rect.minY < v.minY else {
             pin.isHidden = true
             return
         }
         let h = rect.height
-        let next = i + 1 < headers.count ? text.rect(for: headers[i + 1].range) : nil
-        let shift = next.map { min(0, $0.minY - v.minY - h) } ?? 0
+        // the next file's break, not its header, pushes this one off: the ground reads between them
+        let next = i + 1 < headers.count ? text.rect(for: headers[i + 1].range).map { $0.minY - text.gapAbove(headers[i + 1].range.location) } : nil
+        let shift = next.map { min(0, $0 - v.minY - h) } ?? 0
         guard h + shift > 0 else { pin.isHidden = true; return }
         var r = headers[i].range
         if r.length > 0, (ts.string as NSString).character(at: r.location + r.length - 1) == 10 { r.length -= 1 }
-        let header = ts.attributedSubstring(from: r)
+        let header = NSMutableAttributedString(attributedString: ts.attributedSubstring(from: r))
+        header.enumerateAttribute(.paragraphStyle, in: NSRange(location: 0, length: header.length)) { v, at, _ in
+            guard let p = v as? NSParagraphStyle, p.paragraphSpacingBefore > 0, let m = p.mutableCopy() as? NSMutableParagraphStyle else { return }
+            m.paragraphSpacingBefore = 0
+            header.addAttribute(.paragraphStyle, value: m, range: at)
+        }
         let cv = scroll.contentView.frame
         let frame = NSRect(x: cv.minX, y: scroll.isFlipped ? cv.minY : cv.maxY - h - shift, width: cv.width, height: h + shift)
         if pin.frame != frame { pin.frame = frame }
