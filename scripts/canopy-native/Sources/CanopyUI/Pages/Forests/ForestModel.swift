@@ -74,6 +74,13 @@ public struct PRSignals: Decodable, Equatable {
     public var approvals: Int
     public var changesRequested: Bool
     public var conflicts: Bool
+    public struct Strand: Decodable, Equatable {
+        public var branch: String
+        public var commits: Int
+    }
+    /// branches above this PR in a native GitHub stack that hold unpushed commits: merging it makes GitHub
+    /// rebase them, and those commits are left behind
+    public var strands: [Strand]? = nil
 }
 
 /// A row of the home's open PRs: one of a forest's branches, or a PR of mine no forest carries.

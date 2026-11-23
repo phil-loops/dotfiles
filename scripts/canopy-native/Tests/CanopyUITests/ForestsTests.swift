@@ -449,6 +449,23 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = f
         #expect(PRSignalStrip.marks(blocked).last?.symbol == "hand.raised.fill")
     }
 
+    /// A PR under unpushed work in a native GitHub stack says so first: merging it makes GitHub rebase the
+    /// branches above and leaves their unpushed commits behind (2026-11-23).
+    @Test func prSignalStripWarnsBeforeAMergeThatStrandsUnpushedCommits() throws {
+        var s = PRSignals(checks: .init(pass: 1, fail: 0, running: 0, queued: 0), threads: 0, comments: 0, approvals: 1, changesRequested: false, conflicts: false)
+        #expect(PRSignalStrip.marks(s).map(\.symbol) == ["checkmark.circle.fill", "person.fill.checkmark"], "nothing above it: no mark")
+        s.strands = []
+        #expect(PRSignalStrip.marks(s).count == 2, "a stack with everything pushed: no mark")
+        s.strands = [.init(branch: "delete-a-user-for-admin", commits: 2), .init(branch: "add-a-script", commits: 1)]
+        let first = try #require(PRSignalStrip.marks(s).first)
+        #expect(first.symbol == "exclamationmark.arrow.triangle.2.circlepath" && first.tone == .fail)
+        #expect(first.help == "merging this makes GitHub rebase the stack above it and strands 2 unpushed commits on delete-a-user-for-admin, 1 unpushed commit on add-a-script — push first")
+        let wire = try JSONDecoder().decode(PRSignals.self, from: Data(#"{"checks":{"pass":0,"fail":0,"running":0,"queued":0},"threads":0,"comments":0,"approvals":0,"changesRequested":false,"conflicts":false,"strands":[{"branch":"b","commits":3}]}"#.utf8))
+        #expect(wire.strands == [.init(branch: "b", commits: 3)])
+        let old = try JSONDecoder().decode(PRSignals.self, from: Data(#"{"checks":{"pass":0,"fail":0,"running":0,"queued":0},"threads":0,"comments":0,"approvals":0,"changesRequested":false,"conflicts":false}"#.utf8))
+        #expect(old.strands == nil, "a server that predates the field still decodes")
+    }
+
     /// Phil 2026-11-18: when all the work is done, the forest archives itself — through the archive
     /// command, so u undoes it — and a forest with open items on its own list stays out.
     @Test func aForestWhoseWorkIsDoneArchivesItself() {

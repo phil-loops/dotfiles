@@ -541,6 +541,7 @@ private struct StepText: View {
 
 /// One open PR's GitHub signals as GitHub's checks summary draws them — passed, failed, running and queued
 /// checks, then unresolved threads, comments, approvals or changes requested, conflicts; a zero draws nothing.
+/// First of all, when it applies: merging this PR would strand unpushed commits on the stack above it.
 struct PRSignalStrip: View {
     @Environment(\.theme) private var theme
     let signals: PRSignals?
@@ -557,6 +558,11 @@ struct PRSignalStrip: View {
         var out: [Mark] = []
         func add(_ n: Int, _ symbol: String, _ tone: Tone, _ help: String) {
             if n > 0 { out.append(Mark(symbol: symbol, count: n, tone: tone, help: "\(n) \(help)")) }
+        }
+        if let strands = s.strands, !strands.isEmpty {
+            let what = strands.map { "\($0.commits) unpushed \($0.commits == 1 ? "commit" : "commits") on \($0.branch)" }.joined(separator: ", ")
+            out.append(Mark(symbol: "exclamationmark.arrow.triangle.2.circlepath", count: nil, tone: .fail,
+                            help: "merging this makes GitHub rebase the stack above it and strands \(what) — push first"))
         }
         if s.conflicts { out.append(Mark(symbol: "exclamationmark.triangle.fill", count: nil, tone: .fail, help: "conflicts with its base")) }
         add(s.checks.pass, "checkmark.circle.fill", .pass, "checks passed")
