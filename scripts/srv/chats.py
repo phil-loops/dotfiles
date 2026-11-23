@@ -9,6 +9,8 @@ full session id:
   generation the binding generation this was read at — a click that binds sends it back (P7)
   at         where it stands: the presence record's repo name and branch, for the unbound list
   pane       its tmux pane, to focus; absent outside tmux
+  label      what the chat says it's working on: its pane's tmux option @chat_label (`chat-label`); absent
+             when unset or outside tmux
   activeAt   its last tool call; live vs idle is the reader's call, and an ended chat is absent
   acted      the branches it acted on within ACTED_WITHIN, newest first: {branch: "<repo>:<name>",
              how: edit | commit, at} — an edit from its presence record (resolved at the edit), a
@@ -31,6 +33,8 @@ from . import agents, ctx, workfresh, workjournal as wj
 SOURCE = wj.CLAUDE_CODE_SOURCE
 ACTED_WITHIN = 2 * 3600
 USAGE_TAIL = 512 * 1024
+LABELS_TTL = 2.0
+_LABELS = {"at": float("-inf"), "panes": {}}
 _COMMON = {}   # repo path -> its git common dir
 
 
@@ -113,6 +117,25 @@ def _records():
     return out
 
 
+def _read_labels():
+    """Every tmux pane's @chat_label, by pane id, in one tmux call; {} when tmux isn't there."""
+    try:
+        r = subprocess.run(["tmux", "list-panes", "-a", "-F", "#{pane_id}\t#{@chat_label}"],
+                           capture_output=True, text=True, timeout=2)
+    except (OSError, subprocess.TimeoutExpired):
+        return {}
+    rows = (line.partition("\t") for line in r.stdout.splitlines()) if r.returncode == 0 else ()
+    return {pane: label for pane, _, label in rows if label.strip()}
+
+
+def _labels():
+    """The pane labels, read at most every LABELS_TTL: tmux keeps them in memory, so no file stat can say they moved."""
+    now = time.monotonic()
+    if now - _LABELS["at"] >= LABELS_TTL:
+        _LABELS["panes"], _LABELS["at"] = _read_labels(), now
+    return _LABELS["panes"]
+
+
 def _running(pid):
     try:
         os.kill(int(pid), 0)
@@ -125,7 +148,7 @@ def _running(pid):
 
 def fingerprint():
     """Moves when a presence record is written or removed, or a chat's process ends (which writes
-    nothing). The journal's own fingerprint rides beside this in the todo domain."""
+    nothing), or a pane's label changes. The journal's own fingerprint rides beside this in the todo domain."""
     out = []
     for f in sorted(glob.glob(os.path.join(presence_dir(), "*.json"))):
         try:
@@ -142,7 +165,7 @@ def fingerprint():
             logs.append(None)
     # links fade with time alone, so the minute moves it too
     return (tuple(out) + tuple((r.get("session_id"), _running(r.get("pid"))) for r in _records())
-            + tuple(logs) + (int(time.time() // 60),))
+            + tuple(logs) + tuple(sorted(_labels().items())) + (int(time.time() // 60),))
 
 
 def bind(req, raw):
@@ -232,13 +255,14 @@ def entities():
     now = time.time()
     commits = _commits(now - ACTED_WITHIN)
     dismissed = _dismissals(now)
+    labels = _labels()
     chats = {}
     for r in live:
         sid = r["session_id"]
         b = bound.get(sid, {"generation": 0, "works": []})
         chats[sid] = {"id": sid, "works": None if error else b["works"], "generation": b["generation"],
                       "at": {"repo": r.get("repo_name") or "", "branch": r.get("branch") or ""},
-                      "pane": r.get("tmux_pane") or None, "activeAt": r.get("last_active") or 0,
+                      "pane": r.get("tmux_pane") or None, "label": labels.get(r.get("tmux_pane")), "activeAt": r.get("last_active") or 0,
                       "acted": _acted(r, commits, now, dismissed),
                       **({"bindingError": f"work journal unreadable: {type(error).__name__}"} if error else {})}
     return {"chat": chats}

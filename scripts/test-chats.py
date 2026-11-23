@@ -17,6 +17,10 @@ os.makedirs(os.environ["CLAUDE_SESSION_PRESENCE_DIR"])
 sys.path.insert(0, HERE)
 from srv import chats, workjournal as wj  # noqa: E402
 
+PANE_LABELS = {}
+chats._read_labels = lambda: dict(PANE_LABELS)   # never the machine's tmux
+chats.LABELS_TTL = 0
+
 failures = 0
 
 
@@ -53,6 +57,19 @@ check("a bound chat names its work by id, with the branch only as a label",
       got[BOUND]["works"] == [{"work": w, "todo": None, "repo": "loops", "branch": "feat/x"}] and got[BOUND]["generation"] == gen, got[BOUND])
 check("an unbound chat says where it stands, never what it works on",
       got[LOOSE]["works"] == [] and got[LOOSE]["at"] == {"repo": "loops-wt-1", "branch": "wt-1"} and got[LOOSE]["pane"] == "%9", got[LOOSE])
+
+check("a chat without a pane label has none", got[LOOSE]["label"] is None, got[LOOSE])
+fp = chats.fingerprint()
+PANE_LABELS["%9"] = "canopy · chat labels"
+check("a pane label moves the fingerprint, though no file changed", chats.fingerprint() != fp)
+check("a chat carries its pane's label", chats.entities()["chat"][LOOSE]["label"] == "canopy · chat labels")
+chats.LABELS_TTL, chats._LABELS["at"] = 60, float("-inf")
+chats._labels()
+PANE_LABELS["%9"] = "renamed"
+check("within the TTL the labels are read once, not per tick", chats.entities()["chat"][LOOSE]["label"] == "canopy · chat labels")
+chats.LABELS_TTL = 0
+PANE_LABELS.clear()
+fp = chats.fingerprint()
 
 presence(LOOSE, start="Thu Jan  1 00:00:00 1970")
 check("a recycled pid is not the chat", LOOSE not in chats.entities()["chat"], chats.entities()["chat"].keys())
