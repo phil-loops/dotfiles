@@ -45,8 +45,8 @@ struct ForestsPage: View {
                                 section(.workbench, p.workbench, fs, working, nameWidth: nameWidth, cursor: cursor, selection: selection)
                             } else {
                                 let home = m.homeSections()
-                                if !home.cards.isEmpty {
-                                    PRCards(cards: home.cards, cursor: cursor, selection: selection)
+                                if !home.cards.isEmpty || !m.reviewRequests.isEmpty {
+                                    PRCards(cards: home.cards, asked: m.reviewRequests, cursor: cursor, selection: selection)
                                 }
                                 ForEach(home.sections, id: \.verb) { sec in
                                     if sec.verb == .push {
@@ -208,23 +208,67 @@ private struct HomeGroup: View {
     }
 }
 
-/// The home's first strip (round 32): a card for each of my open PRs that isn't a draft — what it asks (merge, in
-/// review, after its parent), its number and title, GitHub's state and signals, where it lives. `h`/`l` walk the cards;
-/// ↵ reviews one.
+/// The home's top (rounds 32–36): two columns of cards. Left, each of my open PRs that isn't a draft — what it asks
+/// (merge, in review, after its parent), its number and title, GitHub's state and signals, where it lives — keyed
+/// ⌥1…; right, each PR I'm asked to review, keyed ⌥a…. `j`/`k` move down a column, `h`/`l` across; ↵ reviews one.
 private struct PRCards: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme
     let cards: [OpenPRRow]
+    let asked: [ReviewRequest]
     let cursor: String?
     let selection: Set<String>
 
-    static let width: CGFloat = 372
-
     var body: some View {
-        ChipFlow(spacing: 12) {
-            ForEach(Array(cards.enumerated()), id: \.element.key) { i, r in card(r, n: i + 1) }
+        HStack(alignment: .top, spacing: 20) {
+            column("your PRs · \(cards.count)") {
+                ForEach(Array(cards.enumerated()), id: \.element.key) { i, r in card(r, n: i + 1) }
+            }
+            column("review · \(asked.count)") {
+                ForEach(Array(asked.enumerated()), id: \.element.number) { i, r in askedCard(r, n: i + 1) }
+            }
         }
         .padding(.leading, 28).padding(.trailing, 16).padding(.top, 6).padding(.bottom, 30)
+    }
+
+    private func column<C: View>(_ title: String, @ViewBuilder _ content: () -> C) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SectionHead(text: title, gold: true).padding(.leading, 16)
+            content()
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    private func askedCard(_ r: ReviewRequest, n: Int) -> some View {
+        let key = RowKey.reviewRequest(r.number)
+        let here = cursor == key
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                if n <= Verbs.askedLetters.count {
+                    Text(verbatim: "⌥\(Verbs.askedLetters[n - 1])").font(Theme.text(11, weight: .semibold))
+                        .foregroundStyle(here ? theme.goldLeaf : theme.inkFaint)
+                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(here ? theme.goldLeaf.opacity(0.6) : theme.vellumEdge, lineWidth: 1))
+                }
+                Text(verbatim: "REVIEW").font(Theme.display(20)).tracking(1.2).foregroundStyle(theme.goldLeaf)
+                Spacer(minLength: 8)
+                Text(verbatim: "#\(r.number)").font(Theme.text(13, weight: .medium)).monospacedDigit().foregroundStyle(here ? theme.goldLeaf : theme.inkDim)
+            }
+            Text(verbatim: r.title).font(Theme.text(14)).foregroundStyle(theme.ink).lineLimit(2, reservesSpace: true)
+            HStack(alignment: .firstTextBaseline, spacing: 9) {
+                Text(verbatim: r.author).font(Theme.text(11)).foregroundStyle(theme.inkDim)
+                Text(verbatim: r.imported ? "loaded" : "on GitHub").font(Theme.text(11)).foregroundStyle(theme.inkFaint)
+                    .help(r.imported ? "its head is local as review/pr-\(r.number): ↵ opens it at once" : "↵ fetches its head first, a second or two")
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 10).fill(here ? theme.goldLeaf.opacity(0.12) : theme.vellumRaise))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(here ? theme.goldLeaf.opacity(0.7) : theme.goldDeep, lineWidth: here ? 1.5 : 1))
+        .contentShape(Rectangle())
+        .onTapGesture { app.runner.dispatch("cursor.set", via: .click, target: key) }
+        .labelTarget(pane: "main", key: key)
+        .id(key)
     }
 
     private func card(_ r: OpenPRRow, n: Int) -> some View {
@@ -247,7 +291,7 @@ private struct PRCards: View {
             Text(verbatim: r.place).font(Theme.text(11)).foregroundStyle(theme.inkFaint).lineLimit(1)
         }
         .padding(14)
-        .frame(width: Self.width, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 10).fill(here ? theme.goldLeaf.opacity(0.12) : theme.vellumRaise))
         .overlay(RoundedRectangle(cornerRadius: 10).stroke(here ? theme.goldLeaf.opacity(0.7) : ask.yours ? theme.goldDeep : theme.vellumEdge, lineWidth: here ? 1.5 : 1))
         .contentShape(Rectangle())

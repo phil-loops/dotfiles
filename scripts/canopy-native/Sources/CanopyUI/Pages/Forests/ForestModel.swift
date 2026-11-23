@@ -359,7 +359,7 @@ public final class ForestModel {
             }
         }
         let home = homeSections()
-        out += home.cards.map(\.key)
+        out += home.cards.map(\.key) + reviewRequests.map { RowKey.reviewRequest($0.number) }
         for item in home.sections.flatMap(\.items) {
             if case .forest(let x) = item { add([x]) } else { out.append(item.key) }
         }
@@ -384,7 +384,6 @@ public final class ForestModel {
             }
         }
         for r in openPRRows() where r.draft { if let p = r.mine { by[.waiting, default: []].append(.myPR(p)) } }
-        by[.review] = reviewRequests.map { HomeItem.review($0) }
         by[.reply] = replies().map { HomeItem.reply($0.chat, $0.forests) }
         let sections = HomeVerb.allCases.compactMap { v in (by[v] ?? []).isEmpty ? nil : HomeSection(verb: v, items: by[v]!) }
         return (cards, sections)
@@ -418,10 +417,12 @@ public final class ForestModel {
         }
     }
 
-    /// The home's strips — rows drawn side by side, which `h`/`l` walk: the PR cards and the push chips.
-    func homeStrips() -> [[String]] {
+    /// The home's blocks (round 36): my PR cards and the PRs I'm asked to review, as two columns side by side; the
+    /// push chips, a row of one-chip columns.
+    func homeBlocks() -> [[[String]]] {
         let home = homeSections()
-        return [home.cards.map(\.key), home.sections.first { $0.verb == .push }?.items.map(\.key) ?? []].filter { $0.count > 1 }
+        let chips = home.sections.first { $0.verb == .push }?.items.map { [$0.key] } ?? []
+        return [[home.cards.map(\.key), reviewRequests.map { RowKey.reviewRequest($0.number) }], chips]
     }
 
     /// The open PRs a forest's home row carries, the one at the forest's own move first, then merge order.

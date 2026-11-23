@@ -45,6 +45,7 @@ public enum Verb: String, CaseIterable, Sendable, Comparable {
     case alternate
     case slot1 = "slot-1", slot2 = "slot-2", slot3 = "slot-3", slot4 = "slot-4", slot5 = "slot-5"
     case slot6 = "slot-6", slot7 = "slot-7", slot8 = "slot-8", slot9 = "slot-9"
+    case asked1 = "asked-a", asked2 = "asked-b", asked3 = "asked-c", asked4 = "asked-d", asked5 = "asked-e", asked6 = "asked-f", asked7 = "asked-g"
     case pr1 = "pr-1", pr2 = "pr-2", pr3 = "pr-3", pr4 = "pr-4", pr5 = "pr-5", pr6 = "pr-6", pr7 = "pr-7", pr8 = "pr-8", pr9 = "pr-9"
     case jumpBack = "jump-back", jumpForward = "jump-forward", saveJump = "save-jump"
     case branches, jumps, flags, findings, grep, lastPicker = "last-picker"
@@ -74,6 +75,8 @@ public enum Verb: String, CaseIterable, Sendable, Comparable {
     /// The Nth focus forest (1…9).
     public static func slot(_ n: Int) -> Verb { Verb(rawValue: "slot-\(n)")! }
     public static func pr(_ n: Int) -> Verb { Verb(rawValue: "pr-\(n)")! }
+    /// the n-th PR you're asked to review, 1-based: lettered a… on its card
+    public static func asked(_ n: Int) -> Verb { Verb(rawValue: "asked-\(Verbs.askedLetters[n - 1])")! }
 
     public var spec: VerbSpec { Verbs.byVerb[self]! }
     /// Its name as which-key, the `?` sheet and keys.toml say it.
@@ -115,7 +118,8 @@ public enum KeySection: String, CaseIterable, Sendable {
              .firstChange, .lastChange, .nextCommit, .previousCommit:
             return .review
         case .root, .tip, .nextSibling, .previousSibling, .out, .nextOpenPR, .previousOpenPR,
-             .pr1, .pr2, .pr3, .pr4, .pr5, .pr6, .pr7, .pr8, .pr9:
+             .pr1, .pr2, .pr3, .pr4, .pr5, .pr6, .pr7, .pr8, .pr9,
+             .asked1, .asked2, .asked3, .asked4, .asked5, .asked6, .asked7:
             return .stack
         case .wordsTitle, .wordsWhy, .wordsDescription, .wordsCommit, .wordsFold:
             return .words
@@ -161,6 +165,9 @@ public struct VerbSpec: Sendable {
 }
 
 public enum Verbs {
+    /// the letters on the review cards, in order — ⌥h and ⌥l are pane moves, so the run stops at g
+    public static let askedLetters: [Character] = ["a", "b", "c", "d", "e", "f", "g"]
+
     private static func v(_ verb: Verb, _ tier: VerbTier, _ keys: [String], entry: [String] = [], jump: Bool = false,
                           native: Bool = false, _ meaning: String) -> VerbSpec {
         VerbSpec(verb: verb, tier: tier, keys: keys, entry: entry, meaning: meaning, jump: jump, native: native)
@@ -272,6 +279,10 @@ public enum Verbs {
         v(.pr4, .nav, ["A-4"], jump: true, "open PR 4's review"), v(.pr5, .nav, ["A-5"], jump: true, "open PR 5's review"),
         v(.pr6, .nav, ["A-6"], jump: true, "open PR 6's review"), v(.pr7, .nav, ["A-7"], jump: true, "open PR 7's review"),
         v(.pr8, .nav, ["A-8"], jump: true, "open PR 8's review"), v(.pr9, .nav, ["A-9"], jump: true, "open PR 9's review"),
+        v(.asked1, .nav, ["A-a"], jump: true, "open the first PR you're asked to review, from any page — the letter on its card (⌥h and ⌥l stay panes, so a…g)"),
+        v(.asked2, .nav, ["A-b"], jump: true, "the second PR you're asked to review"), v(.asked3, .nav, ["A-c"], jump: true, "the third"),
+        v(.asked4, .nav, ["A-d"], jump: true, "the fourth"), v(.asked5, .nav, ["A-e"], jump: true, "the fifth"),
+        v(.asked6, .nav, ["A-f"], jump: true, "the sixth"), v(.asked7, .nav, ["A-g"], jump: true, "the seventh"),
         v(.jumpBack, .nav, ["C-o"], "jump back (the jumplist)"),
         v(.jumpForward, .nav, ["C-i"], "jump forward again"),
         v(.saveJump, .nav, ["C-s"], "save this spot to the jumplist"),

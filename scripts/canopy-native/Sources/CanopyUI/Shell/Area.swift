@@ -138,26 +138,38 @@ public struct Pane: Identifiable, Equatable {
     public var row: Int
     /// rows `C-d` / `C-u` move
     public var pageSize: Int
-    /// Runs of `rows` drawn side by side, as one line: `j`/`k` step over a strip as a single line and `h`/`l` walk it.
-    /// A row in no strip is a line of its own.
-    public var strips: [[String]]
+    /// Rows drawn as side-by-side columns (a block): `j`/`k` move along a column and step out of the block past its
+    /// ends; `h`/`l` cross to the next column at the same height. A row of chips is a block of one-row columns. A row
+    /// in no block is a line of its own.
+    public var blocks: [[[String]]]
 
-    public init(id: String, title: String = "", rows: [String], column: Int = 0, row: Int = 0, pageSize: Int = 10, strips: [[String]] = []) {
-        self.id = id; self.title = title; self.rows = rows; self.column = column; self.row = row; self.pageSize = pageSize; self.strips = strips
+    public init(id: String, title: String = "", rows: [String], column: Int = 0, row: Int = 0, pageSize: Int = 10, blocks: [[[String]]] = []) {
+        self.id = id; self.title = title; self.rows = rows; self.column = column; self.row = row; self.pageSize = pageSize
+        self.blocks = blocks.map { $0.map { $0.filter(rows.contains) }.filter { !$0.isEmpty } }.filter { !$0.isEmpty }
     }
 
-    /// The pane's rows as lines, top to bottom: each strip once, where its first row stands; every other row alone.
-    public var lines: [[String]] {
-        guard !strips.isEmpty else { return rows.map { [$0] } }
-        var stripOf: [String: Int] = [:]
-        for (i, s) in strips.enumerated() { for k in s { stripOf[k] = i } }
-        var out: [[String]] = [], placed = Set<Int>()
+    /// Where a row sits in a block: the block, its column, its place in that column.
+    public func place(of key: String) -> (block: Int, column: Int, index: Int)? {
+        for (b, cols) in blocks.enumerated() {
+            for (c, col) in cols.enumerated() { if let i = col.firstIndex(of: key) { return (b, c, i) } }
+        }
+        return nil
+    }
+
+    /// The pane top to bottom as `j`/`k` sees it outside a block: each block once, where its first row stands; every
+    /// other row alone. A unit is a block's index, or a row.
+    public var units: [Either<Int, String>] {
+        var out: [Either<Int, String>] = [], placed = Set<Int>()
         for k in rows {
-            guard let i = stripOf[k] else { out.append([k]); continue }
-            if placed.insert(i).inserted { out.append(strips[i].filter(rows.contains)) }
+            guard let p = place(of: k) else { out.append(.right(k)); continue }
+            if placed.insert(p.block).inserted { out.append(.left(p.block)) }
         }
         return out
     }
+}
+
+public enum Either<L: Equatable, R: Equatable>: Equatable {
+    case left(L), right(R)
 }
 
 public enum Direction: String, Sendable { case left, down, up, right }

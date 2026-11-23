@@ -584,3 +584,10 @@ Phil, on #11682's review after round 34: "this style feels adrift now … and al
 2. **Numbers are text, never numbers to format** — `Text(verbatim:)` everywhere a PR number is drawn.
 3. **A force's guards speak only when a force is the question.** When origin holds everything the checkout has (prep route `conform`), the strip leaves the force-scope line out; `p` takes origin's copy.
 
+## Round 36: two columns of cards
+
+Phil, relayed: "these need to be vertical" (the PR cards, then a three-wide grid) and "then these are vertical too, but second column, and it's like option+a to select the first one" (the PRs he's asked to review).
+
+1. **The home opens on two columns**: my PR cards stacked on the left (⌥1…), the PRs I'm asked to review stacked on the right as cards of the same shape (⌥a…g — `⌥h`/`⌥l` stay pane moves). The review rows leave the groups below.
+2. **A strip becomes a block of columns** (`Pane.blocks`, `Pane.place`, `Pane.units`): `j`/`k` move down a column and step out of the block past its ends, returning to where you were; `h`/`l` cross columns at the same height, falling through to the pane at the edge. The push chips are a block of one-chip columns, so they behave as before.
+

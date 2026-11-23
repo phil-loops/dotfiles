@@ -390,24 +390,37 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = f
         #expect(PRState.of(MyPR(number: 1, title: "t", url: "u", draft: false, head: "h", local: false, approvals: 1, changesRequested: false, mergeState: "CLEAN")).word == "ready to merge")
     }
 
-    /// Round 32: rows drawn side by side are one line. `j`/`k` step over a strip and come back to where you were on it;
-    /// `h`/`l` walk it and, at its end, go to the pane that way.
-    @Test func jAndKStepOverAStripAndHAndLWalkIt() {
+    /// Round 36: my PR cards and the PRs I'm asked to review stand as two columns. `j`/`k` move down a column and step
+    /// out of it past its end, coming back to where you were; `h`/`l` cross columns at the same height, and at the
+    /// block's edge go to the pane that way. ⌥a reviews the first request.
+    @Test func jAndKMoveDownAColumnAndHAndLCrossColumns() {
         let a = world(branchOver: ["s": ["pushed": "synced"], "w": ["pushed": "synced"]], extraPRs: [
             "r:s": prObj(["id": "r:s", "branch": "s", "project": "r:solo", "number": 13, "review": "CHANGES_REQUESTED"]),
         ])
         a.forestModel.syncClosings()
-        let cards = a.forestModel.homeStrips().first ?? []
-        #expect(cards.count == 2 && Set(cards) == ["pr:r:s", "pr:r:a"])
-        a.setCursor(cards[0])
-        a.keys.handle("l")
-        #expect(a.selected == cards[1], "l walks the cards")
+        a.forestModel.setReviewRequests([
+            ReviewRequest(number: 7, title: "compile footer lmx", author: "someone", url: "https://github.com/o/r/pull/7", imported: true),
+            ReviewRequest(number: 9, title: "fix a thing", author: "someone", url: "https://github.com/o/r/pull/9", imported: false),
+        ])
+        let block = a.forestModel.homeBlocks()[0]
+        #expect(block == [["pr:r:a", "pr:r:s"], ["r:7", "r:9"]], "mine on the left by number, asked on the right")
+        a.setCursor("pr:r:a")
         a.keys.handle("j")
-        #expect(a.selected == a.rows[2], "j leaves the strip for the line below it")
+        #expect(a.selected == "pr:r:s", "j moves down my column")
+        a.keys.handle("l")
+        #expect(a.selected == "r:9", "l crosses to the review column at the same height")
         a.keys.handle("k")
-        #expect(a.selected == cards[1], "k comes back to where you were on the strip")
-        a.keys.handle("h"); a.keys.handle("h")
-        #expect(a.selected == cards[0], "h at the strip's start doesn't wrap")
+        #expect(a.selected == "r:7")
+        a.keys.handle("h")
+        #expect(a.selected == "pr:r:a")
+        a.keys.handle("j"); a.keys.handle("j")
+        let below = a.selected
+        #expect(below != nil && !block.joined().contains(below!), "past a column's end, j steps out of the block")
+        a.keys.handle("k")
+        #expect(a.selected == "pr:r:s", "and k comes back to where you were")
+        #expect(a.registry.command("forests.asked.a")?.keys == ["A-a"])
+        a.keys.handle("A-a")
+        #expect(a.runner.fired?.id == "forests.asked.a" && a.runner.fired?.ok == true, "⌥a opens the first review request")
     }
 
     /// Round 34: the cards keep one order — by PR number, oldest first — whatever their state, and ⌥n reviews card n

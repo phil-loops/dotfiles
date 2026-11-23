@@ -39,8 +39,8 @@ public final class AppModel: CommandContext {
     public private(set) var cursors: [String: String] = [:]
     public private(set) var cursorIdxs: [String: Int] = [:]
     public private(set) var anchors: [String: Int] = [:]
-    /// where the cursor last stood on each strip, by pane and the strip's first row
-    private var stripPlace: [String: String] = [:]
+    /// where the cursor last stood in each block, by pane and the block's first row
+    private var blockPlace: [String: String] = [:]
     @ObservationIgnored private var cursorGenerations: [String: Int] = [:]
 
     /// The label layer while it's up: what's labelled, and what's been typed of a label.
@@ -326,27 +326,44 @@ public final class AppModel: CommandContext {
         cursorIdx = n
     }
 
-    /// `j`/`k`: `by` lines down or up. A strip is one line; arriving on one lands where you last were in it.
+    /// `j`/`k`: `by` rows down or up. In a block the cursor moves along its column and steps out past the column's
+    /// ends; arriving on a block lands where you last were in it (else its first column's top, or bottom coming up).
     public func moveCursor(_ by: Int) {
         let r = rows
         guard !r.isEmpty else { return }
-        guard let lines = pane?.lines, lines.count != r.count else {
+        guard let pane, !pane.blocks.isEmpty else {
             cursorTo((r.firstIndex(of: selected ?? r[0]) ?? 0) + by)
             return
         }
-        let here = lines.firstIndex { $0.contains(selected ?? r[0]) } ?? 0
-        if lines[here].count > 1, let k = selected { stripPlace[paneKey(pane?.id ?? "main") + "|" + lines[here][0]] = k }
-        let to = lines[max(0, min(lines.count - 1, here + by))]
-        let back = stripPlace[paneKey(pane?.id ?? "main") + "|" + to[0]]
-        setCursor(back.flatMap { to.contains($0) ? $0 : nil } ?? to[0])
+        let here = selected ?? r[0]
+        let units = pane.units
+        var u: Int
+        if let p = pane.place(of: here) {
+            let col = pane.blocks[p.block][p.column]
+            blockPlace[paneKey(pane.id) + "|" + pane.blocks[p.block][0][0]] = here
+            if col.indices.contains(p.index + by) { return setCursor(col[p.index + by]) }
+            u = units.firstIndex(of: .left(p.block)) ?? 0
+        } else {
+            u = units.firstIndex(of: .right(here)) ?? 0
+        }
+        u = max(0, min(units.count - 1, u + (by > 0 ? max(1, by) : min(-1, by))))
+        switch units[u] {
+        case .right(let k): setCursor(k)
+        case .left(let b):
+            let cols = pane.blocks[b]
+            let back = blockPlace[paneKey(pane.id) + "|" + cols[0][0]].flatMap { k in cols.contains { $0.contains(k) } ? k : nil }
+            setCursor(back ?? (by > 0 ? cols[0].first! : cols[0].last!))
+        }
     }
 
-    /// `h`/`l` on a strip: the row beside the cursor; false at the strip's end or off a strip, so the move falls
-    /// through to the pane that way.
+    /// `h`/`l` in a block: the next column's row at the cursor's height; false at the block's edge or off a block, so
+    /// the move falls through to the pane that way.
     public func moveAlongStrip(_ by: Int) -> Bool {
-        guard let k = selected, let line = pane?.lines.first(where: { $0.contains(k) }), line.count > 1,
-              let i = line.firstIndex(of: k), line.indices.contains(i + by) else { return false }
-        setCursor(line[i + by])
+        guard let pane, let k = selected, let p = pane.place(of: k) else { return false }
+        let cols = pane.blocks[p.block]
+        guard cols.indices.contains(p.column + by) else { return false }
+        let col = cols[p.column + by]
+        setCursor(col[min(p.index, col.count - 1)])
         return true
     }
 

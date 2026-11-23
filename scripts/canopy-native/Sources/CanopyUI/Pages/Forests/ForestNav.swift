@@ -83,6 +83,16 @@ enum ForestNav {
                                    else if let p = row.mine { openOnGitHub(p.number, p.url) }
                                }))
         }
+        // ⌥a–⌥g: open the n-th PR you're asked to review, by the letter on its card
+        for n in 1...Verbs.askedLetters.count {
+            r.register(Command(id: "forests.asked.\(Verbs.askedLetters[n - 1])", title: "Open review request \(Verbs.askedLetters[n - 1])", scope: .global,
+                               verb: .asked(n), label: "review \(Verbs.askedLetters[n - 1])", recordsJump: true,
+                               available: { _ in m.reviewRequests.count >= n },
+                               local: { _, _ in
+                                   guard m.reviewRequests.indices.contains(n - 1) else { throw Refusal("no review request \(Verbs.askedLetters[n - 1])") }
+                                   app.runner.dispatch("forests.review.open", via: .key, target: String(m.reviewRequests[n - 1].number))
+                               }))
+        }
         r.register(Command(id: "forests.pr.next", title: "Review the next open PR", scope: .global, verb: .nextOpenPR, label: "open PR",
                            pair: "forests.pr.prev", recordsJump: true, available: { _ in !m.openPRRows().isEmpty }, local: { _, _ in try hopPR(1) }))
         r.register(Command(id: "forests.pr.prev", title: "Review the previous open PR", scope: .global, verb: .previousOpenPR, label: "open PR",
