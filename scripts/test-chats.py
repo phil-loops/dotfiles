@@ -18,6 +18,7 @@ sys.path.insert(0, HERE)
 from srv import chats, workjournal as wj  # noqa: E402
 
 PANE_LABELS = {}
+_real_read_labels = chats._read_labels
 chats._read_labels = lambda: dict(PANE_LABELS)   # never the machine's tmux
 chats.LABELS_TTL = 0
 
@@ -163,5 +164,20 @@ check("a click from a view of an older generation is refused with the binding no
       code == 409 and body["current"] == {"generation": 1, "works": [work]}, (code, body))
 check("a malformed click is refused in words", post({"session": "short", "branch": "old-branch", "generation": 1})[0] == 400)
 check("a branch that isn't there is refused", post({"session": BOUND, "branch": "no-such", "generation": 1})[0] == 400)
+
+# a pane's label is its chat-label, else the topic of Claude Code's title — from a stand-in tmux on PATH
+fake_bin = os.path.join(TMP, "bin")
+os.makedirs(fake_bin)
+host = chats.socket.gethostname()
+with open(os.path.join(fake_bin, "tmux"), "w") as f:
+    f.write("#!/bin/sh\nprintf '%s\\n' '%1\tchosen\t✳ Some topic' '%2\t\t✳ Too many bounces' '%3\t\t⠂ Working on it'"
+            f" '%4\t\t✳ Claude Code' '%5\t\t{host}' '%6\t\t{host.split('.')[0]}' '%7\t  \t'\n")
+os.chmod(os.path.join(fake_bin, "tmux"), 0o755)
+path = os.environ["PATH"]
+os.environ["PATH"] = fake_bin + os.pathsep + path
+got = _real_read_labels()
+os.environ["PATH"] = path
+check("chat-label wins; else Claude's title without its mark; a generic or host-name title names nothing",
+      got == {"%1": "chosen", "%2": "Too many bounces", "%3": "Working on it"}, got)
 
 sys.exit(1 if failures else 0)

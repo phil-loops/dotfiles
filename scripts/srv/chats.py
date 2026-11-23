@@ -9,8 +9,8 @@ full session id:
   generation the binding generation this was read at — a click that binds sends it back (P7)
   at         where it stands: the presence record's repo name and branch, for the unbound list
   pane       its tmux pane, to focus; absent outside tmux
-  label      what the chat says it's working on: its pane's tmux option @chat_label (`chat-label`); absent
-             when unset or outside tmux
+  label      what the chat is working on: its pane's tmux option @chat_label (`chat-label`), else the
+             title Claude Code gives the pane; absent when neither names anything or outside tmux
   activeAt   its last tool call; live vs idle is the reader's call, and an ended chat is absent
   acted      the branches it acted on within ACTED_WITHIN, newest first: {branch: "<repo>:<name>",
              how: edit | commit, at} — an edit from its presence record (resolved at the edit), a
@@ -25,6 +25,7 @@ import json
 import os
 import re
 import fcntl
+import socket
 import subprocess
 import time
 
@@ -117,15 +118,30 @@ def _records():
     return out
 
 
+def _topic(title):
+    """Claude Code's pane title as a topic: its status mark (✳, a spinner) dropped; None when it names
+    nothing — tmux's default title is the host's name, and a new chat's is "Claude Code"."""
+    t = re.sub(r"^\W+", "", title).strip()
+    host = socket.gethostname()
+    return None if not t or t == "Claude Code" or t in (host, host.split(".")[0]) else t
+
+
 def _read_labels():
-    """Every tmux pane's @chat_label, by pane id, in one tmux call; {} when tmux isn't there."""
+    """Every tmux pane's label, by pane id, in one tmux call: its @chat_label, else the topic of
+    its title. {} when tmux isn't there."""
     try:
-        r = subprocess.run(["tmux", "list-panes", "-a", "-F", "#{pane_id}\t#{@chat_label}"],
+        r = subprocess.run(["tmux", "list-panes", "-a", "-F", "#{pane_id}\t#{@chat_label}\t#{pane_title}"],
                            capture_output=True, text=True, timeout=2)
     except (OSError, subprocess.TimeoutExpired):
         return {}
-    rows = (line.partition("\t") for line in r.stdout.splitlines()) if r.returncode == 0 else ()
-    return {pane: label for pane, _, label in rows if label.strip()}
+    out = {}
+    for line in r.stdout.splitlines() if r.returncode == 0 else ():
+        pane, _, rest = line.partition("\t")
+        label, _, title = rest.partition("\t")
+        name = label.strip() or _topic(title)
+        if name:
+            out[pane] = name
+    return out
 
 
 def _labels():
