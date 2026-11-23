@@ -98,6 +98,7 @@
 | definition / type-definition / implementations / references | `g d` / `g y` / `g i` / `g r` | code navigation: the place replaces what the window shows (the diff, or a file at its commit in the diff's place), centred; `C-o` brings back what it replaced |
 | symbols | `space s` | list the file's symbols |
 | workspace symbols | `space S` (`:symbol <name>`) | the name under the cursor across the branch's project (Helix's workspace symbols); `:symbol` names any other |
+| ask / ask line | `space a` / `space A` | ask Claude about this change in its one chat (opens with what it's for and any concerns; again brings it forward) / type the line under the cursor into that chat for you to finish — srv/asks.py |
 | github | `space o g` | open it on GitHub |
 | lines on GitHub | `space o m` / `space o b` | the lines under the cursor or selection on GitHub, on main / at the branch (the open file: at its commit) — Helix's gh-open keys |
 | preview | `space o p` | preview it on a side port |

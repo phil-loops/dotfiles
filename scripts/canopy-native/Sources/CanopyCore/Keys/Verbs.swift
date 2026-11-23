@@ -50,6 +50,7 @@ public enum Verb: String, CaseIterable, Sendable, Comparable {
     case jumpBack = "jump-back", jumpForward = "jump-forward", saveJump = "save-jump"
     case branches, jumps, flags, findings, grep, lastPicker = "last-picker"
     case workspaceSymbols = "workspace-symbols"
+    case ask, askLine = "ask-line"
     case paneLeft = "pane-left", paneDown = "pane-down", paneUp = "pane-up", paneRight = "pane-right", paneNext = "pane-next"
     case splitRight = "split-right", splitBelow = "split-below", closeWindow = "close-window", onlyWindow = "only-window"
     case pickRight = "pick-right", pickBelow = "pick-below"
@@ -112,6 +113,8 @@ public enum KeySection: String, CaseIterable, Sendable {
         case .type, .definition, .typeDefinition, .implementations, .references, .symbols, .workspaceSymbols, .rename, .match,
              .nextFunction, .previousFunction, .nextType, .previousType, .nextTest, .previousTest:
             return .code
+        case .ask, .askLine:
+            return .review
         case .nextFile, .previousFile, .nextHunk, .previousHunk, .nextUnviewed, .previousUnviewed,
              .nextThread, .previousThread, .nextConversation, .previousConversation, .nextComment, .previousComment,
              .nextFinding, .previousFinding, .firstFinding, .lastFinding, .nextGitHunk, .previousGitHunk,
@@ -261,6 +264,8 @@ public enum Verbs {
         v(.references, .nav, ["g r"], "list its references"),
         v(.symbols, .nav, ["space s"], "list the file's symbols"),
         v(.workspaceSymbols, .nav, ["space S"], "symbols named like the name under the cursor, across the branch's project (Helix's workspace symbols); :symbol <name> asks for any"),
+        v(.ask, .nav, ["space a"], "ask Claude about this change: its chat opens with what it's for and any concerns, or comes forward if it has one"),
+        v(.askLine, .nav, ["space A"], "ask Claude about the line under the cursor: its place and code typed into the change's chat, for you to finish"),
         v(.github, .nav, ["space o g"], "open it on GitHub"),
         v(.githubMain, .nav, ["space o m"], "open these lines on GitHub, on main"),
         v(.githubBranch, .nav, ["space o b"], "open these lines on GitHub, at the branch (the open file: at its commit)"),

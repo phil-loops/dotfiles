@@ -13,6 +13,7 @@ enum ReviewArea: PageArea {
         HelixLanding.install(app)
         ReviewGuide.install(app)
         EvidenceCommands.install(app)
+        ReviewAsk.install(app)
         placeInSheet(app.registry)
         let pg = ReviewPageState.of(app)
         ShipState.of(app).host = pg

@@ -529,6 +529,7 @@ public final class ReviewPageState: ShipHost {
         "review.github.main", "review.github.branch", "review.expand",
         "review.function.next", "review.function.prev", "review.type.next", "review.type.prev",
         "review.finding.next", "review.finding.prev", "review.finding.last", "review.finding.first", "review.findings",
+        "review.ask", "review.ask.line",
     ])
     /// Ship's keys that take their line from its host, which is this page only on the review page.
     static let shipLines: Set<String> = ["review.comment", "review.gutter", "review.compose.edit"]
