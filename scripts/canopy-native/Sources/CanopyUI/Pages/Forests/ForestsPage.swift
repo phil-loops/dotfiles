@@ -45,14 +45,20 @@ struct ForestsPage: View {
                                 section(.workbench, p.workbench, fs, working, nameWidth: nameWidth, cursor: cursor, selection: selection)
                             } else {
                                 let home = m.homeSections()
-                                if !home.cards.isEmpty || !m.reviewRequests.isEmpty {
-                                    PRCards(cards: home.cards, asked: m.reviewRequests, cursor: cursor, selection: selection)
+                                let beside = m.pushBesideCards(home)
+                                let carded = Set(home.cards.map(\.number))
+                                if beside {
+                                    PRCards(cards: home.cards, asked: m.reviewRequests, push: home.sections.first { $0.verb == .push }?.items ?? [],
+                                            fs: fs, cursor: cursor, selection: selection)
+                                    // what you act on sits above the rule; the forests, by who holds them, below
+                                    Rectangle().fill(theme.vellumEdge).frame(height: 1)
+                                        .padding(.leading, HomeColumns.edge - HomeColumns.card).padding(.trailing, 16).padding(.bottom, 26)
                                 }
                                 ForEach(home.sections, id: \.verb) { sec in
                                     if sec.verb == .push {
-                                        PushChips(items: sec.items, fs: fs, cursor: cursor, selection: selection)
+                                        if !beside { PushChips(items: sec.items, fs: fs, cursor: cursor, selection: selection) }
                                     } else {
-                                        HomeGroup(verb: sec.verb, items: sec.items, fs: fs, working: working, nameWidth: nameWidth, cursor: cursor, selection: selection)
+                                        HomeGroup(verb: sec.verb, items: sec.items, fs: fs, working: working, nameWidth: nameWidth, cursor: cursor, selection: selection, carded: carded)
                                     }
                                 }
                                 // what needs nothing from you sits below what does (round 29, P5)
@@ -132,7 +138,7 @@ struct ForestsPage: View {
                     }
                 }
             }
-            .padding(.bottom, 28)
+            .padding(.bottom, HomeColumns.gap)
         }
     }
 
@@ -172,16 +178,18 @@ private struct HomeGroup: View {
     let nameWidth: CGFloat
     let cursor: String?
     let selection: Set<String>
+    /// the PRs the cards above already say: a forest's row doesn't say them again
+    var carded: Set<Int> = []
 
     var body: some View {
         let m = app.forestModel
         VStack(alignment: .leading, spacing: 0) {
-            SectionHead(text: verb.title, gold: verb.isYours).padding(.leading, 44).padding(.bottom, 4)
+            SectionHead(text: verb.title, gold: verb.isYours).padding(.leading, 44).padding(.bottom, 6)
             ForEach(items, id: \.key) { item in
                 switch item {
                 case .forest(let p):
                     if let f = fs[p.id] {
-                        ForestRowView(f: f, nameWidth: nameWidth, cursor: cursor == item.key, selected: selection.contains(item.key))
+                        ForestRowView(f: f, nameWidth: nameWidth, cursor: cursor == item.key, selected: selection.contains(item.key), carded: carded)
                         ForEach(ForestsPage.workLines(f, working), id: \.item.id) { l in BranchWorkLine(branch: l.branch, item: l.item) }
                         if m.launching == f.p.id { LaunchLine(f: f) }
                         ForEach(m.expanded.contains(f.p.id) ? f.branches : [], id: \.b.id) { v in
@@ -204,7 +212,7 @@ private struct HomeGroup: View {
                 }
             }
         }
-        .padding(.bottom, 28)
+        .padding(.bottom, HomeColumns.gap)
     }
 }
 
@@ -216,6 +224,9 @@ private struct PRCards: View {
     @Environment(\.theme) private var theme
     let cards: [OpenPRRow]
     let asked: [ReviewRequest]
+    /// the forests whose next step is a push: their chips sit under the review requests
+    var push: [HomeItem] = []
+    var fs: [String: ForestView] = [:]
     let cursor: String?
     let selection: Set<String>
 
@@ -224,16 +235,22 @@ private struct PRCards: View {
             column("your PRs") {
                 ForEach(Array(cards.enumerated()), id: \.element.key) { i, r in card(r, n: i + 1) }
             }
-            column("review") {
-                ForEach(Array(asked.enumerated()), id: \.element.number) { i, r in askedCard(r, n: i + 1) }
+            VStack(alignment: .leading, spacing: 26) {
+                if !asked.isEmpty || push.isEmpty {
+                    column("review") {
+                        ForEach(Array(asked.enumerated()), id: \.element.number) { i, r in askedCard(r, n: i + 1) }
+                    }
+                }
+                if !push.isEmpty { PushChips(items: push, fs: fs, cursor: cursor, selection: selection, inColumn: true) }
             }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
-        .padding(.leading, 28).padding(.trailing, 16).padding(.top, 6).padding(.bottom, 30)
+        .padding(.leading, HomeColumns.edge - HomeColumns.card).padding(.trailing, 16).padding(.top, 6).padding(.bottom, 30)
     }
 
     private func column<C: View>(_ title: String, @ViewBuilder _ content: () -> C) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            SectionHead(text: title, gold: true).padding(.leading, 16)
+            SectionHead(text: title, gold: true).padding(.leading, HomeColumns.card)
             content()
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -311,6 +328,8 @@ private struct PushChips: View {
     let fs: [String: ForestView]
     let cursor: String?
     let selection: Set<String>
+    /// in the top band's right column: its head lines up with that column's, and it brings no gap of its own
+    var inColumn = false
 
     var body: some View {
         let forests = items.compactMap { item -> (key: String, f: ForestView)? in
@@ -328,7 +347,7 @@ private struct PushChips: View {
                     KeyHint(id: "forests.push.green")
                 }
             }
-            .padding(.leading, 44)
+            .padding(.leading, inColumn ? HomeColumns.card : 44)
             ChipFlow(spacing: 8) {
                 ForEach(forests, id: \.key) { c in
                     let here = cursor == c.key
@@ -343,9 +362,9 @@ private struct PushChips: View {
                     .id(c.key)
                 }
             }
-            .padding(.leading, 40).padding(.trailing, 16)
+            .padding(.leading, inColumn ? 0 : HomeColumns.edge - HomeColumns.card).padding(.trailing, inColumn ? 0 : 16)
         }
-        .padding(.bottom, 28)
+        .padding(.bottom, inColumn ? 0 : HomeColumns.gap)
     }
 }
 
@@ -390,6 +409,12 @@ struct ChipFlow: Layout {
 enum HomeColumns {
     static let pr: CGFloat = 360
     static let step: CGFloat = 170
+    /// where every section's words start, from the page's edge: heads, row names and the words inside a card
+    static let edge: CGFloat = 44
+    /// a card's own padding: its box starts that far left of `edge`
+    static let card: CGFloat = 14
+    /// between sections: clearly more than a row's height, so a section reads as one thing
+    static let gap: CGFloat = 40
 }
 
 private struct HomeLine: View {
@@ -408,7 +433,7 @@ private struct HomeLine: View {
     var body: some View {
         let here = cursor == key
         HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text("").frame(width: 12)
+            Text("").frame(width: 16)
             Text(verbatim: name).font(Theme.display(17)).foregroundStyle(here ? theme.goldLeaf : theme.ink)
                 .lineLimit(1).truncationMode(.tail).frame(width: nameWidth, alignment: .leading)
             Text(verbatim: line).foregroundStyle(theme.inkDim).lineLimit(1).truncationMode(.tail).frame(maxWidth: .infinity, alignment: .leading)
@@ -608,7 +633,7 @@ private struct ReplyQueue: View {
                     let key = RowKey.reply(r.chat.id)
                     let here = cursor == key
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
-                        Text("").frame(width: 12)
+                        Text("").frame(width: 16)
                         Text("reply to Claude").font(Theme.display(17)).foregroundStyle(here ? theme.goldLeaf : theme.ink)
                             .lineLimit(1).frame(width: nameWidth, alignment: .leading)
                         Text(r.forests.map(\.name).joined(separator: ", ")).foregroundStyle(theme.inkDim).lineLimit(1)
@@ -622,7 +647,7 @@ private struct ReplyQueue: View {
                     .rowChrome(key, cursor: here, selected: selection.contains(key))
                 }
             }
-            .padding(.bottom, 28)
+            .padding(.bottom, HomeColumns.gap)
         }
     }
 }
@@ -647,7 +672,7 @@ private struct ReviewQueue: View {
                     let key = RowKey.reviewRequest(r.number)
                     let here = cursor == key
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
-                        Text("").frame(width: 12)
+                        Text("").frame(width: 16)
                         Text(verbatim: "#\(r.number)").font(Theme.display(17)).foregroundStyle(here ? theme.goldLeaf : theme.ink)
                             .lineLimit(1).frame(width: nameWidth, alignment: .leading)
                         Text(r.title).foregroundStyle(theme.inkDim).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
@@ -663,7 +688,7 @@ private struct ReviewQueue: View {
                     .rowChrome(key, cursor: here, selected: selection.contains(key))
                 }
             }
-            .padding(.bottom, 28)
+            .padding(.bottom, HomeColumns.gap)
         }
     }
 }
@@ -692,6 +717,7 @@ private struct ForestRowView: View {
     let nameWidth: CGFloat
     let cursor: Bool
     let selected: Bool
+    var carded: Set<Int> = []
 
     var body: some View {
         @Bindable var m = app.forestModel
@@ -700,7 +726,7 @@ private struct ForestRowView: View {
         let verdict = m.verdict(p.id)
         HStack(alignment: .firstTextBaseline, spacing: 12) {
             // the focus lane reorders by key (C-k / C-j); the grip only says it can
-            Text("⋮").foregroundStyle(theme.inkFaint).opacity(p.state == .focus && cursor ? 1 : 0).frame(width: 12)
+            Text("⋮").foregroundStyle(theme.inkFaint).opacity(p.state == .focus && cursor ? 1 : 0).frame(width: 16)
             HStack(spacing: 6) {
                 let nameField = ProjectCommands.renameField(p.id)
                 if app.insertField == nameField {
@@ -748,7 +774,7 @@ private struct ForestRowView: View {
             }
             if cursor, !meta(verdict).isEmpty { Text(meta(verdict)).font(Theme.text(11)).foregroundStyle(theme.inkFaint).fixedSize() }
             if !f.closed { ForestChats(f: f, cursor: cursor).fixedSize() }
-            let prs = m.forestPRs(f)
+            let prs = m.forestPRs(f).filter { v in v.pr.map { !carded.contains($0.number) } ?? true }
             PRCell(numbers: prs.compactMap { $0.pr?.number }, state: prs.first?.pr.map(PRState.of),
                    signals: prs.first?.pr.flatMap { m.prSignals[$0.number] })
             // the forest's one step, in a column that never grows (round 29, P2): the full line is on hover

@@ -367,7 +367,8 @@ public final class ForestModel {
         }
         let home = homeSections()
         out += home.cards.map(\.key) + reviewRequests.map { RowKey.reviewRequest($0.number) }
-        for item in home.sections.flatMap(\.items) {
+        let sections = pushBesideCards(home) ? home.sections.filter { $0.verb == .push } + home.sections.filter { $0.verb != .push } : home.sections
+        for item in sections.flatMap(\.items) {
             if case .forest(let x) = item { add([x]) } else { out.append(item.key) }
         }
         add(showArchive ? p.archive : [])
@@ -421,6 +422,12 @@ public final class ForestModel {
         return (p.focus + p.workbench).compactMap { f[$0.id] }.filter { !$0.closed }.flatMap(\.branches).filter {
             $0.b.role != "proof" && $0.b.gates == .green && $0.st.actor == .you && $0.st.next == "branch.push.arm" && $0.b.pending == nil
         }
+    }
+
+    /// Whether the push chips sit in the top band's right column, under the review requests, instead of a band of
+    /// their own: whenever the top band is drawn.
+    func pushBesideCards(_ home: (cards: [OpenPRRow], sections: [HomeSection])) -> Bool {
+        !home.cards.isEmpty || !reviewRequests.isEmpty
     }
 
     /// The home's blocks (round 36): my PR cards and the PRs I'm asked to review, as two columns side by side; the
