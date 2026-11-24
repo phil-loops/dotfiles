@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """prod-callers — which production entry points reach the functions a branch changes, at that branch's tip.
 
-  prod-callers <branch> [--base <ref>] [--json] [--repo <path>]
+  prod-callers <branch or commit> [--base <ref>] [--json] [--repo <path>] [--port <the viewer server's>]
 
 For every top-level declaration the branch's own diff (base...branch) touches, walk its references upward
 — references, not calls, so a function handed over as a default dep counts — until an entry point:
@@ -331,7 +331,7 @@ def main():
     if not args or args[0] in ("-h", "--help"):
         print(__doc__)
         return 0 if args else 2
-    opts = {"--base": None, "--repo": os.getcwd()}
+    opts = {"--base": None, "--repo": os.getcwd(), "--port": None}
     as_json = "--json" in args
     args = [a for a in args if a != "--json"]
     while len(args) >= 3 and args[-2] in opts:
@@ -339,7 +339,7 @@ def main():
         args = args[:-2]
     branch, repo = args[0], git(opts["--repo"], "rev-parse", "--show-toplevel").strip()
     base = opts["--base"] or git(repo, "config", f"branch.{branch}.stack-parent").strip() or "main"
-    port = subprocess.run([os.path.join(HERE, "stack-review-port")], capture_output=True, text=True, cwd=repo).stdout.strip()
+    port = opts["--port"] or subprocess.run([os.path.join(HERE, "stack-review-port")], capture_output=True, text=True, cwd=repo).stdout.strip()
     result = report(repo, branch, base, port)
     print(json.dumps(result, indent=1)) if as_json else say(result)
     return 0

@@ -19,6 +19,7 @@ from collections import namedtuple
 from . import evidence   # own line: the big import below is contested across sessions
 from . import pushintent   # own line: the big import below is contested across sessions
 from . import asks   # own line: the big import below is contested across sessions
+from . import callers   # own line: the big import below is contested across sessions
 from . import catchup, ctx, edits, forestlock, forestowner
 from . import (actor, chat, chats, integrate, lsp, outbox, outline, packet, picker, preview, push, queue, restack,
                review, reviewdesk, reviews, sync, syntax, todo, tutor, usage, verdicts, viewed)
@@ -51,6 +52,7 @@ POST = {
     "/lsp/workspace-symbols": _r(lsp.workspace_symbols),
     "/lsp/prepare": _r(lsp.prepare),                     # moves the type trees (its own scratch checkouts)
     "/syntax/units": _r(syntax.units),
+    "/callers": _r(callers.answer),                      # which production entry points reach a branch's changes (kept per tip)
     "/integrate": _r(integrate.check),                   # does the whole forest land on main (scratch worktree)
     "/edit-session": _r(edits.prepare, "machine"),
     "/edit-release": _r(edits.release, "machine"),
