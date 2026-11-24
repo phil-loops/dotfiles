@@ -391,6 +391,7 @@ FORM_SCRIPT = """function buildShadowQuiz() {{
   form.setDescription("block or send");
   form.setProgressBar(true);
   form.setLimitOneResponsePerUser(true);
+  try {{ form.setEmailCollectionType(FormApp.EmailCollectionType.VERIFIED); }} catch (e) {{}}
   form.setAllowResponseEdits(true);
   form.setPublishingSummary(true);
   senders.forEach(function (s, i) {{
@@ -464,6 +465,7 @@ SQL = """-- shadow flips for one pipeline over the last day; copy the result row
 SELECT * FROM "EvalResult"
 WHERE pipeline = '{pipeline}'
   AND status = 'Completed'
+  AND "rawOutput" <> ''
   AND decision IS DISTINCT FROM "prodDecision"
   AND "createdAt" > now() - interval '1 day'
 ORDER BY "createdAt" DESC;"""
