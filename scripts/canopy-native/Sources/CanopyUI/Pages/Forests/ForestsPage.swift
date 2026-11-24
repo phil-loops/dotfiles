@@ -61,7 +61,7 @@ struct ForestsPage: View {
                                     section(.archive, p.archive, fs, working, nameWidth: nameWidth, cursor: cursor, selection: selection)
                                 } else if !p.archive.isEmpty {
                                     HStack(spacing: 6) {
-                                        Button("archive · \(p.archive.count)") { app.runner.dispatch("archive.toggle", via: .click) }
+                                        Button("archive") { app.runner.dispatch("archive.toggle", via: .click) }
                                             .buttonStyle(.plain).foregroundStyle(theme.inkFaint)
                                             .labelTarget(pane: "controls", key: "archive.toggle", title: "archive", run: RouteTo("archive.toggle"))
                                         KeyHint(id: "archive.toggle")
@@ -176,7 +176,7 @@ private struct HomeGroup: View {
     var body: some View {
         let m = app.forestModel
         VStack(alignment: .leading, spacing: 0) {
-            SectionHead(text: "\(verb.title) · \(items.count)", gold: verb.isYours).padding(.leading, 44).padding(.bottom, 4)
+            SectionHead(text: verb.title, gold: verb.isYours).padding(.leading, 44).padding(.bottom, 4)
             ForEach(items, id: \.key) { item in
                 switch item {
                 case .forest(let p):
@@ -221,10 +221,10 @@ private struct PRCards: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 20) {
-            column("your PRs · \(cards.count)") {
+            column("your PRs") {
                 ForEach(Array(cards.enumerated()), id: \.element.key) { i, r in card(r, n: i + 1) }
             }
-            column("review · \(asked.count)") {
+            column("review") {
                 ForEach(Array(asked.enumerated()), id: \.element.number) { i, r in askedCard(r, n: i + 1) }
             }
         }
@@ -302,8 +302,8 @@ private struct PRCards: View {
     }
 }
 
-/// The push group (rounds 31–32): every forest whose next step is a push, as one wrapping run of chips — the name and
-/// how many of its branches wait to go. `h`/`l` walk them; ↵ opens a forest, where `p` sends them.
+/// The push group (rounds 31–32): every forest whose next step is a push, as one wrapping run of chips, each its
+/// forest's name. `h`/`l` walk them; ↵ opens a forest, where `p` sends them.
 private struct PushChips: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme
@@ -312,23 +312,18 @@ private struct PushChips: View {
     let cursor: String?
     let selection: Set<String>
 
-    static func waiting(_ f: ForestView) -> Int {
-        f.branches.filter { ["branch.push.arm", "branch.push.queue", "branch.push.early.arm"].contains($0.st.next ?? "") }.count
-    }
-
     var body: some View {
         let forests = items.compactMap { item -> (key: String, f: ForestView)? in
             if case .forest(let p) = item, let f = fs[p.id] { return (item.key, f) }
             return nil
         }
-        let branches = forests.reduce(0) { $0 + Self.waiting($1.f) }
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
-                SectionHead(text: "push · \(forests.count) \(forests.count == 1 ? "forest" : "forests") · \(branches) \(branches == 1 ? "branch" : "branches")", gold: true)
+                SectionHead(text: "push", gold: true)
                 let green = app.forestModel.greenPushes()
                 if !green.isEmpty {
                     let armed = app.runner.armed?.hasPrefix("push green ") == true
-                    Text(verbatim: armed ? "\(green.count) ready to send — again to push" : "\(green.count) green")
+                    Text(verbatim: armed ? "ready to send — again to push" : "push the green ones")
                         .font(Theme.text(11)).foregroundStyle(armed ? theme.goldLeaf : theme.inkFaint)
                     KeyHint(id: "forests.push.green")
                 }
@@ -337,10 +332,7 @@ private struct PushChips: View {
             ChipFlow(spacing: 8) {
                 ForEach(forests, id: \.key) { c in
                     let here = cursor == c.key
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(verbatim: c.f.p.name).font(Theme.text(13, weight: .medium)).foregroundStyle(here ? theme.goldLeaf : theme.ink)
-                        Text(verbatim: "\(Self.waiting(c.f))").font(Theme.text(11)).monospacedDigit().foregroundStyle(theme.inkFaint)
-                    }
+                    Text(verbatim: c.f.p.name).font(Theme.text(13, weight: .medium)).foregroundStyle(here ? theme.goldLeaf : theme.ink)
                     .padding(.horizontal, 10).padding(.vertical, 5)
                     .background(RoundedRectangle(cornerRadius: 6).fill(here ? theme.goldLeaf.opacity(0.14) : theme.vellumRaise))
                     .overlay(RoundedRectangle(cornerRadius: 6).stroke(here ? theme.goldLeaf.opacity(0.6) : theme.vellumEdge, lineWidth: 1))
@@ -592,11 +584,8 @@ struct PRSignalStrip: View {
     var body: some View {
         HStack(spacing: 9) {
             ForEach(signals.map(Self.marks) ?? [], id: \.symbol) { m in
-                HStack(spacing: 3) {
-                    Image(systemName: m.symbol).font(.system(size: 11, weight: .semibold)).foregroundStyle(color(m.tone))
-                    if let n = m.count { Text(verbatim: "\(n)").font(Theme.text(11)).foregroundStyle(theme.inkDim) }
-                }
-                .help(m.help)
+                Image(systemName: m.symbol).font(.system(size: 11, weight: .semibold)).foregroundStyle(color(m.tone))
+                    .help(m.help)
             }
         }
         .lineLimit(1)
@@ -773,11 +762,12 @@ private struct ForestRowView: View {
     private func meta(_ verdict: IntegrationVerdict?) -> String {
         if f.p.state == .archive || f.branches.isEmpty { return "" }
         var parts: [String] = []
-        if f.unopened.count > 1 { parts.append("\(f.unopened.count) without a PR") }
+        if f.unopened.count > 1 { parts.append("some without a PR") }
         if verdict?.state == .clean { parts.append("merges clean") } else if verdict?.state == .conflicts { parts.append("doesn't merge") }
         if let t = f.p.ticket { parts.append(t) }
         let merging = f.branches.filter { $0.b.role != "proof" }
-        parts.append("\(merging.filter { $0.st.ship == .landed }.count)/\(merging.count) landed")
+        let landed = merging.filter { $0.st.ship == .landed }.count
+        if landed > 0 { parts.append(landed == merging.count ? "all landed" : "partly landed") }
         return parts.joined(separator: " · ")
     }
 }
@@ -869,8 +859,7 @@ private struct LaunchLine: View {
                 Capsule().fill(theme.vellumEdge).frame(width: 112, height: 3)
                 Capsule().fill(theme.goldLeaf).frame(width: 112 * CGFloat(done) / CGFloat(max(1, live.count)), height: 3)
             }
-            if done < live.count { Text("\(done)/\(live.count) on GitHub").foregroundStyle(theme.inkDim) }
-            else { Text("✦ all on GitHub").font(Theme.display(13)).foregroundStyle(theme.goldLeaf) }
+            if done == live.count { Text("✦ all on GitHub").font(Theme.display(13)).foregroundStyle(theme.goldLeaf) }
         }
         .font(Theme.text(12))
         .padding(.leading, 40).padding(.vertical, 6)

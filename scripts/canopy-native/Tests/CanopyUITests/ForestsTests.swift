@@ -104,9 +104,9 @@ private let NOW = iso("2026-10-22T18:00:00Z") // Thu 11:00 PT
     @Test func aForestSitsAtItsMostUrgentBranch() {
         func st(_ a: Actor, done: Bool = false) -> Stand { Stand(ship: .local, action: nil, waiting: [], held: false, actor: a, next: nil, done: done) }
         let mixed = ShipRules.fold([(st(.reviewer), "waiting on review"), (st(.you), "push 2"), (st(.gates), "gates running"), (st(.you), "merge it")])
-        #expect(mixed.move == .yours && mixed.says == "push 2 · 1 more", "one step and a count — the others' moves are their own lines")
+        #expect(mixed.move == .yours && mixed.says == "push 2 · more", "one step and that there are others — the others' moves are their own lines")
         let others = ShipRules.fold([(st(.ci), "waiting on required checks"), (st(.reviewer), "waiting on review"), (st(.reviewer), "waiting on review")])
-        #expect(others.move == .moving && others.says == "waiting on required checks · 2 more", "never a list that grows with the forest")
+        #expect(others.move == .moving && others.says == "waiting on required checks · more", "never a list that grows with the forest")
         #expect(ShipRules.fold([(st(.building), "being built"), (st(.nobody, done: true), "landed")]).move == .waiting)
         #expect(ShipRules.fold([(st(.nobody, done: true), "landed")]).move == .done)
     }

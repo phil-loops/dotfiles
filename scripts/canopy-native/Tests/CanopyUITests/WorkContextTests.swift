@@ -500,7 +500,7 @@ import Testing
             "bbbbbbbb-2": chat("bbbbbbbb-2", activeAt: now - 145 * 3600, at: ("loops", "")),
         ])
         #expect(WorkInProgressView.noDot(app).map(\.id) == ["aaaaaaaa-1"], "145h without a tool call is stale")
-        #expect(WorkContext.looseLine(WorkInProgressView.noDot(app), now: now) == "1 chat on no branch · 1 live")
+        #expect(WorkContext.looseLine(WorkInProgressView.noDot(app), now: now) == "a chat on no branch · live")
     }
 
     @Test func chatsOnNoBranchAreOneRowThatReturnOpens() {
@@ -508,7 +508,7 @@ import Testing
         let app = world(chats: ["aaaaaaaa-1": chat("aaaaaaaa-1", activeAt: now - 600), "cccccccc-3": chat("cccccccc-3", activeAt: now - 60)])
         #expect(app.panes.map(\.id) == ["main", "work"])
         #expect(app.panes.last?.rows == [RowKey.looseChats], "one row for every chat on no branch, never a row each")
-        #expect(WorkContext.looseLine(WorkInProgressView.noDot(app), now: now) == "2 chats on no branch · 1 live")
+        #expect(WorkContext.looseLine(WorkInProgressView.noDot(app), now: now) == "chats on no branch · live")
         app.keys.handle("C-w"); app.keys.handle("k")
         #expect(app.pane?.id == "work" && app.selected == RowKey.looseChats)
         #expect(!app.forestModel.showLooseChats)
@@ -531,8 +531,8 @@ import Testing
         #expect(WorkContext.forestChatsLabel([c], says: "push 2", now: now) == "Claude working", "named by what it is, not its id")
         #expect(WorkContext.forestChatsLabel([c], says: "Claude is on it", now: now) == nil, "never said twice on one line")
         var idle = c; idle.id = "aaaaaaaa-2"; idle.activeAt = now - 600
-        #expect(WorkContext.forestChatsLabel([c, idle], says: "push 2", now: now) == "2 chats · 1 working", "two chats are one phrase")
-        #expect(WorkContext.forestChatsLabel([c, idle], says: "Claude is on it", now: now) == "2 chats")
+        #expect(WorkContext.forestChatsLabel([c, idle], says: "push 2", now: now) == "chats working", "two chats are one phrase")
+        #expect(WorkContext.forestChatsLabel([c, idle], says: "Claude is on it", now: now) == "chats")
     }
 
     @Test func anInProgressRowIsOneLineWhateverItsStepsAndDirection() {

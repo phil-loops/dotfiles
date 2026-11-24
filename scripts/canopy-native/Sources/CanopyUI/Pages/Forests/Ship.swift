@@ -122,7 +122,7 @@ extension ShipRules {
         guard !live.isEmpty else { return (branches.isEmpty ? .waiting : .done, branches.isEmpty ? "no branches" : "every branch landed") }
         let move = live.map { Move.of($0.st.actor) }.min { Move.allCases.firstIndex(of: $0)! < Move.allCases.firstIndex(of: $1)! }!
         let at = live.filter { Move.of($0.st.actor) == move }
-        return (move, at[0].says + (at.count > 1 ? " · \(at.count - 1) more" : ""))
+        return (move, at[0].says + (at.count > 1 ? " · more" : ""))
     }
 }
 
@@ -308,7 +308,7 @@ public enum ShipRules {
         case .you:
             if let a = st.awaiting { return a.hasPrefix("chat ") ? "reply to Claude" : "reply to its agent" }
             switch st.next {
-            case "branch.push.arm": return "push \(b.pushed == .ahead ? b.ahead : b.commits)"
+            case "branch.push.arm": return "push"
             case "branch.conform": return "take origin's copy"
             case "branch.force.arm": return "replace origin's copy"
             case "branch.catchup": return "catch up to \(leaf(b.owes ?? b.parent)) first"

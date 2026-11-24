@@ -306,10 +306,9 @@ struct WorkContext {
             .sorted { $0.activeAt == $1.activeAt ? $0.id < $1.id : $0.activeAt > $1.activeAt }
     }
 
-    /// The home's one quiet line for them: how many, and how many are live.
+    /// The home's one quiet line for them, and whether any is live.
     static func looseLine(_ chats: [Chat], now: Double) -> String {
-        let live = chats.filter { Self.live($0, now: now) }.count
-        return "\(chats.count) chat\(chats.count == 1 ? "" : "s") on no branch" + (live > 0 ? " · \(live) live" : "")
+        (chats.count == 1 ? "a chat" : "chats") + " on no branch" + (chats.contains { Self.live($0, now: now) } ? " · live" : "")
     }
 
     /// The chats on a forest's branches, each once, newest first — what its one line names.
@@ -319,14 +318,14 @@ struct WorkContext {
         return out.sorted { $0.activeAt == $1.activeAt ? $0.id < $1.id : $0.activeAt > $1.activeAt }
     }
 
-    /// The forest line's chat words, all its chats in one phrase (round 29, P3–P4): "Claude working", "2 chats · 1 working",
+    /// The forest line's chat words, all its chats in one phrase (round 29, P3–P4): "Claude working", "chats working",
     /// or nil where its situation already names the one chat ("Claude is on it"). Ids are the hover's.
     static func forestChatsLabel(_ chats: [Chat], says: String, now: Double) -> String? {
         guard let first = chats.first else { return nil }
         let named = says.contains("Claude")
         if chats.count == 1 { return named ? nil : "Claude \(live(first, now: now) ? "working" : "idle")" }
         let working = chats.filter { live($0, now: now) }.count
-        return named || working == 0 ? "\(chats.count) chats" : "\(chats.count) chats · \(working) working"
+        return named || working == 0 ? "chats" : "chats working"
     }
 
     /// Where a chat is in a forest, branch by branch, in words: what its hover says.

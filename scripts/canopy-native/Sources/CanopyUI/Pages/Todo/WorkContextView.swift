@@ -148,7 +148,7 @@ struct WorkInProgressView: View {
         let items = Self.items(app)
         if Self.visible(app) {
             VStack(alignment: .leading, spacing: 0) {
-                SectionHead(text: "In progress · \(items.count)").padding(.leading, 44).padding(.bottom, 6)
+                SectionHead(text: "In progress").padding(.leading, 44).padding(.bottom, 6)
                 if items.isEmpty {
                     Text(app.forestModel.readyOnly ? "Hidden by the ready filter" : "No work is marked in progress")
                         .font(Theme.text(12)).foregroundStyle(theme.inkFaint)
@@ -243,7 +243,7 @@ struct ForestChats: View {
     var body: some View {
         let chats = WorkContext.onForest(f.branches)
         let panes = PaneBranches.addresses(on: f.branches, rows: PaneBranches.of(app).rows)
-        if !panes.isEmpty {
+        if cursor && !panes.isEmpty {
             Text(panes.joined(separator: " ")).font(Theme.text(11)).foregroundStyle(theme.inkFaint).fixedSize()
                 .help("the tmux panes working on this forest, as window:pane — ⌃a and a pane's number opens its branch")
         }
