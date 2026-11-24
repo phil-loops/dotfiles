@@ -254,7 +254,7 @@ public final class CodeLookup {
             let places = locs.map { Loc(repo: w.repo, sha: r.sha ?? "", path: $0.path, line: $0.line, end: $0.span?.count == 2 ? $0.span![1] : nil) }
             guard let app else { return }
             if places.count == 1 { return app.nav.go(places[0]) }
-            app.nav.pick("\(words.title) · \(places.count)", places.map { PickItem(loc: $0, label: "\($0.path):\($0.line)") })
+            app.nav.pick(words.title, places.map { PickItem(loc: $0, label: "\($0.path):\($0.line)") })
             fillTexts(places)
         }
     }

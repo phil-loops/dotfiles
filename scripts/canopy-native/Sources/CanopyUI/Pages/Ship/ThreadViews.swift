@@ -56,7 +56,7 @@ public struct ThreadView: View {
                     if !open { Text(first?.author ?? "").foregroundStyle(theme.goldLeaf) }
                     if aside || t.outdated || t.local?.startLine != nil { Text(where_(t)).foregroundStyle(theme.inkFaint) }
                     if !open { Text(Markdown.plain(first?.body ?? "", max: 110)).foregroundStyle(theme.inkDim).lineLimit(1) }
-                    if t.comments.count > 1 { Chip(text: "\(t.comments.count - 1) repl\(t.comments.count == 2 ? "y" : "ies")") }
+                    if t.comments.count > 1 { Chip(text: t.comments.count == 2 ? "a reply" : "replies") }
                     if t.resolved { Chip(text: "resolved", ok: true) }
                     if t.outdated { Chip(text: "outdated") }
                     if !t.fixedBy.isEmpty { Chip(text: "fixed in \(t.fixedBy.map(\.short).joined(separator: ", "))", gold: true) }
@@ -144,7 +144,7 @@ struct NoteView: View {
             HStack(spacing: 6) {
                 Text("second reader").foregroundStyle(theme.goldDeep)
                 Text(verdictWord[note.verdict.rawValue] ?? note.verdict.rawValue).foregroundStyle(note.verdict == .wrong ? theme.ember : theme.patina)
-                if !note.elsewhere.isEmpty { Text("· \(note.elsewhere.count) more like it") }
+                if !note.elsewhere.isEmpty { Text("· more like it") }
                 Text("\(open ? "▾" : "▸") \(app.registry.keyOf("review.note.toggle"))").foregroundStyle(theme.inkFaint)
             }
             if open {

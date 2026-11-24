@@ -163,7 +163,7 @@ extension KeySheet.Model {
         let shown = query.isEmpty ? KeySheet.anywhereShown : everywhere.count
         out += everywhere.prefix(shown).map { .line($0, dim: false) }
         if everywhere.count > shown {
-            out.append(.empty("\(everywhere.count - KeySheet.anywhereShown) more work anywhere — : finds any of them by name"))
+            out.append(.empty("more work anywhere — : finds any of them by name"))
         }
         if !moves.isEmpty && !query.isEmpty {
             // a search answers with what each key does, not a row of bare keys

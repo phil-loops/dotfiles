@@ -82,7 +82,7 @@ final class ForestAncestry {
             guard !deps.isEmpty else { return app.runner.say("\(branch.name) has no parent or dependency shown in this forest") }
             if deps.count == 1 { return ForestNav.go(deps[0], app) }
             var choice: Request?
-            app.nav.pick("builds on · \(deps.count)", deps.map {
+            app.nav.pick("builds on", deps.map {
                 PickItem(label: $0.b.name, text: ($0.b.name == branch.parent ? "parent" : "requires") + ($0.b.description.isEmpty ? "" : " · \($0.b.description)"))
             }) { [weak self, weak app] index in
                 MainActor.assumeIsolated {

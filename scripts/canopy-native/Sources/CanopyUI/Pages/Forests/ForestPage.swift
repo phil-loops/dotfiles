@@ -203,7 +203,7 @@ private struct ForestTodoList: View {
     var body: some View {
         if !items.isEmpty {
             VStack(alignment: .leading, spacing: 0) {
-                SectionHead(text: "\(forest.p.ticket ?? "todo") · \(items.count)").padding(.leading, 52).padding(.bottom, 4)
+                SectionHead(text: forest.p.ticket ?? "todo").padding(.leading, 52).padding(.bottom, 4)
                 ForEach(items, id: \.id) { t in
                     let cover = ForestPage.cover(t, forest, landed: landed)
                     CursorRow(pane: "todo", key: RowKey.todo(t.id)) { on in

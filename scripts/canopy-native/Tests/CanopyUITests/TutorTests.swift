@@ -451,7 +451,7 @@ let learningFixture = #"""
         #expect(CodeLookup.of(a).pop == nil)
         a.keys.handle("g"); a.keys.handle("d")
         await settle { a.nav.picker != nil }
-        #expect(a.nav.picker?.title == "definitions · 2")
+        #expect(a.nav.picker?.title == "definitions")
         #expect(a.keys.layer == .picker)
         a.keys.handle("ret")
         #expect(t.pin == Pin(path: "b.ts", ref: "abc", lines: [4, 4]), "the picked place opens in the code pane")

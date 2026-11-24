@@ -194,13 +194,13 @@ struct WorkContext {
 
     var summary: String {
         var parts: [String] = []
-        if !doing.isEmpty { parts.append("\(doing.count) in progress") }
-        if !reopened.isEmpty { parts.append("\(reopened.count) with new direction") }
+        if !doing.isEmpty { parts.append("in progress") }
+        if !reopened.isEmpty { parts.append("new direction") }
         let waiting = items.filter { $0.state == .waiting }.count
         let decisions = items.filter { Tracker.sectionOf($0) == .decide }.count
-        if decisions > 0 { parts.append("\(decisions) need you") }
-        if waiting > 0 { parts.append("\(waiting) waiting") }
-        if parts.isEmpty { parts.append("\(items.filter { Tracker.sectionOf($0) != nil }.count) open") }
+        if decisions > 0 { parts.append("needs you") }
+        if waiting > 0 { parts.append("waiting") }
+        if parts.isEmpty { parts.append(items.contains { Tracker.sectionOf($0) != nil } ? "open" : "nothing open") }
         return parts.joined(separator: " · ")
     }
 

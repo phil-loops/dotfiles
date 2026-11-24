@@ -76,7 +76,7 @@ import Testing
         let context = WorkContext([TodoItem(id: "busy", state: .doing), TodoItem(id: "waiting", state: .waiting),
                                    TodoItem(id: "call", kind: "decide"), TodoItem(id: "broken", kind: "decide", state: .broken),
                                    TodoItem(id: "done", state: .done)], subject: .viewer)
-        #expect(context.summary == "1 in progress · 1 need you · 1 waiting")
+        #expect(context.summary == "in progress · needs you · waiting")
         #expect(context.doing.map(\.id) == ["busy"])
         #expect(WorkContext.status(context.doing[0]) == "marked in progress")
         #expect(WorkContext.status(TodoItem(id: "future", state: "future")) == "state: future")
@@ -205,7 +205,7 @@ import Testing
         #expect(w.revision == 3 && w.answeredRevision == 2 && w.progress?.basis == "older" && w.latest?.seq == 3)
         #expect(WorkContext.reopened(item) && Tracker.sectionOf(item) == .doing)
         let context = WorkContext([item], subject: .viewer)
-        #expect(context.reopened.map(\.id) == ["item"] && context.summary.contains("1 with new direction"))
+        #expect(context.reopened.map(\.id) == ["item"] && context.summary.contains("new direction"))
         #expect(WorkContext.status(item) == "marked done · new direction since")
         let line = WorkContext.freshness(w)
         #expect(line.contains("direction r3") && line.contains("delivered r2 confirmed") && line.contains("worker ended (succeeded)"))

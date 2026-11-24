@@ -8,7 +8,7 @@ struct MachineRunsRows: View {
     var body: some View {
         let reports = MachineRuns.of(app)
         VStack(alignment: .leading, spacing: 4) {
-            Text("reported runs · \(reports.runs.count)").font(Theme.text(11)).foregroundStyle(theme.inkFaint)
+            Text("reported runs").font(Theme.text(11)).foregroundStyle(theme.inkFaint)
             if reports.unavailable { Text(reports.runs.isEmpty ? "run registry unavailable" : "run registry unavailable · showing last reports").foregroundStyle(theme.inkFaint) }
             if reports.unreadable > 0 { Text("\(reports.unreadable) run documents unavailable").foregroundStyle(theme.inkFaint) }
             if reports.runs.isEmpty, !reports.unavailable {

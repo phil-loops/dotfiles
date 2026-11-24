@@ -67,7 +67,6 @@ struct ReviewPage: View {
                                         HStack {
                                             Text("changed files").foregroundStyle(theme.inkFaint)
                                             Spacer()
-                                            Text("\(pg.views.count)").foregroundStyle(theme.inkFaint)
                                         }
                                         .font(Theme.text(10.5)).padding(.horizontal, 16).padding(.vertical, 8)
                                     }

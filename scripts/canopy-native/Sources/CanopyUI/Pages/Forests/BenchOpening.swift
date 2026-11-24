@@ -60,7 +60,7 @@ final class BenchOpening {
             }
             if documents.count == 1 { return await finish(documents[0], request, io) }
             var choice = request
-            app.nav.pick("open bench · \(documents.count)", documents.map { PickItem(label: $0.title, text: $0.url.path) }) { [weak self] index in
+            app.nav.pick("open bench", documents.map { PickItem(label: $0.title, text: $0.url.path) }) { [weak self] index in
                 MainActor.assumeIsolated {
                     guard let self, documents.indices.contains(index), self.current(choice, afterPicker: true), let app = self.app else { return }
                     var selected = choice

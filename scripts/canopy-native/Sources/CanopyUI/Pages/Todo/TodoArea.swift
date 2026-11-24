@@ -63,7 +63,7 @@ struct TodoPage: View {
                     if sections.isEmpty { Text("nothing tracked").foregroundStyle(theme.inkFaint).padding(.leading, 44) }
                     ForEach(sections, id: \.section) { s in
                         VStack(alignment: .leading, spacing: 0) {
-                            SectionHead(text: "\(Tracker.titles[s.section]!) · \(s.items.count)", gold: s.section == .decide)
+                            SectionHead(text: Tracker.titles[s.section]!, gold: s.section == .decide)
                                 .padding(.leading, 44).padding(.bottom, 4)
                             ForEach(s.items, id: \.id) { t in TodoRow(t: t) }
                         }

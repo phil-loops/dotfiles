@@ -271,7 +271,6 @@ struct DueSection: View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 Text("Due").font(Theme.display(19)).foregroundStyle(theme.ink)
-                Text("\(t.due.count) concepts").font(Theme.text(11)).foregroundStyle(theme.inkFaint)
             }
             Text("open misconceptions first, then what you've shown only with help, then whatever's gone longest unchecked")
                 .font(Theme.text(12)).foregroundStyle(theme.inkFaint).padding(.bottom, 6)
@@ -299,7 +298,7 @@ struct DueSection: View {
             }
             .tutorPane(TutorPane.due)
             if t.due.count > 8 {
-                Text(t.allDue ? ":tutor.due.all — fewer" : ":tutor.due.all — all \(t.due.count)").font(Theme.text(11)).foregroundStyle(theme.inkFaint).padding(.top, 6)
+                Text(t.allDue ? ":tutor.due.all — fewer" : ":tutor.due.all — all").font(Theme.text(11)).foregroundStyle(theme.inkFaint).padding(.top, 6)
             }
         }
     }
@@ -572,7 +571,7 @@ struct SessionCenter: View {
                 Text(t.titleOf(s)).font(Theme.display(15)).foregroundStyle(theme.ink).lineLimit(1)
                 Spacer()
                 HStack(spacing: 3) { Text("map"); TutorKey(id: "tutor.map") }.foregroundStyle(t.mapOpen ? theme.goldLeaf : theme.inkFaint)
-                HStack(spacing: 3) { Text("evidence · \(mine.count)"); TutorKey(id: "tutor.evidence") }.foregroundStyle(t.evidenceOpen ? theme.goldLeaf : theme.inkFaint)
+                HStack(spacing: 3) { Text("evidence"); TutorKey(id: "tutor.evidence") }.foregroundStyle(t.evidenceOpen ? theme.goldLeaf : theme.inkFaint)
                 HStack(spacing: 3) { Text("wrap up"); TutorKey(id: "tutor.wrap") }.foregroundStyle(t.streaming ? theme.inkFaint.opacity(0.4) : theme.inkFaint)
             }
             .font(Theme.text(11))
@@ -604,7 +603,7 @@ struct SessionCenter: View {
                     VStack(alignment: .leading, spacing: 0) {
                         if !earlier.isEmpty {
                             TutorRow(pane: TutorPane.turn, key: "hist") { _ in
-                                Text("\(t.historyOpen ? "▾" : "▸") \(earlier.count) earlier \(earlier.count == 1 ? "rung" : "rungs")")
+                                Text("\(t.historyOpen ? "▾" : "▸") earlier \(earlier.count == 1 ? "rung" : "rungs")")
                                     .font(Theme.text(11)).foregroundStyle(theme.inkFaint)
                             }
                             if t.historyOpen {

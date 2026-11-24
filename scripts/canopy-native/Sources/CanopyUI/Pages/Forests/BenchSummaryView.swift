@@ -59,7 +59,7 @@ struct BenchSummaryView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(alignment: .firstTextBaseline, spacing: 10) {
                         Text("Recorded responses · current claims").foregroundStyle(theme.inkFaint).lineLimit(1)
-                        KeyButton(title: library.entries.count == 1 ? "bench" : "\(library.entries.count) benches", id: command, busy: BenchOpening.of(app).waiting)
+                        KeyButton(title: library.entries.count == 1 ? "bench" : "benches", id: command, busy: BenchOpening.of(app).waiting)
                             .labelTarget(pane: "bench-open", key: "open", title: "bench", run: RouteTo(command))
                         if library.loading { Text("refreshing…").foregroundStyle(theme.inkFaint) }
                     }
@@ -68,7 +68,7 @@ struct BenchSummaryView: View {
                             .foregroundStyle(theme.inkDim).lineLimit(2)
                     }
                     if rows.count > BenchSummary.limit {
-                        Text("\(rows.count - BenchSummary.limit) more recorded results in Show").foregroundStyle(theme.inkFaint)
+                        Text("more recorded results in Show").foregroundStyle(theme.inkFaint)
                     }
                 }
                 .font(Theme.text(11))

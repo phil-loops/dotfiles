@@ -444,7 +444,7 @@ enum DiffCommands {
         func pickChild(_ kids: [Branch], then: @escaping @MainActor (Branch) -> Void) {
             let origin = pg.branch, epoch = app.store.epoch, git = app.store.versions[Domain.git]
             var reader: ReaderContext?
-            app.nav.pick("which child · \(kids.count)", kids.map { PickItem(label: $0.name, text: $0.description) }) { i in
+            app.nav.pick("which child", kids.map { PickItem(label: $0.name, text: $0.description) }) { i in
                 MainActor.assumeIsolated {
                     guard reader?.isCurrentAfterPickerChoice(app) == true, app.store.epoch == epoch,
                           app.store.versions[Domain.git] == git, pg.branch == origin, kids.indices.contains(i),
@@ -481,7 +481,7 @@ enum DiffCommands {
                                if deps.count == 1 { return try hop(deps[0]) }
                                let epoch = app.store.epoch, git = app.store.versions[Domain.git], payload = pg.payloadGen
                                var reader: ReaderContext?
-                               app.nav.pick("builds on · \(deps.count)", deps.map { d in
+                               app.nav.pick("builds on", deps.map { d in
                                    PickItem(label: d.name, text: (d.name == me.parent ? "parent" : "requires") + (d.description.isEmpty ? "" : " · \(d.description)"))
                                }) { i in
                                    MainActor.assumeIsolated {

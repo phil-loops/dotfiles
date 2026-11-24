@@ -439,8 +439,7 @@ struct EvidenceChip: View {
                 let judged = c.status?.judged == true && c.status?.stands != false
                 HStack(spacing: 6) {
                     Text("evidence").foregroundStyle(theme.inkDim)
-                    Text("\(c.fields.count) field\(c.fields.count == 1 ? "" : "s")")
-                    if let g = c.manifest?.gaps, !g.isEmpty { Text("· \(g.count) not captured").foregroundStyle(theme.inkFaint) }
+                    if c.manifest?.gaps?.isEmpty == false { Text("· some not captured").foregroundStyle(theme.inkFaint) }
                     Text(c.current != true ? "· older code" : c.status?.stands == false ? "· verdict void" : judged ? "· \(c.status?.verdict == "accept" ? "accepted" : "rejected")" : "· unjudged")
                         .foregroundStyle(c.current != true || c.status?.stands == false ? theme.ember : judged ? (c.status?.verdict == "accept" ? theme.patina : theme.ember) : theme.goldLeaf)
                     Text(",e").foregroundStyle(theme.inkFaint)
@@ -569,7 +568,7 @@ struct EvidencePanel: View {
                         .padding(.leading, 18)
                     }
                     if let n = f.diffCount, n > (f.diff?.count ?? 0) {
-                        Text("+\(n - (f.diff?.count ?? 0)) more changed paths not listed").font(Theme.text(11.5)).foregroundStyle(theme.goldLeaf)
+                        Text("more changed paths not listed").font(Theme.text(11.5)).foregroundStyle(theme.goldLeaf)
                             .padding(.leading, 18)
                     }
                 }
@@ -606,7 +605,7 @@ struct EvidencePanel: View {
                 Text(ev.alone.map { "showing all \($0)" } ?? "before above after · ,t flips all").font(Theme.mono(11)).foregroundStyle(ev.alone == nil ? theme.inkFaint : theme.goldLeaf)
                     .padding(.leading, 6)
                 Spacer()
-                Text("\(m.findings.count) scenes · before \(m.basis.beforeCommit.prefix(8)) → after \(m.basis.afterCommit.prefix(8))")
+                Text("before \(m.basis.beforeCommit.prefix(8)) → after \(m.basis.afterCommit.prefix(8))")
                     .font(Theme.mono(11)).foregroundStyle(theme.inkFaint)
             }
             if let cov = m.coverage {

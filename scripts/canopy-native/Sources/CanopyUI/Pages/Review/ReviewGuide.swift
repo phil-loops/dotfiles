@@ -53,10 +53,7 @@ enum ReviewGuide {
 
     static func emptyKey(_ app: AppModel) -> String { "guide|\(ReviewPageState.of(app).contextKey)|empty" }
 
-    static func summary(_ app: AppModel) -> String {
-        let entries = entries(app)
-        return entries.isEmpty ? "return to" : "return to · \(entries.count)"
-    }
+    static func summary(_ app: AppModel) -> String { "return to" }
 
     static func progress(_ app: AppModel) -> String {
         let pg = ReviewPageState.of(app)
@@ -125,7 +122,7 @@ enum ReviewGuide {
         let items = files.map { view in
             PickItem(label: view.file.path, text: "+\(view.file.add) −\(view.file.del)" + (pg.scoped ? "" : " · \(view.marks.filter { $0 != .unread }.count) of \(view.blocks.count) changes marked read · \(view.flagged) flagged · \(view.open) open threads"))
         }
-        app.nav.pick("changed files · \(files.count)", items) { i in
+        app.nav.pick("changed files", items) { i in
             MainActor.assumeIsolated {
                 guard app.router.route.surfaceID == "review", pg.contextKey == context, pg.diffCurrent, paths.indices.contains(i), pg.views.contains(where: { $0.file.path == paths[i] }) else {
                     app.runner.say("the diff changed · open the file picker again")
