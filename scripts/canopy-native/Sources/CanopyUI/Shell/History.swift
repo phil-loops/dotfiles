@@ -27,11 +27,30 @@ extension AppModel {
     /// Go to an address from outside (a canopy:// link, the launch route): a jump like any other, so
     /// `C-o` comes back. What the address doesn't name about the place, the page decides as usual;
     /// the query stays for the page to read (the tutor's `?concept=`).
-    public func open(address: String) {
-        recordJump()
-        let p = Place(address: address)
-        restore(p)
-        router.keep(Route.query(address), at: p.route)
+    public func open(address: String, source: String = "link") {
+        navigating(source) {
+            recordJump()
+            let p = Place(address: address)
+            restore(p)
+            router.keep(Route.query(address), at: p.route)
+        }
+    }
+
+    /// Runs `f` with page changes inside it credited to `source` (an outside link, the tmux pane, the launch).
+    public func navigating(_ source: String, _ f: () -> Void) {
+        let outer = navSource
+        navSource = outer ?? source
+        defer { navSource = outer }
+        f()
+    }
+
+    /// Why the page is changing: the command running, else the outside door it came through, else the last
+    /// command and how long ago — never a guess. Read at the change, not when its event is sent.
+    func navCause(now: Date = Date()) -> String {
+        if let c = runner.dispatching { return "cmd:\(c)" }
+        if let s = navSource { return s }
+        if let l = runner.lastRan { return "after:\(l.id) \(Int((now.timeIntervalSince(l.at) * 1000).rounded()))ms" }
+        return "unknown"
     }
 
     /// `C-o`.

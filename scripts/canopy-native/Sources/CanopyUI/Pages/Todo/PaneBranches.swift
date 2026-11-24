@@ -109,7 +109,7 @@ final class PaneBranches {
             guard let app else { return }
             switch got {
             case .success(let said):
-                if let route = Self.route(said) { app.go(route) } else { app.runner.say("pane-branch said \(said.isEmpty ? "nothing" : said)") }
+                if let route = Self.route(said) { app.navigating("pane") { app.go(route) } } else { app.runner.say("pane-branch said \(said.isEmpty ? "nothing" : said)") }
             case .failure(let why): app.runner.say(why.message)
             }
         }

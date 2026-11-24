@@ -29,7 +29,7 @@ public final class CanopyEmbed {
         }
         m.start()
         PaneStates.of(m).start(m)
-        if let route { m.open(address: route) }
+        if let route { m.open(address: route, source: "launch") }
         model = m
         let host = NSHostingView(rootView: AnyView(RootView().environment(m).preferredColorScheme(.dark)))
         host.sizingOptions = []   // the host window is the size its person made it; content never grows it
@@ -38,7 +38,8 @@ public final class CanopyEmbed {
         monitor.install()
     }
 
-    public func navigate(_ route: String) { model.open(address: route) }
+    /// Show sends canopy a page (its history, finder, an Inbox link, a ⌘⇧O): an outside door, said as `show`.
+    public func navigate(_ route: String) { model.open(address: route, source: "show") }
 
     /// Goes to the branch a tmux pane (its id, "%12") is working on, once `pane-branch` has said which.
     public func follow(pane: String) { PaneBranches.of(model).follow(pane: pane, model) }

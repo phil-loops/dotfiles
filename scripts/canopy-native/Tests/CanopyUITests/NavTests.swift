@@ -18,6 +18,27 @@ import Testing
         }
     }
 
+    /// Phil 2026-11-24 ("nav sometimes snaps back to an old stale view"): the usage log couldn't say what moved a
+    /// page — nav events had neither a cause nor a press time. Each change now says its cause at the moment it happens.
+    @Test func everyPageChangeSaysWhatMovedIt() {
+        var c = AppConfig()
+        c.route = .forests
+        let a = testApp(config: c, port: 1)
+        var causes: [String] = []
+        let wired = a.router.onNavigate
+        a.router.onNavigate = { from, to in causes.append(a.navCause()); wired?(from, to) }
+        a.registry.register(Command(id: "t.go", title: "Go", scope: .global, local: { _, _ in a.go(.machine) }))
+        a.runner.dispatch("t.go", via: .key)
+        a.open(address: "/v2/todo", source: "show")
+        a.open(address: "/v2", source: "launch")
+        a.navigating("pane") { a.go(.review(repo: "r", branch: "b")) }
+        a.go(.machine)
+        #expect(causes.count == 5)
+        #expect(causes[0] == "cmd:t.go", "inside a command: that command")
+        #expect(causes[1] == "show" && causes[2] == "launch" && causes[3] == "pane", "an outside door says which")
+        #expect(causes[4].hasPrefix("after:t.go "), "outside any command or door: the last command and how long ago — \(causes[4])")
+    }
+
     @Test func jumpVerbsRecordJumps() {
         let a = app()
         for c in a.registry.commands where c.verbs.contains(where: { $0.spec.jump }) {

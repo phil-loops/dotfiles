@@ -47,6 +47,8 @@ public final class AppModel: CommandContext {
     public internal(set) var labeling: LabelSession?
     /// >0 while one jump is under way: the jump recorded its origin once, nothing inside re-records.
     @ObservationIgnored var jumpDepth = 0
+    /// the outside door a page change is coming through, while it does (`navigating`)
+    @ObservationIgnored var navSource: String?
     /// Branch visits, fuzzy × frecency for `space b` (seeded from the usage log at start).
     @ObservationIgnored public var frecency = Frecency()
     /// Commands run from a key, frecency-ranked, for the `?` sheet's order (seeded with `frecency`).
@@ -105,6 +107,8 @@ public final class AppModel: CommandContext {
         }
         nav.record = { [weak self] in self?.recordJump() }
         router.onNavigate = { [weak self] from, to in
+            // what moved the page, read now while its cause is still on the stack (the event goes out a turn later)
+            let cause = self.map { $0.navCause() } ?? "unknown"
             self?.navigationGeneration &+= 1
             if let self { CodeLookup.of(self).dismiss() }
             self?.keys.reset()
@@ -115,9 +119,10 @@ public final class AppModel: CommandContext {
             DispatchQueue.main.async { [weak self] in
                 // the first frame of the new page: the main queue's next turn, after SwiftUI's commit
                 let paint = (Date().timeIntervalSince(t0) * 10000).rounded() / 10
-                self?.telemetry.emit(["type": "nav", "from": .string(from.surfaceID), "to": .string(to.surfaceID), "path": .string(to.path), "paintMs": .number(paint)])
+                self?.telemetry.emit(["type": "nav", "from": .string(from.surfaceID), "to": .string(to.surfaceID), "path": .string(to.path), "paintMs": .number(paint),
+                                      "cause": .string(cause), "at": .number((t0.timeIntervalSince1970 * 1000).rounded())])
             }
-            Log.line("nav \(from.path) → \(to.path)")
+            Log.line("nav \(from.path) → \(to.path) · \(cause)")
         }
         keys.onChange = { [weak self] from, to in self?.modeChanged(from, to) }
         nav.onPickerChange = { [weak self] open in

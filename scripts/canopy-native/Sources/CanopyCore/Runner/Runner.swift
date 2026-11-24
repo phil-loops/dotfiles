@@ -61,6 +61,11 @@ public final class Runner {
     @ObservationIgnored public let transport: Transport
     /// Each command as it runs (after its availability check): the `?` sheet ranks keys by it.
     @ObservationIgnored public var onRun: ((String) -> Void)?
+    /// The command a dispatch is running right now (the key's own, through any route it took): a page change
+    /// made inside it is that command's. Nil between commands — then a change came from elsewhere.
+    @ObservationIgnored public private(set) var dispatching: String?
+    /// The last command that ran and when, for a page change that came after it rather than inside it.
+    @ObservationIgnored public private(set) var lastRan: (id: String, at: Date)?
     /// A session can refuse a command before routing, jump recording or any effect.
     @ObservationIgnored public var refusal: ((Command) -> String?)?
     /// A page's say over whether a command may act on what it shows yet, before routing or its
@@ -153,6 +158,9 @@ public final class Runner {
     /// Run a registered command. Never awaited by callers — the UI has already moved.
     public func dispatch(_ id: String, via: Via, target explicit: String? = nil, arg: Any? = nil, undoing: Bool = false, from: String? = nil) {
         guard let cmd = registry.command(id) else { return }
+        let outer = dispatching
+        dispatching = outer ?? (from ?? id)
+        defer { dispatching = outer }
         held = nil   // the next key drops a hold, whatever kind of command it is; a Hold below re-takes it
         if via == .menu || via == .palette { context?.closeMenu() }
         let named = from ?? id
@@ -194,6 +202,7 @@ public final class Runner {
         if let available = cmd.available, !available(target) { return echo(named, via, false, why: cmd.unavailable?(target)) }
         if cmd.recordsJump { context?.willJump(id) }
         onRun?(id)
+        lastRan = (from ?? id, Date())
         var base: JSONObject = ["type": "cmd", "id": .string(id), "budget": .string(cmd.budget.rawValue), "via": .string(via.rawValue)]
         if let target { base["target"] = .string(target) }
         let feedback = { (extra: JSONObject) in
