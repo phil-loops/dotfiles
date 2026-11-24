@@ -188,12 +188,30 @@ def target(all_rows, prefer=(), worked=(), last=None):
     return next((pane for pane in [*prefer, *worked, last] if pane in here), None)
 
 
+SHOW = os.path.expanduser("~/.cache/show/Show.app/Contents/MacOS/Show")
+
+
+def show_takes_bare_links():
+    """Whether the running Show is its current build: an older one reads a link with no page as "go home"."""
+    r = subprocess.run(["pgrep", "-nxf", SHOW], capture_output=True, text=True)
+    if r.returncode != 0:
+        return False
+    started = " ".join(subprocess.run(["ps", "-o", "lstart=", "-p", r.stdout.strip()], capture_output=True, text=True).stdout.split())
+    try:
+        return time.mktime(time.strptime(started, "%a %b %d %H:%M:%S %Y")) >= os.path.getmtime(SHOW)
+    except (ValueError, OSError):
+        return False
+
+
 def to_canopy(pane, state, moves, git):
-    """One pane's branch is all this asks git about, and the link goes straight to Show."""
+    """One pane's branch is all this asks git about, and the link goes straight to Show, marked so Show takes the
+    terminal window's place and size (show-app/TerminalFrame.swift)."""
     remember(state[0], pane)
     move = working_on([m for m in moves if m["pane"] == pane], git).get(pane)
     if move:
-        os.execvp("open", ["open", f"canopy://v2/b/{os.path.basename(move['repo'])}/{move['branch']}"])
+        os.execvp("open", ["open", f"canopy://v2/b/{os.path.basename(move['repo'])}/{move['branch']}?beside=terminal"])
+    if show_takes_bare_links():
+        os.execvp("open", ["open", "canopy://?beside=terminal"])
     canopy = os.path.join(os.path.dirname(os.path.abspath(__file__)), "canopy")
     os.execv(canopy, [canopy, "--focus"])
 

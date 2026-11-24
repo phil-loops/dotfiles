@@ -270,7 +270,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     func application(_ application: NSApplication, open urls: [URL]) {
         let requests = urls.compactMap { url -> ShowRequest? in
             if url.scheme == "canopy" {
-                return .phil(Target(canopyLink: url))
+                let (link, beside) = TerminalFrame.unmarked(url)
+                if beside { takeTerminalFrame() }
+                return .phil(Target(canopyLink: link))
             }
             return takeInboxRequest(url.path) ?? .phil(.document(canonicalPath(url.path)))
         }
