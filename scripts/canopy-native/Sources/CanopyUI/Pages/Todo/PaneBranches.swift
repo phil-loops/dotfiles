@@ -83,7 +83,23 @@ final class PaneBranches {
     /// Ctrl-Space in tmux has already brought canopy forward: now go to the branch the pane it was pressed in is
     /// working on, and have that pane remembered for the way back. A pane with none says why and stays here.
     @discardableResult
-    func follow(pane: String, _ app: AppModel) -> Task<Void, Never> { go(["from", pane], app) }
+    func follow(pane: String, _ app: AppModel) -> Task<Void, Never> {
+        entered = (pane, Self.front(app))
+        let going = go(["from", pane], app)
+        return Task { [weak app] in
+            await going.value
+            if let app { self.entered = (pane, Self.front(app)) }
+        }
+    }
+
+    /// the pane canopy was last entered from, and what was in front once it had gone to that pane's branch
+    @ObservationIgnored private(set) var entered: (pane: String, front: String)?
+
+    /// What is in front, as one word to compare: the page's branch, else the row under the cursor.
+    static func front(_ app: AppModel) -> String {
+        if case .review(let repo, let branch, _) = app.router.route { return "\(repo)\t\(branch)" }
+        return app.selected ?? ""
+    }
 
     private func go(_ args: [String], _ app: AppModel) -> Task<Void, Never> {
         let ask = ask
@@ -116,11 +132,13 @@ final class PaneBranches {
         return ["tmux"] + prefer + (named.map { [$0.repo, $0.branch] } ?? [])
     }
 
-    /// Brings the terminal forward at once, then has tmux go to the pane for what's in front.
+    /// Brings the terminal forward at once, then has tmux go to the pane for what's in front — or, when canopy still
+    /// shows what it showed on the way in, back to the pane it was entered from.
     @discardableResult
     func toTmux(_ app: AppModel) -> Task<Void, Never> {
         raise()
-        let ask = ask, args = Self.wayBack(app) + ["--stay"]
+        let unmoved = entered.flatMap { $0.front == Self.front(app) ? ["tmux", "--prefer", $0.pane] : nil }
+        let ask = ask, args = (unmoved ?? Self.wayBack(app)) + ["--stay"]
         return Task { [weak app] in
             if case .failure(let why) = await Task.detached(operation: { ask(args) }).value { app?.runner.say(why.message) }
         }

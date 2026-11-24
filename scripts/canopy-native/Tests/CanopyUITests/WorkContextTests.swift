@@ -467,6 +467,29 @@ import Testing
                 "a pane with no branch leaves canopy where it is")
     }
 
+    /// Back from a canopy that still shows what it showed on the way in is the pane you left, even with a chat's pane
+    /// on what's in front; once you've moved in canopy, the way back follows what's in front.
+    @Test func theWayBackFromAnUnmovedCanopyIsThePaneYouLeft() async throws {
+        let now = world().forestModel.now.timeIntervalSince1970
+        let app = world(.review(repo: "r", branch: "a"), chats: ["59fa0cc0-1": chat("59fa0cc0-1", activeAt: now - 30, acted: [("r:a", "commit", now - 180)])])
+        let panes = PaneBranches.of(app)
+        nonisolated(unsafe) var did: [[String]] = []
+        panes.raise = {}
+        panes.ask = { did.append($0); return $0.first == "from" ? .failure(Refusal("no branch")) : .success("") }
+        await panes.follow(pane: "%9", app).value
+        await panes.toTmux(app).value
+        #expect(did.last == ["tmux", "--prefer", "%9", "--stay"], "a pane with no branch left canopy where it was: back to that pane")
+        app.go(.review(repo: "r", branch: "unknown/x"))
+        await panes.toTmux(app).value
+        #expect(did.last == ["tmux", "r", "unknown/x", "--stay"], "moved in canopy: the pane for what's in front")
+        app.go(.review(repo: "r", branch: "a"))
+        panes.ask = { did.append($0); return $0.first == "from" ? .success("r\tunknown/x\n") : .success("") }
+        await panes.follow(pane: "%9", app).value
+        await panes.toTmux(app).value
+        #expect(app.router.route == .review(repo: "r", branch: "unknown/x") && did.last == ["tmux", "--prefer", "%9", "--stay"],
+                "canopy went to the pane's branch and nothing moved since: back to that pane")
+    }
+
     /// A forest's line says where its panes sit: a chat's pane, and any pane (Codex, a shell) whose latest work is on
     /// one of its branches. Each pane's border names its branch, written when it changes and cleared when it has none.
     @Test func aPanesBranchGoesOnItsForestsLineAndItsBorder() throws {
