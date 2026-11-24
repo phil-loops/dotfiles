@@ -1,0 +1,349 @@
+#!/usr/bin/env python3
+"""prod-callers — which production entry points reach the functions a branch changes, at that branch's tip.
+
+  prod-callers <branch> [--base <ref>] [--json] [--repo <path>]
+
+For every top-level declaration the branch's own diff (base...branch) touches, walk its references upward
+— references, not calls, so a function handed over as a default dep counts — until an entry point:
+a registered job (jobs/index.ts), a script that can run in production (script-runner/index.ts), a cron
+(croon/), an API route or page (pages/), a tRPC router (trpc/routers/), client code (components/, hooks/).
+The same walk at the base says which of those were already there. Each declaration gets one answer:
+
+  existing     production already reached it at the base
+  connected    reached at the tip only; "behind <setting>" when a call on the way sits under a setting read
+  none         nothing in production reaches it at this tip (tests don't count)
+  unresolved   the walk stopped somewhere it couldn't follow; never read as "none"
+
+Answers come from the forest viewer's own TypeScript service (srv/lsp.py), which reads its own detached
+trees: nothing is checked out or written in the repo."""
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+import urllib.request
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+BUDGET = 60
+TEST = re.compile(r"(\.test\.tsx?$|^testing/|^cypress/|^playwright/|\.d\.ts$|/__tests__/)")
+SOURCE = re.compile(r"\.tsx?$")
+FLAG = re.compile(r"\bsettings\.(\w+)")
+
+
+def git(repo, *args):
+    return subprocess.run(["git", "-C", repo, *args], capture_output=True, text=True).stdout
+
+
+class Service:
+    """The viewer's TypeScript answers at one commit, each asked once."""
+
+    def __init__(self, port, sha, repo, post=None):
+        self.port, self.sha, self.repo, self.asked = port, sha, repo, 0
+        self._post = post or self._http
+        self._symbols, self._text = {}, {}
+
+    def _http(self, route, body):
+        data = json.dumps(body).encode()
+        for _ in range(60):
+            with urllib.request.urlopen(urllib.request.Request(f"http://localhost:{self.port}{route}", data=data), timeout=120) as r:
+                got = json.load(r)
+            if got.get("ok") or got.get("state") != "loading":
+                return got
+            time.sleep(2)
+        return got
+
+    def text(self, path):
+        if path not in self._text:
+            self._text[path] = git(self.repo, "show", f"{self.sha}:{path}").split("\n")
+        return self._text[path]
+
+    def symbols(self, path):
+        if path not in self._symbols:
+            got = self._post("/lsp/symbols", {"sha": self.sha, "path": path})
+            self._symbols[path] = got.get("symbols") or []
+        return self._symbols[path]
+
+    def definition(self, path, line, character):
+        got = self._post("/lsp/definition", {"sha": self.sha, "path": path, "line": line, "character": character})
+        return (got.get("locations") or [None])[0] if got.get("ok") else None
+
+    def references(self, path, line, character):
+        self.asked += 1
+        got = self._post("/lsp/references", {"sha": self.sha, "path": path, "line": line, "character": character})
+        return got.get("locations") if got.get("ok") else None
+
+
+def declarations(svc, path):
+    """The file's own top-level declarations (an import is a name, not a declaration)."""
+    text = svc.text(path)
+    out = []
+    for s in svc.symbols(path):
+        if s.get("depth") != 0 or not (0 < s["line"] <= len(text)):
+            continue
+        if re.match(r"\s*(import|export\s+\*|export\s*\{)", text[s["line"] - 1]):
+            continue
+        out.append(s)
+    return out
+
+
+def touched(svc, path, lines):
+    """The declarations these lines change. A registry (an object or class whose members hold the lines) answers
+    with those members: adding one entry to a table everything reads changes that entry, not the table."""
+    symbols, out = svc.symbols(path), []
+    for decl in declarations(svc, path):
+        mine = [n for n in lines if decl["line"] <= n <= decl["endLine"]]
+        if not mine:
+            continue
+        members = [s for s in symbols if s.get("depth") == 1 and s.get("kind") in ("property", "method")
+                   and decl["line"] <= s["line"] <= decl["endLine"]]
+        held = [m for m in members if any(m["line"] <= n <= m["endLine"] for n in mine)]
+        if decl.get("kind") in ("variable", "constant", "class") and held and all(any(m["line"] <= n <= m["endLine"] for m in held) for n in mine):
+            out.extend(held)
+        else:
+            out.append(decl)
+    return out
+
+
+def named(svc, path, name):
+    """The declaration or registry member of that name in the file at this commit, if it is there."""
+    if svc.text(path) == [""]:
+        return None
+    members = [s for s in svc.symbols(path) if s.get("depth") == 1 and s.get("kind") in ("property", "method")]
+    return next((s for s in declarations(svc, path) + members if s["name"] == name), None)
+
+
+def enclosing(svc, path, line):
+    for s in declarations(svc, path):
+        if s["line"] <= line <= s["endLine"]:
+            return s
+    return None
+
+
+def changed(repo, base, tip):
+    """path -> the tip's line numbers the branch's own diff touches."""
+    out, path = {}, None
+    for line in git(repo, "diff", "-U0", "--no-color", f"{base}...{tip}").split("\n"):
+        if line.startswith("+++ "):
+            path = line[6:] if line.startswith("+++ b/") else None
+        elif line.startswith("@@") and path and SOURCE.search(path) and not TEST.search(path):
+            m = re.search(r"\+(\d+)(?:,(\d+))?", line)
+            start, count = int(m.group(1)), int(m.group(2) or 1)
+            out.setdefault(path, set()).update(range(start, start + max(count, 1)))
+    return out
+
+
+def entry(path, word):
+    """What production entry point a reference in this file is, if the file is one."""
+    stem = re.sub(r"\.tsx?$", "", path)
+    if path == "jobs/index.ts":
+        return f"job {word}"
+    if path == "script-runner/index.ts":
+        return f"script {word}"
+    if path.startswith("croon/"):
+        return f"cron {os.path.basename(stem)}"
+    if path.startswith("pages/api/"):
+        return f"route /{stem[6:]}"
+    if path.startswith("pages/"):
+        return f"page /{stem[6:]}"
+    if path.startswith("trpc/routers/"):
+        return f"trpc {stem[13:]}"
+    if path.startswith(("components/", "hooks/", "store/")):
+        return f"client {path}"
+    return None
+
+
+def word_at(text, line, character):
+    m = re.match(r"\w+", text[line - 1][character:]) if 0 < line <= len(text) else None
+    return m.group(0) if m else ""
+
+
+def walk(svc, path, decl):
+    """(entries, unresolved): entries maps an entry point to the declarations from the changed one up to it."""
+    start = (path, decl["name"], decl["line"])
+    came, queue, entries, unresolved, asked = {start: None}, [start], {}, [], svc.asked
+
+    def trail(node):
+        out = []
+        while node:
+            out.append({"path": node[0], "name": node[1], "line": node[2]})
+            node = came[node]
+        return out[::-1]
+
+    while queue:
+        node = queue.pop(0)
+        if svc.asked - asked >= BUDGET:
+            unresolved.append({"why": "the walk ran out of budget", "at": trail(node)})
+            break
+        p, name, line = node
+        text = svc.text(p)
+        column = next((m.start() for m in re.finditer(rf"\b{re.escape(name)}\b", text[line - 1])), None) if name.isidentifier() else None
+        if column is None:   # an anonymous default export: its name is the word after `export default`
+            m = re.search(r"\bdefault\b", text[line - 1])
+            column = m.start() if m else 0
+        found = svc.references(p, line, column)
+        if found is None:
+            unresolved.append({"why": "the TypeScript service gave no answer", "at": trail(node)})
+            continue
+        for loc in found:
+            q = loc["path"]
+            if TEST.search(q) or not SOURCE.search(q):
+                continue
+            source = svc.text(q)
+            if re.match(r"\s*(import\b|export\s*\{|export\s+\*)", source[loc["line"] - 1]) or (q == p and loc["line"] == line):
+                continue
+            what = entry(q, word_at(source, loc["line"], loc["character"]))
+            if what:
+                entries.setdefault(what, trail(node) + [{"path": q, "name": what, "line": loc["line"]}])
+                continue
+            up = enclosing(svc, q, loc["line"])
+            if not up:
+                unresolved.append({"why": "used at a module's top level", "at": trail(node) + [{"path": q, "name": "(module)", "line": loc["line"]}]})
+                continue
+            nxt = (q, up["name"], up["line"])
+            if nxt not in came:
+                came[nxt] = node
+                queue.append(nxt)
+    return entries, unresolved
+
+
+def node_end(svc, node):
+    s = enclosing(svc, node[0], node[2])
+    return s["endLine"] if s else node[2]
+
+
+def guard(svc, caller, callee):
+    """The setting a use of `callee` inside `caller` sits under, if any: an enclosing `if`, or an early return above
+    it, whose condition reads `settings.<name>` directly or through one of the caller's own deps."""
+    s = enclosing(svc, caller["path"], caller["line"])
+    if not s:
+        return None
+    text = svc.text(caller["path"])
+    body = text[s["line"] - 1:s["endLine"]]
+
+    def setting(condition):
+        m = FLAG.search(condition)
+        if m:
+            return m.group(1)
+        for dep in re.findall(r"\bdeps\.(\w+)\s*\(", condition):
+            for line in body:
+                m = re.search(rf"\b{dep}\s*:.*?\bsettings\.(\w+)", line)
+                if m:
+                    return m.group(1)
+        return None
+
+    uses = [i for i, line in enumerate(body) if re.search(rf"\.{re.escape(callee)}\s*\(|\b{re.escape(callee)}\s*\(", line)]
+    for use in uses:
+        open_ifs, depth = [], 0
+        for i, line in enumerate(body[:use + 1]):
+            head = re.match(r"\s*(?:\}\s*else\s+)?if\s*\((.*)", line)
+            if i < use and head and re.search(r"\)\s*(return|throw)\b", line) and setting(head.group(1)):
+                return setting(head.group(1))
+            if i < use and head and line.rstrip().endswith("{"):
+                open_ifs.append((depth, head.group(1)))
+            depth += line.count("{") - line.count("}")
+            open_ifs = [(d, c) for d, c in open_ifs if d < depth or i == use]
+        for _, condition in open_ifs:
+            found = setting(condition)
+            if found:
+                return found
+    return None
+
+
+def answer(tip, base, path, decl):
+    entries, unresolved = walk(tip, path, decl)
+    before = {}
+    old = named(base, path, decl["name"])
+    if old:
+        before, _ = walk(base, path, old)
+    out = {"path": path, "name": decl["name"], "line": decl["line"], "reached": []}
+    for what, trail in sorted(entries.items()):
+        row = {"by": what, "how": "existing" if what in before else "connected", "path": trail}
+        if row["how"] == "connected":
+            for callee, caller in zip(trail, trail[1:]):
+                flag = guard(tip, caller, callee["name"]) if caller["name"] != what else None
+                if flag:
+                    row["behind"] = flag
+                    break
+        out["reached"].append(row)
+    out["unresolved"] = unresolved
+    out["answer"] = ("existing" if any(r["how"] == "existing" for r in out["reached"]) else "connected" if out["reached"]
+                     else "unresolved" if unresolved else "none")
+    return out
+
+
+def report(repo, branch, base, port, post=None):
+    tip_sha, base_sha = git(repo, "rev-parse", branch).strip(), git(repo, "merge-base", base, branch).strip()
+    tip, old = Service(port, tip_sha, repo, post), Service(port, base_sha, repo, post)
+    rows = []
+    diff = changed(repo, base_sha, tip_sha)
+    for path, lines in sorted(diff.items()):
+        for decl in touched(tip, path, lines):
+            rows.append(answer(tip, old, path, decl))
+    mine = {(r["path"], r["name"]) for r in rows}
+    # a changed declaration every path from which runs through another changed one is that one's change, said once
+    for r in rows:
+        through = [{(s["path"], s["name"]) for s in x["path"][1:]} & mine for x in r["reached"]]
+        if through and all(through) and not r["unresolved"]:
+            r["under"] = sorted(set.intersection(*through) or through[0])[0][1]
+    # what the branch's new imports bring in: code production didn't reach at the base and does at the tip
+    connects = []
+    for path, lines in sorted(diff.items()):
+        text = tip.text(path)
+        for n in sorted(lines):
+            if not (0 < n <= len(text)) or not re.match(r"\s*import\b|^\s+\w+,?\s*$", text[n - 1]):
+                continue
+            for m in re.finditer(r"\b[A-Za-z_]\w*\b", text[n - 1].split(" from ")[0]):
+                if m.group(0) in ("import", "type", "as", "from"):
+                    continue
+                at = tip.definition(path, n, m.start())
+                if not at or TEST.search(at["path"]) or not SOURCE.search(at["path"]) or at["path"].startswith("node_modules/"):
+                    continue
+                decl = next((s for s in declarations(tip, at["path"]) if s["line"] <= at["line"] <= s["endLine"]), None)
+                if not decl or (at["path"], decl["name"]) in mine:
+                    continue
+                mine.add((at["path"], decl["name"]))
+                row = answer(tip, old, at["path"], decl)
+                if row["answer"] == "connected":
+                    connects.append(row)
+    return {"branch": branch, "sha": tip_sha, "base": base_sha, "declarations": rows, "connects": connects}
+
+
+def say(result):
+    for d in result["declarations"] + result["connects"]:
+        if d.get("under"):
+            continue
+        with_ = [o["name"] for o in result["declarations"] if o.get("under") == d["name"]]
+        print(f"{d['name']}  ({d['path']})" + (f"  with {', '.join(with_)}" if with_ else ""))
+        if d["answer"] == "none":
+            print("    no production caller at this tip")
+        for r in d["reached"]:
+            how = "reached by" if r["how"] == "existing" else "newly connected to"
+            tail = f", behind {r['behind']}" if r.get("behind") else ", no flag found" if r["how"] == "connected" else ""
+            print(f"    {how} {r['by']}{tail}")
+            print("        " + " ← ".join(step["name"] for step in r["path"]))
+        for u in d["unresolved"]:
+            print(f"    unresolved: {u['why']} at {' ← '.join(step['name'] for step in u['at'])}")
+
+
+def main():
+    args = sys.argv[1:]
+    if not args or args[0] in ("-h", "--help"):
+        print(__doc__)
+        return 0 if args else 2
+    opts = {"--base": None, "--repo": os.getcwd()}
+    as_json = "--json" in args
+    args = [a for a in args if a != "--json"]
+    while len(args) >= 3 and args[-2] in opts:
+        opts[args[-2]] = args[-1]
+        args = args[:-2]
+    branch, repo = args[0], git(opts["--repo"], "rev-parse", "--show-toplevel").strip()
+    base = opts["--base"] or git(repo, "config", f"branch.{branch}.stack-parent").strip() or "main"
+    port = subprocess.run([os.path.join(HERE, "stack-review-port")], capture_output=True, text=True, cwd=repo).stdout.strip()
+    result = report(repo, branch, base, port)
+    print(json.dumps(result, indent=1)) if as_json else say(result)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
