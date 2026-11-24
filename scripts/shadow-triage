@@ -405,6 +405,8 @@ FORM_SCRIPT = """function buildShadowQuiz() {{
       .setFeedbackForCorrect(feedback)
       .setFeedbackForIncorrect(feedback);
     form.addPageBreakItem().setTitle("What Sol said").setHelpText(s.reveal);
+    form.addParagraphTextItem().setTitle("Anything off about this reasoning?")
+      .setHelpText("Optional. e.g. \\"I don't buy this because…\\"");
   }});
   form.addPageBreakItem();
   form.addParagraphTextItem().setTitle("Anything Sol got wrong? Which sender, and why");
