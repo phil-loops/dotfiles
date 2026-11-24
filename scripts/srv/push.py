@@ -560,7 +560,8 @@ def landing_body(branch):
 
 def compare_url(branch, base=None):
     """github.com compare link for the branch, opened straight to the 'Open a pull
-    request' form (?expand=1) with the landing title, body and review label prefilled, against base
+    request' form (?expand=1) with the landing title, body and review label prefilled — the bot's
+    opt-out label when the branch hasn't turned review on — against base
     (default _pr_base: the nearest stacked ancestor with an open PR, else main). Authoring
     still happens on the website — this only opens the form; it never calls gh pr create."""
     url = repostate.snapshot().get("remote.origin.url")
@@ -572,7 +573,7 @@ def compare_url(branch, base=None):
     return (f"https://github.com/{m.group(1)}/compare/{base or _pr_base(branch)}...{branch}?expand=1"
             + (f"&title={quote(title, safe='')}" if title else "")
             + (f"&body={quote(body, safe='')}" if body else "")
-            + (f"&labels={packet.rp.LABEL}" if packet.label_on(branch) else ""))
+            + f"&labels={packet.rp.LABEL if packet.label_on(branch) else packet.rp.OPT_OUT_LABEL}")
 
 
 def _origin_web(branch):
