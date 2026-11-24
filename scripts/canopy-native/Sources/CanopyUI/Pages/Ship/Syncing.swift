@@ -160,6 +160,8 @@ public enum Syncing {
     public static func prepOf(_ ok: Bool, _ body: JSONObject) -> Prep {
         let err = str(body["err"])
         if ok { return .ok(note: routed(body).joined(separator: " · ").shipNonEmpty) }
+        // a diverged draft: the door's answer is Phil's replace, the push route's next press — not a failure
+        if truthy(body["replace"]) { return .rest(note: err.shipNonEmpty ?? "origin's copy has no PR — p replaces it") }
         if truthy(body["reconcile"]) { return .claude(note: err.shipNonEmpty ?? "no mechanical route — handing to Claude") }
         if truthy(body["vehiclePending"]) { return .rest(note: "additive vehicle already built — push it, or delete it to rebuild") }
         if err.hasPrefix("nothing to push") { return .rest(note: "nothing to push — origin already has this") }

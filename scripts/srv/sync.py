@@ -81,12 +81,11 @@ def state(branch, fresh_prs=False, with_patches=False):
       behind    — commits on origin/main not yet in this branch (two-dot count,
                   `git rev-list --count <branch>..origin/main`). >0 means the fork
                   point is stale, so GitHub-Desktop two-dot diffs inflate by ~this.
-      syncable  — safe to auto-rebase onto origin/main with NO force-push. True
-                  only for a root off main (parent==main) that is unpublished (no
-                  remote-tracking ref). Rebasing a *published* branch rewrites
-                  pushed commits (→ force-push); rebasing a *stacked* branch
-                  detaches it from its parent (→ that's a restack, not a sync).
-                  Neither is offered here — `why` explains the refusal.
+      syncable  — sync may rebase it onto origin/main: a root off main (parent==main)
+                  without an open PR (snap.visibility). A never-pushed root rebases
+                  freely; a pushed draft's rebase is declared to the published-history
+                  hook and its push becomes Phil's replace. A PR branch is append-only;
+                  a *stacked* branch is a restack, not a sync — `why` explains either.
       shared    — local-vs-origin visibility (see _shared), with aheadOfOrigin
                   the commit count origin's copy lacks.
     Pure inspection: no fetch, no mutation."""
@@ -96,7 +95,8 @@ def state(branch, fresh_prs=False, with_patches=False):
     snap = repostate.snapshot(fresh_prs=fresh_prs)
     behind = snap.count(f"{branch}..origin/main")   # origin/main absent → 0 → no badge
     parent = snap.parent(branch)
-    # published = has an OPEN PR (Phil's rule: only an open PR counts, not a bare remote ref).
+    # Phil's rule: only an open PR makes a branch append-only (snap.visibility, the one answer).
+    vis = snap.visibility(branch)
     published = snap.published(branch)
     proj = snap.project(branch)
     # A stacked branch behind main can't forward-rebase alone, but its PROJECT can — sync
@@ -117,7 +117,7 @@ def state(branch, fresh_prs=False, with_patches=False):
     # unpublished — refuse to auto-rewrite it rather than run with a toothless guard
     # (2026-08-23: exactly how a PR'd parent got rebased under its child). Unpushed
     # branches can't have an open PR, so they stay syncable through an outage.
-    pr_blind = shared in ("ahead", "synced") and not published and openprs.failed()
+    pr_blind = vis == "pr" and not published
     if pr_blind:
         restack = False
         why = "pushed to origin but gh is unreachable — can't verify it has no open PR; not rebasing"
@@ -146,7 +146,7 @@ def state(branch, fresh_prs=False, with_patches=False):
                 dirty_rows.append({"path": p, "code": code,
                                    "patch": ctx.run(args).stdout[:20000]})
     return {"branch": branch, "behind": behind, "parent": parent, "published": published,
-            "syncable": behind > 0 and parent == "main" and not published and not pr_blind,
+            "syncable": behind > 0 and parent == "main" and vis != "pr",
             "restack": restack, "project": proj,
             "shared": shared, "aheadOfOrigin": ahead,
             "dirty": dirty, "dirtyRows": dirty_rows, "dirtyWorktree": dirty_wt,
@@ -432,7 +432,9 @@ def _direct_rebase(branch):
         own = True
     else:
         return "skip", ""
-    reb = rebaseguard.run(target, ["origin/main"])   # aborts itself; a death mid-run is healed next time
+    from . import repostate
+    draft = branch if repostate.snapshot().visibility(branch) == "draft" else None
+    reb = rebaseguard.run(target, ["origin/main"], rewrite=draft)   # aborts itself; a death mid-run is healed next time
     if reb.returncode != 0:
         if own:
             ctx.run(["git", "-C", target, "checkout", "--detach"])

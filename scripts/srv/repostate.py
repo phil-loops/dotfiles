@@ -128,6 +128,19 @@ class RepoState:
     def published(self, branch):
         return branch in self.pr_heads()
 
+    def visibility(self, branch):
+        """Who can see this branch — the one answer every writer asks before rewriting it:
+        "pr" (an open PR: append-only, catch-ups by merge), "draft" (origin has a copy with no PR:
+        a rewrite is deliberate, declared to the published-history hook, and goes out by Phil's
+        replace), "local" (never pushed). gh unreachable with a copy on origin reads "pr": a draft
+        it can't verify is treated as reviewed."""
+        if self.published(branch):
+            return "pr"
+        if not self.remote(branch):
+            return "local"
+        from . import openprs
+        return "pr" if openprs.failed() else "draft"
+
     def branch_cfg(self, branch):
         """The branch's own config block as sorted "key=value" lines — indexed once per snapshot, so a
         fingerprint per branch costs its own block, not a scan of every key (929 ms for 509 branches)."""

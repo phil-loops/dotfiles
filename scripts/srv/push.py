@@ -1101,8 +1101,9 @@ def prep_push(req, raw):
     tail is sealed into one; deliberate voiced commits go out as they are):
       restacked + open PR   → carry as a catch-up merge on origin's head (additive, plain push)
       diverged + open PR    → build the additive vehicle, absorb it as the branch tip
-      diverged, no PR       → refuse (⋯ reconcile is the manual override)
-      behind + unpublished  → forward-rebase onto origin/main first (skipped on conflict)
+      diverged, a draft     → Phil's replace (force-with-lease, /force-origin re-checks the scope)
+      behind, never pushed  → forward-rebase onto origin/main first (skipped on conflict); a pushed
+                              draft stays on its base — rebasing it would turn the push into a replace
       unpushed tail > 1     → stack-squash --unpushed --format (voiced draft)
       already one / nothing → no-op, report
     The words are edited afterwards in the outline column (srv/outline.py)."""
@@ -1113,7 +1114,8 @@ def prep_push(req, raw):
         return req._send(404, json.dumps({"ok": False, "err": "no such branch"}))
     if branch in ("main", "master"):
         return req._send(200, json.dumps({"ok": False, "err": "trunk doesn't go through this door"}))
-    published = branch in openprs.heads(fresh=True)
+    vis = repostate.snapshot(fresh_prs=True).visibility(branch)
+    published = vis == "pr"
     tip_before = _tip(branch)
     routed = []
     # a press made for one route says so: if the branch no longer takes it, refuse rather than take another
@@ -1131,11 +1133,11 @@ def prep_push(req, raw):
         v = _origin_verdict(branch)
     elif not v["ff"]:
         if not published:
-            # not mechanically routable — the omni sync reads this flag and puts Claude in
-            # the middle (the /reconcile eject) instead of stopping at a refusal
+            # a draft nobody reviews: the door's own answer (_origin_verdict's replace route) —
+            # Phil's press replaces origin's copy; /force-origin re-verifies the scope
             return req._send(200, json.dumps({
-                "ok": False, "reconcile": True,
-                "err": "diverged from origin without an open PR — handing to Claude to work out the source of truth"}))
+                "ok": False, "replace": True,
+                "err": "origin's copy has no PR and local differs — p replaces it with your local history"}))
         if _is_restack(branch):
             holder = next((p for p, b in stage._worktrees() if b == branch), None)
             if holder and stage._dirty(holder):
@@ -1217,7 +1219,9 @@ def prep_push(req, raw):
             routed.append("carried your rework onto the PR head as one additive commit")
     else:
         state = sync.state(branch, fresh_prs=True)
-        if state["behind"] > 0 and not published and state.get("parent") == "main" and v["outgoing"] > 0:
+        if state["behind"] > 0 and vis == "draft" and state.get("parent") == "main" and v["outgoing"] > 0:
+            routed.append(f"left on its base ({state['behind']} behind) — origin has a copy, and rebasing it would turn the push into a replace")
+        elif state["behind"] > 0 and vis == "local" and state.get("parent") == "main" and v["outgoing"] > 0:
             scratch = "/tmp/viewer-prep-scratch"
             ctx.run(["git", "worktree", "remove", "--force", scratch])
             if ctx.run(["git", "worktree", "add", "--detach", scratch, "origin/main"]).returncode == 0:
@@ -1231,7 +1235,8 @@ def prep_push(req, raw):
                         routed.append(f"restacked onto origin/main ({state['behind']} behind)")
                     else:
                         ctx.run(["git", "-C", scratch, "rebase", "--abort"])
-                        routed.append("restack skipped (would conflict) — pushing from the current base")
+                        said = ((r.stderr or r.stdout or "").strip().splitlines() or ["it stopped"])[-1][:160]
+                        routed.append(f"restack skipped ({said}) — pushing from the current base")
                 else:
                     routed.append("restack skipped (branch is checked out) — pushing from the current base")
                 ctx.run(["git", "worktree", "remove", "--force", scratch])

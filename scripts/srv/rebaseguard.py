@@ -16,8 +16,10 @@ OWNER = "canopy-rebase-owner"
 _SCRUB = ("GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE", "GIT_PREFIX")
 
 
-def _git(wt, *args):
+def _git(wt, *args, rewrite=None):
     env = {k: v for k, v in os.environ.items() if k not in _SCRUB}
+    if rewrite:
+        env["STACK_REWRITE_PUBLISHED"] = rewrite
     return subprocess.run(["git", "-C", wt, *args], capture_output=True, text=True, env=env)
 
 
@@ -83,11 +85,12 @@ def heal(wt):
     return "healed"
 
 
-def run(wt, args, owner_pid=None, abort=True):
+def run(wt, args, owner_pid=None, abort=True, rewrite=None):
     """`git -C wt rebase <args>` with an owner record; aborts on failure. Returns a
     CompletedProcess. A person's rebase in progress is refused (returncode 3). abort=False
     leaves a failed rebase stopped so the caller can read its conflicts and then abort it; the
-    record stays meanwhile, so a death before that abort is still healed."""
+    record stays meanwhile, so a death before that abort is still healed. rewrite names a pushed
+    draft this rebase rewrites on purpose (the published-history hook refuses it otherwise)."""
     state = heal(wt)
     if state in ("person", "live"):
         return subprocess.CompletedProcess(["git", "rebase", *args], 3, "",
@@ -97,7 +100,7 @@ def run(wt, args, owner_pid=None, abort=True):
     with open(p, "w") as f:
         json.dump({"pid": pid, "start": _start(pid)}, f)
     try:
-        r = _git(wt, "rebase", *args)
+        r = _git(wt, "rebase", *args, rewrite=rewrite)
         if r.returncode != 0 and abort and in_progress(wt):
             _git(wt, "rebase", "--abort")
         return r

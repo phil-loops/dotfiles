@@ -250,6 +250,9 @@ func shipBranch(_ f: (inout Branch) -> Void = { _ in }) -> Branch {
         if case .rest = Syncing.prepOf(false, ["err": "nothing to push — origin already has this"]) {} else { Issue.record("not rest") }
         if case .rest = Syncing.prepOf(false, ["vehiclePending": true, "err": "x"]) {} else { Issue.record("not rest") }
         if case .claude = Syncing.prepOf(false, ["reconcile": true, "err": "diverged from origin without an open PR"]) {} else { Issue.record("not claude") }
+        // a diverged draft goes to Phil's replace, never to Claude (2026-11-16: the door ejected its own rewrite to a Claude pane)
+        #expect(Syncing.prepOf(false, ["replace": true, "err": "origin's copy has no PR and local differs — p replaces it with your local history"])
+                == .rest(note: "origin's copy has no PR and local differs — p replaces it with your local history"))
         #expect(Syncing.prepOf(false, ["err": "unpushed commits include a merge"]) == .fail(note: "unpushed commits include a merge"))
     }
 
