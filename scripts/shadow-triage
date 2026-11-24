@@ -404,6 +404,7 @@ FORM_SCRIPT = """function buildShadowQuiz() {{
       .setPoints(1)
       .setFeedbackForCorrect(feedback)
       .setFeedbackForIncorrect(feedback);
+    form.addPageBreakItem().setTitle("What Sol said").setHelpText(s.reveal);
   }});
   form.addPageBreakItem();
   form.addParagraphTextItem().setTitle("Anything Sol got wrong? Which sender, and why");
