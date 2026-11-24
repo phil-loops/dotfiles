@@ -1,5 +1,6 @@
 #!/bin/sh
-# dotfiles pre-commit — run the forest fixture harness when this commit could break it.
+# dotfiles pre-commit — block staged secrets (gitleaks), then run the forest fixture harness when
+# this commit could break it.
 #
 # Gated on path, because the harness is ~11s: it fires only when scripts/srv/**, a stack-*
 # script, worktree-hygiene, or the harness itself is staged. The index is SHARED across this
@@ -7,6 +8,19 @@
 # over-inclusive — running once too often costs 11s, missing a break costs a debugging session.
 #
 # CANOPY_TEST_SKIP=1 git commit …   bypasses (say so in the commit message when you use it).
+# Secret scan over the staged diff, before any bypass: CANOPY_TEST_SKIP skips the harness, never this.
+# The CRX signing key was "rotated out of git" in 6c65ab8 and that same commit re-committed the new
+# key — gitignore never untracks, and nothing looked at what was staged. ~50ms; false positives are
+# pinned by fingerprint in .gitleaksignore.
+if command -v gitleaks >/dev/null 2>&1; then
+  if ! gitleaks git --pre-commit --staged --no-banner --redact --exit-code 1 "$(git rev-parse --show-toplevel)" >/dev/null 2>&1; then
+    printf 'gitleaks: a staged change looks like a secret.\n'
+    gitleaks git --pre-commit --staged --no-banner --redact=60 -v "$(git rev-parse --show-toplevel)" 2>&1 | grep -E '^(Finding|File|Line|RuleID|Fingerprint):' | sed 's/^/  /'
+    printf '\nthe commit is blocked. Move the secret out of the repo, or pin a false positive in .gitleaksignore by its Fingerprint.\n'
+    exit 1
+  fi
+fi
+
 [ -n "$CANOPY_TEST_SKIP" ] && exit 0
 
 root=$(git rev-parse --show-toplevel)

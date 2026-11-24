@@ -1,0 +1,6 @@
+# gitleaks false positives, by fingerprint (commit:file:rule:line, or file:rule:line for a staged scan).
+# The CRX signing key (scripts/gh-to-nvim-key.pem) is deliberately NOT listed: it is a real leak.
+e238b60ecbed506711b1cb48177e512bd1108a91:scripts/gh-to-nvim/manifest.json:generic-api-key:8
+scripts/gh-to-nvim/manifest.json:generic-api-key:8
+62e1ef5f01ccd365f2357a669f9ec76d968f5263:scripts/loops-postman-gen/console.mjs:generic-api-key:6
+scripts/loops-postman-gen/console.mjs:generic-api-key:6
