@@ -591,7 +591,7 @@ public final class ReviewPageState: ShipHost {
             "review.commit.prev", "review.commits.retry",
         ]),
         ("the branch or its checkout as a whole, by name and tip; not the shown lines", [
-            "bench.open.review", "review.sync", "review.sync.fold", "review.sync.stash", "review.sync.stop", "review.sync.dirt.show",
+            "bench.open.review", "review.callers", "review.sync", "review.sync.fold", "review.sync.stash", "review.sync.stop", "review.sync.dirt.show",
             "review.sync.dismiss", "review.diverged.inspect", "review.push", "review.words", "review.finish", "review.preview",
             "review.preview.pr", "review.github", "review.gates.show", "review.gates.skip", "review.gates.quick", "review.helix.recover",
             "review.helix.resume",

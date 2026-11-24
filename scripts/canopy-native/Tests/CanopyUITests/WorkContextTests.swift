@@ -497,6 +497,37 @@ import Testing
                 "canopy went to the pane's branch and nothing moved since: back to that pane")
     }
 
+    /// What production reaches of a branch's changes, in words and loudest first: wired in with no flag found, wired
+    /// in behind a flag, already live, reached by nothing. A helper under another changed declaration gets no line.
+    @Test func productionCallersReadLoudestFirst() async throws {
+        typealias P = ProdCallers
+        func step(_ n: String) -> P.Step { P.Step(path: "x.ts", name: n) }
+        func reach(_ by: String, _ how: String, behind: String? = nil, _ path: [String]) -> P.Reach { P.Reach(by: by, how: how, behind: behind, path: path.map(step)) }
+        let live = P.Declaration(name: "build", answer: "existing", reached: [reach("job scan", "existing", ["build", "evaluate", "job scan"]),
+                                                                              reach("route /api/send", "existing", ["build", "send"]),
+                                                                              reach("trpc team", "existing", ["build", "team"])], unresolved: [])
+        let helper = P.Declaration(name: "helper", answer: "connected", reached: [reach("job scan", "connected", ["helper", "build", "job scan"])], unresolved: [], under: "build")
+        let alone = P.Declaration(name: "lonely", answer: "none", reached: [], unresolved: [])
+        let flagged = P.Declaration(name: "compare", answer: "connected", reached: [reach("job scan", "connected", behind: "shadow", ["compare", "scan", "job scan"])], unresolved: [])
+        let bare = P.Declaration(name: "wire", answer: "connected", reached: [reach("script backfill", "connected", ["wire", "script backfill"])], unresolved: [])
+        let lost = P.Declaration(name: "odd", answer: "unresolved", reached: [], unresolved: [P.Stop(why: "used at a module's top level", at: [step("odd"), step("(module)")])])
+        let lines = P.lines(P.Found(declarations: [live, helper, alone, lost], connects: [flagged, bare]))
+        #expect(lines.map(\.text) == ["odd: call path unresolved", "wire newly reaches script backfill, no flag found", "compare newly reaches job scan, behind shadow",
+                                      "build is reached by job scan, route /api/send and others", "lonely has no production caller"])
+        #expect(lines.map(\.tone) == [.loud, .loud, .fresh, .live, .quiet])
+        #expect(lines[3].paths.first == "build ← evaluate ← job scan" && lines[0].paths == ["stopped (used at a module's top level) at odd ← (module)"])
+
+        let app = world(.review(repo: "r", branch: "a"))
+        let callers = P.of(app)
+        callers.pause = 0
+        var asked: [Bool] = []
+        let answers = [P.Answer(ok: true, state: "running"), P.Answer(ok: true, state: "done", result: P.Found(declarations: [alone], connects: []))]
+        callers.ask = { _, _, run in asked.append(run); return answers[min(asked.count, answers.count) - 1] }
+        await callers.load("r:a", repo: "r", branch: "a", run: true, app)
+        #expect(asked == [true, false] && callers.answers["r:a"]?.state == "done", "asked to start once, then only read while the server works")
+        #expect(app.registry.command("review.callers") != nil)
+    }
+
     /// A forest's line says where its panes sit: a chat's pane, and any pane (Codex, a shell) whose latest work is on
     /// one of its branches. Each pane's border names its branch, written when it changes and cleared when it has none.
     @Test func aPanesBranchGoesOnItsForestsLineAndItsBorder() throws {

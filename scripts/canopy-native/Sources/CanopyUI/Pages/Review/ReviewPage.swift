@@ -194,6 +194,7 @@ private struct ReviewHeader: View {
             if pg.tab == "files", pg.integration == nil { BranchLine().padding(.top, 4) }
             if pg.integration == nil, let b { WorkContextView(subject: .branch(project: b.project, name: b.name), compact: true, showsMissing: true) }
             if pg.integration == nil, let b { BenchSummaryView(subject: .branch(repo: b.repo, name: b.name)) }
+            if pg.integration == nil, pg.tab == "files", let b { ProdCallersView(branch: b) }
             if let c, !waiting(c, pg).isEmpty {
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
                     ForEach(waiting(c, pg), id: \.self) { Text($0) }
