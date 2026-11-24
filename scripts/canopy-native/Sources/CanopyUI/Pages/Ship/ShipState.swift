@@ -103,7 +103,7 @@ public final class ShipState {
     /// Every command Ship registered, for its keyboard-rule test.
     @ObservationIgnored public internal(set) var commandIDs: [String] = []
     /// Opens a URL in the browser (GitHub, the compare form, a preview). Tests swap it out.
-    @ObservationIgnored public var openURL: (URL) -> Void = { NSWorkspace.shared.open($0) }
+    @ObservationIgnored public var openURL: (URL) -> Void = { NSWorkspace.shared.open($0, configuration: NSWorkspace.OpenConfiguration()) }
     /// Puts text on the clipboard (`y`). The keytutor's practice app swaps it.
     @ObservationIgnored public var copyText: (String) -> Void = { Clipboard.copy($0) }
 

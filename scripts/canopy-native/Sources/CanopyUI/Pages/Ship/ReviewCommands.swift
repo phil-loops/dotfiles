@@ -477,15 +477,23 @@ enum ReviewCommands {
         r.register(Command(
             id: "review.github", title: "Go to GitHub to submit your review", scope: .review, quiet: true,
             available: { _ in canWrite() },
-            local: { _, _ in if let c = conv(), let u = URL(string: "\(c.url)/files") { open(u) } }))
+            local: { _, _ in
+                guard let c = conv(), let u = URL(string: "\(c.url)/files") else { return }
+                weakApp?.runner.say("opening your review on GitHub…")
+                open(u)
+            }))
 
         r.register(Command(
             id: "branch.pr", title: "Go to the PR (the prefilled compare form if there's none yet)", scope: .branch, verb: .github, label: "pr", v1: ["open-pr"],
             available: { id in weakApp?.forestModel.opensPR(id) ?? false },
             local: { id, _ in
                 guard let app = weakApp, let id, let b = branch(id) else { return }
-                if let pr = store.view(Pr.self, id), let u = URL(string: pr.url) { open(u); return }
+                if let pr = store.view(Pr.self, id), let u = URL(string: pr.url) {
+                    app.runner.say("opening #\(pr.number) on GitHub…")
+                    open(u); return
+                }
                 guard let v = app.forestModel.branchView(b.id) else { return }
+                app.runner.say("filling in the PR form…")
                 let fallback = app.forestModel.compareURL(v), path = app.forestModel.comparePath(v) + "&json=1"
                 Task { @MainActor in
                     let got = try? await tr.getJSON(path, as: CompareLink.self)

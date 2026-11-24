@@ -571,6 +571,16 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = f
         #expect(a.runner.note == "p · nothing to push — origin has this · waiting on review")
     }
 
+    /// Phil 2026-11-24: space o g sat silent until the browser came up — the press says where it's going first.
+    @Test func goingToThePRSaysSoBeforeTheBrowserAnswers() throws {
+        let a = world()
+        var opened: [URL] = []
+        ShipState.of(a).openURL = { opened.append($0) }
+        a.runner.dispatch("branch.pr", via: .key, target: "r:a")
+        #expect(a.runner.note == "opening #11 on GitHub…")
+        #expect(opened.count == 1)
+    }
+
     /// Phil 2026-11-18: one press queues the push for green — the server sends it through the same
     /// door when the gates pass; only shipping WITHOUT them costs two more presses, and u takes the queue back.
     @Test func pQueuesThePushForGreenAndOnlyShippingWithoutThemCostsMore() throws {
