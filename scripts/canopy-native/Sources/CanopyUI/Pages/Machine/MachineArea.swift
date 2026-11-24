@@ -96,10 +96,12 @@ struct MachinePage: View {
         let m = app.state { Workstation(app: app) }
         FollowScroll(panes: ["servers", "log", "queue"]) {
             VStack(alignment: .leading, spacing: 32) {
+                let lead = MachineText.memoryLeads(m.footprint?.machine.pressure)
+                if lead { FootprintSection() }
                 Servers()
                 StackSection()
                 QueueSection()
-                FootprintSection()
+                if !lead { FootprintSection() }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.top, 8)
@@ -130,7 +132,7 @@ private struct Servers: View {
         let n = m.servers.count
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
-                SectionHead(text: "serving · \(n)")
+                SectionHead(text: "serving")
                 Spacer()
                 if app.runner.armed == "reap" { Lever(id: "machine.reap", word: "again reaps · esc", danger: true) }
                 if app.runner.armed == "kill all" { Lever(id: "machine.killall", word: "again kills \(n) · esc", danger: true) }
@@ -292,16 +294,13 @@ private struct StackSection: View {
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
                     SectionHead(text: "stack")
                     Dot(color: !s.down ? theme.add : starting ? theme.ember : theme.del, breathe: s.down && starting)
-                    Text("\(s.up)/\(s.total) up · from \(MachineText.shortDir(s.dir ?? s.project))").foregroundStyle(theme.inkDim)
+                    Text(MachineText.stackFrom(s)).foregroundStyle(s.home == false ? theme.ember : theme.inkDim)
                     Spacer()
                     if s.down {
                         if starting { Text("starting…").foregroundStyle(theme.ember) } else { Lever(id: "machine.stack", word: "start") }
                     }
                 }
                 Group {
-                    if s.home == false, let dir = s.dir {
-                        Text("from \(MachineText.shortDir(dir)) — its own Postgres and ClickHouse, not main's").foregroundStyle(theme.ember)
-                    }
                     if let broken = s.doctor?.broken, !broken.isEmpty {
                         Text(broken.map { "\($0.name) — \($0.detail)" }.joined(separator: " · ")).foregroundStyle(theme.del)
                     }
@@ -342,7 +341,7 @@ private struct QueueSection: View {
                     SectionHead(text: "queue")
                     let uneasy = !q.warnings.isEmpty || !q.outside.isEmpty
                     Dot(color: uneasy ? theme.ember : (q.holders.isEmpty ? theme.inkFaint : theme.add), breathe: uneasy)
-                    Text(QueueText.headline(q)).foregroundStyle(theme.inkDim)
+                    if let h = QueueText.headline(q) { Text(h).foregroundStyle(theme.inkDim) }
                     Spacer()
                 }
                 VStack(alignment: .leading, spacing: 0) {

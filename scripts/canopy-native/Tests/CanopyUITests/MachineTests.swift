@@ -30,9 +30,26 @@ import Testing
     @Test func theQueueDecodesAndItsHeadlineSaysWhatHoldsTheSlots() throws {
         let q = try JSONDecoder().decode(Queue.self, from: Data(MachineFixtures.queue.utf8))
         #expect(q.holders.first?.idle == true && q.waiters.first?.gate?.step == "1st in line" && q.outside.first?.name == "seed-gen")
-        #expect(QueueText.headline(q) == "1 of 1 slot (memory 24% headroom cut it from 2) · held by eval.py 19h 0m · 1 waiting · 1 outside the queue")
+        // the head says only what no row does: holders, waiters and un-queued work are rows (Phil 2026-11-24: counts are noise)
+        #expect(QueueText.headline(q) == "memory at 24% headroom cut the slots to 1")
+        var calm = q
+        calm.floor = nil
+        #expect(QueueText.headline(calm) == nil)
+        calm.holders = []; calm.waiters = []; calm.outside = []
+        #expect(QueueText.headline(calm) == "idle")
         #expect(QueueText.who(q.waiters[0]) == "other" && QueueText.doing(q.waiters[0]) == "1st in line")
         #expect(QueueText.doing(q.holders[0]) == "eval · eval")
+    }
+
+    /// Phil 2026-11-24: "critical — next dev dies here" sat bottom-right, under the queue — memory leads only while it's critical.
+    @Test func memoryLeadsOnlyWhileCritical() throws {
+        #expect(MachineText.memoryLeads("critical"))
+        #expect(!MachineText.memoryLeads("high") && !MachineText.memoryLeads("ok") && !MachineText.memoryLeads(nil))
+        var s = try JSONDecoder().decode(Previews.self, from: Data(MachineFixtures.previews.utf8)).substrate
+        s.dir = "/Users/x/coding/loops-wt-231007"; s.home = false
+        #expect(MachineText.stackFrom(s) == "from loops-wt-231007 — its own Postgres and ClickHouse, not main's")
+        s.home = true
+        #expect(MachineText.stackFrom(s) == "from loops-wt-231007")
     }
 
     @Test func driftInWords() {

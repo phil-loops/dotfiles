@@ -7,13 +7,11 @@ struct MachineRunsRows: View {
 
     var body: some View {
         let reports = MachineRuns.of(app)
+        if !reports.runs.isEmpty || reports.unavailable || reports.unreadable > 0 {
         VStack(alignment: .leading, spacing: 4) {
             Text("reported runs").font(Theme.text(11)).foregroundStyle(theme.inkFaint)
             if reports.unavailable { Text(reports.runs.isEmpty ? "run registry unavailable" : "run registry unavailable · showing last reports").foregroundStyle(theme.inkFaint) }
             if reports.unreadable > 0 { Text("\(reports.unreadable) run documents unavailable").foregroundStyle(theme.inkFaint) }
-            if reports.runs.isEmpty, !reports.unavailable {
-                Text(reports.loaded ? "no unfinished run documents" : "reading run reports…").foregroundStyle(theme.inkFaint)
-            }
             ForEach(reports.runs, id: \.url) { run in
                 CursorRow(pane: "queue", key: run.key) { on in
                     VStack(alignment: .leading, spacing: 3) {
@@ -36,6 +34,7 @@ struct MachineRunsRows: View {
         }
         .font(Theme.text(12))
         .padding(.top, 8)
+        }
     }
 }
 

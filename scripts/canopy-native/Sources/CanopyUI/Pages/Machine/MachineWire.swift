@@ -188,13 +188,11 @@ struct Queue: Decodable, Equatable {
 }
 
 enum QueueText {
-    /// The one line atop the section: `queue · 1 of 2 slots (memory 24% < floor) · held by eval 19h · 14 waiting`.
-    static func headline(_ q: Queue) -> String {
-        var bits = ["\(q.holders.count) of \(q.slots) slot\(q.slots == 1 ? "" : "s")" + (q.floor != nil ? " (memory \(q.mem ?? 0)% headroom cut it from \(q.configured))" : "")]
-        if let h = q.holders.first { bits.append("held by \(who(h)) \(MachineText.ago(Double(h.age)))" + (q.holders.count > 1 ? " +\(q.holders.count - 1)" : "")) }
-        if !q.waiters.isEmpty { bits.append("\(q.waiters.count) waiting") }
-        if !q.outside.isEmpty { bits.append("\(q.outside.count) outside the queue") }
-        return bits.joined(separator: " · ")
+    /// The line beside the section head: only what its rows don't say — memory cutting the slots, or
+    /// that nothing holds one. Holders, waiters and un-queued work are each their own row.
+    static func headline(_ q: Queue) -> String? {
+        if q.floor != nil { return "memory at \(q.mem ?? 0)% headroom cut the slots to \(q.slots)" }
+        return q.holders.isEmpty && q.waiters.isEmpty && q.outside.isEmpty ? "idle" : nil
     }
 
     /// A ticket's short name: its gate's branch, else its command's first word, else its class.
@@ -228,6 +226,15 @@ enum MachineText {
         if let pg = sc?.pg, pg.ahead > 0 { bits.append("\(pg.ahead) not in main (\(shortMig(pg.latestAhead)))") }
         if let ch = sc?.ch, ch.behind > 0 { bits.append("clickhouse \(ch.behind) behind") }
         return bits.joined(separator: " · ")
+    }
+
+    /// Memory goes above everything else while it's critical — the one thing on the page that ends dev.
+    static func memoryLeads(_ pressure: String?) -> Bool { pressure == "critical" }
+
+    /// Where the dev stack runs from, and when it isn't main's, that its databases aren't either.
+    static func stackFrom(_ s: Substrate) -> String {
+        let dir = shortDir(s.dir ?? s.project)
+        return s.home == false ? "from \(dir) — its own Postgres and ClickHouse, not main's" : "from \(dir)"
     }
 
     static func shortDir(_ d: String) -> String { d.split(separator: "/").last.map(String.init) ?? d }
