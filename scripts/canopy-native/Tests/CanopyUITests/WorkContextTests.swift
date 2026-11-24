@@ -528,30 +528,28 @@ import Testing
         #expect(app.registry.command("review.callers") != nil)
     }
 
-    /// The home lists local work only when its next step is Phil's. What an agent or a teammate holds, however busy,
-    /// shows with the archive, and so does the work in progress.
-    @Test func theHomeListsOnlyLocalWorkThatIsYourMove() throws {
-        let now = world().forestModel.now.timeIntervalSince1970
-        let app = world(chats: ["59fa0cc0-1": chat("59fa0cc0-1", activeAt: now - 30, acted: [("r:a", "commit", now - 180)])])
+    /// The home lists local work only when its next step is Phil's and something is on it. What an agent or a
+    /// teammate holds, and what is his but idle, shows with the archive, and so does the work in progress.
+    @Test func theHomeListsOnlyYourMoveOnWorkSomethingIsOn() throws {
+        let app = world()
         let m = app.forestModel
         func listed() -> Set<String> { Set(m.homeSections().sections.flatMap(\.items).map(\.key)) }
         let everything = listed()
         m.showParked = false
-        let mine = listed()
-        #expect(mine.isSubset(of: everything) && mine.count < everything.count, "what asks nothing of you leaves the home")
         let fs = m.forests()
         for key in everything {
             guard let f = RowKey.id(key, "p").flatMap({ fs[$0] }) else { continue }
-            #expect(mine.contains(key) == m.verb(f).isYours, "\(f.p.name) is listed exactly when its step is yours")
+            let on = f.p.state == .focus || !WorkContext.onForest(f.branches).isEmpty
+            #expect(listed().contains(key) == (m.verb(f).isYours && on), "\(f.p.name) is listed exactly when its step is yours and something is on it")
         }
-        let held = try #require(fs.values.first { !m.yours($0) && !$0.branches.isEmpty && everything.contains(RowKey.project($0.p.id)) })
-        let v = try #require(held.branches.first)
-        #expect(m.hasParked(), "which is what gives the archive's key something more to show")
         let panes = PaneBranches.of(app)
         panes.tmux = { _ in }
-        panes.take([PaneBranches.Row(pane: "%7", address: "3:1", repo: v.b.repo, branch: v.b.name)])
-        #expect(!listed().contains(RowKey.project(held.p.id)), "a pane or a chat at work on it doesn't make it your move")
-        #expect(WorkInProgressView.rows(app).isEmpty && !WorkInProgressView.visible(app), "work in progress is hidden with it")
+        let held = try #require(fs.values.first { !m.verb($0).isYours && !$0.branches.isEmpty && everything.contains(RowKey.project($0.p.id)) })
+        #expect(m.hasParked(), "which is what gives the archive's key something more to show")
+        panes.take([PaneBranches.Row(pane: "%7", address: "3:1", repo: held.branches[0].b.repo, branch: held.branches[0].b.name)])
+        #expect(m.paneWork == ["\(held.branches[0].b.repo)\t\(held.branches[0].b.name)"], "the home hears which branches panes work on")
+        #expect(!listed().contains(RowKey.project(held.p.id)), "a pane at work doesn't make someone else's step yours")
+        #expect(WorkInProgressView.rows(app).isEmpty && !WorkInProgressView.visible(app), "work in progress is hidden with the rest")
         app.runner.dispatch("archive.toggle", via: .palette)
         #expect(m.showParked && m.showArchive, "the archive's key shows the rest too")
         #expect(listed().contains(RowKey.project(held.p.id)))

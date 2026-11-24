@@ -265,7 +265,7 @@ enum ProjectCommands {
                 m.readyOnly.toggle()
             }))
         r.register(Command(
-            id: "archive.toggle", title: "Show or hide everything else: work that isn't your move, and the archive", scope: .forests, leader: LocalKey(",a"), label: "the rest",
+            id: "archive.toggle", title: "Show or hide everything else: work that isn't your move or that nothing is on, and the archive", scope: .forests, leader: LocalKey(",a"), label: "the rest",
             available: { _ in !m.readyOnly },
             local: { _, _ in
                 m.showArchive.toggle()

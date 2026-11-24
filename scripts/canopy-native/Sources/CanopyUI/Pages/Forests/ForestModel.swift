@@ -164,6 +164,8 @@ public final class ForestModel {
     public var showArchive = false
     /// Whether the home also lists what asks nothing of Phil (`yours`); the archive's key shows both.
     public var showParked = false
+    /// The branches tmux panes are working on, "repo\tbranch" (PaneBranches): a pane's work is live whatever runs in it.
+    public var paneWork: Set<String> = []
     /// the home's chats-on-no-branch line, opened into its list
     public var showLooseChats = false
     /// closed forests shown in the archive fold (display only — their state stays until archived)
@@ -399,10 +401,14 @@ public final class ForestModel {
         return (cards, sections)
     }
 
-    /// Whether the forest's next step is Phil's: the only local work the home lists beside the PR cards. A forest an
-    /// agent or a teammate holds, however busy, asks nothing of him; it shows with the archive, and comes back by
-    /// itself when its step becomes his.
-    func yours(_ f: ForestView) -> Bool { verb(f).isYours }
+    /// The only local work the home lists beside the PR cards: a forest whose next step is Phil's and that something
+    /// is on (the focus lane, a chat, a tmux pane). One an agent or a teammate holds, however busy, asks nothing of
+    /// him; one whose step is his but that nothing is on is backlog. Both show with the archive, and come back by
+    /// themselves.
+    func yours(_ f: ForestView) -> Bool {
+        verb(f).isYours && (f.p.state == .focus || !WorkContext.onForest(f.branches).isEmpty
+            || f.branches.contains { paneWork.contains("\($0.b.repo)\t\($0.b.name)") })
+    }
 
     /// Whether any listed forest is someone else's move: what the archive's key has to show beyond the archive itself.
     func hasParked() -> Bool {

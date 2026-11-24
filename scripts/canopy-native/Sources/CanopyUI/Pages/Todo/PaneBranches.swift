@@ -54,6 +54,8 @@ final class PaneBranches {
     /// the app the tmux client runs in (Terminal, Ghostty, …), as `pane-branch host` last said; nil until it has
     @ObservationIgnored var host: pid_t?
 
+    /// the home reads which branches panes are working on from here
+    @ObservationIgnored weak var model: ForestModel?
     private(set) var rows: [Row] = []
     @ObservationIgnored private(set) var written: [String: String] = [:]
     @ObservationIgnored private var task: Task<Void, Never>?
@@ -152,6 +154,8 @@ final class PaneBranches {
     /// Takes every pane's answer, and brings the borders to it, touching only the panes whose branch changed.
     func take(_ rows: [Row]) {
         if rows != self.rows { self.rows = rows }
+        let work = Set(rows.compactMap { r in r.branch.map { "\(r.repo ?? "")\t\($0)" } })
+        if let model, model.paneWork != work { model.paneWork = work }
         var want: [String: String] = [:]
         for r in rows { if let b = r.branch { want[r.pane] = leaf(b) } }
         for (pane, name) in want where written[pane] != name { tmux(["set-option", "-p", "-t", pane, "@pane_branch", name]) }
@@ -190,6 +194,7 @@ final class PaneBranches {
     }
 
     static func install(_ app: AppModel) {
+        PaneBranches.of(app).model = app.forestModel
         app.registry.register(Command(id: "tmux.switch", title: "Go to the tmux pane working on this branch", scope: .global,
                                       verb: .tmuxSwitch, label: "tmux",
                                       local: { [weak app] _, _ in
