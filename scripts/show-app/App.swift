@@ -302,6 +302,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        if tutor?.voice.active == true { tutor?.voice.reset() }
         if snapshotPath == nil {
             saveAll()
         }

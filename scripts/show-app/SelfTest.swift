@@ -340,6 +340,23 @@ final class SelfTestDriver {
         escape()
         check("⎋ leaves the composer with its text", app.tutor?.composer.string == "draft question" && !app.isTyping, app.tutor?.composer.string ?? "-")
 
+        if let controller = app.tutor, let question = controller.session?.rungs.first {
+            switchKey(.review)
+            controller.acceptDictation("one message", path: tutor, question: question, part: "a")
+            check("background dictation stays on the original part", controller.drafts["r1"]?["a"] == "one message" && app.active == .review)
+            controller.acceptDictation("the same ID", path: tutor, question: question, part: "b")
+            check("a dictated prediction waits for confidence", loadAnswers(tutor).isEmpty)
+            controller.choose(confidence: 1)
+            controller.acceptDictation("after retry", path: tutor, question: question, part: "b")
+            let answer = loadAnswers(tutor)["r1"]
+            check("finishing a voice prediction preserves its parts and confidence",
+                  answer?.parts == ["a": "one message", "b": "the same ID after retry"] && answer?.confidence == "medium")
+            controller.acceptDictation("late transcript", path: tutor, question: question, part: "a")
+            check("an answered question keeps late dictation as a draft", controller.composer.string == "draft question late transcript" && loadAnswers(tutor)["r1"]?.parts == answer?.parts)
+            controller.composer.string = "draft question"
+            controller.saveDrafts()
+        }
+
         switchKey(.review)
         scrolledPartway()
         app.workspaces[.canopy]?.canopy?.resume(at: Self.canopyPlace)

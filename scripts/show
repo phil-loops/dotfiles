@@ -100,6 +100,7 @@ build_held() {
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>1.0</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
+  <key>NSMicrophoneUsageDescription</key><string>Dictate an answer in Learn while you read in another app.</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSPrincipalClass</key><string>NSApplication</string>
   <key>CFBundleURLTypes</key>
