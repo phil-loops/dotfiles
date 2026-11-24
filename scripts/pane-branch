@@ -1,0 +1,182 @@
+#!/usr/bin/env python3
+"""pane-branch — which branch each tmux pane is working on, whatever runs in it (Claude, Codex, a shell).
+
+  pane-branch                 every pane that has a branch: where it sits, the branch, why, how long ago
+  pane-branch --json          every pane as JSON; branch is null where there's none
+  pane-branch <pane>          "<repo>\\t<branch>" for one pane; exit 1 saying why when it has none
+  pane-branch url <pane>      that branch's canopy:// link
+
+<pane> is a pane id (%342), window:pane (3:1) in the session your tmux client shows, or one digit: that
+pane of the window your client shows.
+
+The record is the reference-transaction hook's (hooks/loops-reference-transaction): one line per branch
+move, written in the pane that made it. A pane is on the branch it last added commits to, or last
+started in a forest. A rewrite (a restack, a squash), a delete, the default branch and a bare
+placeholder branch say nothing about what a pane is working on."""
+import glob
+import json
+import os
+import subprocess
+import sys
+import time
+
+ZERO = "0" * 40
+
+
+def journal_dir():
+    return os.environ.get("PANE_BRANCH_DIR") or os.path.expanduser("~/.cache/pane-branch")
+
+
+def read_moves(server, base=None):
+    """The server's moves, oldest first: dicts of at, pane, repo, branch, old, new."""
+    out = []
+    try:
+        with open(os.path.join(base or journal_dir(), f"moves-{server}.tsv")) as f:
+            for line in f:
+                parts = line.rstrip("\n").split("\t")
+                if len(parts) == 6 and parts[0].isdigit():
+                    out.append(dict(zip(("at", "pane", "repo", "branch", "old", "new"), parts), at=int(parts[0])))
+    except OSError:
+        pass
+    return out
+
+
+class Git:
+    """The few facts a move is judged by, asked once each."""
+
+    def __init__(self):
+        self.memo = {}
+
+    def _run(self, repo, *args):
+        key = (repo, args)
+        if key not in self.memo:
+            r = subprocess.run(["git", "-C", repo, *args], capture_output=True, text=True)
+            self.memo[key] = (r.returncode, r.stdout.strip())
+        return self.memo[key]
+
+    def exists(self, repo, branch):
+        return self._run(repo, "rev-parse", "-q", "--verify", f"refs/heads/{branch}")[0] == 0
+
+    def in_forest(self, repo, branch):
+        return bool(self._run(repo, "config", "--get", f"branch.{branch}.stack-project")[1])
+
+    def default_branch(self, repo):
+        rc, out = self._run(repo, "symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD")
+        return out.split("/", 1)[1] if rc == 0 and "/" in out else "main"
+
+    def adds_commits(self, repo, old, new):
+        return old != new and self._run(repo, "merge-base", "--is-ancestor", old, new)[0] == 0
+
+
+def how(move, git):
+    """"committed" | "started" when the move is work on its branch, else None."""
+    repo, branch, old, new = move["repo"], move["branch"], move["old"], move["new"]
+    if new == ZERO or branch == git.default_branch(repo) or not git.exists(repo, branch):
+        return None
+    if old == ZERO:
+        return "started" if git.in_forest(repo, branch) else None
+    return "committed" if git.adds_commits(repo, old, new) else None
+
+
+def working_on(moves, git):
+    """pane id → its latest move that is work, with `how` set."""
+    out = {}
+    for move in reversed(moves):
+        if move["pane"] in out:
+            continue
+        why = how(move, git)
+        if why:
+            out[move["pane"]] = dict(move, how=why)
+    return out
+
+
+def tmux(*args):
+    r = subprocess.run(["tmux", *args], capture_output=True, text=True)
+    return r.stdout.rstrip("\n") if r.returncode == 0 else None
+
+
+def tmux_state():
+    """(server pid, the client's session, the client's window id, panes) or None without a server."""
+    head = tmux("display-message", "-p", "#{pid}\t#{session_name}\t#{window_id}")
+    listing = tmux("list-panes", "-a", "-F", "#{pane_id}\t#{session_name}\t#{window_index}\t#{pane_index}\t#{window_id}")
+    if not head or listing is None:
+        return None
+    server, session, window = head.split("\t")
+    panes = [dict(zip(("pane", "session", "window", "index", "window_id"), line.split("\t"))) for line in listing.splitlines()]
+    return server, session, window, panes
+
+
+def rows(state, moves, git):
+    """Every pane with its address and, where it has one, its branch."""
+    _, session, _, panes = state
+    found = working_on(moves, git)
+    out = []
+    for p in panes:
+        place = f"{p['window']}:{p['index']}"
+        row = {"pane": p["pane"], "address": place if p["session"] == session else f"{p['session']} {place}",
+               "session": p["session"], "window": int(p["window"]), "index": int(p["index"]), "window_id": p["window_id"],
+               "repo": None, "repo_path": None, "branch": None, "how": None, "at": None}
+        move = found.get(p["pane"])
+        if move:
+            row.update(repo=os.path.basename(move["repo"]), repo_path=move["repo"], branch=move["branch"], how=move["how"], at=move["at"])
+        out.append(row)
+    return out
+
+
+def pick(target, state, all_rows):
+    """The row a <pane> argument names, or (None, why)."""
+    _, session, window, _ = state
+    if target.startswith("%"):
+        hits = [r for r in all_rows if r["pane"] == target]
+    elif target.isdigit():
+        hits = [r for r in all_rows if r["window_id"] == window and r["index"] == int(target)]
+    else:
+        w, _, i = target.partition(":")
+        if not (w.isdigit() and i.isdigit()):
+            return None, f"{target!r} isn't a pane id, window:pane or a digit"
+        hits = [r for r in all_rows if r["session"] == session and r["window"] == int(w) and r["index"] == int(i)]
+    return (hits[0], None) if hits else (None, f"no pane {target}")
+
+
+def ago(seconds):
+    for size, unit in ((86400, "d"), (3600, "h"), (60, "m")):
+        if seconds >= size:
+            return f"{int(seconds // size)}{unit}"
+    return "now"
+
+
+def main():
+    args = sys.argv[1:]
+    if args[:1] in (["-h"], ["--help"]):
+        print(__doc__)
+        return 0
+    state = tmux_state()
+    if not state:
+        print("pane-branch: no tmux server", file=sys.stderr)
+        return 1
+    all_rows = rows(state, read_moves(state[0]), Git())
+    if args == ["--json"]:
+        print(json.dumps(all_rows))
+        return 0
+    if not args:
+        now = time.time()
+        for r in all_rows:
+            if r["branch"]:
+                print(f"{r['address']:<14} {r['repo']:<12} {r['branch']}  ·  {r['how']} {ago(now - r['at'])}")
+        return 0
+    want_url = args[0] == "url"
+    if len(args) != (2 if want_url else 1):
+        print(__doc__, file=sys.stderr)
+        return 2
+    row, why = pick(args[-1], state, all_rows)
+    if row and not row["branch"]:
+        row, why = None, f"pane {row['address']} hasn't committed to a branch or started one"
+    if not row:
+        print(f"pane-branch: {why}", file=sys.stderr)
+        return 1
+    print(f"canopy://v2/b/{row['repo']}/{row['branch']}" if want_url else f"{row['repo']}\t{row['branch']}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

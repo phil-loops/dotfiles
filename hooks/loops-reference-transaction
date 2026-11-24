@@ -10,8 +10,25 @@
 # Override, for a caller that has decided the rewrite is right — stack-restack's pushed-but-no-PR
 # drafts, an explicit replace of an unreviewed draft: STACK_REWRITE_PUBLISHED="<b> [<b>…]" (or "*").
 # Installed: ln -s ~/.dotfiles/hooks/loops-reference-transaction <repo>/.git/hooks/reference-transaction
-[ "$1" = prepared ] || exit 0
 zero=0000000000000000000000000000000000000000
+# Which tmux pane moved which branch (scripts/pane-branch reads it): one line per move that happened,
+# whatever tool or agent made it. An update with no expected old value reports a zero old; by now the
+# reflog holds the real one. Nothing here can fail a move.
+if [ "$1" = committed ]; then
+  server=${TMUX#*,}; server=${server%%,*}
+  [ -n "$TMUX_PANE" ] && [ -n "$server" ] || exit 0
+  dir=${PANE_BRANCH_DIR:-$HOME/.cache/pane-branch}
+  repo=""
+  while read -r old new ref; do
+    case "$ref" in refs/heads/*) ;; *) continue ;; esac
+    case "$old$new" in *ref:*) continue ;; esac
+    [ "$old" = "$zero" ] && { old=$(git rev-parse -q --verify "$ref@{1}" 2>/dev/null) || old=$zero; }
+    [ -n "$repo" ] || { repo=$(cd "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null && pwd -P) || exit 0; mkdir -p "$dir" 2>/dev/null; }
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$(date +%s)" "$TMUX_PANE" "${repo%/.git}" "${ref#refs/heads/}" "$old" "$new" >> "$dir/moves-$server.tsv" 2>/dev/null
+  done
+  exit 0
+fi
+[ "$1" = prepared ] || exit 0
 refused=""
 lines=$(cat)
 # One owning chat per forest (scripts/srv/forestowner.py): a move a chat makes, or one made for a
