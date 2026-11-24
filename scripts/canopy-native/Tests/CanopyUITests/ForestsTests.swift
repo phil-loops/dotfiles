@@ -267,6 +267,7 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = f
     ]
     a.store.hydrate(try! Snapshot.decode(JSONSerialization.data(withJSONObject: state)))
     a.forestModel.now = NOW
+    a.forestModel.showParked = true   // the fixture's forests have no chat or pane on them; the home's own filter has its own test
     a.forestModel.face = .branches
     return a
 }
@@ -289,7 +290,7 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = f
         #expect(a.keys.pendingKeys == "," && a.keys.pendingIsLeader)
         let rows = a.keys.whichKeyRows()
         #expect(rows.contains { $0.key == "f" && $0.verb == nil && $0.what == "move to focus" }, "\(rows)")
-        #expect(rows.contains { $0.key == "a" && $0.what.hasPrefix("show or hide the archive") })
+        #expect(rows.contains { $0.key == "a" && $0.what.hasPrefix("show or hide everything else") })
         #expect(rows.allSatisfy { $0.verb == nil })
         a.keys.handle("f")
         #expect(a.store.view(Project.self, "r:bench")?.state == .focus)

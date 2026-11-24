@@ -71,11 +71,11 @@ struct ForestsPage: View {
                                 WorkInProgressView()
                                 if m.showArchive {
                                     section(.archive, p.archive, fs, working, nameWidth: nameWidth, cursor: cursor, selection: selection)
-                                } else if !p.archive.isEmpty {
+                                } else if !p.archive.isEmpty || m.hasParked() {
                                     HStack(spacing: 6) {
-                                        Button("archive") { app.runner.dispatch("archive.toggle", via: .click) }
+                                        Button("everything else") { app.runner.dispatch("archive.toggle", via: .click) }
                                             .buttonStyle(.plain).foregroundStyle(theme.inkFaint)
-                                            .labelTarget(pane: "controls", key: "archive.toggle", title: "archive", run: RouteTo("archive.toggle"))
+                                            .labelTarget(pane: "controls", key: "archive.toggle", title: "everything else", run: RouteTo("archive.toggle"))
                                         KeyHint(id: "archive.toggle")
                                     }
                                     .padding(.leading, 44)

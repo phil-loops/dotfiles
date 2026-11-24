@@ -528,6 +528,31 @@ import Testing
         #expect(app.registry.command("review.callers") != nil)
     }
 
+    /// The home lists local work only while something is on it: a chat, a tmux pane, or the focus lane. The rest is
+    /// parked, and shows with the archive.
+    @Test func theHomeListsOnlyLocalWorkSomethingIsOn() throws {
+        let now = world().forestModel.now.timeIntervalSince1970
+        let app = world(chats: ["59fa0cc0-1": chat("59fa0cc0-1", activeAt: now - 30, acted: [("r:a", "commit", now - 180)])])
+        let m = app.forestModel
+        func listed() -> Set<String> { Set(m.homeSections().sections.flatMap(\.items).map(\.key)) }
+        let everything = listed()
+        m.showParked = false
+        let live = listed()
+        let tree = RowKey.project("r:tree")
+        #expect(live.isSubset(of: everything) && live.count < everything.count, "parked forests leave the home")
+        #expect(everything.contains(tree) == live.contains(tree), "a forest a chat is on stays wherever it was listed")
+        #expect(m.forests().values.filter { m.liveLocal($0) }.allSatisfy { $0.p.state == .focus || !WorkContext.onForest($0.branches).isEmpty })
+        let parked = try #require(m.forests().values.first { !m.liveLocal($0) && !$0.branches.isEmpty && everything.contains(RowKey.project($0.p.id)) })
+        let v = try #require(parked.branches.first)
+        #expect(m.hasParked(), "which is what gives the archive's key something more to show")
+        let panes = PaneBranches.of(app)
+        panes.tmux = { _ in }
+        panes.take([PaneBranches.Row(pane: "%7", address: "3:1", repo: v.b.repo, branch: v.b.name)])
+        #expect(m.liveLocal(parked) && listed().contains(RowKey.project(parked.p.id)), "a pane working on one of its branches makes it live, whatever runs there")
+        app.runner.dispatch("archive.toggle", via: .palette)
+        #expect(m.showParked && m.showArchive, "the archive's key shows the parked work too")
+    }
+
     /// A forest's line says where its panes sit: a chat's pane, and any pane (Codex, a shell) whose latest work is on
     /// one of its branches. Each pane's border names its branch, written when it changes and cleared when it has none.
     @Test func aPanesBranchGoesOnItsForestsLineAndItsBorder() throws {
