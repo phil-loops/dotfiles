@@ -239,16 +239,23 @@ private struct PRCards: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 20) {
-            column("your PRs") {
-                ForEach(Array(cards.enumerated()), id: \.element.key) { i, r in card(r, n: i + 1) }
+            if !cards.isEmpty {
+                column("your PRs") {
+                    ForEach(Array(cards.enumerated()), id: \.element.key) { i, r in card(r, n: i + 1) }
+                }
             }
-            VStack(alignment: .leading, spacing: 26) {
-                if !asked.isEmpty || push.isEmpty {
+            // with no PR of mine open the heading would stand over nothing: review and push take a half each
+            let beside = cards.isEmpty ? AnyLayout(HStackLayout(alignment: .top, spacing: 20)) : AnyLayout(VStackLayout(alignment: .leading, spacing: 26))
+            beside {
+                if !asked.isEmpty || (push.isEmpty && !cards.isEmpty) {
                     column("review") {
                         ForEach(Array(asked.enumerated()), id: \.element.number) { i, r in askedCard(r, n: i + 1) }
                     }
                 }
-                if !push.isEmpty { PushChips(items: push, fs: fs, cursor: cursor, selection: selection, inColumn: true) }
+                if !push.isEmpty {
+                    PushChips(items: push, fs: fs, cursor: cursor, selection: selection, inColumn: true)
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
