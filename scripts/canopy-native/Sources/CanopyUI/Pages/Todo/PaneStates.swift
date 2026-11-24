@@ -43,6 +43,7 @@ final class PaneStates {
 
     func start(_ app: AppModel) {
         guard task == nil else { return }
+        PaneBranches.of(app).start()
         task = Task { @MainActor [weak app] in
             while !Task.isCancelled, let app {
                 let m = app.forestModel

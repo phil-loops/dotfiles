@@ -421,6 +421,45 @@ import Testing
         return c
     }
 
+    /// ⌃a and a digit opens the branch that tmux pane is working on, asked of `pane-branch` at the press; a pane with
+    /// none says why and goes nowhere.
+    @Test func aTmuxPanesDigitOpensItsBranch() async throws {
+        let app = world()
+        #expect(app.registry.command("tmux.pane.1")?.keys == ["C-a 1"])
+        let panes = PaneBranches.of(app)
+        panes.ask = { $0 == ["1"] ? .success("r\ta\n") : .failure(Refusal("pane 3:2 hasn't committed to a branch or started one")) }
+        app.keys.handle("C-a"); app.keys.handle("1")
+        #expect(app.runner.fired?.id == "tmux.pane.1" && app.runner.fired?.ok == true)
+        await panes.open(1, app).value
+        #expect(app.router.route == .review(repo: "r", branch: "a"))
+        await panes.open(2, app).value
+        #expect(app.router.route == .review(repo: "r", branch: "a"))
+        #expect(app.runner.note == "pane 3:2 hasn't committed to a branch or started one")
+        #expect(PaneBranches.route("r\tfeat/x\n") == .review(repo: "r", branch: "feat/x") && PaneBranches.route("") == nil)
+    }
+
+    /// A forest's line says where its panes sit: a chat's pane, and any pane (Codex, a shell) whose latest work is on
+    /// one of its branches. Each pane's border names its branch, written when it changes and cleared when it has none.
+    @Test func aPanesBranchGoesOnItsForestsLineAndItsBorder() throws {
+        let now = world().forestModel.now.timeIntervalSince1970
+        let app = world(chats: ["59fa0cc0-1": chat("59fa0cc0-1", activeAt: now - 30, acted: [("r:a", "commit", now - 180)])])
+        let f = try #require(app.forestModel.forests()["r:tree"])
+        typealias Row = PaneBranches.Row
+        let rows = [Row(pane: "%7", address: "3:1", repo: "r", branch: "a"), Row(pane: "%1", address: "3:2", repo: nil, branch: nil),
+                    Row(pane: "%8", address: "3:3", repo: "other", branch: "a"), Row(pane: "%9", address: "agents 1:1", repo: "r", branch: "elsewhere/x")]
+        #expect(PaneBranches.addresses(on: f.branches, rows: rows) == ["3:1", "3:2"], "the pane that committed here and the chat's own pane, in tmux's order")
+        #expect(PaneBranches.addresses(on: f.branches, rows: []).isEmpty)
+        let panes = PaneBranches()
+        var calls: [[String]] = []
+        panes.tmux = { calls.append($0) }
+        panes.take(rows)
+        panes.take(rows)
+        #expect(Set(calls) == [["set-option", "-p", "-t", "%7", "@pane_branch", "a"], ["set-option", "-p", "-t", "%8", "@pane_branch", "a"],
+                               ["set-option", "-p", "-t", "%9", "@pane_branch", "x"]] && calls.count == 3, "written once, not on every pass")
+        panes.take(Array(rows.dropFirst()))
+        #expect(calls.last == ["set-option", "-pu", "-t", "%7", "@pane_branch"], "a pane that left tmux, or has no branch, is cleared")
+    }
+
     /// A chat's forest, in the home's words, goes on its pane's border — written when it changes, cleared when it leaves.
     @Test func aBoundChatsPaneSaysItsForest() throws {
         let now = world().forestModel.now.timeIntervalSince1970

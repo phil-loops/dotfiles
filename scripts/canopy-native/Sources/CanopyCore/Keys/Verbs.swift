@@ -47,6 +47,8 @@ public enum Verb: String, CaseIterable, Sendable, Comparable {
     case slot6 = "slot-6", slot7 = "slot-7", slot8 = "slot-8", slot9 = "slot-9"
     case asked1 = "asked-a", asked2 = "asked-b", asked3 = "asked-c", asked4 = "asked-d", asked5 = "asked-e", asked6 = "asked-f", asked7 = "asked-g"
     case pr1 = "pr-1", pr2 = "pr-2", pr3 = "pr-3", pr4 = "pr-4", pr5 = "pr-5", pr6 = "pr-6", pr7 = "pr-7", pr8 = "pr-8", pr9 = "pr-9"
+    case tmux1 = "tmux-1", tmux2 = "tmux-2", tmux3 = "tmux-3", tmux4 = "tmux-4", tmux5 = "tmux-5"
+    case tmux6 = "tmux-6", tmux7 = "tmux-7", tmux8 = "tmux-8", tmux9 = "tmux-9"
     case jumpBack = "jump-back", jumpForward = "jump-forward", saveJump = "save-jump"
     case branches, jumps, flags, findings, grep, lastPicker = "last-picker"
     case workspaceSymbols = "workspace-symbols"
@@ -76,6 +78,8 @@ public enum Verb: String, CaseIterable, Sendable, Comparable {
     /// The Nth focus forest (1…9).
     public static func slot(_ n: Int) -> Verb { Verb(rawValue: "slot-\(n)")! }
     public static func pr(_ n: Int) -> Verb { Verb(rawValue: "pr-\(n)")! }
+    /// the branch tmux pane n is working on, n being the pane's number in the window tmux shows
+    public static func tmux(_ n: Int) -> Verb { Verb(rawValue: "tmux-\(n)")! }
     /// the n-th PR you're asked to review, 1-based: lettered a… on its card
     public static func asked(_ n: Int) -> Verb { Verb(rawValue: "asked-\(Verbs.askedLetters[n - 1])")! }
 
@@ -122,6 +126,7 @@ public enum KeySection: String, CaseIterable, Sendable {
             return .review
         case .root, .tip, .nextSibling, .previousSibling, .out, .nextOpenPR, .previousOpenPR,
              .pr1, .pr2, .pr3, .pr4, .pr5, .pr6, .pr7, .pr8, .pr9,
+             .tmux1, .tmux2, .tmux3, .tmux4, .tmux5, .tmux6, .tmux7, .tmux8, .tmux9,
              .asked1, .asked2, .asked3, .asked4, .asked5, .asked6, .asked7:
             return .stack
         case .wordsTitle, .wordsWhy, .wordsDescription, .wordsCommit, .wordsFold:
@@ -284,6 +289,11 @@ public enum Verbs {
         v(.pr4, .nav, ["A-4"], jump: true, "open PR 4's review"), v(.pr5, .nav, ["A-5"], jump: true, "open PR 5's review"),
         v(.pr6, .nav, ["A-6"], jump: true, "open PR 6's review"), v(.pr7, .nav, ["A-7"], jump: true, "open PR 7's review"),
         v(.pr8, .nav, ["A-8"], jump: true, "open PR 8's review"), v(.pr9, .nav, ["A-9"], jump: true, "open PR 9's review"),
+        v(.tmux1, .nav, ["C-a 1"], jump: true, "open the branch tmux pane 1 is working on, from any page — the pane's number in the window your tmux shows"),
+        v(.tmux2, .nav, ["C-a 2"], jump: true, "tmux pane 2's branch"), v(.tmux3, .nav, ["C-a 3"], jump: true, "tmux pane 3's branch"),
+        v(.tmux4, .nav, ["C-a 4"], jump: true, "tmux pane 4's branch"), v(.tmux5, .nav, ["C-a 5"], jump: true, "tmux pane 5's branch"),
+        v(.tmux6, .nav, ["C-a 6"], jump: true, "tmux pane 6's branch"), v(.tmux7, .nav, ["C-a 7"], jump: true, "tmux pane 7's branch"),
+        v(.tmux8, .nav, ["C-a 8"], jump: true, "tmux pane 8's branch"), v(.tmux9, .nav, ["C-a 9"], jump: true, "tmux pane 9's branch"),
         v(.asked1, .nav, ["A-a"], jump: true, "open the first PR you're asked to review, from any page — the letter on its card (⌥h and ⌥l stay panes, so a…g)"),
         v(.asked2, .nav, ["A-b"], jump: true, "the second PR you're asked to review"), v(.asked3, .nav, ["A-c"], jump: true, "the third"),
         v(.asked4, .nav, ["A-d"], jump: true, "the fourth"), v(.asked5, .nav, ["A-e"], jump: true, "the fifth"),

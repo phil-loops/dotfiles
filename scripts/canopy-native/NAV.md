@@ -73,6 +73,7 @@
 | next-sibling / previous-sibling | `J` / `K`, and `] b` / `[ b` (one verb, both keys) | the next / previous branch in merge order — the forest's numbered list — staying on this kind of page and the same file when it's in the neighbour's diff (jumps); the only next |
 | next-open-pr / previous-open-pr | `] o` / `[ o` | the next / previous open PR's review, in the home's order (yours to act on first, drafts last), from any page; wraps (jumps) |
 | asked-a … asked-g | `⌥a` … `⌥g` | open the n-th PR you're asked to review, from any page — the letter on its card in the home's right column; stops at g because `⌥h`/`⌥l` are pane moves (jumps) |
+| tmux-1 … tmux-9 | `⌃a 1` … `⌃a 9` | open the branch tmux pane n is working on, from any page — n is the pane's number in the window your tmux shows; a pane that hasn't committed to a branch or started one says so (jumps) |
 | pr-1 … pr-9 | `⌥1` … `⌥9` | open PR n's review from any page — the number on its card on the home; PRs keep one order, by number, oldest first (jumps). A modifier, so a bare digit stays a count everywhere and a key means one thing on every page; `⌘` is the menu bar's and `⌃1`–`⌃9` are macOS Spaces' |
 | root / tip | `g K` / `g J` | the branch's stack's root, tip (jumps) |
 | ancestry, by name | `:parent` / `:child` / `:requires` | the branch's parent; its child (which one, at a fork); what it builds on — its parent or a requires dep (a picker at a fan-in). Named, not stepped (jumps) |

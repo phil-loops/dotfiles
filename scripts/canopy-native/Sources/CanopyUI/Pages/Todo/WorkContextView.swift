@@ -242,6 +242,11 @@ struct ForestChats: View {
 
     var body: some View {
         let chats = WorkContext.onForest(f.branches)
+        let panes = PaneBranches.addresses(on: f.branches, rows: PaneBranches.of(app).rows)
+        if !panes.isEmpty {
+            Text(panes.joined(separator: " ")).font(Theme.text(11)).foregroundStyle(theme.inkFaint).fixedSize()
+                .help("the tmux panes working on this forest, as window:pane — ⌃a and a pane's number opens its branch")
+        }
         if let newest = chats.first {
             TimelineView(.periodic(from: .now, by: 30)) { ctx in
                 let now = ctx.date.timeIntervalSince1970

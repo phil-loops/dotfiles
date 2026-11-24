@@ -155,6 +155,7 @@ enum KeyLessons {
         for n in 2...9 { out[.nth(n)] = "the same verb as nth-1 with another digit; the practice branch offers one commit to pick" }
         for n in 1...9 { out[.pr(n)] = "jumps to the review ] o reaches, by its card's number; the practice home has one open PR, drilled as ] o" }
         for n in 1...Verbs.askedLetters.count { out[.asked(n)] = "opens a review request by its card's letter; the practice home has none to open" }
+        for n in 1...9 { out[.tmux(n)] = "opens the branch a tmux pane is working on; the practice sandbox has no tmux to ask" }
         out[.ask] = "opens a Claude chat in tmux; the practice sandbox has no server to start one"
         out[.askLine] = "types into a Claude chat in tmux; the practice sandbox has no server to start one"
         out[.copyPlace] = "y's place written out for pasting; it puts nothing on screen to practice against"

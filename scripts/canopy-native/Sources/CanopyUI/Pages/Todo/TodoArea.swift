@@ -9,6 +9,7 @@ enum TodoArea: PageArea {
     static func install(_ app: AppModel) {
         app.addSurface(TodoSurface())
         TodoCommands.install(app)
+        PaneBranches.install(app)
     }
 }
 
