@@ -115,5 +115,8 @@ os.environ["PANE_BRANCH_DIR"] = JOURNAL
 pb.remember("4242", "%3")
 check("the pane you left is remembered per tmux server", pb.remembered("4242") == "%3" and pb.remembered("9999") is None)
 
+table = {"9": ("8", "tmux"), "8": ("7", "/usr/bin/login"), "7": ("1", "/Applications/Ghostty.app/Contents/MacOS/ghostty"), "1": ("0", "/sbin/launchd")}
+check("the terminal is the app the tmux client runs in", pb.host_of("9", table) == ("7", "/Applications/Ghostty.app"), pb.host_of("9", table))
+check("a client in no app has no terminal", pb.host_of("1", table) is None and pb.host_of("404", table) is None)
 print("---", "all passed" if not failures else f"{failures} failed")
 raise SystemExit(1 if failures else 0)

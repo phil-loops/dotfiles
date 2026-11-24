@@ -49,18 +49,17 @@ final class PaneBranches {
         try? p.run()
     }
 
-    /// what brings the terminal forward, at once and before any pane is asked for; tests swap it
-    @ObservationIgnored var raise: () -> Void = {
-        if let terminal = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.Terminal").first {
-            terminal.activate()
-        } else if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Terminal") {
-            NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
-        }
-    }
+    /// what brings the terminal app forward, at once and before any pane is asked for; tests swap it
+    @ObservationIgnored var raise: (pid_t) -> Void = { NSRunningApplication(processIdentifier: $0)?.activate() }
+    /// the app the tmux client runs in (Terminal, Ghostty, …), as `pane-branch host` last said; nil until it has
+    @ObservationIgnored var host: pid_t?
 
     private(set) var rows: [Row] = []
     @ObservationIgnored private(set) var written: [String: String] = [:]
     @ObservationIgnored private var task: Task<Void, Never>?
+
+    /// The pid in `pane-branch host`'s answer: "<pid>\t<app>".
+    nonisolated static func host(_ said: String) -> pid_t? { said.components(separatedBy: "\t").first.flatMap { pid_t($0) } }
 
     /// The page for what one pane's answer said: "<repo>\t<branch>".
     nonisolated static func route(_ said: String) -> Route? {
@@ -132,13 +131,14 @@ final class PaneBranches {
         return ["tmux"] + prefer + (named.map { [$0.repo, $0.branch] } ?? [])
     }
 
-    /// Brings the terminal forward at once, then has tmux go to the pane for what's in front — or, when canopy still
+    /// Brings the terminal app forward at once (before it is known, `pane-branch` brings it forward itself), then has tmux go to the pane for what's in front — or, when canopy still
     /// shows what it showed on the way in, back to the pane it was entered from.
     @discardableResult
     func toTmux(_ app: AppModel) -> Task<Void, Never> {
-        raise()
+        let host = host
+        if let host { raise(host) }
         let unmoved = entered.flatMap { $0.front == Self.front(app) ? ["tmux", "--prefer", $0.pane] : nil }
-        let ask = ask, args = (unmoved ?? Self.wayBack(app)) + ["--stay"]
+        let ask = ask, args = (unmoved ?? Self.wayBack(app)) + (host == nil ? [] : ["--stay"])
         return Task { [weak app] in
             if case .failure(let why) = await Task.detached(operation: { ask(args) }).value { app?.runner.say(why.message) }
         }
@@ -174,6 +174,9 @@ final class PaneBranches {
                     if case .success(let said) = await Task.detached(operation: { ask(["--json"]) }).value,
                        let rows = try? JSONDecoder().decode([Row].self, from: Data(said.utf8)) {
                         self.take(rows)
+                    }
+                    if case .success(let said) = await Task.detached(operation: { ask(["host"]) }).value {
+                        self.host = Self.host(said)
                     }
                 }
                 try? await Task.sleep(nanoseconds: 5_000_000_000)

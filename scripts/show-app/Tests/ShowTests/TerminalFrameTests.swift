@@ -18,15 +18,15 @@ struct TerminalFrameTests {
         #expect(TerminalFrame.unmarked(plain) == (plain, false, nil))
     }
 
-    @Test func showTakesTerminalsFrontWindowInAppKitsCoordinates() {
-        func window(_ owner: String, layer: Int = 0, _ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat) -> [String: Any] {
-            [kCGWindowOwnerName as String: owner, kCGWindowLayer as String: layer,
+    @Test func showTakesTheTerminalAppsFrontWindowInAppKitsCoordinates() {
+        func window(_ owner: pid_t, layer: Int = 0, _ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat) -> [String: Any] {
+            [kCGWindowOwnerPID as String: owner, kCGWindowLayer as String: layer,
              kCGWindowBounds as String: CGRect(x: x, y: y, width: w, height: h).dictionaryRepresentation as NSDictionary]
         }
-        let windows = [window("Show", 0, 0, 800, 600), window("Terminal", layer: 25, 0, 0, 1728, 24), window("Terminal", 10, 10, 120, 40),
-                       window("Terminal", 100, 50, 1400, 900), window("Terminal", 0, 0, 800, 600)]
-        #expect(TerminalFrame.frame(in: windows, mainScreenHeight: 1117) == NSRect(x: 100, y: 167, width: 1400, height: 900),
-                "the frontmost ordinary Terminal window; a menu-bar layer and a sliver are passed over")
-        #expect(TerminalFrame.frame(in: [window("Show", 0, 0, 800, 600)], mainScreenHeight: 1117) == nil)
+        let windows = [window(7, 0, 0, 800, 600), window(42, layer: 25, 0, 0, 1728, 24), window(42, 10, 10, 120, 40),
+                       window(42, 100, 50, 1400, 900), window(42, 0, 0, 800, 600)]
+        #expect(TerminalFrame.frame(in: windows, owner: 42, mainScreenHeight: 1117) == NSRect(x: 100, y: 167, width: 1400, height: 900),
+                "the frontmost ordinary window of the app the tmux client runs in; a menu-bar layer and a sliver are passed over")
+        #expect(TerminalFrame.frame(in: [window(7, 0, 0, 800, 600)], owner: 42, mainScreenHeight: 1117) == nil)
     }
 }

@@ -11,6 +11,7 @@
                               go to the pane for that branch: a preferred pane that exists, else the pane that
                               last worked on the branch, else the pane you left; then bring the terminal forward
                               (--stay: the caller already has)
+  pane-branch host            "<pid>\\t<app>" of the app your tmux client runs in (Terminal, Ghostty, …)
 
 <pane> is a pane id (%342), window:pane (3:1) in the session your tmux client shows, or one digit: that
 pane of the window your client shows.
@@ -117,6 +118,31 @@ def tmux_state():
     server, session, window = head.split("\t")
     panes = [dict(zip(("pane", "session", "window", "index", "window_id"), line.split("\t"))) for line in listing.splitlines()]
     return server, session, window, panes
+
+
+def host_of(pid, table):
+    """(pid, bundle path) of the app a process runs in: its nearest ancestor that is an app's own executable.
+    `table` is pid -> (parent pid, command path)."""
+    seen = set()
+    while pid in table and pid not in seen:
+        seen.add(pid)
+        parent, command = table[pid]
+        if ".app/Contents/MacOS/" in command:
+            return pid, command.split(".app/Contents/MacOS/")[0] + ".app"
+        pid = parent
+    return None
+
+
+def host():
+    """The app the tmux client runs in, or None: the terminal is whatever that is, never a name assumed here."""
+    client = tmux("display-message", "-p", "#{client_pid}")
+    listing = subprocess.run(["ps", "-axo", "pid=,ppid=,comm="], capture_output=True, text=True).stdout
+    table = {}
+    for line in listing.splitlines():
+        parts = line.split(None, 2)
+        if len(parts) == 3:
+            table[parts[0]] = (parts[1], parts[2])
+    return host_of(client, table) if client else None
 
 
 def rows(state, moves, git):
@@ -233,7 +259,7 @@ def to_tmux(args, state, moves, git):
     pane = target(here, prefer) or target(here, (), workers(moves, git, repo, branch) if branch else (), remembered(state[0]))
     commands = [["tmux", "select-window", "-t", pane, ";", "select-pane", "-t", pane, ";", "switch-client", "-t", pane]] if pane else []
     if not stay:
-        commands.append(["open", "-a", "Terminal"])
+        commands.append(["open", "-a", (host() or (None, "Terminal"))[1]])
     for command in commands:
         if dry:
             print(" ".join(command))
@@ -261,6 +287,13 @@ def main():
     moves, git = read_moves(state[0]), Git()
     if args[:1] == ["canopy"] and len(args) == 2:   # the binding a tmux not yet reloaded still has
         to_canopy(args[1], state, moves, git)
+    if args == ["host"]:
+        found = host()
+        if not found:
+            print("pane-branch: the tmux client runs in no app", file=sys.stderr)
+            return 1
+        print("\t".join(found))
+        return 0
     if args[:1] == ["tmux"]:
         return to_tmux(args[1:], state, moves, git)
     if args[:1] == ["from"] and len(args) == 2 and args[1].startswith("%"):

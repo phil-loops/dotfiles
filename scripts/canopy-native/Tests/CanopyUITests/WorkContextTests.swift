@@ -448,10 +448,16 @@ import Testing
         #expect(PaneBranches.wayBack(world(.todo)) == ["tmux"], "with no branch in front, the pane you came from")
         let panes = PaneBranches.of(app)
         nonisolated(unsafe) var did: [[String]] = []
-        panes.raise = { did.append(["raise"]) }
+        panes.raise = { did.append(["raise", String($0)]) }
         panes.ask = { did.append($0); return .success("") }
         await panes.toTmux(app).value
-        #expect(did == [["raise"], ["tmux", "--prefer", "%1", "r", "a", "--stay"]], "the terminal comes forward before any pane is asked for")
+        #expect(did == [["tmux", "--prefer", "%1", "r", "a"]], "which app the terminal is isn't known yet: pane-branch brings it forward")
+        did = []
+        panes.host = PaneBranches.host("13423\t/Applications/Ghostty.app\n")
+        await panes.toTmux(app).value
+        #expect(did == [["raise", "13423"], ["tmux", "--prefer", "%1", "r", "a", "--stay"]],
+                "the app the tmux client runs in comes forward before any pane is asked for")
+        #expect(PaneBranches.host("") == nil)
     }
 
     /// Ctrl-Space in tmux brings canopy forward first; canopy then asks for the pane's branch and goes there.
@@ -474,7 +480,8 @@ import Testing
         let app = world(.review(repo: "r", branch: "a"), chats: ["59fa0cc0-1": chat("59fa0cc0-1", activeAt: now - 30, acted: [("r:a", "commit", now - 180)])])
         let panes = PaneBranches.of(app)
         nonisolated(unsafe) var did: [[String]] = []
-        panes.raise = {}
+        panes.raise = { _ in }
+        panes.host = 1
         panes.ask = { did.append($0); return $0.first == "from" ? .failure(Refusal("no branch")) : .success("") }
         await panes.follow(pane: "%9", app).value
         await panes.toTmux(app).value

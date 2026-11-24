@@ -45,6 +45,9 @@ final class CanopyHost: NSViewController {
     /// The address canopy is at, file and line included, or the one it will open on when it hasn't started: what a relaunch brings back.
     var place: String? { embed?.address ?? pendingRoute }
 
+    /// The app the tmux client runs in, once canopy is up and has asked.
+    var terminalHost: pid_t? { embed?.terminalHost }
+
     /// Has canopy go to the branch a tmux pane is working on, now or once it has come up.
     func follow(pane: String) {
         if let embed { embed.follow(pane: pane) } else { pendingPane = pane }

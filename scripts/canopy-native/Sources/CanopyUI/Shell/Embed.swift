@@ -43,6 +43,9 @@ public final class CanopyEmbed {
     /// Goes to the branch a tmux pane (its id, "%12") is working on, once `pane-branch` has said which.
     public func follow(pane: String) { PaneBranches.of(model).follow(pane: pane, model) }
 
+    /// The app the tmux client runs in (Terminal, Ghostty, …), once canopy has asked; the switch takes its window's frame.
+    public var terminalHost: pid_t? { PaneBranches.of(model).host }
+
     /// Where canopy is, exactly, as an address `navigate` lands back on: the page, its tab, the cursor,
     /// the code place and the page's windows.
     public var address: String { model.savedHere().address }
