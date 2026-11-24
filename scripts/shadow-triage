@@ -5,6 +5,10 @@
                                      pipeline's store and open its labelling deck in Show
   shadow-triage sql [PIPELINE]       print the query whose result rows this reads (copy them as CSV, run again)
   shadow-triage results [PIPELINE]   your labels so far, content-free, plus the sharp set file for the next run
+  shadow-triage form [PIPELINE] [--day YYYY-MM-DD]
+                                     copy a Google Apps Script that builds a quiz for the team: one question per sending
+                                     domain (Block / Allow), Sol's call as the answer key, Sol's reasoning shown after
+                                     they submit. Paste at script.google.com/create, Run, open the logged link.
 
 Rows are grouped by the From address's root domain, one deck section per domain, so six copies of one campaign are
 one decision. In Show: j/k move, 1 sol right · 2 sol wrong · 3 unsure, a takes the proposed label (your label from
@@ -379,6 +383,76 @@ def results(pipeline):
         print(f"  sharp set: {sharp_path} ({len(sharp)} rows)")
 
 
+FORM_SCRIPT = """function buildShadowQuiz() {{
+  var senders = {senders};
+  var form = FormApp.create({title});
+  form.setIsQuiz(true);
+  form.setDescription({description});
+  try {{ form.setCollectEmail(true); }} catch (e) {{}}
+  form.setPublishingSummary(true);
+  senders.forEach(function (s) {{
+    var item = form.addMultipleChoiceItem();
+    var feedback = FormApp.createFeedback().setText(s.reveal).build();
+    item.setTitle(s.title)
+      .setHelpText(s.email)
+      .setChoices([item.createChoice("Block", s.sol === "block"), item.createChoice("Allow", s.sol === "allow")])
+      .setRequired(true)
+      .setPoints(1)
+      .setFeedbackForCorrect(feedback)
+      .setFeedbackForIncorrect(feedback);
+  }});
+  form.addParagraphTextItem().setTitle("Anything Sol got wrong? Which sender, and why");
+  Logger.log("Share this: " + form.getPublishedUrl());
+  Logger.log("Edit / responses: " + form.getEditUrl());
+}}
+"""
+
+
+def form(pipeline, day):
+    pipelines = [pipeline] if pipeline else [p.name for p in STORE.iterdir() if p.is_dir()] if STORE.exists() else []
+    if len(pipelines) != 1:
+        die("name the pipeline: " + ", ".join(pipelines) if pipelines else "nothing triaged yet")
+    store = load_json(STORE / slug(pipelines[0]) / "rows.json", {})
+    if not store:
+        die("no rows stored for " + pipelines[0])
+    full = next(iter(store.values())).get("pipeline") or pipelines[0]
+    day = day or max((r.get("createdAt") or "")[:10] for r in store.values())
+    groups = {}
+    for row in store.values():
+        if (row.get("createdAt") or "").startswith(day):
+            groups.setdefault(root_domain(email_fields(row["emailText"]).get("From")), []).append(row)
+    if not groups:
+        die(f"no rows on {day}")
+    senders = []
+    for domain, rows in sorted(groups.items()):
+        row = max(rows, key=lambda r: r.get("createdAt") or "")
+        answer = model_answer(row.get("rawOutput"))
+        sol = "block" if as_bool(row.get("decision")) else "allow"
+        prod = {True: "blocked", False: "allowed", None: "?"}[as_bool(row.get("prodDecision"))]
+        text = row["emailText"].strip()
+        senders.append({
+            "title": f"{domain} · {len(rows)} email{'s' if len(rows) != 1 else ''} — would you let this send?",
+            "email": text if len(text) <= 1800 else text[:1800] + "\\n…",
+            "sol": sol,
+            "reveal": f"Sol: {sol}. Prod: {prod}.\\n\\nRequest: {answer.get('request', '?')}\\n"
+                      f"Relies on: {answer.get('relies_on', '?')}\\nWhy: {answer.get('reason', '?')}",
+        })
+    blocks = sum(1 for s in senders if s["sol"] == "block")
+    script = FORM_SCRIPT.format(
+        senders=json.dumps(senders, ensure_ascii=False, indent=2),
+        title=json.dumps(f"Sol vs prod · {day}"),
+        description=json.dumps(
+            f"{len(senders)} senders where Sol and prod disagreed on {day} ({blocks} Sol would block). "
+            "Make your own call on each; after you submit you'll see what Sol decided and why. "
+            "Your score is how often you agreed with Sol."),
+    )
+    out = STORE / slug(pipelines[0]) / f"form-{day}.gs"
+    out.write_text(script)
+    subprocess.run(["pbcopy"], input=script, text=True)
+    print(f"{full} · {day}: {len(senders)} questions → {out} (on the clipboard)")
+    print("  script.google.com/create → paste over the editor → Run buildShadowQuiz → allow → the log prints the link")
+
+
 SQL = """-- shadow flips for one pipeline over the last day; copy the result rows as CSV, then `shadow-triage`
 SELECT * FROM "EvalResult"
 WHERE pipeline = '{pipeline}'
@@ -395,6 +469,12 @@ def main():
         return
     if args and args[0] == "sql":
         print(SQL.format(pipeline=args[1] if len(args) > 1 else "sol_layered_block_or_allow_v1"))
+        return
+    if args and args[0] == "form":
+        rest = args[1:]
+        day = rest[rest.index("--day") + 1] if "--day" in rest else None
+        rest = [a for i, a in enumerate(rest) if a != "--day" and (i == 0 or rest[i - 1] != "--day")]
+        form(rest[0] if rest else None, day)
         return
     if args and args[0] == "results":
         results(args[1] if len(args) > 1 else None)

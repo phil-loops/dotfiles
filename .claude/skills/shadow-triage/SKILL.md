@@ -9,6 +9,7 @@ description: Label a shadow evaluator's disagreements with prod (EvalResult rows
 
 - `shadow-triage sql [PIPELINE]` prints the query for the last day's flips.
 - `shadow-triage results [PIPELINE]` folds the deck's (or its archived) `.signoff.json` into `labels.json` and writes `sharp-set.json` (evalResultId, emailMessageId, domain, label, note): the 10–20-item set for the next prompt iteration.
+- `shadow-triage form [PIPELINE] [--day D]` copies a Google Apps Script that builds a team quiz for one day (one Block/Allow question per sending domain, Sol's call as the answer key, Sol's reasoning as the feedback shown after submit, responses in a Sheet). Phil pastes it at script.google.com/create and runs it; the log prints the share link.
 - A domain labelled once comes back as the proposed choice (`a`) in later decks, under "Seen before".
 
 Data rule: rows are template scans (placeholders unresolved), which Claude may read for prompt work. Hydrated/sent-scan rows are not: don't open those decks. Decks stay outside every repo.
