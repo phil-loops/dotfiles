@@ -60,7 +60,8 @@ def send(path, phil, sandbox):
         os.environ.pop("STACK_REVIEW_SANDBOX", None)
     ran.clear()
     r = Req()
-    routes.post(r, path, "{}")
+    saw = (routes.POST.get(path) or routes.Route(None, frozenset(), False)).saw
+    routes.post(r, path, json.dumps({saw: "abc1234"} if saw else {}))
     return r, bool(ran)
 
 
@@ -82,6 +83,23 @@ routes.POST["/__open_outward__"] = routes.Route(lambda req, raw: ran.append("x")
 got, called = send("/__open_outward__", False, False)
 check("an outward route declared open still needs Phil's click", got.status == 403 and not called, (got.status, called))
 del routes.POST["/__open_outward__"]
+# Principle 2: a route that moves history or reaches outward names what it acted on, or says why not
+moving = {p for p, r in real.items() if r.effects & {"history", "outward"}}
+check("every history or outward route declares what it saw, or why not",
+      all(real[p].saw or p in routes.UNPINNED for p in moving), sorted(p for p in moving if not real[p].saw and p not in routes.UNPINNED))
+check("UNPINNED names only real unpinned routes", all(p in real and not real[p].saw for p in routes.UNPINNED),
+      [p for p in routes.UNPINNED if p not in real or real[p].saw])
+check("the unpinned list only shrinks: adding to it is a decision written here", set(routes.UNPINNED) <= {
+    "/outline", "/review-address", "/outline-undo", "/lsp/rename", "/push-when-green", "/sync", "/catch-up", "/prep-push",
+    "/prep", "/restack", "/squash", "/reseat-children", "/dirty-resolve", "/reconcile", "/review-apply", "/review-helix"},
+      sorted(routes.UNPINNED))
+actor.is_phil = lambda req: True
+os.environ.pop("STACK_REVIEW_SANDBOX", None)
+for p in ("/push-origin", "/gates-waive", "/force-origin", "/revert-commit"):
+    ran.clear()
+    r = Req()
+    routes.post(r, p, "{}")
+    check(f"{p} without what it saw is refused before its handler", r.status == 400 and r.body.get("unseen") and not ran, (r.status, r.body, ran))
 got, called = send("/__nope__", True, False)
 check("an unknown route is a 404", got.status == 404 and not called)
 

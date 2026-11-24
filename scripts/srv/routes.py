@@ -11,6 +11,9 @@
 #   outward  changes what other people see (origin, GitHub) — always Phil's click
 #
 # No effects: a read (it may compute, cache or run a scratch job, but changes nothing anyone sees).
+# saw="<field>": the body field naming the identity the press acted on (the tip on screen, a lease, a
+# commit) — the dispatcher refuses a body without it, before the handler (CLAUDE.md principle 2). A
+# route that moves history or reaches outward declares one, or stands in UNPINNED saying why not.
 # phil=True: only Phil's click in Show may send it, whatever it touches. A refusal that depends on
 # the request's arguments (a gate skip, a run moved next) stays in its handler.
 import json
@@ -25,11 +28,11 @@ from . import (actor, chat, chats, integrate, lsp, outbox, outline, packet, pick
                review, reviewdesk, reviews, sync, syntax, todo, tutor, usage, verdicts, viewed)
 
 EFFECTS = ("repo", "history", "machine", "outward")
-Route = namedtuple("Route", "handler effects phil")
+Route = namedtuple("Route", "handler effects phil saw", defaults=(None,))
 
 
-def _r(handler, *effects, phil=False):
-    return Route(handler, frozenset(effects), phil)
+def _r(handler, *effects, phil=False, saw=None):
+    return Route(handler, frozenset(effects), phil, saw)
 
 
 def _heartbeat(req, raw):
@@ -80,7 +83,7 @@ POST = {
     "/review-draft": _r(reviewdesk.draft, "repo"),       # the review ledger
     "/learning-evidence": _r(tutor.learning_evidence, "repo"),
     "/learning-question": _r(tutor.learning_question, "repo"),
-    "/gates-waive": _r(verdicts.waive, "repo", phil=True),     # ships this tree without gates
+    "/gates-waive": _r(verdicts.waive, "repo", phil=True, saw="expectTip"),     # ships this tree without gates
     "/evidence-run": _r(evidence.run, "repo"),           # renders before/after evidence (a run)
     "/evidence-judge": _r(evidence.judge, "repo", phil=True),  # Phil's verdict on the manifest he saw
 
@@ -93,7 +96,7 @@ POST = {
     "/outline-undo": _r(outline.undo, "history"),
     "/dirty-resolve": _r(push.dirty_resolve, "history"),
     "/reconcile": _r(sync.post_reconcile, "history"),
-    "/revert-commit": _r(review.revert_commit, "history"),
+    "/revert-commit": _r(review.revert_commit, "history", saw="sha"),
     "/squash": _r(review.squash, "history"),
     "/prep": _r(review.prep, "history"),
     "/restack": _r(restack.restack, "history"),
@@ -101,8 +104,8 @@ POST = {
     "/review-apply": _r(reviewdesk.apply, "history"),    # a suggestion as a local commit
     "/review-address": _r(reviewdesk.address, "history"),
     "/review-helix": _r(reviewdesk.helix, "history", "machine"),   # opens Helix, then lands its edits
-    "/edit-commit": _r(edits.commit, "history", "machine"),
-    "/edit-recover": _r(edits.recover, "history", "machine"),
+    "/edit-commit": _r(edits.commit, "history", "machine", saw="expectedTip"),
+    "/edit-recover": _r(edits.recover, "history", "machine", saw="expectedTip"),
 
     # ── the machine ──
     "/open": _r(picker.open_file, "machine"),            # a file in the warm review-nvim
@@ -120,10 +123,40 @@ POST = {
     "/queue-kill": _r(queue.kill, "machine", phil=True),
 
     # ── what other people see ──
-    "/push-origin": _r(push.push_origin, "outward", phil=True),
+    "/push-origin": _r(push.push_origin, "outward", phil=True, saw="expectTip"),
     "/push-when-green": _r(pushintent.post, "outward", phil=True),   # Phil's press, sent when the gates go green
-    "/force-origin": _r(push.force_origin, "outward", phil=True),
+    "/force-origin": _r(push.force_origin, "outward", phil=True, saw="lease"),
 }
+
+# History and outward routes that don't name what they acted on yet — each says why. This list only
+# shrinks: test-routes.py pins it, so a new route can't join it without that decision written down.
+UNPINNED = {
+    "/outline": "pinned per edit: each names its commit's sha, and a sha no longer on the branch is refused (outline.save)",
+    "/review-address": "pinned per edit, through outline.save",
+    "/outline-undo": "reverses the branch's latest journal entry — pin-outline-undo-to-the-journal-entry-it-promises-to-reverse",
+    "/lsp/rename": "keep-rename-previews-and-commits-on-their-reviewed-source",
+    "/push-when-green": "queues Phil's press for the tree it reads then (pushintent); the push sends only a tree whose own gates passed",
+    "/sync": "rebases the branch as it stands", "/catch-up": "catches the branch up as it stands",
+    "/prep-push": "seals the branch as it stands", "/prep": "seals the branch as it stands",
+    "/restack": "queues a restack of the forest as it stands", "/squash": "squashes the branch as it stands",
+    "/reseat-children": "moves the children as they stand", "/dirty-resolve": "resolves the worktree as it stands",
+    "/reconcile": "hands the branch as it stands to Claude", "/review-apply": "commits a suggestion onto the branch as it stands",
+    "/review-helix": "lands Helix's edits onto the branch as it stands",
+}
+
+
+def unseen(route, raw):
+    """Why a press that must name what it saw didn't, in words; "" when it did or needn't."""
+    if not route.saw:
+        return ""
+    try:
+        body = json.loads(raw or "{}")
+    except ValueError:
+        body = None
+    if isinstance(body, dict) and body.get(route.saw):
+        return ""
+    return f"this press didn't say which {route.saw} it acted on — an older canopy build; restart Show"
+
 
 SANDBOX_REFUSAL = "the sandbox has none of the machine's servers or processes — this would act on the real ones"
 
@@ -146,6 +179,9 @@ def post(req, path, raw):
     why = refusal(route, req)
     if why:
         return req._send(403, json.dumps({"ok": False, "err": why}))
+    why = unseen(route, raw)
+    if why:
+        return req._send(400, json.dumps({"ok": False, "err": why, "unseen": True}))
     why = _owner_refusal(route, req, path, raw)
     if why:
         return req._send(403, json.dumps({"ok": False, "err": why, "owner": True}))
