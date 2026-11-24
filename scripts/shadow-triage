@@ -7,8 +7,8 @@
   shadow-triage results [PIPELINE]   your labels so far, content-free, plus the sharp set file for the next run
   shadow-triage form [PIPELINE] [--day YYYY-MM-DD]
                                      copy a Google Apps Script that builds a quiz for the team: one question per sending
-                                     domain (Block / Allow), Sol's call as the answer key, Sol's reasoning shown after
-                                     they submit. Paste at script.google.com/create, Run, open the logged link.
+                                     domain, one per page (Block / Allow); the answer key is your label from the deck
+                                     (sol right / sol wrong), else Sol's call; Sol's reasoning shows after submit. Paste at script.google.com/create, Run, open the logged link.
 
 Rows are grouped by the From address's root domain, one deck section per domain, so six copies of one campaign are
 one decision. In Show: j/k move, 1 sol right · 2 sol wrong · 3 unsure, a takes the proposed label (your label from
@@ -25,6 +25,7 @@ import hashlib
 import io
 import json
 import os
+import random
 import re
 import subprocess
 import sys
@@ -387,20 +388,24 @@ FORM_SCRIPT = """function buildShadowQuiz() {{
   var senders = {senders};
   var form = FormApp.create({title});
   form.setIsQuiz(true);
-  form.setDescription({description});
-  try {{ form.setCollectEmail(true); }} catch (e) {{}}
+  form.setDescription("block or send");
+  form.setProgressBar(true);
+  form.setLimitOneResponsePerUser(true);
+  form.setAllowResponseEdits(true);
   form.setPublishingSummary(true);
-  senders.forEach(function (s) {{
+  senders.forEach(function (s, i) {{
+    if (i > 0) form.addPageBreakItem();
     var item = form.addMultipleChoiceItem();
     var feedback = FormApp.createFeedback().setText(s.reveal).build();
-    item.setTitle(s.title)
+    item.setTitle("would you let this send?")
       .setHelpText(s.email)
-      .setChoices([item.createChoice("Block", s.sol === "block"), item.createChoice("Allow", s.sol === "allow")])
+      .setChoices([item.createChoice("Block", s.key === "block"), item.createChoice("Allow", s.key === "allow")])
       .setRequired(true)
       .setPoints(1)
       .setFeedbackForCorrect(feedback)
       .setFeedbackForIncorrect(feedback);
   }});
+  form.addPageBreakItem();
   form.addParagraphTextItem().setTitle("Anything Sol got wrong? Which sender, and why");
   Logger.log("Share this: " + form.getPublishedUrl());
   Logger.log("Edit / responses: " + form.getEditUrl());
@@ -423,28 +428,27 @@ def form(pipeline, day):
             groups.setdefault(root_domain(email_fields(row["emailText"]).get("From")), []).append(row)
     if not groups:
         die(f"no rows on {day}")
+    ledger = harvest_labels(full)
     senders = []
     for domain, rows in sorted(groups.items()):
         row = max(rows, key=lambda r: r.get("createdAt") or "")
         answer = model_answer(row.get("rawOutput"))
         sol = "block" if as_bool(row.get("decision")) else "allow"
+        label = ledger.get(domain, {}).get("choice")
+        key = {"1": sol, "2": "allow" if sol == "block" else "block"}.get(label, sol)
         prod = {True: "blocked", False: "allowed", None: "?"}[as_bool(row.get("prodDecision"))]
         text = row["emailText"].strip()
         senders.append({
-            "title": f"{domain} · {len(rows)} email{'s' if len(rows) != 1 else ''} — would you let this send?",
             "email": text if len(text) <= 1800 else text[:1800] + "\n…",
-            "sol": sol,
+            "key": key,
             "reveal": f"Sol: {sol}. Prod: {prod}.\n\nRequest: {answer.get('request', '?')}\n"
                       f"Relies on: {answer.get('relies_on', '?')}\nWhy: {answer.get('reason', '?')}",
         })
-    blocks = sum(1 for s in senders if s["sol"] == "block")
+    random.shuffle(senders)
+    month, date = day[5:7].lstrip("0"), day[8:10].lstrip("0")
     script = FORM_SCRIPT.format(
         senders=json.dumps(senders, ensure_ascii=False, indent=2),
-        title=json.dumps(f"Sol vs prod · {day}"),
-        description=json.dumps(
-            f"{len(senders)} senders where Sol and prod disagreed on {day} ({blocks} Sol would block). "
-            "Make your own call on each; after you submit you'll see what Sol decided and why. "
-            "Your score is how often you agreed with Sol."),
+        title=json.dumps(f"{month}/{date} Disagreements"),
     )
     out = STORE / slug(pipelines[0]) / f"form-{day}.gs"
     out.write_text(script)
