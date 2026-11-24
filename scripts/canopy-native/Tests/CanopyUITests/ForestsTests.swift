@@ -404,7 +404,7 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = f
             ReviewRequest(number: 9, title: "fix a thing", author: "someone", url: "https://github.com/o/r/pull/9", imported: false),
         ])
         let block = a.forestModel.homeBlocks()[0]
-        #expect(block == [["pr:r:a", "pr:r:s"], ["r:7", "r:9"]], "mine on the left by number, asked on the right")
+        #expect(block == [["pr:r:a", "pr:r:s"], ["r:7", "r:9", "p:r:tree"]], "mine on the left by number, asked on the right, the push names under them")
         a.setCursor("pr:r:a")
         a.keys.handle("j")
         #expect(a.selected == "pr:r:s", "j moves down my column")
@@ -422,6 +422,33 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = f
         #expect(a.registry.command("forests.asked.a")?.keys == ["A-a"])
         a.keys.handle("A-a")
         #expect(a.runner.fired?.id == "forests.asked.a" && a.runner.fired?.ok == true, "⌥a opens the first review request")
+    }
+
+    /// Phil 2026-11-24 ("the j/k nav on the home page is a bit unexpected"): the keys walk the columns the home
+    /// draws — the push names wrap under the review requests (or beside them), so they're one column read in
+    /// order, not a row of one-name columns j leaps out of; a column the home doesn't draw isn't one to land in.
+    @Test func theHomeKeysWalkTheColumnsItDraws() {
+        #expect(ForestModel.homeColumns(cards: ["pr:1"], asked: ["r:7"], push: ["p:a", "p:b"]) == [["pr:1"], ["r:7", "p:a", "p:b"]],
+                "mine on the left; review then push on the right, as drawn")
+        #expect(ForestModel.homeColumns(cards: ["pr:1"], asked: [], push: ["p:a"]) == [["pr:1"], ["p:a"]])
+        #expect(ForestModel.homeColumns(cards: [], asked: ["r:7"], push: ["p:a", "p:b"]) == [["r:7"], ["p:a", "p:b"]],
+                "none of mine open: review and push side by side")
+        #expect(ForestModel.homeColumns(cards: [], asked: [], push: ["p:a", "p:b"]) == [["p:a", "p:b"]], "push alone is one column")
+        #expect(ForestModel.homeColumns(cards: ["pr:1"], asked: [], push: []) == [["pr:1"]], "no empty review column to cross into")
+        #expect(ForestModel.homeColumns(cards: [], asked: [], push: []) == [])
+
+        let a = world()
+        a.forestModel.setReviewRequests([ReviewRequest(number: 7, title: "t", author: "x", url: "https://github.com/o/r/pull/7", imported: false)])
+        let cols = a.forestModel.homeBlocks().first ?? []
+        let push = a.forestModel.homeSections().sections.first { $0.verb == .push }?.items.map(\.key) ?? []
+        try? #require(push.count >= 2, "the fixture has forests to push")
+        let right = try? #require(cols.last)
+        #expect(right?.suffix(push.count).elementsEqual(push) == true, "the push names end the right-hand column, in order")
+        a.setCursor(push[0])
+        a.keys.handle("j")
+        #expect(a.selected == push[1], "j goes to the next push name, not out of the block")
+        a.keys.handle("k")
+        #expect(a.selected == push[0])
     }
 
     /// Round 34: the cards keep one order — by PR number, oldest first — whatever their state, and ⌥n reviews card n

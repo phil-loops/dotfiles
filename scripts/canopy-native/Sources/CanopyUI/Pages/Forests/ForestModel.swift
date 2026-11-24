@@ -445,8 +445,18 @@ public final class ForestModel {
     /// push chips, a row of one-chip columns.
     func homeBlocks() -> [[[String]]] {
         let home = homeSections()
-        let chips = home.sections.first { $0.verb == .push }?.items.map { [$0.key] } ?? []
-        return [[home.cards.map(\.key), reviewRequests.map { RowKey.reviewRequest($0.number) }], chips]
+        let top = Self.homeColumns(cards: home.cards.map(\.key), asked: reviewRequests.map { RowKey.reviewRequest($0.number) },
+                                   push: home.sections.first { $0.verb == .push }?.items.map(\.key) ?? [])
+        return top.isEmpty ? [] : [top]
+    }
+
+    /// The home's top as PRCards and PushChips draw it, as columns of rows for j/k (down a column, in reading
+    /// order) and h/l (across): my PRs on the left with the review requests and then the push names on the right;
+    /// with none of mine open, review and push side by side; with neither cards nor requests, the push names alone.
+    /// A column that draws nothing is no column, so h/l never land on an empty one. Pure.
+    static func homeColumns(cards: [String], asked: [String], push: [String]) -> [[String]] {
+        if cards.isEmpty { return [asked, push].filter { !$0.isEmpty } }
+        return [cards, asked + push].filter { !$0.isEmpty }
     }
 
     /// The open PRs a forest's home row carries, the one at the forest's own move first, then merge order.
