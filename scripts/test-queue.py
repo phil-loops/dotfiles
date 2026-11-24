@@ -39,6 +39,8 @@ procs = [
     {"pid": 200, "ppid": 190, "cpu": 95.0, "rssMb": 2500, "age": 290, "command": "node /x/tsc --noEmit"},             # the ticket (holds a slot)
     {"pid": 300, "ppid": 1, "cpu": 0.0, "rssMb": 5, "age": 60, "command": "python3 /s/heavy-turn -- stack-gates"},
     {"pid": 400, "ppid": 1, "cpu": 300.0, "rssMb": 1800, "age": 120, "command": "/u/bin/seed-gen --sync /w/warm"},   # outside the queue
+    {"pid": 500, "ppid": 1, "cpu": 0.0, "rssMb": 1700, "age": 500000, "command": "node /opt/homebrew/bin/tsc --lsp --stdio"},   # an editor's
+    {"pid": 501, "ppid": 500, "cpu": 0.0, "rssMb": 3, "age": 500000, "command": "/w/node_modules/.bin/oxlint --lsp"},
     {"pid": 500, "ppid": 1, "cpu": 0.0, "rssMb": 10, "age": 5, "command": "/bin/zsh -l"},
     {"pid": 600, "ppid": 1, "cpu": 0.0, "rssMb": 3, "age": 50, "command": "/bin/zsh -c 'npx tsc --noEmit'"},   # a shell naming the tool, not the tool
 ]
@@ -54,7 +56,8 @@ check("a gates ticket names its run's branch and step", h["t2"]["gate"] == {"bra
 w = q["waiters"][0]
 check("a waiter knows its run too", w["gate"] == {"branch": "other", "step": "1st in line"} and w["age"] == 60, w)
 check("heavy work outside the queue is listed, the queued tree is not", [o["pid"] for o in q["outside"]] == [400], q["outside"])
-check("the warnings say both", len(q["warnings"]) == 2 and "holding, not working" in q["warnings"][0] and "outside the queue" in q["warnings"][1], q["warnings"])
+check("a language server is the editor's, never outside the queue", not {500, 501} & {o["pid"] for o in q["outside"]}, q["outside"])
+check("the warnings name the idle holder; outside work is said once, as its row", len(q["warnings"]) == 1 and "holding, not working" in q["warnings"][0], q["warnings"])
 
 check("a queued run says its place", queue.gate_step([], {"position": 2}) == "2nd in line")
 check("a run in setup says the step", queue.gate_step([{"event": "setup", "step": "env"}]) == "env (seed-gen)")

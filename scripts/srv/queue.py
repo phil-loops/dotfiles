@@ -17,6 +17,7 @@ from . import ctx
 
 IDLE_AFTER_S = 15 * 60      # a holder whose tree has done nothing this long holds, not works
 IDLE_CPU = 2.0              # % — ps's decaying average; below it a tree is idle
+LSP = re.compile(r"\s--lsp(\s|$)")
 HEAVY = re.compile(r"(^|/)(tsc|tsgo|seed-gen|oxlint)(\s|$)|swift(-frontend|-build| build)|node .*--test\b")
 
 
@@ -157,6 +158,9 @@ def compose(ht, procs, gates, now=None, idle_after=IDLE_AFTER_S):
     for p in procs:
         if p["pid"] in queued_pids or not HEAVY.search(p["command"]):
             continue
+        # an editor's language server (tsc --lsp under hx) lives as long as the editor: not batch work
+        if LSP.search(p["command"]):
+            continue
         # a shell whose command line merely names a heavy tool (zsh -c '… tsc …') is not the work
         if os.path.basename(p["command"].split()[0]).lstrip("-") in ("zsh", "bash", "sh", "login", "fish"):
             continue
@@ -175,8 +179,7 @@ def compose(ht, procs, gates, now=None, idle_after=IDLE_AFTER_S):
         "holders": holders, "waiters": waiters,
         "gates": [{"branch": g["branch"], "step": g["step"], "age": round(now - g.get("started", now))} for g in gates],
         "outside": outside,
-        "warnings": [f"{h['cmd'] or h['cls']} has held a slot {_ago(h['age'])} with its tree idle — holding, not working" for h in holders if h["idle"]]
-                    + [f"{o['name']} (pid {o['pid']}) runs outside the queue" for o in outside],
+        "warnings": [f"{h['cmd'] or h['cls']} has held a slot {_ago(h['age'])} with its tree idle — holding, not working" for h in holders if h["idle"]],
     }
 
 
