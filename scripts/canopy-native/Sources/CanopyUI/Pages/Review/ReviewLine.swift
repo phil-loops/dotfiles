@@ -47,14 +47,25 @@ public struct ReviewLine: Equatable {
         return lit.lo == parentIndex && lit.hi == tip ? .landing : .part
     }
 
-    /// The stretch in words, read from where it sits and never from how it was reached.
-    public func words(_ lit: (lo: Int, hi: Int)) -> String {
+    /// The stretch in words, read from where it sits and never from how it was reached. One commit is
+    /// named — its short sha, its subject when `subject` knows it, and which of the branch's it is.
+    public func words(_ lit: (lo: Int, hi: Int), subject: (String) -> String? = { _ in nil }) -> String {
         let n = lit.hi - lit.lo, all = tip - parentIndex
         switch cover(lit) {
         case .landing: return n > 1 ? "what lands · all \(n) commits" : "what lands"
         case .beyond: return lit.hi == tip ? "the whole stack, from main" : "from main, up to \(lit.hi - parentIndex) of \(all) commits"
-        case .part: return "\(n) of \(all) commits" + (lit.lo == origin && lit.hi == tip ? " · the next push" : "")
+        case .part:
+            let push = lit.lo == origin && lit.hi == tip ? " · the next push" : ""
+            guard n == 1, let s = sha(lit.hi) else { return "\(n) of \(all) commits" + push }
+            let named = subject(s).flatMap { $0.isEmpty ? nil : $0 }.map { " · \($0)" } ?? ""
+            return "\(s.prefix(7))\(named) — \(lit.hi - parentIndex) of \(all)" + push
         }
+    }
+
+    /// The keys that move the stretch from where it sits: on part of the branch, a step either way and the
+    /// jump back; on the whole branch, the step into its commits. Pure; the keys come from the registry.
+    public static func hint(_ cover: Cover?, prev: String, next: String, back: String) -> String {
+        cover == .landing ? "\(next) steps through its commits" : "\(prev) \(next) step · \(back) back"
     }
 
     /// `commits` as the history reads them, newest first. A branch on main has no separate main point.

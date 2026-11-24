@@ -249,8 +249,10 @@ private struct BranchLine: View {
                     }
                     let isStart = lit?.lo == i
                     VStack(spacing: 1) {
+                        // the stretch starts after its first point: a ring, so only lit points look chosen
                         Circle()
-                            .fill(on ? (lands ? theme.goldLeaf : theme.inkDim) : isStart ? theme.ink : lands ? theme.goldLeaf.opacity(0.5) : theme.inkFaint)
+                            .fill(on ? (lands ? theme.goldLeaf : theme.inkDim) : isStart ? Color.clear : lands ? theme.goldLeaf.opacity(0.5) : theme.inkFaint)
+                            .overlay { if isStart && !on { Circle().stroke(theme.ink, lineWidth: 1) } }
                             .frame(width: 7, height: 7)
                             .overlay { if cursor == i { Circle().stroke(theme.ink, lineWidth: 1.2).frame(width: 13, height: 13) } }
                             .overlay { if pg.lineAnchor == i { Circle().stroke(theme.goldLeaf, lineWidth: 1.2).frame(width: 13, height: 13) } }
@@ -267,7 +269,9 @@ private struct BranchLine: View {
                     // read for an older tip: drawn until the read for this one lands, never blanked
                     Text("· updating").font(Theme.text(11)).foregroundStyle(theme.inkFaint).padding(.leading, 6)
                 }
-                Text(", h").font(Theme.text(11)).foregroundStyle(theme.inkFaint).padding(.leading, 8)
+                Text(ReviewLine.hint(pg.lit.map(l.cover), prev: app.registry.keyOf("review.commit.prev"),
+                                     next: app.registry.keyOf("review.commit.next"), back: app.registry.keyOf("nav.back")))
+                    .font(Theme.text(11)).foregroundStyle(theme.inkFaint).padding(.leading, 8)
             } else {
                 Text(ship.historyNote(pg.id)).font(Theme.text(11)).foregroundStyle(theme.inkFaint)
             }
@@ -291,7 +295,7 @@ private struct BranchLine: View {
     /// Where the lit stretch sits against what lands, or the commit under the line's cursor while it's there.
     private func words(_ pg: ReviewPageState, _ l: ReviewLine, _ rows: [String: HistoryCommit], _ cursor: Int?) -> String {
         if let c = cursor, case .commit(let s) = l.points[c] { return rows[s]?.subject ?? "" }
-        if let lit = pg.lit { return l.words(lit) }
+        if let lit = pg.lit { return l.words(lit) { rows[$0]?.subject } }
         // off the line: a commit this history doesn't hold, or origin's copy after a rewrite
         if let scope = pg.commitScope { return ReviewLine.ends(scope).from == nil ? "one commit" : "a run of commits" }
         return pg.base == .outgoing ? "what the next push sends" : ""
