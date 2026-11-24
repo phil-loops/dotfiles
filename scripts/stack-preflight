@@ -1,0 +1,181 @@
+#!/usr/bin/env python3
+"""stack-preflight — read everything a push publishes, on one screen, before pressing push.
+
+  stack-preflight [<branch>]          the words (description, what the squash will say), the
+                                      commits this push adds newest first with their bodies, and
+                                      the code it adds against origin
+  stack-preflight [<branch>] --step   then page through those commits one at a time, newest
+                                      first: each message above its own diff
+  --no-fetch                          skip refreshing origin's copy of the branch first
+  --no-gh                             skip reading the open PR's title and body from GitHub
+
+Read-only: it fetches one ref and reads one PR, and writes nothing anywhere.
+"""
+import json
+import os
+import subprocess
+import sys
+
+TTY = sys.stdout.isatty()
+
+
+def paint(code, s):
+    return f"\033[{code}m{s}\033[0m" if TTY else s
+
+
+def bold(s):
+    return paint("1", s)
+
+
+def dim(s):
+    return paint("2", s)
+
+
+def gold(s):
+    return paint("33", s)
+
+
+def red(s):
+    return paint("31", s)
+
+
+def git(*args, check=True):
+    p = subprocess.run(["git", *args], capture_output=True, text=True)
+    if check and p.returncode:
+        sys.exit(f"stack-preflight: git {' '.join(args)}: {p.stderr.strip()}")
+    return p.stdout.rstrip("\n") if p.returncode == 0 else ""
+
+
+def has_ref(ref):
+    return subprocess.run(["git", "rev-parse", "-q", "--verify", ref + "^{commit}"], capture_output=True).returncode == 0
+
+
+def outgoing_range(branch, published, parent):
+    """srv/push.py's _outgoing_range: past origin's copy (or every remote before the first push), and past a stacked parent."""
+    rng = [f"origin/{branch}..{branch}"] if published else [branch, "--not", "--remotes=origin"]
+    if parent not in ("main", "master") and has_ref(parent):
+        rng += ["--not", parent] if published else [parent]
+    return rng
+
+
+def commits(rng):
+    out = git("log", "--format=%H%x1f%h%x1f%s%x1f%b%x1e", *rng)
+    rows = []
+    for rec in out.split("\x1e"):
+        rec = rec.strip("\n")
+        if rec:
+            full, short, subject, body = rec.split("\x1f")
+            rows.append({"sha": full, "short": short, "subject": subject, "body": body.strip()})
+    return rows
+
+
+def open_pr(branch):
+    p = subprocess.run(["gh", "pr", "list", "--head", branch, "--state", "open", "--json", "number,title,body,url"],
+                       capture_output=True, text=True)
+    if p.returncode:
+        return None, p.stderr.strip() or "gh failed"
+    prs = json.loads(p.stdout or "[]")
+    return (prs[0] if prs else None), None
+
+
+def why_of(body):
+    """The hand-written lines above the PR template: everything before the first heading, rule or HTML comment."""
+    lines = []
+    for line in (body or "").splitlines():
+        if line.lstrip().startswith(("#", "<!--")) or line.strip() == "---":
+            break
+        lines.append(line)
+    return "\n".join(lines).strip()
+
+
+def indent(text, pad="      "):
+    return "\n".join(pad + l if l.strip() else "" for l in text.splitlines())
+
+
+def main(argv):
+    flags = {a for a in argv if a.startswith("--")}
+    unknown = flags - {"--step", "--no-fetch", "--no-gh", "--help", "-h"}
+    if "--help" in flags or "-h" in argv or unknown:
+        print(__doc__.strip())
+        return 2 if unknown else 0
+    names = [a for a in argv if not a.startswith("-")]
+    branch = names[0] if names else git("symbolic-ref", "--short", "HEAD")
+    if not has_ref(f"refs/heads/{branch}"):
+        sys.exit(f"stack-preflight: no local branch {branch}")
+
+    if "--no-fetch" not in flags:
+        subprocess.run(["git", "fetch", "-q", "origin", f"+refs/heads/{branch}:refs/remotes/origin/{branch}"],
+                       capture_output=True)
+    published = has_ref(f"refs/remotes/origin/{branch}")
+    parent = git("config", f"branch.{branch}.stack-parent", check=False) or "main"
+    parent_ref = f"origin/{parent}" if parent in ("main", "master") and has_ref(f"origin/{parent}") else parent
+
+    landing = commits([f"{parent_ref}..{branch}"])
+    outgoing = commits(outgoing_range(branch, published, parent))
+    out_shas = {c["sha"] for c in outgoing}
+    behind = commits([f"{branch}..origin/{branch}"]) if published else []
+
+    pr, pr_err = (None, None)
+    if published and "--no-gh" not in flags:
+        pr, pr_err = open_pr(branch)
+
+    print(bold(branch) + dim(f"  on {parent}  ·  " + ("on origin" if published else "never pushed")))
+    desc = git("config", f"branch.{branch}.description", check=False)
+    print(f"  {dim('description')}  {desc or dim('(none)')}")
+
+    print()
+    if pr:
+        print(bold("What lands") + dim(f"  the open PR #{pr['number']} on GitHub — the squash-merge uses this, not the commits"))
+        print(f"  {dim('title')}  {pr['title']}")
+        why = why_of(pr["body"])
+        print(f"  {dim('why')}\n{indent(why)}" if why else f"  {dim('why')}    {dim('(empty)')}")
+        print(f"  {dim('a push never changes this text; edit it on the PR')}")
+    else:
+        opening = landing[-1] if landing else None
+        print(bold("What lands") + dim("  the opening commit's words — the PR form prefills from them"))
+        if opening:
+            print(f"  {dim('title')}  {opening['subject']}")
+            print(f"  {dim('why')}\n{indent(opening['body'])}" if opening["body"] else f"  {dim('why')}    {dim('(empty)')}")
+        else:
+            print(f"  {dim('(no commits past ' + parent + ')')}")
+        if pr_err:
+            print(f"  {red('could not read the PR:')} {pr_err}")
+
+    if behind:
+        print()
+        print(red(bold("origin has commits this branch doesn't")) + dim("  — a push would be refused; look before anything else"))
+        for c in behind:
+            print(f"  {red(c['short'])}  {c['subject']}")
+
+    print()
+    print(bold("This push adds") + dim("  newest first"))
+    if not outgoing:
+        print(f"  {dim('nothing — origin already has every commit')}")
+    for c in outgoing:
+        print(f"  {gold(c['short'])}  {c['subject']}")
+        if c["body"]:
+            print(dim(indent(c["body"], "            ")))
+    already = [c for c in landing if c["sha"] not in out_shas]
+    if already and outgoing:
+        print(dim("  already on origin:"))
+        for c in already:
+            print(dim(f"  {c['short']}  {c['subject']}"))
+
+    print()
+    if outgoing:
+        base = f"origin/{branch}" if published else parent_ref
+        stat = git("diff", "--stat", f"{base}...{branch}")
+        print(bold("Code this push adds") + dim(f"  {base}...{branch}"))
+        print(indent(stat, "  "))
+    if published and landing:
+        print(bold("Code the whole branch lands") + dim(f"  {parent_ref}...{branch}"))
+        print("  " + git("diff", "--shortstat", f"{parent_ref}...{branch}").strip())
+
+    if "--step" in flags and outgoing:
+        sys.stdout.flush()
+        os.execvp("git", ["git", "log", "-p", "--stat", "--format=%n%C(yellow)%h%Creset  %C(bold)%s%Creset%n%n%b", *outgoing_range(branch, published, parent)])
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
