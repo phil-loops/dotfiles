@@ -827,12 +827,19 @@ def address(req, d):
     from . import outline
     branch = d.get("branch") or ""
     if d.get("undo"):
-        ans = _Answer()
-        outline.undo(ans, json.dumps({"branch": branch}))
-        if not ans.ok():
-            raise ghreview.Refused(ans.data.get("err") or "couldn't undo the trailer")
         with _FLOCK:
-            _save_items([i for i in _items() if not (i["key"] == d["undo"] and i.get("state") in ("draft", None))])
+            items = _items()
+            item = next((i for i in items if i["key"] == d["undo"] and i["branch"] == branch), None)
+            if not item or item.get("state") not in ("draft", None):
+                raise ghreview.Refused("that reply is no longer a draft on this branch")
+            if "outlineJournal" not in item:
+                raise ghreview.Refused("that draft has no record of the outline save to undo")
+            if item["outlineJournal"] is not None:
+                ans = _Answer()
+                outline.undo(ans, json.dumps({"branch": branch, "journal": item["outlineJournal"]}))
+                if not ans.ok():
+                    raise ghreview.Refused(ans.data.get("err") or "couldn't undo the trailer")
+            _save_items([i for i in items if i is not item])
         return _send(req, 200, {"ok": True})
     pr = _pr_for(branch)
     t = next((x for x in pr["threads"] if x["node"] == d.get("thread")), None)
@@ -856,6 +863,7 @@ def address(req, d):
     if not ans.ok():
         raise ghreview.Refused(ans.data.get("err") or "couldn't add the trailer")
     item = dict(_new_item(branch, pr, {"kind": "reply", "thread": t["node"], "body": "done in {fix}", "fixFor": thread_url(t)}), send=True)
+    item["outlineJournal"] = ans.data["journal"]
     with _FLOCK:
         _save_items([*_items(), item])
     _send(req, 200, {"ok": True, "key": item["key"], "newTip": ans.data.get("newTip")})

@@ -134,10 +134,10 @@ enum ReviewCommands {
         r.register(Command(
             id: "review.address.undo", title: "Take back a declared fix", scope: .review, budget: .gitWrite, needsArg: true, quiet: true,
             write: { id, key in
-                guard let subject = ShipRows.splitID(id) else { return nil }
-                let tip = branch(id)?.tip
-                return Write(path: tr.atRepo(subject.repo, "/review-address"), body: ["branch": .string(subject.name), "undo": key.map { .string("\($0)") } ?? .null],
-                             settled: { store.table(Branch.self)[id]?.tip != tip }, said: "undone", failed: "couldn't take it back")
+                guard let subject = ShipRows.splitID(id), let key = key as? String else { return nil }
+                return Write(path: tr.atRepo(subject.repo, "/review-address"), body: ["branch": .string(subject.name), "undo": .string(key)],
+                             settled: { store.table(Draft.self)[id]?.items.contains { $0.key == key } != true },
+                             said: "undone", failed: "couldn't take it back")
             }))
         r.register(Command(
             id: "review.address.cancel", title: "Drop a reply that waits for a fix", scope: .review, budget: .configWrite, needsArg: true, quiet: true,

@@ -11,6 +11,7 @@ import Foundation
 struct WordsUndo {
     var moves: Bool
     var fields: Set<WordsState.PRPart> = []
+    var journal: String
 }
 
 /// A words row, decoded: "w|desc", "w|title", "w|body", "w|s|<sha>", "w|b|<sha>".
@@ -102,7 +103,9 @@ enum WordsCommands {
                     answered: { ok, response in
                         guard ok else { return }
                         words.accept(receipt)
-                        app.runner.say(acknowledgedUndo(response) == nil ? "words already on file" : "\(what) · \(app.registry.keyOf("undo")) undoes")
+                        if acknowledgedUndo(response) != nil { app.runner.say("\(what) · \(app.registry.keyOf("undo")) undoes") }
+                        else if (response["changed"]?.int ?? 0) > 0 || response["fields"]?.array?.isEmpty == false { app.runner.say(what) }
+                        else { app.runner.say("words already on file") }
                         words.load(app, id, force: true)
                     })
             }))
@@ -112,10 +115,10 @@ enum WordsCommands {
             write: { [weak app] id, arg in
                 guard let b = store.view(Branch.self, id) else { return nil }
                 let tip = b.tip
-                let u = arg as? WordsUndo ?? WordsUndo(moves: true)
+                guard let u = arg as? WordsUndo else { throw Refusal("no save of yours to undo here") }
                 let receipt = words.stageUndo(id, fields: u.fields)
                 return Write(
-                    path: tr.atRepo(b.repo, "/outline-undo"), body: ["branch": .string(b.name)],
+                    path: tr.atRepo(b.repo, "/outline-undo"), body: ["branch": .string(b.name), "journal": .string(u.journal)],
                     settled: { !u.moves || store.table(Branch.self)[id]?.tip != tip },
                     failed: "couldn't put the messages back",
                     rollback: { words.rollback(receipt) },
@@ -171,9 +174,10 @@ enum WordsCommands {
     }
 
     static func acknowledgedUndo(_ response: JSONObject) -> WordsUndo? {
-        let moves = (response["changed"]?.int ?? 0) > 0
+        guard let journal = response["journal"]?.string, !journal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        let moves = (response["changed"]?.int ?? 0) > 0 || (response["folded"]?.int ?? 0) > 0
         let fields = Set((response["fields"]?.array ?? []).compactMap { $0.string.flatMap(WordsState.PRPart.init(rawValue:)) })
-        return moves || !fields.isEmpty ? WordsUndo(moves: moves, fields: fields) : nil
+        return moves || !fields.isEmpty ? WordsUndo(moves: moves, fields: fields, journal: journal) : nil
     }
 
     /// Whether a words row can be written here: the PR's text until GitHub owns it, a commit until it's locked.

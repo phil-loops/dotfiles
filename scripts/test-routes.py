@@ -90,12 +90,12 @@ check("every history or outward route declares what it saw, or why not",
 check("UNPINNED names only real unpinned routes", all(p in real and not real[p].saw for p in routes.UNPINNED),
       [p for p in routes.UNPINNED if p not in real or real[p].saw])
 check("the unpinned list only shrinks: adding to it is a decision written here", set(routes.UNPINNED) <= {
-    "/outline", "/review-address", "/outline-undo", "/lsp/rename", "/push-when-green", "/sync", "/catch-up", "/prep-push",
+    "/outline", "/review-address", "/lsp/rename", "/push-when-green", "/sync", "/catch-up", "/prep-push",
     "/prep", "/restack", "/squash", "/reseat-children", "/dirty-resolve", "/reconcile", "/review-apply", "/review-helix"},
       sorted(routes.UNPINNED))
 actor.is_phil = lambda req: True
 os.environ.pop("STACK_REVIEW_SANDBOX", None)
-for p in ("/push-origin", "/gates-waive", "/force-origin", "/revert-commit"):
+for p in ("/push-origin", "/gates-waive", "/force-origin", "/revert-commit", "/outline-undo"):
     ran.clear()
     r = Req()
     routes.post(r, p, "{}")

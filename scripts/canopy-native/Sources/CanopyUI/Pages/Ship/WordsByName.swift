@@ -128,13 +128,17 @@ enum WordsByName {
                 let below = own[i - 1]
                 for x in [c, below] where !x.locked.isEmpty { throw Refusal("\(x.short.prefix(7)) is \(x.locked)") }
                 let tip = b.tip
+                let summary = "folded \(c.short.prefix(7)) into \(below.short.prefix(7))"
                 return Write(
                     path: app.transport.atRepo(b.repo, "/outline"),
                     body: ["branch": .string(b.name), "head": .string(o.head), "fold": .array([.string(c.sha)])],
                     settled: { app.store.table(Branch.self)[id]?.tip != tip },
-                    said: "folded \(c.short.prefix(7)) into \(below.short.prefix(7)) — \(app.registry.keyOf("undo")) puts it back",
+                    said: summary,
+                    saidFrom: { response in
+                        WordsCommands.acknowledgedUndo(response).map { _ in "\(summary) — \(app.registry.keyOf("undo")) puts it back" }
+                    },
                     failed: "couldn't fold \(c.short.prefix(7))",
-                    inverse: { _ in Inverse(id: "words.undo", target: id, arg: WordsUndo(moves: true)) })
+                    inverse: { response in WordsCommands.acknowledgedUndo(response).map { Inverse(id: "words.undo", target: id, arg: $0) } })
             }))
     }
 

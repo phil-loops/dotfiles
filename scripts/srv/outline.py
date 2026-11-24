@@ -6,7 +6,7 @@
 #                                    pr, draft, reseat, undo}
 #   POST /outline                 {branch, head, edits:[{sha, subject, body}], description?,
 #                                  prTitle?, prBody?} → {ok, newTip, changed, warnings, reseat}
-#   POST /outline-undo            {branch} → restores the last outline save, same reseat path
+#   POST /outline-undo            {branch,journal} → restores the matching outline save, same reseat path
 #
 # A save rewrites every changed unpushed commit in ONE pass: a new chain built with commit-tree
 # on the identical trees, landed with a single update-ref against the head the editor loaded —
@@ -558,13 +558,15 @@ def save(req, raw):
         if fold:
             entry["fold"] = fold
     _apply_fields(branch, d, entry)
-    if entry.get("commits") or any(k in entry for k in ("description", *_PR_KEYS)):
+    fields = [k for k in ("description", *_PR_KEYS) if k in entry]
+    journal = None
+    if entry.get("commits") or fields:
         _journal(entry)
+        journal = entry["id"]
     repostate.invalidate()
     job = _start_reseat(branch, tip, new_tip, rewritten) if (changes or fold) else None
     _send(req, 200, {"ok": True, "newTip": new_tip, "oldTip": tip, "changed": len(changes), "folded": len(fold),
-                     "fields": [k for k in ("description", *_PR_KEYS) if k in entry],
-                     "warnings": warnings, "reseat": job, "journal": entry["id"]})
+                     "fields": fields, "warnings": warnings, "reseat": job, "journal": journal})
 
 
 def undo(req, raw):
@@ -573,12 +575,17 @@ def undo(req, raw):
     branch = (d.get("branch") or "").strip()
     if not branch:
         return _refuse(req, 400, "no branch")
+    journal = d.get("journal")
+    if not isinstance(journal, str) or not journal.strip():
+        return _refuse(req, 400, "undo needs the journal id from the save")
     tip = _out("rev-parse", "--verify", "-q", f"refs/heads/{branch}")
     if not tip:
         return _refuse(req, 404, f"no local branch {branch}")
     e = _undoable(branch)
     if not e:
         return _refuse(req, 409, "nothing to undo on this branch")
+    if e["id"] != journal:
+        return _refuse(req, 409, f"{branch} was saved again since — undo would reverse that save, not yours; reload", moved=True)
     moved = e["oldTip"] != e["newTip"]
     if moved:
         if tip != e["newTip"]:

@@ -89,16 +89,20 @@ import Testing
         #expect(write.inverse?(["changed": 0, "fields": []]) == nil)
         write.answered?(true, ["changed": 0, "fields": []])
         #expect(app.runner.note == "words already on file")
-        let inverse = try #require(write.inverse?(["changed": 0, "fields": ["prTitle"]]))
+        let inverse = try #require(write.inverse?(["changed": 0, "fields": ["prTitle"], "journal": "j1"]))
         let target = try #require(inverse.arg as? WordsUndo)
         #expect(!target.moves && target.fields == [.title])
+        #expect(try undo(app, inverse).body["journal"] == "j1")
+        #expect(write.inverse?(["changed": 1]) == nil)
+        #expect(write.inverse?(["changed": 1, "journal": " "]) == nil)
+        #expect(write.inverse?(["changed": 0, "fields": [], "journal": "unused"]) == nil)
     }
 
     @Test func anAcceptedUndoDoesNotReappearAfterANewerSaveFails() throws {
         let (app, words, _, _) = try fixture()
         words.editPr(id, MessageWords(subject: "S1", body: "B1"))
         let original = try save(app)
-        let answer: JSONObject = ["changed": 0, "fields": ["prTitle", "prBody"]]
+        let answer: JSONObject = ["journal": "j1", "changed": 0, "fields": ["prTitle", "prBody"]]
         original.answered?(true, answer)
         let inverse = try #require(original.inverse?(answer))
         let restoring = try undo(app, inverse)
@@ -115,7 +119,7 @@ import Testing
         let (app, words, _, _) = try fixture()
         words.editPr(id, MessageWords(subject: "S1", body: "B1"))
         let original = try save(app)
-        let answer: JSONObject = ["changed": 0, "fields": ["prTitle", "prBody"]]
+        let answer: JSONObject = ["journal": "j1", "changed": 0, "fields": ["prTitle", "prBody"]]
         original.answered?(true, answer)
         let restoring = try undo(app, try #require(original.inverse?(answer)))
         words.editPr(id, MessageWords(subject: "S2", body: "B1"))
@@ -152,7 +156,7 @@ import Testing
         let (app, words, _, _) = try fixture()
         words.editPr(id, MessageWords(subject: "S1", body: words.prValue(id).body))
         let original = try save(app)
-        let answer: JSONObject = ["changed": 0, "fields": ["prTitle"]]
+        let answer: JSONObject = ["journal": "j1", "changed": 0, "fields": ["prTitle"]]
         original.answered?(true, answer)
         let restoring = try undo(app, try #require(original.inverse?(answer)))
         restoring.answered?(true, ["restored": [], "commits": 0])
@@ -201,7 +205,7 @@ import Testing
             words.setShown(id, baseline)
             words.editPr(id, MessageWords(subject: words.prValue(id).subject, body: "B2"))
             let original = try save(app)
-            let answer: JSONObject = ["changed": 0, "fields": ["prBody"]]
+            let answer: JSONObject = ["journal": "j1", "changed": 0, "fields": ["prBody"]]
             original.answered?(true, answer)
             await words.load(app, id)?.value
             words.editPr(id, MessageWords(subject: words.prValue(id).subject, body: "B3"))

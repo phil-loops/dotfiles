@@ -362,8 +362,8 @@ All four routes go through `reviewdesk._guarded`: a `Refused` becomes `200 {ok:f
 | Call | R/M | Body / query | Response | Used by |
 |---|---|---|---|---|
 | `GET /outline` [R] | READ | `?branch=` | *(live)* `{ok, branch, parent, base, head, description, story, ticket, commits:[{sha, short, subject, body, author, date, pushed, merge, carried, locked, files, add, del}], pr:{exists, …}, draft:{title, titleSaved, body, bodySaved, derivedBody, bodyPending}, reseat, undo}` | `Commits.tsx` (**re-polled every 1.5 s while `draft.bodyPending`**), `review/Overlays.tsx` |
-| `POST /outline` [R] | MUTATING. Rewrites unpushed commit messages through commit-tree plus a guarded update-ref, and writes git config for the description and PR text. | `{branch, head, edits:[{sha, subject, body}], description?, prTitle?, prBody?}`. `head` is a compare-and-swap check: the save is refused if the branch moved. | `{ok, newTip, oldTip, changed, fields[], warnings[], reseat, journal}` · `{ok:false, err, …}` | `commands/words.ts`, `commands/branch.ts` (description only: `edits:[]`) |
-| `POST /outline-undo` [R] | MUTATING (replays the last outline save) | `{branch}` | `{ok, newTip, restored, commits, reseat}` | `commands/words.ts` |
+| `POST /outline` [R] | MUTATING. Rewrites unpushed commit messages through commit-tree plus a guarded update-ref, and writes git config for the description and PR text. | `{branch, head, edits:[{sha, subject, body}], description?, prTitle?, prBody?}`. `head` is a compare-and-swap check: the save is refused if the branch moved. | `{ok, newTip, oldTip, changed, fields[], warnings[], reseat, journal}` (journal is null for an unchanged save) · `{ok:false, err, …}` | `commands/words.ts`, `commands/branch.ts` (description only: `edits:[]`) |
+| `POST /outline-undo` [R] | MUTATING. Restores the requested save if it is still the latest undoable entry on that branch. | `{branch, journal}` | `{ok, newTip, restored, commits, reseat}` | `commands/words.ts` |
 
 ## 7. Machine and previews
 
