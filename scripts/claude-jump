@@ -2,7 +2,7 @@
 """claude-jump <session-id prefix> [--dry-run] — bring a Claude session's tmux pane to the front.
 
 Resolves the pane with `claude-say --json`, selects its window and pane, switches the attached tmux client to it, and
-activates Terminal. --dry-run prints the tmux commands instead of running them.
+brings forward the app that tmux client runs in (`pane-branch host` — Ghostty, Terminal, whatever it is; never assumed). --dry-run prints the tmux commands instead of running them.
 """
 import json
 import subprocess
@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 CLAUDE_SAY = Path(__file__).with_name("claude-say")
+PANE_BRANCH = Path(__file__).with_name("pane-branch")
 
 
 def main():
@@ -29,7 +30,10 @@ def main():
         return
     for command in commands:
         subprocess.run(command, check=True)
-    subprocess.run(["open", "-a", "Terminal"], check=True)
+    host = subprocess.run([str(PANE_BRANCH), "host"], capture_output=True, text=True)
+    if host.returncode != 0 or "\t" not in host.stdout:
+        sys.exit("claude-jump: switched tmux to the pane, but found no app its client runs in to bring forward")
+    subprocess.run(["open", host.stdout.strip().split("\t", 1)[1]], check=True)
 
 
 if __name__ == "__main__":
