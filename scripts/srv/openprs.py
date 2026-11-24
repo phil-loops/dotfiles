@@ -123,6 +123,16 @@ def failed():
         return bool((_listing.get(ctx.repo_cwd()) or {}).get("outage"))
 
 
+def cached_pr(slug, number):
+    """Look up a PR in the current listing without making the caller wait for a sweep."""
+    with _lock:
+        entry = _listing.get(ctx.repo_cwd())
+        if not entry or entry["outage"] or time.monotonic() - entry["at"] >= TTL:
+            return None
+        return next((pr for pr in entry["prs"] or () if pr.get("number") == number
+                     and pr.get("slug", "").lower() == slug.lower()), None)
+
+
 def of_slug(slug):
     """The open PRs on one slug (a teammate's stack lives on origin)."""
     return [p for p in listing() if p.get("slug") == slug]

@@ -137,14 +137,36 @@ async function openWithRecovery(payload) {
   return res;
 }
 
+let latestOpen = 0;
+
 async function openActiveTab(target) {
+  const request = ++latestOpen;
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   const url = tab?.url || "";   // readable only because the gesture granted activeTab
   if (!url.startsWith("https://github.com/")) {
     await fail("not a GitHub page");
     return;
   }
-  const res = await openWithRecovery({ url, open: target });
+  // A warm route opens in one hop. On a cold import, bring the current Canopy workspace forward.
+  let focus;
+  let focusTimer;
+  if (target === "viewer" && PR_RE.test(url)) {
+    focusTimer = setTimeout(() => {
+      if (request === latestOpen) {
+        focus = chrome.runtime.sendNativeMessage(HOST, { action: "focus-canopy" }).catch(() => {});
+      }
+    }, 150);
+  }
+  let res;
+  try {
+    res = await openWithRecovery({ url, open: target });
+  } finally {
+    clearTimeout(focusTimer);
+  }
+  await focus;
+  if (request !== latestOpen) {
+    return;
+  }
   const ok = res.status === 200 && res.body?.ok;
   if (!ok) {
     await fail(String(reason(res)));

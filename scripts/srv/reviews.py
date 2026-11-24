@@ -210,13 +210,18 @@ def _local_branch_for_pr(num):
     hit = _branch_cache.get(_pr_key(num))
     if hit and now - hit[0] < _BRANCH_TTL:
         return hit[1]
-    r = ctx.run(["gh", "pr", "view", num, "--json", "headRefName,isCrossRepository",
-                 "--jq", "[.headRefName, .isCrossRepository] | @tsv"], timeout=15)
-    parts = r.stdout.strip().split("\t") if r.returncode == 0 else []
-    branch = None
-    if len(parts) == 2 and parts[1] != "true" and parts[0] and \
-            ctx.run(["git", "show-ref", "--verify", "--quiet", f"refs/heads/{parts[0]}"]).returncode == 0:
-        branch = parts[0]
+    row = openprs.cached_pr(openprs.origin_slug() or "", int(num))
+    if row is None:
+        r = ctx.run(["gh", "pr", "view", num, "--json", "headRefName,isCrossRepository",
+                     "--jq", "[.headRefName, .isCrossRepository] | @tsv"], timeout=15)
+        if r.returncode:
+            return None
+        parts = r.stdout.strip().split("\t")
+        head = parts[0] if len(parts) == 2 and parts[1] == "false" else None
+    else:
+        head = row.get("headRefName") if row.get("isCrossRepository") is False else None
+    branch = head if head and ctx.run(["git", "show-ref", "--verify", "--quiet",
+                                      f"refs/heads/{head}"]).returncode == 0 else None
     _branch_cache[_pr_key(num)] = (now, branch)
     return branch
 
@@ -226,7 +231,7 @@ _refresh_locks = {}
 _REFRESH_TTL = 1800   # the keypress trusts the page-load fetch this long; a reload fetches again (force)
 
 
-def _refresh_review_branch(num, force=False):
+def _refresh_review_branch(num, since=None):
     # Re-sync review/pr-N to the live PR head before a precise line-open, so the line lands where
     # GitHub shows it — a stale fetch drifts line numbers (a pushed refactor moves the line).
     # --force because a PR head can be force-pushed.
@@ -242,10 +247,12 @@ def _refresh_review_branch(num, force=False):
     # skip. Waiting for the in-flight fetch is strictly cheaper, and leaves the TTL warm.
     key = _pr_key(num)
     with _refresh_locks.setdefault(key, threading.Lock()):
-        if not force and time.time() - _refreshed.get(key, 0) < _REFRESH_TTL:
+        earliest = time.time() - _REFRESH_TTL if since is None else since
+        if _refreshed.get(key, 0) >= earliest:
             return
-        ctx.run(["git", "fetch", "--force", "origin", f"pull/{num}/head:review/pr-{num}"], timeout=20)
-        _refreshed[key] = time.time()
+        fetched = ctx.run(["git", "fetch", "--force", "origin", f"pull/{num}/head:review/pr-{num}"], timeout=20)
+        if fetched.returncode == 0:
+            _refreshed[key] = time.time()
 
 
 def _match_diffhash(paths, want):
@@ -279,20 +286,23 @@ def _open_pr(req, d):   # via open_url (POST /open-url) — Chrome ext: open a P
     if not num.isdigit():
         req._send(400, json.dumps({"ok": False, "err": "no pr number"}))
         return
+    requested_at = time.time()
     branch = _local_branch_for_pr(num)
     local = branch is not None
     if not local:
-        review = f"review/pr-{num}"
-        if ctx.run(["git", "show-ref", "--verify", "--quiet", f"refs/heads/{review}"]).returncode == 0:
-            branch = review   # already imported — reuse, don't re-fetch on every click
-        else:
-            r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-review-import"), num], timeout=30)
-            if r.returncode != 0:
-                req._send(500, json.dumps({"ok": False, "err": (r.stderr or "import failed").strip()[:500]}))
-                return
-            _cache.pop(ctx.repo_cwd(), None)   # force the next /review-requests to re-flag this PR as imported
-            branch = r.stdout.strip()
-            _refreshed[_pr_key(num)] = time.time()   # the import just fetched this head — don't re-fetch it below
+        key = _pr_key(num)
+        with _refresh_locks.setdefault(key, threading.Lock()):
+            review = f"review/pr-{num}"
+            if ctx.run(["git", "show-ref", "--verify", "--quiet", f"refs/heads/{review}"]).returncode == 0:
+                branch = review   # already imported — reuse, don't re-fetch on every click
+            else:
+                r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-review-import"), num], timeout=30)
+                if r.returncode != 0:
+                    req._send(500, json.dumps({"ok": False, "err": (r.stderr or "import failed").strip()[:500]}))
+                    return
+                _cache.pop(ctx.repo_cwd(), None)   # force the next /review-requests to re-flag this PR as imported
+                branch = r.stdout.strip()
+                _refreshed[key] = time.time()   # the import just fetched this head — don't re-fetch it below
     route = _viewer_route(branch)
     refreshed = False
     dh = (d.get("diffhash") or "").strip()
@@ -323,7 +333,7 @@ def _open_pr(req, d):   # via open_url (POST /open-url) — Chrome ext: open a P
     path = (d.get("path") or "").strip()
     if not path:
         if not local:
-            _refresh_review_branch(num, force=True)   # a page (re)load is the moment the page's line numbers come from
+            _refresh_review_branch(num, since=requested_at)
         picker.prepare_branch(branch)   # warm the worktree in the background for a fast first open
         req._send(200, json.dumps({"ok": True, "branch": branch, "path": route, "opened": False, "local": local}))
         return

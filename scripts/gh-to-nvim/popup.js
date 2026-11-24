@@ -113,7 +113,6 @@ async function showTarget() {
   $("open-title").textContent = "Open in Show";
   what.textContent = `#${m[2]}`;
   detail.textContent = at;
-  openBtn.classList.add("pending");
   let info = null;
   try {
     const r = await fetch(`${VIEWER_URL}/pr-forest`, {
@@ -125,10 +124,7 @@ async function showTarget() {
   } catch {
     info = null;
   }
-  openBtn.classList.remove("pending");
   if (!info?.ok || !info.branch) {
-    what.textContent = `#${m[2]} · new`;
-    detail.textContent = ["imports the PR", at].filter(Boolean).join(" · ");
     return;
   }
   what.textContent = info.project ? `⧉ ${info.project}` : info.branch;

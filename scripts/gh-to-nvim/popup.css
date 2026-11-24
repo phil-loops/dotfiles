@@ -57,24 +57,6 @@ kbd {
 .open-detail .kid { display: block; color: var(--faint); }
 .open-detail .orphan { color: var(--warn); }
 
-/* while /pr-forest resolves, a thin line sweeps under the card; the button works throughout */
-.open.pending::after {
-  content: "";
-  display: block;
-  height: 1px;
-  margin-top: 5px;
-  background: linear-gradient(90deg, transparent, var(--accent), transparent);
-  animation: sweep 1.2s ease-in-out infinite;
-}
-@keyframes sweep {
-  0%   { transform: translateX(-60%); opacity: 0.2; }
-  50%  { opacity: 0.9; }
-  100% { transform: translateX(60%); opacity: 0.2; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .open.pending::after { animation: none; opacity: 0.4; }
-}
-
 /* only when something needs doing: one quiet row, the whole row is the fix */
 .fix {
   display: flex;

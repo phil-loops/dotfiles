@@ -61,9 +61,15 @@ openprs._listing["/repo"]["at"] -= openprs.FRESH_TTL + 1
 openprs.heads(fresh=True)
 check("a guard asking fresh gets a live sweep past 5 s", len(calls) == 2, calls)
 
+calls.clear()
+check("the extension can read a known PR without another GitHub call",
+      openprs.cached_pr("loops-so/loops", 1)["headRefName"] == "feat" and not calls)
+check("the same number on another remote is a miss", openprs.cached_pr("phil-loops/loops", 1) is None)
+
 GH["Loops-so/loops"].append({"number": 3, "headRefName": "new", "isCrossRepository": False})
 openprs._listing["/repo"]["at"] -= openprs.TTL + 1
 calls.clear()
+check("a stale PR lookup leaves refresh to the listing owner", openprs.cached_pr("Loops-so/loops", 1) is None and not calls)
 stale = openprs.heads()
 for _ in range(50):
     if openprs.heads() != stale:

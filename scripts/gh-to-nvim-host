@@ -67,7 +67,7 @@ def launch(repo):
 
 
 def canopy(route):
-    if not isinstance(route, str) or not route.startswith("/v2"):
+    if not isinstance(route, str) or (route and not route.startswith("/v2")):
         return {"ok": False, "err": f"not a canopy address: {route!r}"}
     # Chrome quarantines whatever its children write, so this never builds; `open` hands the
     # address to LaunchServices, which starts the app outside Chrome's process tree.
@@ -85,6 +85,8 @@ def main():
         return
     if msg.get("action") == "launch":
         send_message(launch(msg.get("repo") or DEFAULT_REPO))
+    elif msg.get("action") == "focus-canopy":
+        send_message(canopy(""))
     elif msg.get("action") == "canopy":
         send_message(canopy(msg.get("route")))
     else:
