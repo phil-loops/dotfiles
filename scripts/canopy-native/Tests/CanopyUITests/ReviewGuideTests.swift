@@ -112,6 +112,20 @@ import Testing
         #expect(app.runner.note?.contains("not in this diff") == true)
     }
 
+    /// 2026-11-19 #11682: a catch-up merge with no conflict resolution answered `files: []` and its view
+    /// said "reading the commit…" forever — an empty answer is an answer.
+    @Test func aCommitWithNoFilesSaysSoOnceItsReadIsIn() async throws {
+        let (app, port) = try await base.app(protocolClasses: [HeldLookupStub.self, ShipStub.self])
+        let pg = ReviewPageState.of(app)
+        HeldLookupStub.hold(port, "/loops/commit-diff")
+        pg.setStretch("m1")
+        await until("the held read") { HeldLookupStub.waiting(port, "/loops/commit-diff") }
+        #expect(pg.files.isEmpty && pg.emptyCommitLine == "reading the commit…", "no answer yet")
+        HeldLookupStub.release(port, "/loops/commit-diff", #"{"sha":"m1","files":[]}"#)
+        await until("the empty answer") { pg.commitFiles?.sha == "m1" }
+        #expect(pg.files.isEmpty && pg.emptyCommitLine == "this commit changes no files — a clean merge, or an empty commit")
+    }
+
     @Test func aScopeChangeInvalidatesGuideEntriesAndOldFilePickers() async throws {
         let (app, port) = try await base.app(protocolClasses: [HeldLookupStub.self, ShipStub.self])
         let pg = ReviewPageState.of(app)

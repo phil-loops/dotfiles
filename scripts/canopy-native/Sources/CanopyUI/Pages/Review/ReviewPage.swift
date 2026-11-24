@@ -396,7 +396,7 @@ private struct DiffPane: View {
                 Text(pg.loadErr.map { "couldn't read the diff — \($0)" } ?? "reading the diff…").foregroundStyle(theme.inkFaint).padding(16)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             } else if pg.files.isEmpty {
-                Text(pg.scoped ? pg.readErr.map { "couldn't read the commit — \($0)" } ?? "reading the commit…" : pg.diffStale ? older(pg) : empty).foregroundStyle(theme.inkFaint).padding(16)
+                Text(pg.scoped ? pg.emptyCommitLine : pg.diffStale ? older(pg) : empty).foregroundStyle(theme.inkFaint).padding(16)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             } else if pg.diffStale {
                 canvas(pg).opacity(0.5)

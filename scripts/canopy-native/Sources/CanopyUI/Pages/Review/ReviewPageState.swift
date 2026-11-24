@@ -331,6 +331,13 @@ public final class ReviewPageState: ShipHost {
     /// What's shown is an older read of this branch's diff (an earlier tip, base or parent), kept up
     /// while the current one is read: it draws dimmed, and keys that act on its lines wait (`gate`).
     var diffStale: Bool { diffHere && commitScope == nil && payload?.key != keyOf }
+    /// What a commit view with no files says, from what was recorded: why its read failed, that the commit
+    /// changes no files once its answer is in (a clean merge), else that it's still being read.
+    var emptyCommitLine: String {
+        if let e = readErr { return "couldn't read the commit — \(e)" }
+        return diffCurrent ? "this commit changes no files — a clean merge, or an empty commit" : "reading the commit…"
+    }
+
     var diffCurrent: Bool {
         if let scope = commitScope { return commitFiles?.sha == scope }
         return payload?.key == keyOf
