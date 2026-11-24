@@ -8,12 +8,14 @@ struct TerminalFrameTests {
         let marked = TerminalFrame.unmarked(try #require(URL(string: "canopy://v2/b/loops/feat/x?beside=terminal")))
         #expect(marked.beside && marked.link.absoluteString == "canopy://v2/b/loops/feat/x")
         #expect(Target(canopyLink: marked.link) == .canopy("/v2/b/loops/feat/x"))
-        let bare = TerminalFrame.unmarked(try #require(URL(string: "canopy://?beside=terminal")))
-        #expect(bare.beside && Target(canopyLink: bare.link) == .canopy(""), "no branch: canopy as it stands")
+        let bare = TerminalFrame.unmarked(try #require(URL(string: "canopy://?beside=terminal&pane=346")))
+        #expect(bare.beside && bare.pane == "%346" && Target(canopyLink: bare.link) == .canopy(""), "canopy as it stands, then the pane's branch")
+        #expect(TerminalFrame.unmarked(try #require(URL(string: "canopy://?beside=terminal&pane=x;rm"))).pane == nil, "a pane is a number")
+        #expect(TerminalFrame.unmarked(try #require(URL(string: "canopy://v2?pane=3"))).pane == nil, "only the switch names a pane")
         let kept = TerminalFrame.unmarked(try #require(URL(string: "canopy://v2/tutor?concept=x&beside=terminal")))
         #expect(kept.beside && kept.link.absoluteString == "canopy://v2/tutor?concept=x")
         let plain = try #require(URL(string: "canopy://v2/b/loops/feat"))
-        #expect(TerminalFrame.unmarked(plain) == (plain, false))
+        #expect(TerminalFrame.unmarked(plain) == (plain, false, nil))
     }
 
     @Test func showTakesTerminalsFrontWindowInAppKitsCoordinates() {

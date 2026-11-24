@@ -447,10 +447,24 @@ import Testing
         #expect(PaneBranches.wayBack(world(.review(repo: "r", branch: "unknown/x"))) == ["tmux", "r", "unknown/x"], "a branch canopy has no chat on still goes by name")
         #expect(PaneBranches.wayBack(world(.todo)) == ["tmux"], "with no branch in front, the pane you came from")
         let panes = PaneBranches.of(app)
-        nonisolated(unsafe) var asked: [[String]] = []
-        panes.ask = { asked.append($0); return .success("") }
+        nonisolated(unsafe) var did: [[String]] = []
+        panes.raise = { did.append(["raise"]) }
+        panes.ask = { did.append($0); return .success("") }
         await panes.toTmux(app).value
-        #expect(asked == [["tmux", "--prefer", "%1", "r", "a"]])
+        #expect(did == [["raise"], ["tmux", "--prefer", "%1", "r", "a", "--stay"]], "the terminal comes forward before any pane is asked for")
+    }
+
+    /// Ctrl-Space in tmux brings canopy forward first; canopy then asks for the pane's branch and goes there.
+    @Test func canopyFollowsThePaneItWasEnteredFrom() async throws {
+        let app = world(.todo)
+        let panes = PaneBranches.of(app)
+        nonisolated(unsafe) var asked: [[String]] = []
+        panes.ask = { asked.append($0); return $0 == ["from", "%7"] ? .success("r\ta\n") : .failure(Refusal("pane 3:2 hasn't committed to a branch or started one")) }
+        await panes.follow(pane: "%7", app).value
+        #expect(asked == [["from", "%7"]] && app.router.route == .review(repo: "r", branch: "a"))
+        await panes.follow(pane: "%8", app).value
+        #expect(app.router.route == .review(repo: "r", branch: "a") && app.runner.note == "pane 3:2 hasn't committed to a branch or started one",
+                "a pane with no branch leaves canopy where it is")
     }
 
     /// A forest's line says where its panes sit: a chat's pane, and any pane (Codex, a shell) whose latest work is on

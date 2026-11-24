@@ -5,11 +5,12 @@
   pane-branch --json          every pane as JSON; branch is null where there's none
   pane-branch <pane>          "<repo>\\t<branch>" for one pane; exit 1 saying why when it has none
   pane-branch url <pane>      that branch's canopy:// link
-  pane-branch canopy <pane>   bring canopy forward on that pane's branch (as it stands when the pane has none),
-                              and remember the pane for the way back
-  pane-branch tmux [--prefer <pane-id>]… [<repo> <branch>] [--dry-run]
-                              bring the terminal forward on the pane for that branch: a preferred pane that
-                              exists, else the pane that last worked on the branch, else the pane you left
+  pane-branch from <pane>     the same answer, and remember the pane as the one you left: what canopy asks once
+                              Ctrl-Space in tmux has brought it forward
+  pane-branch tmux [--prefer <pane-id>]… [<repo> <branch>] [--stay] [--dry-run]
+                              go to the pane for that branch: a preferred pane that exists, else the pane that
+                              last worked on the branch, else the pane you left; then bring the terminal forward
+                              (--stay: the caller already has)
 
 <pane> is a pane id (%342), window:pane (3:1) in the session your tmux client shows, or one digit: that
 pane of the window your client shows.
@@ -217,8 +218,8 @@ def to_canopy(pane, state, moves, git):
 
 
 def to_tmux(args, state, moves, git):
-    dry = "--dry-run" in args
-    args = [a for a in args if a != "--dry-run"]
+    dry, stay = "--dry-run" in args, "--stay" in args
+    args = [a for a in args if a not in ("--dry-run", "--stay")]
     prefer = []
     while args[:1] == ["--prefer"] and len(args) >= 2:
         prefer.append(args[1])
@@ -231,7 +232,8 @@ def to_tmux(args, state, moves, git):
     # a chat's pane needs no question of git; the branch's workers are only asked for when none is there
     pane = target(here, prefer) or target(here, (), workers(moves, git, repo, branch) if branch else (), remembered(state[0]))
     commands = [["tmux", "select-window", "-t", pane, ";", "select-pane", "-t", pane, ";", "switch-client", "-t", pane]] if pane else []
-    commands.append(["open", "-a", "Terminal"])
+    if not stay:
+        commands.append(["open", "-a", "Terminal"])
     for command in commands:
         if dry:
             print(" ".join(command))
@@ -257,10 +259,12 @@ def main():
         print("pane-branch: no tmux server", file=sys.stderr)
         return 1
     moves, git = read_moves(state[0]), Git()
-    if args[:1] == ["canopy"] and len(args) == 2:
+    if args[:1] == ["canopy"] and len(args) == 2:   # the binding a tmux not yet reloaded still has
         to_canopy(args[1], state, moves, git)
     if args[:1] == ["tmux"]:
         return to_tmux(args[1:], state, moves, git)
+    if args[:1] == ["from"] and len(args) == 2 and args[1].startswith("%"):
+        moves = [m for m in moves if m["pane"] == args[1]]   # one pane's branch is all this asks git about
     all_rows = rows(state, moves, git)
     if args == ["--json"]:
         print(json.dumps(all_rows))
@@ -271,11 +275,13 @@ def main():
             if r["branch"]:
                 print(f"{r['address']:<14} {r['repo']:<12} {r['branch']}  ·  {r['how']} {ago(now - r['at'])}")
         return 0
-    want_url = args[0] == "url"
-    if len(args) != (2 if want_url else 1):
+    want_url, leaving = args[0] == "url", args[0] == "from"
+    if len(args) != (2 if want_url or leaving else 1):
         print(__doc__, file=sys.stderr)
         return 2
     row, why = pick(args[-1], state, all_rows)
+    if row and leaving:
+        remember(state[0], row["pane"])
     if row and not row["branch"]:
         row, why = None, f"pane {row['address']} hasn't committed to a branch or started one"
     if not row:

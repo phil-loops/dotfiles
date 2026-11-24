@@ -1,3 +1,4 @@
+import AppKit
 import CanopyCore
 import Foundation
 import Observation
@@ -48,6 +49,15 @@ final class PaneBranches {
         try? p.run()
     }
 
+    /// what brings the terminal forward, at once and before any pane is asked for; tests swap it
+    @ObservationIgnored var raise: () -> Void = {
+        if let terminal = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.Terminal").first {
+            terminal.activate()
+        } else if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Terminal") {
+            NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
+        }
+    }
+
     private(set) var rows: [Row] = []
     @ObservationIgnored private(set) var written: [String: String] = [:]
     @ObservationIgnored private var task: Task<Void, Never>?
@@ -68,14 +78,21 @@ final class PaneBranches {
 
     /// Opens the branch pane `n` of the shown tmux window is working on, asked now; a pane with none says why.
     @discardableResult
-    func open(_ n: Int, _ app: AppModel) -> Task<Void, Never> {
+    func open(_ n: Int, _ app: AppModel) -> Task<Void, Never> { go([String(n)], app) }
+
+    /// Ctrl-Space in tmux has already brought canopy forward: now go to the branch the pane it was pressed in is
+    /// working on, and have that pane remembered for the way back. A pane with none says why and stays here.
+    @discardableResult
+    func follow(pane: String, _ app: AppModel) -> Task<Void, Never> { go(["from", pane], app) }
+
+    private func go(_ args: [String], _ app: AppModel) -> Task<Void, Never> {
         let ask = ask
         return Task { [weak app] in
-            let got = await Task.detached { ask([String(n)]) }.value
+            let got = await Task.detached { ask(args) }.value
             guard let app else { return }
             switch got {
             case .success(let said):
-                if let route = Self.route(said) { app.go(route) } else { app.runner.say("pane \(n): pane-branch said \(said.isEmpty ? "nothing" : said)") }
+                if let route = Self.route(said) { app.go(route) } else { app.runner.say("pane-branch said \(said.isEmpty ? "nothing" : said)") }
             case .failure(let why): app.runner.say(why.message)
             }
         }
@@ -99,10 +116,11 @@ final class PaneBranches {
         return ["tmux"] + prefer + (named.map { [$0.repo, $0.branch] } ?? [])
     }
 
-    /// Brings the terminal forward on the pane for what's in front.
+    /// Brings the terminal forward at once, then has tmux go to the pane for what's in front.
     @discardableResult
     func toTmux(_ app: AppModel) -> Task<Void, Never> {
-        let ask = ask, args = Self.wayBack(app)
+        raise()
+        let ask = ask, args = Self.wayBack(app) + ["--stay"]
         return Task { [weak app] in
             if case .failure(let why) = await Task.detached(operation: { ask(args) }).value { app?.runner.say(why.message) }
         }

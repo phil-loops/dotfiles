@@ -1,19 +1,20 @@
 import AppKit
 
-/// Ctrl-Space in tmux comes over to canopy (`pane-branch canopy`) with a link marked `beside=terminal`: Show then takes the
-/// Terminal window's place and size, so the switch reads as one window changing what it shows. Terminal is never moved, and
-/// any other door into Show leaves its window as it is.
+/// Ctrl-Space in tmux opens a link marked `beside=terminal` that names its pane: Show takes the Terminal window's place and
+/// size and comes forward at once, so the switch reads as one window changing what it shows, and canopy then goes to that
+/// pane's branch. Terminal is never moved, and any other door into Show leaves its window as it is.
 enum TerminalFrame {
     static let mark = URLQueryItem(name: "beside", value: "terminal")
 
-    /// The link without the mark, and whether it carried one.
-    static func unmarked(_ link: URL) -> (link: URL, beside: Bool) {
+    /// The link without the switch's words, whether it carried the mark, and the tmux pane id it named ("%12").
+    static func unmarked(_ link: URL) -> (link: URL, beside: Bool, pane: String?) {
         guard var parts = URLComponents(url: link, resolvingAgainstBaseURL: false), let items = parts.queryItems, items.contains(mark) else {
-            return (link, false)
+            return (link, false, nil)
         }
-        let rest = items.filter { $0 != mark }
+        let pane = items.first { $0.name == "pane" }?.value.flatMap { Int($0) }.map { "%\($0)" }
+        let rest = items.filter { $0 != mark && $0.name != "pane" }
         parts.queryItems = rest.isEmpty ? nil : rest
-        return (parts.url ?? link, true)
+        return (parts.url ?? link, true, pane)
     }
 
     /// Terminal's frontmost ordinary window among the window server's list (front to back), in AppKit's coordinates:

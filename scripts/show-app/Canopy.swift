@@ -13,6 +13,7 @@ final class CanopyHost: NSViewController {
     var onNavigate: ((String) -> Void)?
     private var embed: CanopyEmbed?
     private var pendingRoute: String?
+    private var pendingPane: String?
     private var starting = false
     private let note = NSTextField(labelWithString: "")
 
@@ -43,6 +44,11 @@ final class CanopyHost: NSViewController {
 
     /// The address canopy is at, file and line included, or the one it will open on when it hasn't started: what a relaunch brings back.
     var place: String? { embed?.address ?? pendingRoute }
+
+    /// Has canopy go to the branch a tmux pane is working on, now or once it has come up.
+    func follow(pane: String) {
+        if let embed { embed.follow(pane: pane) } else { pendingPane = pane }
+    }
 
     /// Brings canopy up on its first visit, and goes to `route` (a /v2/… path) once it's there.
     func start(route: String? = nil) {
@@ -97,6 +103,8 @@ final class CanopyHost: NSViewController {
         say("")
         pinned(embed.view, in: view)
         view.window?.makeFirstResponder(embed.view)
+        if let pane = pendingPane { embed.follow(pane: pane) }
+        pendingPane = nil
     }
 
     private func say(_ text: String) {

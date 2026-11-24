@@ -111,5 +111,9 @@ check("…else on the pane that last worked on the branch", pb.target(rows, work
 check("…else on the pane canopy was entered from", pb.target(rows, last="%9") == "%9")
 check("…and nowhere in particular when that pane is gone", pb.target(rows, last="%77") is None)
 
+os.environ["PANE_BRANCH_DIR"] = JOURNAL
+pb.remember("4242", "%3")
+check("the pane you left is remembered per tmux server", pb.remembered("4242") == "%3" and pb.remembered("9999") is None)
+
 print("---", "all passed" if not failures else f"{failures} failed")
 raise SystemExit(1 if failures else 0)
