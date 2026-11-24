@@ -20,10 +20,14 @@ enum BranchCommands {
         if v.b.diverged, ShipState.of(app).prepOf(id)?.route == "conform" { return "branch.conform" }
         let next = v.st.next
         switch next {
-        case "branch.push.arm": return app.runner.armed == pushArm(id) ? "branch.push.confirm" : next
+        case "branch.push.arm":
+            if app.runner.armed == pushArm(id, v.b.tip) { return "branch.push.confirm" }
+            return seenTip(id, app) != nil ? "branch.push.moved" : next
         case "branch.force.arm": return app.runner.armed == forceArm(id) ? "branch.force.confirm" : next
         case "branch.conform", "branch.catchup", "branch.gates.run", "branch.gates.next", "branch.proof": return next
-        case "branch.push.early.arm": return app.runner.armed == earlyArm(id) ? "branch.push.early" : next
+        case "branch.push.early.arm":
+            if app.runner.armed == earlyArm(id, v.b.tip) { return "branch.push.early" }
+            return seenTip(id, app) != nil ? "branch.push.moved" : next
         case "branch.push.queue": return next
         default: return nil
         }
@@ -61,14 +65,34 @@ enum BranchCommands {
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
-    /// What the runner holds while a branch's push, or its force, waits for the second press.
-    static func pushArm(_ id: String) -> String { "push \(id)" }
+    /// What the runner holds while a branch's push, or its force, waits for the second press. A push
+    /// readied names the commit that was on screen: the second press sends that commit or nothing.
+    static func pushArm(_ id: String, _ tip: String) -> String { "push \(id) @\(tip)" }
     static func forceArm(_ id: String) -> String { "force \(id)" }
-    static func earlyArm(_ id: String) -> String { "push early \(id)" }
+    static func earlyArm(_ id: String, _ tip: String) -> String { "push early \(id) @\(tip)" }
+
+    /// The commit a push readied on this branch was readied for, if one is waiting.
+    static func seenTip(_ id: String, _ app: AppModel) -> String? {
+        guard let a = app.runner.armed, a.hasPrefix("push \(id) @") || a.hasPrefix("push early \(id) @") else { return nil }
+        return a.components(separatedBy: " @").last
+    }
 
     /// Whether this branch has a push or a force waiting for its second press.
     static func isArmed(_ id: String, _ app: AppModel) -> Bool {
-        [pushArm(id), forceArm(id), earlyArm(id)].contains(app.runner.armed)
+        seenTip(id, app) != nil || app.runner.armed == forceArm(id)
+    }
+
+    /// What a branch that moved under a readied push says: the commits that arrived since (oldest
+    /// first, as the outline lists them), or that it was rewritten. Pure.
+    static func movedLine(saw: String, now: String, commits: [OutlineCommit], key: String) -> String {
+        let shas = commits.map(\.sha)
+        guard let from = shas.firstIndex(where: { $0.hasPrefix(saw) || saw.hasPrefix($0) }) else {
+            return "rewritten since you readied the push — now at \(now.prefix(7)) · \(key) again sends it"
+        }
+        let new = Array(commits[(from + 1)...])
+        guard let first = new.first else { return "moved since you readied the push — now at \(now.prefix(7)) · \(key) again sends it" }
+        let more = new.count > 1 ? " +\(new.count - 1) more" : ""
+        return "moved since you readied the push: \(first.short) \(first.subject)\(more) · \(key) again sends it"
     }
 
     /// A push is queued for green on a branch nothing else holds back (its Stand says so): Phil may
@@ -194,7 +218,7 @@ enum BranchCommands {
             write: { id, _ in
                 guard let v = m.branchView(id) else { return nil }
                 return Write(
-                    path: t.atRepo(v.b.repo, "/gates-waive"), body: ["branch": .string(v.b.name)],
+                    path: t.atRepo(v.b.repo, "/gates-waive"), body: ["branch": .string(v.b.name), "expectTip": .string(v.b.tip)],
                     settled: { true },
                     said: "gates waived for this code — p pushes it",
                     failed: "the waiver didn't take", alone: true)
@@ -236,34 +260,49 @@ enum BranchCommands {
             id: "branch.push.early.arm", title: "Ready a push before the gates answer (the next press waives them for this code and sends it)",
             scope: .branch, quiet: true,
             available: { id in m.branchView(id).map(canPushEarly) ?? false },
-            local: { id, _ in if let id { try app.runner.arm(earlyArm(id)) } }))
+            local: { id, _ in if let id, let v = m.branchView(id) { try app.runner.arm(earlyArm(id, v.b.tip)) } }))
         r.register(Command(
             id: "branch.push.early", title: "Send the readied push before the gates answer — the door records it as your call",
             scope: .branch, budget: .gitWrite, quiet: true,
-            available: { id in id.map { app.runner.armed == earlyArm($0) } == true && m.branchView(id).map(canPushEarly) == true },
+            available: { id in id.flatMap { i in m.branchView(i).map { app.runner.armed == earlyArm(i, $0.b.tip) } } == true && m.branchView(id).map(canPushEarly) == true },
             task: { id, _ in
                 guard let id, let v = m.branchView(id) else { return nil }
-                let w = await t.post(t.atRepo(v.b.repo, "/gates-waive"), ["branch": JSONValue.string(v.b.name)] as JSONObject, via: .key)
+                guard let saw = seenTip(id, app) else { return nil }
+                let w = await t.post(t.atRepo(v.b.repo, "/gates-waive"), ["branch": .string(v.b.name), "expectTip": .string(saw)] as JSONObject, via: .key)
+                if w.body?["moved"] == true { throw Refusal(w.body?["err"]?.string ?? "\(leaf(v.b.name)) moved since you looked") }
                 guard w.ok else { throw Refusal("\(leaf(v.b.name)) didn't push — the waiver didn't take\(w.err.map { " (\($0))" } ?? "")") }
-                try app.runner.arm(pushArm(id))
+                try app.runner.arm(pushArm(id, saw))
                 app.runner.dispatch("branch.push.confirm", via: .key, target: id)
                 return nil   // the push says its own line
             }))
         r.register(Command(
             id: "branch.push.arm", title: "Ready a push (the next press sends it)", scope: .branch, quiet: true,
             available: { id in m.branchView(id).map { ShipRules.canPush($0.b, $0.pr) } ?? false },
-            local: { id, _ in if let id { try app.runner.arm(pushArm(id)) } }))
+            local: { id, _ in if let id, let v = m.branchView(id) { try app.runner.arm(pushArm(id, v.b.tip)) } }))
+        r.register(Command(
+            id: "branch.push.moved", title: "Ready the push again for what the branch holds now, saying what arrived since", scope: .branch, quiet: true,
+            available: { id in id.flatMap { seenTip($0, app) } != nil },
+            local: { id, _ in
+                guard let id, let v = m.branchView(id), let saw = seenTip(id, app) else { return }
+                let early = app.runner.armed?.hasPrefix("push early ") == true
+                let line = movedLine(saw: saw, now: v.b.tip, commits: WordsState.of(app).shown[id]?.commits ?? [], key: app.registry.keyOf("branch.push"))
+                try app.runner.arm(early ? earlyArm(id, v.b.tip) : pushArm(id, v.b.tip))
+                app.runner.say(line)
+            }))
         r.register(Command(
             id: "branch.push.confirm", title: "Send the readied push", scope: .branch, budget: .gitWrite, v1: ["push-origin"], quiet: true,
-            available: { id in id.map { app.runner.armed == pushArm($0) } ?? false },
+            available: { id in id.flatMap { i in m.branchView(i).map { app.runner.armed == pushArm(i, $0.b.tip) } } ?? false },
             write: { id, _ in
-                guard let v = m.branchView(id) else { return nil }
+                guard let v = m.branchView(id), let saw = seenTip(id, app) else { return nil }
                 return Write(
                     ops: [Op(type: .branch, id: id, fields: ["pending": "pushing"])],
-                    path: t.atRepo(v.b.repo, "/push-origin"), body: ["branch": .string(v.b.name), "stay": true],
+                    path: t.atRepo(v.b.repo, "/push-origin"), body: ["branch": .string(v.b.name), "stay": true, "expectTip": .string(saw)],
                     settled: { s.table(Branch.self)[id]?.pushed == .synced },
                     said: v.pr.map { "pushed \(v.b.ahead) follow-up\(v.b.ahead == 1 ? "" : "s") onto #\($0.number)" },
-                    saidFrom: { body in body["already"] == true ? "origin already has this — nothing to push" : nil },
+                    saidFrom: { body in
+                        if body["moved"] == true { return "\(body["err"]?.string ?? "moved since you looked") · \(app.registry.keyOf("branch.push")) readies it again" }
+                        return body["already"] == true ? "origin already has this — nothing to push" : nil
+                    },
                     failed: "\(leaf(v.b.name)) didn't push",
                     answered: { ok, body in
                         // the children the push carried (P7) are said right after the push's own line

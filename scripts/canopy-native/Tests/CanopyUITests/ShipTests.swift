@@ -309,8 +309,8 @@ final class ShipStub: URLProtocol, @unchecked Sendable {
         a.keys.handle("p")
         #expect(a.runner.armed == nil)
         // a green branch with commits origin lacks arms on p, and p again would send it
-        try a.runner.arm(BranchCommands.pushArm(Self.branch))
-        #expect(a.registry.command("review.push")?.route?(Self.branch) == nil || a.runner.armed == BranchCommands.pushArm(Self.branch))
+        try a.runner.arm(BranchCommands.pushArm(Self.branch, a.store.view(Branch.self, Self.branch)?.tip ?? ""))
+        #expect(a.registry.command("review.push")?.route?(Self.branch) == nil || a.runner.armed == BranchCommands.pushArm(Self.branch, a.store.view(Branch.self, Self.branch)?.tip ?? ""))
     }
 
     @Test func goToThePROpensIt() throws {

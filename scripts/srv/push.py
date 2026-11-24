@@ -17,7 +17,7 @@ import threading
 from urllib.parse import quote, parse_qs
 
 from . import rebaseguard
-from . import ctx, stage, sync, repostate, shellout, stackcfg, gate_queue, runs
+from . import ctx, stage, sync, repostate, seen, shellout, stackcfg, gate_queue, runs
 from . import actor, verdicts   # own line: Phil-only checks + the waiver
 from . import openprs
 
@@ -927,15 +927,20 @@ def force_origin(req, raw):
 
 def push_origin(req, raw):
     d = json.loads(raw or "{}")
-    res = push_now(d.get("branch", ""), stay=bool(d.get("stay")))
+    branch = d.get("branch", "")
+    refused = seen.moved(branch, d.get("expectTip", ""))
+    if refused:
+        return req._send(200 if refused.get("moved") else 400, json.dumps(refused))
+    res = push_now(branch, stay=bool(d.get("stay")), tip=d["expectTip"])
     status = res.pop("_status", 200)
     req._send(status, json.dumps(res))
 
 
-def push_now(branch, stay=False):
+def push_now(branch, stay=False, tip=None):
     """The door p goes through, as a function: every ward recomputed, a plain push from the
     branch's own worktree, its children carried. A press (POST /push-origin) and a push Phil
-    queued for green (srv/pushintent.py) are the same act. Answers what /push-origin sends."""
+    queued for green (srv/pushintent.py) are the same act. Answers what /push-origin sends.
+    tip pins the press to the commit Phil saw: exactly that commit goes out, or nothing does."""
     v = _origin_verdict(branch)
     if v is None:
         return {"_status": 400, "ok": False, "err": "no such branch"}
@@ -964,7 +969,14 @@ def push_now(branch, stay=False):
     # the branch's own worktree so the hook checks the tree that went green; no /checkout-to-main
     # relocation. Falls back to the pinned cwd when the branch is checked out nowhere.
     wt = _branch_worktree(branch)
-    r = ctx.run((["git", "-C", wt] if wt else ["git"]) + ["push", "origin", branch])
+    if tip:
+        # the wards read the branch as it stood a moment ago — refuse if it moved since, and push
+        # the commit itself, so a commit landing during the push stays local
+        late = seen.moved(branch, tip)
+        if late:
+            return late
+        tip = ctx.run(["git", "rev-parse", "--verify", "-q", f"{tip}^{{commit}}"]).stdout.strip()
+    r = ctx.run((["git", "-C", wt] if wt else ["git"]) + ["push", "origin", f"{tip}:refs/heads/{branch}" if tip else branch])
     ok = r.returncode == 0
     carried = []
     if ok:

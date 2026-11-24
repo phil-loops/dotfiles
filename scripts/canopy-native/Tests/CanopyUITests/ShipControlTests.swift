@@ -84,7 +84,7 @@ import Testing
         #expect(ReviewCommands.pushRoute(app, branch.id) == "branch.push.arm")
         #expect(ShipControlState.push(route: ReviewCommands.pushRoute(app, branch.id), situation: nil).enabled)
         app.runner.dispatch("review.push", via: .click, target: branch.id)
-        #expect(app.runner.armed == BranchCommands.pushArm(branch.id))
+        #expect(app.runner.armed == BranchCommands.pushArm(branch.id, branch.tip))
         #expect(ReviewCommands.pushRoute(app, branch.id) == "branch.push.confirm")
         #expect(ShipStub.posts(port).isEmpty)
     }

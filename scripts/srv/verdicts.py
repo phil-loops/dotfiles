@@ -165,6 +165,11 @@ def waived(branch, tree=None):
 def waive(req, raw):
     d = json.loads(raw or "{}")
     branch = d.get("branch", "")
+    from . import seen
+    refused = seen.moved(branch, d.get("expectTip", ""))
+    if refused:
+        # a waiver covers the code Phil saw — never a commit that landed after he looked
+        return req._send(200 if refused.get("moved") else 400, json.dumps(refused))
     tree = _tree(branch) if branch else ""
     if not tree:
         return req._send(404, json.dumps({"ok": False, "err": f"no branch {branch or '(none)'}"}))

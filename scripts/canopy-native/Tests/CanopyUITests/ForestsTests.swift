@@ -548,14 +548,15 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = f
         #expect(a.selected == "b:r:s")
         #expect(BranchCommands.pushRoute("r:s", a) == "branch.push.arm")
         a.keys.handle("p")
-        #expect(a.runner.armed == "push r:s")
+        let tip = a.store.view(Branch.self, "r:s")!.tip
+        #expect(a.runner.armed == "push r:s @\(tip)")
         #expect(BranchCommands.pushRoute("r:s", a) == "branch.push.confirm")
         a.keys.handle("esc")
         #expect(a.runner.armed == nil)
         #expect(a.registry.command("branch.push.confirm")!.available!("r:s") == false, "an unarmed confirm sends nothing")
-        try! a.runner.arm("push r:s")
+        try! a.runner.arm("push r:s @\(tip)")
         let sent = try! a.registry.command("branch.push.confirm")!.write!("r:s", nil)!
-        #expect(sent.path == "/r/push-origin" && sent.body == ["branch": "s", "stay": true])
+        #expect(sent.path == "/r/push-origin" && sent.body == ["branch": "s", "stay": true, "expectTip": .string(tip)], "the push names the commit that was on screen")
         // a branch with only the gates in the way: p queues the push for green (and the server starts them)
         #expect(BranchCommands.pushRoute("r:c", a) == "branch.push.queue")
     }
@@ -604,7 +605,7 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = f
         #expect(BranchCommands.pushRoute("r:c", a) == "branch.push.early.arm", "queued: p offers to ship it now")
         #expect(a.registry.command("branch.push.early")!.available!("r:c") == false, "nothing ships without the gates before a second press")
         a.runner.dispatch("branch.push", via: .key, target: "r:c")
-        #expect(a.runner.armed == "push early r:c" && BranchCommands.isArmed("r:c", a))
+        #expect(a.runner.armed == "push early r:c @\(a.store.view(Branch.self, "r:c")!.tip)" && BranchCommands.isArmed("r:c", a))
         #expect(BranchCommands.pushRoute("r:c", a) == "branch.push.early")
         #expect(a.registry.command("branch.push.early")!.available!("r:c"))
         a.keys.handle("esc")
@@ -704,11 +705,42 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = f
         #expect(a.runner.armed == nil && a.router.surface.id == "review", "ret goes in; p is the push")
     }
 
+    /// Phil 2026-11-24: a commit that lands between readying a push and sending it never goes out
+    /// unseen — the next press re-readies for the new tip and names what arrived; the one after sends it.
+    @Test func aPushReadiedForOneCommitNeverSendsAnother() throws {
+        let a = world()
+        a.setCursor("p:r:solo"); a.keys.handle("ret")
+        a.keys.handle("p")
+        let saw = a.store.view(Branch.self, "r:s")!.tip
+        #expect(BranchCommands.seenTip("r:s", a) == saw)
+        var obj = try #require(a.store.rawView("branch", "r:s"))
+        obj["tip"] = "feedbeef00000000000000000000000000000000"
+        #expect(a.store.applyPatch(try Patch.make(domain: Domain.git, version: (a.store.versions[Domain.git] ?? 0) + 1,
+                                                  upserts: ["branch": ["r:s": .object(obj)]])) == .ok)
+        #expect(BranchCommands.pushRoute("r:s", a) == "branch.push.moved", "the readied push was for another commit")
+        #expect(a.registry.command("branch.push.confirm")!.available!("r:s") == false, "nothing sends for a commit not on screen")
+        a.runner.dispatch("branch.push", via: .key, target: "r:s")
+        #expect(a.runner.armed == "push r:s @feedbeef00000000000000000000000000000000", "the press re-readies for what's there now")
+        #expect(a.runner.note?.contains("again sends it") == true, "\(a.runner.note ?? "")")
+        #expect(BranchCommands.pushRoute("r:s", a) == "branch.push.confirm", "the next press sends what was just named")
+    }
+
+    @Test func movedLineNamesWhatArrived() {
+        func c(_ sha: String, _ subject: String) -> OutlineCommit {
+            OutlineCommit(sha: sha, short: String(sha.prefix(7)), subject: subject, body: "", author: "", date: "", pushed: false, carried: false, locked: "")
+        }
+        let cs = [c("aaaaaaaa1", "first"), c("bbbbbbbb2", "fix the import"), c("cccccccc3", "tidy")]
+        #expect(BranchCommands.movedLine(saw: "aaaaaaaa1", now: "cccccccc3", commits: cs, key: "p")
+                == "moved since you readied the push: bbbbbbb fix the import +1 more · p again sends it")
+        #expect(BranchCommands.movedLine(saw: "zzzz", now: "cccccccc3", commits: cs, key: "p")
+                == "rewritten since you readied the push — now at ccccccc · p again sends it")
+    }
+
     @Test func anArmedPushLastsOneKey() {
         let a = world()
         a.setCursor("p:r:solo"); a.keys.handle("ret")
         a.keys.handle("p")
-        #expect(a.runner.armed == "push r:s")
+        #expect(a.runner.armed == "push r:s @\(a.store.view(Branch.self, "r:s")!.tip)")
         a.keys.handle("k")
         #expect(a.runner.armed == nil, "moving drops it")
         a.keys.handle("p")
