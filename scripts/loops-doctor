@@ -255,7 +255,8 @@ check_jobs_consumer() {
   if [ "$health" = "200" ]; then
     row "jobs worker" "$(red WEDGED)" "backlog $d2 not draining, yet :4000 says ok (healthcheck lies)"
   else
-    row "jobs worker" "$(red "not consuming")" "backlog $d2 not draining · :4000 → $health"
+    if [ "$health" = "000" ]; then why="its health check on :4000 gets no answer"; else why=":4000 answers $health"; fi
+    row "jobs worker" "$(red "not consuming")" "$d2 jobs waiting and none taken · $why"
   fi
   return 1
 }
