@@ -66,8 +66,14 @@ class Git:
         return bool(self._run(repo, "config", "--get", f"branch.{branch}.stack-project")[1])
 
     def default_branch(self, repo):
-        rc, out = self._run(repo, "symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD")
-        return out.split("/", 1)[1] if rc == 0 and "/" in out else "main"
+        key = (repo, "default")
+        if key not in self.memo:
+            try:
+                with open(os.path.join(repo, ".git", "refs", "remotes", "origin", "HEAD")) as f:
+                    self.memo[key] = f.read().strip().removeprefix("ref: refs/remotes/origin/") or "main"
+            except OSError:
+                self.memo[key] = "main"
+        return self.memo[key]
 
     def adds_commits(self, repo, old, new):
         return old != new and self._run(repo, "merge-base", "--is-ancestor", old, new)[0] == 0
@@ -102,10 +108,11 @@ def tmux(*args):
 
 def tmux_state():
     """(server pid, the client's session, the client's window id, panes) or None without a server."""
-    head = tmux("display-message", "-p", "#{pid}\t#{session_name}\t#{window_id}")
-    listing = tmux("list-panes", "-a", "-F", "#{pane_id}\t#{session_name}\t#{window_index}\t#{pane_index}\t#{window_id}")
-    if not head or listing is None:
+    out = tmux("display-message", "-p", "#{pid}\t#{session_name}\t#{window_id}", ";",
+               "list-panes", "-a", "-F", "#{pane_id}\t#{session_name}\t#{window_index}\t#{pane_index}\t#{window_id}")
+    if not out:
         return None
+    head, _, listing = out.partition("\n")
     server, session, window = head.split("\t")
     panes = [dict(zip(("pane", "session", "window", "index", "window_id"), line.split("\t"))) for line in listing.splitlines()]
     return server, session, window, panes
@@ -181,15 +188,17 @@ def target(all_rows, prefer=(), worked=(), last=None):
     return next((pane for pane in [*prefer, *worked, last] if pane in here), None)
 
 
-def to_canopy(pane, state, all_rows):
+def to_canopy(pane, state, moves, git):
+    """One pane's branch is all this asks git about, and the link goes straight to Show."""
     remember(state[0], pane)
-    row = next((r for r in all_rows if r["pane"] == pane), None)
-    route = f"/v2/b/{row['repo']}/{row['branch']}" if row and row["branch"] else None
+    move = working_on([m for m in moves if m["pane"] == pane], git).get(pane)
+    if move:
+        os.execvp("open", ["open", f"canopy://v2/b/{os.path.basename(move['repo'])}/{move['branch']}"])
     canopy = os.path.join(os.path.dirname(os.path.abspath(__file__)), "canopy")
-    os.execv(canopy, [canopy, "--focus"] + ([route] if route else []))
+    os.execv(canopy, [canopy, "--focus"])
 
 
-def to_tmux(args, state, all_rows, moves, git):
+def to_tmux(args, state, moves, git):
     dry = "--dry-run" in args
     args = [a for a in args if a != "--dry-run"]
     prefer = []
@@ -200,8 +209,10 @@ def to_tmux(args, state, all_rows, moves, git):
         print(__doc__, file=sys.stderr)
         return 2
     repo, branch = args if args else (None, None)
-    pane = target(all_rows, prefer, workers(moves, git, repo, branch) if branch else (), remembered(state[0]))
-    commands = [["tmux", verb, "-t", pane] for verb in ("select-window", "select-pane", "switch-client")] if pane else []
+    here = [{"pane": p["pane"]} for p in state[3]]
+    # a chat's pane needs no question of git; the branch's workers are only asked for when none is there
+    pane = target(here, prefer) or target(here, (), workers(moves, git, repo, branch) if branch else (), remembered(state[0]))
+    commands = [["tmux", "select-window", "-t", pane, ";", "select-pane", "-t", pane, ";", "switch-client", "-t", pane]] if pane else []
     commands.append(["open", "-a", "Terminal"])
     for command in commands:
         if dry:
@@ -228,14 +239,14 @@ def main():
         print("pane-branch: no tmux server", file=sys.stderr)
         return 1
     moves, git = read_moves(state[0]), Git()
+    if args[:1] == ["canopy"] and len(args) == 2:
+        to_canopy(args[1], state, moves, git)
+    if args[:1] == ["tmux"]:
+        return to_tmux(args[1:], state, moves, git)
     all_rows = rows(state, moves, git)
     if args == ["--json"]:
         print(json.dumps(all_rows))
         return 0
-    if args[:1] == ["canopy"] and len(args) == 2:
-        to_canopy(args[1], state, all_rows)
-    if args[:1] == ["tmux"]:
-        return to_tmux(args[1:], state, all_rows, moves, git)
     if not args:
         now = time.time()
         for r in all_rows:
