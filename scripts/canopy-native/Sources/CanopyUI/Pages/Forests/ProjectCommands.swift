@@ -254,7 +254,7 @@ enum ProjectCommands {
                 // `-` is deterministic (NAV.md §4.1): Forests, with the cursor on this forest
                 let pid = m.pageProject
                 if let pid, s.view(Project.self, pid)?.state == .archive || m.shelved.contains(pid) { m.showArchive = true }
-                if let pid, let f = m.forests()[pid], !m.liveLocal(f) { m.showParked = true }
+                if let pid, let f = m.forests()[pid], !m.yours(f) { m.showParked = true }
                 app.go(.forests)
                 if let pid { app.setCursor(RowKey.project(pid)) }
             }))
@@ -265,7 +265,7 @@ enum ProjectCommands {
                 m.readyOnly.toggle()
             }))
         r.register(Command(
-            id: "archive.toggle", title: "Show or hide everything else: local work nothing is on, and the archive", scope: .forests, leader: LocalKey(",a"), label: "the rest",
+            id: "archive.toggle", title: "Show or hide everything else: work that isn't your move, and the archive", scope: .forests, leader: LocalKey(",a"), label: "the rest",
             available: { _ in !m.readyOnly },
             local: { _, _ in
                 m.showArchive.toggle()

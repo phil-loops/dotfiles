@@ -162,10 +162,8 @@ public final class ForestModel {
 
     // ── ui.ts ──
     public var showArchive = false
-    /// Whether the home also lists local work nothing is on (`liveLocal`); the archive's key shows both.
+    /// Whether the home also lists what asks nothing of Phil (`yours`); the archive's key shows both.
     public var showParked = false
-    /// The branches tmux panes are working on, "repo\tbranch" (PaneBranches): a pane's work is live whatever runs in it.
-    public var paneWork: Set<String> = []
     /// the home's chats-on-no-branch line, opened into its list
     public var showLooseChats = false
     /// closed forests shown in the archive fold (display only — their state stays until archived)
@@ -392,7 +390,7 @@ public final class ForestModel {
                 guard let fv = f[p.id] else { continue }
                 let live = fv.branches.filter { !$0.st.done && $0.b.role != "proof" }
                 if !live.isEmpty && live.allSatisfy({ carded.contains($0.b.id) }) { continue }
-                if !showParked && !liveLocal(fv) { continue }
+                if !showParked && !yours(fv) { continue }
                 by[verb(fv), default: []].append(.forest(p))
             }
         }
@@ -401,16 +399,15 @@ public final class ForestModel {
         return (cards, sections)
     }
 
-    /// Local work that is live now, the only forests the home lists beside the PR cards: one in the focus lane, one a
-    /// chat is on, or one a tmux pane is working on. The rest is parked: nothing is lost, it shows with the archive.
-    func liveLocal(_ f: ForestView) -> Bool {
-        f.p.state == .focus || !WorkContext.onForest(f.branches).isEmpty || f.branches.contains { paneWork.contains("\($0.b.repo)\t\($0.b.name)") }
-    }
+    /// Whether the forest's next step is Phil's: the only local work the home lists beside the PR cards. A forest an
+    /// agent or a teammate holds, however busy, asks nothing of him; it shows with the archive, and comes back by
+    /// itself when its step becomes his.
+    func yours(_ f: ForestView) -> Bool { verb(f).isYours }
 
-    /// Whether any listed forest is parked: what the archive's key has to show beyond the archive itself.
+    /// Whether any listed forest is someone else's move: what the archive's key has to show beyond the archive itself.
     func hasParked() -> Bool {
         let f = forests(), p = projects()
-        return (p.focus + p.workbench).compactMap { f[$0.id] }.contains { !$0.closed && !liveLocal($0) }
+        return (p.focus + p.workbench).compactMap { f[$0.id] }.contains { !$0.closed && !yours($0) }
     }
 
     /// The branch a forest's line is about: its first live branch at the forest's move.

@@ -54,8 +54,6 @@ final class PaneBranches {
     /// the app the tmux client runs in (Terminal, Ghostty, …), as `pane-branch host` last said; nil until it has
     @ObservationIgnored var host: pid_t?
 
-    /// the home reads which branches panes are working on from here
-    @ObservationIgnored weak var model: ForestModel?
     private(set) var rows: [Row] = []
     @ObservationIgnored private(set) var written: [String: String] = [:]
     @ObservationIgnored private var task: Task<Void, Never>?
@@ -116,7 +114,8 @@ final class PaneBranches {
     }
 
     /// What the way to tmux asks for: the panes of the chats on what's in front (the page's branch, else the branch or
-    /// forest under the cursor), then that branch by name so a pane that committed there is found.
+    /// forest under the cursor, a forest also by the panes working on its branches), then that branch by name so a
+    /// pane that committed there is found.
     static func wayBack(_ app: AppModel) -> [String] {
         let m = app.forestModel
         var named: (repo: String, branch: String)?, views: [BranchView] = []
@@ -129,7 +128,11 @@ final class PaneBranches {
         } else if let f = RowKey.id(app.selected, "p").flatMap({ m.forests()[$0] }) {
             views = f.branches
         }
-        let prefer = WorkContext.onForest(views).compactMap(\.pane).flatMap { ["--prefer", $0] }
+        // a forest's row names no one branch: any pane working on one of its branches will do
+        let here = Set(views.map { "\($0.b.repo)\t\($0.b.name)" })
+        let working = named == nil ? PaneBranches.of(app).rows.filter { r in r.branch.map { here.contains("\(r.repo ?? "")\t\($0)") } == true }.map(\.pane) : []
+        var seen = Set<String>()
+        let prefer = (WorkContext.onForest(views).compactMap(\.pane) + working).filter { seen.insert($0).inserted }.flatMap { ["--prefer", $0] }
         return ["tmux"] + prefer + (named.map { [$0.repo, $0.branch] } ?? [])
     }
 
@@ -149,8 +152,6 @@ final class PaneBranches {
     /// Takes every pane's answer, and brings the borders to it, touching only the panes whose branch changed.
     func take(_ rows: [Row]) {
         if rows != self.rows { self.rows = rows }
-        let work = Set(rows.compactMap { r in r.branch.map { "\(r.repo ?? "")\t\($0)" } })
-        if let model, model.paneWork != work { model.paneWork = work }
         var want: [String: String] = [:]
         for r in rows { if let b = r.branch { want[r.pane] = leaf(b) } }
         for (pane, name) in want where written[pane] != name { tmux(["set-option", "-p", "-t", pane, "@pane_branch", name]) }
@@ -189,7 +190,6 @@ final class PaneBranches {
     }
 
     static func install(_ app: AppModel) {
-        PaneBranches.of(app).model = app.forestModel
         app.registry.register(Command(id: "tmux.switch", title: "Go to the tmux pane working on this branch", scope: .global,
                                       verb: .tmuxSwitch, label: "tmux",
                                       local: { [weak app] _, _ in

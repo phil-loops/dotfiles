@@ -131,7 +131,8 @@ struct WorkInProgressView: View {
 
     /// The work pane's rows: each in-progress item, then the one line for chats on no branch.
     @MainActor static func rows(_ app: AppModel) -> [String] {
-        items(app).map { RowKey.todo($0.id) } + (noDot(app).isEmpty ? [] : [RowKey.looseChats])
+        guard app.forestModel.showParked else { return [] }
+        return items(app).map { RowKey.todo($0.id) } + (noDot(app).isEmpty ? [] : [RowKey.looseChats])
     }
 
     /// The rest: work no listed branch carries, so it keeps its own line at the top.
@@ -141,7 +142,8 @@ struct WorkInProgressView: View {
     }
 
     @MainActor static func visible(_ app: AppModel) -> Bool {
-        !items(app).isEmpty || !noDot(app).isEmpty || app.focusedPane["forests"] == "work"
+        // work under way asks nothing of Phil: it shows with everything else
+        app.forestModel.showParked && (!items(app).isEmpty || !noDot(app).isEmpty || app.focusedPane["forests"] == "work")
     }
 
     var body: some View {
