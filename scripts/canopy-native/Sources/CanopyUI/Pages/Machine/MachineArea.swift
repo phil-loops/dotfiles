@@ -340,7 +340,8 @@ private struct QueueSection: View {
             if let q = m.queue {
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
                     SectionHead(text: "queue")
-                    Dot(color: q.warnings.isEmpty ? (q.holders.isEmpty ? theme.inkFaint : theme.add) : theme.ember, breathe: !q.warnings.isEmpty)
+                    let uneasy = !q.warnings.isEmpty || !q.outside.isEmpty
+                    Dot(color: uneasy ? theme.ember : (q.holders.isEmpty ? theme.inkFaint : theme.add), breathe: uneasy)
                     Text(QueueText.headline(q)).foregroundStyle(theme.inkDim)
                     Spacer()
                 }

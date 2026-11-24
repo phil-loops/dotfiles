@@ -13,7 +13,7 @@ enum MachineFixtures {
  "waiters": [{"id": "t3", "pid": 300, "cls": "gates", "batch": false, "cmd": "stack-gates --branch other", "cwd": "/w/other", "age": 60, "state": "waiting", "cpu": 0.0, "rssMb": 5, "gate": {"branch": "other", "step": "1st in line"}, "idle": false}],
  "gates": [{"branch": "other", "step": "1st in line", "age": 60}],
  "outside": [{"pid": 400, "name": "seed-gen", "cpu": 300.0, "rssMb": 1800, "age": 120, "command": "/u/bin/seed-gen --sync /w/warm"}],
- "warnings": ["python3 eval.py has held a slot 19h 0m with its tree idle — holding, not working", "seed-gen (pid 400) runs outside the queue"]}
+ "warnings": ["python3 eval.py has held a slot 19h 0m with its tree idle — holding, not working"]}
 """#
 
     static let footprint = #"""
