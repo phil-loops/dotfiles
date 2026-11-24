@@ -25,11 +25,13 @@ def _size(value):
 
 
 def state(key):
-    """"hit", "expired" (stored but past _MAX_AGE) or "absent" — what get() would find for key now."""
+    """"hit", "building" (a get() for it is running — this one joins it), "expired" (stored but
+    past _MAX_AGE) or "absent" — what get() would find for key now."""
     with _LOCK:
         hit = _ENTRIES.get(key)
+        building = key in _FLIGHTS
     if hit is None:
-        return "absent"
+        return "building" if building else "absent"
     return "hit" if time.monotonic() - hit[0] < _MAX_AGE else "expired"
 
 

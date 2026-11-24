@@ -24,6 +24,9 @@ check("both moved", why("absent", ("r1", "d1"), "r2", "d2") == "refs + dirt move
 check("same key, nothing stored", why("absent", ("r1", "d1"), "r1", "d1") == "evicted or never stored")
 
 check("memo: absent before a build", memo.state(("t", 1)) == "absent")
+memo._FLIGHTS[("t", 2)] = object()
+check("memo: a read that joins a running build isn't a miss", memo.state(("t", 2)) == "building")
+memo._FLIGHTS.pop(("t", 2))
 memo.get(("t", 1), lambda: "v")
 check("memo: hit after", memo.state(("t", 1)) == "hit")
 memo._ENTRIES[("t", 1)] = (time.monotonic() - memo._MAX_AGE - 1, "v", 1)

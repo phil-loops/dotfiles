@@ -321,7 +321,7 @@ def node(req, u):
     key = ("node", ctx.repo_cwd(), branch, base, hide_ws, rk, dirt)
     seen = (ctx.repo_cwd(), branch, base, hide_ws)
     found = memo.state(key)
-    if found != "hit":
+    if found not in ("hit", "building"):
         ctx.log(f"node-miss {branch} — {_node_miss_why(found, _NODE_SEEN.get(seen), rk, dirt)}")
     _NODE_SEEN[seen] = (rk, dirt)
 
