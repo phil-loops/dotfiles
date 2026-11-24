@@ -54,12 +54,18 @@ struct ForestsPage: View {
                                     Rectangle().fill(theme.vellumEdge).frame(height: 1)
                                         .padding(.leading, HomeColumns.edge - HomeColumns.card).padding(.trailing, 16).padding(.bottom, 26)
                                 }
-                                ForEach(home.sections, id: \.verb) { sec in
+                                ForEach(home.sections.filter(\.verb.isYours), id: \.verb) { sec in
                                     if sec.verb == .push {
                                         if !beside { PushChips(items: sec.items, fs: fs, cursor: cursor, selection: selection) }
                                     } else {
-                                        HomeGroup(verb: sec.verb, items: sec.items, fs: fs, working: working, nameWidth: nameWidth, cursor: cursor, selection: selection, carded: carded)
+                                        HomeGroup(head: sec.verb.title, gold: true, items: sec.items, fs: fs, working: working, nameWidth: nameWidth, cursor: cursor, selection: selection, carded: carded)
                                     }
+                                }
+                                // the forests that ask nothing of you are one list, in the order others hold → waiting → landed:
+                                // each row's own step already says which, so the list carries no headings for it
+                                let rest = home.sections.filter { !$0.verb.isYours }.flatMap(\.items)
+                                if !rest.isEmpty {
+                                    HomeGroup(head: "forests", gold: false, items: rest, fs: fs, working: working, nameWidth: nameWidth, cursor: cursor, selection: selection, carded: carded)
                                 }
                                 // what needs nothing from you sits below what does (round 29, P5)
                                 WorkInProgressView()
@@ -171,7 +177,8 @@ struct ForestsPage: View {
 /// One group of the home (rounds 30–31): its verb as the head, then each item once, every row in the one shape `HomeLine` draws.
 private struct HomeGroup: View {
     @Environment(AppModel.self) private var app
-    let verb: HomeVerb
+    let head: String
+    let gold: Bool
     let items: [HomeItem]
     let fs: [String: ForestView]
     let working: [String: [TodoItem]]
@@ -184,7 +191,7 @@ private struct HomeGroup: View {
     var body: some View {
         let m = app.forestModel
         VStack(alignment: .leading, spacing: 0) {
-            SectionHead(text: verb.title, gold: verb.isYours).padding(.leading, 44).padding(.bottom, 6)
+            SectionHead(text: head, gold: gold).padding(.leading, 44).padding(.bottom, 6)
             ForEach(items, id: \.key) { item in
                 switch item {
                 case .forest(let p):
@@ -197,7 +204,7 @@ private struct HomeGroup: View {
                         }
                     }
                 case .myPR(let p):
-                    HomeLine(key: item.key, nameWidth: nameWidth, cursor: cursor, selection: selection, yours: verb.isYours,
+                    HomeLine(key: item.key, nameWidth: nameWidth, cursor: cursor, selection: selection, yours: gold,
                              name: p.local ? p.head : "#\(p.number)", line: p.title, pr: PRCell(numbers: [p.number], state: PRState.of(p), signals: m.prSignals[p.number]),
                              step: m.openPRRows().first { $0.mine?.number == p.number }?.says ?? "")
                 case .review(let r):
@@ -271,7 +278,7 @@ private struct PRCards: View {
                 Spacer(minLength: 8)
                 Text(verbatim: "#\(r.number)").font(Theme.text(13, weight: .medium)).monospacedDigit().foregroundStyle(here ? theme.goldLeaf : theme.inkDim)
             }
-            Text(verbatim: r.title).font(Theme.text(14)).foregroundStyle(theme.ink).lineLimit(2, reservesSpace: true)
+            Text(verbatim: r.title).font(Theme.text(14)).foregroundStyle(theme.ink).lineLimit(2)
             HStack(alignment: .firstTextBaseline, spacing: 9) {
                 Text(verbatim: r.author).font(Theme.text(11)).foregroundStyle(theme.inkDim)
                 Text(verbatim: r.imported ? "loaded" : "on GitHub").font(Theme.text(11)).foregroundStyle(theme.inkFaint)
@@ -300,12 +307,13 @@ private struct PRCards: View {
                 Spacer(minLength: 8)
                 Text(verbatim: "#\(r.number)").font(Theme.text(13, weight: .medium)).monospacedDigit().foregroundStyle(here ? theme.goldLeaf : theme.inkDim)
             }
-            Text(verbatim: r.title).font(Theme.text(14)).foregroundStyle(theme.ink).lineLimit(2, reservesSpace: true)
+            Text(verbatim: r.title).font(Theme.text(14)).foregroundStyle(theme.ink).lineLimit(2)
             HStack(alignment: .firstTextBaseline, spacing: 9) {
-                if let state { Text(verbatim: state.word).font(Theme.text(11)).foregroundStyle(PRCell.color(state.tone, theme)) }
-                PRSignalStrip(signals: r.signals)
+                // the card's verb already says GitHub's state, except when the verb is about its parent ("after #12")
+                if let state, ask.word.hasPrefix("after ") { Text(verbatim: state.word).font(Theme.text(11)).foregroundStyle(PRCell.color(state.tone, theme)) }
+                if let signals = r.signals, !PRSignalStrip.marks(signals).isEmpty { PRSignalStrip(signals: signals) }
+                Text(verbatim: r.place).font(Theme.text(11)).foregroundStyle(theme.inkFaint).lineLimit(1)
             }
-            Text(verbatim: r.place).font(Theme.text(11)).foregroundStyle(theme.inkFaint).lineLimit(1)
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -336,7 +344,7 @@ private struct PushChips: View {
             if case .forest(let p) = item, let f = fs[p.id] { return (item.key, f) }
             return nil
         }
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 SectionHead(text: "push", gold: true)
                 let green = app.forestModel.greenPushes()
@@ -348,13 +356,13 @@ private struct PushChips: View {
                 }
             }
             .padding(.leading, inColumn ? HomeColumns.card : 44)
-            ChipFlow(spacing: 8) {
+            // names in a run, not boxes: the least urgent thing on the page reads as one quiet sentence
+            ChipFlow(spacing: 2) {
                 ForEach(forests, id: \.key) { c in
                     let here = cursor == c.key
-                    Text(verbatim: c.f.p.name).font(Theme.text(13, weight: .medium)).foregroundStyle(here ? theme.goldLeaf : theme.ink)
-                    .padding(.horizontal, 10).padding(.vertical, 5)
-                    .background(RoundedRectangle(cornerRadius: 6).fill(here ? theme.goldLeaf.opacity(0.14) : theme.vellumRaise))
-                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(here ? theme.goldLeaf.opacity(0.6) : theme.vellumEdge, lineWidth: 1))
+                    Text(verbatim: c.f.p.name).font(Theme.text(13)).foregroundStyle(here ? theme.goldLeaf : theme.inkDim)
+                    .padding(.horizontal, 6).padding(.vertical, 3)
+                    .background(RoundedRectangle(cornerRadius: 5).fill(here ? theme.goldLeaf.opacity(0.14) : .clear))
                     .contentShape(Rectangle())
                     .onTapGesture { app.runner.dispatch("cursor.set", via: .click, target: c.key) }
                     .labelTarget(pane: "main", key: c.key)
@@ -362,7 +370,7 @@ private struct PushChips: View {
                     .id(c.key)
                 }
             }
-            .padding(.leading, inColumn ? 0 : HomeColumns.edge - HomeColumns.card).padding(.trailing, inColumn ? 0 : 16)
+            .padding(.leading, (inColumn ? HomeColumns.card : HomeColumns.edge) - 6).padding(.trailing, inColumn ? 0 : 16)
         }
         .padding(.bottom, inColumn ? 0 : HomeColumns.gap)
     }
