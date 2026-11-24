@@ -21,3 +21,7 @@ scripts/gh-to-nvim-key.pem
 # claude.ai skill-sync buckets and their trash — machine-written, re-synced on every launch
 .claude/skills/synced/
 .claude/skills/.trash/
+
+# Show decks are working data (research, customer-derived reviews), never repo content.
+# They live in ~/.local/share/show; this path is only a compat symlink to it.
+/show
