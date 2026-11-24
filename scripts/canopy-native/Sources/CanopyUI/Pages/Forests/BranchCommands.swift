@@ -29,6 +29,14 @@ enum BranchCommands {
         }
     }
 
+    /// Why `p` has no route, with the branch's next step — so the press never reads as a dead key.
+    static func noPushWhy(_ id: String?, _ app: AppModel) -> String? {
+        guard let id, let v = app.forestModel.branchView(id) else { return nil }
+        let next = ShipRules.says(v.st, v.b, v.pr)
+        if v.b.pushed == .synced { return "nothing to push — origin has this · \(next)" }
+        return "nothing to push · \(next)"
+    }
+
     /// `p` while the gates run: put the run next when anything waits ahead of it — otherwise the
     /// press moves nothing, and `p` has no route until the gates answer.
     static func runningRoute(_ id: String, _ app: AppModel) -> String? {
@@ -88,6 +96,7 @@ enum BranchCommands {
 
         r.register(Command(
             id: "branch.push", title: "Push to origin", scope: .branch, verb: .push, label: "push",
+            unavailable: { id in noPushWhy(id, app) },
             route: { id in pushRoute(id, app).map { RouteTo($0, target: id) } }))
 
         r.register(Command(id: "branch.proof", title: "A proof branch never pushes — it rides the forest for its run", scope: .branch, quiet: true,

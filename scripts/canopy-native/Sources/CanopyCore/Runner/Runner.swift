@@ -136,7 +136,7 @@ public final class Runner {
     }
 
     /// `explained`: a refusal already said why, so the key's "nothing here" doesn't cover it.
-    private func echo(_ id: String, _ via: Via, _ ok: Bool, explained: Bool = false) {
+    private func echo(_ id: String, _ via: Via, _ ok: Bool, explained: Bool = false, why: String? = nil) {
         guard via == .key else { return }
         let at = Date()
         fired = (id, ok, at)
@@ -145,7 +145,9 @@ public final class Runner {
         scheduler.after(ok ? 0.6 : 1.4) { [weak self] in
             if self?.firedGen == g { self?.fired = nil }
         }
-        if !ok && !explained { say("\(glyph(registry.command(id)?.keys.first ?? "")) · nothing here") }
+        guard !ok && !explained else { return }
+        let key = glyph(registry.command(id)?.keys.first ?? "")
+        say("\(key) · \(why ?? "nothing here")")
     }
 
     /// Run a registered command. Never awaited by callers — the UI has already moved.
@@ -177,7 +179,7 @@ public final class Runner {
                 dispatch(next.id, via: via, target: next.target ?? explicit, arg: next.arg ?? arg, undoing: undoing, from: named)
             } else {
                 armed = nil
-                echo(named, via, false)
+                echo(named, via, false, why: cmd.unavailable?(explicit ?? context?.target(for: cmd.scope)))
             }
             return
         }
@@ -189,7 +191,7 @@ public final class Runner {
         }
         let t0 = Date()
         let target = explicit ?? context?.target(for: cmd.scope)
-        if let available = cmd.available, !available(target) { return echo(named, via, false) }
+        if let available = cmd.available, !available(target) { return echo(named, via, false, why: cmd.unavailable?(target)) }
         if cmd.recordsJump { context?.willJump(id) }
         onRun?(id)
         var base: JSONObject = ["type": "cmd", "id": .string(id), "budget": .string(cmd.budget.rawValue), "via": .string(via.rawValue)]

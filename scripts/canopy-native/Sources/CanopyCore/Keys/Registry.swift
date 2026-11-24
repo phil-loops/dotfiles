@@ -222,6 +222,8 @@ public struct Command {
     /// A compatibility name represented by its eligible canonical command in discovery.
     public var aliasFor: String? = nil
     public var available: ((String?) -> Bool)?
+    /// why a key has nothing to act on here, said in place of "nothing here"
+    public var unavailable: ((String?) -> String?)?
     /// a key that means "the right thing here": names the command that actually runs
     public var route: ((String?) -> RouteTo?)?
     /// a local effect; throw `Refusal` to refuse with a quiet line
@@ -238,7 +240,8 @@ public struct Command {
                 modes: [KeyMode] = [.normal], needsArg: Bool = false, takes: String? = nil, label: String? = nil,
                 pair: String? = nil, group: KeyGroup? = nil, hint: [String] = [], v1: [String] = [], quiet: Bool = false,
                 recordsJump: Bool = false,
-                available: ((String?) -> Bool)? = nil, route: ((String?) -> RouteTo?)? = nil,
+                available: ((String?) -> Bool)? = nil, unavailable: ((String?) -> String?)? = nil,
+                route: ((String?) -> RouteTo?)? = nil,
                 local: ((_ target: String?, _ arg: Any?) throws -> Void)? = nil,
                 write: ((_ target: String, _ arg: Any?) throws -> Write?)? = nil,
                 task: ((_ target: String?, _ arg: Any?) async throws -> String?)? = nil) {
@@ -246,6 +249,7 @@ public struct Command {
         self.verbs = (verb.map { [$0] } ?? []) + verbs; self.leader = leader
         self.modes = modes; self.needsArg = needsArg; self.takes = takes
         self.pair = pair; self.group = group; self.hint = hint; self.v1 = v1; self.quiet = quiet; self.recordsJump = recordsJump; self.available = available
+        self.unavailable = unavailable
         self.route = route; self.local = local; self.write = write; self.task = task
     }
 }

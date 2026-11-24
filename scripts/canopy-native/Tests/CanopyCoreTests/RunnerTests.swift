@@ -229,6 +229,18 @@ final class Ctx: CommandContext {
         #expect(runner.note == " · nothing here")
     }
 
+    @Test func aKeyWithNothingToDoSaysWhy() throws {
+        let (runner, _, _) = try setup()
+        runner.registry.register(Command(id: "t.gone", title: "G", scope: .global, available: { _ in false },
+                                         unavailable: { _ in "origin has this" }, local: { _, _ in }))
+        runner.registry.register(Command(id: "t.dead", title: "D", scope: .global, unavailable: { _ in "gates first in line" },
+                                         route: { _ in nil }))
+        runner.dispatch("t.gone", via: .key)
+        #expect(runner.note == " · origin has this")
+        runner.dispatch("t.dead", via: .key)
+        #expect(runner.note == " · gates first in line")
+    }
+
     @Test func routeSendsTheKeyOn() throws {
         let (runner, _, _) = try setup()
         var got: String?

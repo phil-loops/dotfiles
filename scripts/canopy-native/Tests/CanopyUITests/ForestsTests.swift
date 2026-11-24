@@ -560,6 +560,17 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = f
         #expect(BranchCommands.pushRoute("r:c", a) == "branch.push.queue")
     }
 
+    /// Phil 2026-11-24: p on a branch origin already has read as a dead key ("p · nothing here")
+    /// while its gates ran — the press says why and what's next instead.
+    @Test func pWithNothingToPushSaysWhy() throws {
+        let a = world()
+        #expect(BranchCommands.pushRoute("r:a", a) == nil)
+        a.runner.dispatch("branch.push", via: .key, target: "r:a")
+        #expect(a.runner.note == "p · nothing to push — origin has this · waiting on review")
+        a.runner.dispatch("review.push", via: .key, target: "r:a")
+        #expect(a.runner.note == "p · nothing to push — origin has this · waiting on review")
+    }
+
     /// Phil 2026-11-18: one press queues the push for green — the server sends it through the same
     /// door when the gates pass; only shipping WITHOUT them costs two more presses, and u takes the queue back.
     @Test func pQueuesThePushForGreenAndOnlyShippingWithoutThemCostsMore() throws {

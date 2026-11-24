@@ -41,6 +41,7 @@ enum ReviewCommands {
             id: "review.push", title: "Push to origin — a first push or follow-ups onto the PR (press twice)", scope: .review,
             verb: .push, label: "push",
             available: { id in pushRoute(weakApp, id) != nil },
+            unavailable: { id in weakApp.flatMap { BranchCommands.noPushWhy(id, $0) } },
             route: { id in pushRoute(weakApp, id).map { RouteTo($0, target: id) } }))
         r.register(Command(
             id: "review.words", title: "Edit what lands on main: the PR's title and why, above the whole branch's diff", scope: .review, verb: .words, label: "words",
