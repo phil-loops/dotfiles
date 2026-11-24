@@ -45,6 +45,14 @@ replies. Everyone else accepts about 59%.
     queries on the same table apply and the new one leaves out. (#10110, #11196)
 14. **Unbounded reads.** A new `findMany`, `IN (...)` or backlog loop with no `take`/limit (#10986). Admin-only
     paths that are bounded in time are exempt.
+15. **Guards that lock nothing.** For every guard on a write ("delete unless owner", "insert unless
+    exists", a check then an update), ask: what rows does the check read, and what locks them until
+    commit? Postgres reads don't lock, even inside one statement (`DELETE … WHERE NOT EXISTS (…)`) or a
+    transaction, so a concurrent writer changing those rows slips between check and write. Name the
+    concurrent path that changes them. The fix is `SELECT … FOR UPDATE` on the rows the check reads
+    (and on the parent row, to block new children) before the write, or a unique constraint. A finding
+    only when a real concurrent writer exists. (#11733: a promote-to-owner in flight let the
+    owner-guarded user delete through, and the FK cascade took the new owner row with it.)
 
 ## Stay quiet on (authors decline these)
 
