@@ -542,21 +542,6 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = f
         #expect(a.rows == ["p:r:tree", "b:r:b", "p:r:solo", "b:r:s"])
     }
 
-    /// Round 33: `, p` on the home readies every push whose gates are green and names them; the same keys again send
-    /// exactly that set — a readied set that no longer matches readies the new one instead of sending.
-    @Test func commaPReadiesEveryGreenPushThenSendsExactlyThose() {
-        let a = world()
-        a.forestModel.syncClosings()
-        let green = a.forestModel.greenPushes().map(\.b.id)
-        #expect(green.contains("r:s") && !green.contains("r:c"), "green gates only: a branch the gates still hold isn't in it")
-        try! a.runner.arm("push green r:elsewhere")
-        a.keys.handle(","); a.keys.handle("p")
-        #expect(a.runner.armed == "push green " + green.sorted().joined(separator: ","), "a set readied for other branches readies this one, never sends")
-        #expect(a.forestModel.branchView("r:s")?.b.pending == nil)
-        a.keys.handle(","); a.keys.handle("p")
-        #expect(a.forestModel.branchView("r:s")?.b.pending == "pushing", "the second press sends each one through its own push")
-    }
-
     @Test func pArmsThenSendsAndEscDisarms() {
         let a = world()
         a.setCursor("p:r:solo"); a.keys.handle("ret")

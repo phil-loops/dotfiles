@@ -274,25 +274,6 @@ enum ProjectCommands {
         r.register(Command(
             id: "chats.loose.toggle", title: "Open or fold the chats on no branch", scope: .forests,
             local: { _, _ in m.showLooseChats.toggle() }))
-        // , p on the home: ready every green push at once, naming each; the same keys again send exactly that set
-        func greenKey(_ vs: [BranchView]) -> String { "push green " + vs.map(\.b.id).sorted().joined(separator: ",") }
-        r.register(Command(
-            id: "forests.push.green", title: "Push every branch with green gates (the next press sends exactly those)", scope: .forests,
-            leader: LocalKey(",p"), label: "push green",
-            available: { _ in !m.greenPushes().isEmpty },
-            local: { [unowned app] _, _ in
-                let vs = m.greenPushes()
-                guard app.runner.armed == greenKey(vs) else {
-                    try app.runner.arm(greenKey(vs))
-                    let names = vs.map { leaf($0.b.name) }
-                    app.runner.say("push \(vs.count) green: \(names.prefix(6).joined(separator: ", "))\(names.count > 6 ? " +\(names.count - 6)" : "") · \(app.registry.keyOf("forests.push.green")) again sends them")
-                    return
-                }
-                for v in vs {
-                    try app.runner.arm(BranchCommands.pushArm(v.b.id))
-                    app.runner.dispatch("branch.push.confirm", via: .key, target: v.b.id)
-                }
-            }))
         r.register(Command(
             id: "forest.launch", title: "Launch the whole forest", scope: .project, leader: LocalKey(",l"), label: "launch", v1: ["launch"],
             available: { id in !(m.forest(id)?.unopened.isEmpty ?? true) },

@@ -347,13 +347,6 @@ private struct PushChips: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 SectionHead(text: "push", gold: true)
-                let green = app.forestModel.greenPushes()
-                if !green.isEmpty {
-                    let armed = app.runner.armed?.hasPrefix("push green ") == true
-                    Text(verbatim: armed ? "ready to send — again to push" : "push the green ones")
-                        .font(Theme.text(11)).foregroundStyle(armed ? theme.goldLeaf : theme.inkFaint)
-                    KeyHint(id: "forests.push.green")
-                }
             }
             .padding(.leading, inColumn ? HomeColumns.card : 44)
             // names in a run, not boxes: the least urgent thing on the page reads as one quiet sentence
