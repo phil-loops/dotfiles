@@ -27,7 +27,7 @@ import sys
 SECTIONS = ("Intent", "Not in this PR", "Where this sits", "How to read it", "Verified")
 PACKET_KEY = "stack-packet"
 LABEL = "ai-code-review"
-OPT_OUT_LABEL = "ai-code-review-opt-out"
+SUPPRESS_LABEL = "suppress-ai-review"
 MAX_CLAIMS = 5
 MAX_READ = 12
 
