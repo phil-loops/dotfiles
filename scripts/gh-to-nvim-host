@@ -56,7 +56,7 @@ def launch(repo):
     with open(log_path, "ab") as log:
         log.write(f"\n── launch {repo} @ {datetime.datetime.now():%Y-%m-%d %H:%M:%S} ──\n".encode())
         subprocess.Popen(
-            [SERVE],
+            [SERVE, "--ensure"],
             cwd=repo,
             stdin=subprocess.DEVNULL,
             stdout=log,

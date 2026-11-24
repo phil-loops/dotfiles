@@ -47,12 +47,14 @@ function openCanopy(route) {
       chrome.runtime.sendNativeMessage(HOST, { action: "canopy", route }, (res) => {
         if (chrome.runtime.lastError || !res?.ok) {
           tab();
+          resolve(false);
+        } else {
+          resolve(true);
         }
-        resolve();
       });
     } catch {
       tab();
-      resolve();
+      resolve(false);
     }
   });
 }
@@ -110,8 +112,8 @@ const reason = (res) => res?.body?.err || res?.error || `status ${res?.status}`;
 // Self-healing open: dead viewer → native-host launch + wait + one retry; cold first open
 // (504 — the worktree still warming) → brief wait + retry.
 async function openWithRecovery(payload) {
-  await badge("…", "#58A6FF", 30000);
-  let res = await post(payload);
+  const waiting = setTimeout(() => badge("…", "#58A6FF", 30000), 150);
+  let res = await post(payload).finally(() => clearTimeout(waiting));
   if (res.timedOut) {
     // A live-but-stuck viewer must not take the launch path — stack-review-serve would find the
     // port held, report success, and the retry would hang exactly as long all over again.
@@ -139,10 +141,10 @@ async function openWithRecovery(payload) {
 
 let latestOpen = 0;
 
-async function openActiveTab(target) {
+async function openActiveTab(target, commandTab) {
+  const started = performance.now();
   const request = ++latestOpen;
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  const url = tab?.url || "";   // readable only because the gesture granted activeTab
+  const url = commandTab?.url || (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.url || "";   // readable only because the gesture granted activeTab
   if (!url.startsWith("https://github.com/")) {
     await fail("not a GitHub page");
     return;
@@ -173,7 +175,11 @@ async function openActiveTab(target) {
     return;
   }
   if (target === "viewer" && res.body.path) {
-    await openCanopy(res.body.path === "/" ? "/v2" : res.body.path);
+    const delivered = await openCanopy(res.body.path === "/" ? "/v2" : res.body.path);
+    if (request !== latestOpen) return;
+    if (delivered && PR_RE.test(url)) {
+      await chrome.storage.session.set({ lastHandoffMs: Math.round(performance.now() - started) });
+    }
   }
   // a success can still carry a warning — the stack-open stale/force-push backstop landed the
   // cursor at EOF because this checkout differs from GitHub; never let that be a silent wrong jump
@@ -185,9 +191,9 @@ async function openActiveTab(target) {
   }
 }
 
-chrome.commands.onCommand.addListener((cmd) => {
+chrome.commands.onCommand.addListener((cmd, tab) => {
   if (cmd === "open-in-nvim") {
-    openActiveTab("viewer");
+    openActiveTab("viewer", tab);
   }
 });
 
@@ -202,8 +208,7 @@ chrome.commands.onCommand.addListener((cmd) => {
 // the worse trade while the signing key is public). Enforced below: the ONLY thing that ever
 // leaves the browser is a URL matching PR_RE.
 const PR_RE = /^https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/\d+/;
-let lastPrewarmed = "";
-let lastPrewarmedAt = 0;
+const recentPRs = new Map();
 // The server trusts a prewarm's fetch for the next keypress (30 min), so the same PR warms again
 // after a minute: a reload after the author pushes refetches, a line click inside the minute doesn't.
 const PREWARM_REPEAT_MS = 60000;
@@ -222,11 +227,13 @@ function prewarmPost(pr) {
 
 async function prewarm(url) {
   const m = (url || "").match(PR_RE);
-  if (!m || (m[0] === lastPrewarmed && Date.now() - lastPrewarmedAt < PREWARM_REPEAT_MS)) {
-    return;   // not a PR, or the same one just now — clicking a line rewrites the hash, not the PR
+  if (!m) return;
+  const now = Date.now();
+  for (const [pr, at] of recentPRs) {
+    if (now - at >= PREWARM_REPEAT_MS) recentPRs.delete(pr);
   }
-  lastPrewarmed = m[0];
-  lastPrewarmedAt = Date.now();
+  if (recentPRs.has(m[0])) return;
+  recentPRs.set(m[0], now);
   if (await prewarmPost(m[0])) {
     return;
   }
@@ -254,6 +261,10 @@ chrome.tabs.onUpdated.addListener((_id, info, tab) => {
   if (info.status === "complete" || info.url) {
     prewarm(tab?.url);
   }
+});
+
+chrome.tabs.onActivated.addListener(({ tabId }) => {
+  chrome.tabs.get(tabId).then(tab => prewarm(tab.url), () => {});
 });
 
 // The popup's open button routes here — opening the popup is itself the
@@ -321,7 +332,12 @@ async function apply(state) {
   await chrome.action.setIcon({ path: ICONS[state] });
   await chrome.action.setBadgeText({ text: s.badge });
   await chrome.action.setBadgeBackgroundColor({ color: s.color });
-  await chrome.action.setTitle({ title: s.title });
+  let title = s.title;
+  if (state === "fresh") {
+    const { lastHandoffMs } = await chrome.storage.session.get("lastHandoffMs");
+    if (Number.isFinite(lastHandoffMs)) title += ` · Last PR sent to Canopy in ${lastHandoffMs} ms`;
+  }
+  await chrome.action.setTitle({ title });
 }
 
 async function diskMtime() {
