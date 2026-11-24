@@ -136,7 +136,7 @@ struct BenchIO: Sendable {
     var status: @Sendable (URL, Data) throws -> String = { try BenchIO.recordedStatus($0, data: $1) }
 
     static var local: BenchIO {
-        let path = ProcessInfo.processInfo.environment["SHOW_DIR"] ?? "~/.dotfiles/show"
+        let path = ProcessInfo.processInfo.environment["SHOW_DIR"] ?? "~/.local/share/show"
         return BenchIO(directory: URL(fileURLWithPath: (path as NSString).expandingTildeInPath))
     }
 
