@@ -238,6 +238,7 @@ def _git_entities(name, snap, jobs):
             order[b] = i
     for b, p in member.items():
         parent = snap.parent(b)
+        requires = snap.branch_key_all(b, "requires")
         tip = snap.local(b)
         base_tip = "" if parent in _TRUNKS or parent not in member and not snap.exists(parent) else snap.local(parent)
         own = graph.own(tip, base_tip) if tip else []
@@ -256,6 +257,7 @@ def _git_entities(name, snap, jobs):
         ents["branch"][f"{name}:{b}"] = {
             "id": f"{name}:{b}", "repo": name, "name": b, "project": f"{name}:{p}",
             "parent": parent, "parentId": f"{name}:{parent}" if parent in member else None,
+            "requires": requires,
             "description": snap.description(b), "subject": own[0] if own else "",
             "commits": len(own), "outline": own[::-1], "tip": tip, "tree": tree,
             "pushed": "synced" if remote and not ahead else "ahead" if remote else "local", "ahead": ahead,
@@ -272,10 +274,10 @@ def _git_entities(name, snap, jobs):
             # refs (each copy, origin's included) and config blocks, the trunk: the server's own read
             # keys use these inputs, so a client key on this stamp moves exactly when a read could
             # change (a push, a parent's seal, a review run's flags). Dirt is the one input it lacks.
-            "readStamp": snap.inputs_fingerprint([b, parent, *snap.branch_key_all(b, "requires")])[:16],
+            "readStamp": snap.inputs_fingerprint([b, parent, *requires])[:16],
             # what the branch's diff is derived from — the same refs, no config: /node keys on it, so a
             # verdict or a review flag landing doesn't send the page to re-read an unchanged diff
-            "diffStamp": snap.refs_fingerprint([b, parent, *snap.branch_key_all(b, "requires")])[:16],
+            "diffStamp": snap.refs_fingerprint([b, parent, *requires])[:16],
             # a push Phil queued for when its gates go green (srv/pushintent.py), and what it came to
             "pushQueued": pushintent.queued(b, snap, tree),
             # the client shows it for an hour from `pushSaidAt` on its own clock (no clock in a fingerprint)

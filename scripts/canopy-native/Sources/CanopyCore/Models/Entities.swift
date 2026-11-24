@@ -72,6 +72,7 @@ public struct Branch: Entity {
     public var project: String
     public var parent: String
     public var parentId: String?
+    public var requires: [String]?
     public var description: String
     public var subject: String
     public var commits: Int

@@ -5,7 +5,7 @@ import SwiftUI
 /// in merge order, indented by ancestry, then the other PRs; j/k walk it, ↵ opens, p the forest's page.
 @MainActor
 enum ReviewMap {
-    struct Row: Equatable { var id: String; var label: String; var depth: Int; var word: String; var threads: Int }
+    struct Row: Equatable { var id: String; var label: String; var depth: Int; var word: String; var threads: Int; var relationship: String? }
 
     static let words: [ShipStage: String] = [.local: "local", .green: "green", .pushed: "pushed", .review: "in review", .approved: "approved", .landed: "landed"]
 
@@ -21,10 +21,15 @@ enum ReviewMap {
                 guard let id, let p = app.store.view(Branch.self, id), n < 32 else { return n }
                 return depth(p.parentId, n + 1)
             }
+            let dependencies = Set(b.requires ?? [])
             for x in app.store.list(Branch.self).filter({ $0.project == b.project }).sorted(by: { ($0.order, $0.name) < ($1.order, $1.name) }) {
                 let ship = ShipRules.shipOf(x, app.store.view(Pr.self, x.id))
                 if ship == .landed { continue }
-                out.append(Row(id: x.id, label: x.name, depth: depth(x.parentId), word: words[ship] ?? "", threads: open(x.id)))
+                let relationship: String?
+                if x.id == b.parentId { relationship = "parent" }
+                else if dependencies.contains(x.name) { relationship = "dependency" }
+                else { relationship = nil }
+                out.append(Row(id: x.id, label: x.name, depth: depth(x.parentId), word: words[ship] ?? "", threads: open(x.id), relationship: relationship))
             }
         }
         for c in app.store.list(Conv.self) where !out.contains(where: { $0.id == c.id }) {
@@ -57,6 +62,9 @@ struct MapOverlay: View {
                             HStack(spacing: 8) {
                                 Text((r.depth > 0 ? "└ " : "") + shortPath(r.label)).lineLimit(1)
                                     .foregroundStyle(r.id == pg.id ? theme.goldLeaf : theme.ink)
+                                if let relationship = r.relationship {
+                                    Text(relationship).foregroundStyle(theme.inkDim).fixedSize()
+                                }
                                 Spacer()
                                 if r.threads > 0 { Text("\(r.threads)").foregroundStyle(theme.ember) }
                                 Text(r.word).foregroundStyle(theme.inkFaint)
