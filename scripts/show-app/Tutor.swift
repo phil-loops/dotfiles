@@ -743,7 +743,7 @@ final class TutorController: NSObject, NSTextViewDelegate {
         }
     }
 
-    func showEmpty(_ message: String = "No tutor sessions in `~/.dotfiles/show/tutor` yet. Claude starts one with `show --tutor <file>`.") {
+    func showEmpty(_ message: String = "No tutor sessions in `~/.local/share/show/tutor` yet. Claude starts one with `show --tutor <file>`.") {
         saveDrafts()
         timer?.invalidate()
         path = nil

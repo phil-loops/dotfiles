@@ -10,7 +10,7 @@ import UniformTypeIdentifiers
 let buildStamp = ((Bundle.main.bundlePath as NSString).deletingLastPathComponent as NSString).appendingPathComponent("source.sha")
 
 /// Where decks live; `SHOW_DIR` points a scratch build at fixtures instead.
-let decksDirectory = ((ProcessInfo.processInfo.environment["SHOW_DIR"] ?? "~/.dotfiles/show") as NSString).expandingTildeInPath
+let decksDirectory = ((ProcessInfo.processInfo.environment["SHOW_DIR"] ?? "~/.local/share/show") as NSString).expandingTildeInPath
 
 /// Remembered selections, drafts and open documents; a snapshot run keeps its own so it never touches the real app's.
 var prefs = UserDefaults.standard

@@ -17,7 +17,7 @@ show="$HOME/.dotfiles/scripts/show"
 import json, os, sys, pathlib, subprocess, time
 show = sys.argv[1]
 crashes_cmd = str(pathlib.Path.home() / ".dotfiles/scripts/app-crashes")
-root = pathlib.Path.home() / ".dotfiles/show"
+root = pathlib.Path.home() / ".local/share/show"
 runs = pathlib.Path(os.environ.get("SHOW_LIVE_RUNS") or pathlib.Path.home() / "Library/Application Support/Show/live-runs.json")
 
 def load(p):

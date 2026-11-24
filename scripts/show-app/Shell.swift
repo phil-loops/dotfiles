@@ -584,7 +584,7 @@ func touchedDate(_ path: String) -> Date {
     return ([path] + sidecarPaths(path)).compactMap(modificationDate).reduce(marks.max() ?? .distantPast) { max($0, $1) }
 }
 
-/// Every document Show can open, from `~/.dotfiles/show` and its `tutor/` folder, sidecars left out.
+/// Every document Show can open, from `~/.local/share/show` and its `tutor/` folder, sidecars left out.
 func libraryPaths() -> [String] {
     let folders = [decksDirectory, tutorDirectory].flatMap { directory in
         ((try? FileManager.default.contentsOfDirectory(atPath: directory)) ?? [])
@@ -776,7 +776,7 @@ enum ShelfRow {
     case dueFold(hidden: Int, expanded: Bool)
 }
 
-/// Moves a document and its sidecars into `~/.dotfiles/show/archive/`; nothing is ever deleted. Returns where the document went.
+/// Moves a document and its sidecars into `~/.local/share/show/archive/`; nothing is ever deleted. Returns where the document went.
 func archiveDocument(_ path: String) throws -> String {
     let archive = (decksDirectory as NSString).appendingPathComponent("archive")
     try FileManager.default.createDirectory(atPath: archive, withIntermediateDirectories: true)
@@ -1076,7 +1076,7 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
         switch workspace {
         case .learn:
             tutor?.showEmpty(entries.isEmpty
-                ? "No tutor sessions in `~/.dotfiles/show/tutor` yet. Claude starts one with `show --tutor <file>`."
+                ? "No tutor sessions in `~/.local/share/show/tutor` yet. Claude starts one with `show --tutor <file>`."
                 : "Nothing open. Pick a session from the shelf, or press ⌘O.")
         case .api:
             if let console { display(console) }

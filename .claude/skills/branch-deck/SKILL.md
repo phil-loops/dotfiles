@@ -41,7 +41,7 @@ When a UI branch has a running preview, add a `url` section pointing at it right
 - Set `replyTo` to this session so Submit reaches you.
 - Show's Forest workspace reads the deck without shelling out to git, so the deck carries the forest itself. At the top level, set `"mode": "forest"`, `"project": "<stack-project>"` and `"repo": "<repo name, e.g. loops>"`. On each branch section, set `"rank"` (from `stack-merge-rank <project>` JSON `.rank`) and `"parent"` (from `git config branch.<b>.stack-parent`). Also set `"sha"` (`git rev-parse <branch>` when the page is written); Show marks the page as moved when the tip changes. Read all three when you generate the deck, never from memory. Sections that aren't branches (the overview, live pages) carry none of them.
 - Answering Show: a `regenerate page <branch> — <deck>` message means rewrite that one section from the branch's current tip, keeping its id, and refresh its `sha`, `rank` and `parent`. A `Show thread:` message is answered per the show skill's *Threads* section.
-- Write with a generator script in the scratchpad, output to `~/.dotfiles/show/<project>-branches.json`, then `show` it.
+- Write with a generator script in the scratchpad, output to `~/.local/share/show/<project>-branches.json`, then `show` it.
 
 ## 4 · After sign-off
 

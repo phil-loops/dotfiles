@@ -10,7 +10,7 @@
 # show --build — just (re)build. show --snapshot <file.json> <out.png> [--appearance light|dark] — render the window offscreen, no window shown.
 # show --selftest — drive the app's own offscreen window through every workspace on scratch fixtures; non-zero exit on a failed step.
 # show --check-routing <file.json> — print the workspace a file opens in (and a forest's merge order). show --check-live <deck.json> — print a live deck's header, groups and compare diffs.
-# show --tutor [<session.json>] — open the Tutor space on a session (no file: the newest in ~/.dotfiles/show/tutor). show --tutor-check <session.json> — print what it would show.
+# show --tutor [<session.json>] — open the Tutor space on a session (no file: the newest in ~/.local/share/show/tutor). show --tutor-check <session.json> — print what it would show.
 # Deck format: ~/.dotfiles/.claude/skills/show/SKILL.md. Source: show-app/*.swift (one file per area; main.swift holds the entry point), a Swift package that links canopy-native for the Canopy workspace. Sign-offs land in <deck>.signoff.json.
 set -euo pipefail
 
@@ -214,8 +214,8 @@ PY
     else
       # no file named: the user asked for the newest session, so it comes forward
       focus=1
-      session="$(ls -t "$HOME/.dotfiles/show/tutor/"*.json 2>/dev/null | grep -v '\.answers\.json$' | head -1)"
-      [[ -n "$session" ]] || { echo "show: no tutor sessions in ~/.dotfiles/show/tutor" >&2; exit 66; }
+      session="$(ls -t "$HOME/.local/share/show/tutor/"*.json 2>/dev/null | grep -v '\.answers\.json$' | head -1)"
+      [[ -n "$session" ]] || { echo "show: no tutor sessions in ~/.local/share/show/tutor" >&2; exit 66; }
     fi
     [[ -f "$session" ]] || { echo "show: no such session: $session" >&2; exit 66; }
     python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d.get("mode", d.get("kind")) == "tutor" and d["title"] and isinstance(d["rungs"], list)' "$session" \
