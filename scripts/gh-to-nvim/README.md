@@ -56,31 +56,16 @@ Two ids, both derived, both whitelisted for the native host:
 
 ## Dev loop (toolbar icon)
 
-The toolbar icon is the dev console — no `chrome://extensions` trip:
+The toolbar shows an amber dot when the unpacked copy has source changes or the installed copy has a newer signed release. A grey × means the viewer is offline.
 
-- **green** → loaded copy matches disk.
-- **amber ●** → you edited a source file; the loaded copy is stale.
-- **grey ×** → the viewer isn't reachable on `:62497` (its `/ext-mtime` is the
-  staleness signal; a service worker can't read disk itself).
+The viewer packs source changes automatically. The installed extension compares its own ID and version with the release in `dist/updates.xml`. Once a newer signed version is available it asks Chrome to install it, and reloads when Chrome reports the download is ready. Chrome controls the download schedule. A throttled check backs off for an hour, including across service-worker wakes.
 
-What stale does next depends on which copy is running (`installType`):
-
-- **unpacked dev copy** → self-reloads once the source goes quiet for 5s —
-  `runtime.reload()` re-reads from disk, so this is the live-edit loop.
-- **force-installed copy** → reloading would rerun the same installed bytes and
-  lie "fresh", so it asks the updater instead (at most once a minute). Run
-  `gh-to-nvim-pack` to publish your edits — it bumps the patch version, signs a
-  new CRX into `dist/`, and the installed copy hot-swaps on its next ask. Until
-  you pack, the amber ● is truthfully saying "installed ≠ disk".
+The unpacked copy reloads after source edits settle. Its source timestamp baseline lives in `storage.session`.
 
 For heavy hacking sessions, load the unpacked copy (`chrome://extensions` →
 Load unpacked → this dir), toggle the forced copy off while you work (two copies
 means duplicate toolbar icons and one of them loses the keyboard chords), and
 `gh-to-nvim-pack` when done.
-
-Staleness is computed against the viewer's `/ext-mtime`; the baseline lives in
-`storage.session`, which Chrome wipes on a real reload — so a fresh reload
-re-baselines to "green" automatically.
 
 ## Launch the viewer from the popup (native messaging)
 

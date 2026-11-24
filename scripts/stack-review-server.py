@@ -574,32 +574,48 @@ PACK_QUIET = 1.5   # let a burst of saves settle before packing
 
 
 def pack_watcher():
-    # Pack the extension when its source goes quiet. Without this the whole self-update path is
-    # theatre: an edit sits on disk, updates.xml keeps advertising the old version, and the SW can
-    # ask as eagerly as it likes — there is nothing newer to fetch. (dist/ lives in a subdir, so a
-    # pack's own output can't retrigger us; manifest.json can — the version bump — hence the
-    # re-baseline below, or we'd pack in a loop forever.)
-    d = os.path.join(SCRIPTS, "gh-to-nvim")
-    exts = (".js", ".json", ".css", ".html")
+    import zipfile
+    from pathlib import Path
+    directory = Path(SCRIPTS) / "gh-to-nvim"
+    dist = directory / "dist"
+    extensions = (".js", ".json", ".html", ".css", ".png")
 
-    def newest():
+    def source_stamp():
+        return {p.relative_to(directory).as_posix(): p.stat().st_mtime_ns
+                for p in directory.rglob("*") if dist not in p.parents and p.is_file()
+                and p.suffix in extensions}
+
+    def published_matches(files):
         try:
-            return max((os.path.getmtime(os.path.join(d, f))
-                        for f in os.listdir(d) if f.endswith(exts)), default=0.0)
-        except OSError:
-            return 0.0
+            with zipfile.ZipFile(dist / "gh-to-nvim.crx") as pack:
+                loadable = {f.filename for f in pack.infolist() if Path(f.filename).suffix in extensions}
+                if loadable != files.keys() or any(pack.read(f) != (directory / f).read_bytes() for f in files):
+                    return False
+                version = json.loads(pack.read("manifest.json"))["version"]
+            return version in reviews.published_extension_versions(directory).values()
+        except (OSError, ValueError, KeyError, zipfile.BadZipFile):
+            return False
 
-    seen = newest()
+    seen = None
     while True:
-        time.sleep(1.0)
-        m = newest()
-        if m == seen:
-            continue
-        time.sleep(PACK_QUIET)
-        if newest() != m:
-            continue   # still being edited — catch it on the next quiet
-        subprocess.run([os.path.join(SCRIPTS, "gh-to-nvim-pack")], capture_output=True)
-        seen = newest()
+        time.sleep(1)
+        try:
+            stamp = source_stamp()
+            if stamp == seen:
+                continue
+            if published_matches(stamp):
+                seen = stamp
+                continue
+            time.sleep(PACK_QUIET)
+            if source_stamp() != stamp:
+                continue
+            result = subprocess.run([os.path.join(SCRIPTS, "gh-to-nvim-pack")], capture_output=True)
+            if result.returncode:
+                _log(f"extension pack failed: {result.stderr.decode(errors='replace')[-300:]}")
+                time.sleep(60)
+        except OSError as exc:
+            _log(f"extension pack: {exc}")
+            time.sleep(60)
 
 
 def warm():

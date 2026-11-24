@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 import threading
 import time
+import xml.etree.ElementTree as ET
 from urllib.parse import parse_qs, quote, unquote, urlencode
 
 from srv import ctx
@@ -465,6 +466,19 @@ def open_url(req, raw):   # POST /open-url {url, open?} — Chrome ext (URL-only
     req._send(400, json.dumps({"ok": False, "err": "no file in this URL (PR, blob, blame, commit, compare pages work)"}))
 
 
+def published_extension_versions(directory):
+    published = {}
+    try:
+        root = ET.parse(os.path.join(directory, "dist", "updates.xml"))
+        for app in root.findall("{*}app"):
+            update = app.find("{*}updatecheck")
+            if update is not None and app.get("appid") and update.get("version"):
+                published[app.get("appid")] = update.get("version")
+    except (OSError, ET.ParseError):
+        pass
+    return published
+
+
 def ext_mtime(req):   # GET /ext-mtime — newest source mtime (ms) so the ext can flag a stale loaded copy
     d = os.path.join(ctx.SCRIPTS, "gh-to-nvim")
     latest = 0.0
@@ -474,7 +488,7 @@ def ext_mtime(req):   # GET /ext-mtime — newest source mtime (ms) so the ext c
                 latest = max(latest, os.path.getmtime(os.path.join(d, name)))
     except OSError:
         pass
-    req._send(200, json.dumps({"mtime": int(latest * 1000)}))
+    req._send(200, json.dumps({"mtime": int(latest * 1000), "published": published_extension_versions(d)}))
 
 
 # ── PR → forest: which forest is this PR part of, and are its children still seated on it? ──

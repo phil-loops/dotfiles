@@ -64,7 +64,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function waitForViewer(timeoutMs) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
-    if ((await diskMtime()) !== null) {
+    if ((await extensionStatus()) !== null) {
       return true;
     }
     await sleep(500);
@@ -284,11 +284,13 @@ chrome.runtime.onMessage.addListener((msg, _s, respond) => {
 const ICONS = {
   fresh: iconSet("fresh"),
   stale: iconSet("stale"),
+  updating: iconSet("stale"),
   offline: iconSet("offline"),
   unbound: iconSet("stale"),
 };
 const STATE = {
   fresh: { badge: "", color: "#3FB950", title: "GitHub → Show — up to date" },
+  updating: { badge: "●", color: "#D29922", title: "GitHub → Show — waiting for Chrome to install the update" },
   stale: { badge: "●", color: "#D29922", title: "GitHub → Show — source changed (click for menu)" },
   offline: { badge: "×", color: "#6E7681", title: `GitHub → Show — viewer offline (${VIEWER_URL})` },
   unbound: { badge: "!", color: "#D29922", title: "GitHub → Show — ⌘⇧O isn't bound (click to fix)" },
@@ -310,7 +312,7 @@ async function chordsUnbound() {
 // and flagging that would just nag — and mask its stale→reload HMR path.
 async function stateWithChords() {
   const state = await computeState();
-  if (state !== "fresh" || installType === "development") {
+  if (state !== "fresh" || await developmentInstall) {
     return state;
   }
   return (await chordsUnbound()) ? "unbound" : "fresh";
@@ -340,14 +342,14 @@ async function apply(state) {
   await chrome.action.setTitle({ title });
 }
 
-async function diskMtime() {
+async function extensionStatus() {
   try {
     const r = await fetch(`${VIEWER_URL}/ext-mtime`);
     if (!r.ok) {
       return null;
     }
     const j = await r.json();
-    return typeof j?.mtime === "number" ? j.mtime : null;
+    return typeof j?.mtime === "number" ? j : null;
   } catch {
     return null;
   }
@@ -359,10 +361,15 @@ async function diskMtime() {
 let lastDiskMtime = null;   // what maybeAutoReload watches for quiet
 
 async function computeState() {
-  const m = await diskMtime();
-  if (m === null) {
+  const status = await extensionStatus();
+  if (status === null) {
     return "offline";
   }
+  if (!(await developmentInstall)) {
+    const published = status.published?.[chrome.runtime.id];
+    return newerVersion(published, chrome.runtime.getManifest().version) ? "updating" : "fresh";
+  }
+  const m = status.mtime;
   lastDiskMtime = m;
   const { baseline } = await chrome.storage.session.get("baseline");
   if (baseline === undefined) {
@@ -381,26 +388,39 @@ const QUIET_MS = 1500;   // just enough to let a burst of saves settle — this 
 let staleMtime = null;
 let staleSince = 0;
 
-// "development" = unpacked (runtime.reload re-reads source from disk = real HMR).
-// Anything else = the force-installed CRX, where runtime.reload would rerun the SAME
-// installed bytes and then read as fresh — a silent lie. That copy asks the updater
-// instead, which pulls whatever gh-to-nvim-pack last published to the local server.
-//
-// Default to NOT development: defaulting the other way is what wedged the forced copy — if
-// getSelf never lands, every stale tick called runtime.reload(), which re-ran the same bytes and
-// reseeded the baseline to "fresh", so requestUpdateCheck was never reached and the installed copy
-// could not update itself at all (0.3.9 took ~2h to land, via Chrome's own slow cycle). Guessing
-// "packed" costs a dev copy one wasted update check; guessing "dev" costs the real copy every update.
-let installType = "admin";
-chrome.management.getSelf((info) => {
-  if (info?.installType) {
-    installType = info.installType;
-  }
-});
+const developmentInstall = chrome.management.getSelf().then(self => self.installType === "development", () => false);
 chrome.runtime.onUpdateAvailable.addListener(() => chrome.runtime.reload());
 
-const UPDATE_ASK_MS = 5000;   // requestUpdateCheck throttles hard callers — pace it, but 60s WAS the HMR floor
-let lastUpdateAsk = 0;
+function newerVersion(published, installed) {
+  if (typeof published !== "string" || !/^\d+(?:\.\d+){0,3}$/.test(published)) return false;
+  const next = published.split(".").map(Number);
+  const current = installed.split(".").map(Number);
+  for (let i = 0; i < 4; i++) {
+    const diff = (next[i] || 0) - (current[i] || 0);
+    if (diff) return diff > 0;
+  }
+  return false;
+}
+
+let checkingUpdate = false;
+async function requestPublishedUpdate() {
+  if (checkingUpdate) return;
+  checkingUpdate = true;
+  try {
+    const { retryUpdateAt } = await chrome.storage.session.get("retryUpdateAt");
+    if (Date.now() < retryUpdateAt) return;
+    const minute = 60_000;
+    await chrome.storage.session.set({ retryUpdateAt: Date.now() + 5 * minute });
+    const { status } = await chrome.runtime.requestUpdateCheck();
+    if (status === "throttled") {
+      await chrome.storage.session.set({ retryUpdateAt: Date.now() + 60 * minute });
+    }
+  } catch {
+    // The saved deadline also bounds retries after a runtime error.
+  } finally {
+    checkingUpdate = false;
+  }
+}
 
 function maybeAutoReload() {
   if (lastDiskMtime !== staleMtime) {
@@ -411,15 +431,7 @@ function maybeAutoReload() {
   if (Date.now() - staleSince < QUIET_MS) {
     return;
   }
-  if (installType === "development") {
-    chrome.runtime.reload();
-    return;
-  }
-  if (Date.now() - lastUpdateAsk < UPDATE_ASK_MS) {
-    return;
-  }
-  lastUpdateAsk = Date.now();
-  chrome.runtime.requestUpdateCheck(() => {});
+  chrome.runtime.reload();
 }
 
 async function poll() {
@@ -429,6 +441,7 @@ async function poll() {
     maybeAutoReload();
   } else {
     staleMtime = null;
+    if (state === "updating") await requestPublishedUpdate();
   }
 }
 
