@@ -51,6 +51,7 @@ def forest(branch):
     git("config", f"branch.{branch}.stack-project", "proj")
 
 
+check("a test never writes the machine's record", os.environ["PANE_BRANCH_DIR"].startswith(os.devnull), os.environ["PANE_BRANCH_DIR"])
 git("init", "-q", "-b", "main", REPO, cwd=TMP)
 os.symlink(os.path.join(HERE, "..", "hooks", "loops-reference-transaction"), os.path.join(REPO, ".git", "hooks", "reference-transaction"))
 commit("base", pane="%1")

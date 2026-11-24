@@ -11,3 +11,5 @@ for _i, (_k, _v) in enumerate(_CONFIG.items()):
     os.environ[f"GIT_CONFIG_KEY_{_i}"], os.environ[f"GIT_CONFIG_VALUE_{_i}"] = _k, _v
 for _k in ("GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE"):
     os.environ.pop(_k, None)
+# a hook the test installs can't write the machine's pane record (scripts/pane-branch)
+os.environ["PANE_BRANCH_DIR"] = os.path.join(os.devnull, "pane-branch")

@@ -24,7 +24,7 @@ if [ "$1" = committed ]; then
     case "$old$new" in *ref:*) continue ;; esac
     [ "$old" = "$zero" ] && { old=$(git rev-parse -q --verify "$ref@{1}" 2>/dev/null) || old=$zero; }
     [ -n "$repo" ] || { repo=$(cd "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null && pwd -P) || exit 0; mkdir -p "$dir" 2>/dev/null; }
-    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$(date +%s)" "$TMUX_PANE" "${repo%/.git}" "${ref#refs/heads/}" "$old" "$new" >> "$dir/moves-$server.tsv" 2>/dev/null
+    { printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$(date +%s)" "$TMUX_PANE" "${repo%/.git}" "${ref#refs/heads/}" "$old" "$new" >> "$dir/moves-$server.tsv"; } 2>/dev/null
   done
   exit 0
 fi
