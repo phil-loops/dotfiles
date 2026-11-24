@@ -114,6 +114,17 @@ func takeInboxRequest(_ path: String) -> ShowRequest? {
     return try? JSONDecoder().decode(ShowRequest.self, from: data)
 }
 
+/// The PNG a `show --shoot-live` inbox file asks the running window to be drawn into: an absolute .png path, from a file
+/// in the inbox and nowhere else. The file is used up only when it is such a request.
+func takeShootRequest(_ path: String, inbox: String = inboxDirectory) -> String? {
+    struct Shoot: Decodable { let shoot: String }
+    guard canonicalPath((path as NSString).deletingLastPathComponent) == canonicalPath(inbox),
+          let data = FileManager.default.contents(atPath: path), let request = try? JSONDecoder().decode(Shoot.self, from: data),
+          request.shoot.hasPrefix("/"), request.shoot.hasSuffix(".png") else { return nil }
+    try? FileManager.default.removeItem(atPath: path)
+    return request.shoot
+}
+
 /// Something that happened in front of you. Show appends these to `events.jsonl` and never edits one; where you are, what
 /// waits, the back stacks and History are all read from them (`ShowState`).
 struct ShowEvent: Codable, Equatable {

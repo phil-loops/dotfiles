@@ -18,6 +18,29 @@ struct TerminalFrameTests {
         #expect(TerminalFrame.unmarked(plain) == (plain, false, nil))
     }
 
+    /// `show --shoot-live` asks through an inbox file: only a file there, naming an absolute .png, is such a request.
+    @Test func aLivePictureIsAskedForOnlyFromTheInbox() throws {
+        let fm = FileManager.default
+        let inbox = (NSTemporaryDirectory() as NSString).appendingPathComponent("show-inbox-\(UUID().uuidString)")
+        try fm.createDirectory(atPath: inbox, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(atPath: inbox) }
+        func file(_ dir: String, _ body: String) throws -> String {
+            let path = (dir as NSString).appendingPathComponent("shoot-test-\(UUID().uuidString).json")
+            try Data(body.utf8).write(to: URL(fileURLWithPath: path))
+            return path
+        }
+        let asked = try file(inbox, #"{"shoot": "/tmp/x/out.png"}"#)
+        #expect(takeShootRequest(asked, inbox: inbox) == "/tmp/x/out.png" && !fm.fileExists(atPath: asked), "taken, and used up")
+        for body in [#"{"shoot": "out.png"}"#, #"{"shoot": "/etc/hosts"}"#, #"{"target": {"api": true}}"#] {
+            let other = try file(inbox, body)
+            #expect(takeShootRequest(other, inbox: inbox) == nil && fm.fileExists(atPath: other), "not a picture request: left for the next reader")
+            try fm.removeItem(atPath: other)
+        }
+        let outside = try file(NSTemporaryDirectory(), #"{"shoot": "/tmp/x/out.png"}"#)
+        #expect(takeShootRequest(outside, inbox: inbox) == nil, "a file outside the inbox asks for nothing")
+        try fm.removeItem(atPath: outside)
+    }
+
     @Test func showTakesTheTerminalAppsFrontWindowInAppKitsCoordinates() {
         func window(_ owner: pid_t, layer: Int = 0, _ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat) -> [String: Any] {
             [kCGWindowOwnerPID as String: owner, kCGWindowLayer as String: layer,

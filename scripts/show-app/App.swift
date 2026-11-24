@@ -269,6 +269,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     /// (Finder, `open`) is Phil's own and comes forward.
     func application(_ application: NSApplication, open urls: [URL]) {
         let requests = urls.compactMap { url -> ShowRequest? in
+            if url.isFileURL, let picture = takeShootRequest(url.path) {
+                if openedEarly == nil { shootLive(to: picture) }
+                return nil
+            }
             if url.scheme == "canopy" {
                 let (link, beside, pane) = TerminalFrame.unmarked(url)
                 if beside { takeTerminalFrame() }

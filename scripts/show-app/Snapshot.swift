@@ -60,8 +60,8 @@ func writePNG(_ view: NSView, to file: String) {
 }
 
 /// The whole window as drawn, with each visible list painted over its slot: an ancestor's capture leaves table rows out.
-func writeComposite(_ root: NSView, to file: String, cover: NSView? = nil) {
-    snapshotAppearance?.performAsCurrentDrawingAppearance {
+func writeComposite(_ root: NSView, to file: String, cover: NSView? = nil, appearance: NSAppearance? = snapshotAppearance) {
+    appearance?.performAsCurrentDrawingAppearance {
         guard let rep = root.bitmapImageRepForCachingDisplay(in: root.bounds) else { return }
         root.cacheDisplay(in: root.bounds, to: rep)
         func tables(in view: NSView) -> [NSTableView] {
@@ -97,7 +97,17 @@ func writeComposite(_ root: NSView, to file: String, cover: NSView? = nil) {
             paint(tables(in: cover))
         }
         NSGraphicsContext.restoreGraphicsState()
-        try? canvas.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: file))
+        try? canvas.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: file), options: .atomic)
+    }
+}
+
+extension AppDelegate {
+    /// `show --shoot-live`: the running window drawn as it stands into a PNG, by the app itself. Nothing opens, moves,
+    /// comes forward or is recorded; a session reads the picture instead of asking for a screenshot of the desktop.
+    func shootLive(to file: String) {
+        guard snapshotPath == nil, selfTest == nil, let window else { return }
+        shell.view.layoutSubtreeIfNeeded()
+        writeComposite(shell.view, to: file, cover: shell.overlay ?? shell.finder, appearance: window.effectiveAppearance)
     }
 }
 

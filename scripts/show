@@ -7,6 +7,8 @@
 #   document: show <bench.json>.
 # show --canopy [--focus] [/v2/…] — the Canopy workspace (⌘1; its machine page has ⌘3): the forest viewer, at a page when given one.
 # show --status <deck | /v2/…> — whether it's waiting, opened or dismissed, from Show's event log.
+# show --shoot-live <out.png> — the RUNNING window drawn as it stands, by the app itself: what Phil has in front of him, with
+#   nothing opened, moved or brought forward. For a session to see the real page; refuses when Show isn't running.
 # show --build — just (re)build. show --snapshot <file.json> <out.png> [--appearance light|dark] — render the window offscreen, no window shown.
 # show --selftest — drive the app's own offscreen window through every workspace on scratch fixtures; non-zero exit on a failed step.
 # show --check-routing <file.json> — print the workspace a file opens in (and a forest's merge order). show --check-live <deck.json> — print a live deck's header, groups and compare diffs.
@@ -147,7 +149,7 @@ focus=0
 
 case "${1:-}" in
   -h|--help)
-    echo "usage: show [--focus] [<file.json>…] | show --api | show --canopy [--focus] [/v2/…] | show --status <deck | /v2/…> | show --build | show --snapshot <file.json> <out.png> [--appearance light|dark] | show --selftest | show --check-routing <file.json> | show --check-live <deck.json> | show --tutor [<session.json>] | show --tutor-check <session.json> | show --tutor-ask <session.json> <message>" >&2
+    echo "usage: show [--focus] [<file.json>…] | show --api | show --canopy [--focus] [/v2/…] | show --status <deck | /v2/…> | show --build | show --shoot-live <out.png> | show --snapshot <file.json> <out.png> [--appearance light|dark] | show --selftest | show --check-routing <file.json> | show --check-live <deck.json> | show --tutor [<session.json>] | show --tutor-check <session.json> | show --tutor-ask <session.json> <message>" >&2
     exit 64
     ;;
   --canopy)
@@ -195,6 +197,23 @@ PY
     ;;
   --build-held)
     build_held
+    ;;
+  --shoot-live)
+    [[ $# -eq 2 && "$2" == *.png && -d "$(dirname "$2")" ]] || { echo "usage: show --shoot-live <out.png>" >&2; exit 64; }
+    pgrep -xf "$app/Contents/MacOS/Show" >/dev/null || { echo "show: not running, so there is no window to draw" >&2; exit 1; }
+    out="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"
+    mkdir -p "$cache/inbox"
+    ask="$cache/inbox/shoot-$(date +%s)-$$.json"
+    rm -f "$out"
+    python3 -c 'import json, sys; json.dump({"shoot": sys.argv[1]}, open(sys.argv[2], "w"))' "$out" "$ask"
+    open -g -a "$app" "$ask"
+    for _ in $(seq 1 50); do
+      [[ -f "$out" ]] && { echo "$out"; exit 0; }
+      /bin/sleep 0.1
+    done
+    rm -f "$ask"
+    echo "show: the running Show drew nothing (an older build? relaunch it)" >&2
+    exit 1
     ;;
   --snapshot)
     [[ $# -eq 3 || ( $# -eq 5 && "$4" == "--appearance" && ( "$5" == "light" || "$5" == "dark" ) ) ]] \
