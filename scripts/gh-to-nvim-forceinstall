@@ -77,6 +77,11 @@ EOF
 
 "$here/gh-to-nvim-install"
 
+# The review server reads the trusted extension ids once at startup, so after a rotation it
+# 403s the popup ("cross-origin POST rejected") until it restarts.
+launchctl kickstart -k "gui/$(id -u)/com.philbrockman.canopy-server" 2>/dev/null &&
+  echo "✓ restarted the review server so it trusts $PROD_ID"
+
 # The defaults write above only reaches policy level "Recommended", which Chrome
 # ignores for force-install; the profile is what lands it as Mandatory. Human
 # approval is a macOS requirement — regenerate + re-approve after key rotations.
