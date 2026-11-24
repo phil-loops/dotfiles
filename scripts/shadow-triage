@@ -432,10 +432,10 @@ def form(pipeline, day):
         text = row["emailText"].strip()
         senders.append({
             "title": f"{domain} · {len(rows)} email{'s' if len(rows) != 1 else ''} — would you let this send?",
-            "email": text if len(text) <= 1800 else text[:1800] + "\\n…",
+            "email": text if len(text) <= 1800 else text[:1800] + "\n…",
             "sol": sol,
-            "reveal": f"Sol: {sol}. Prod: {prod}.\\n\\nRequest: {answer.get('request', '?')}\\n"
-                      f"Relies on: {answer.get('relies_on', '?')}\\nWhy: {answer.get('reason', '?')}",
+            "reveal": f"Sol: {sol}. Prod: {prod}.\n\nRequest: {answer.get('request', '?')}\n"
+                      f"Relies on: {answer.get('relies_on', '?')}\nWhy: {answer.get('reason', '?')}",
         })
     blocks = sum(1 for s in senders if s["sol"] == "block")
     script = FORM_SCRIPT.format(
