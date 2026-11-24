@@ -103,5 +103,13 @@ check("window:pane is in the client's session", pb.pick("2:1", state, rows)[0]["
 check("a pane id names any pane", pb.pick("%9", state, rows)[0]["address"] == "agents 3:1")
 check("a pane that isn't there says so", pb.pick("7", state, rows) == (None, "no pane 7"))
 
+moves = pb.read_moves(SERVER, JOURNAL)
+check("a branch's workers are named latest first, a pane that moved on included", pb.workers(moves, pb.Git(), "repo", "feat") == ["%3", "%2"], pb.workers(moves, pb.Git(), "repo", "feat"))
+check("…and only for that repo", pb.workers(moves, pb.Git(), "other", "feat") == [])
+check("the way back lands on a preferred pane that exists", pb.target(rows, prefer=["%77", "%9"], worked=["%1"]) == "%9")
+check("…else on the pane that last worked on the branch", pb.target(rows, worked=["%77", "%1"], last="%9") == "%1")
+check("…else on the pane canopy was entered from", pb.target(rows, last="%9") == "%9")
+check("…and nowhere in particular when that pane is gone", pb.target(rows, last="%77") is None)
+
 print("---", "all passed" if not failures else f"{failures} failed")
 raise SystemExit(1 if failures else 0)

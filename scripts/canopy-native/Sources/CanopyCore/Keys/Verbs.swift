@@ -49,6 +49,7 @@ public enum Verb: String, CaseIterable, Sendable, Comparable {
     case pr1 = "pr-1", pr2 = "pr-2", pr3 = "pr-3", pr4 = "pr-4", pr5 = "pr-5", pr6 = "pr-6", pr7 = "pr-7", pr8 = "pr-8", pr9 = "pr-9"
     case tmux1 = "tmux-1", tmux2 = "tmux-2", tmux3 = "tmux-3", tmux4 = "tmux-4", tmux5 = "tmux-5"
     case tmux6 = "tmux-6", tmux7 = "tmux-7", tmux8 = "tmux-8", tmux9 = "tmux-9"
+    case tmuxSwitch = "tmux-switch"
     case jumpBack = "jump-back", jumpForward = "jump-forward", saveJump = "save-jump"
     case branches, jumps, flags, findings, grep, lastPicker = "last-picker"
     case workspaceSymbols = "workspace-symbols"
@@ -148,7 +149,7 @@ public enum KeySection: String, CaseIterable, Sendable {
         // bare keys: no prefix's box shows them
         case .halfDown, .halfUp, .pageDown, .pageUp, .left, .right, .nextWord, .previousWord,
              .findChar, .tillChar, .findCharBack, .tillCharBack, .cancel, .nextLongWord, .previousLongWord, .longWordEnd,
-             .face, .search, .wordEnd, .searchBack, .repeatMotion, .searchWord, .jumpBack, .jumpForward, .saveJump,
+             .face, .search, .wordEnd, .searchBack, .repeatMotion, .searchWord, .jumpBack, .jumpForward, .saveJump, .tmuxSwitch,
              .select, .leader, .main, .write, .mark, .unmark, .putAway, .apply, .copy, .push, .sync, .words, .editor,
              .comment, .reply, .extend, .undo, .copyPlace, .moveUp, .moveDown, .send, .newline:
             return nil
@@ -294,6 +295,7 @@ public enum Verbs {
         v(.tmux4, .nav, ["C-a 4"], jump: true, "tmux pane 4's branch"), v(.tmux5, .nav, ["C-a 5"], jump: true, "tmux pane 5's branch"),
         v(.tmux6, .nav, ["C-a 6"], jump: true, "tmux pane 6's branch"), v(.tmux7, .nav, ["C-a 7"], jump: true, "tmux pane 7's branch"),
         v(.tmux8, .nav, ["C-a 8"], jump: true, "tmux pane 8's branch"), v(.tmux9, .nav, ["C-a 9"], jump: true, "tmux pane 9's branch"),
+        v(.tmuxSwitch, .nav, ["C-space"], "over to tmux, on the pane working on the branch you're looking at — else the pane you came from; the same key in tmux comes back on that pane's branch"),
         v(.asked1, .nav, ["A-a"], jump: true, "open the first PR you're asked to review, from any page — the letter on its card (⌥h and ⌥l stay panes, so a…g)"),
         v(.asked2, .nav, ["A-b"], jump: true, "the second PR you're asked to review"), v(.asked3, .nav, ["A-c"], jump: true, "the third"),
         v(.asked4, .nav, ["A-d"], jump: true, "the fourth"), v(.asked5, .nav, ["A-e"], jump: true, "the fifth"),

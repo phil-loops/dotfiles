@@ -5,6 +5,11 @@
   pane-branch --json          every pane as JSON; branch is null where there's none
   pane-branch <pane>          "<repo>\\t<branch>" for one pane; exit 1 saying why when it has none
   pane-branch url <pane>      that branch's canopy:// link
+  pane-branch canopy <pane>   bring canopy forward on that pane's branch (as it stands when the pane has none),
+                              and remember the pane for the way back
+  pane-branch tmux [--prefer <pane-id>]… [<repo> <branch>] [--dry-run]
+                              bring the terminal forward on the pane for that branch: a preferred pane that
+                              exists, else the pane that last worked on the branch, else the pane you left
 
 <pane> is a pane id (%342), window:pane (3:1) in the session your tmux client shows, or one digit: that
 pane of the window your client shows.
@@ -138,6 +143,74 @@ def pick(target, state, all_rows):
     return (hits[0], None) if hits else (None, f"no pane {target}")
 
 
+def last_pane_file():
+    return os.path.join(journal_dir(), "last-pane")
+
+
+def remember(server, pane):
+    try:
+        os.makedirs(journal_dir(), exist_ok=True)
+        with open(last_pane_file(), "w") as f:
+            f.write(f"{server}\t{pane}\n")
+    except OSError:
+        pass
+
+
+def remembered(server):
+    try:
+        with open(last_pane_file()) as f:
+            was, _, pane = f.read().strip().partition("\t")
+    except OSError:
+        return None
+    return pane if was == server and pane else None
+
+
+def workers(moves, git, repo, branch):
+    """The panes that worked on a branch, latest work first — a pane since moved on to another still counts."""
+    out = []
+    for move in reversed(moves):
+        if move["branch"] == branch and os.path.basename(move["repo"]) == repo and move["pane"] not in out and how(move, git):
+            out.append(move["pane"])
+    return out
+
+
+def target(all_rows, prefer=(), worked=(), last=None):
+    """The pane to land on: a preferred one that exists, else the one that last worked on the branch,
+    else the one canopy was entered from; None when there's nothing to choose by."""
+    here = {r["pane"] for r in all_rows}
+    return next((pane for pane in [*prefer, *worked, last] if pane in here), None)
+
+
+def to_canopy(pane, state, all_rows):
+    remember(state[0], pane)
+    row = next((r for r in all_rows if r["pane"] == pane), None)
+    route = f"/v2/b/{row['repo']}/{row['branch']}" if row and row["branch"] else None
+    canopy = os.path.join(os.path.dirname(os.path.abspath(__file__)), "canopy")
+    os.execv(canopy, [canopy, "--focus"] + ([route] if route else []))
+
+
+def to_tmux(args, state, all_rows, moves, git):
+    dry = "--dry-run" in args
+    args = [a for a in args if a != "--dry-run"]
+    prefer = []
+    while args[:1] == ["--prefer"] and len(args) >= 2:
+        prefer.append(args[1])
+        args = args[2:]
+    if len(args) not in (0, 2):
+        print(__doc__, file=sys.stderr)
+        return 2
+    repo, branch = args if args else (None, None)
+    pane = target(all_rows, prefer, workers(moves, git, repo, branch) if branch else (), remembered(state[0]))
+    commands = [["tmux", verb, "-t", pane] for verb in ("select-window", "select-pane", "switch-client")] if pane else []
+    commands.append(["open", "-a", "Terminal"])
+    for command in commands:
+        if dry:
+            print(" ".join(command))
+        else:
+            subprocess.run(command, capture_output=True)
+    return 0
+
+
 def ago(seconds):
     for size, unit in ((86400, "d"), (3600, "h"), (60, "m")):
         if seconds >= size:
@@ -154,10 +227,15 @@ def main():
     if not state:
         print("pane-branch: no tmux server", file=sys.stderr)
         return 1
-    all_rows = rows(state, read_moves(state[0]), Git())
+    moves, git = read_moves(state[0]), Git()
+    all_rows = rows(state, moves, git)
     if args == ["--json"]:
         print(json.dumps(all_rows))
         return 0
+    if args[:1] == ["canopy"] and len(args) == 2:
+        to_canopy(args[1], state, all_rows)
+    if args[:1] == ["tmux"]:
+        return to_tmux(args[1:], state, all_rows, moves, git)
     if not args:
         now = time.time()
         for r in all_rows:

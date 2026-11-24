@@ -81,6 +81,33 @@ final class PaneBranches {
         }
     }
 
+    /// What the way to tmux asks for: the panes of the chats on what's in front (the page's branch, else the branch or
+    /// forest under the cursor), then that branch by name so a pane that committed there is found.
+    static func wayBack(_ app: AppModel) -> [String] {
+        let m = app.forestModel
+        var named: (repo: String, branch: String)?, views: [BranchView] = []
+        if case .review(let repo, let branch, _) = app.router.route {
+            named = (repo, branch)
+            views = m.forests().values.flatMap(\.branches).filter { $0.b.repo == repo && $0.b.name == branch }
+        } else if let v = m.branchView(RowKey.id(app.selected, "b")) {
+            named = (v.b.repo, v.b.name)
+            views = [v]
+        } else if let f = RowKey.id(app.selected, "p").flatMap({ m.forests()[$0] }) {
+            views = f.branches
+        }
+        let prefer = WorkContext.onForest(views).compactMap(\.pane).flatMap { ["--prefer", $0] }
+        return ["tmux"] + prefer + (named.map { [$0.repo, $0.branch] } ?? [])
+    }
+
+    /// Brings the terminal forward on the pane for what's in front.
+    @discardableResult
+    func toTmux(_ app: AppModel) -> Task<Void, Never> {
+        let ask = ask, args = Self.wayBack(app)
+        return Task { [weak app] in
+            if case .failure(let why) = await Task.detached(operation: { ask(args) }).value { app?.runner.say(why.message) }
+        }
+    }
+
     /// Takes every pane's answer, and brings the borders to it, touching only the panes whose branch changed.
     func take(_ rows: [Row]) {
         if rows != self.rows { self.rows = rows }
@@ -119,6 +146,12 @@ final class PaneBranches {
     }
 
     static func install(_ app: AppModel) {
+        app.registry.register(Command(id: "tmux.switch", title: "Go to the tmux pane working on this branch", scope: .global,
+                                      verb: .tmuxSwitch, label: "tmux",
+                                      local: { [weak app] _, _ in
+                                          guard let app else { return }
+                                          PaneBranches.of(app).toTmux(app)
+                                      }))
         for n in 1...9 {
             app.registry.register(Command(id: "tmux.pane.\(n)", title: "Open the branch tmux pane \(n) is working on", scope: .global,
                                           verb: .tmux(n), label: "pane \(n)", recordsJump: true,

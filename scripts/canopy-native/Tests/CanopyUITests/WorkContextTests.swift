@@ -438,6 +438,21 @@ import Testing
         #expect(PaneBranches.route("r\tfeat/x\n") == .review(repo: "r", branch: "feat/x") && PaneBranches.route("") == nil)
     }
 
+    /// ⌃space goes to tmux on the pane for what's in front: the chat's pane first, then the branch by name.
+    @Test func theWayToTmuxNamesWhatIsInFront() async throws {
+        let now = world().forestModel.now.timeIntervalSince1970
+        let app = world(.review(repo: "r", branch: "a"), chats: ["59fa0cc0-1": chat("59fa0cc0-1", activeAt: now - 30, acted: [("r:a", "commit", now - 180)])])
+        #expect(app.registry.command("tmux.switch")?.keys == ["C-space"])
+        #expect(PaneBranches.wayBack(app) == ["tmux", "--prefer", "%1", "r", "a"])
+        #expect(PaneBranches.wayBack(world(.review(repo: "r", branch: "unknown/x"))) == ["tmux", "r", "unknown/x"], "a branch canopy has no chat on still goes by name")
+        #expect(PaneBranches.wayBack(world(.todo)) == ["tmux"], "with no branch in front, the pane you came from")
+        let panes = PaneBranches.of(app)
+        nonisolated(unsafe) var asked: [[String]] = []
+        panes.ask = { asked.append($0); return .success("") }
+        await panes.toTmux(app).value
+        #expect(asked == [["tmux", "--prefer", "%1", "r", "a"]])
+    }
+
     /// A forest's line says where its panes sit: a chat's pane, and any pane (Codex, a shell) whose latest work is on
     /// one of its branches. Each pane's border names its branch, written when it changes and cleared when it has none.
     @Test func aPanesBranchGoesOnItsForestsLineAndItsBorder() throws {
