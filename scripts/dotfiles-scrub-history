@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# dotfiles-scrub-history — rewrite origin/main without the paths that should never have been
+# public (the gh-to-nvim signing key, Show's decks), force-push it, and move local main onto it.
+#
+# Phil runs this; it force-pushes. It rebuilds the rewrite from local main at run time, so it is
+# never stale, and refuses rather than guesses: the push is leased on the origin/main it read,
+# and local main moves by compare-and-swap, only if no session committed while it ran (rerun
+# then). filter-repo drops commit signatures, so a rerun re-forces any commit signed since.
+# The tip tree is unchanged by construction (neither path is tracked any more), so main's
+# checkout, index and everyone's uncommitted work stay exactly as they are.
+set -euo pipefail
+
+D="${DOTFILES_DIR:-$HOME/.dotfiles}"
+URL="$(git -C "$D" remote get-url origin)"
+PATHS=(--path scripts/gh-to-nvim-key.pem --path show/)
+
+old_main="$(git -C "$D" rev-parse refs/heads/main)"
+remote_main="$(git -C "$D" ls-remote "$URL" refs/heads/main | cut -f1)"
+
+for p in scripts/gh-to-nvim-key.pem show; do
+  if git -C "$D" ls-tree -r --name-only "$old_main" -- "$p" | grep -q .; then
+    echo "scrub: $p is still tracked on main — untrack it first" >&2
+    exit 1
+  fi
+done
+
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+git clone -q --no-local --single-branch --branch main "$D" "$work/r"
+git -C "$work/r" filter-repo --force --quiet --invert-paths "${PATHS[@]}"
+new_main="$(git -C "$work/r" rev-parse main)"
+
+[[ "$(git -C "$D" rev-parse "$old_main^{tree}")" == "$(git -C "$work/r" rev-parse "main^{tree}")" ]] ||
+  { echo "scrub: rewritten tip tree differs from main's — refusing" >&2; exit 1; }
+[[ -z "$(git -C "$work/r" log --all --format=%h -- scripts/gh-to-nvim-key.pem show)" ]] ||
+  { echo "scrub: a scrubbed path survived the rewrite — refusing" >&2; exit 1; }
+
+echo "main $old_main → $new_main ($(git -C "$work/r" rev-list --count main) commits)"
+git -C "$work/r" push --force-with-lease="main:$remote_main" "$URL" main:main
+
+git -C "$D" fetch -q origin
+git -C "$D" update-ref -m "dotfiles-scrub-history" refs/heads/main "$new_main" "$old_main" ||
+  { echo "scrub: local main moved while this ran — rerun to fold the new commits in" >&2; exit 1; }
+echo "✓ origin/main and local main are scrubbed; pre-push refuses branches cut from the old history"

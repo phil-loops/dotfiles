@@ -1,0 +1,24 @@
+#!/bin/sh
+# dotfiles pre-push — refuse to publish history that still carries the scrubbed paths.
+#
+# The repo is public. scripts/gh-to-nvim-key.pem and show/ were removed from origin's history
+# by scripts/dotfiles-scrub-history; every local branch cut before that rewrite still contains
+# them, and pushing one would put them straight back. a0c0eb3 added the key, so any ref that
+# has it as an ancestor is old history: rebase that branch's own commits onto origin/main first.
+# Escape hatch (only to push the rewrite itself from a fresh clone, never routine): DOTFILES_SCRUB_GUARD=off
+[ "${DOTFILES_SCRUB_GUARD:-on}" = off ] && exit 0
+
+marker=a0c0eb369a36121a1ce6d2d28b2c997a41ce9425
+git cat-file -e "$marker^{commit}" 2>/dev/null || exit 0
+
+zero=0000000000000000000000000000000000000000
+status=0
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [ "$local_sha" = "$zero" ] && continue
+  if git merge-base --is-ancestor "$marker" "$local_sha" 2>/dev/null; then
+    echo "pre-push: $local_ref carries pre-scrub history (contains ${marker%"${marker#???????}"}, which published the gh-to-nvim key)." >&2
+    echo "  rebase its own commits onto origin/main: git rebase --onto origin/main <old-base> $local_ref" >&2
+    status=1
+  fi
+done
+exit $status
