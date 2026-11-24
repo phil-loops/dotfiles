@@ -24,6 +24,15 @@ def _size(value):
     return sum(len(v) for v in parts if isinstance(v, (str, bytes)))
 
 
+def state(key):
+    """"hit", "expired" (stored but past _MAX_AGE) or "absent" — what get() would find for key now."""
+    with _LOCK:
+        hit = _ENTRIES.get(key)
+    if hit is None:
+        return "absent"
+    return "hit" if time.monotonic() - hit[0] < _MAX_AGE else "expired"
+
+
 def get(key, build, keep=lambda value: True):
     """build()'s value for key — memoised, single-flight. build must be read-only; a value
     keep() rejects (a failed build) is returned but not stored."""

@@ -289,6 +289,19 @@ def _is_convergence(branch, stdout):
     return bool(ctx.run(["git", "config", "--get-all", f"branch.{branch}.stack-requires"]).stdout.strip())
 
 
+_NODE_SEEN = {}   # (repo, branch, base, ws) -> (refs key, dirt) of the last read, to say why the next one missed
+
+
+def _node_miss_why(found, last, rk, dirt):
+    """Why a /node read rebuilt: the memo's own state, else which half of the key moved. Pure."""
+    if found == "expired":
+        return "expired"
+    if last is None:
+        return "first read"
+    moved = [name for name, was, now in (("refs", last[0], rk), ("dirt", last[1], dirt)) if was != now]
+    return " + ".join(moved) + " moved" if moved else "evicted or never stored"
+
+
 def node(req, u):
     q = parse_qs(u.query)
     branch = q.get("branch", [""])[0]
@@ -304,10 +317,21 @@ def node(req, u):
         return snap.inputs_fingerprint([n for n in names if n])
     rk = refs_key()
     hide_ws = _hide_ws(u)
-    key = ("node", ctx.repo_cwd(), branch, base, hide_ws, rk, watch.dirt_stamp([p for p, _ in watch.holders(branch)]))
-    # a ref that moved mid-build would file the newer payload under the older key
-    code, body = memo.get(key, lambda: _node_build(branch, base, hide_ws),
-                          keep=lambda v: v[0] == 200 and refs_key() == rk)
+    dirt = watch.dirt_stamp([p for p, _ in watch.holders(branch)])
+    key = ("node", ctx.repo_cwd(), branch, base, hide_ws, rk, dirt)
+    seen = (ctx.repo_cwd(), branch, base, hide_ws)
+    found = memo.state(key)
+    if found != "hit":
+        ctx.log(f"node-miss {branch} — {_node_miss_why(found, _NODE_SEEN.get(seen), rk, dirt)}")
+    _NODE_SEEN[seen] = (rk, dirt)
+
+    def keep(v):
+        # a ref that moved mid-build would file the newer payload under the older key
+        stored = v[0] == 200 and refs_key() == rk
+        if not stored:
+            ctx.log(f"node-miss {branch} — not stored ({'refs moved mid-build' if v[0] == 200 else v[0]})")
+        return stored
+    code, body = memo.get(key, lambda: _node_build(branch, base, hide_ws), keep=keep)
     req._send(code, body)
 
 
