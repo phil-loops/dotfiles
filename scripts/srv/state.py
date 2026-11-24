@@ -273,6 +273,9 @@ def _git_entities(name, snap, jobs):
             # keys use these inputs, so a client key on this stamp moves exactly when a read could
             # change (a push, a parent's seal, a review run's flags). Dirt is the one input it lacks.
             "readStamp": snap.inputs_fingerprint([b, parent, *snap.branch_key_all(b, "requires")])[:16],
+            # what the branch's diff is derived from — the same refs, no config: /node keys on it, so a
+            # verdict or a review flag landing doesn't send the page to re-read an unchanged diff
+            "diffStamp": snap.refs_fingerprint([b, parent, *snap.branch_key_all(b, "requires")])[:16],
             # a push Phil queued for when its gates go green (srv/pushintent.py), and what it came to
             "pushQueued": pushintent.queued(b, snap, tree),
             # the client shows it for an hour from `pushSaidAt` on its own clock (no clock in a fingerprint)

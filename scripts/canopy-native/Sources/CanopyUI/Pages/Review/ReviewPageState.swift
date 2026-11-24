@@ -399,13 +399,13 @@ public final class ReviewPageState: ShipHost {
 
     /// What a diff was read from: the tip, the base asked for, and — read against the parent — which
     /// parent, since a contract or reparent moves the base without moving the tip.
-    /// `stamp`: the branch's readStamp — the base's tip (the parent's, origin's copy) moves it.
+    /// `stamp`: the branch's diffStamp — the base's tip (the parent's, origin's copy) moves it; config doesn't.
     static func diffKey(id: String, at: String, ref: String, parent: String, stamp: String) -> String {
         "\(id)@\(at)|\(ref)" + (ref.isEmpty ? "<\(parent)" : "") + "#\(stamp)"
     }
 
     public var keyOf: String {
-        Self.diffKey(id: id, at: at, ref: baseRef(target?.name ?? ""), parent: branch?.parent ?? "", stamp: branch?.readStamp ?? "")
+        Self.diffKey(id: id, at: at, ref: baseRef(target?.name ?? ""), parent: branch?.parent ?? "", stamp: branch?.diffStamp ?? branch?.readStamp ?? "")
     }
     public var baseSha: String { payload?.data.baseSha ?? "" }
     public var scoped: Bool { commitScope != nil }
@@ -822,7 +822,7 @@ public final class ReviewPageState: ShipHost {
     /// Prefetch a branch's diff so opening it paints at once (page.ts warm).
     public func warm(_ b: Branch) {
         let (repo, name) = (b.repo, b.name)
-        let key = Self.diffKey(id: b.id, at: b.tip, ref: "", parent: b.parent, stamp: b.readStamp ?? "")
+        let key = Self.diffKey(id: b.id, at: b.tip, ref: "", parent: b.parent, stamp: b.diffStamp ?? b.readStamp ?? "")
         guard cache[key] == nil, !loading.contains(key), let app else { return }
         loading.insert(key)
         let path = app.transport.atRepo(repo, "/node?branch=\(name.uriComponent)")

@@ -263,6 +263,33 @@ import Testing
         return (a, p)
     }
 
+    /// Phil 2026-11-24 ("what if the new one loading was just faster?"): the diff is keyed on what it
+    /// reads. A config write (a verdict, a flag) moves the branch's readStamp but not its diffStamp,
+    /// and the page keeps its diff; a diffStamp that moves — a parent's commit — re-reads it.
+    @Test func aConfigWriteKeepsTheDiffAndARefMoveRereadsIt() async throws {
+        let (a, p) = try await app()
+        let pg = ReviewPageState.of(a)
+        func set(_ f: JSONObject) throws {
+            var obj = try #require(a.store.rawView("branch", Self.branch))
+            for (k, v) in f { obj[k] = v }
+            #expect(a.store.applyPatch(try Patch.make(domain: Domain.git, version: (a.store.versions[Domain.git] ?? 0) + 1,
+                                                      upserts: ["branch": [Self.branch: .object(obj)]])) == .ok)
+        }
+        try set(["readStamp": "r1", "diffStamp": "d1"])
+        pg.sync()
+        await until("the diff under its stamp") { pg.payload?.key == pg.keyOf }
+        let key = pg.keyOf
+        try set(["readStamp": "r2"])
+        pg.sync()
+        #expect(pg.keyOf == key, "a config write leaves the diff's key")
+        #expect(pg.payload?.key == key && !pg.diffStale, "and the diff on screen stays current")
+        ShipStub.answer(p, "GET", "/loops/node", #"{"branch":"add-hankles-limited-label","baseSha":"parent-moved","files":[]}"#)
+        try set(["diffStamp": "d2"])
+        pg.sync()
+        #expect(pg.keyOf != key, "a ref the diff reads moving moves its key")
+        await until("the reread diff") { pg.baseSha == "parent-moved" }
+    }
+
     /// A branch opened before canopy knew its repo was read from the wrong place; a moved repo list rereads it.
     @Test func aMovedRepoListRereadsTheDiff() async throws {
         let (a, p) = try await app()

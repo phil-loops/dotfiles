@@ -171,6 +171,16 @@ class RepoState:
         return tuple(self.sha.get(r, "") for r in (f"refs/heads/{name}", f"refs/remotes/{name}",
                                                     f"refs/remotes/origin/{name}", name))
 
+    def refs_fingerprint(self, branches, *extra):
+        """Key material for a payload derived only from these branches' tips and the trunk's — a
+        diff. Config isn't read by a diff (the links that are, parent and requires, are the names
+        passed in), so a verdict, a review flag or a description write leaves it alone. No spawn."""
+        main = self.main()
+        parts = [main, self.ref_any(main), *extra]
+        for b in branches:
+            parts += [b, self.ref_any(b)]
+        return hashlib.sha1(repr(parts).encode()).hexdigest()
+
     def inputs_fingerprint(self, branches, *extra):
         """Key material for a payload derived from these branches' refs + config blocks, the
         and the trunk. No spawn."""

@@ -309,12 +309,12 @@ def node(req, u):
     if branch.startswith("refs/stack/"):   # the ghost integration ref is rebuilt per select
         return _node_uncached(req, branch, base, _hide_ws(u))
     # The payload is a pure function of the branch's, its parent's, its requires' and the base's
-    # tips, their config blocks, and the dirt of the worktree holding it —
-    # so that is the key. A hit costs a stat walk plus one `status` per holding worktree.
+    # tips, and the dirt of the worktree holding it — so that is the key (state.py's diffStamp is
+    # the same fingerprint). A hit costs a stat walk plus one `status` per holding worktree.
     def refs_key():
         snap = repostate.snapshot()
         names = [branch, snap.parent(branch), base, *snap.branch_key_all(branch, "requires")]
-        return snap.inputs_fingerprint([n for n in names if n])
+        return snap.refs_fingerprint([n for n in names if n])
     rk = refs_key()
     hide_ws = _hide_ws(u)
     dirt = watch.dirt_stamp([p for p, _ in watch.holders(branch)])

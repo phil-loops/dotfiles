@@ -105,6 +105,9 @@ public struct Branch: Entity {
     /// what every server read about this branch is derived from (its, its parent's and requires' refs
     /// and config, the trunk): a client key on it moves exactly when such a read could change
     public var readStamp: String?
+    /// what the branch's diff reads — its, its parent's and its requires' refs and the trunk's, no
+    /// config; the diff is keyed on it so a verdict or a flag landing doesn't re-read an unchanged diff
+    public var diffStamp: String?
     /// what the last queued push came to, and when (epoch seconds) — shown for an hour on the client's clock
     public var pushSaid: String?
     public var pushSaidAt: Double?
