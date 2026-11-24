@@ -1,7 +1,13 @@
 # srv/seen.py — a press acts on the commit Phil saw, never on whatever the branch holds when it lands.
 # The door's writes (push, waive) name the tip that was on screen; a branch that moved since is
 # refused with what's new, so the next press is made having seen it — never a trip to a chat.
+import re
+
 from . import ctx
+
+
+def full_tip(value):
+    return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", value) is not None
 
 
 def tip(branch):

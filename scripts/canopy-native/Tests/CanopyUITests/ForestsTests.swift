@@ -659,11 +659,22 @@ func world(_ route: Route = .forests, todo: [String: Any] = [:], fanIn: Bool = f
         let a = world()
         var obj = try #require(a.store.rawView("branch", "r:d"))
         obj["owes"] = "c"
+        obj["catchUpStamp"] = "chain-on-screen"
         #expect(a.store.applyPatch(try Patch.make(domain: Domain.git, version: (a.store.versions[Domain.git] ?? 0) + 1,
                                                   upserts: ["branch": ["r:d": .object(obj)]])) == .ok)
         #expect(BranchCommands.pushRoute("r:d", a) == "branch.catchup")
         let w = try #require(try a.registry.command("branch.catchup")!.write!("r:d", nil))
-        #expect(w.path == "/r/catch-up" && w.body == ["branch": "d"])
+        let seen: JSONObject = ["branch": "d", "expectTip": try #require(obj["tip"]), "expectChain": "chain-on-screen"]
+        #expect(w.path == "/r/catch-up" && w.body == .object(seen))
+        obj["catchUpStamp"] = "changed-during-sync"
+        #expect(a.store.applyPatch(try Patch.make(domain: Domain.git, version: (a.store.versions[Domain.git] ?? 0) + 1,
+                                                  upserts: ["branch": ["r:d": .object(obj)]])) == .ok)
+        let sync = try #require(try a.registry.command("branch.sync.catchup")!.write!("r:d", StepArg(seen)))
+        #expect(sync.path == w.path && sync.body == w.body)
+        var refreshed = false
+        a.runner.resync = { refreshed = true }
+        w.answered?(false, ["stale": true])
+        #expect(refreshed)
     }
 
     @Test func aPrepRouteReadBeforeTheBranchMovedRoutesNothing() throws {

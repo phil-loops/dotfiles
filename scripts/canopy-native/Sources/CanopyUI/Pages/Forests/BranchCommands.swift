@@ -156,9 +156,10 @@ enum BranchCommands {
             write: { id, _ in
                 guard let v = m.branchView(id) else { return nil }
                 if app.runner.runOf("branch.catchup", id)?.inFlight == true { throw Refusal("still catching up — the strip says when it lands") }
-                return Write(path: t.atRepo(v.b.repo, "/catch-up"), body: ["branch": .string(v.b.name)], settled: { true },
+                return Write(path: t.atRepo(v.b.repo, "/catch-up"), body: .object(v.b.catchUpBody), settled: { true },
                              said: "caught the chain up — p pushes next",
-                             failed: "the catch-up stopped — a conflict to resolve by hand, or the forest is busy", alone: true)
+                             failed: "catch-up stopped",
+                             answered: { _, body in if body["stale"] == true { app.runner.resync?() } }, alone: true)
             }))
         r.register(Command(
             id: "branch.conform", title: "Take origin's copy — it was rewritten upstream and already has everything local has",

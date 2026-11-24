@@ -55,7 +55,7 @@ import threading
 import time
 from urllib.parse import parse_qs
 
-from . import chats, ctx, outbox, push, pushintent, repostate, reviewdesk, sync, todo, viewed, watch, workfresh
+from . import catchup, chats, ctx, outbox, push, pushintent, repostate, reviewdesk, sync, todo, viewed, watch, workfresh
 
 EPOCH = f"{os.getpid():x}{int(time.time()):x}"
 DOMAINS = ("git", "remote", "review", "todo")
@@ -270,6 +270,7 @@ def _git_entities(name, snap, jobs):
             "behind": behind.get(b, 0),
             "drifted": bool(tip) and not rooted and not _is_ancestor(graph, snap.local(parent), tip),
             "upstream": up, "upstreamBad": up_bad, "diverged": diverged,
+            "catchUpStamp": catchup.chain_stamp(b, snap),
             # what every read about this branch is derived from — its, its parent's and its requires'
             # refs (each copy, origin's included) and config blocks, the trunk: the server's own read
             # keys use these inputs, so a client key on this stamp moves exactly when a read could

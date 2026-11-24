@@ -10,6 +10,12 @@ import Foundation
 // one is measured; the motion only sequences them. Also the rare repairs: reseat, detach a footgun
 // upstream, inspect a divergence.
 
+extension Branch {
+    var catchUpBody: JSONObject {
+        ["branch": .string(name), "expectTip": .string(tip), "expectChain": catchUpStamp.map(JSONValue.string) ?? .null]
+    }
+}
+
 /// A step's argument: how the motion hears the step's answer.
 final class StepArg {
     var done: ((Bool, JSONObject) -> Void)?
@@ -53,7 +59,7 @@ enum SyncCommands {
              failed: "the rebase didn't run", title: "Rebase it onto origin/main (or say its forest needs a restack)", budget: .slowIO, v1: "sync")
         step("branch.sync.restack", path: "/restack", body: { _, a in ["project": a?.extra["project"] ?? .null] },
              failed: "the restack didn't start", title: "Queue its forest's restack onto origin/main", budget: .gitWrite, v1: "restack")
-        step("branch.sync.catchup", path: "/catch-up", body: { b, _ in ["branch": .string(b.name)] },
+        step("branch.sync.catchup", path: "/catch-up", body: { b, a in a?.extra ?? b.catchUpBody },
              failed: "the catch-up didn't run", title: "Catch the chain up to its moved ancestors — rebase drafts, catch-up merge for published ones",
              budget: .gitWrite, v1: "catch-up")
         step("branch.sync.prep", path: "/prep-push", body: { b, _ in ["branch": .string(b.name)] },
@@ -72,10 +78,10 @@ enum SyncCommands {
             verb: .sync, label: "sync", v1: ["prep-push"],
             available: { id in branch(id).map { !$0.tip.isEmpty } == true && !running(id) && !deciding(id) },
             local: { [weak app] id, _ in
-                guard let app, let id else { return }
+                guard let app, let id, let b = branch(id) else { return }
                 let via: Via = .key
-                guard let b = branch(id), ship.syncNeeds(b)?.isEmpty == true else {
-                    Task { @MainActor in await SyncMotionDriver(app: app).start(id, via: via) }
+                guard ship.syncNeeds(b)?.isEmpty == true else {
+                    Task { @MainActor in await SyncMotionDriver(app: app).start(b, via: via) }
                     return
                 }
                 // "nothing to sync" is a decision, and uncommitted work is the one input the cached read
@@ -83,7 +89,7 @@ enum SyncCommands {
                 Task { @MainActor in
                     let driver = SyncMotionDriver(app: app)
                     guard let fresh = try? await driver.facts(b), Syncing.needs(b, facts: fresh, prep: ship.prepOf(id)).isEmpty else {
-                        return await driver.start(id, via: via)
+                        return await driver.start(b, via: via)
                     }
                     app.runner.say("nothing to sync — it's on its parent and main, clean and in shape")
                 }
@@ -102,8 +108,8 @@ enum SyncCommands {
         ] {
             r.register(Command(id: cid, title: title, scope: .review, leader: LocalKey(key), label: label, group: .branch, available: deciding,
                                local: { [weak app] id, _ in
-                                   guard let app, let id else { return }
-                                   Task { @MainActor in await SyncMotionDriver(app: app).decide(id, via: .menu, action: action) }
+                                   guard let app, let b = branch(id) else { return }
+                                   Task { @MainActor in await SyncMotionDriver(app: app).decide(b, via: .menu, action: action) }
                                }))
         }
         r.register(Command(
@@ -199,8 +205,8 @@ struct SyncMotionDriver {
         try await app.transport.getJSON(app.transport.atRepo(b.repo, "/sync?branch=\(b.name.uriComponent)"), as: SyncFacts.self)
     }
 
-    func start(_ id: String, via: Via) async {
-        guard let b = branch(id) else { return }
+    func start(_ b: Branch, via: Via) async {
+        let id = b.id
         ship.motions[id] = SyncMotion(steps: [SyncStep(id: .dirt, label: "working tree", state: .run, t0: Date())], phase: .running, stashed: false, tip: b.tip)
         let f: SyncFacts
         do { f = try await facts(b) } catch {
@@ -215,10 +221,12 @@ struct SyncMotionDriver {
             app.runner.say("\(shipLeaf(b.name)): \(f.dirty.count) uncommitted — fold, stash or stop on its page")
             return
         }
-        await run(id, via: via, facts: f, dirt: nil)
+        await run(b, via: via, facts: f, dirt: nil)
     }
 
-    func decide(_ id: String, via: Via, action: String) async {
+    func decide(_ observed: Branch, via: Via, action: String) async {
+        var b = observed
+        let id = b.id
         if action == "abort" {
             ship.setStep(id, .dirt, .fail, "stopped — the working tree is untouched")
             ship.patch(id) { $0.phase = .stopped; $0.dirt = nil }
@@ -233,25 +241,32 @@ struct SyncMotionDriver {
             return
         }
         ship.patch(id) { $0.dirt = nil; $0.stashed = action == "stash" }
-        guard let b = branch(id) else { return }
+        if action == "include", ship.motionOf(id)?.steps.contains(where: { $0.id == .reseat }) == true {
+            guard r.body["parent"]?.string == b.tip, let tip = r.body["tip"]?.string else {
+                ship.setStep(id, .reseat, .fail, "the branch changed while folding — refresh and sync again")
+                return await finish(id, via: via, .stopped)
+            }
+            b.tip = tip
+        }
         let f: SyncFacts
         do { f = try await facts(b) } catch {
             // a failed read isn't "nothing behind": stop, and the stash (if any) comes back
             ship.setStep(id, .dirt, .fail, "couldn't read the branch after the \(action) — \(error)")
             return await finish(id, via: via, .stopped)
         }
-        await run(id, via: via, facts: f, dirt: action == "stash" ? "stashed for the run" : "folded into the commit")
+        await run(b, via: via, facts: f, dirt: action == "stash" ? "stashed for the run" : "folded into the commit")
     }
 
-    func run(_ id: String, via: Via, facts f: SyncFacts, dirt: String?) async {
-        guard let b = branch(id) else { return }
+    func run(_ b: Branch, via: Via, facts f: SyncFacts, dirt: String?) async {
+        let id = b.id
         ship.setStep(id, .dirt, .ok, dirt)
         let has = { (s: StepID) in ship.motionOf(id)?.steps.contains { $0.id == s } == true }
 
         if has(.reseat) {
             ship.setStep(id, .reseat, .run)
-            let r = await step("branch.sync.catchup", id, via)
+            let r = await step("branch.sync.catchup", id, via, b.catchUpBody)
             if !r.ok || r.body["ok"]?.bool == false {
+                if r.body["stale"] == true { app.runner.resync?() }
                 ship.setStep(id, .reseat, .fail, reseatWhy(r.body))
                 return await finish(id, via: via, .stopped)
             }

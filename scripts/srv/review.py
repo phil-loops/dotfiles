@@ -5,7 +5,7 @@
 #   GET  /file?branch&path  a file's contents on a ref (git show)
 #   GET  /commits?branch=X  branch history: own commits (own:true) + ancestors (own:false)
 #   GET  /commit-diff?sha=X one commit's changed files + patches (git show); &from=<sha> a run, &from=main main...X
-#   POST /squash {branch}        collapse parent..branch into unstaged working-tree changes
+#   POST /squash {branch, expectTip}   collapse outgoing commits into unstaged working-tree changes
 #   POST /prep {branch}          prep-for-push: squash unpushed → one, then oxfmt
 import os
 import subprocess
@@ -16,7 +16,7 @@ import hashlib
 import threading
 from urllib.parse import parse_qs
 
-from . import ctx, lru, memo, repostate, shellout, picker, watch
+from . import ctx, lru, memo, repostate, seen, shellout, picker, watch
 
 # (repo, branch) -> {"sig", "branches", "out"} — validated per-FOREST (only its own ref
 # tips + config), so an unrelated worktree's commit no longer busts every
@@ -729,10 +729,15 @@ def squash(req, raw):
     # (Phil writes the commit in GitHub Desktop). See stack-squash --unstage.
     # --unpushed for the same reason /prep passes it: without it this collapsed to the frozen
     # fork-point even on a published branch, swallowing pushed commits and diverging the PR.
-    r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-squash"), "--unstage", "--unpushed", d.get("branch", "")])
-    # stack-squash always prints a JSON report (on success AND handled failure)
-    req._send(200 if r.returncode == 0 else 500,
-              r.stdout or json.dumps({"ok": False, "err": r.stderr or "squash crashed"}))
+    branch, tip = d.get("branch"), d.get("expectTip")
+    if not isinstance(branch, str) or not branch or branch.startswith("-") or not seen.full_tip(tip):
+        return req._send(400, json.dumps({"ok": False, "err": "refresh the branch to squash the commit you saw"}))
+    why = seen.moved(branch, tip)
+    if why:
+        return req._send(409, json.dumps(why))
+    r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-squash"), "--unstage", "--unpushed", f"--expect-tip={tip}", branch])
+    report = json.loads(r.stdout) if r.stdout else {"ok": False, "err": r.stderr or "squash crashed"}
+    req._send(409 if report.get("moved") else 500 if r.returncode else 200, json.dumps(report))
 
 
 def prep(req, raw):

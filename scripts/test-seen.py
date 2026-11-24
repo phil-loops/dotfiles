@@ -5,6 +5,7 @@ and refuse a request that names none. Temp repo; the push itself is a stand-in, 
 import testenv  # noqa: F401,E402 — git here ignores the machine's config (testenv.py)
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -40,7 +41,7 @@ os.chdir(repo)
 ctx.run = lambda argv, **kw: subprocess.run(argv, capture_output=True, text=True, env=env, cwd=kw.get("cwd", repo))
 ctx.CWD = ctx.MAIN_WT = repo
 ctx.log = lambda line: None
-from srv import push, seen, stackcfg, verdicts  # noqa: E402
+from srv import push, review, seen, stackcfg, verdicts  # noqa: E402
 
 pushed = []
 push.push_now = lambda branch, stay=False, tip=None: pushed.append((branch, tip)) or {"ok": True}
@@ -99,6 +100,49 @@ r = post(verdicts.waive, {"branch": "b"})
 check("a waiver naming no commit is refused", r.code == 400, r.body)
 r = post(verdicts.waive, {"branch": "b", "expectTip": rewritten})
 check("a waiver for the commit on screen records that commit's tree", r.body.get("ok") and git("config", "branch.b.stack-gates-waived-tree") == git("rev-parse", "b^{tree}"), r.body)
+
+published = rewritten
+git("update-ref", "refs/remotes/origin/b", published)
+observed = commit("outgoing")
+latest = commit("another pane's commit")
+ctx.SCRIPTS = HERE
+before = (git("show-ref"), git("write-tree"), open("f.txt").read())
+r = post(review.squash, {"branch": "b", "expectTip": observed})
+check("stale squash names the new commit and preserves refs, index and files",
+      r.code == 409 and r.body["commits"][0]["subject"] == "another pane's commit"
+      and before == (git("show-ref"), git("write-tree"), open("f.txt").read()), r.body)
+r = post(review.squash, {"branch": "b", "expectTip": latest[:8]})
+check("squash requires a full commit id", r.code == 400, r.body)
+# Inject an ordinary concurrent ref update immediately before the CLI's final compare-and-swap.
+race = git("commit-tree", latest + "^{tree}", "-p", latest, "-m", "arrived during squash")
+real_git = shutil.which("git")
+wrapper = os.path.join(repo, ".git", "test-bin")
+os.mkdir(wrapper)
+shim = os.path.join(wrapper, "git")
+with open(shim, "w") as f:
+    f.write(f'#!/bin/sh\nif test "$1" = update-ref && test "$2" = -m; then\n'
+            f'  "{real_git}" update-ref refs/heads/b {race} {latest} || exit 1\nfi\nexec "{real_git}" "$@"\n')
+os.chmod(shim, 0o755)
+old_path = env["PATH"]
+env["PATH"] = wrapper + os.pathsep + old_path
+try:
+    r = post(review.squash, {"branch": "b", "expectTip": latest})
+finally:
+    env["PATH"] = old_path
+check("a commit racing the final reset survives with its index and files", r.code == 409 and r.body.get("moved")
+      and git("rev-parse", "b") == race and git("write-tree") == before[1] and open("f.txt").read() == before[2], r.body)
+latest = race
+r = post(review.squash, {"branch": "b", "expectTip": latest})
+check("a fresh squash preserves published history and leaves both outgoing changes unstaged",
+      r.code == 200 and r.body.get("unstaged") and git("rev-parse", "b") == published
+      and git("write-tree") == git("rev-parse", published + "^{tree}") and git("rev-parse", "ORIG_HEAD") == latest
+      and open("f.txt").read() == before[2] and git("diff", "--name-only") == "f.txt", r.body)
+
+with open("fold.txt", "w") as f:
+    f.write("included by sync")
+r = post(push.dirty_resolve, {"branch": "b", "action": "include"})
+check("fold acknowledges the exact new commit and the tip it was built on",
+      r.body.get("tip") == git("rev-parse", "HEAD") and r.body.get("parent") == published, r.body)
 
 print(f"\n{'OK' if not failures else 'FAILED'} — {failures} failure(s)")
 sys.exit(1 if failures else 0)

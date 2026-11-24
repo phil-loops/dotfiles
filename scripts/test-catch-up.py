@@ -3,6 +3,7 @@
 catch-up merge (append-only, the parent's tip becomes an ancestor), unpublished links by a rebase.
 Temp repo; origin refs written with update-ref, so nothing is pushed or fetched."""
 import testenv  # noqa: F401,E402 — git here ignores the machine's config (testenv.py)
+import json
 import os
 import subprocess
 import sys
@@ -12,13 +13,6 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 
-class _State:
-    @staticmethod
-    def poke():
-        pass
-
-
-sys.modules["srv.state"] = _State
 from srv import ctx  # noqa: E402
 
 env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
@@ -29,8 +23,9 @@ repo = os.path.join(root, "r")
 subprocess.run(["git", "init", "-q", "-b", "main", repo], check=True, env=env)
 os.chdir(repo)
 ctx.run = lambda argv, **kw: subprocess.run(argv, capture_output=True, text=True, env=env, cwd=kw.get("cwd", repo))
-ctx.MAIN_WT = repo
-from srv import catchup  # noqa: E402
+ctx.SCRIPTS = HERE
+ctx.CWD = ctx.MAIN_WT = repo
+from srv import catchup, repostate, state  # noqa: E402
 
 failures = 0
 
@@ -56,6 +51,21 @@ def anc(a, b):
     return subprocess.run(["git", "merge-base", "--is-ancestor", a, b], env=env).returncode == 0
 
 
+def observed():
+    snap = repostate.read_now()
+    row = state._git_entities("r", snap, {})["branch"]["r:c"]
+    return {"branch": row["name"], "expectTip": row["tip"], "expectChain": row["catchUpStamp"]}
+
+
+def press(body):
+    class Req:
+        def _send(self, status, raw):
+            self.result = status, json.loads(raw)
+    req = Req()
+    catchup.post(req, json.dumps(body))
+    return req.result
+
+
 commit("base.txt", "base\n", "root")
 for b, parent in (("a", "main"), ("b", "a"), ("c", "b")):
     git("checkout", "-q", "-b", b)
@@ -63,13 +73,43 @@ for b, parent in (("a", "main"), ("b", "a"), ("c", "b")):
     git("config", f"branch.{b}.stack-parent", parent)
 git("update-ref", "refs/remotes/origin/a", "a")
 git("update-ref", "refs/remotes/origin/b", "b")          # a and b published, c local only
+git("config", "branch.a.stack-project", "fixture")
+original = observed()
+git("config", "branch.b.description", "new words")
+check("editing a description keeps the observed chain", observed() == original)
+git("branch", "other-a", "a")
+git("config", "branch.b.stack-parent", "other-a")
+check("reparenting to the same commit changes the chain", press(original)[0] == 409)
+git("config", "branch.b.stack-parent", "a")
+git("update-ref", "refs/remotes/origin/c", "c")
+check("publishing the leaf changes the catch-up plan", press(original)[0] == 409)
+git("update-ref", "-d", "refs/remotes/origin/c")
 git("checkout", "-q", "a")
 commit("a2.txt", "a moved\n", "a2")                       # the grandparent of c moves
 git("checkout", "-q", "main")
 b_before, c_before = git("rev-parse", "b"), git("rev-parse", "c")
 
 check("c's own parent hasn't moved, but its chain owes a catch-up at b", not catchup.off_parent("c") and catchup.owes("c") == "b")
-res = catchup.catch_up("c")
+before = git("show-ref")
+status, refusal = press(original)
+check("a changed grandparent refuses the press before any branch moves", status == 409 and git("show-ref") == before, refusal)
+fresh = observed()
+plan = catchup._plan
+def plan_then_publish(*args):
+    result = plan(*args)
+    git("update-ref", "refs/remotes/origin/c", "c")
+    return result
+
+catchup._plan = plan_then_publish
+try:
+    status, refusal = press(fresh)
+finally:
+    catchup._plan = plan
+check("publishing a child during the first rebase stops before its parent moves",
+      status == 409 and refusal.get("moved") == [] and git("rev-parse", "b") == b_before, refusal)
+git("update-ref", "-d", "refs/remotes/origin/c")
+status, res = press(observed())
+check("a fresh press is accepted", status == 200, res)
 check("the walk catches up b, then c", res["ok"] and [m["branch"] for m in res["moved"]] == ["b", "c"], res)
 check("published b got a catch-up merge, not a rewrite", res["moved"][0]["how"] == "merged" and anc(b_before, "b") and anc("a", "b"))
 check("…its merge's parents are b's old tip and a's tip", git("rev-list", "--parents", "-n1", "b").split()[1:] == [b_before, git("rev-parse", "a")])

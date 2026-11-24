@@ -469,7 +469,8 @@ The todo items themselves arrive through the `todo` store domain (`/state`, `/v2
   route; get a PR's forest membership).
 - `POST /diverged-additive`: drafts the additive push-vehicle branch (MUTATING, never pushes). `/prep-route`
   may name it as `next`.
-- `POST /squash`: collapses `parent..branch` into one voiced commit (MUTATING).
+- `POST /catch-up` takes `{branch, expectChain: catchUpStamp, expectTip: tip}` from the observed branch. A changed ancestor, parent link, publication ref or tip returns 409 before the walk starts.
+- `POST /squash` takes `{branch, expectTip: tip}`. It collapses outgoing commits into unstaged changes for GitHub Desktop. A moved tip returns 409.
 - `POST /prep`: v1's prep-for-push (squash unpushed commits, then oxfmt) (MUTATING). `/prep-route` may name
   it as `next`.
 - `POST /packet-guide`: re-drafts the packet's reading guide with headless Claude (MUTATING, process).

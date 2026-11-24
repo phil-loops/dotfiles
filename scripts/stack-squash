@@ -16,6 +16,7 @@
   stack-squash --unstage <branch>  collapse parent..branch into UNSTAGED working-tree
                                    changes (reset --mixed base) — NO commit, no message;
                                    hand the commit to GitHub Desktop. Skips claude.
+  stack-squash --expect-tip=<sha> --unstage <branch>  refuse if the named branch moved
   stack-squash --message=<msg> <b> use <msg> verbatim as the commit message (the
                                    composer wrote it) — skips drafting entirely
   stack-squash --no-voice <b>      skip the claude draft: commit with the mechanical
@@ -40,7 +41,7 @@ and we fell back to a mechanical message.
 Env: CLAUDE_BIN (default "claude"), SQUASH_MODEL (optional --model passthrough),
 MAIN_BRANCH (default "main").
 """
-import sys, os, json, re, subprocess, time
+import sys, os, json, re, shutil, subprocess, time
 
 CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "claude")
 MAIN = os.environ.get("MAIN_BRANCH", "main")
@@ -165,6 +166,7 @@ argv = sys.argv[1:]
 dry = unpushed = fmt = subject_only = unstage = no_voice = reseat = False
 allow_published = False   # --allow-published: squash BELOW the remote head anyway (needs a force-push)
 provided_msg = ""   # --message=<msg>: use this verbatim (the composer wrote it), skip drafting
+expected_tip = None
 rest = []
 for a in argv:
     if a in ("-h", "--help"):
@@ -186,6 +188,8 @@ for a in argv:
         reseat = True
     elif a == "--allow-published":
         allow_published = True
+    elif a.startswith("--expect-tip="):
+        expected_tip = a.partition("=")[2]
     elif a.startswith("--message="):
         provided_msg = a[len("--message="):]
     elif a.startswith("-"):
@@ -195,6 +199,15 @@ for a in argv:
 branch = (rest[0] if rest else "").strip()
 if not branch:
     out({"ok": False, "err": "usage: stack-squash [--dry] [--unpushed] [--format] [--subject-only] [--unstage] [--no-voice] [--allow-published] <branch>"})
+
+if expected_tip is not None and (not unstage or not re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", expected_tip)):
+    out({"ok": False, "err": "--expect-tip needs --unstage and a full commit id"})
+
+def moved():
+    out({"ok": False, "branch": branch, "moved": True, "err": f"{branch} moved since you looked — refresh before squashing"})
+
+if expected_tip is not None and git(["show-ref", "--verify", "--hash", f"refs/heads/{branch}"]).stdout.strip() != expected_tip:
+    moved()
 
 # branch must exist
 if git(["rev-parse", "--verify", "--quiet", branch]).returncode != 0:
@@ -279,6 +292,54 @@ if n == 0:
     out({"ok": False, "branch": branch, "parent": parent, "base": base, "n": 0,
          "err": f"{branch} has no {'unpushed ' if unpushed else ''}commits beyond {base} — nothing to squash"})
 
+def guarded_unstage():
+    # Hold the checkout's index while Git compares and swaps the branch. A rejected
+    # ref update discards the replacement index without changing the checkout.
+    ref = f"refs/heads/{branch}"
+    index = git(["rev-parse", "--path-format=absolute", "--git-path", "index"]).stdout.strip()
+    lock = index + ".lock"
+    for attempt in range(6):
+        try:
+            with open(lock, "xb"):
+                pass
+            break
+        except FileExistsError:
+            if attempt == 5:
+                return "the checkout's index is busy — try again"
+            time.sleep(.15 * (attempt + 1))
+    committed = False
+    try:
+        if git(["symbolic-ref", "-q", "HEAD"]).stdout.strip() != ref:
+            return "the checkout changed branches — refresh before squashing"
+        if git(["rev-parse", "--verify", ref]).stdout.strip() != expected_tip:
+            moved()
+        status = git(["--no-optional-locks", "status", "--porcelain", "--untracked-files=no"])
+        if status.returncode or status.stdout.strip():
+            return status.stderr.strip() or "working tree is dirty — commit or stash first"
+        shutil.copyfile(index, lock)
+        target = git(["rev-parse", "--verify", f"{base}^{{commit}}"]).stdout.strip()
+        if not target:
+            return "couldn't resolve the squash base"
+        prepared = git(["read-tree", "--reset", target], env={**os.environ, "GIT_INDEX_FILE": lock})
+        if prepared.returncode:
+            return prepared.stderr.strip()
+        update = git(["update-ref", "-m", f"reset: moving to {base}", "--stdin"],
+                     input=f"update {ref} {target} {expected_tip}\nupdate ORIG_HEAD {expected_tip}\n")
+        if update.returncode:
+            if git(["rev-parse", "--verify", ref]).stdout.strip() != expected_tip:
+                moved()
+            return update.stderr.strip()
+        committed = True
+        try:
+            os.replace(lock, index)
+        except OSError as e:
+            return f"branch is at {target}; the prepared index remains at {lock}: {e}"
+        return ""
+    finally:
+        if not committed and os.path.exists(lock):
+            os.unlink(lock)
+
+
 # ---- --unstage: collapse to UNSTAGED working-tree changes, no commit ------
 # Hand the commit to GitHub Desktop. `reset --mixed base` moves HEAD+index to base but
 # leaves the working tree at the branch tip, so the whole parent..branch diff shows up as
@@ -299,10 +360,14 @@ if unstage:
         if co.returncode != 0:
             out({"ok": False, "branch": branch, "parent": parent, "base": base, "n": n,
                  "err": "checkout failed: " + co.stderr.strip()})
-    rs = git(["reset", "--mixed", base])
-    if rs.returncode != 0:
+    if expected_tip is not None:
+        err = guarded_unstage()
+    else:
+        rs = git(["reset", "--mixed", base])
+        err = rs.stderr.strip() if rs.returncode else ""
+    if err:
         out({"ok": False, "branch": branch, "parent": parent, "base": base, "n": n,
-             "err": "reset --mixed failed: " + rs.stderr.strip()})
+             "err": "reset --mixed failed: " + err})
     out({"ok": True, "branch": branch, "parent": parent, "base": base, "n": n, "unstaged": True})
 
 # ---- draft the message in your voice -------------------------------------

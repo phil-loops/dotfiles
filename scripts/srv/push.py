@@ -1308,9 +1308,14 @@ def dirty_resolve(req, raw):
     wt = next((p for p, b in stage._worktrees() if b == branch), None)
     if not wt:
         return req._send(404, json.dumps({"ok": False, "err": f"no worktree holds {branch}"}))
+    folded = {}
     if action == "include":
         ctx.run(["git", "-C", wt, "add", "-A"])
-        r = ctx.run(["git", "-C", wt, "commit", "-m", "wip: uncommitted working-tree changes, folded in via sync"])
+        r = ctx.run(["git", "-C", wt, "-c", "core.abbrev=no", "commit", "-m", "wip: uncommitted working-tree changes, folded in via sync"])
+        receipt = re.search(r"^\[.* ([0-9a-f]{40}(?:[0-9a-f]{24})?)\] ", r.stdout or "", re.MULTILINE)
+        if r.returncode == 0 and receipt:
+            sha = receipt[1]
+            folded = {"tip": sha, "parent": ctx.run(["git", "rev-parse", f"{sha}^"]).stdout.strip()}
     elif action == "stash":
         r = ctx.run(["git", "-C", wt, "stash", "push", "-u", "-m", f"sync-stash {branch}"])
     elif action == "pop":
@@ -1320,6 +1325,7 @@ def dirty_resolve(req, raw):
     ok = r.returncode == 0
     req._send(200, json.dumps({
         "ok": ok,
+        **folded,
         "out": (r.stdout or "").strip(),
         "err": "" if ok else (r.stderr or r.stdout or f"{action} failed").strip(),
     }))

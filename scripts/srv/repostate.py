@@ -274,6 +274,11 @@ def _read():
     return refs, cfg
 
 
+def read_now():
+    """Read refs and parent links directly for a history mutation under the forest lock."""
+    return RepoState(*_read())
+
+
 def snapshot(fresh_prs=False):
     """The current RepoState for the request's repo. Served without a spawn while the stat
     watcher's generation is unchanged (and the snapshot is under _SAFETY_AGE); otherwise the

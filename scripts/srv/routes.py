@@ -90,14 +90,14 @@ POST = {
     # ── branches move ──
     "/reseat-children": _r(reviews.reseat, "history"),
     "/sync": _r(sync.post_sync, "history"),
-    "/catch-up": _r(catchup.post, "history"),             # the chain onto its moved ancestors (srv/catchup.py)
+    "/catch-up": _r(catchup.post, "history", saw="expectChain"),             # the chain onto its moved ancestors (srv/catchup.py)
     "/prep-push": _r(push.prep_push, "history"),
     "/outline": _r(outline.save, "history"),             # rewords unpushed messages
     "/outline-undo": _r(outline.undo, "history", saw="journal"),
     "/dirty-resolve": _r(push.dirty_resolve, "history"),
     "/reconcile": _r(sync.post_reconcile, "history"),
     "/revert-commit": _r(review.revert_commit, "history", saw="sha"),
-    "/squash": _r(review.squash, "history"),
+    "/squash": _r(review.squash, "history", saw="expectTip"),
     "/prep": _r(review.prep, "history"),
     "/restack": _r(restack.restack, "history"),
     "/lsp/rename": _r(lsp.rename, "history"),            # one commit at the branch tip
@@ -135,9 +135,9 @@ UNPINNED = {
     "/review-address": "pinned per edit, through outline.save",
     "/lsp/rename": "keep-rename-previews-and-commits-on-their-reviewed-source",
     "/push-when-green": "queues Phil's press for the tree it reads then (pushintent); the push sends only a tree whose own gates passed",
-    "/sync": "rebases the branch as it stands", "/catch-up": "catches the branch up as it stands",
+    "/sync": "rebases the branch as it stands",
     "/prep-push": "seals the branch as it stands", "/prep": "seals the branch as it stands",
-    "/restack": "queues a restack of the forest as it stands", "/squash": "squashes the branch as it stands",
+    "/restack": "queues a restack of the forest as it stands",
     "/reseat-children": "moves the children as they stand", "/dirty-resolve": "resolves the worktree as it stands",
     "/reconcile": "hands the branch as it stands to Claude", "/review-apply": "commits a suggestion onto the branch as it stands",
     "/review-helix": "lands Helix's edits onto the branch as it stands",

@@ -17,9 +17,12 @@ the top ancestor down to `branch`; each link off its parent's tip catches up bef
 The new tree is computed by a guarded rebase on a DETACHED checkout, so no branch moves until its
 result is known; each ref then moves by compare-and-swap. The first conflict stops the walk with
 nothing half-done. Callers hold the forest lock (the /catch-up route does)."""
+import hashlib
+import json
 import os
+import re
 
-from . import ctx, rebaseguard, sync
+from . import ctx, rebaseguard, repostate, seen, sync
 
 TRUNKS = ("", "main", "master", "origin/main")
 
@@ -36,15 +39,21 @@ def parent(b):
     return _git("config", f"branch.{b}.stack-parent").stdout.strip()
 
 
-def chain(branch):
-    """The stack from its top ancestor (the child of main) down to `branch`."""
-    out, cur = [], branch
-    while cur and cur not in out and parent(cur) not in TRUNKS and len(out) < 30:
-        out.append(cur)
-        cur = parent(cur)
-    if cur and cur not in out:
-        out.append(cur)
+def chain(branch, parent_of=parent):
+    """The stack from its top ancestor (the child of main) down to the branch."""
+    out = []
+    while branch not in TRUNKS and branch not in out:
+        out.append(branch)
+        branch = parent_of(branch)
     return list(reversed(out))
+
+
+def chain_stamp(branch, snap, moved_tips=None):
+    """Links, ancestor tips and origin copies. The leaf tip travels separately as expectTip."""
+    tips = moved_tips or {}
+    links = [(b, snap.branch_key(b, "parent"), tips.get(b, snap.local(b)) if b != branch else "", snap.remote(b))
+             for b in chain(branch, lambda b: snap.branch_key(b, "parent"))]
+    return hashlib.sha256(json.dumps(links).encode()).hexdigest()
 
 
 def off_parent(b):
@@ -64,10 +73,10 @@ def _move(b, old, new):
     return "" if r.returncode == 0 else (r.stderr or f"{b} moved while catching up — retry").strip().replace("stack-move-branch: ", "")
 
 
-def unpushed(b, tip=None):
+def unpushed(b, tip=None, origin=None):
     """(own, merges) on `b`'s first-parent line past origin's copy, oldest first: its own unpushed
     commits, and the merges among them. ([], []) when origin has no copy or isn't under the tip."""
-    o = _sha(f"refs/remotes/origin/{b}")
+    o = _sha(f"refs/remotes/origin/{b}") if origin is None else origin
     tip = tip or _sha(f"refs/heads/{b}")
     if not o or not tip or o == tip or _git("merge-base", "--is-ancestor", o, tip).returncode != 0:
         return [], []
@@ -87,7 +96,7 @@ def _pick(onto, c):
                     "git", "commit-tree", *sign, tree, "-p", onto, "-m", meta[3].strip()]).stdout.strip()
 
 
-def _under_unpushed(b, tip, second, tree, msg, caught_up):
+def _under_unpushed(b, tip, second, tree, msg, caught_up, origin=None):
     """The catch-up for a published branch that is ahead of origin, in the one shape the push door
     takes (push.py `catchup`): a single merge, the oldest outgoing commit, its first parent
     origin's copy. A merge on the local tip sits on top of the unpushed commits, and a second one
@@ -98,14 +107,15 @@ def _under_unpushed(b, tip, second, tree, msg, caught_up):
     only ancestry changes, never content. Returns the new tip, or "" when there is nothing
     unpushed or that tree can't be reached this way (an unpushed merge of something else, a
     replay that conflicts) — the caller then merges on the local tip, which loses nothing."""
-    own, merges = unpushed(b, tip)
+    origin = _sha(f"refs/remotes/origin/{b}") if origin is None else origin
+    own, merges = unpushed(b, tip, origin)
     if not own and not merges:
         return ""
     if any(_git("merge-base", "--is-ancestor", f"{m}^2", second).returncode != 0 for m in merges):
         ctx.log(f"catch-up: {b} has an unpushed merge of something other than its base — merging on its local tip")
         return ""
-    under = caught_up(_sha(f"refs/remotes/origin/{b}"))
-    new = _git("commit-tree", under, "-p", _sha(f"refs/remotes/origin/{b}"), "-p", second, "-m", msg).stdout.strip() if under else ""
+    under = caught_up(origin)
+    new = _git("commit-tree", under, "-p", origin, "-p", second, "-m", msg).stdout.strip() if under else ""
     for c in own:
         new = new and _pick(new, c)
     if not new or _git("rev-parse", f"{new}^{{tree}}").stdout.strip() != tree:
@@ -133,31 +143,34 @@ def catch_up_one(b, wt=None):
     detached scratch checkout to compute in (default: the server's own)."""
     p = parent(b)
     tip, ptip = _sha(f"refs/heads/{b}"), _sha(f"refs/heads/{p}")
+    how, new, err = _plan(b, p, tip, ptip, _sha(f"refs/remotes/origin/{b}"), wt)
+    return how, err or _move(b, tip, new)
+
+
+def _plan(b, p, tip, ptip, origin, wt):
     cut = _git("merge-base", tip, ptip).stdout.strip()
     if not (tip and ptip and cut):
-        return "", f"couldn't resolve {b}'s parent {p}"
+        return "", "", f"couldn't resolve {b}'s parent {p}"
     wt = wt or sync._scratch_wt()
     state = rebaseguard.heal(wt)
     if state in ("person", "live"):
-        return "", f"the scratch checkout {wt} has a rebase in progress — finish or abort it"
+        return "", "", f"the scratch checkout {wt} has a rebase in progress — finish or abort it"
     rebased = _replayed(wt, tip, ptip)
     if not rebased:
-        return "", f"{b} conflicts with {p}'s new commits — resolve it by hand (nothing was moved)"
-    published = bool(_sha(f"refs/remotes/origin/{b}"))
-    if not published:
-        err = _move(b, tip, rebased)
-        return ("rebased", err)
+        return "", "", f"{b} conflicts with {p}'s new commits — resolve it by hand (nothing was moved)"
+    if not origin:
+        return "rebased", rebased, ""
     tree = _git("rev-parse", f"{rebased}^{{tree}}").stdout.strip()
     msg = f"catch up to {p}\n\nVia: /catch-up (stack-review-server)"
 
     def caught_up(rev):
         r = _replayed(wt, rev, ptip)
         return r and _git("rev-parse", f"{r}^{{tree}}").stdout.strip()
-    carrier = (_under_unpushed(b, tip, ptip, tree, msg, caught_up)
+    carrier = (_under_unpushed(b, tip, ptip, tree, msg, caught_up, origin)
                or ctx.run(["git", "commit-tree", tree, "-p", tip, "-p", ptip, "-m", msg]).stdout.strip())
     if not carrier:
-        return "", f"couldn't build {b}'s catch-up merge"
-    return ("merged", _move(b, tip, carrier))
+        return "", "", f"couldn't build {b}'s catch-up merge"
+    return "merged", carrier, ""
 
 
 def land_plan(c, ptip, wt=None):
@@ -203,15 +216,27 @@ def land_plan(c, ptip, wt=None):
     return "rebased", rebased, ""
 
 
-def catch_up(branch, wt=None):
-    """Walk the chain top-down; returns {ok, moved: [{branch, how}], stopped?: {branch, why}}."""
-    moved = []
-    for b in chain(branch):
-        if not off_parent(b):
+def catch_up(branch, wt=None, snap=None):
+    """Walk the observed chain top-down, carrying each successful move into its child's plan."""
+    observed = snap is not None
+    snap = snap or repostate.read_now()
+    moved, tips = [], {}
+    for b in chain(branch, lambda name: snap.branch_key(name, "parent")):
+        p, tip = snap.branch_key(b, "parent"), snap.local(b)
+        ptip = tips.get(p, snap.local(p))
+        if p in TRUNKS or not ptip or snap.is_ancestor(ptip, tip):
             continue
-        how, err = catch_up_one(b, wt)
+        how, new, err = _plan(b, p, tip, ptip, snap.remote(b), wt)
+        if observed and not err:
+            now = repostate.read_now()
+            if now.local(branch) != snap.local(branch) or chain_stamp(branch, now) != chain_stamp(branch, snap, tips):
+                repostate.invalidate()
+                return {"ok": False, "moved": moved, "stale": True,
+                        "err": f"{branch}'s chain changed during catch-up — try again on the refreshed branch"}
+        err = err or _move(b, tip, new)
         if err:
             return {"ok": False, "moved": moved, "stopped": {"branch": b, "why": err}, "err": err}
+        tips[b] = new
         moved.append({"branch": b, "how": how})
     return {"ok": True, "moved": moved}
 
@@ -267,12 +292,17 @@ def owes(branch):
 
 
 def post(req, raw):
-    """POST /catch-up {branch} — catch the chain up to `branch` (routes.py holds the forest lock)."""
-    import json
-    try:
-        b = (json.loads(raw or "{}") or {}).get("branch", "")
-    except ValueError:
-        b = ""
-    if not b or not _sha(f"refs/heads/{b}"):
-        return req._send(400, json.dumps({"ok": False, "err": f"no branch {b or '(none)'}"}))
-    req._send(200, json.dumps(catch_up(b)))
+    d = json.loads(raw or "{}")
+    b, stamp, tip = d.get("branch"), d.get("expectChain"), d.get("expectTip")
+    if not isinstance(b, str) or not b or not isinstance(stamp, str) or not re.fullmatch("[0-9a-f]{64}", stamp) or not seen.full_tip(tip):
+        return req._send(400, json.dumps({"ok": False, "err": "refresh the branch to catch up the chain you saw"}))
+    snap = repostate.read_now()
+    if snap.local(b) != tip:
+        repostate.invalidate()
+        why = seen.moved(b, tip) or {"ok": False, "err": f"{b} moved — refresh the branch"}
+        return req._send(409, json.dumps({**why, "stale": True}))
+    if chain_stamp(b, snap) != stamp:
+        repostate.invalidate()
+        return req._send(409, json.dumps({"ok": False, "stale": True, "err": f"{b}'s chain changed since you looked — try again on the refreshed branch"}))
+    result = catch_up(b, snap=snap)
+    req._send(409 if result.get("stale") else 200, json.dumps(result))
