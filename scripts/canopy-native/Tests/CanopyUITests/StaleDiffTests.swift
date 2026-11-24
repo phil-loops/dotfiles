@@ -70,6 +70,18 @@ import Testing
         #expect(pg.here?.key == "l|a.ts|R:3", "the line it was on is in the new diff: the cursor stays on it")
     }
 
+    /// A thread's line is the current tip's: on the previous read it sits aside in its file, never
+    /// beside a row it may not be on; the current read puts it back on its line.
+    @Test func aThreadWaitsAsideWhileThePreviousDiffShows() async throws {
+        let (app, port, _) = try await olderA()
+        let pg = ReviewPageState.of(app)
+        let a = try #require(pg.views.first { $0.file.path == "a.ts" })
+        #expect(a.threadsAt.isEmpty && a.aside.map(\.node) == ["T1"], "not anchored to a line of the previous read")
+        await answer(app, port, "add-hankles-limited-label", payload("add-hankles-limited-label", baseSha: "fresh"))
+        let now = try #require(pg.views.first { $0.file.path == "a.ts" })
+        #expect(now.threadsAt["R:3"]?.map(\.node) == ["T1"] && now.aside.isEmpty, "back on its line once the current diff is in")
+    }
+
     @Test func aKeyThatActsOnTheLinesWaitsForTheCurrentDiff() async throws {
         let (app, port, _) = try await olderA()
         let pg = ReviewPageState.of(app)

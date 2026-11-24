@@ -307,6 +307,7 @@ private struct FileTree: View {
         let pg = ReviewPageState.of(app)
         let views = Dictionary(pg.views.map { ($0.file.path, $0) }, uniquingKeysWith: { a, _ in a })
         let current = pg.onScreen.flatMap { views[$0] == nil ? nil : $0 } ?? pg.here?.path
+        // the files and counts are the read on screen: dimmed with the diff while it's the previous one
         PaneList(pane: reviewTreePane, rows: ReviewPage.treeRows(pg), follow: current.map { "f|\($0)" }) { key, _ in
             let path = String(key.dropFirst(2))
             if let v = views[path] {
@@ -327,6 +328,7 @@ private struct FileTree: View {
                 .help(path)
             }
         }
+        .opacity(pg.diffStale ? 0.5 : 1)
     }
 }
 

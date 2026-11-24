@@ -1064,6 +1064,8 @@ public final class ReviewPageState: ShipHost {
 
     struct ViewsSig: Equatable {
         var payload: String
+        /// the read on screen is the previous one: threads sit aside, their lines are the current tip's
+        var stale: Bool
         var scope: String?
         var scopeLoaded: Bool
         var split: Bool
@@ -1090,7 +1092,7 @@ public final class ReviewPageState: ShipHost {
     }
 
     private var viewsSig: ViewsSig {
-        ViewsSig(payload: "\(payloadGen)|\(payload?.key ?? "")", scope: commitScope, scopeLoaded: commitFiles?.sha == commitScope, split: split,
+        ViewsSig(payload: "\(payloadGen)|\(payload?.key ?? "")", stale: diffStale, scope: commitScope, scopeLoaded: commitFiles?.sha == commitScope, split: split,
                  review: app?.store.versions[Domain.review] ?? 0, ops: app?.store.ops.map(\.seq) ?? [], context: contextGen,
                  override: viewedOverride, showOutdated: showOutdated)
     }
@@ -1122,6 +1124,8 @@ public final class ReviewPageState: ShipHost {
         var pend: [String: [DraftItem]] = [:]
         for c in items where c.kind == "comment" { if let p = c.path { pend[p, default: []].append(c) } }
         let server = serverMarks
+        // a thread's line is the current tip's; on the previous read it could sit beside the wrong row
+        let anchorThreads = !diffStale
         return fs.map { raw in
             let c = contextOf(raw.path)
             let (file, gaps) = expand(raw, c?.lines, c?.reveal ?? [:])
@@ -1132,7 +1136,7 @@ public final class ReviewPageState: ShipHost {
             var aside: [CanopyCore.Thread] = []
             for t in byPath[file.path] ?? [] {
                 let a = t.local.map { "\(t.side == .left ? "L" : "R"):\($0.line)" } ?? ""
-                if !a.isEmpty && anchors.contains(a) { threadsAt[a, default: []].append(t) } else { aside.append(t) }
+                if anchorThreads && !a.isEmpty && anchors.contains(a) { threadsAt[a, default: []].append(t) } else { aside.append(t) }
             }
             var pendingAt: [String: [DraftItem]] = [:]
             for c in pend[file.path] ?? [] { pendingAt["\(c.side == .left ? "L" : "R"):\(c.line ?? 0)", default: []].append(c) }
