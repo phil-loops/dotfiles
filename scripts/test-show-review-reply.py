@@ -99,6 +99,26 @@ def main():
         check("a declined ask is in Look at", "**n2b declined**: one file is enough" in look, look)
         check("a new branch is in Look at with its reason", "[owners](canopy://v2/b/loops/owners) — new: split out of fixed (n2)" in look, look)
         check("a gone branch is in Look at with its reason", "- gone — gone: folded into fixed" in look, look)
+        top = since.split("# Details")[0]
+        check("the page leads with what needs your eyes", since.startswith("## Needs your eyes"), since)
+        check("without a summary, it names the new branch and the declined ask in plain words",
+              "**[owners](canopy://v2/b/loops/owners)** is new: split out of fixed (n2). Read it whole." in top
+              and "something you asked for was declined: one file is enough" in top, top)
+        check("what was done as asked is one line", "**Done as you asked:** [fixed](canopy://v2/b/loops/fixed)." in top, top)
+        check("what you already read is one line to skip", "**Same as what you read, skip:** [kept](canopy://v2/b/loops/kept)." in top, top)
+        check("your own words stay out of the top", "rename it, and split it" not in top and "rename it, and split it" in since, top)
+        with open(folder / "answers.txt", "a") as f:
+            f.write("# for phil\n- The new owners branch is the one to read: it is what turns emails on.\n")
+        subprocess.run([str(SCRIPT), str(folder)], env=env, check=True)
+        top = (folder / "since.md").read_text().split("# Details")[0]
+        check("the session's own plain words replace the generated ones", "- The new owners branch is the one to read" in top
+              and "Read it whole" not in top, top)
+        data = json.loads((folder / "since.json").read_text())["branches"]
+        check("since.json gives canopy each branch's kind and the tip it was computed against",
+              {b: d["kind"] for b, d in data.items()} == {"kept": "same", "fixed": "asked", "owners": "new", "gone": "gone"}
+              and data["fixed"]["tipNow"] == git("rev-parse", "fixed") and data["fixed"]["changed"] == ["fixed.txt"], data)
+        check("since.json carries each note with its answers", [a["id"] for a in data["fixed"]["notes"][0]["answers"]] == ["n2a", "n2b"]
+              and [a["id"] for a in data["fixed"]["needsEyes"]] == ["n2b"], data["fixed"])
         check("--plan still shows the plan once answers exist",
               subprocess.run([str(SCRIPT), "--plan", str(folder)], env=env).returncode == 0 and sent.read_text().startswith("Plan for your review"))
 

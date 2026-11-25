@@ -8,7 +8,8 @@ The session that acts on a review writes into its folder, in this shape:
     # notes
     <note id> | <state> | <commits, or -> | <what it heard and will do, or did and why>
 
-first plan.txt, before changing anything (states: will do, partly, won't, ask, no ask), so Phil can correct a misreading
+and, under `# for phil`, two or three plain sentences: what needs his eyes and why, in words he'd use, no ids or
+commits. Write first plan.txt, before changing anything (states: will do, partly, won't, ask, no ask), so Phil can correct a misreading
 while it's cheap; then answers.txt once the round's tips are final (states: done, partly, declined, no ask, no change
 needed). A note holding several asks is answered as n7a, n7b, …
 
@@ -16,6 +17,9 @@ Rendered: answers.txt when it exists (--plan forces the plan), as an Inbox messa
 typed under it goes back to that session. The answers view compares each branch's own change (its diff from its parent,
 file by file) with what was on screen in the review, so it can say what changed, what changed with nobody asking, and
 what's the same as what Phil already read. Earlier folders add their notes (a review picked up where one left off).
+The answers view also writes since.json beside it for canopy: per branch its kind (same, asked, unasked, new, gone),
+the tip it was computed against (a branch whose tip has moved since is stale, not same), the files that moved, and
+each note with its answers.
 """
 import json
 import os
@@ -34,11 +38,15 @@ def git(repo, *args):
 
 def parse(path):
     """The structure and note lines of a plan or answers file."""
-    structure, answers, section = [], [], None
+    structure, answers, summary, section = [], [], [], None
     for raw in path.read_text().splitlines():
         line = raw.strip()
         if line.startswith("#"):
-            section = "structure" if "structure" in line.lower() else "notes" if "note" in line.lower() else None
+            low = line.lower()
+            section = "phil" if "phil" in low else "structure" if "structure" in low else "notes" if "note" in low else None
+            continue
+        if section == "phil" and line:
+            summary.append(line.lstrip("-• ").strip())
             continue
         fields = [f.strip() for f in line.split("|")]
         if section == "structure" and len(fields) >= 3:
@@ -46,7 +54,7 @@ def parse(path):
         elif section == "notes" and len(fields) >= 3:
             answers.append({"id": fields[0], "state": fields[1].lower(), "commits": fields[2] if fields[2] != "-" else "",
                             "text": " | ".join(fields[3:])})
-    return structure, answers
+    return structure, answers, summary
 
 
 def base_id(answer_id):
@@ -117,7 +125,7 @@ def main():
     reply = folder / ("plan.txt" if plan_mode else "answers.txt")
     if not reply.exists():
         sys.exit(f"show-review-reply: no {reply.name} in {folder}")
-    structure, answers = parse(reply)
+    structure, answers, summary = parse(reply)
 
     notes, earlier, baseline, parents_then = [], [], {}, {}
     for i, f in enumerate(folders):
@@ -149,9 +157,16 @@ def main():
     for note in earlier:
         said_before.setdefault(note["branch"], []).append(note)
 
+    def link(branch):
+        return f"[{branch}](canopy://v2/b/loops/{branch})"
+
     lines = []
     if plan_mode:
         heading = f"Plan for your review · {title}"
+        if summary:
+            lines.append("## In short")
+            lines.extend(f"- {line}" for line in summary)
+            lines.append("")
         lines.append("_A rough plan, before anything changes: what each note was heard as, and the shape the forest is headed for. "
                      "Reply under this message to correct a misreading._\n")
         if structure:
@@ -168,7 +183,7 @@ def main():
             lines.append("")
     else:
         heading = f"Since your review · {title}"
-        sections, look = [], {}
+        sections, look, kinds, eyes, record = [], {}, {}, [], {}
         for branch in order(members, parents_now):
             branch_notes = by_branch.get(branch, [])
             mine = [a for a in answers if any(base_id(a["id"]) == n["id"] for n in branch_notes)]
@@ -190,8 +205,11 @@ def main():
             if not then:
                 body.append("**New since your review.**")
                 look.setdefault(branch, []).append("new" + (f": {plan['why']}" if plan.get("why") else ""))
+                kinds[branch] = "new"
+                eyes.append(f"**{link(branch)}** is new" + (f": {plan['why']}" if plan.get("why") else "") + ". Read it whole.")
             elif same:
                 body.append(f"Same change you read ({then[:8]}); nothing to look at.")
+                kinds[branch] = "same"
             else:
                 def opened(files):
                     return ", ".join(f"[`{f}`](canopy://v2/b/loops/{branch}?file={quote(f, safe='/')})" for f in files)
@@ -201,6 +219,9 @@ def main():
                 body.append(f"**Its own change moved** ({then[:8]} → {tips_now[branch][:8]}): " + "; ".join(p for p in parts if p) + ".")
                 reason = "you asked: " + ", ".join(a["id"] for a in asked) if asked else "nobody asked"
                 look.setdefault(branch, []).append(f"changed, {reason}")
+                kinds[branch] = "asked" if asked else "unasked"
+                if not asked:
+                    eyes.append(f"**{link(branch)}** changed though you didn't ask for anything there.")
             for note in said_before.get(branch, []):
                 body.append(f"- earlier you said — “{shorten(note['text'])}”")
             for note in branch_notes:
@@ -208,13 +229,30 @@ def main():
             for a in mine:
                 if a["state"] in NEEDS_LOOK:
                     look.setdefault(branch, []).append(f"**{a['id']} {a['state']}**: {shorten(a['text'], 140)}")
+                    eyes.append(f"**{link(branch)}**: something you asked for was {a['state']}: {shorten(a['text'], 160)}")
             sections.append("\n".join([head] + body) + "\n")
+            record[branch] = {
+                "kind": kinds.get(branch), "tipThen": then, "tipNow": tips_now[branch], "why": plan.get("why", ""),
+                "changed": changed, "added": added, "dropped": dropped,
+                "notes": [{"id": n["id"], "file": n.get("file"), "line": n.get("line"), "said": n["text"],
+                           "answers": [a for a in answers if base_id(a["id"]) == n["id"]]} for n in branch_notes],
+                "needsEyes": [a for a in mine if a["state"] in NEEDS_LOOK]}
         gone = sorted(b for b in baseline if b not in members and (b in by_branch or b in said_before or b in planned))
         for branch in gone:
             plan = planned.get(branch, {})
             sections.append(f"## {branch}\n**Gone since your review.**" + (f" {plan['why']}" if plan.get("why") else "") + "\n")
             look.setdefault(branch, []).append("gone" + (f": {plan['why']}" if plan.get("why") else ""))
+            record[branch] = {"kind": "gone", "tipThen": baseline.get(branch), "tipNow": None, "why": plan.get("why", "")}
         loose = [a for a in answers if base_id(a["id"]) not in {n["id"] for n in notes}]
+        def names(kind):
+            return ", ".join(link(b) for b in order(members, parents_now) if kinds.get(b) == kind)
+        lines.append("## Needs your eyes")
+        lines.extend(f"- {line}" for line in (summary or eyes)) if (summary or eyes) else lines.append("- Nothing.")
+        if names("asked"):
+            lines.append(f"\n**Done as you asked:** {names('asked')}. Each one's moved files are in the details.")
+        if names("same"):
+            lines.append(f"\n**Same as what you read, skip:** {names('same')}.")
+        lines.append("\n---\n\n# Details\n")
         lines.append("## Look at")
         for branch, items in look.items():
             link = f"[{branch}](canopy://v2/b/loops/{branch})" if branch in members else branch
@@ -229,6 +267,9 @@ def main():
         lines.append(f"\n<sub>against {', '.join(f'{b} {tips_now[b][:8]}' for b in order(members, parents_now))}</sub>")
     body = "\n".join(lines).strip() + f"\n\n<sub>{folder}</sub>\n"
     (folder / ("plan.md" if plan_mode else "since.md")).write_text(body)
+    if not plan_mode:
+        (folder / "since.json").write_text(json.dumps({"forest": forest, "review": str(folder), "summary": summary or eyes,
+                                                       "branches": record}, indent=1))
     subprocess.run([os.environ.get("SHOW_NOTE", str(SCRIPTS / "show-note")), heading, body], check=False)
 
 
