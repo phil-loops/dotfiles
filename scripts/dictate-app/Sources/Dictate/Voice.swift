@@ -179,6 +179,7 @@ final class Voice: NSObject, AVAudioRecorderDelegate {
             bubble.hide()
         }
         status.menu = menu
+        status.isVisible = recorder == nil
     }
 
     nonisolated func audioRecorderDidFinishRecording(_ recorder: AVAudioRecorder, successfully flag: Bool) {
