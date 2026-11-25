@@ -6,6 +6,8 @@ import SwiftUI
 /// One thing on a forest a session pinned for Phil (`stack-attention`): a place, what's wanted there, one sentence.
 struct AttentionItem: Decodable, Equatable, Sendable, Identifiable {
     struct Done: Decodable, Equatable, Sendable { var at: String; var by: String }
+    /// the review note it answers: the review's folder and the note's id there (ids restart in every review)
+    struct NoteRef: Decodable, Equatable, Sendable, Hashable { var review: String; var id: String }
     var id: String
     var forest: String
     var branch: String
@@ -18,6 +20,7 @@ struct AttentionItem: Decodable, Equatable, Sendable, Identifiable {
     var by: String?
     var at: String?
     var done: Done?
+    var note: NoteRef?
 
     /// Whether the branch has moved since it was written: still open, but about an older tip.
     func stale(tip now: String?) -> Bool { now != tip }
@@ -35,6 +38,36 @@ struct AttentionItem: Decodable, Equatable, Sendable, Identifiable {
         }
         return a
     }
+}
+
+/// One note of a spoken review (its folder's notes.json): what Phil said, and where — the branch, file and line, and
+/// the commit that was on screen.
+struct ReviewNote: Decodable, Equatable, Sendable {
+    var id: String
+    var branch: String?
+    var file: String?
+    var line: Int?
+    var commit: String?
+    var text: String
+
+    /// The note an item points at, read from its review's folder (a path, or a folder name under `reviews`).
+    static func read(_ ref: AttentionItem.NoteRef, reviews: URL) -> ReviewNote? {
+        let folder = ref.review.hasPrefix("/") ? URL(fileURLWithPath: ref.review) : reviews.appendingPathComponent(ref.review)
+        guard let data = try? Data(contentsOf: folder.appendingPathComponent("notes.json")),
+              let notes = try? JSONDecoder().decode([ReviewNote].self, from: data) else { return nil }
+        return notes.first { $0.id == ref.id }
+    }
+}
+
+/// An item opened into its card: what Phil said, the file as he saw it, and the change to it since — each read once.
+struct AttentionCard: Equatable, Sendable {
+    var note: ReviewNote?
+    /// the commit the change is measured from: the note's, else the tip the review saw
+    var base: String?
+    /// the file at the note's commit, by line
+    var seen: [String]?
+    /// the change from `base` to the item branch's tip, one file; empty when it hasn't changed
+    var since: [NodeFile]?
 }
 
 /// The repo's item store (`$GIT_COMMON_DIR/stack-attention.json`), read whole; sign-offs go through the script.
@@ -110,6 +143,36 @@ final class Attention {
 
     func item(_ id: String?) -> AttentionItem? { items.first { $0.id == id } }
 
+    /// items opened into their cards (↵ on one opens it; `, a` on a branch page opens or folds its items)
+    var opened: Set<String> = []
+    /// each opened item's card, by item id and the tip it was read for
+    private(set) var cards: [String: AttentionCard] = [:]
+    @ObservationIgnored private var reading: Set<String> = []
+    @ObservationIgnored var reviews = ReviewSinceIO.local.dir
+
+    static func cardKey(_ i: AttentionItem, tip: String) -> String { "\(i.id)@\(tip)" }
+
+    /// Reads an item's card for the branch's tip now: the note, the file as Phil saw it, the change since.
+    func loadCard(_ i: AttentionItem, tip: String, fallbackBase: String?, app: AppModel) async {
+        let key = Self.cardKey(i, tip: tip)
+        guard cards[key] == nil, !reading.contains(key), let io else { return }
+        reading.insert(key)
+        defer { reading.remove(key) }
+        let reviews = reviews
+        let note = await Task.detached { i.note.flatMap { ReviewNote.read($0, reviews: reviews) } }.value
+        var card = AttentionCard(note: note, base: note?.commit ?? fallbackBase)
+        let at = { (p: String) in app.transport.atRepo(io.repo, p) }
+        if let note, let commit = note.commit, let file = note.file {
+            card.seen = await app.transport.getText(at("/file?branch=\(commit.uriComponent)&path=\(file.uriComponent)"))?.components(separatedBy: "\n")
+        }
+        if let base = card.base, let file = i.file ?? note?.file {
+            struct D: Decodable { var files: [NodeFile] }
+            card.since = base == tip ? [] : (try? await app.transport.getJSON(
+                at("/commit-diff?sha=\(tip.uriComponent)&since=\(base.uriComponent)&path=\(file.uriComponent)"), as: D.self))?.files
+        }
+        cards[key] = card
+    }
+
     /// Reads the store now and again on every write to it.
     func start() async {
         guard let io else { return }
@@ -173,7 +236,17 @@ final class Attention {
         r.register(Command(id: "attention.open", title: "Go to the place the item points at", scope: scope, verb: .main, label: "open",
                            local: { [weak app] id, _ in
                                guard let app, let i = Attention.of(app).item(id), let io = Attention.of(app).io else { return }
+                               Attention.of(app).opened.insert(i.id)
                                app.open(address: i.address(repo: io.repo), source: "attention")
+                           }))
+        r.register(Command(id: "attention.cards", title: "Open or fold what your review left on this branch", scope: .review, leader: LocalKey(",A"),
+                           label: "your review", group: .show, local: { [weak app] _, _ in
+                               guard let app, let b = ReviewPageState.of(app).branch,
+                                     let forest = app.store.view(Project.self, b.project)?.name else { return }
+                               let ids = Set(Attention.of(app).on(repo: b.repo, forest: forest).filter { $0.branch == b.name }.map(\.id))
+                               guard !ids.isEmpty else { throw Refusal("nothing from your review is pinned on this branch") }
+                               let att = Attention.of(app)
+                               if ids.isSubset(of: att.opened) { att.opened.subtract(ids) } else { att.opened.formUnion(ids) }
                            }))
         r.register(Command(id: "attention.next", title: "The next branch that needs your eyes", scope: .forest, verb: .nextFinding,
                            modes: [.normal, .select], quiet: true, local: { [weak app] _, _ in if let app { try step(app, 1) } }))

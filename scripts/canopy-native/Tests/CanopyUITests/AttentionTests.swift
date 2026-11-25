@@ -82,4 +82,36 @@ import Testing
         a.keys.handle("["); a.keys.handle("d")
         #expect(a.selected == RowKey.branch("r:b"))
     }
+
+    @Test func aCardShowsTheFileAroundTheLineAndSaysWhereTheCodeWent() throws {
+        #expect(ReviewSinceView.window(count: 0, line: 5) == [], "an empty file shows nothing, never a backwards range")
+        #expect(ReviewSinceView.window(count: 100, line: 1) == Array(1...40), "a note on line 1 is about the file: its start")
+        #expect(ReviewSinceView.window(count: 100, line: 50) == Array(44...64))
+        #expect(ReviewSinceView.window(count: 10, line: 99) == Array(1...10), "a line past the end shows the file's start")
+        let item = AttentionItem(id: "a", forest: "f", branch: "owners", file: "m.ts", line: 3, ask: "decide", text: "t", tip: "t1")
+        let note = ReviewNote(id: "n7", branch: "wording", file: "m.ts", line: 1, commit: "c1", text: "why fourteen?")
+        #expect(ReviewSinceView.nowTitle(item, note: note) == "what it is now · moved from wording to owners")
+        #expect(ReviewSinceView.nowTitle(item, note: ReviewNote(id: "n7", branch: "owners", file: nil, line: nil, commit: nil, text: "")) == "what it is now")
+    }
+
+    @Test func anItemsNoteIsReadFromTheReviewItNames() throws {
+        let reviews = FileManager.default.temporaryDirectory.appendingPathComponent("reviews-\(UUID().uuidString)")
+        let folder = reviews.appendingPathComponent("2026-11-25T133320-f")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try Data(#"[{"id": "n7", "branch": "w", "file": "m.ts", "line": 1, "commit": "c1", "text": "the words"}, {"id": "n1", "branch": null, "file": null, "line": null, "commit": null, "text": "hi"}]"#.utf8)
+            .write(to: folder.appendingPathComponent("notes.json"))
+        #expect(ReviewNote.read(.init(review: "2026-11-25T133320-f", id: "n7"), reviews: reviews)?.text == "the words", "by folder name")
+        #expect(ReviewNote.read(.init(review: folder.path, id: "n7"), reviews: reviews)?.commit == "c1", "or by its path")
+        #expect(ReviewNote.read(.init(review: folder.path, id: "n9"), reviews: reviews) == nil)
+    }
+
+    @Test func commaAOpensAndFoldsTheCardsOnTheBranchPage() async throws {
+        let a = try await Self.page([Self.item("a-1", branch: "c"), Self.item("a-2", branch: "d")])
+        #expect(a.registry.command("attention.cards")?.keys == [", A"])
+        a.go(.review(repo: "r", branch: "c"))
+        try a.registry.command("attention.cards")?.local?(nil, nil)
+        #expect(Attention.of(a).opened == ["a-1"], "only this branch's items")
+        try a.registry.command("attention.cards")?.local?(nil, nil)
+        #expect(Attention.of(a).opened.isEmpty)
+    }
 }

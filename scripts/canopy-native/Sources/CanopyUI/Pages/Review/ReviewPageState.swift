@@ -557,6 +557,7 @@ public final class ReviewPageState: ShipHost {
     /// Every other command on the review page, each with why it needs no rule: a new one must land in
     /// this list or in `actsOnDiff` (`StaleDiffTests` checks every one is named).
     static let actsOnItsOwn: [String: String] = [
+        "attention.cards": "opens or folds the review's cards above the diff, read for the branch's own tip; it reads nothing from the diff",
         "review.viewed.set": "undo's put-back: names its own branch and block keys",
         "review.compose.send": "a line comment refuses once what its line was read at changed (`ShipState.composerReads`)",
         "review.compose.draft": "as review.compose.send",

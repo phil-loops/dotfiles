@@ -89,6 +89,9 @@ struct ReviewPage: View {
                             .overlay(alignment: .trailing) { theme.vellumEdge.frame(width: 1) }
                         }
                     }
+                    .overlay(alignment: .top) {
+                        if pg.integration == nil, let b = pg.branch { ReviewCardsPanel(branch: b) }
+                    }
                     .overlay(alignment: .topLeading) {
                         if pg.guideOpen {
                             ReviewGuidePanel()
