@@ -32,6 +32,10 @@ struct Session: Decodable, Equatable {
 }
 
 enum Logic {
+    /// Terminal apps: with one in front, Dictate looks for a Claude session in tmux before pasting.
+    static let terminals: Set<String> = ["com.mitchellh.ghostty", "com.apple.Terminal", "com.googlecode.iterm2",
+                                         "net.kovidgoyal.kitty", "org.alacritty", "dev.warp.Warp-Stable", "com.github.wez.wezterm"]
+
     /// The pane of the tmux client used last, from `tmux list-clients -F '#{client_activity}\t#{pane_id}'`.
     static func activePane(clients: String) -> String? {
         clients.split(separator: "\n").compactMap { line -> (Int, String)? in

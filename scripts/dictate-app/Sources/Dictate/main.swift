@@ -3,8 +3,8 @@ import CoreGraphics
 import ServiceManagement
 
 /// Dictate: the 🎤 key (or 🌐 twice, or `Ctrl-a v` in tmux as `dictate://pane/<id>`) records in the background; 🎤 again or
-/// one 🌐 tap drops the transcript as a draft into the Claude session of the tmux pane you were last in, by `claude-say
-/// --draft`, so switching windows mid-sentence costs nothing and a pane whose session changed refuses the words.
+/// one 🌐 tap delivers the words to whatever had focus at the start. A Claude pane in tmux gets them through `claude-say`,
+/// so switching windows mid-sentence costs nothing; any other app is brought back and gets them pasted.
 @MainActor
 final class Dictate: NSObject, NSApplicationDelegate {
     private let voice = Voice()
@@ -18,7 +18,10 @@ final class Dictate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         voice.idleMenu = { [weak self] menu in self?.idleMenu(menu) }
         voice.reset()
-        try? SMAppService.mainApp.register()
+        if UserDefaults.standard.object(forKey: "login.offered") == nil {
+            try? SMAppService.mainApp.register()
+            UserDefaults.standard.set(true, forKey: "login.offered")
+        }
         listen()
     }
 
@@ -30,13 +33,55 @@ final class Dictate: NSObject, NSApplicationDelegate {
     }
 
     private func idleMenu(_ menu: NSMenu) {
-        menu.addItem(withTitle: tap == nil ? "Allow 🎤 in Input Monitoring…" : "🎤 dictates to your last tmux pane",
-                     action: tap == nil ? #selector(openInputMonitoring) : nil, keyEquivalent: "").target = self
-        if tap != nil, !swallows {
-            menu.addItem(withTitle: "Allow in Accessibility so 🎤 stops macOS dictation…", action: #selector(openAccessibility), keyEquivalent: "").target = self
+        func item(_ title: String, _ action: Selector?, on: Bool = false, tag: String? = nil, to parent: NSMenu? = nil) {
+            let entry = (parent ?? menu).addItem(withTitle: title, action: action, keyEquivalent: "")
+            entry.target = self
+            entry.state = on ? .on : .off
+            entry.representedObject = tag
+        }
+        if tap == nil {
+            item("Allow 🎤 in Input Monitoring…", #selector(openInputMonitoring))
+        } else if !swallows {
+            item("Allow in Accessibility so 🎤 stops macOS dictation…", #selector(openAccessibility))
+        } else {
+            item("🎤 dictates to whatever has focus", nil)
         }
         menu.addItem(.separator())
+        item("Leave as a draft", #selector(chooseSend), on: !Settings.send, tag: "draft")
+        item("Send it (press Enter)", #selector(chooseSend), on: Settings.send, tag: "send")
+        menu.addItem(.separator())
+        for (title, current, action) in [("Start sound", Settings.startSound, #selector(chooseStartSound)),
+                                         ("Finish sound", Settings.finishSound, #selector(chooseFinishSound))] {
+            let sub = NSMenu()
+            item("None", action, on: current.isEmpty, tag: "", to: sub)
+            sub.addItem(.separator())
+            for name in Settings.sounds { item(name, action, on: current == name, tag: name, to: sub) }
+            menu.addItem(withTitle: title, action: nil, keyEquivalent: "").submenu = sub
+        }
+        menu.addItem(.separator())
+        item("Live preview", #selector(togglePreview), on: Settings.preview)
+        let places = NSMenu()
+        for (place, title) in [(Settings.Place.bottom, "Bottom of the screen"), (.top, "Top of the screen"), (.dragged, "Where I last dragged it")] {
+            item(title, #selector(choosePlace), on: Settings.place == place, tag: place.rawValue, to: places)
+        }
+        menu.addItem(withTitle: "Preview position", action: nil, keyEquivalent: "").submenu = places
+        menu.addItem(.separator())
+        item("Open at login", #selector(toggleLogin), on: SMAppService.mainApp.status == .enabled)
         menu.addItem(withTitle: "Quit Dictate", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
+    }
+
+    @objc private func chooseSend(_ sender: NSMenuItem) { Settings.send = sender.representedObject as? String == "send"; voice.reset() }
+    @objc private func chooseStartSound(_ sender: NSMenuItem) { Settings.startSound = sender.representedObject as? String ?? ""; Voice.chime(Settings.startSound); voice.reset() }
+    @objc private func chooseFinishSound(_ sender: NSMenuItem) { Settings.finishSound = sender.representedObject as? String ?? ""; Voice.chime(Settings.finishSound); voice.reset() }
+    @objc private func togglePreview() { Settings.preview.toggle(); voice.reset() }
+    @objc private func choosePlace(_ sender: NSMenuItem) {
+        Settings.place = (sender.representedObject as? String).flatMap(Settings.Place.init(rawValue:)) ?? .bottom
+        voice.reset()
+        voice.flash("The preview shows here")
+    }
+    @objc private func toggleLogin() {
+        if SMAppService.mainApp.status == .enabled { try? SMAppService.mainApp.unregister() } else { try? SMAppService.mainApp.register() }
+        voice.reset()
     }
 
     @objc private func openAccessibility() {
@@ -102,7 +147,7 @@ final class Dictate: NSObject, NSApplicationDelegate {
         case .flagsChanged where code == 63:
             if event.flags.contains(.maskSecondaryFn) { taps.press(at: time); return false }
             switch taps.release(at: time) {
-            case .double: toggleLastPane()
+            case .double: toggleFromKeys()
             case .single where voice.active:
                 taps.interrupt()
                 note("🌐 finish")
@@ -112,7 +157,7 @@ final class Dictate: NSObject, NSApplicationDelegate {
             }
         case .keyDown where code == micKey:
             note("🎤 key")
-            if event.getIntegerValueField(.keyboardEventAutorepeat) == 0 { toggleLastPane() }
+            if event.getIntegerValueField(.keyboardEventAutorepeat) == 0 { toggleFromKeys() }
             return swallows
         case .keyDown where code == 179 || code == 63:
             break
@@ -128,16 +173,31 @@ final class Dictate: NSObject, NSApplicationDelegate {
         return false
     }
 
-    private func toggleLastPane() {
+    /// 🎤 or 🌐 🌐: finishes a recording, or starts one for whatever has focus — the Claude session of the tmux pane in front
+    /// when a terminal has focus and that pane holds one, else the focused app itself.
+    private func toggleFromKeys() {
         note("toggle")
         if voice.active { voice.finish(); return }
+        guard !voice.busy, let front = NSWorkspace.shared.frontmostApplication else { return }
+        guard Logic.terminals.contains(front.bundleIdentifier ?? "") else { startPasting(into: front); return }
         Task.detached {
             let clients = run(["tmux", "list-clients", "-F", "#{client_activity}\t#{pane_id}"])
             let pane = Logic.activePane(clients: String(decoding: clients.out, as: UTF8.self))
+            let listing = pane == nil ? nil : run([claudeSay, "--json"])
+            let session = pane.flatMap { pane in listing.flatMap { $0.status == 0 ? Logic.session(in: pane, listing: $0.out) : nil } }
             await MainActor.run { [weak self] in
-                guard let pane else { NSSound.beep(); return }
-                self?.toggle(pane: pane)
+                guard let self else { return }
+                if let session { self.startClaude(session) } else { self.startPasting(into: front) }
             }
+        }
+    }
+
+    private func startPasting(into target: NSRunningApplication) {
+        note("start → paste into \(target.bundleIdentifier ?? "?")")
+        voice.onError = { [weak self] in self?.voice.flash($0) }
+        voice.start(to: target.localizedName ?? "this app") { text in
+            paste(text, into: target, enter: Settings.send)
+            note("pasted")
         }
     }
 
@@ -150,23 +210,64 @@ final class Dictate: NSObject, NSApplicationDelegate {
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 guard let session else { note("no Claude session in \(pane)"); tell(pane, "No Claude session in this pane to dictate to"); return }
-                note("start → \(session.session_id.prefix(8)) in \(session.pane)")
-                self.voice.onError = { tell(session.pane, $0) }
-                self.voice.start(to: session.topic.isEmpty ? session.pane : session.topic) { text in
-                    Task.detached {
-                        let sent = run([claudeSay, session.session_id, "--draft", "--unsigned", text])
-                        guard sent.status != 0 else { note("delivered"); return }
-                        note("not delivered: \(String(decoding: sent.err, as: UTF8.self))")
-                        let reason = String(decoding: sent.err, as: UTF8.self).split(separator: "\n").first.map(String.init) ?? "claude-say failed"
-                        await MainActor.run {
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(text, forType: .string)
-                            tell(session.pane, "Not delivered (\(reason)); the text is on the clipboard")
-                        }
-                    }
+                self.startClaude(session)
+            }
+        }
+    }
+
+    private func startClaude(_ session: Session) {
+        note("start → \(session.session_id.prefix(8)) in \(session.pane)")
+        voice.onError = { tell(session.pane, $0) }
+        voice.start(to: session.topic.isEmpty ? session.pane : session.topic) { text in
+            Task.detached {
+                let sent = run([claudeSay, session.session_id] + (Settings.send ? [] : ["--draft"]) + ["--unsigned", text])
+                guard sent.status != 0 else { note("delivered"); return }
+                note("not delivered: \(String(decoding: sent.err, as: UTF8.self))")
+                let reason = String(decoding: sent.err, as: UTF8.self).split(separator: "\n").first.map(String.init) ?? "claude-say failed"
+                await MainActor.run {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(text, forType: .string)
+                    tell(session.pane, "Not delivered (\(reason)); the text is on the clipboard")
                 }
             }
         }
+    }
+}
+
+/// Puts `text` into `target` as if typed: brought to the front, pasted with ⌘V, then Enter when sending. The clipboard
+/// holds the text only for the paste; what was on it comes back after, unless something else has used it since.
+@MainActor
+func paste(_ text: String, into target: NSRunningApplication, enter: Bool) {
+    let board = NSPasteboard.general
+    let saved = (board.pasteboardItems ?? []).map { item in
+        item.types.reduce(into: [NSPasteboard.PasteboardType: Data]()) { kept, type in kept[type] = item.data(forType: type) }
+    }
+    board.clearContents()
+    board.setString(text, forType: .string)
+    let ours = board.changeCount
+    let wasFront = target.isActive
+    target.activate()
+    DispatchQueue.main.asyncAfter(deadline: .now() + (wasFront ? 0.05 : 0.3)) {
+        press(9, flags: .maskCommand)
+        if enter { press(36) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            guard board.changeCount == ours, !saved.isEmpty else { return }
+            board.clearContents()
+            board.writeObjects(saved.map { kept in
+                let item = NSPasteboardItem()
+                kept.forEach { item.setData($1, forType: $0) }
+                return item
+            })
+        }
+    }
+}
+
+/// One key press and release, posted as if typed (key codes are US-layout positions: 9 is V, 36 is Return).
+func press(_ code: CGKeyCode, flags: CGEventFlags = []) {
+    for down in [true, false] {
+        let event = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: down)
+        event?.flags = flags
+        event?.post(tap: .cghidEventTap)
     }
 }
 

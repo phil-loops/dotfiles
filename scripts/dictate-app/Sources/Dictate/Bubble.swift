@@ -1,12 +1,13 @@
 import AppKit
 
-/// The words heard so far, in a small floating box: near the bottom of the screen the pointer is on, or wherever it was last
-/// dragged. It never takes focus, so typing carries on in the app underneath.
+/// The words heard so far, in a small floating box at the bottom or top of the screen the pointer is on, or wherever it was
+/// last dragged (dragging it chooses that). It never takes focus, so typing carries on in the app underneath.
 @MainActor
 final class Bubble {
     private let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 520, height: 60),
                                 styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
     private let label = Words(wrappingLabelWithString: "")
+    private var placing = false
 
     init() {
         panel.level = .statusBar
@@ -39,8 +40,9 @@ final class Bubble {
         panel.contentView = backdrop
         NotificationCenter.default.addObserver(forName: NSWindow.didMoveNotification, object: panel, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
-                guard let self, self.panel.isVisible else { return }
+                guard let self, self.panel.isVisible, !self.placing else { return }
                 UserDefaults.standard.set(NSStringFromPoint(self.panel.frame.origin), forKey: "bubble.origin")
+                Settings.place = .dragged
             }
         }
     }
@@ -52,10 +54,13 @@ final class Bubble {
         let mouse = NSEvent.mouseLocation
         let screen = NSScreen.screens.first { $0.frame.contains(mouse) } ?? NSScreen.main
         let saved = UserDefaults.standard.string(forKey: "bubble.origin").map(NSPointFromString)
-        if let saved, NSScreen.screens.contains(where: { $0.visibleFrame.contains(saved) }) {
+        placing = true
+        defer { placing = false }
+        if Settings.place == .dragged, let saved, NSScreen.screens.contains(where: { $0.visibleFrame.contains(saved) }) {
             panel.setFrame(NSRect(origin: saved, size: size), display: true)
         } else if let area = screen?.visibleFrame {
-            panel.setFrame(NSRect(x: area.midX - size.width / 2, y: area.minY + 72, width: size.width, height: size.height), display: true)
+            let y = Settings.place == .top ? area.maxY - 48 - size.height : area.minY + 72
+            panel.setFrame(NSRect(x: area.midX - size.width / 2, y: y, width: size.width, height: size.height), display: true)
         }
         panel.orderFrontRegardless()
     }

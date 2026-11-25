@@ -37,6 +37,7 @@ final class Voice: NSObject, AVAudioRecorderDelegate {
     private var deliver: ((String) -> Void)?
     private var failure: String?
     private(set) var busy = false
+    private var flashing: String?
 
     var active: Bool { deliver != nil }
     var onError: ((String) -> Void)?
@@ -67,11 +68,11 @@ final class Voice: NSObject, AVAudioRecorderDelegate {
                 ])
                 recorder.delegate = self
                 guard recorder.record() else { throw CocoaError(.fileWriteUnknown) }
-                NSSound(named: "Pop")?.play()
+                Voice.chime(Settings.startSound)
                 self.file = file
                 self.recorder = recorder
                 busy = false
-                startPreview(of: file)
+                if Settings.preview { startPreview(of: file) }
                 update()
             } catch {
                 reset()
@@ -80,9 +81,24 @@ final class Voice: NSObject, AVAudioRecorderDelegate {
         }
     }
 
+    static func chime(_ name: String) {
+        if !name.isEmpty { NSSound(named: name)?.play() }
+    }
+
+    /// A short message in the preview box, shown whether or not the live preview is on.
+    func flash(_ message: String) {
+        flashing = message
+        update()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
+            guard let self, self.flashing == message else { return }
+            self.flashing = nil
+            self.update()
+        }
+    }
+
     @objc func finish() {
         guard let recorder else { return }
-        NSSound(named: "Bottle")?.play()
+        Voice.chime(Settings.finishSound)
         recorder.delegate = nil
         recorder.stop()
         self.recorder = nil
@@ -171,10 +187,14 @@ final class Voice: NSObject, AVAudioRecorderDelegate {
         }
         status.button?.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
         status.button?.toolTip = label
-        if recorder != nil {
-            bubble.show(heard.isEmpty ? "Listening to \(target)…" : heard, dim: heard.isEmpty)
+        if !Settings.preview, flashing == nil {
+            bubble.hide()
+        } else if recorder != nil {
+            bubble.show(heard.isEmpty ? "Listening for \(target)…" : heard, dim: heard.isEmpty)
         } else if busy && deliver != nil && file != nil {
             bubble.show(heard.isEmpty ? "Transcribing…" : heard, dim: true)
+        } else if let flashing {
+            bubble.show(flashing, dim: true)
         } else {
             bubble.hide()
         }
