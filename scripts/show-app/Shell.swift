@@ -1175,11 +1175,14 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
     var savedPlace: String? { prefs.string(forKey: placeKey) ?? prefs.string(forKey: legacyCanopyPlaceKey) }
 
     /// Keeps `place`; a canopy page still loading keeps the spot saved for that same page.
-    func savePlace() {
-        guard let place, !place.isEmpty else { return }
+    /// Keeps where this workspace is for a relaunch, and returns it: the one read of canopy's place each second.
+    @discardableResult
+    func savePlace() -> String? {
+        guard let place, !place.isEmpty else { return nil }
         prefs.removeObject(forKey: legacyCanopyPlaceKey)
-        if canopy != nil, let saved = prefs.string(forKey: placeKey), !place.contains("?"), saved.hasPrefix(place + "?") { return }
+        if canopy != nil, let saved = prefs.string(forKey: placeKey), !place.contains("?"), saved.hasPrefix(place + "?") { return place }
         prefs.set(place, forKey: placeKey)
+        return place
     }
 
     // MARK: the shelf

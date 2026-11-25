@@ -1,7 +1,8 @@
 import AppKit
 
 /// A spoken review of a forest or a branch: ⌘⇧R on its canopy page has Dictate record into the review's folder while
-/// Show writes down each place canopy goes and the commit on screen there, on the uptime clock Dictate stamps the audio
+/// Show writes down each place canopy goes (each page as it opens, the file and line from the place Show already reads
+/// once a second, never an extra read of canopy) and the commit on screen there, on the uptime clock Dictate stamps the audio
 /// with. ⌘⇧R again (or 🎤) finishes; Dictate cuts the audio at pauses and `show-review-join` files each stretch under
 /// the place it was said and posts the notes to the Inbox.
 final class SpokenReview {
@@ -164,8 +165,6 @@ extension AppDelegate {
                 controller.say("Stopped waiting for that review; its folder is \(review.dir.path)")
             } else {
                 review.finish()
-                reviewSampler?.invalidate()
-                reviewSampler = nil
                 updateTitle()
             }
             return
@@ -179,10 +178,6 @@ extension AppDelegate {
             controller.say(refusal.message)
         case .success(let review):
             spokenReview = review
-            reviewSampler = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
-                guard let self, let review = self.spokenReview else { return }
-                review.sample(self.workspaces[.canopy]?.canopy?.place)
-            }
             updateTitle()
         }
     }
@@ -200,10 +195,8 @@ extension AppDelegate {
         case .recording:
             return
         case .transcribing:
-            if reviewSampler != nil {
+            if !review.finishing {
                 review.finish()
-                reviewSampler?.invalidate()
-                reviewSampler = nil
                 updateTitle()
             }
         case .done:
@@ -216,8 +209,6 @@ extension AppDelegate {
     }
 
     private func endSpokenReview() {
-        reviewSampler?.invalidate()
-        reviewSampler = nil
         spokenReview = nil
         updateTitle()
     }

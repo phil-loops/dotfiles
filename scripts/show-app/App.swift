@@ -94,9 +94,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     let launchPaths: [String]
     let snapshotPath: String?
     var watcher: Timer?
-    /// The spoken review in progress (⌘⇧R in canopy), and the timer that writes down where canopy is while it records.
+    /// The spoken review in progress (⌘⇧R in canopy).
     var spokenReview: SpokenReview?
-    var reviewSampler: Timer?
     var signature = ""
     let launchedBuild = modificationDate(buildStamp)
     /// Requests that came in before the window existed (a launch by opening a file can do that);
@@ -162,8 +161,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         ArrivalNotices.shared.onOpen = { [weak self] target in
             self?.handle(.phil(target))
         }
-        workspaces[.canopy]?.canopy?.onNavigate = { route in
+        workspaces[.canopy]?.canopy?.onNavigate = { [weak self] route in
             showEvents.append(ShowEvent(kind: .opened, target: .canopy(route), workspace: .canopy, title: canopyTitle(route)))
+            self?.spokenReview?.sample(route)
         }
         refreshLibrary(force: true)
         restore()
@@ -223,7 +223,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     private func stayCurrent() {
         workspaces.values.forEach { $0.reloadChanged() }
         settleSpokenReview()
-        workspaces[active]?.savePlace()   // a crash or a kill comes back to within a second of where you were, not to the last quit
+        let place = workspaces[active]?.savePlace()   // a crash or a kill comes back to within a second of where you were, not to the last quit
+        if active == .canopy { spokenReview?.sample(place) }
         shell.runsRunning = workspaces[.runs]?.isRunning ?? false
         refreshLibrary()
         if let built = modificationDate(buildStamp), built != launchedBuild {
