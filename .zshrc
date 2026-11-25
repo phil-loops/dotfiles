@@ -94,9 +94,6 @@ stack() {
         fmt)
             ~/.dotfiles/scripts/stack-fmt "$@"
             ;;
-        rm|kill)
-            ~/.dotfiles/scripts/stack-rm "$@"
-            ;;
         archive)
             ~/.dotfiles/scripts/stack-archive archive "$@"
             ;;
@@ -114,18 +111,6 @@ stack() {
             ;;
         staging)
             ~/.dotfiles/scripts/staging "$@"
-            ;;
-        purpose)
-            # View or set a branch's purpose — git's native branch description.
-            #   stack purpose [branch]              → show
-            #   stack purpose [branch] <text...>    → set
-            local b="$1"
-            if [[ -z "$b" || "$b" == --* ]]; then b=$(git branch --show-current 2>/dev/null); else shift; fi
-            if (( $# )); then
-                ~/.dotfiles/scripts/stack-purpose --set "$*" "$b" >/dev/null && echo "purpose set on $b"
-            else
-                ~/.dotfiles/scripts/stack-purpose "$b" | jq -r '.thesis | if . == "" then "(no purpose set)" else . end'
-            fi
             ;;
         stories)
             # every branch's one-line story in ONE $EDITOR buffer: blank boxes, each branch's

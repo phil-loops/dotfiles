@@ -42,7 +42,6 @@ LINKS=(
   "$HOME/.zshenv"                 .zshenv
   "$HOME/.zshrc"                  .zshrc
   "$HOME/.tmux.conf"              tmux.conf
-  "$HOME/.hammerspoon"            hammerspoon
   "$HOME/.config/helix"           helix
   "$HOME/.config/nvim"            nvim
   "$HOME/.config/starship.toml"   starship.toml

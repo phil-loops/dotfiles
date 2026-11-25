@@ -15,7 +15,7 @@ step is idempotent; re-running is safe.
 ```bash
 # Xcode CLT (git), then Homebrew (https://brew.sh), then:
 brew install git gh jq fzf ripgrep fd tmux helix neovim starship go-task terminal-notifier python@3.13
-brew install --cask orbstack hammerspoon swiftbar
+brew install --cask orbstack swiftbar
 curl https://get.volta.sh | bash && ~/.volta/bin/volta install node@22
 curl -fsSL https://claude.ai/install.sh | bash        # Claude Code → ~/.local/bin/claude
 ```
@@ -85,7 +85,7 @@ hx --health typescript         # language server found via volta
 | `helix/`, `nvim/`, `tmux.conf`, `starship.toml` | editor and terminal config |
 | `hooks/` | git hooks installed into the loops checkout |
 | `launchd/` | background agents (CI mail watch, PR sweep, build notify) |
-| `swiftbar/`, `hammerspoon/` | menu bar and hotkeys |
+| `swiftbar/` | menu bar |
 | `CLAUDE.md`, `claude/` | Claude Code instructions: hard rules in `CLAUDE.md`, mechanics in the `claude/` topic files |
 | `.claude/` | Claude Code `settings.json`, agents, skills (linked to `~/.claude/`) |
 | `OWNERS` | file lanes for concurrent Claude sessions; `own` reads it |
