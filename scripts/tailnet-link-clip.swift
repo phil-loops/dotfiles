@@ -47,14 +47,14 @@ if args.count == 2, let audience = Audience(rawValue: args[0]) {
 final class Watcher: NSObject {
   let board = NSPasteboard.general
   var seen = NSPasteboard.general.changeCount
-  let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+  let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
   var shown: Audience?
 
   func start() {
     let menu = NSMenu()
     for audience in [Audience.external, .internal] {
       let entry = NSMenuItem(
-        title: audience == .external ? "Copy links as app.loops.so" : "Copy links as tailnet",
+        title: audience == .external ? "Customers — copy as app.loops.so" : "Team — copy as tailnet",
         action: #selector(choose(_:)), keyEquivalent: "")
       entry.target = self
       entry.representedObject = audience.rawValue
@@ -75,10 +75,12 @@ final class Watcher: NSObject {
     let audience = readAudience()
     guard audience != shown else { return }
     shown = audience
-    let symbol = audience == .external ? "link" : "lock"
+    let symbol = audience == .external ? "globe" : "person.2"
     let image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Copy links: \(audience.rawValue)")
     image?.isTemplate = true
     item.button?.image = image
+    item.button?.imagePosition = .imageLeading
+    item.button?.title = audience == .external ? "app.loops.so" : "tailnet"
     item.button?.toolTip = audience == .external ? "Copied links become app.loops.so" : "Copied links become tailnet"
     for entry in item.menu?.items ?? [] {
       entry.state = entry.representedObject as? String == audience.rawValue ? .on : .off
