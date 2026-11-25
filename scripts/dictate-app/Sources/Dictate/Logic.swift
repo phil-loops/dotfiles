@@ -1,7 +1,9 @@
 import Foundation
 
-/// Two taps of the 🌐 key, each a press and release with nothing typed between, the second soon after the first.
+/// Taps of the 🌐 key: a press and release with nothing typed between. A second soon after the first makes a double.
 struct GlobeTaps {
+    enum Tap: Equatable { case none, single, double }
+
     var tap: TimeInterval = 0.35
     var gap: TimeInterval = 0.5
     private var down: TimeInterval?
@@ -9,13 +11,13 @@ struct GlobeTaps {
 
     mutating func press(at time: TimeInterval) { down = time }
 
-    /// True when this release completes a double tap.
-    mutating func release(at time: TimeInterval) -> Bool {
-        guard let pressed = down, time - pressed < tap else { down = nil; last = nil; return false }
+    /// What this release completes: nothing (held too long, or no press), a first tap, or a double.
+    mutating func release(at time: TimeInterval) -> Tap {
+        guard let pressed = down, time - pressed < tap else { down = nil; last = nil; return .none }
         down = nil
-        if let first = last, time - first < gap { last = nil; return true }
+        if let first = last, time - first < gap { last = nil; return .double }
         last = time
-        return false
+        return .single
     }
 
     mutating func interrupt() { down = nil; last = nil }
@@ -81,13 +83,13 @@ func selfTest() -> Int32 {
     var taps = GlobeTaps()
     taps.press(at: 0); let one = taps.release(at: 0.1)
     taps.press(at: 0.2); let two = taps.release(at: 0.3)
-    check("two quick 🌐 taps make a double tap", !one && two)
+    check("two quick 🌐 taps make a single then a double", one == .single && two == .double)
     taps.press(at: 1); _ = taps.release(at: 1.1); taps.interrupt(); taps.press(at: 1.2)
-    check("a key typed between taps cancels it", !taps.release(at: 1.3))
-    taps.press(at: 2); _ = taps.release(at: 2.8); taps.press(at: 2.9)
-    check("holding 🌐 is not a tap", !taps.release(at: 3.0))
+    check("a key typed between taps cancels the double", taps.release(at: 1.3) == .single)
+    taps.press(at: 2); let held = taps.release(at: 2.8)
+    check("holding 🌐 is not a tap", held == .none)
     taps.press(at: 4); _ = taps.release(at: 4.1); taps.press(at: 4.9)
-    check("taps too far apart are two singles", !taps.release(at: 5.0))
+    check("taps too far apart are two singles", taps.release(at: 5.0) == .single)
 
     check("the last-used tmux client names the pane", Logic.activePane(clients: "100\t%3\n250\t%12\n90\t%7\n") == "%12")
     check("no tmux clients, no pane", Logic.activePane(clients: "") == nil)

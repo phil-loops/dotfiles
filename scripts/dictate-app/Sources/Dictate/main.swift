@@ -43,7 +43,7 @@ final class Dictate: NSObject, NSApplicationDelegate {
     private func listen() {
         guard tap == nil else { return }
         if !CGPreflightListenEventAccess() { CGRequestListenEventAccess() }
-        let mask = CGEventMask(1 << CGEventType.flagsChanged.rawValue | 1 << CGEventType.keyDown.rawValue)
+        let mask = CGEventMask(1 << CGEventType.flagsChanged.rawValue | 1 << CGEventType.keyDown.rawValue | 1 << systemDefined)
         tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .listenOnly, eventsOfInterest: mask,
                                 callback: { _, type, event, context in
                                     let app = Unmanaged<Dictate>.fromOpaque(context!).takeUnretainedValue()
@@ -77,17 +77,33 @@ final class Dictate: NSObject, NSApplicationDelegate {
             if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
         case .flagsChanged where code == 63:
             if event.flags.contains(.maskSecondaryFn) { taps.press(at: time); return }
-            if taps.release(at: time) { toggleLastPane() } else if modifierLog > 0 { note(taps.pending ? "🌐 tap" : "🌐 held too long") }
+            switch taps.release(at: time) {
+            case .double: toggleLastPane()
+            case .single where voice.active:
+                taps.interrupt()
+                note("🌐 finish")
+                voice.finish()
+            case .single: if modifierLog > 0 { note("🌐 tap") }
+            case .none: if modifierLog > 0 { note("🌐 held too long") }
+            }
+        case .keyDown where code == micKey:
+            note("🎤 key")
+            toggleLastPane()
         case .keyDown where code == 179 || code == 63:
             break
+        case let other where other.rawValue == systemDefined:
+            if let key = NSEvent(cgEvent: event), key.subtype.rawValue == 8 {
+                note("special key \((key.data1 & 0xFFFF0000) >> 16), \((key.data1 & 0xFF00) >> 8 == 0xA ? "down" : "up")")
+            }
         default:
+            if type == .keyDown, code >= 160 { note("special key \(code)") }
             if taps.pending, modifierLog > 0 { note("\(type == .keyDown ? "key" : "event \(type.rawValue)") \(code) between 🌐 taps") }
             taps.interrupt()
         }
     }
 
     private func toggleLastPane() {
-        note("🌐 🌐")
+        note("toggle")
         if voice.active { voice.finish(); return }
         Task.detached {
             let clients = run(["tmux", "list-clients", "-F", "#{client_activity}\t#{pane_id}"])
@@ -141,6 +157,11 @@ func note(_ line: String) {
         try? entry.write(to: log)
     }
 }
+
+/// The 🎤 dictation key on the function row (F5 on recent Mac keyboards), as a key code.
+let micKey: Int64 = 176
+/// NX_SYSDEFINED: media and special keys that don't arrive as plain key presses.
+let systemDefined: UInt32 = 14
 
 let claudeSay = ("~/.dotfiles/scripts/claude-say" as NSString).expandingTildeInPath
 
