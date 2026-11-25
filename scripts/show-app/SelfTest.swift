@@ -358,6 +358,13 @@ final class SelfTestDriver {
         }
 
         let listing = Data(#"[{"session_id":"aaa","pane":"%3","topic":"x"},{"session_id":"bbb","pane":"%12","topic":"y"}]"#.utf8)
+        var wav = Data("RIFF\0\0\0\0WAVEfmt ".utf8) + Data(count: 20) + Data("data\0\0\0\0".utf8)
+        for sample: Int16 in [0, 16_384, -16_384, 32_767] { wav += withUnsafeBytes(of: sample.littleEndian) { Data($0) } }
+        check("the live preview reads samples from a WAV still being written",
+              LearnTranscriber.tail(of: wav, seconds: 10) == [0, 0.5, -0.5, Float(32_767) / 32_768]
+              && LearnTranscriber.tail(of: wav, seconds: 2.0 / 16_000) == [-0.5, Float(32_767) / 32_768])
+        check("the menu bar keeps the end of what it heard, on a word boundary",
+              LearnTranscriber.heard("short") == "short" && LearnTranscriber.heard("one two three four", width: 12) == "…three four")
         check("a dictate link names its tmux pane", PaneDictation.pane(of: URL(string: "canopy://dictate?pane=12")!) == "%12"
               && PaneDictation.pane(of: URL(string: "canopy://v2/b/loops/x?pane=12")!) == nil)
         check("pane dictation targets the session in that pane, and none when it holds none",
