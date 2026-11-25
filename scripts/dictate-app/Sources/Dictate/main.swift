@@ -66,17 +66,22 @@ final class Dictate: NSObject, NSApplicationDelegate {
     }
 
     private func key(_ type: CGEventType, _ event: CGEvent) {
-        let time = Double(event.timestamp) / 1_000_000_000
+        let time = ProcessInfo.processInfo.systemUptime
+        let code = event.getIntegerValueField(.keyboardEventKeycode)
         if type == .flagsChanged, modifierLog > 0 {
             modifierLog -= 1
-            note("modifier key \(event.getIntegerValueField(.keyboardEventKeycode)), fn \(event.flags.contains(.maskSecondaryFn) ? "down" : "up")")
+            note("modifier key \(code), fn \(event.flags.contains(.maskSecondaryFn) ? "down" : "up")")
         }
         switch type {
         case .tapDisabledByTimeout, .tapDisabledByUserInput:
             if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
-        case .flagsChanged where event.getIntegerValueField(.keyboardEventKeycode) == 63:
-            if event.flags.contains(.maskSecondaryFn) { taps.press(at: time) } else if taps.release(at: time) { toggleLastPane() }
+        case .flagsChanged where code == 63:
+            if event.flags.contains(.maskSecondaryFn) { taps.press(at: time); return }
+            if taps.release(at: time) { toggleLastPane() } else if modifierLog > 0 { note(taps.pending ? "🌐 tap" : "🌐 held too long") }
+        case .keyDown where code == 179 || code == 63:
+            break
         default:
+            if taps.pending, modifierLog > 0 { note("\(type == .keyDown ? "key" : "event \(type.rawValue)") \(code) between 🌐 taps") }
             taps.interrupt()
         }
     }

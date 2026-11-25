@@ -19,6 +19,8 @@ struct GlobeTaps {
     }
 
     mutating func interrupt() { down = nil; last = nil }
+
+    var pending: Bool { down != nil || last != nil }
 }
 
 struct Session: Decodable, Equatable {
