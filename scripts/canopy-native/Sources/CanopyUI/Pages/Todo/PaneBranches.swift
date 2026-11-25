@@ -1,17 +1,23 @@
 import AppKit
 import CanopyCore
+import CoreServices
 import Foundation
 import Observation
 
 /// Which branch each tmux pane is working on, whatever runs in it: `pane-branch`'s answer, read from the record the
 /// reference-transaction hook writes in the pane that moved a branch. `⌃a n` opens pane n's branch, a forest's line
-/// says where its panes sit, and each pane's border names its branch (the pane option `@pane_branch`).
+/// says where its panes sit, and each pane's border names its branch (the pane option `@pane_branch`). The rows are
+/// read again whenever the record changes — a branch move, or tmux touching `layout` (tmux.conf) — so while tmux does
+/// that, ⌃a n is a lookup in them rather than a question to `pane-branch`.
 @MainActor @Observable
 final class PaneBranches {
     struct Row: Decodable, Equatable {
         var pane: String
         /// window:pane, with the session when it isn't the one tmux shows
         var address: String
+        var index: Int?
+        /// in the window the tmux client shows: the window ⌃a n counts panes in
+        var shown: Bool?
         var repo: String?
         var branch: String?
     }
@@ -59,6 +65,12 @@ final class PaneBranches {
     private(set) var rows: [Row] = []
     @ObservationIgnored private(set) var written: [String: String] = [:]
     @ObservationIgnored private var task: Task<Void, Never>?
+    /// whether tmux touches the record on every layout change (`pane-branch hooked`): only then do the rows answer ⌃a n
+    @ObservationIgnored private(set) var hooked = false
+    /// the record changed since the rows were read
+    @ObservationIgnored private var stale = true
+    @ObservationIgnored private var reading: Task<Void, Never>?
+    @ObservationIgnored private var watch: RecordWatch?
 
     /// The pid in `pane-branch host`'s answer: "<pid>\t<app>".
     nonisolated static func host(_ said: String) -> pid_t? { said.components(separatedBy: "\t").first.flatMap { pid_t($0) } }
@@ -77,9 +89,65 @@ final class PaneBranches {
         return rows.filter { r in chats.contains(r.pane) || r.branch.map { here.contains("\(r.repo ?? "")\t\($0)") } == true }.map(\.address)
     }
 
-    /// Opens the branch pane `n` of the shown tmux window is working on, asked now; a pane with none says why.
+    /// Opens the branch pane `n` of the shown tmux window is working on — from the rows, once they hold every change the
+    /// record has seen, while tmux keeps the record told; else asked now. A pane with none says why.
     @discardableResult
-    func open(_ n: Int, _ app: AppModel) -> Task<Void, Never> { go([String(n)], app) }
+    func open(_ n: Int, _ app: AppModel) -> Task<Void, Never> {
+        guard hooked else { return go([String(n)], app) }
+        return Task { [weak app] in
+            await self.current()
+            guard let app else { return }
+            guard self.hooked else { return await self.go([String(n)], app).value }
+            switch Self.pane(n, in: self.rows) {
+            case .success(let route): app.navigating("pane") { app.go(route) }
+            case .failure(let why): app.runner.say(why.message)
+            }
+        }
+    }
+
+    /// Pane `n` of the shown window's branch, in `pane-branch <n>`'s words when there's none.
+    static func pane(_ n: Int, in rows: [Row]) -> Result<Route, Refusal> {
+        guard let row = rows.first(where: { $0.shown == true && $0.index == n }) else { return .failure(Refusal("no pane \(n)")) }
+        guard let repo = row.repo, let branch = row.branch else {
+            return .failure(Refusal("pane \(row.address) hasn't committed to a branch or started one"))
+        }
+        return .success(.review(repo: repo, branch: branch))
+    }
+
+    /// The record changed: the rows are stale until read again, which starts now.
+    func changed() {
+        stale = true
+        Task { await current() }
+    }
+
+    /// Returns once the rows hold every change the record has seen: waits out a read under way, and reads again while
+    /// a change landed during it.
+    func current() async {
+        while true {
+            if let reading {
+                await reading.value
+            } else if stale {
+                stale = false
+                let task = Task { await read() }
+                reading = task
+                await task.value
+            } else {
+                return
+            }
+        }
+    }
+
+    private func read() async {
+        defer { reading = nil }
+        let ask = ask
+        let (listing, hook) = await Task.detached { (ask(["--json"]), ask(["hooked"])) }.value
+        guard case .success(let said) = listing, let rows = try? JSONDecoder().decode([Row].self, from: Data(said.utf8)) else {
+            hooked = false
+            return
+        }
+        take(rows)
+        if case .success = hook { hooked = true } else { hooked = false }
+    }
 
     /// Ctrl-Space in tmux has already brought canopy forward: now go to the branch the pane it was pressed in is
     /// working on, and have that pane remembered for the way back. A pane with none says why and stays here.
@@ -163,32 +231,23 @@ final class PaneBranches {
         written = want
     }
 
-    /// When the record last changed: asking again is only worth it then, or once panes may have moved.
-    nonisolated static func stamp() -> Date? {
-        let dir = URL(fileURLWithPath: record)
-        let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
-        return files.compactMap { try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate }.max()
-    }
+    /// Which of the record's files say something about panes: a branch move, or tmux's layout touch.
+    nonisolated static func tells(_ name: String) -> Bool { name == "layout" || (name.hasPrefix("moves-") && name.hasSuffix(".tsv")) }
 
+    /// Reads the rows whenever the record changes; every 30s too, for a tmux not yet telling it of layout changes.
     func start() {
         guard task == nil else { return }
+        try? FileManager.default.createDirectory(atPath: Self.record, withIntermediateDirectories: true)
+        watch = RecordWatch(dir: Self.record, wanted: Self.tells) { [weak self] in self?.changed() }
         task = Task { @MainActor [weak self] in
-            var seen: Date?, asked = Date.distantPast
             while !Task.isCancelled, let self {
-                let stamp = Self.stamp()
-                if stamp != seen || Date().timeIntervalSince(asked) > 30 {
-                    seen = stamp
-                    asked = Date()
-                    let ask = self.ask
-                    if case .success(let said) = await Task.detached(operation: { ask(["--json"]) }).value,
-                       let rows = try? JSONDecoder().decode([Row].self, from: Data(said.utf8)) {
-                        self.take(rows)
-                    }
-                    if case .success(let said) = await Task.detached(operation: { ask(["host"]) }).value {
-                        self.host = Self.host(said)
-                    }
+                self.stale = true
+                await self.current()
+                let ask = self.ask
+                if case .success(let said) = await Task.detached(operation: { ask(["host"]) }).value {
+                    self.host = Self.host(said)
                 }
-                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                try? await Task.sleep(nanoseconds: 30_000_000_000)
             }
         }
     }
@@ -209,5 +268,41 @@ final class PaneBranches {
                                               PaneBranches.of(app).open(n, app)
                                           }))
         }
+    }
+}
+
+/// Calls `changed` on the main thread soon after a file in `dir` whose name `wanted` passes is written (FSEvents).
+@MainActor
+final class RecordWatch {
+    private var stream: FSEventStreamRef?
+    private let wanted: (String) -> Bool
+    private let changed: () -> Void
+
+    init?(dir: String, wanted: @escaping (String) -> Bool, changed: @escaping () -> Void) {
+        self.wanted = wanted
+        self.changed = changed
+        var context = FSEventStreamContext(version: 0, info: Unmanaged.passUnretained(self).toOpaque(), retain: nil, release: nil, copyDescription: nil)
+        let callback: FSEventStreamCallback = { _, info, _, paths, _, _ in
+            guard let info else { return }
+            let names = (Unmanaged<CFArray>.fromOpaque(paths).takeUnretainedValue() as? [String] ?? []).map { ($0 as NSString).lastPathComponent }
+            MainActor.assumeIsolated {
+                let me = Unmanaged<RecordWatch>.fromOpaque(info).takeUnretainedValue()
+                if names.contains(where: me.wanted) { me.changed() }
+            }
+        }
+        let flags = FSEventStreamCreateFlags(kFSEventStreamCreateFlagFileEvents | kFSEventStreamCreateFlagNoDefer | kFSEventStreamCreateFlagUseCFTypes)
+        guard let made = FSEventStreamCreate(nil, callback, &context, [dir] as CFArray, FSEventStreamEventId(kFSEventStreamEventIdSinceNow), 0.03, flags) else {
+            return nil
+        }
+        stream = made
+        FSEventStreamSetDispatchQueue(made, .main)
+        FSEventStreamStart(made)
+    }
+
+    deinit {
+        guard let stream else { return }
+        FSEventStreamStop(stream)
+        FSEventStreamInvalidate(stream)
+        FSEventStreamRelease(stream)
     }
 }

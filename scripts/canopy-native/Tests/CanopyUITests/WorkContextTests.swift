@@ -438,6 +438,51 @@ import Testing
         #expect(PaneBranches.route("r\tfeat/x\n") == .review(repo: "r", branch: "feat/x") && PaneBranches.route("") == nil)
     }
 
+    /// While tmux tells the record of every layout change, ⌃a n answers from the rows, read again after any change
+    /// before it answers; a tmux that doesn't tell it gets the question asked at the press.
+    @Test func aTmuxPanesDigitAnswersFromTheRowsWhileTmuxKeepsThemCurrent() async throws {
+        let app = world(.todo)
+        let panes = PaneBranches.of(app)
+        nonisolated(unsafe) var asked: [[String]] = []
+        nonisolated(unsafe) var listing = """
+            [{"pane": "%1", "address": "3:1", "index": 1, "shown": true, "repo": "r", "branch": "a"},
+             {"pane": "%2", "address": "3:2", "index": 2, "shown": true, "repo": null, "branch": null},
+             {"pane": "%9", "address": "agents 1:1", "index": 1, "shown": false, "repo": "r", "branch": "other"}]
+            """
+        nonisolated(unsafe) var hooked = true
+        panes.tmux = { _ in }
+        panes.ask = { args in
+            asked.append(args)
+            switch args {
+            case ["--json"]: return .success(listing)
+            case ["hooked"]: return hooked ? .success("") : .failure(Refusal("not hooked"))
+            default: return .success("r\tasked\n")
+            }
+        }
+        await panes.current()
+        #expect(panes.hooked)
+        asked = []
+        await panes.open(1, app).value
+        #expect(app.router.route == .review(repo: "r", branch: "a") && asked == [], "the shown window's pane 1, from the rows")
+        await panes.open(2, app).value
+        #expect(app.runner.note == "pane 3:2 hasn't committed to a branch or started one")
+        await panes.open(7, app).value
+        #expect(app.runner.note == "no pane 7")
+
+        listing = listing.replacingOccurrences(of: "\"branch\": \"a\"", with: "\"branch\": \"b\"")
+        panes.changed()
+        await panes.open(1, app).value
+        #expect(app.router.route == .review(repo: "r", branch: "b") && asked == [["--json"], ["hooked"]], "a change is read before the key answers")
+
+        hooked = false
+        panes.changed()
+        await panes.current()
+        asked = []
+        await panes.open(1, app).value
+        #expect(app.router.route == .review(repo: "r", branch: "asked") && asked == [["1"]], "without tmux's layout touch, asked at the press")
+        #expect(PaneBranches.tells("layout") && PaneBranches.tells("moves-4242.tsv") && !PaneBranches.tells("ancestry.tsv") && !PaneBranches.tells("last-pane"))
+    }
+
     /// ⌃space goes to tmux on the pane for what's in front: the chat's pane first, then the branch by name.
     @Test func theWayToTmuxNamesWhatIsInFront() async throws {
         let now = world().forestModel.now.timeIntervalSince1970
