@@ -17,7 +17,9 @@ Rendered: answers.txt when it exists (--plan forces the plan), as an Inbox messa
 typed under it goes back to that session. The answers view compares each branch's own change (its diff from its parent,
 file by file) with what was on screen in the review, so it can say what changed, what changed with nobody asking, and
 what's the same as what Phil already read. Earlier folders add their notes (a review picked up where one left off).
-The answers view also writes since.json beside it for canopy: per branch its kind (same, asked, unasked, new, gone),
+Lines under `# for phil` shaped `<branch> <file[:line] | -> | <look|decide|act> | <one sentence>` become stack-attention
+items on the forest's canopy page, with every partly/declined/won't/ask answer as a decide item at its note's place;
+the session's earlier items for the forest are replaced. The answers view also writes since.json beside it for canopy: per branch its kind (same, asked, unasked, new, gone),
 the tip it was computed against (a branch whose tip has moved since is stale, not same), the files that moved, and
 each note with its answers.
 """
@@ -111,6 +113,29 @@ def render_note(note, answers, lines):
     for a in mine:
         commits = f" · {short_commits(a['commits'])}" if a["commits"] else ""
         lines.append(f"  - **{a['id']} {a['state']}**{commits} — {a['text']}")
+
+
+def item_line(line):
+    """A '# for phil' line shaped as an attention item: (branch, place, ask, sentence), else None (plain prose)."""
+    fields = [f.strip() for f in line.split("|")]
+    if len(fields) != 3 or fields[1] not in ("look", "decide", "act"):
+        return None
+    where = fields[0].split()
+    return (where[0], where[1] if len(where) > 1 else "-", fields[1], fields[2]) if where else None
+
+
+def pin(repo, forest, items):
+    """Replaces this session's open items on the forest with `items`, through stack-attention (which refuses what isn't
+    pithy and keeps at most five); returns what it said for each one it refused."""
+    tool = os.environ.get("SHOW_STACK_ATTENTION", str(SCRIPTS / "stack-attention"))
+    env = dict(os.environ, STACK_ATTENTION_REPO=repo)
+    subprocess.run([tool, "clear", forest, "--mine"], env=env, capture_output=True, text=True)
+    refused = []
+    for branch, place, ask, text in items:
+        result = subprocess.run([tool, "add", branch, place, ask, text], env=env, capture_output=True, text=True)
+        if result.returncode != 0:
+            refused.append(f"{branch}: {result.stderr.strip()}")
+    return refused
 
 
 def main():
@@ -247,7 +272,10 @@ def main():
         def names(kind):
             return ", ".join(link(b) for b in order(members, parents_now) if kinds.get(b) == kind)
         lines.append("## Needs your eyes")
-        lines.extend(f"- {line}" for line in (summary or eyes)) if (summary or eyes) else lines.append("- Nothing.")
+        prose = [l for l in summary if not item_line(l)]
+        pinned = [item_line(l) for l in summary if item_line(l)]
+        shown = prose + [f"**{link(b)}** ({ask}): {text}" for b, _, ask, text in pinned]
+        lines.extend(f"- {line}" for line in (shown or eyes)) if (shown or eyes) else lines.append("- Nothing.")
         if names("asked"):
             lines.append(f"\n**Done as you asked:** {names('asked')}. Each one's moved files are in the details.")
         if names("same"):
@@ -270,6 +298,14 @@ def main():
     if not plan_mode:
         (folder / "since.json").write_text(json.dumps({"forest": forest, "review": str(folder), "summary": summary or eyes,
                                                        "branches": record}, indent=1))
+        items = list(pinned)
+        for branch, entry in record.items():
+            for a in entry.get("needsEyes", []):
+                note = next((n for n in entry["notes"] if any(x["id"] == a["id"] for x in n["answers"])), {})
+                place = f"{note['file']}:{note['line']}" if note.get("file") and note.get("line") else note.get("file") or "-"
+                items.append((branch, place, "decide", shorten(f"{a['state']}: {a['text']}", 155)))
+        for refusal in pin(repo, forest, items):
+            print(f"show-review-reply: not pinned, {refusal}", file=sys.stderr)
     subprocess.run([os.environ.get("SHOW_NOTE", str(SCRIPTS / "show-note")), heading, body], check=False)
 
 

@@ -1,0 +1,155 @@
+#!/usr/bin/env python3
+"""stack-attention — the few specific things on a forest that need Phil, each one standing alone.
+
+  stack-attention add <branch> <file[:line] | -> <look|decide|act> "<one sentence>"
+  stack-attention ls [<forest>] [--json]
+  stack-attention done <id> [--by phil]
+  stack-attention clear <forest> --mine
+
+An item is one place (a branch, and a file and line on it), what's wanted from Phil there, and one sentence of context
+he can read cold hours later. canopy shows a forest's open items on its page; Phil signs one off there and it goes.
+An item remembers the branch's tip when written: once the tip moves it is stale (canopy says so) until rewritten.
+Pithy is enforced: a sentence over 160 characters, or a sixth open item on a forest, is refused.
+Who wrote an item is the writer's identity (its Claude session id, else its tmux pane), never a label. Phil's sign-off
+(`done --by phil`) is refused from inside an agent session: only canopy's keypress writes it. An agent may `done` only
+an item it wrote (a retraction, recorded under its own identity).
+
+Store: $GIT_COMMON_DIR/stack-attention.json, {"version": 1, "items": [{id, forest, branch, file, line, ask, text, tip,
+by, at, done}]}, written under a lock on stack-attention.lock. Run inside the repo (or set STACK_ATTENTION_REPO).
+"""
+import fcntl
+import json
+import os
+import secrets
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+ASKS = ("look", "decide", "act")
+LONGEST = 160
+MOST = 5
+
+
+def git(*args):
+    repo = os.environ.get("STACK_ATTENTION_REPO", ".")
+    return subprocess.run(["git", "-C", repo, *args], capture_output=True, text=True).stdout.strip()
+
+
+def store():
+    common = git("rev-parse", "--path-format=absolute", "--git-common-dir")
+    if not common:
+        sys.exit("stack-attention: not in a git repo")
+    return Path(common) / "stack-attention.json"
+
+
+def load(path):
+    return json.loads(path.read_text()) if path.exists() else {"version": 1, "items": []}
+
+
+def save(path, data):
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, indent=1))
+    os.replace(tmp, path)
+
+
+def tip(branch):
+    return git("rev-parse", "--verify", "-q", f"refs/heads/{branch}") or None
+
+
+def fresh(item):
+    return "stale" if tip(item["branch"]) != item["tip"] else "fresh"
+
+
+def me():
+    """The writer's identity: its Claude session, else its tmux pane; None outside both (canopy, Phil's own shell)."""
+    return os.environ.get("CLAUDE_CODE_SESSION_ID", "")[:8] or os.environ.get("TMUX_PANE") or None
+
+
+def in_agent():
+    return bool(os.environ.get("CLAUDE_CODE_SESSION_ID") or os.environ.get("CLAUDECODE")
+                or any(k.startswith("CODEX_") for k in os.environ))
+
+
+def refuse(message):
+    print(f"stack-attention: {message}", file=sys.stderr)
+    sys.exit(2)
+
+
+def main():
+    args = sys.argv[1:]
+    if not args or args[0] in ("-h", "--help"):
+        sys.exit(__doc__.strip())
+    command, rest = args[0], args[1:]
+    path = store()
+    with open(path.with_suffix(".lock"), "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        data = load(path)
+        items = data["items"]
+        if command == "add":
+            if len(rest) != 4:
+                refuse('add <branch> <file[:line] | -> <look|decide|act> "<one sentence>"')
+            branch, place, ask, text = rest
+            text = " ".join(text.split())
+            forest = git("config", "--get", f"branch.{branch}.stack-project")
+            if not tip(branch):
+                refuse(f"no branch {branch}")
+            if not forest:
+                refuse(f"{branch} isn't in a forest (no branch.{branch}.stack-project)")
+            if ask not in ASKS:
+                refuse(f"ask is one of {', '.join(ASKS)}, not {ask}")
+            if not me():
+                refuse("add runs from a Claude session or a tmux pane, so the item says who wrote it")
+            if not text or len(text) > LONGEST:
+                refuse(f"one sentence of at most {LONGEST} characters ({len(text)} given): say what and why, the link carries where")
+            if sum(1 for i in items if i["forest"] == forest and not i["done"]) >= MOST:
+                refuse(f"{forest} already has {MOST} open items: Phil reads a short list, so clear or merge before adding")
+            file, line = None, None
+            if place != "-":
+                head, _, tail = place.rpartition(":")
+                file, line = (head, tail) if head and tail.isdigit() else (place, None)
+            item = {"id": "a-" + secrets.token_hex(3), "forest": forest, "branch": branch, "file": file,
+                    "line": int(line) if line else None, "ask": ask, "text": text, "tip": tip(branch),
+                    "by": me(),
+                    "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "done": None}
+            items.append(item)
+            save(path, data)
+            print(item["id"])
+        elif command == "ls":
+            forest = next((a for a in rest if not a.startswith("--")), None)
+            open_items = [dict(i, state=fresh(i)) for i in items if not i["done"] and (forest is None or i["forest"] == forest)]
+            if "--json" in rest:
+                print(json.dumps(open_items, indent=1))
+            for i in open_items if "--json" not in rest else []:
+                where = f"{i['branch']}" + (f" {i['file']}" if i["file"] else "") + (f":{i['line']}" if i["line"] else "")
+                print(f"{i['id']}  {i['ask']:<6} {i['state']:<5}  {where} — {i['text']}")
+        elif command == "done":
+            if not rest:
+                refuse("done <id> [--by phil]")
+            phil = "--by" in rest and rest[rest.index("--by") + 1:rest.index("--by") + 2] == ["phil"]
+            match = [i for i in items if i["id"] == rest[0]]
+            if not match:
+                refuse(f"no item {rest[0]}")
+            if phil and in_agent():
+                refuse("only Phil signs an item off (canopy's key); an agent can retract only what it wrote: done <id>")
+            if not phil and (in_agent() or me()) and match[0]["by"] != me():
+                refuse(f"{rest[0]} was written by {match[0]['by']}; only it can retract it, and only Phil can sign it off")
+            if not phil and not me():
+                refuse("done without --by phil is a writer's retraction, so it runs from the session that wrote the item")
+            match[0]["done"] = {"at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "by": "phil" if phil else me()}
+            save(path, data)
+        elif command == "clear":
+            if not rest or "--mine" not in rest:
+                refuse("clear <forest> --mine (a session clears only the open items it wrote)")
+            mine = me()
+            if not mine:
+                refuse("clear --mine runs from a Claude session or a tmux pane")
+            forest = rest[0]
+            data["items"] = [i for i in items if not (i["forest"] == forest and not i["done"] and i["by"] == mine)]
+            save(path, data)
+        else:
+            refuse(f"unknown command {command}")
+
+
+if __name__ == "__main__":
+    main()

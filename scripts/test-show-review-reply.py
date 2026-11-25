@@ -75,7 +75,7 @@ def main():
         note = tmp / "show-note"
         note.write_text(f"#!/bin/sh\nprintf '%s\\n%s' \"$1\" \"$2\" > {sent}\n")
         note.chmod(0o755)
-        env = dict(os.environ, SHOW_NOTE=str(note))
+        env = dict(os.environ, SHOW_NOTE=str(note), CLAUDE_CODE_SESSION_ID="cccccccc-3")
 
         (folder / "plan.txt").write_text("# structure\nowners | fixed | new | split out of fixed (n2)\n"
                                          "# notes\nn1 | no ask | - | heard: fine as is\nn2a | will do | - | heard: rename → call it fixed-name\n")
@@ -119,6 +119,20 @@ def main():
               and data["fixed"]["tipNow"] == git("rev-parse", "fixed") and data["fixed"]["changed"] == ["fixed.txt"], data)
         check("since.json carries each note with its answers", [a["id"] for a in data["fixed"]["notes"][0]["answers"]] == ["n2a", "n2b"]
               and [a["id"] for a in data["fixed"]["needsEyes"]] == ["n2b"], data["fixed"])
+        with open(folder / "answers.txt", "a") as f:
+            f.write("fixed fixed.txt:1 | look | The rename landed; check the new name reads right.\n")
+        subprocess.run([str(SCRIPT), str(folder)], env=env, check=True)
+        listed = json.loads(subprocess.run([str(SCRIPT.parent / "stack-attention"), "ls", "f", "--json"], capture_output=True, text=True,
+                                           env=dict(env, STACK_ATTENTION_REPO=str(repo))).stdout)
+        check("a '# for phil' item line and the declined answer become canopy items at their places",
+              sorted((i["branch"], i["file"], i["line"], i["ask"], i["text"][:20]) for i in listed)
+              == [("fixed", "fixed.txt", 1, "decide", "declined: one file i"), ("fixed", "fixed.txt", 1, "look", "The rename landed; c")], listed)
+        subprocess.run([str(SCRIPT), str(folder)], env=env, check=True)
+        again = json.loads(subprocess.run([str(SCRIPT.parent / "stack-attention"), "ls", "f", "--json"], capture_output=True, text=True,
+                                          env=dict(env, STACK_ATTENTION_REPO=str(repo))).stdout)
+        check("rendering again replaces the session's items rather than piling up", len(again) == 2, again)
+        check("the item line reads as a linked sentence on the page", "**[fixed](canopy://v2/b/loops/fixed)** (look): The rename landed" in
+              (folder / "since.md").read_text())
         check("--plan still shows the plan once answers exist",
               subprocess.run([str(SCRIPT), "--plan", str(folder)], env=env).returncode == 0 and sent.read_text().startswith("Plan for your review"))
 
