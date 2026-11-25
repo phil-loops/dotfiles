@@ -9,7 +9,7 @@ The app itself is untouched: no proxy, no rewriting inside pages. Once you're on
 
 ## The two pieces
 
-| | Chrome extension (`chrome/loops-tailnet/`) | Clipboard watcher (`scripts/tailnet-link-clip`) |
+| | Chrome extension (`extension/`) | Clipboard watcher (`bin/tailnet-link-clip`, `tailnet-link-clip.swift`) |
 |---|---|---|
 | Acts when | a top-level `app.loops.so` page loads | the clipboard changes |
 | Rule | `https://app.loops.so/<path>` → `https://admin.your-tailnet.ts.net/<path>` | a copy that is exactly one `https://admin.your-tailnet.ts.net/<path>` URL → `https://app.loops.so/<path>` |
@@ -29,10 +29,10 @@ Why two pieces: Chrome lets an extension redirect page loads, but not change wha
 
 Requires Tailscale on the Loops tailnet and a staff login on the admin host.
 
-1. **Extension**: `chrome://extensions` → Developer mode → Load unpacked → this folder. Open any `app.loops.so` link to check it lands on `admin.your-tailnet.ts.net`; log in there once.
+1. **Extension**: `chrome://extensions` → Developer mode → Load unpacked → `extension/`. Open any `app.loops.so` link to check it lands on `admin.your-tailnet.ts.net`; log in there once.
 2. **Watcher** (needs Xcode command line tools for `swiftc`):
    ```bash
-   scripts/tailnet-link-clip "https://admin.your-tailnet.ts.net/campaigns/x"   # builds, prints https://app.loops.so/campaigns/x
+   tools/tailnet-links/bin/tailnet-link-clip "https://admin.your-tailnet.ts.net/campaigns/x"   # builds, prints https://app.loops.so/campaigns/x
    ```
    Then copy `launchd/com.philbrockman.tailnet-link-clip.plist` into `~/Library/LaunchAgents/` — edit the label and the `/Users/philbrockman/...` paths to yours first; launchd doesn't expand `~` — and run:
    ```bash

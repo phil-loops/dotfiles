@@ -3,7 +3,7 @@
 # Copy the same link again within 2s to keep the tailnet form. `tailnet-link-clip <text>` prints one rewrite.
 # Launchd keeps it alive; a failed build or a crash posts to Show's Inbox once a day.
 set -uo pipefail
-src=${0:A:h}/tailnet-link-clip.swift
+src=${0:A:h:h}/tailnet-link-clip.swift
 dir=$HOME/.cache/tailnet-link-clip
 bin=$dir/tailnet-link-clip
 mkdir -p $dir

@@ -4,7 +4,7 @@
 <dict>
   <key>Label</key><string>com.philbrockman.tailnet-link-clip</string>
   <key>ProgramArguments</key>
-  <array><string>/Users/philbrockman/.dotfiles/scripts/tailnet-link-clip</string></array>
+  <array><string>/Users/philbrockman/.dotfiles/tools/tailnet-links/bin/tailnet-link-clip</string></array>
   <key>EnvironmentVariables</key>
   <dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string></dict>
   <key>KeepAlive</key><true/>
