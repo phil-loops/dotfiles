@@ -130,18 +130,57 @@ func stepState(_ frames: [StepFrame], through count: Int) -> [String: String] {
     return state
 }
 
-/// A staged tutor reply: sections opened by a line `@name`, in the order the tutor wrote them.
-func tutorSections(_ text: String) -> [(name: String, body: String)] {
-    var out: [(name: String, body: String)] = []
+/// The section names a staged reply may use. A line `@name` (or `@name <argument>`) opens one only when the name is
+/// one of these, so an `@` inside prose stays prose.
+let tutorSectionNames: Set<String> = [
+    "title", "map", "stage", "concept", "topic", "note", "consolidate", "plan", "evidence",
+    "prediction", "explanation", "misconception", "contrast",
+    "step", "fix", "setup", "frame", "predict", "reveal", "result", "explain", "source",
+    "draft", "idea", "stations", "take",
+]
+
+/// One section of a staged reply: its name, what followed the name on its line, and the lines under it.
+struct TutorSection {
+    let name: String
+    let argument: String
+    var body: String
+}
+
+/// A staged tutor reply: sections opened by a line `@name [argument]`, in the order the tutor wrote them.
+func tutorSections(_ text: String) -> [TutorSection] {
+    var out: [TutorSection] = []
     for line in text.components(separatedBy: "\n") {
         let bare = line.trimmingCharacters(in: .whitespaces)
-        if bare.hasPrefix("@"), bare.dropFirst().allSatisfy({ $0.isLetter }), bare.count > 1 {
-            out.append((String(bare.dropFirst()), ""))
-        } else if !out.isEmpty {
-            out[out.count - 1].body += (out[out.count - 1].body.isEmpty ? "" : "\n") + line
+        if bare.hasPrefix("@") {
+            let head = bare.dropFirst().prefix { $0.isLetter }
+            let rest = bare.dropFirst(1 + head.count)
+            if tutorSectionNames.contains(String(head)), rest.isEmpty || rest.first == " " {
+                out.append(TutorSection(name: String(head), argument: rest.trimmingCharacters(in: .whitespaces), body: ""))
+                continue
+            }
+        }
+        if !out.isEmpty { out[out.count - 1].body += (out[out.count - 1].body.isEmpty ? "" : "\n") + line }
+    }
+    return out.map { TutorSection(name: $0.name, argument: $0.argument, body: $0.body.trimmingCharacters(in: .whitespacesAndNewlines)) }
+}
+
+/// A timeline line `<time> | <event> | key=value; key=value` (the state part is optional).
+func frameLine(_ line: String) -> [String: Any]? {
+    var parts = line.components(separatedBy: " | ").map { $0.trimmingCharacters(in: .whitespaces) }
+    guard parts.count >= 2, !parts[0].isEmpty else { return nil }
+    var state: [String: String] = [:]
+    var keys: [String] = []
+    if parts.count >= 3, parts.last!.contains("=") {
+        for pair in parts.removeLast().components(separatedBy: ";") {
+            guard let eq = pair.firstIndex(of: "=") else { continue }
+            let key = pair[..<eq].trimmingCharacters(in: .whitespaces)
+            if !key.isEmpty, state[key] == nil { keys.append(key) }
+            if !key.isEmpty { state[key] = pair[pair.index(after: eq)...].trimmingCharacters(in: .whitespaces) }
         }
     }
-    return out.map { ($0.name, $0.body.trimmingCharacters(in: .whitespacesAndNewlines)) }
+    let event = parts.dropFirst().joined(separator: " | ")
+    guard !event.isEmpty else { return nil }
+    return ["t": parts[0], "event": event, "state": state, "keys": keys]
 }
 
 /// What Show did with a staged reply: the evidence rows to record and the steps it posted, or why it refused the
@@ -150,7 +189,7 @@ struct StagedApply {
     var evidence: [String] = []
     var refused: [String] = []
     var posted: [String] = []
-    /// The opening's topic map, for `learn map`, or the id of a topic the graph already has.
+    /// The opening's topic map, as `learn map` reads it, or the id of a topic the graph already has.
     var map: String?
     var topic: String?
     /// A step was consolidated: once its evidence is recorded, the session owes its next step.
@@ -173,9 +212,17 @@ func stamp(_ step: inout [String: Any], with assignment: [String: Any]) {
     if let via = assignment["via"] as? String, !via.isEmpty { step["via"] = via }
 }
 
-/// Writes a staged reply into the session file — Show is its only writer. `stepID` is the step the message was about.
+func newStepID(_ steps: [[String: Any]]) -> String {
+    let taken = Set(steps.compactMap { $0["id"] as? String })
+    var n = steps.count + 1
+    while taken.contains("s\(n)") { n += 1 }
+    return "s\(n)"
+}
+
+/// Writes a staged reply into the session file — Show is its only writer. `stepID` is the step the message was about;
+/// `branches` is what `learn next` assigns after that step if it holds ("hit") and if it misses ("miss"), for its drafts.
 /// Every new or fixed step is checked first; a refusal writes nothing.
-func applyStagedReply(_ text: String, path: String, stepID: String?, now: String) throws -> StagedApply {
+func applyStagedReply(_ text: String, path: String, stepID: String?, now: String, branches: [String: [String: Any]] = [:]) throws -> StagedApply {
     var result = StagedApply()
     let sections = tutorSections(text)
     guard !sections.isEmpty else {
@@ -185,6 +232,8 @@ func applyStagedReply(_ text: String, path: String, stepID: String?, now: String
     var raw = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: path))) as? [String: Any] ?? [:]
     var steps = raw["steps"] as? [[String: Any]] ?? []
     var notes = raw["notes"] as? [[String: Any]] ?? []
+    let open = stepID.flatMap { id in steps.firstIndex { $0["id"] as? String == id } }
+
     func checked(_ object: [String: Any]) {
         do {
             let typed = try JSONDecoder().decode(TutorStep.self, from: JSONSerialization.data(withJSONObject: object))
@@ -194,125 +243,254 @@ func applyStagedReply(_ text: String, path: String, stepID: String?, now: String
             result.refused.append("a step didn't match the schema: \(error)")
         }
     }
-    func step(_ body: String, stampedWith assignment: [String: Any]? = nil) -> [String: Any]? {
-        let parsed = Result { try JSONSerialization.jsonObject(with: Data(body.utf8)) }
-        guard case .success(let value) = parsed, var object = value as? [String: Any] else {
-            let why = (try? parsed.get()) == nil ? parsed.failureReason : "it's not an object"
-            result.refused.append("a @step or @fix wasn't one JSON object (\(why))")
-            return nil
+
+    // ── the walk: steps, drafts and the map are built from their sections
+    enum Owner { case owed, fix(String), draft(Int) }
+    var building: (owner: Owner, fields: [String: Any], frames: [[String: Any]], reveal: [[String: Any]])?
+    var drafts: [[String: Any]] = []
+    var draftOpen: Int?
+    var verdicts: [String: String] = [:]
+    var mapTopic: [String: Any]?
+    var stages: [[String: Any]] = []
+    var told: [[String: Any]] = []
+
+    func finishStep() {
+        guard let b = building else { return }
+        building = nil
+        var step = b.fields
+        var watch: [String] = []
+        // the panel lists keys in the order the frames first set them
+        for frame in b.frames + b.reveal {
+            for key in frame["keys"] as? [String] ?? [] where !watch.contains(key) { watch.append(key) }
         }
-        if let assignment { stamp(&object, with: assignment) }
-        checked(object)
-        return object
-    }
-    func post(_ object: [String: Any]) {
-        if steps.contains(where: { $0["id"] as? String == object["id"] as? String }) {
-            result.refused.append("step \(object["id"] ?? "?") already exists; a new step needs a new id")
+        let bare = { (frames: [[String: Any]]) in frames.map { $0.filter { $0.key != "keys" } } }
+        step["watch"] = watch
+        step["frames"] = bare(b.frames)
+        let result_ = (step.removeValue(forKey: "result") as? String) ?? ""
+        let source = step.removeValue(forKey: "source") as? String
+        if !b.reveal.isEmpty || !result_.isEmpty {
+            var reveal: [String: Any] = ["frames": bare(b.reveal), "result": result_]
+            if let source, !source.isEmpty { reveal["source"] = source }
+            step["reveal"] = reveal
         }
-        steps.append(object)
-        if let id = object["id"] as? String { result.posted.append(id) }
+        switch b.owner {
+        case .owed:
+            guard let assigned = raw["assigned"] as? [String: Any], let form = assigned["form"] as? String, !showWrittenForms.contains(form) else {
+                result.refused.append("no step is owed now; Show asks for one when the session is due its next")
+                return
+            }
+            step["id"] = newStepID(steps)
+            stamp(&step, with: assigned)
+            checked(step)
+            raw["assigned"] = nil
+            steps.append(step)
+            result.posted.append(step["id"] as! String)
+        case .fix(let id):
+            guard let i = steps.firstIndex(where: { $0["id"] as? String == id }) else {
+                result.refused.append("@fix \(id) names no step")
+                return
+            }
+            for key in ["id", "concept", "conceptName", "level", "form", "via", "drafts"] { step[key] = steps[i][key] }
+            checked(step)
+            steps[i] = step
+        case .draft(let i):
+            drafts[i]["next"] = step
+        }
     }
-    for (name, body) in sections {
-        switch name {
+
+    func stepField(_ section: TutorSection) {
+        guard building != nil else {
+            result.refused.append("@\(section.name) came outside a @step")
+            return
+        }
+        switch section.name {
+        case "frame", "reveal":
+            let lines = ([section.argument] + section.body.components(separatedBy: "\n")).filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+            for line in lines {
+                guard let frame = frameLine(line) else {
+                    result.refused.append("a @\(section.name) line isn't `<time> | <event> | key=value; …`: \(line)")
+                    continue
+                }
+                if section.name == "frame" { building!.frames.append(frame) } else { building!.reveal.append(frame) }
+            }
+        case "source":
+            building!.fields["source"] = section.argument.isEmpty ? section.body : section.argument
+        default:
+            building!.fields[section.name] = [section.argument, section.body].filter { !$0.isEmpty }.joined(separator: "\n")
+        }
+    }
+
+    for section in sections {
+        switch section.name {
+        case "setup", "frame", "predict", "reveal", "result", "explain", "source":
+            stepField(section)
+            continue
+        case "step":
+            finishStep()
+            building = (draftOpen.map { .draft($0) } ?? .owed, ["title": section.argument, "consolidate": NSNull()], [], [])
+            continue
+        case "fix":
+            finishStep()
+            draftOpen = nil
+            let words = section.argument.split(separator: " ", maxSplits: 1).map(String.init)
+            building = (.fix(words.first ?? ""), ["title": words.count > 1 ? words[1] : "", "consolidate": NSNull()], [], [])
+            continue
+        case "draft":
+            finishStep()
+            guard section.argument == "held" || section.argument == "missed" else {
+                result.refused.append("@draft takes held or missed, not \(section.argument.isEmpty ? "nothing" : section.argument)")
+                continue
+            }
+            draftOpen = drafts.count
+            drafts.append(["id": "a\(drafts.count + 1)", "held": section.argument == "held", "answer": section.body])
+            continue
+        case "idea" where draftOpen != nil, "misconception" where draftOpen != nil:
+            finishStep()
+            drafts[draftOpen!][section.name] = [section.argument, section.body].filter { !$0.isEmpty }.joined(separator: "\n")
+            continue
+        default:
+            finishStep()
+            draftOpen = nil
+        }
+        let text = [section.argument, section.body].filter { !$0.isEmpty }.joined(separator: "\n")
+        switch section.name {
         case "note":
-            if !body.isEmpty { notes.append(["at": now, "text": body]) }
+            if !text.isEmpty { notes.append(["at": now, "text": text]) }
         case "consolidate":
-            guard let stepID, let i = steps.firstIndex(where: { $0["id"] as? String == stepID }) else {
+            guard let open else {
                 result.refused.append("@consolidate came for no open step")
                 continue
             }
-            steps[i]["consolidate"] = body
+            steps[open]["consolidate"] = text
             result.finished = true
-        case "step":
-            guard let assigned = raw["assigned"] as? [String: Any], let form = assigned["form"] as? String, !showWrittenForms.contains(form) else {
-                result.refused.append("no step is owed now; Show asks for one when the session is due its next")
+        case "prediction", "explanation":
+            guard section.argument == "held" || section.argument == "revised" else {
+                result.refused.append("@\(section.name) takes held or revised")
                 continue
             }
-            guard var object = step(body, stampedWith: assigned) else { continue }
-            stamp(&object, with: assigned)
-            raw["assigned"] = nil
-            post(object)
-        case "drafts":
-            guard let stepID, let i = steps.firstIndex(where: { $0["id"] as? String == stepID }) else {
-                result.refused.append("@drafts came for no open step")
-                continue
-            }
-            guard let data = body.data(using: .utf8), let list = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]], !list.isEmpty else {
-                result.refused.append("@drafts wasn't a JSON list of drafts")
-                continue
-            }
-            // each draft's next step is the one `learn next` will assign if the answer lands that way
-            let branches = steps[i]["branches"] as? [String: [String: Any]] ?? [:]
-            let shared = sameAssignment(branches["hit"], branches["miss"])
-            var stamped: [[String: Any]] = []
-            for var draft in list {
-                guard draft["id"] is String, draft["answer"] is String, draft["idea"] is String, let held = draft["held"] as? Bool else {
-                    result.refused.append("each draft has id, answer, held and idea")
-                    continue
-                }
-                let branch = branches[held ? "hit" : "miss"]
-                if shared, draft["next"] is NSNull || draft["next"] == nil {
-                    draft["next"] = nil   // either outcome leads to the same step: one draft carries it
-                } else if let branch, let form = branch["form"] as? String, !showWrittenForms.contains(form) {
-                    guard var next = draft["next"] as? [String: Any] else {
-                        result.refused.append("draft \(draft["id"] ?? "?") needs a next step: the \(form) step for \(branch["concept"] ?? "?")")
-                        continue
-                    }
-                    stamp(&next, with: branch)
-                    checked(next)
-                    draft["next"] = next
-                } else {
-                    draft["next"] = nil
-                }
-                stamped.append(draft)
-            }
-            if shared, let form = branches["hit"]?["form"] as? String, !showWrittenForms.contains(form), !stamped.contains(where: { $0["next"] != nil }) {
-                result.refused.append("one draft needs the next step, which either outcome leads to: the \(form) step for \(branches["hit"]?["concept"] ?? "?")")
-            }
-            steps[i]["drafts"] = stamped
-        case "fix":
-            guard var object = step(body) else { continue }
-            guard let i = steps.firstIndex(where: { $0["id"] as? String == object["id"] as? String }) else {
-                result.refused.append("@fix names no existing step")
-                continue
-            }
-            for key in ["concept", "conceptName", "level", "form", "via", "branches"] { object[key] = steps[i][key] }
-            steps[i] = object
+            verdicts[section.name] = section.argument
+        case "misconception", "contrast":
+            verdicts[section.name] = text
         case "map":
-            guard let data = body.data(using: .utf8), (try? JSONSerialization.jsonObject(with: data)) is [String: Any] else {
-                result.refused.append("@map wasn't one JSON object")
+            let parts = section.argument.components(separatedBy: " | ")
+            mapTopic = ["id": parts[0], "title": parts.count > 1 ? parts[1] : parts[0], "source": parts.count > 2 ? parts[2] : ""]
+        case "stage":
+            stages.append(["name": text, "concepts": [[String: Any]]()])
+        case "concept":
+            let parts = section.argument.components(separatedBy: " | ").map { $0.trimmingCharacters(in: .whitespaces) }
+            guard !stages.isEmpty, parts.count >= 3 else {
+                result.refused.append("a @concept is `<id> | <name> | <statement> | needs <ids> | like <ids>`, under a @stage: \(section.argument)")
                 continue
             }
-            result.map = body
+            var concept: [String: Any] = ["id": parts[0], "name": parts[1], "statement": parts[2]]
+            for extra in parts.dropFirst(3) {
+                let ids = { (p: String) in extra.dropFirst(p.count).split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty } }
+                if extra.hasPrefix("needs ") { concept["builds_on"] = ids("needs ") }
+                if extra.hasPrefix("like ") { concept["analogs"] = ids("like ") }
+            }
+            var stage = stages.removeLast()
+            stage["concepts"] = (stage["concepts"] as! [[String: Any]]) + [concept]
+            stages.append(stage)
         case "topic":
-            result.topic = body.components(separatedBy: "\n")[0].trimmingCharacters(in: .whitespaces)
+            result.topic = text.components(separatedBy: "\n")[0].trimmingCharacters(in: .whitespaces)
         case "plan":
             continue
         case "stations", "take":
-            result.refused.append("@\(name) is Show's: it derives the stations and picks the next step from the learner's graph")
+            result.refused.append("@\(section.name) is Show's: it derives the stations and picks the next step from the learner's graph")
         case "title":
-            if !body.isEmpty { raw["title"] = body.components(separatedBy: "\n")[0] }
+            if !text.isEmpty { raw["title"] = text.components(separatedBy: "\n")[0] }
         case "evidence":
-            for line in body.components(separatedBy: "\n").map({ $0.trimmingCharacters(in: .whitespaces) }) where !line.isEmpty {
-                guard let data = line.data(using: .utf8), var row = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            for line in text.components(separatedBy: "\n").map({ $0.trimmingCharacters(in: .whitespaces) }) where !line.isEmpty {
+                guard let data = line.data(using: .utf8), let row = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
                     result.refused.append("an @evidence line wasn't one JSON object: \(line)")
                     continue
                 }
-                if let stepID, steps.first(where: { $0["id"] as? String == stepID })?["form"] as? String == "recall" { row["rung"] = "recall" }
-                guard let out = try? JSONSerialization.data(withJSONObject: row, options: [.sortedKeys, .withoutEscapingSlashes]) else { continue }
-                result.evidence.append(String(decoding: out, as: UTF8.self))
+                told.append(row)
             }
         default:
-            result.refused.append("unknown section @\(name)")
+            result.refused.append("@\(section.name) belongs inside a @step or a @draft")
         }
     }
-    if result.finished, let stepID, let open = steps.first(where: { $0["id"] as? String == stepID }),
-       let concept = open["concept"] as? String, !concept.isEmpty, let level = open["level"] as? String, !level.isEmpty {
-        let rows = result.evidence.compactMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any] }
-        if !rows.contains(where: { $0["concept"] as? String == concept && $0["level"] as? String == level }) {
-            result.refused.append("@evidence needs the step's own row: concept \(concept) at level \(level), a hit only if the prediction and the explanation both held")
+    finishStep()
+
+    // ── the map
+    if let mapTopic {
+        if stages.isEmpty || stages.contains(where: { ($0["concepts"] as? [[String: Any]])?.isEmpty != false }) {
+            result.refused.append("a @map needs @stage sections, each with its @concept lines")
+        } else if let data = try? JSONSerialization.data(withJSONObject: ["topic": mapTopic, "stages": stages], options: [.sortedKeys, .withoutEscapingSlashes]) {
+            result.map = String(decoding: data, as: UTF8.self)
         }
     }
+
+    // ── drafts: Show numbers them, and each carries the step its outcome is assigned
+    if !drafts.isEmpty {
+        if let open {
+            let shared = sameAssignment(branches["hit"], branches["miss"])
+            let sharedNext = shared ? drafts.compactMap({ $0["next"] as? [String: Any] }).first : nil
+            for i in drafts.indices {
+                guard drafts[i]["idea"] is String, !(drafts[i]["answer"] as? String ?? "").isEmpty else {
+                    result.refused.append("draft \(i + 1) needs its answer under @draft and an @idea")
+                    continue
+                }
+                let branch = branches[(drafts[i]["held"] as? Bool) == true ? "hit" : "miss"]
+                guard let branch, let form = branch["form"] as? String, !showWrittenForms.contains(form) else {
+                    drafts[i]["next"] = nil
+                    continue
+                }
+                guard var next = drafts[i]["next"] as? [String: Any] ?? sharedNext else {
+                    result.refused.append("draft \(i + 1) needs a @step after it: the \(form) step for \(branch["concept"] ?? "?")")
+                    continue
+                }
+                next["id"] = "next"
+                stamp(&next, with: branch)
+                checked(next)
+                drafts[i]["next"] = next
+            }
+            steps[open]["drafts"] = drafts
+        } else {
+            result.refused.append("@draft came for no open step")
+        }
+    }
+
+    // ── evidence: the step's own row is Show's, from the judge's reading of the prediction and the tutor's of the explanation
+    let rung = open.flatMap { steps[$0]["form"] as? String } == "recall" ? "recall" : nil
+    if let open, result.finished, let concept = steps[open]["concept"] as? String, !concept.isEmpty,
+       let level = steps[open]["level"] as? String, !level.isEmpty {
+        let answer = loadAnswers(path)[stepID!]
+        guard let prediction = answer?.verdict ?? verdicts["prediction"] else {
+            result.refused.append("there was no judge reading, so give @prediction held or revised too")
+            return result
+        }
+        guard let explanation = verdicts["explanation"] else {
+            result.refused.append("@explanation held or revised is needed: it decides the step's evidence row with the judge's reading")
+            return result
+        }
+        let hit = prediction == "held" && explanation == "held"
+        var row: [String: Any] = ["concept": concept, "level": level, "credit": "unaided", "outcome": hit ? "hit" : "miss"]
+        if let confidence = answer?.confidence { row["confidence"] = confidence }
+        if let via = steps[open]["via"] as? String { row["via"] = via }
+        if hit {
+            row["note"] = "held: " + String((answer?.parts["explain"] ?? "").prefix(160))
+        } else {
+            guard let misconception = verdicts["misconception"], let contrast = verdicts["contrast"] else {
+                result.refused.append("a miss needs @misconception (what they believe) and @contrast (the same situation with one thing changed)")
+                return result
+            }
+            row["note"] = misconception
+            row["contrast"] = contrast
+        }
+        if told.contains(where: { $0["concept"] as? String == concept && $0["level"] as? String == level }) {
+            result.refused.append("the step's own row (\(concept) at \(level)) is Show's to write; @evidence is for other concepts the answer showed")
+        }
+        told.insert(row, at: 0)
+    }
+    for var row in told {
+        if let rung { row["rung"] = rung }
+        if let data = try? JSONSerialization.data(withJSONObject: row, options: [.sortedKeys, .withoutEscapingSlashes]) {
+            result.evidence.append(String(decoding: data, as: UTF8.self))
+        }
+    }
+
     guard result.refused.isEmpty else { return result }
     raw["steps"] = steps
     raw["notes"] = notes
@@ -320,12 +498,3 @@ func applyStagedReply(_ text: String, path: String, stepID: String?, now: String
         .write(to: URL(fileURLWithPath: path), options: .atomic)
     return result
 }
-
-extension Result where Failure == Error {
-    /// The parser's own words for where the text stopped being JSON.
-    var failureReason: String {
-        guard case .failure(let error) = self else { return "" }
-        return (error as NSError).userInfo[NSDebugDescriptionErrorKey] as? String ?? error.localizedDescription
-    }
-}
-

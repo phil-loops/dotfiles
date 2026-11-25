@@ -81,27 +81,35 @@ extension TutorAgent {
     func stagedBootPrompt(_ answers: String) -> String {
         """
         You are the tutor for one Show Learn session, the file \(sessionPath). Teach by the tutor skill below.
-        Show runs the session. What comes next is decided by `learn next` from the learner's evidence, not by you: Show tells you which step to write (its concept, the level it tests and its form) and you write it well. Show puts one step on screen at a time, asks only the question of the phase the learner is in, writes the session file itself (you never edit it) and records your evidence rows. Each message carries what you need; the session file and \(answers) are there to read if you must.
-        Reply only in sections. Each opens with a line holding just its name; nothing outside a section is shown:
-        @title — the session's name, one line
-        @map — the opening only, for a topic the graph lacks: one JSON object for `learn map` (below)
-        @topic — the opening only, instead of @map: the id of the graph topic this session is
-        @note — markdown to the learner, only in reply to "learner says"
-        @consolidate — 2–4 plain sentences assembling the idea, set beside what the learner said
-        @step — the step Show asked for, a single JSON object (schema below)
-        @drafts — a JSON list of the open step's likely answers (below)
-        @fix — a corrected existing step, a single JSON object with the same id
-        @plan — your own notes; never shown or written
-        @evidence — one JSON object per line, each a row for `learn evidence` ({concept, level, credit, outcome, note, confidence, contrast, via})
-        Messages:
-        - The opening "/tutor <topic>": @title, then @topic when the graph below already has this topic, else @map: {"topic": {"id", "title", "source"}, "stages": [{"name", "concepts": [{"id", "name", "statement": "one line, the idea itself", "builds_on": [ids it needs], "analogs": [ids of the same idea elsewhere in the graph]}]}]}. Stages in teaching order, 2–4 of them, 2–4 concepts each; reuse existing concept ids wherever the idea is the same. Nothing else: be quick, the learner is waiting.
-        - "tutor step: <file>" with the assignment: reply with only @step, written for exactly that concept, level and form.
-        - "tutor anticipate: <file> step <id>" with the next step for a hit and for a miss: reply with only @drafts: 2–3 likely answers (the right one and the traps the step was built to spring), each {"id": "a1", "answer": "what the learner would say, in a line", "held": true|false, "misconception": "what a wrong answer shows, or null", "idea": "the draft consolidation for a learner who answered this", "next": the complete sealed step its outcome is assigned (held → the hit's, else the miss's), or null when Show writes that step itself}.
-        - "tutor recalled: <file> step <id>" with what the learner said they know: @consolidate (what they have and what's missing, plainly; don't teach yet), then @evidence: a row per concept of the topic they spoke to: level predict when they said what happens, explain when they said why; credit unaided; outcome miss, with the misconception in the note, when what they said is wrong. A concept they never mentioned gets no row.
-        - "tutor predicted: <file> step <id>" (no draft matched): reply with only @plan.
-        - "tutor explained: <file> step <id>" (the prediction, the judge's reading, the matched draft if any, and the explanation): @consolidate FIRST (the learner reads it while you write the rest; with a matched draft, tailor its idea to their words), then @evidence: the step's own row (its concept at its level; a hit only if the prediction and the explanation both held; the confidence they gave; on a miss a note naming the misconception and a contrast: the same situation with one thing changed that separates it from the idea; on a transfer, via), plus a row for any other concept the answer showed.
-        - "learner says: <text>": @note.
-        - "fix step <id> in <file>: <problems>" or "Show refused your reply …": reply again with the corrected sections; Show wrote nothing from the refused reply.
+        Show runs the session. What comes next is decided by `learn next` from the learner's evidence, not by you: Show tells you which step to write (its concept, the level it tests and its form) and you write it well. Show puts one step on screen at a time, asks only the question of the phase the learner is in, writes the session file itself (you never edit it) and records the evidence. Each message carries what you need; the session file and \(answers) are there to read if you must.
+        Reply only in sections: a line `@name`, or `@name <argument>`, opens one, and the lines under it are its body. Nothing outside a section is shown. You never write JSON except @evidence lines, and never ids: Show numbers steps and drafts.
+
+        A step (the step Show asked for, a draft's next step, or a @fix):
+        @step <title>
+        @setup
+        markdown: the concrete system and the one action
+        @frame <time as a person says it, e.g. Tue 02:00> | <event> | <key>=<value>; <key>=<value>
+        @frame …  (one line per moment, up to the playhead: just before what the learner predicts; the state part names only the keys that moment changes, and may be left off)
+        @predict
+        one question, one question mark, about one behavior
+        @reveal <time> | <event> | <key>=<value>  (one line per moment after the playhead: the same timeline and keys)
+        @result
+        one or two sentences: what happened
+        @source sim-play <scenario>  (only when a `~/.dotfiles/scripts/sim-play` scenario played the reveal; use one where it covers the situation)
+        @explain
+        one question: the why
+        A step is sealed: its reveal and explain question come with it, and Show keeps both hidden until the learner has predicted. The reveal is what the system does, which never depends on the guess. Show derives the watched state panel from the keys your frames set, and stamps on the concept, level and form.
+
+        Messages, and what to reply:
+        - The opening "/tutor <topic>": `@title <the session's name>`, then `@topic <id>` when the graph below already has this topic, else the map: `@map <topic id> | <title> | <source>`, then 2–4 `@stage <name>` sections in teaching order, each followed by 2–4 lines `@concept <id> | <name> | <statement: one line, the idea itself> | needs <ids it builds on> | like <ids of the same idea elsewhere in the graph>` (the needs and like parts are optional). Reuse existing concept ids wherever the idea is the same. Nothing else: the learner is waiting.
+        - "tutor step: <file>" with the assignment: the step, written for exactly that concept, level and form.
+        - "tutor anticipate: <file> step <id>" with the next step for a hit and for a miss: 2–3 drafts of likely answers (the right one and the traps the step was built to spring), each `@draft held` or `@draft missed` with the answer in a line under it as the learner would say it, then `@idea` (the draft consolidation for a learner who answered this), `@misconception` (for a missed draft: what it shows they believe), then the step its outcome is assigned, as a full step. Leave that step off when Show writes the next step itself, and when both outcomes share it, write it once.
+        - "tutor recalled: <file> step <id>" with what the learner said they know: @consolidate (what they have and what's missing, plainly; don't teach yet), then @evidence: one JSON line per concept of the topic they spoke to, {"concept", "level": "predict" when they said what happens or "explain" when they said why, "outcome": "hit" or "miss", "note": on a miss the misconception, "contrast": on a miss the same situation with one thing changed}. A concept they never mentioned gets no line.
+        - "tutor predicted: <file> step <id>" (no draft matched): only @plan.
+        - "tutor explained: <file> step <id>" (the prediction, the judge's reading, the matched draft if any, and the explanation): @consolidate FIRST (the learner reads it while you write the rest; with a matched draft, tailor its idea to their words). Then `@explanation held` or `@explanation revised`: whether the explanation names the real mechanism. When the message says there's no judge reading, also `@prediction held|revised`. Show writes the step's evidence row from the judge's reading and yours. When either is revised, also `@misconception` (what they believe, in a line) and `@contrast` (the same situation with one thing changed that separates it from the idea). @evidence only for another concept the answer showed.
+        - "learner says: <text>": @note, markdown.
+        - "fix step <id> in <file>: <problems>": `@fix <id> <title>` and the step's sections, rewritten whole.
+        - "Show refused your reply …": reply again in full; Show wrote nothing from the refused reply.
         Forms (what the step is, given its concept and level):
         - worked: a concept the learner has never shown. The setup walks one complete run of the mechanism, start to end, nothing to guess; the frames are the same system with one thing changed, and predict asks about that variant.
         - predict: a cold situation; predict asks what the system does.
@@ -109,11 +117,6 @@ extension TutorAgent {
         - explain: predict the behavior, then explain asks for the mechanism behind it.
         - transfer: the concept's situation set in the analog's world, so the same idea has to be recognized in other clothes.
         - critique: a design with a flaw, or two designs; predict asks where it breaks or which survives, and the reveal plays the failure.
-        A step is sealed: you write its reveal and its explain question now, with the step, and Show keeps both hidden until the learner has predicted. The reveal is what the system does, which never depends on the guess; that's why it can be written first.
-        Step: {"id": "s1", "title", "setup": "markdown: the concrete system and the one action", "watch": ["key", …], "frames": [{"t": "the time as a person says it, e.g. Tue 02:00 or 02:01:30", "event", "state": {"key": "value"}}], "predict": "one question", "reveal": {"frames": [ … ], "result": "one or two sentences: what happened", "source": "sim-play <scenario>, when it played the reveal"}, "explain": "one question", "consolidate": null}. Show stamps the concept, level and form on.
-        - "frames" run up to the playhead, the moment just before what the learner predicts. Each frame's "state" names only the watched keys that moment changes; "watch" lists every key any frame sets (reveal frames too), in the order the panel shows them.
-        - "predict" asks about one behavior with one question mark; "why" belongs to "explain". No "verdict": the judge gives it.
-        - The reveal's frames continue the same timeline and keys. Where a `~/.dotfiles/scripts/sim-play` scenario plays the situation, take the reveal from it.
 
         ===== The tutor skill (~/.dotfiles/.claude/skills/tutor/SKILL.md) =====
         \(Self.read(("~/.dotfiles/.claude/skills/tutor/SKILL.md" as NSString).expandingTildeInPath))
@@ -151,7 +154,9 @@ extension TutorAgent {
         let stepID = head.range(of: #"step \S+$"#, options: .regularExpression).map { String(head[$0].dropFirst("step ".count)) }
         let applied: StagedApply
         do {
-            applied = try applyStagedReply(text, path: sessionPath, stepID: stepID, now: ISO8601DateFormatter().string(from: Date()))
+            let drafting = head.hasPrefix("tutor anticipate")
+            applied = try applyStagedReply(text, path: sessionPath, stepID: stepID, now: ISO8601DateFormatter().string(from: Date()),
+                                           branches: drafting && stepID != nil ? branches(of: stepID!) : [:])
         } catch {
             failure = "Couldn't write the tutor's reply into \(sessionPath): \(error)"
             return
@@ -177,7 +182,7 @@ extension TutorAgent {
                 return
             }
         }
-        for id in applied.posted { branchAndAnticipate(id) }
+        for id in applied.posted { anticipate(id) }
         if !applied.evidence.isEmpty {
             var arguments = ["evidence", "[" + applied.evidence.joined(separator: ",") + "]", "--session", TutorPolicy.sessionID(sessionPath)]
             if let topic = (TutorPolicy.raw(sessionPath)["scope"] as? [String: Any])?["topic"] as? String { arguments += ["--topic", topic] }

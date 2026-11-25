@@ -72,24 +72,34 @@ private func answer(_ parts: [String: String]) -> TutorAnswer {
     #expect(currentStep(session, [:])?.id == "s1")
 }
 
-@Test func aReplyIsReadBySections() {
-    let sections = tutorSections("@consolidate\nThe key outlives\nits holder.\n\n@evidence\n{\"a\":1}\n{\"b\":2}\nstray")
-    #expect(sections.map(\.name) == ["consolidate", "evidence"])
+@Test func aReplyIsReadBySectionsWithArguments() {
+    let sections = tutorSections("@consolidate\nThe key outlives\nits holder.\n\n@frame 02:00 | A takes it | lock=A\nemail me @alice\n@evidence\n{\"a\":1}")
+    #expect(sections.map(\.name) == ["consolidate", "frame", "evidence"])
     #expect(sections[0].body == "The key outlives\nits holder.")
-    #expect(sections[1].body == "{\"a\":1}\n{\"b\":2}\nstray")
+    #expect(sections[1].argument == "02:00 | A takes it | lock=A" && sections[1].body == "email me @alice")   // an unknown @name is prose
     #expect(tutorSections("no sections here").isEmpty)
 }
 
-private let assignment: [String: Any] = ["form": "contrast", "concept": "lock-ttl", "level": "predict", "why": "missed"]
-private let branches: [String: Any] = ["hit": ["form": "explain", "concept": "lock-ttl", "level": "explain"],
-                                       "miss": ["form": "card", "concept": "lock-ttl", "level": ""]]
+@Test func aFrameLineCarriesTimeEventAndState() {
+    let frame = frameLine("Tue 02:00 | A takes the lock | lock=A; digest = running")!
+    #expect(frame["t"] as? String == "Tue 02:00" && frame["event"] as? String == "A takes the lock")
+    #expect(frame["state"] as? [String: String] == ["lock": "A", "digest": "running"] && frame["keys"] as? [String] == ["lock", "digest"])
+    #expect((frameLine("02:01 | A's node is killed")!["state"] as? [String: String])?.isEmpty == true)
+    #expect(frameLine("02:01 | x | y | lock=B")!["event"] as? String == "x | y")
+    #expect(frameLine("just words") == nil)
+}
 
-private func sessionFile(assigned: [String: Any]? = nil) throws -> String {
+private let assignment: [String: Any] = ["form": "contrast", "concept": "lock-ttl", "level": "predict", "name": "Lock TTL", "why": "missed"]
+private let branches: [String: [String: Any]] = ["hit": ["form": "explain", "concept": "lock-ttl", "level": "explain"],
+                                                 "miss": ["form": "card", "concept": "lock-ttl", "level": ""]]
+
+private func sessionFile(assigned: [String: Any]? = nil, answer: [String: Any]? = nil) throws -> String {
     let path = FileManager.default.temporaryDirectory.appendingPathComponent("staged-\(UUID().uuidString).json").path
     var raw: [String: Any] = ["mode": "tutor", "format": 2, "title": "Locks", "notes": [], "agent": ["session": "x"],
-                              "steps": [stepJSON(["concept": "lock-ttl", "level": "predict", "form": "predict", "branches": branches])]]
+                              "steps": [stepJSON(["concept": "lock-ttl", "level": "predict", "form": "predict"])]]
     if let assigned { raw["assigned"] = assigned }
     try JSONSerialization.data(withJSONObject: raw).write(to: URL(fileURLWithPath: path))
+    if let answer { try JSONSerialization.data(withJSONObject: ["s1": answer]).write(to: answersURL(path)) }
     return path
 }
 
@@ -99,51 +109,100 @@ private func rawFile(_ path: String) -> [String: Any] {
     (try? JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: path)))) as? [String: Any] ?? [:]
 }
 
-@Test func anExplainedReplyClosesTheStepWithItsOwnEvidenceRow() throws {
-    let path = try sessionFile()
-    let row = "{\"concept\": \"lock-ttl\", \"level\": \"predict\", \"outcome\": \"hit\"}"
-    let applied = try applyStagedReply("@title\nJob locks\n@consolidate\nA lock with no expiry outlives its holder.\n@evidence\n\(row)",
-                                       path: path, stepID: "s1", now: "2026-11-24T00:00:00Z")
-    #expect(applied.refused.isEmpty && applied.finished)
-    #expect(applied.evidence == ["{\"concept\":\"lock-ttl\",\"level\":\"predict\",\"outcome\":\"hit\"}"])
-    let session = try loadTutorSession(path)
-    #expect(session.title == "Job locks" && session.steps[0].consolidate == "A lock with no expiry outlives its holder.")
-    let other = try sessionFile()
-    #expect(try applyStagedReply("@consolidate\nidea\n@evidence\n{\"concept\": \"other\", \"level\": \"predict\"}", path: other, stepID: "s1", now: "t")
-        .refused == ["@evidence needs the step's own row: concept lock-ttl at level predict, a hit only if the prediction and the explanation both held"])
-}
+private func row(_ line: String) -> [String: Any] { (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any] ?? [:] }
 
-@Test func aStepIsWrittenOnlyWhenShowAssignedOneAndCarriesTheAssignment() throws {
-    let unasked = try sessionFile()
-    #expect(try applyStagedReply("@step\n\(text(stepJSON(["id": "s2"])))", path: unasked, stepID: nil, now: "t").refused
-        == ["no step is owed now; Show asks for one when the session is due its next"])
+private let flatStep = """
+@step The digest job after a crash
+@setup
+croon's job lock has **no expiry**.
+@frame Tue 02:00 | A takes the lock | lock=A; digest=running
+@frame Tue 02:01 | A's node is killed | digest=dead
+@predict
+Who holds the lock on Wednesday at 02:00?
+@reveal Wed 02:00 | SET NX fails for A, B and C | lock=A
+@result
+Nobody runs digest again until someone deletes the key.
+@explain
+Why does nobody get it?
+"""
+
+@Test func aFlatStepBecomesASealedStepWithItsWatchDerived() throws {
     let path = try sessionFile(assigned: assignment)
-    let applied = try applyStagedReply("@step\n\(text(stepJSON(["id": "s2", "concept": "something-else"])))", path: path, stepID: nil, now: "t")
+    let applied = try applyStagedReply(flatStep, path: path, stepID: nil, now: "t")
     #expect(applied.refused.isEmpty && applied.posted == ["s2"])
     let posted = try loadTutorSession(path).steps[1]
-    #expect(posted.concept == "lock-ttl" && posted.form == "contrast" && posted.level == "predict")
+    #expect(posted.title == "The digest job after a crash" && posted.frames.count == 2 && posted.reveal?.frames.count == 1)
+    #expect(posted.rows == ["lock", "digest"])
+    #expect(posted.concept == "lock-ttl" && posted.form == "contrast" && posted.conceptName == "Lock TTL")
+    #expect(stepProblems(posted, nil).isEmpty)
     #expect(rawFile(path)["assigned"] == nil)
-    #expect(try applyStagedReply("@step\n\(text(stepJSON(["id": "s3"])))", path: path, stepID: nil, now: "t").refused.count == 1)
 }
 
-@Test func aRefusedReplyWritesNothing() throws {
-    let path = try sessionFile(assigned: assignment)
+@Test func aStepIsWrittenOnlyWhenShowAssignedOne() throws {
+    #expect(try applyStagedReply(flatStep, path: try sessionFile(), stepID: nil, now: "t").refused
+        == ["no step is owed now; Show asks for one when the session is due its next"])
+    let unsealed = flatStep.components(separatedBy: "\n@reveal")[0]
+    let refused = try applyStagedReply(unsealed, path: try sessionFile(assigned: assignment), stepID: nil, now: "t").refused
+    #expect(refused == ["step s2: a step arrives sealed: its reveal and its explain question come with it"])
+    #expect(try applyStagedReply("@setup\nloose", path: try sessionFile(assigned: assignment), stepID: nil, now: "t").refused == ["@setup came outside a @step"])
+    #expect(try applyStagedReply("@step T\n@frame nonsense", path: try sessionFile(assigned: assignment), stepID: nil, now: "t").refused
+        .first?.hasPrefix("a @frame line isn't") == true)
+}
+
+@Test func showWritesTheStepsEvidenceRowFromBothReadings() throws {
+    let answered: [String: Any] = ["parts": ["predict": "nobody", "explain": "no expiry"], "confidence": "high", "at": "t", "verdict": "held"]
+    let held = try applyStagedReply("@consolidate\nA lock with no expiry outlives its holder.\n@explanation held",
+                                    path: try sessionFile(answer: answered), stepID: "s1", now: "t")
+    #expect(held.refused.isEmpty && held.finished)
+    let own = row(held.evidence[0])
+    #expect(own["concept"] as? String == "lock-ttl" && own["level"] as? String == "predict" && own["outcome"] as? String == "hit" && own["confidence"] as? String == "high")
+
+    let missed = try applyStagedReply("@consolidate\nidea\n@explanation revised\n@misconception\nthinks the key expires\n@contrast\nsame, with a TTL",
+                                      path: try sessionFile(answer: answered), stepID: "s1", now: "t")
+    #expect(row(missed.evidence[0])["outcome"] as? String == "miss" && row(missed.evidence[0])["contrast"] as? String == "same, with a TTL")
+
+    let path = try sessionFile(answer: answered)
     let before = try Data(contentsOf: URL(fileURLWithPath: path))
-    let applied = try applyStagedReply("@consolidate\nidea\n@step\n\(text(stepJSON(["id": "s2", "predict": "Who? Why?"])))", path: path, stepID: "s1", now: "t")
-    #expect(applied.refused.contains("step s2: predict asks more than one question"))
+    #expect(try applyStagedReply("@consolidate\nidea", path: path, stepID: "s1", now: "t").refused
+        == ["@explanation held or revised is needed: it decides the step's evidence row with the judge's reading"])
+    #expect(try applyStagedReply("@consolidate\nidea\n@explanation revised", path: path, stepID: "s1", now: "t").refused
+        == ["a miss needs @misconception (what they believe) and @contrast (the same situation with one thing changed)"])
+    #expect(try applyStagedReply("@consolidate\nidea\n@explanation held\n@evidence\n{\"concept\": \"lock-ttl\", \"level\": \"predict\"}", path: path, stepID: "s1", now: "t")
+        .refused.first?.hasPrefix("the step's own row") == true)
     #expect(try Data(contentsOf: URL(fileURLWithPath: path)) == before)
-    #expect(try applyStagedReply("@step\n\(text(stepJSON()))", path: path, stepID: nil, now: "t").refused == ["step s1 already exists; a new step needs a new id"])
-    for owned in ["@stations\n[]", "@take\na1"] {
+
+    var unjudged = answered
+    unjudged["verdict"] = nil
+    let asked = try applyStagedReply("@consolidate\nidea\n@explanation held", path: try sessionFile(answer: unjudged), stepID: "s1", now: "t")
+    #expect(asked.refused == ["there was no judge reading, so give @prediction held or revised too"])
+    let given = try applyStagedReply("@consolidate\nidea\n@prediction revised\n@explanation held\n@misconception\nm\n@contrast\nc",
+                                     path: try sessionFile(answer: unjudged), stepID: "s1", now: "t")
+    #expect(row(given.evidence[0])["outcome"] as? String == "miss")
+}
+
+@Test func theStationsAndTheNextStepAreShows() throws {
+    let path = try sessionFile(assigned: assignment)
+    for owned in ["@stations\nx", "@take\na1"] {
         #expect(try applyStagedReply(owned, path: path, stepID: "s1", now: "t").refused.first?.hasSuffix("picks the next step from the learner's graph") == true)
     }
 }
 
-@Test func theOpeningNamesItsTopic() throws {
-    let path = try sessionFile()
-    let mapped = try applyStagedReply("@title\nLocks\n@map\n{\"topic\": {\"id\": \"locks\"}, \"stages\": []}", path: path, stepID: nil, now: "t")
-    #expect(mapped.map != nil && mapped.refused.isEmpty)
-    #expect(try applyStagedReply("@topic\ncroon-job-locks\n", path: path, stepID: nil, now: "t").topic == "croon-job-locks")
-    #expect(try applyStagedReply("@map\nnot json", path: path, stepID: nil, now: "t").refused == ["@map wasn't one JSON object"])
+@Test func theOpeningMapIsWrittenAsLines() throws {
+    let reply = """
+    @title Locks
+    @map locks | Job locks | croon PR #9273
+    @stage Why a lock
+    @concept one-runner | One runner per tick | N copies share one schedule.
+    @concept dead-holder | A dead holder blocks forever | Without expiry nobody runs again. | needs one-runner | like lock-ttl, cursor-stall
+    """
+    let mapped = try applyStagedReply(reply, path: try sessionFile(), stepID: nil, now: "t")
+    #expect(mapped.refused.isEmpty)
+    let map = row(mapped.map ?? "")
+    #expect((map["topic"] as? [String: Any])?["source"] as? String == "croon PR #9273")
+    let concepts = ((map["stages"] as? [[String: Any]])?.first?["concepts"] as? [[String: Any]]) ?? []
+    #expect(concepts.count == 2 && concepts[1]["builds_on"] as? [String] == ["one-runner"] && concepts[1]["analogs"] as? [String] == ["lock-ttl", "cursor-stall"])
+    #expect(try applyStagedReply("@map x | X\n@stage empty", path: try sessionFile(), stepID: nil, now: "t").refused == ["a @map needs @stage sections, each with its @concept lines"])
+    #expect(try applyStagedReply("@topic croon-job-locks", path: try sessionFile(), stepID: nil, now: "t").topic == "croon-job-locks")
 }
 
 @Test func recallAndTheCardTakeOneAnswer() throws {
@@ -157,7 +216,7 @@ private func rawFile(_ path: String) -> [String: Any] {
     #expect(card.concept == "lock-ttl" && stepPhase(card, answer(["predict": "it dies on its own"])) == .done)
 }
 
-@Test func recallEvidenceIsStampedAsRecall() throws {
+@Test func recallEvidenceIsTheTutorsAndStampedAsRecall() throws {
     let path = FileManager.default.temporaryDirectory.appendingPathComponent("recall-\(UUID().uuidString).json").path
     let raw: [String: Any] = ["mode": "tutor", "format": 2, "title": "Locks", "notes": [], "agent": ["session": "x"],
                               "steps": [TutorPolicy.writtenStep(["form": "recall"], id: "s1", title: "Locks")]]
@@ -175,33 +234,32 @@ private func rawFile(_ path: String) -> [String: Any] {
     #expect(TutorJudge.reading("held") == nil)
 }
 
-@Test func eachDraftsNextIsTheStepItsOutcomeWillBeAssigned() throws {
+private func draftsReply(_ held: String, next: Bool) -> String {
+    "@draft \(held)\nnobody runs it\n@idea\nthe key outlives its holder\n" + (next ? flatStep : "")
+}
+
+@Test func eachDraftCarriesTheStepItsOutcomeIsAssigned() throws {
     let path = try sessionFile()
-    let held = ["id": "a1", "answer": "nobody runs it", "held": true, "idea": "the key outlives its holder", "next": stepJSON(["id": "s2"])] as [String: Any]
-    let missed = ["id": "a2", "answer": "B takes over", "held": false, "idea": "x", "next": stepJSON(["id": "s3"])] as [String: Any]
-    let bare = ["id": "a3", "answer": "it expires", "held": true, "idea": "y"] as [String: Any]
-    #expect(try applyStagedReply("@drafts\n\(text([bare]))", path: path, stepID: "s1", now: "t").refused
-        == ["draft a3 needs a next step: the explain step for lock-ttl"])
-    let bad = ["id": "a1", "answer": "x", "held": true, "idea": "x", "next": stepJSON(["id": "s2", "predict": "Who? Why?"])] as [String: Any]
-    #expect(try applyStagedReply("@drafts\n\(text([bad]))", path: path, stepID: "s1", now: "t").refused == ["step s2: predict asks more than one question"])
-    #expect(try applyStagedReply("@drafts\n\(text([held, missed]))", path: path, stepID: "s1", now: "t").refused.isEmpty)
+    #expect(try applyStagedReply(draftsReply("held", next: false), path: path, stepID: "s1", now: "t", branches: branches).refused
+        == ["draft 1 needs a @step after it: the explain step for lock-ttl"])
+    #expect(try applyStagedReply("@draft maybe\nx\n@idea\ny", path: path, stepID: "s1", now: "t", branches: branches).refused.first
+        == "@draft takes held or missed, not maybe")
+    let both = draftsReply("held", next: true) + "\n" + draftsReply("missed", next: false) + "@misconception\nthinks B takes over"
+    #expect(try applyStagedReply(both, path: path, stepID: "s1", now: "t", branches: branches).refused.isEmpty)
     let drafts = (rawFile(path)["steps"] as? [[String: Any]])?.first?["drafts"] as? [[String: Any]] ?? []
+    #expect(drafts.map { $0["id"] as? String } == ["a1", "a2"])
     #expect((drafts[0]["next"] as? [String: Any])?["form"] as? String == "explain")
-    #expect(drafts[1]["next"] == nil)   // a miss closes on the card, which Show writes
-}
-
-@Test func aNextStepBothOutcomesShareIsWrittenOnceAndTakenWhicheverWayItLands() throws {
-    let path = FileManager.default.temporaryDirectory.appendingPathComponent("shared-\(UUID().uuidString).json").path
-    let same: [String: Any] = ["form": "worked", "concept": "key-is-convention", "level": "predict"]
-    let raw: [String: Any] = ["mode": "tutor", "format": 2, "title": "Locks", "notes": [], "agent": ["session": "x"],
-                              "steps": [stepJSON(["concept": "lock-ttl", "level": "predict", "form": "contrast", "branches": ["hit": same, "miss": same]])]]
-    try JSONSerialization.data(withJSONObject: raw).write(to: URL(fileURLWithPath: path))
-    let carrier = ["id": "a1", "answer": "x", "held": true, "idea": "i", "next": stepJSON(["id": "s2"])] as [String: Any]
-    let bare = ["id": "a2", "answer": "y", "held": false, "idea": "j", "next": NSNull()] as [String: Any]
-    #expect(try applyStagedReply("@drafts\n\(text([bare]))", path: path, stepID: "s1", now: "t").refused.count == 1)
-    #expect(try applyStagedReply("@drafts\n\(text([carrier, bare]))", path: path, stepID: "s1", now: "t").refused.isEmpty)
+    #expect(drafts[1]["next"] == nil && drafts[1]["misconception"] as? String == "thinks B takes over")   // a miss closes on the card, Show's
     let step = (rawFile(path)["steps"] as? [[String: Any]])?.first
-    #expect(TutorAgent.draftedNext(step, matched: "a2", for: same)?["form"] as? String == "worked")
-    #expect(TutorAgent.draftedNext(step, matched: nil, for: ["form": "explain", "concept": "lock-ttl", "level": "explain"]) == nil)
+    #expect(TutorAgent.draftedNext(step, matched: "a1", for: branches["hit"]!)?["form"] as? String == "explain")
+    #expect(TutorAgent.draftedNext(step, matched: "a2", for: branches["hit"]!) == nil)
 }
 
+@Test func aNextStepBothOutcomesShareIsWrittenOnceAndCarriedByEveryDraft() throws {
+    let path = try sessionFile()
+    let same: [String: Any] = ["form": "worked", "concept": "key-is-convention", "level": "predict"]
+    let reply = draftsReply("held", next: true) + "\n" + draftsReply("missed", next: false)
+    #expect(try applyStagedReply(reply, path: path, stepID: "s1", now: "t", branches: ["hit": same, "miss": same]).refused.isEmpty)
+    let step = (rawFile(path)["steps"] as? [[String: Any]])?.first
+    #expect(TutorAgent.draftedNext(step, matched: "a2", for: same)?["concept"] as? String == "key-is-convention")
+}

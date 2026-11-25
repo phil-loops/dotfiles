@@ -22,6 +22,9 @@
                                    critique card done. --asked lists what the session posed ({concept, form,
                                    level}, in order); --branch gives {hit, miss}: the next step either way the
                                    open step lands
+  learn stations --topic <id> [--concept <id>]
+                                   the topic's stages as stations, derived from depth: [{name, state}], the
+                                   concept's stage current
   learn standard <id>              one standard with its mastery, coverage and every evidence row
   learn map '<json>'               add/update a topic map  {"topic": {id,title,source}, "stages": [...]}
   learn system '<json>'            add/update a system  {id, title, summary,
@@ -164,6 +167,10 @@ def main(argv):
                 print(json.dumps(learning.branches(g, _json(branch), **scope), indent=1))
             else:
                 print(json.dumps(learning.next_step(g, **scope), indent=1))
+        elif cmd == "stations":
+            if not topic:
+                raise ValueError("stations needs --topic <id>")
+            print(json.dumps(learning.stations(learning.load(), learning.slug(topic), concept)))
         elif cmd == "standard":
             g = learning.load()
             stid = learning.slug(args[0])

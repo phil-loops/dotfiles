@@ -347,6 +347,13 @@ class Policy(unittest.TestCase):
         g = graph()
         self.assertEqual(nxt(g, asked=[{"form": "recall"}])["stations"], [{"name": "why", "state": "current"}])
 
+    def test_stations_mark_the_concept_on_screen(self):
+        g = graph()
+        ev(g, "lock-ttl", level="explain", at="2026-10-09")
+        ev(g, "lease-renewal", level="explain", at="2026-10-09")
+        self.assertEqual(learning.stations(g, "locks"), [{"name": "why", "state": "done"}])
+        self.assertEqual(learning.stations(g, "locks", "lock-ttl"), [{"name": "why", "state": "current"}])
+
     def test_branches_draft_both_outcomes(self):
         g = graph()
         ev(g, "lock-ttl", at="2026-10-10", session="s")

@@ -25,7 +25,7 @@ extension TutorController {
             column.addArrangedSubview(view)
             column.setCustomSpacing(gap, after: view)
         }
-        let strip = stationStrip(session)
+        let strip = stationStrip(session, concept: stagedStep(session)?.concept ?? "")
         if let strip { add(strip, after: 28) }
         let finished = path.map { (TutorPolicy.raw($0)["assigned"] as? [String: Any])?["form"] as? String == "done" } ?? false
         guard let step = stagedStep(session) else {
@@ -285,8 +285,10 @@ extension TutorController {
     }
 
     /// The stations as one quiet line: the current one in full weight, done ones dimmed.
-    private func stationStrip(_ session: TutorSession) -> NSView? {
-        guard let stations = session.stations, !stations.isEmpty else { return nil }
+    private func stationStrip(_ session: TutorSession, concept: String) -> NSView? {
+        // derived from the graph for a session with a topic; stored only in sessions from before stations were derived
+        let topic = path.flatMap { (TutorPolicy.raw($0)["scope"] as? [String: Any])?["topic"] as? String }
+        guard let stations = topic.flatMap({ StationCache.stations(topic: $0, concept: concept) }) ?? session.stations, !stations.isEmpty else { return nil }
         let line = NSMutableAttributedString()
         for (i, station) in stations.enumerated() {
             if i > 0 { line.append(NSAttributedString(string: "   ·   ", attributes: [.font: NSFont.systemFont(ofSize: 11.5), .foregroundColor: NSColor.quaternaryLabelColor])) }
@@ -433,7 +435,7 @@ func stagedBrief(_ kind: String, path: String, step id: String) -> String {
     let answer = loadAnswers(path)[id]
     let level = answer?.confidence.map { raw in "confidence \(raw): \(confidenceLevels.first { $0.0 == raw }?.1 ?? raw)" } ?? "no confidence given"
     var lines = ["\(kind): \(path) step \(id)", "prediction (\(level)): \(answer?.parts["predict"] ?? "")"]
-    if let verdict = answer?.verdict { lines.append("judge: \(verdict) — \(answer?.why ?? "")") }
+    if let verdict = answer?.verdict { lines.append("judge: \(verdict) — \(answer?.why ?? "")") } else { lines.append("judge: no reading") }
     if let draft = answer?.draft {
         let answered = (try? loadTutorSession(path))?.steps.first { $0.id == id }?.drafts?.first { $0.id == draft }?.answer ?? ""
         lines.append("matched draft: \(draft) — \(answered)")

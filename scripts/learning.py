@@ -740,6 +740,13 @@ def _focus(rows, ids):
     return max(counts, key=counts.get) if counts else (ids[0] if ids else "")
 
 
+def stations(g, topic, current="", today=None):
+    """A topic's stages as stations, with `current` (the concept on screen) marking the current one."""
+    if topic not in g["topics"]:
+        raise Invalid(f"no topic {topic}")
+    return _stations(g, state(g, today), topic, slug(current) if current else "")
+
+
 def _stations(g, st, topic, current):
     """A topic's stages as the session's stations: done once every concept is shown at explain or deeper."""
     if not topic:

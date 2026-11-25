@@ -101,17 +101,11 @@ enum TutorPolicy {
                 "predict": "What goes on the card?"]
     }
 
-    static func newID(_ steps: [[String: Any]]) -> String {
-        let taken = Set(steps.compactMap { $0["id"] as? String })
-        var n = steps.count + 1
-        while taken.contains("s\(n)") { n += 1 }
-        return "s\(n)"
-    }
 }
 
 extension TutorAgent {
-    /// When the session owes its next step and nobody has asked for it yet: ask `learn next`, write the stations and the
-    /// assignment, then post the step (Show's own forms, or the matched draft written for this outcome) or ask the tutor for it.
+    /// When the session owes its next step and nobody has asked for it yet: ask `learn next`, then post the step (Show's
+    /// own forms, or the matched draft written for this outcome) or record the assignment and ask the tutor for it.
     func advanceStaged() {
         var raw = TutorPolicy.raw(sessionPath)
         guard raw["assigned"] == nil, let session = try? loadTutorSession(sessionPath), session.isStaged,
@@ -124,10 +118,9 @@ extension TutorAgent {
             onChange?()
             return
         }
-        if let stations = next["stations"] as? [[String: Any]], !stations.isEmpty { raw["stations"] = stations }
         var steps = raw["steps"] as? [[String: Any]] ?? []
         let form = next["form"] as? String ?? ""
-        let id = TutorPolicy.newID(steps)
+        let id = newStepID(steps)
         var posted: [String: Any]?
         if form == "done" {
             raw["assigned"] = next
@@ -140,11 +133,9 @@ extension TutorAgent {
         } else {
             raw["assigned"] = next
         }
-        if var step = posted {
-            if !showWrittenForms.contains(form) { step["branches"] = try? TutorPolicy.branches(raw, step: step, path: sessionPath) }
+        if let step = posted {
             steps.append(step)
             raw["steps"] = steps
-            posted = step
         }
         do {
             try TutorPolicy.write(raw, sessionPath)
@@ -153,51 +144,64 @@ extension TutorAgent {
             onChange?()
             return
         }
-        if let step = posted, !showWrittenForms.contains(form) {
-            anticipate(step)
+        if posted != nil, !showWrittenForms.contains(form) {
+            anticipate(id)
         } else if raw["assigned"] != nil, form != "done" {
-            send("tutor step: \(sessionPath)\nWrite the next step: \(TutorPolicy.brief(next)).\nReply with only @step.")
+            send("tutor step: \(sessionPath)\nWrite the next step: \(TutorPolicy.brief(next)).\nReply with only the @step and its sections.")
         }
         onChange?()
     }
 
-    /// The next step a finished step's drafts already hold for `next`: the judge-matched draft's, tailored to that answer,
-    /// or, when either outcome led to the same step, the one draft that carries it.
+    /// The next step the judge-matched draft of a finished step holds, when it's the one `learn next` now assigns.
     static func draftedNext(_ step: [String: Any]?, matched: String?, for next: [String: Any]) -> [String: Any]? {
-        guard let step, let drafts = step["drafts"] as? [[String: Any]] else { return nil }
-        let nexts = drafts.compactMap { $0["next"] as? [String: Any] }.filter { sameAssignment($0, next) }
-        if let matched, let own = drafts.first(where: { $0["id"] as? String == matched })?["next"] as? [String: Any], sameAssignment(own, next) { return own }
-        let branches = step["branches"] as? [String: [String: Any]] ?? [:]
-        return sameAssignment(branches["hit"], branches["miss"]) ? nexts.first : nil
+        guard let matched, let drafts = step?["drafts"] as? [[String: Any]],
+              let own = drafts.first(where: { $0["id"] as? String == matched })?["next"] as? [String: Any], sameAssignment(own, next) else { return nil }
+        return own
     }
 
-    /// Asks the tutor to draft the posted step's likely answers, each with the next step its outcome will be assigned.
-    func anticipate(_ step: [String: Any]) {
-        let branches = step["branches"] as? [String: Any] ?? [:]
-        var lines = ["tutor anticipate: \(sessionPath) step \(step["id"] ?? "")"]
-        let hit = branches["hit"] as? [String: Any], miss = branches["miss"] as? [String: Any]
+    /// What `learn next` assigns after step `id` if it holds and if it misses, from the graph as it is now.
+    func branches(of id: String) -> [String: [String: Any]] {
+        let raw = TutorPolicy.raw(sessionPath)
+        let steps = raw["steps"] as? [[String: Any]] ?? []
+        guard let i = steps.firstIndex(where: { $0["id"] as? String == id }) else { return [:] }
+        var before = raw
+        before["steps"] = Array(steps[..<i])
+        return (try? TutorPolicy.branches(before, step: steps[i], path: sessionPath)) as? [String: [String: Any]] ?? [:]
+    }
+
+    /// Asks the tutor to draft step `id`'s likely answers, each with the next step its outcome will be assigned.
+    func anticipate(_ id: String) {
+        let branches = branches(of: id)
+        var lines = ["tutor anticipate: \(sessionPath) step \(id)"]
+        let hit = branches["hit"], miss = branches["miss"]
         if sameAssignment(hit, miss), let hit {
-            lines.append("Either way the answer lands, the next step is: \(TutorPolicy.brief(hit)). Write it once, as the first draft's next; every other draft's next is null.")
+            lines.append("Either way the answer lands, the next step is: \(TutorPolicy.brief(hit)). Write it once, after the first draft that needs it.")
         } else {
             if let hit { lines.append("If the answer holds, the next step is: \(TutorPolicy.brief(hit))") }
             if let miss { lines.append("If it misses, the next step is: \(TutorPolicy.brief(miss))") }
         }
-        lines.append("Reply with only @drafts.")
+        lines.append("Reply with only the @draft sections.")
         send(lines.joined(separator: "\n"))
     }
+}
 
-    /// Writes a tutor-written step's branches before asking for its drafts.
-    func branchAndAnticipate(_ id: String) {
-        var raw = TutorPolicy.raw(sessionPath)
-        var steps = raw["steps"] as? [[String: Any]] ?? []
-        guard let i = steps.firstIndex(where: { $0["id"] as? String == id }) else { return }
-        var before = raw
-        before["steps"] = Array(steps[..<i])
-        if let branches = try? TutorPolicy.branches(before, step: steps[i], path: sessionPath) {
-            steps[i]["branches"] = branches
-            raw["steps"] = steps
-            try? TutorPolicy.write(raw, sessionPath)
-        }
-        anticipate(steps[i])
+/// A topic's stations, derived from the graph and cached by everything they're computed from: the graph file as it is,
+/// the topic and the concept on screen.
+enum StationCache {
+    private static var cached: (key: String, value: [TutorSession.Station])?
+
+    static var graphPath: String {
+        ProcessInfo.processInfo.environment["LEARNING_GRAPH"] ?? ("~/.dotfiles/learning/graph.json" as NSString).expandingTildeInPath
+    }
+
+    static func stations(topic: String, concept: String) -> [TutorSession.Station]? {
+        let attributes = try? FileManager.default.attributesOfItem(atPath: graphPath)
+        let stamp = "\((attributes?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0)/\(attributes?[.size] ?? 0)"
+        let key = [graphPath, stamp, topic, concept].joined(separator: "|")
+        if let cached, cached.key == key { return cached.value }
+        guard let data = try? TutorPolicy.learn(["stations", "--topic", topic] + (concept.isEmpty ? [] : ["--concept", concept])),
+              let value = try? JSONDecoder().decode([TutorSession.Station].self, from: data) else { return nil }
+        cached = (key, value)
+        return value
     }
 }
