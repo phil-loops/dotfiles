@@ -1,6 +1,6 @@
 # Loops links: open on the tailnet, share as app.loops.so
 
-Staff read Loops on the tailnet admin host (`admin.your-tailnet.ts.net`), which has the internal tools. Customers only know `app.loops.so`. Links move between the two by copy and paste, so the fix sits exactly there:
+Staff read Loops on the tailnet admin host (`<admin-host>`, e.g. `admin.<tailnet>.ts.net`), which has the internal tools. Customers only know `app.loops.so`. Links move between the two by copy and paste, so the fix sits exactly there:
 
 - **Opening a link** — a customer's `app.loops.so/...` link opens as the same page on the tailnet.
 - **Copying a link** — a tailnet link you copy becomes `app.loops.so/...`, ready to send to anyone.
@@ -12,7 +12,7 @@ The app itself is untouched: no proxy, no rewriting inside pages. Once you're on
 | | Chrome extension (`extension/`) | Clipboard watcher (`bin/tailnet-link-clip`, `tailnet-link-clip.swift`) |
 |---|---|---|
 | Acts when | a top-level `app.loops.so` page loads | the clipboard changes |
-| Rule | `https://app.loops.so/<path>` → `https://admin.your-tailnet.ts.net/<path>` | a copy that is exactly one `https://admin.your-tailnet.ts.net/<path>` URL → `https://app.loops.so/<path>` |
+| Rule | `https://app.loops.so/<path>` → `https://<admin-host>/<path>` | a copy that is exactly one `https://<admin-host>/<path>` URL → `https://app.loops.so/<path>` |
 | Leaves alone | `/api/...` (login callbacks and webhooks must reach the real app) | `/admin...` (only exists on the tailnet), URLs inside other text, password-manager copies |
 | Escape | click the toolbar icon to turn it off (badge shows "off") | copy the same link again within 2s to keep the tailnet form |
 | When broken | Loops links fail to load — turn it off | posts a note to Show's Inbox, once a day (Phil's setup; swap `show-note` for your own alert) |
@@ -21,7 +21,7 @@ Why two pieces: Chrome lets an extension redirect page loads, but not change wha
 
 ### How each works
 
-**Extension.** `rules.json` holds two `declarativeNetRequest` rules that Chrome runs itself — an `allow` for `/api/` at higher priority, and a regex `redirect` for everything else on `app.loops.so`, top-level pages only. `background.js` only toggles the ruleset from the toolbar icon. Host permission is limited to `https://app.loops.so/*`.
+**Extension.** `background.js` reads the host from `extension/tailnet-host` and installs two dynamic `declarativeNetRequest` rules that Chrome then runs itself — an `allow` for `/api/` at higher priority, and a regex `redirect` for everything else on `app.loops.so`, top-level pages only. The toolbar icon removes or re-adds them; the choice survives a restart. Host permission is limited to `https://app.loops.so/*`.
 
 **Watcher.** A small Swift program kept alive by launchd. macOS has no "clipboard changed" event, so it reads the pasteboard's change counter every 100ms (with timer tolerance so macOS batches the wakeups; ~0.1% CPU). On a change, if the plain text — trimmed — is one tailnet URL outside `/admin`, it replaces that exact URL in the plain-text, HTML, RTF and URL representations (so a pasted link keeps its title) and copies every other representation back byte-for-byte. The wrapper script recompiles the binary when the source changes.
 
@@ -29,10 +29,15 @@ Why two pieces: Chrome lets an extension redirect page loads, but not change wha
 
 Requires Tailscale on the Loops tailnet and a staff login on the admin host.
 
-1. **Extension**: `chrome://extensions` → Developer mode → Load unpacked → `extension/`. Open any `app.loops.so` link to check it lands on `admin.your-tailnet.ts.net`; log in there once.
+0. **Host**: write the admin host to `extension/tailnet-host` (git-ignored, so the internal hostname never reaches this public repo). Both pieces read it:
+   ```bash
+   echo admin.<tailnet>.ts.net > tools/tailnet-links/extension/tailnet-host
+   ```
+
+1. **Extension**: `chrome://extensions` → Developer mode → Load unpacked → `extension/`. Open any `app.loops.so` link to check it lands on `<admin-host>`; log in there once.
 2. **Watcher** (needs Xcode command line tools for `swiftc`):
    ```bash
-   tools/tailnet-links/bin/tailnet-link-clip "https://admin.your-tailnet.ts.net/campaigns/x"   # builds, prints https://app.loops.so/campaigns/x
+   tools/tailnet-links/bin/tailnet-link-clip "https://<admin-host>/campaigns/x"   # builds, prints https://app.loops.so/campaigns/x
    ```
    Then copy `launchd/com.philbrockman.tailnet-link-clip.plist` into `~/Library/LaunchAgents/` — edit the label and the `/Users/philbrockman/...` paths to yours first; launchd doesn't expand `~` — and run:
    ```bash
@@ -46,4 +51,4 @@ Requires Tailscale on the Loops tailnet and a staff login on the admin host.
 - Only clipboard copies are caught: a screenshot of the address bar or a typed URL isn't.
 - A paste within ~150ms of copying can still get the tailnet form.
 - With the extension on, this browser profile can't use the real `app.loops.so` as a customer — turn it off or use another profile.
-- Hostnames are hard-coded; staging (`admin-staging`) isn't covered.
+- One host per machine (the `tailnet-host` file); staging (`admin-staging`) isn't covered.

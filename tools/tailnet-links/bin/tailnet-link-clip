@@ -1,9 +1,10 @@
 #!/bin/zsh
-# When the clipboard is a lone admin.your-tailnet.ts.net URL outside /admin, rewrites it to app.loops.so (formatting kept).
+# When the clipboard is a lone tailnet admin URL outside /admin, rewrites it to app.loops.so (formatting kept).
 # Copy the same link again within 2s to keep the tailnet form. `tailnet-link-clip <text>` prints one rewrite.
 # Launchd keeps it alive; a failed build or a crash posts to Show's Inbox once a day.
 set -uo pipefail
 src=${0:A:h:h}/tailnet-link-clip.swift
+host_file=${0:A:h:h}/extension/tailnet-host
 dir=$HOME/.cache/tailnet-link-clip
 bin=$dir/tailnet-link-clip
 mkdir -p $dir
@@ -14,6 +15,12 @@ alarm() {
   touch $stamp
   show-note "Copied links are no longer rewritten" "tailnet-link-clip $1. Tailnet links you copy stay tailnet links until it's fixed. Log: \`$dir/agent.log\`" || true
 }
+
+export TAILNET_HOST=$(<$host_file 2>/dev/null) || TAILNET_HOST=
+if [[ -z $TAILNET_HOST ]]; then
+  alarm "has no tailnet host (write it to $host_file)"
+  exit 1
+fi
 
 if [[ ! -x $bin || $src -nt $bin ]]; then
   if swiftc -O -o $bin.tmp $src; then

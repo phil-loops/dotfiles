@@ -1,7 +1,13 @@
 import AppKit
 import Foundation
 
-let lone = try! NSRegularExpression(pattern: #"^https://admin\.your-tailnet\.ts\.net(?!/admin(?![\w-]))([/?#]\S*)?$"#)
+guard let host = ProcessInfo.processInfo.environment["TAILNET_HOST"], !host.isEmpty else {
+  FileHandle.standardError.write("TAILNET_HOST is not set\n".data(using: .utf8)!)
+  exit(2)
+}
+let tailnet = "https://" + host
+let lone = try! NSRegularExpression(
+  pattern: "^" + NSRegularExpression.escapedPattern(for: tailnet) + #"(?!/admin(?![\w-]))([/?#]\S*)?$"#)
 let textTypes: Set<NSPasteboard.PasteboardType> = [.string, .html, .rtf, .URL]
 let leaveAlone: Set<String> = ["org.nspasteboard.ConcealedType", "org.nspasteboard.TransientType"]
 let keepWindow: TimeInterval = 2
@@ -10,7 +16,7 @@ let keepWindow: TimeInterval = 2
 func shareable(_ text: String) -> String? {
   let url = text.trimmingCharacters(in: .whitespacesAndNewlines)
   guard lone.firstMatch(in: url, range: NSRange(url.startIndex..., in: url)) != nil else { return nil }
-  return "https://app.loops.so" + url.dropFirst("https://admin.your-tailnet.ts.net".count)
+  return "https://app.loops.so" + url.dropFirst(tailnet.count)
 }
 
 if CommandLine.arguments.count == 2 {
