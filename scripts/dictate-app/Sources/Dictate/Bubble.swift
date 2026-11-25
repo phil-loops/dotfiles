@@ -6,7 +6,7 @@ import AppKit
 final class Bubble {
     private let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 520, height: 60),
                                 styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
-    private let label = NSTextField(wrappingLabelWithString: "")
+    private let label = Words(wrappingLabelWithString: "")
 
     init() {
         panel.level = .statusBar
@@ -24,8 +24,9 @@ final class Bubble {
         backdrop.layer?.masksToBounds = true
         label.font = .systemFont(ofSize: 15)
         label.textColor = .labelColor
-        label.maximumNumberOfLines = 3
-        label.lineBreakMode = .byTruncatingHead
+        label.isSelectable = false
+        label.lineBreakMode = .byWordWrapping
+        label.preferredMaxLayoutWidth = 488
         label.translatesAutoresizingMaskIntoConstraints = false
         backdrop.addSubview(label)
         NSLayoutConstraint.activate([
@@ -60,4 +61,9 @@ final class Bubble {
     }
 
     func hide() { panel.orderOut(nil) }
+}
+
+/// The box's text: never selected or clicked, so a press anywhere on the box drags it.
+private final class Words: NSTextField {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
