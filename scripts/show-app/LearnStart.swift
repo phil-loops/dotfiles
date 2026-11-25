@@ -81,16 +81,10 @@ enum LearnDue {
     }
 }
 
-/// Learn's shelf group of due re-tests: the top few, the rest folded.
+/// Learn's shelf suggestion between sessions: the one re-test that's most due, never the backlog or its size.
 func dueShelfRows() -> [ShelfRow] {
-    let due = LearnDue.concepts
-    guard !due.isEmpty else { return [] }
-    let shown = LearnDue.expanded ? due : Array(due.prefix(WorkspaceController.foldAfter))
-    var rows = [ShelfRow.dueHeader(due.count)] + shown.map(ShelfRow.due)
-    if due.count > WorkspaceController.foldAfter {
-        rows.append(.dueFold(hidden: due.count - WorkspaceController.foldAfter, expanded: LearnDue.expanded))
-    }
-    return rows
+    guard let next = LearnDue.concepts.first else { return [] }
+    return [.dueHeader(1), .due(next)]
 }
 
 /// The cell for a Due-group row, or nil for every other shelf row.
@@ -106,8 +100,8 @@ func dueShelfView(_ row: ShelfRow) -> NSView? {
     switch row {
     case .dueHeader(let count):
         let header = NSTextField(labelWithString: "")
-        header.attributedStringValue = NSAttributedString(string: "Due  ", attributes: [.font: NSFont.systemFont(ofSize: 12, weight: .semibold), .foregroundColor: NSColor.secondaryLabelColor])
-            + NSAttributedString(string: "\(count)", attributes: [.font: NSFont.systemFont(ofSize: 12), .foregroundColor: NSColor.tertiaryLabelColor])
+        _ = count
+        header.attributedStringValue = NSAttributedString(string: "Next up", attributes: [.font: NSFont.systemFont(ofSize: 12, weight: .semibold), .foregroundColor: NSColor.secondaryLabelColor])
         return header
     case .dueFold(let hidden, let expanded):
         let fold = label(expanded ? "Show fewer" : "Show \(hidden) more", .systemFont(ofSize: 11.5, weight: .medium), .secondaryLabelColor)
@@ -157,8 +151,9 @@ func createTutorSession(title: String, slug: String) throws -> String {
     let template: [String: Any] = [
         "mode": "tutor",
         "title": title,
+        "format": 2,
         "stations": [],
-        "rungs": [],
+        "steps": [],
         "notes": [],
         "agent": ["session": UUID().uuidString.lowercased()],
     ]
@@ -318,6 +313,12 @@ extension AppDelegate {
 
 let learnKeys = [
     KeyBinding(id: "tutor.new", menu: "Tutor", title: "New Session…", key: "n", modifiers: .command, workspaces: [.learn]) { $0.askNewTutorSession() },
+    KeyBinding(id: "tutor.ask", menu: "Tutor", title: "Ask the Tutor", key: "l", modifiers: .command, workspaces: [.learn],
+               isEnabled: { $0.tutor?.session?.isStaged == true }) { $0.tutor?.stageAsk() },
+    KeyBinding(id: "tutor.earlier", menu: "Tutor", title: "Earlier Step", key: "[", modifiers: [.command, .option], workspaces: [.learn],
+               isEnabled: { $0.tutor?.session?.isStaged == true }) { $0.tutor?.stageLook(-1) },
+    KeyBinding(id: "tutor.later", menu: "Tutor", title: "Later Step", key: "]", modifiers: [.command, .option], workspaces: [.learn],
+               isEnabled: { $0.tutor?.session?.isStaged == true }) { $0.tutor?.stageLook(1) },
 ]
 
 /// `--tutor-start "<re-test <concept> | text>"`: what ↵ on a due re-test or ⌘N does, without a window — create the session, boot its tutor, stream the reply.

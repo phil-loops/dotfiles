@@ -11,6 +11,28 @@ struct TutorSession: Decodable {
     let rungs: [Rung]
     let agent: Agent?
     let notes: [Note]?
+    /// 2: typed steps (TutorStep.swift) in `steps`, shown one at a time on the stage; absent: rungs on the worksheet.
+    let format: Int?
+    let steps: [TutorStep]
+
+    enum CodingKeys: String, CodingKey { case mode, kind, title, replyTo, stations, due, rungs, agent, notes, format, steps }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        mode = try c.decodeIfPresent(String.self, forKey: .mode)
+        kind = try c.decodeIfPresent(String.self, forKey: .kind)
+        title = try c.decode(String.self, forKey: .title)
+        replyTo = try c.decodeIfPresent(String.self, forKey: .replyTo)
+        stations = try c.decodeIfPresent([Station].self, forKey: .stations)
+        due = try c.decodeIfPresent([Due].self, forKey: .due)
+        agent = try c.decodeIfPresent(Agent.self, forKey: .agent)
+        notes = try c.decodeIfPresent([Note].self, forKey: .notes)
+        format = try c.decodeIfPresent(Int.self, forKey: .format)
+        steps = try c.decodeIfPresent([TutorStep].self, forKey: .steps) ?? []
+        rungs = format == 2 ? [] : try c.decode([Rung].self, forKey: .rungs)
+    }
+
+    var isStaged: Bool { format == 2 }
 
     struct Agent: Decodable {
         let session: String?
@@ -197,7 +219,7 @@ func isoDate(_ text: String) -> Date? {
 /// The Learn workspace's own tutor: one headless `claude -p` session per tutor file, one turn at a time, later sends queued.
 final class TutorAgent {
     static var all: [String: TutorAgent] = [:]
-    static let allowedTools = "Read,Edit,Write,Grep,Glob,Bash(~/.dotfiles/scripts/learn:*),Bash(~/.dotfiles/scripts/sim-play:*),Bash(date:*)"
+    static let allowedTools = "Read,Edit,Write,Grep,Glob,Bash(~/.dotfiles/scripts/learn:*),Bash(~/.dotfiles/scripts/sim-play:*),Bash(~/.dotfiles/scripts/show --tutor-check:*),Bash(date:*)"
     static let workingDirectory = ("~/.dotfiles" as NSString).expandingTildeInPath
     /// Passed through to the tutor when set, so a test can point `learn` at a scratch graph.
     static let passedEnvironment = ["LEARNING_GRAPH", "LEARNING_MEMORY"]
@@ -265,6 +287,7 @@ final class TutorAgent {
 
     private var bootPrompt: String {
         let answers = answersURL(sessionPath).path
+        if (try? loadTutorSession(sessionPath))?.isStaged == true { return stagedBootPrompt(answers) }
         return """
         You are the tutor for one Show worksheet, the session file \(sessionPath). Teach by ~/.dotfiles/.claude/skills/tutor/SKILL.md; for an opening "re-test <concept>", by ~/.dotfiles/.claude/skills/retest/SKILL.md instead (`learn concept <id>` gives its history), one situation only.
         Every turn:
@@ -641,9 +664,21 @@ final class TutorController: NSObject, NSTextViewDelegate {
     /// The tutor's live row, in its own slot under the thread so a thread redraw never touches it.
     let agentRow = NSStackView()
     var agent: TutorAgent?
+    var composerBar: NSView?
+    /// The stage (format 2): an earlier step being looked at, reveal frames played so far, shape refusals already sent, the ask bar.
+    var stageViewing: String?
+    var stagePlayed: [String: Int] = [:]
+    /// Steps whose reveal the learner is waiting on, so it plays frame by frame when it lands.
+    var stageAwaiting: Set<String> = []
+    var stagePlayer: Timer?
+    var stageAsked: Set<String> = []
+    var stageAsking = false
 
     var window: NSWindow? { viewController.view.window }
-    var currentRungID: String? { session.flatMap { currentRung($0, answers)?.id } }
+    var currentRungID: String? {
+        guard let session else { return nil }
+        return session.isStaged ? currentStep(session, answers)?.id : currentRung(session, answers)?.id
+    }
 
     override init() {
         super.init()
@@ -707,6 +742,7 @@ final class TutorController: NSObject, NSTextViewDelegate {
         composerBar.alignment = .leading
         composerBar.spacing = 6
         composerBar.edgeInsets = NSEdgeInsets(top: 12, left: Self.margin, bottom: 14, right: 24)
+        self.composerBar = composerBar
         let divider = NSBox()
         divider.boxType = .separator
         let detail = NSStackView(views: [scroll, divider, composerBar])
@@ -782,7 +818,9 @@ final class TutorController: NSObject, NSTextViewDelegate {
         session = fresh
         sidecar = loadSidecar(path)
         answers = sidecar.answers
-        let current = currentRung(fresh, answers)?.id
+        let current = fresh.isStaged
+            ? fresh.steps.first { stepPhase($0, answers[$0.id]) != .done }.map { "\($0.id) \(stepPhase($0, answers[$0.id]))" }
+            : currentRung(fresh, answers)?.id
         let moved = !hasRendered || current != lastCurrent
         let focusedField = window?.firstResponder as? AnswerField
         let focused = focusedField?.partID
@@ -836,6 +874,10 @@ final class TutorController: NSObject, NSTextViewDelegate {
         fields = []
         focusRungView = nil
         guard let session else { return }
+        if session.isStaged { return rebuildStage(session) }
+        stagePlayer?.invalidate()
+        viewController.splitViewItems.first?.isCollapsed = false
+        composerBar?.isHidden = false
         renderSidebar(session)
         title = session.title
         subtitle = "\(session.rungs.filter { answers[$0.id] != nil }.count) of \(session.rungs.count) answered"
@@ -967,7 +1009,7 @@ final class TutorController: NSObject, NSTextViewDelegate {
     }
 
     /// Hands a line to whoever tutors this file: its own headless session, or the `replyTo` terminal session in older files.
-    private func deliver(_ message: String) {
+    func deliver(_ message: String) {
         guard let path, let session else { return }
         if session.usesAgent {
             agent?.send(message)
@@ -981,6 +1023,8 @@ final class TutorController: NSObject, NSTextViewDelegate {
     func sendFocused() {
         if window?.firstResponder === composer {
             sendMessage()
+        } else if session?.isStaged == true {
+            sendStep()
         } else if currentRungID != nil {
             sendAnswer()
         } else if !composer.string.isEmpty {
@@ -1008,6 +1052,13 @@ final class TutorController: NSObject, NSTextViewDelegate {
             existing.isEmpty || existing.last?.isWhitespace == true ? existing + text : existing + " " + text
         }
         if path == source { reload() }
+        if path == source, session?.isStaged == true, let part, let id = currentRungID {
+            drafts[id, default: [:]][part] = append(drafts[id]?[part] ?? "")
+            saveDrafts()
+            reload()
+            focusFirstField()
+            return sendStep()
+        }
         let fresh = try? loadTutorSession(source)
         let saved = try? readSidecar(source)
         let current = fresh.flatMap { lesson in saved.flatMap { currentRung(lesson, $0.answers) } }
@@ -1200,7 +1251,7 @@ final class TutorController: NSObject, NSTextViewDelegate {
         scroll.reflectScrolledClipView(scroll.contentView)
     }
 
-    private func showHint(_ text: String) {
+    func showHint(_ text: String) {
         NSSound.beep()
         hint?.stringValue = text
         hint?.isHidden = false

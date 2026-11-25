@@ -149,7 +149,31 @@ The Learn workspace (⌘2) runs a `/tutor` session as a worksheet: one rung at a
 - `show --tutor-check <file>` prints the current rung, the station states and each rung's rail order without opening a window.
 - **Starting from inside the app.** The shelf has a **Due** group (the graph's due re-tests, read with `learn json`, `LEARNING_MEMORY=0`, read-only, refreshed when the window gains focus). ↵ or a double-click on a due row, there or under the open session's "Due re-tests", creates a session from the template (`title`, empty `rungs`, a fresh `agent.session`) and boots its tutor on `re-test <concept>`. ↵ on a station sends `learner wants station <name>`. **⌘N** asks "What do you want to learn?" and boots a new session on `/tutor <text>`. `Show --tutor-start "<re-test <concept> | text>"` and `Show --tutor-turn <file> "<message>"` do the same without a window.
 
-Session file `~/.dotfiles/show/tutor/<name>.json` (Claude writes it):
+**New sessions are format 2: the stage.** One step fills the screen: a quiet station strip, the setup, a timeline (full times) beside the watched state, then only the input of the phase the learner is in — predict (with confidence), then the reveal plays frame by frame with changed values marked, then explain, then the tutor's consolidation and **Next step** (⌘↩). ⌥⌘[ / ⌥⌘] look at earlier steps; ⌘L asks the tutor. The shelf offers one **Next up** re-test, never the backlog. Show refuses a step that breaks the shape (two questions in predict, a reveal or explain before the prediction, a frame setting an unwatched key) and sends the tutor `fix step <id> in <file>: <problems>`; `show --tutor-check` prints each step's phase and any refusal. The protocol and schema live in `stagedBootPrompt` (`scripts/show-app/TutorStep.swift`):
+
+```json
+{
+  "mode": "tutor", "format": 2, "title": "…",
+  "stations": [{ "name": "…", "state": "done | current | todo" }],
+  "steps": [{
+    "id": "s1", "station": "…", "title": "…", "kind": "predict | invent",
+    "setup": "markdown: the concrete system and the one action",
+    "watch": ["lock key", "holder"],
+    "frames": [{ "t": "Tue 02:00", "event": "A takes the lock", "state": { "lock key": "held", "holder": "A" } }],
+    "predict": "one question",
+    "reveal": { "frames": [ … ], "result": "what happened", "source": "sim-play <scenario> (optional)" },
+    "explain": "one question, written with the reveal",
+    "verdict": "held | revised (none on invent)",
+    "consolidate": "markdown, written after the explanation"
+  }],
+  "notes": [{ "at": "ISO-8601", "text": "markdown" }],
+  "agent": { "session": "<uuid>" }
+}
+```
+
+Phases come from the step and its answers entry (`{"parts": {"predict", "explain"}, "confidence", "at"}`): predict → waiting for the reveal (`tutor predicted: <file> step <id>`) → explain → waiting for the consolidation (`tutor explained: <file> step <id>`, which also appends the next step) → done.
+
+Format 1, the worksheet (older files, no `format`) — session file `~/.dotfiles/show/tutor/<name>.json` (Claude writes it):
 
 ```json
 {

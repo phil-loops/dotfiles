@@ -636,9 +636,18 @@ func shelfEntry(_ path: String) -> ShelfEntry? {
     case .learn:
         guard let session = try? loadTutorSession(path) else { return nil }
         let answers = loadAnswers(path)
-        let answered = session.rungs.filter { answers[$0.id] != nil }.count
-        let waiting = currentRung(session, answers) != nil
-        let progress = "\(answered) of \(session.rungs.count) answered" + (waiting ? "" : " · Claude's turn")
+        let waiting: Bool
+        let progress: String
+        if session.isStaged {
+            let step = currentStep(session, answers)
+            let phase = step.map { stepPhase($0, answers[$0.id]) }
+            waiting = phase == .predict || phase == .explain
+            progress = step.map { $0.title } ?? "Claude's turn"
+        } else {
+            let answered = session.rungs.filter { answers[$0.id] != nil }.count
+            waiting = currentRung(session, answers) != nil
+            progress = "\(answered) of \(session.rungs.count) answered" + (waiting ? "" : " · Claude's turn")
+        }
         return ShelfEntry(path: path, workspace: workspace, title: session.title, state: waiting ? .waiting : .done, progress: progress, touched: touched,
                           topic: Topics.cached(session.replyTo))
     case .runs:

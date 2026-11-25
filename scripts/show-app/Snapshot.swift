@@ -12,6 +12,14 @@ func tutorCheck(_ raw: String) -> Int32 {
         print("agent: \(session.agent?.session ?? "-") (\(session.usesAgent ? "answers go to the headless tutor" : "answers go to replyTo via claude-say"))")
         print("thread: \(sidecar.messages.count) learner messages, \((session.notes ?? []).count) tutor notes")
         print("answers: \(answersURL(path).path)")
+        if session.isStaged {
+            for step in session.steps {
+                let problems = stepProblems(step, answers[step.id])
+                print("step: \(step.id) \(stepPhase(step, answers[step.id])) — \(step.title)" + (problems.isEmpty ? "" : " — refused: \(problems.joined(separator: "; "))"))
+            }
+            print("current: \(currentStep(session, answers).map { "\($0.id) (\(stepPhase($0, answers[$0.id])))" } ?? "none (waiting for Claude)")")
+            return 0
+        }
         print("answered: \(session.rungs.filter { answers[$0.id] != nil }.map(\.id).joined(separator: ", "))")
         if let rung = currentRung(session, answers) {
             print("current: \(rung.id) (\(rung.ask); parts \(rung.answerParts.map(\.id).joined(separator: ", ")); confidence \(rung.isPredict ? "required" : "optional"))")
