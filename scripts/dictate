@@ -41,7 +41,10 @@ build() {
 </dict>
 </plist>
 PLIST
-  codesign --force --sign - --identifier com.philbrockman.dictate "$app" >&2
+  # a fixed local identity, so macOS keeps Dictate's Microphone and Input Monitoring grants across rebuilds (ad hoc changes
+  # identity every build); falls back to ad hoc on a machine without it
+  codesign --force --sign "Dictate Local Signing" --identifier com.philbrockman.dictate "$app" >&2 2>/dev/null \
+    || codesign --force --sign - --identifier com.philbrockman.dictate "$app" >&2
   echo "$sha" > "$stamp"
 }
 

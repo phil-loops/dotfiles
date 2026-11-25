@@ -11,6 +11,7 @@ final class Dictate: NSObject, NSApplicationDelegate {
     private var taps = GlobeTaps()
     private var tap: CFMachPort?
     private var waiting: Timer?
+    private var modifierLog = 20
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         voice.idleMenu = { [weak self] menu in self?.idleMenu(menu) }
@@ -20,7 +21,10 @@ final class Dictate: NSObject, NSApplicationDelegate {
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
-        for url in urls { if let pane = Logic.pane(of: url) { toggle(pane: pane) } }
+        for url in urls {
+            note("link \(url.absoluteString)")
+            if let pane = Logic.pane(of: url) { toggle(pane: pane) }
+        }
     }
 
     private func idleMenu(_ menu: NSMenu) {
@@ -47,6 +51,7 @@ final class Dictate: NSObject, NSApplicationDelegate {
                                     return Unmanaged.passUnretained(event)
                                 }, userInfo: Unmanaged.passUnretained(self).toOpaque())
         guard let tap else {
+            if waiting == nil { note("no Input Monitoring yet; 🌐 🌐 is off until it's allowed") }
             waiting = waiting ?? Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
                 MainActor.assumeIsolated { self?.listen() }
             }
@@ -56,11 +61,16 @@ final class Dictate: NSObject, NSApplicationDelegate {
         waiting = nil
         CFRunLoopAddSource(CFRunLoopGetMain(), CFMachPortCreateRunLoopSource(nil, tap, 0), .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
+        note("listening for 🌐 🌐")
         voice.reset()
     }
 
     private func key(_ type: CGEventType, _ event: CGEvent) {
         let time = Double(event.timestamp) / 1_000_000_000
+        if type == .flagsChanged, modifierLog > 0 {
+            modifierLog -= 1
+            note("modifier key \(event.getIntegerValueField(.keyboardEventKeycode)), fn \(event.flags.contains(.maskSecondaryFn) ? "down" : "up")")
+        }
         switch type {
         case .tapDisabledByTimeout, .tapDisabledByUserInput:
             if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
@@ -72,6 +82,7 @@ final class Dictate: NSObject, NSApplicationDelegate {
     }
 
     private func toggleLastPane() {
+        note("🌐 🌐")
         if voice.active { voice.finish(); return }
         Task.detached {
             let clients = run(["tmux", "list-clients", "-F", "#{client_activity}\t#{pane_id}"])
@@ -84,20 +95,22 @@ final class Dictate: NSObject, NSApplicationDelegate {
     }
 
     private func toggle(pane: String) {
-        if voice.active { voice.finish(); return }
-        guard !voice.busy else { return }
+        if voice.active { note("finish"); voice.finish(); return }
+        guard !voice.busy else { note("busy transcribing; ignored"); return }
         Task.detached {
             let listing = run([claudeSay, "--json"])
             let session = listing.status == 0 ? Logic.session(in: pane, listing: listing.out) : nil
             await MainActor.run { [weak self] in
                 guard let self else { return }
-                guard let session else { tell(pane, "No Claude session in this pane to dictate to"); return }
+                guard let session else { note("no Claude session in \(pane)"); tell(pane, "No Claude session in this pane to dictate to"); return }
+                note("start → \(session.session_id.prefix(8)) in \(session.pane)")
                 self.voice.onError = { tell(session.pane, $0) }
                 tell(session.pane, "Listening; 🌐 🌐 to finish")
                 self.voice.start(to: session.topic.isEmpty ? session.pane : session.topic) { text in
                     Task.detached {
                         let sent = run([claudeSay, session.session_id, "--draft", "--unsigned", text])
-                        guard sent.status != 0 else { return }
+                        guard sent.status != 0 else { note("delivered"); return }
+                        note("not delivered: \(String(decoding: sent.err, as: UTF8.self))")
                         let reason = String(decoding: sent.err, as: UTF8.self).split(separator: "\n").first.map(String.init) ?? "claude-say failed"
                         await MainActor.run {
                             NSPasteboard.general.clearContents()
@@ -108,6 +121,19 @@ final class Dictate: NSObject, NSApplicationDelegate {
                 }
             }
         }
+    }
+}
+
+/// One line per thing Dictate saw or did, in ~/.cache/dictate/events.log, so a key that seemed to do nothing can be traced.
+func note(_ line: String) {
+    let log = URL(fileURLWithPath: ("~/.cache/dictate/events.log" as NSString).expandingTildeInPath)
+    let entry = Data("\(ISO8601DateFormatter().string(from: Date())) \(line)\n".utf8)
+    if let handle = try? FileHandle(forWritingTo: log) {
+        handle.seekToEndOfFile()
+        handle.write(entry)
+        try? handle.close()
+    } else {
+        try? entry.write(to: log)
     }
 }
 
