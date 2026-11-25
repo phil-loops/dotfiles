@@ -67,7 +67,7 @@ final class Voice: NSObject, AVAudioRecorderDelegate {
                 ])
                 recorder.delegate = self
                 guard recorder.record() else { throw CocoaError(.fileWriteUnknown) }
-                NSSound(named: "Tink")?.play()
+                NSSound(named: "Pop")?.play()
                 self.file = file
                 self.recorder = recorder
                 busy = false
@@ -82,7 +82,7 @@ final class Voice: NSObject, AVAudioRecorderDelegate {
 
     @objc func finish() {
         guard let recorder else { return }
-        NSSound(named: "Pop")?.play()
+        NSSound(named: "Bottle")?.play()
         recorder.delegate = nil
         recorder.stop()
         self.recorder = nil
