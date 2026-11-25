@@ -65,7 +65,7 @@ final class SpokenReview {
         return .success(review)
     }
 
-    private init(dir: URL, title: String, repoPath: String) {
+    init(dir: URL, title: String, repoPath: String) {
         self.dir = dir
         self.title = title
         self.repoPath = repoPath
@@ -96,6 +96,9 @@ final class SpokenReview {
         }
     }
 
+    /// Dictate stopped on its own (🎤): stop writing places down, without asking it to finish again.
+    func stopped() { finishing = true }
+
     func finish() {
         guard !finishing else { return }
         finishing = true
@@ -104,14 +107,35 @@ final class SpokenReview {
         NSWorkspace.shared.open(link.url!)
     }
 
-    enum State: Equatable { case recording, transcribing, done, neverStarted }
+    enum State: Equatable { case recording, transcribing(done: Int, total: Int), done, neverStarted }
 
-    /// Read from the folder: Dictate's files say whether it recorded, and the notes file that the join step is through.
+    /// Read from the folder: Dictate's files say whether it recorded, stopped and how far transcribing is, and the
+    /// notes file that the join step is through.
     var state: State {
         let has = { FileManager.default.fileExists(atPath: self.dir.appendingPathComponent($0).path) }
         if has("notes.md") { return .done }
         if !has("recording.json") { return Date().timeIntervalSince(began) > 8 ? .neverStarted : .recording }
-        return finishing || has("utterances.json") ? .transcribing : .recording
+        guard finishing || has("stopped.json") || has("utterances.json") else { return .recording }
+        let progress = (try? Data(contentsOf: dir.appendingPathComponent("progress.json")))
+            .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Int] } ?? [:]
+        return .transcribing(done: progress["done"] ?? 0, total: progress["total"] ?? 0)
+    }
+
+    /// What the title bar says about this review.
+    var status: String {
+        switch state {
+        case .transcribing(let done, let total) where total > 0: return "transcribing your review · \(done) of \(total)"
+        case .transcribing, .done: return "transcribing your review…"
+        case .recording, .neverStarted: return finishing ? "transcribing your review…" : "● reviewing \(title) · ⌘⇧R finishes"
+        }
+    }
+
+    /// The Inbox message the join step posted for this review: the newest one under its name.
+    var inboxKey: String? {
+        guard let data = FileManager.default.contents(atPath: inboxPath),
+              let deck = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let sections = deck["sections"] as? [[String: Any]] else { return nil }
+        return sections.first { $0["title"] as? String == "Spoken review · \(title)" }?["id"] as? String
     }
 
     /// The branches whose `stack-project` names `forest`.
@@ -183,10 +207,7 @@ extension AppDelegate {
     }
 
     /// What the title bar says while a review runs.
-    var spokenReviewStatus: String? {
-        guard let review = spokenReview else { return nil }
-        return review.finishing ? "transcribing the review of \(review.title)…" : "● reviewing \(review.title) · ⌘⇧R finishes"
-    }
+    var spokenReviewStatus: String? { spokenReview?.status }
 
     /// Called each second: a review Dictate finished (by ⌘⇧R or 🎤) stops sampling, and one whose notes are written ends.
     func settleSpokenReview() {
@@ -195,13 +216,13 @@ extension AppDelegate {
         case .recording:
             return
         case .transcribing:
-            if !review.finishing {
-                review.finish()
-                updateTitle()
-            }
+            review.stopped()
+            updateTitle()
         case .done:
             endSpokenReview()
-            workspaces[active]?.say("Your review of \(review.title) is in the Inbox (⌘4) and on the clipboard")
+            openInbox()
+            if let key = review.inboxKey { workspaces[.inbox]?.currentDeck?.select(section: key) }
+            workspaces[.inbox]?.say("Your review of \(review.title), also on the clipboard")
         case .neverStarted:
             endSpokenReview()
             workspaces[active]?.say("Dictate didn't start recording; is it running and free?")
