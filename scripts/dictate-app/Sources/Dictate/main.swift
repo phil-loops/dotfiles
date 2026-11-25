@@ -2,14 +2,16 @@ import AppKit
 import CoreGraphics
 import ServiceManagement
 
-/// Dictate: 🌐 twice (or `Ctrl-a v` in tmux, as `dictate://pane/<id>`) records in the background; 🌐 twice again drops the
-/// transcript as a draft into the Claude session of the tmux pane you were last in, by `claude-say --draft`, so switching
-/// windows mid-sentence costs nothing and a pane whose session changed refuses instead of taking the words.
+/// Dictate: the 🎤 key (or 🌐 twice, or `Ctrl-a v` in tmux as `dictate://pane/<id>`) records in the background; 🎤 again or
+/// one 🌐 tap drops the transcript as a draft into the Claude session of the tmux pane you were last in, by `claude-say
+/// --draft`, so switching windows mid-sentence costs nothing and a pane whose session changed refuses the words.
 @MainActor
 final class Dictate: NSObject, NSApplicationDelegate {
     private let voice = Voice()
     private var taps = GlobeTaps()
     private var tap: CFMachPort?
+    private var source: CFRunLoopSource?
+    private var swallows = false
     private var waiting: Timer?
     private var modifierLog = 20
 
@@ -28,10 +30,17 @@ final class Dictate: NSObject, NSApplicationDelegate {
     }
 
     private func idleMenu(_ menu: NSMenu) {
-        menu.addItem(withTitle: tap == nil ? "Allow 🌐 🌐 in Input Monitoring…" : "🌐 🌐 dictates to your last tmux pane",
+        menu.addItem(withTitle: tap == nil ? "Allow 🎤 in Input Monitoring…" : "🎤 dictates to your last tmux pane",
                      action: tap == nil ? #selector(openInputMonitoring) : nil, keyEquivalent: "").target = self
+        if tap != nil, !swallows {
+            menu.addItem(withTitle: "Allow in Accessibility so 🎤 stops macOS dictation…", action: #selector(openAccessibility), keyEquivalent: "").target = self
+        }
         menu.addItem(.separator())
         menu.addItem(withTitle: "Quit Dictate", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
+    }
+
+    @objc private func openAccessibility() {
+        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
     }
 
     @objc private func openInputMonitoring() {
@@ -39,33 +48,44 @@ final class Dictate: NSObject, NSApplicationDelegate {
         NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")!)
     }
 
-    /// Watches the keyboard for 🌐 once Input Monitoring allows it, checking back until it does.
+    /// Watches the keyboard once Input Monitoring allows it. With Accessibility too, the watch also swallows the 🎤 key so
+    /// macOS's own dictation never starts beside Dictate; it checks back every few seconds and upgrades when that's granted.
     private func listen() {
-        guard tap == nil else { return }
+        let trusted = AXIsProcessTrusted()
+        guard tap == nil || (trusted && !swallows) else { return }
         if !CGPreflightListenEventAccess() { CGRequestListenEventAccess() }
-        let mask = CGEventMask(1 << CGEventType.flagsChanged.rawValue | 1 << CGEventType.keyDown.rawValue | 1 << systemDefined)
-        tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .listenOnly, eventsOfInterest: mask,
-                                callback: { _, type, event, context in
-                                    let app = Unmanaged<Dictate>.fromOpaque(context!).takeUnretainedValue()
-                                    MainActor.assumeIsolated { app.key(type, event) }
-                                    return Unmanaged.passUnretained(event)
-                                }, userInfo: Unmanaged.passUnretained(self).toOpaque())
-        guard let tap else {
-            if waiting == nil { note("no Input Monitoring yet; 🌐 🌐 is off until it's allowed") }
-            waiting = waiting ?? Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
-                MainActor.assumeIsolated { self?.listen() }
-            }
+        let mask = CGEventMask(1 << CGEventType.flagsChanged.rawValue | 1 << CGEventType.keyDown.rawValue
+                               | 1 << CGEventType.keyUp.rawValue | 1 << systemDefined)
+        let created = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: trusted ? .defaultTap : .listenOnly,
+                                        eventsOfInterest: mask, callback: { _, type, event, context in
+                                            let app = Unmanaged<Dictate>.fromOpaque(context!).takeUnretainedValue()
+                                            let swallow = MainActor.assumeIsolated { app.key(type, event) }
+                                            return swallow ? nil : Unmanaged.passUnretained(event)
+                                        }, userInfo: Unmanaged.passUnretained(self).toOpaque())
+        waiting = waiting ?? Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.listen() }
+        }
+        guard let created else {
+            if tap == nil { note("no Input Monitoring yet; the keys are off until it's allowed") }
             return
         }
-        waiting?.invalidate()
-        waiting = nil
-        CFRunLoopAddSource(CFRunLoopGetMain(), CFMachPortCreateRunLoopSource(nil, tap, 0), .commonModes)
-        CGEvent.tapEnable(tap: tap, enable: true)
-        note("listening for 🌐 🌐")
+        if let tap, let source {
+            CGEvent.tapEnable(tap: tap, enable: false)
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
+            CFMachPortInvalidate(tap)
+        }
+        tap = created
+        swallows = trusted
+        source = CFMachPortCreateRunLoopSource(nil, created, 0)
+        CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
+        CGEvent.tapEnable(tap: created, enable: true)
+        if trusted { waiting?.invalidate(); waiting = nil }
+        note(trusted ? "listening; 🎤 is Dictate's alone" : "listening; macOS dictation also hears 🎤 until Accessibility is allowed")
         voice.reset()
     }
 
-    private func key(_ type: CGEventType, _ event: CGEvent) {
+    /// Acts on one key event; true when the event should go no further (the 🎤 key, once Dictate may swallow it).
+    private func key(_ type: CGEventType, _ event: CGEvent) -> Bool {
         let time = ProcessInfo.processInfo.systemUptime
         let code = event.getIntegerValueField(.keyboardEventKeycode)
         if type == .flagsChanged, modifierLog > 0 {
@@ -75,8 +95,12 @@ final class Dictate: NSObject, NSApplicationDelegate {
         switch type {
         case .tapDisabledByTimeout, .tapDisabledByUserInput:
             if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
+        case .keyUp where code == micKey:
+            return swallows
+        case .keyUp:
+            break
         case .flagsChanged where code == 63:
-            if event.flags.contains(.maskSecondaryFn) { taps.press(at: time); return }
+            if event.flags.contains(.maskSecondaryFn) { taps.press(at: time); return false }
             switch taps.release(at: time) {
             case .double: toggleLastPane()
             case .single where voice.active:
@@ -88,7 +112,8 @@ final class Dictate: NSObject, NSApplicationDelegate {
             }
         case .keyDown where code == micKey:
             note("🎤 key")
-            toggleLastPane()
+            if event.getIntegerValueField(.keyboardEventAutorepeat) == 0 { toggleLastPane() }
+            return swallows
         case .keyDown where code == 179 || code == 63:
             break
         case let other where other.rawValue == systemDefined:
@@ -100,6 +125,7 @@ final class Dictate: NSObject, NSApplicationDelegate {
             if taps.pending, modifierLog > 0 { note("\(type == .keyDown ? "key" : "event \(type.rawValue)") \(code) between 🌐 taps") }
             taps.interrupt()
         }
+        return false
     }
 
     private func toggleLastPane() {
