@@ -68,6 +68,9 @@ Dark-additive first: (1) messages and decks carry the branch they concern (most 
 (2) the branch page shows them; (3) home shows the branch-less rest; (4) keystone — the rail loses the
 workspaces the branch page replaced. Each step is its own branch; 1–3 change nothing visible until 4.
 
+Status: (1) landed 11-25 as `show-note --branch <repo>/<branch> | --forest <repo>/<project>` → the message's
+`about` field (fce0f06c); wt-121940 moves spoken review onto it. (2) — canopy's pages reading `about` — is next.
+
 ## Messages with no branch
 
 Phil (11-25): these shouldn't be prominent. Proposal: the Dock icon's badge is their only signal (one quiet
