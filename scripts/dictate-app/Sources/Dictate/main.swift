@@ -7,7 +7,7 @@ import ServiceManagement
 /// one 🌐 tap delivers the words to whatever had focus at the start. A Claude pane in tmux gets them through `claude-say`,
 /// so switching windows mid-sentence costs nothing; any other app is brought back and gets them pasted.
 @MainActor
-final class Dictate: NSObject, NSApplicationDelegate {
+final class Dictate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let voice = Voice()
     private var taps = GlobeTaps()
     private var tap: CFMachPort?
@@ -84,6 +84,15 @@ final class Dictate: NSObject, NSApplicationDelegate {
         NSPasteboard.general.setString(text, forType: .string)
     }
 
+    private var auditioning: NSSound?
+
+    /// A sound plays as the pointer reaches it in the start or finish menu, so you hear each one before choosing.
+    func menu(_ menu: NSMenu, willHighlight item: NSMenuItem?) {
+        auditioning?.stop()
+        auditioning = (item?.representedObject as? String).flatMap { $0.isEmpty ? nil : NSSound(named: $0) }
+        auditioning?.play()
+    }
+
     private func idleMenu(_ menu: NSMenu) {
         func item(_ title: String, _ action: Selector?, on: Bool = false, tag: String? = nil, to parent: NSMenu? = nil) {
             let entry = (parent ?? menu).addItem(withTitle: title, action: action, keyEquivalent: "")
@@ -106,6 +115,7 @@ final class Dictate: NSObject, NSApplicationDelegate {
         for (title, current, action) in [("Start sound", Settings.startSound, #selector(chooseStartSound)),
                                          ("Finish sound", Settings.finishSound, #selector(chooseFinishSound))] {
             let sub = NSMenu()
+            sub.delegate = self
             item("None", action, on: current.isEmpty, tag: "", to: sub)
             sub.addItem(.separator())
             for name in Settings.sounds { item(name, action, on: current == name, tag: name, to: sub) }
