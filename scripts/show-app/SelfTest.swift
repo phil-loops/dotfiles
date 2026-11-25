@@ -357,6 +357,12 @@ final class SelfTestDriver {
             controller.saveDrafts()
         }
 
+        let listing = Data(#"[{"session_id":"aaa","pane":"%3","topic":"x"},{"session_id":"bbb","pane":"%12","topic":"y"}]"#.utf8)
+        check("a dictate link names its tmux pane", PaneDictation.pane(of: URL(string: "canopy://dictate?pane=12")!) == "%12"
+              && PaneDictation.pane(of: URL(string: "canopy://v2/b/loops/x?pane=12")!) == nil)
+        check("pane dictation targets the session in that pane, and none when it holds none",
+              PaneDictation.session(in: "%12", listing: listing)?.session_id == "bbb" && PaneDictation.session(in: "%7", listing: listing) == nil)
+
         switchKey(.review)
         scrolledPartway()
         app.workspaces[.canopy]?.canopy?.resume(at: Self.canopyPlace)

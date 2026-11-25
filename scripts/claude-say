@@ -8,7 +8,7 @@ sent, so a note can't be silently lost in an unattended pane. --draft (alias
 still accepted as a no-op for muscle memory.
 
 Every note is SIGNED with the sender's worktree name ("[dotfiles-wt-220810] …") unless
-it already starts with a [sig] — the receiver must never have to guess who's talking.
+--unsigned (Phil's own words, e.g. Show's dictation) or it already starts with a [sig] — the receiver must never have to guess who's talking.
 
 <who> picks a LIVE session (from the presence registry, see claude-sessions) by:
   • session-id prefix      claude-say 9272 "…"
@@ -252,7 +252,7 @@ def main():
     # unsigned notes get misattributed across sessions (2026-08-19: a receiver had to
     # deny authorship of work a sender's anonymous note implied was theirs) — sign with
     # the sender's worktree name; an existing [sig] prefix (manual, forward) stands.
-    if not msg.startswith("["):
+    if not msg.startswith("[") and "--unsigned" not in flags:
         top = sh(["git", "rev-parse", "--show-toplevel"]).strip()
         msg = "[%s] %s" % (os.path.basename(top or os.getcwd()).lstrip("."), msg)
 

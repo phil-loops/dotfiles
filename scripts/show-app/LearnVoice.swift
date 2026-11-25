@@ -32,6 +32,8 @@ final class LearnVoice: NSObject, AVAudioRecorderDelegate {
 
     var active: Bool { receive != nil }
     var onError: ((String) -> Void)?
+    var listening = "Learn is listening"
+    private static weak var live: LearnVoice?
 
     override init() {
         super.init()
@@ -66,6 +68,11 @@ final class LearnVoice: NSObject, AVAudioRecorderDelegate {
         if recording != nil { finish(); return }
         guard !busy else { return }
         if failure != nil { transcribe(); return }
+        if let other = Self.live, other !== self, other.active {
+            onError?("Another dictation is still listening. Finish it with ⌃⌥↩ first.")
+            return
+        }
+        Self.live = self
         self.receive = receive
         busy = true
         configureButton()
@@ -138,7 +145,7 @@ final class LearnVoice: NSObject, AVAudioRecorderDelegate {
         }
         let label: String
         if recording != nil {
-            label = "Learn is listening"
+            label = listening
             action(hotKey == nil ? "Finish dictation" : "Finish dictation  ⌃⌥↩", #selector(finish))
             action("Discard recording", #selector(reset))
         } else if failure != nil {

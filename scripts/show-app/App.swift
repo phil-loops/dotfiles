@@ -107,6 +107,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     var active: Workspace { shell.active }
     var tutor: TutorController? { workspaces[.learn]?.tutor }
+    @MainActor lazy var paneDictation = PaneDictation()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let start = prefs.string(forKey: "workspace.active").flatMap(Workspace.init(rawValue:)) ?? .canopy
@@ -271,6 +272,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         let requests = urls.compactMap { url -> ShowRequest? in
             if url.isFileURL, let picture = takeShootRequest(url.path) {
                 if openedEarly == nil { shootLive(to: picture) }
+                return nil
+            }
+            if let pane = PaneDictation.pane(of: url) {
+                paneDictation.toggle(pane: pane)
                 return nil
             }
             if url.scheme == "canopy" {
