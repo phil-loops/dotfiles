@@ -1,0 +1,12 @@
+#!/bin/zsh
+# Rewrites copied admin.your-tailnet.ts.net links outside /admin to app.loops.so.
+# `tailnet-link-clip <text>` prints the rewrite once; no args watches the clipboard.
+set -euo pipefail
+src=${0:A:h}/tailnet-link-clip.swift
+bin=$HOME/.cache/tailnet-link-clip/tailnet-link-clip
+if [[ ! -x $bin || $src -nt $bin ]]; then
+  mkdir -p ${bin:h}
+  swiftc -O -o $bin.tmp $src
+  mv $bin.tmp $bin
+fi
+exec $bin "$@"

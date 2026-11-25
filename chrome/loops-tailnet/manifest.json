@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "Loops via tailnet",
+  "version": "1.0",
+  "description": "Opens app.loops.so pages on the tailnet admin host. Click the icon to turn it off.",
+  "permissions": ["declarativeNetRequest"],
+  "host_permissions": ["https://app.loops.so/*"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_title": "Loops via tailnet: on" },
+  "declarative_net_request": {
+    "rule_resources": [{ "id": "tailnet", "enabled": true, "path": "rules.json" }]
+  }
+}
