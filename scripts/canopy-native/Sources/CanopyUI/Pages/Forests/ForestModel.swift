@@ -620,6 +620,11 @@ public final class ForestModel {
         verdicts[pid] = IntegrationVerdict(state: .checking, detail: had?.detail ?? "", stamp: stamp)
         let r = await transport.ask(transport.atRepo(p.repo, "/integrate"), ["project": p.name], as: IntegrateAnswer.self)
         guard verdicts[pid]?.stamp == stamp else { return }
+        // left before the answer came (the page closed): nothing was learned, so the next visit asks again
+        if Task.isCancelled {
+            verdicts[pid] = had
+            return
+        }
         // a check that never ran is not a conflict: the server merely went away
         verdicts[pid] = IntegrationVerdict(
             state: r == nil || r?.ok == false ? .failed : r?.clean == true ? .clean : .conflicts,

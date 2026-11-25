@@ -1053,6 +1053,16 @@ private func showRows(_ a: AppModel) {
         #expect(a.forestModel.verdict("r:tree")?.state == .failed)
         #expect(!a.forestModel.integratable("r:solo"), "a one-branch forest is its own integration")
     }
+
+    @Test func aCheckCancelledByLeavingThePageLeavesNoVerdict() async {
+        let a = page()
+        let check = Task { @MainActor in await a.forestModel.checkIntegration("r:tree") }
+        check.cancel()
+        await check.value
+        #expect(a.forestModel.verdict("r:tree") == nil, "not 'couldn't run': the next visit asks again")
+        await a.forestModel.checkIntegration("r:tree")
+        #expect(a.forestModel.verdict("r:tree")?.state == .failed, "and a check that really ran without a server still says so")
+    }
 }
 
 /// structure.test.ts for this folder: writes go through commands, never straight to the server;
