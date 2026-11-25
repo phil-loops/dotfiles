@@ -152,7 +152,6 @@ final class Dictate: NSObject, NSApplicationDelegate {
                 guard let session else { note("no Claude session in \(pane)"); tell(pane, "No Claude session in this pane to dictate to"); return }
                 note("start → \(session.session_id.prefix(8)) in \(session.pane)")
                 self.voice.onError = { tell(session.pane, $0) }
-                tell(session.pane, "Listening; 🌐 🌐 to finish")
                 self.voice.start(to: session.topic.isEmpty ? session.pane : session.topic) { text in
                     Task.detached {
                         let sent = run([claudeSay, session.session_id, "--draft", "--unsigned", text])
