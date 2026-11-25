@@ -2,7 +2,8 @@
 # dictate — the menu-bar dictation app: 🌐 twice (or Ctrl-a v in tmux) records, 🌐 twice again drops the words as a draft
 # into the Claude session of your last tmux pane. Source in scripts/dictate-app; builds in ~/.cache/dictate, and the app
 # lives in /Applications so Spotlight finds it.
-#   dictate             build if the source changed, then (re)start the app
+#   dictate             build if the source changed, then start the app; a running Dictate is never killed, it moves onto
+#                       the new build by itself once it isn't recording or transcribing
 #   dictate --build     build only
 #   dictate --selftest  check the pure pieces (taps, targeting, preview) without a mic or keyboard
 set -euo pipefail
@@ -46,6 +47,8 @@ PLIST
   codesign --force --sign "Dictate Local Signing" --identifier com.philbrockman.dictate "$app" >&2 2>/dev/null \
     || codesign --force --sign - --identifier com.philbrockman.dictate "$app" >&2
   echo "$sha" > "$stamp"
+  # written last, once the new build is whole and signed: the running Dictate watches it to know when to move over
+  echo "$sha" > "$cache/installed"
 }
 
 case "${1:-}" in
@@ -53,9 +56,6 @@ case "${1:-}" in
   --selftest) build; "$app/Contents/MacOS/Dictate" --selftest ;;
   "")
     build
-    # the running copy, by its exact executable path, never by name
-    pid="$(ps -axo pid=,comm= | awk -v p="$app/Contents/MacOS/Dictate" '$2 == p { print $1 }')"
-    [[ -n "$pid" ]] && kill $=pid && sleep 0.5
-    open "$app" ;;
+    open -g "$app" ;;
   *) echo "usage: dictate [--build | --selftest]" >&2; exit 2 ;;
 esac

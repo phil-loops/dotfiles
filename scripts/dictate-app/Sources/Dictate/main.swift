@@ -14,6 +14,7 @@ final class Dictate: NSObject, NSApplicationDelegate {
     private var swallows = false
     private var waiting: Timer?
     private var modifierLog = 20
+    private let launchedBuild = installedBuild()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         voice.idleMenu = { [weak self] menu in self?.idleMenu(menu) }
@@ -23,6 +24,50 @@ final class Dictate: NSObject, NSApplicationDelegate {
             UserDefaults.standard.set(true, forKey: "login.offered")
         }
         listen()
+        recoverCutOffRecordings()
+        Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.moveToNewBuild() }
+        }
+    }
+
+    /// Relaunches onto a newer build once one is installed and nothing is being recorded or transcribed, so a rebuild
+    /// never cuts off what's being said.
+    private func moveToNewBuild() {
+        guard let build = installedBuild(), build != launchedBuild, !voice.active, !voice.busy else { return }
+        note("moving to build \(build.prefix(8))")
+        let reopen = Process()
+        reopen.executableURL = URL(fileURLWithPath: "/bin/sh")
+        reopen.arguments = ["-c", "sleep 1; open -g \"$0\"", Bundle.main.bundlePath]
+        try? reopen.run()
+        NSApp.terminate(nil)
+    }
+
+    /// Recordings a Dictate before this one was holding when it stopped: each is transcribed, kept beside the log, and the
+    /// last put on the clipboard.
+    private func recoverCutOffRecordings() {
+        let temp = FileManager.default.temporaryDirectory
+        let files = ((try? FileManager.default.contentsOfDirectory(at: temp, includingPropertiesForKeys: [.contentModificationDateKey])) ?? [])
+            .filter { $0.lastPathComponent.hasPrefix("dictate-") && $0.pathExtension == "wav" }
+            .sorted { ($0.modificationDate ?? .distantPast) < ($1.modificationDate ?? .distantPast) }
+        guard !files.isEmpty else { return }
+        Task {
+            let kept = URL(fileURLWithPath: ("~/.cache/dictate/recovered" as NSString).expandingTildeInPath)
+            try? FileManager.default.createDirectory(at: kept, withIntermediateDirectories: true)
+            var last: String?
+            for file in files {
+                if let text = await voice.recover(file), !text.isEmpty {
+                    let saved = kept.appendingPathComponent(file.deletingPathExtension().lastPathComponent + ".txt")
+                    try? text.write(to: saved, atomically: true, encoding: .utf8)
+                    note("recovered a cut-off recording into \(saved.path)")
+                    last = text
+                }
+                try? FileManager.default.removeItem(at: file)
+            }
+            guard let last else { return }
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(last, forType: .string)
+            voice.flash("Recovered a dictation that was cut off; it's on the clipboard")
+        }
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
@@ -282,6 +327,16 @@ func note(_ line: String) {
     } else {
         try? entry.write(to: log)
     }
+}
+
+/// What `dictate` last installed (it writes this after the build is signed), or nil before any build.
+func installedBuild() -> String? {
+    try? String(contentsOfFile: ("~/.cache/dictate/installed" as NSString).expandingTildeInPath, encoding: .utf8)
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+}
+
+extension URL {
+    var modificationDate: Date? { try? resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate }
 }
 
 /// The 🎤 dictation key on the function row (F5 on recent Mac keyboards), as a key code.

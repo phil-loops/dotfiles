@@ -70,6 +70,9 @@ enum Logic {
         }
     }
 
+    /// Every sample of a 16 kHz mono 16-bit WAV, whole or cut off mid-recording.
+    static func samples(of data: Data) -> [Float] { tail(of: data, seconds: Double(data.count)) }
+
     /// The end of the words heard so far, at most `width` characters, starting on a word.
     static func heard(_ text: String, width: Int = 40) -> String {
         guard text.count > width else { return text }
@@ -108,6 +111,7 @@ func selfTest() -> Int32 {
     for sample: Int16 in [0, 16_384, -16_384, 32_767] { wav += withUnsafeBytes(of: sample.littleEndian) { Data($0) } }
     check("the preview reads a WAV still being written", Logic.tail(of: wav, seconds: 10) == [0, 0.5, -0.5, Float(32_767) / 32_768])
     check("the preview keeps only the window's end", Logic.tail(of: wav, seconds: 2.0 / 16_000) == [-0.5, Float(32_767) / 32_768])
+    check("a cut-off recording is read whole", Logic.samples(of: wav) == [0, 0.5, -0.5, Float(32_767) / 32_768])
     check("the menu bar keeps the end of what it heard", Logic.heard("short") == "short"
           && Logic.heard("one two three four", width: 12) == "…three four")
 

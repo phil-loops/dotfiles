@@ -86,6 +86,14 @@ final class Voice: NSObject, AVAudioRecorderDelegate {
     }
 
     /// A short message in the preview box, shown whether or not the live preview is on.
+    /// The words in a recording left behind when a Dictate before this one stopped mid-sentence.
+    func recover(_ file: URL) async -> String? {
+        guard let data = try? Data(contentsOf: file) else { return nil }
+        let samples = Logic.samples(of: data)
+        guard samples.count >= 8_000 else { return nil }
+        return try? await transcriber.transcript(of: samples)
+    }
+
     func flash(_ message: String) {
         flashing = message
         update()
