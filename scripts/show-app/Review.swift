@@ -48,10 +48,14 @@ final class SpokenReview {
         let dir = root.appendingPathComponent("\(stamp)-\(name)")
         let review = SpokenReview(dir: dir, title: name, repoPath: repoPath)
         let branches = scope.forest.map { members(of: $0, in: repoPath) } ?? [scope.branch!]
-        var tips: [String: String] = [:]
-        for branch in branches { if let sha = tip(of: branch, in: repoPath) { tips[branch] = sha } }
+        var tips: [String: String] = [:], parents: [String: String] = [:]
+        for branch in branches {
+            if let sha = tip(of: branch, in: repoPath) { tips[branch] = sha }
+            let parent = git(["config", "--get", "branch.\(branch).stack-parent"], in: repoPath).trimmingCharacters(in: .whitespacesAndNewlines)
+            parents[branch] = parent.isEmpty ? "main" : parent
+        }
         let header: [String: Any] = ["title": name, "scope": address.split(separator: "?").first.map(String.init) ?? address,
-                                     "repo": "loops", "repoPath": repoPath, "startedAt": ISO8601DateFormatter().string(from: Date()), "tips": tips]
+                                     "repo": "loops", "repoPath": repoPath, "startedAt": ISO8601DateFormatter().string(from: Date()), "tips": tips, "parents": parents]
         do {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             try JSONSerialization.data(withJSONObject: header, options: [.prettyPrinted, .sortedKeys]).write(to: dir.appendingPathComponent("review.json"))

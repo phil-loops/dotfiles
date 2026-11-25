@@ -78,10 +78,10 @@ def main():
         check("posts to the Inbox under the review's name", sent.read_text().startswith("Spoken review · lock-user-delete\n"))
         check("copies the same notes", copied.read_text() == notes)
         check("the forest's own notes come first", notes.index("## The whole review") < notes.index("## [add-lock]"), notes)
-        check("a note said before any branch is forest-wide", "- overall the forest reads well" in notes.split("## [add-lock]")[0], notes)
-        check("a note on a branch page with no file sits under the branch", "- the lock name is vague" in notes, notes)
-        check("notes at one file and line run together", "- `models/user.ts:40` — this select should be for update and it needs a test" in notes, notes)
-        check("an utterance goes where it was said longest", "- `queries/x.ts` — mostly said on the query file" in notes, notes)
+        check("a note said before any branch is forest-wide", "- **n1** overall the forest reads well" in notes.split("## [add-lock]")[0], notes)
+        check("a note on a branch page with no file sits under the branch", "- **n2** the lock name is vague" in notes, notes)
+        check("notes at one file and line run together", "- **n3** `models/user.ts:40` — this select should be for update and it needs a test" in notes, notes)
+        check("an utterance goes where it was said longest", "- **n4** `queries/x.ts` — mostly said on the query file" in notes, notes)
         check("a branch that moved mid-review says so", f"changed while you were reviewing it ({first[:8]} → {second[:8]})" in notes, notes)
         check("a note said before the branch moved says the code has changed since",
               f"Moved since you said this: {first[:8]} → {second[:8]}" in notes.split("## [use-lock]")[1].split("##")[0], notes)
@@ -93,6 +93,9 @@ def main():
         place = module.place
         check("a branch name with a slash is the whole name", place("/v2/b/loops/feat/x?file=a.ts&line=3")
               == {"branch": "feat/x", "forest": None, "file": "a.ts", "line": 3})
+        records = json.loads((folder / "notes.json").read_text())
+        check("each note is numbered in order with its branch and commit", [(n["id"], n["branch"]) for n in records[:4]]
+              == [("n1", None), ("n2", "add-lock"), ("n3", "add-lock"), ("n4", "use-lock")] and records[2]["commit"] == first, records)
         check("a deleted branch says it's gone", f"The branch is gone now; you reviewed {first[:8]}" in notes, notes)
 
         git(repo, "branch", "-f", "add-lock", second)

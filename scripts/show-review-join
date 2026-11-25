@@ -5,8 +5,9 @@ Show writes the folder when a review starts (review.json: scope, repo, every in-
 trail.jsonl each time canopy's place changes (uptime-clock ns, the address, the branch and the commit on screen).
 Dictate adds recording.json (when the audio began, same clock) and utterances.json (each stretch between pauses, timed
 from the audio's start). Each utterance goes to the place it overlapped most; each branch's commit is compared with
-the branch's tip now, so a note about code that has since moved says so. Writes notes.md, posts it to Show's Inbox
-and copies it to the clipboard.
+the branch's tip now, so a note about code that has since moved says so. Writes notes.md and notes.json (each note
+numbered n1, n2, … so a session can answer it by id), posts the notes to Show's Inbox and copies them to the clipboard.
+--quiet writes the files only.
 """
 import json
 import os
@@ -58,7 +59,8 @@ def tip(repo_path, branch):
 
 
 def render(review, trail, pairs, tips_now):
-    """The notes as markdown: forest-wide notes first, then each branch in the order it was first talked about."""
+    """The notes as markdown, and as records: forest-wide notes first, then each branch in the order it was first talked
+    about; utterances in a row at one file and line make one note."""
     repo = review.get("repo", "loops")
     sections, order = {}, []
     for u, entry in pairs:
@@ -72,7 +74,7 @@ def render(review, trail, pairs, tips_now):
         order.remove(None)
         order.insert(0, None)
     started = review.get("tips", {})
-    lines = []
+    lines, notes = [], []
     for key in order:
         if key is None:
             lines.append("## The whole review" if review.get("scope", "").startswith("/v2/p/") else "## Not on a branch")
@@ -90,23 +92,27 @@ def render(review, trail, pairs, tips_now):
             elif not seen and key in started and now and started[key] != now:
                 lines.append(f"_Moved since the review started: {started[key][:8]} → {now[:8]}._")
         last = None
-        for u, where, _ in sections[key]:
+        for u, where, entry in sections[key]:
             anchor = (where["file"], where["line"]) if where["file"] else None
             text = u["text"].strip()
             if anchor and anchor == last:
+                notes[-1]["text"] += " " + text
                 lines[-1] += " " + text
                 continue
+            notes.append({"id": f"n{len(notes) + 1}", "branch": key, "file": where["file"], "line": where["line"],
+                          "commit": entry.get("commit") if entry else None, "text": text})
             label = f"`{where['file']}:{where['line']}`" if anchor and where["line"] else f"`{where['file']}`" if anchor else None
-            lines.append(f"- {label} — {text}" if label else f"- {text}")
+            lines.append(f"- **{notes[-1]['id']}** " + (f"{label} — {text}" if label else text))
             last = anchor
         lines.append("")
-    return "\n".join(lines).strip() + "\n"
+    return "\n".join(lines).strip() + "\n", notes
 
 
 def main():
-    if len(sys.argv) != 2:
+    args = [a for a in sys.argv[1:] if a != "--quiet"]
+    if len(args) != 1:
         sys.exit(__doc__.strip())
-    folder = Path(sys.argv[1])
+    folder = Path(args[0])
     review = json.loads((folder / "review.json").read_text())
     start_ns = json.loads((folder / "recording.json").read_text())["startUptimeNs"]
     utterances = json.loads((folder / "utterances.json").read_text())["utterances"]
@@ -116,9 +122,13 @@ def main():
     branches = {place(e["address"])["branch"] for _, e in pairs if e} | set(review.get("tips", {}))
     tips_now = {b: tip(review["repoPath"], b) for b in branches if b}
     title = f"Spoken review · {review.get('title', folder.name)}"
-    body = render(review, trail, pairs, tips_now) if utterances else "_Nothing was heard in this review._\n"
-    body += f"\n<sub>{folder}</sub>\n"
+    body, notes = render(review, trail, pairs, tips_now) if utterances else ("_Nothing was heard in this review._\n", [])
+    body += (f"\n<sub>{folder} · a session acting on these notes answers each by id in plan.txt (before changing anything) "
+             f"and answers.txt (once its tips are final) there, then runs show-review-reply on the folder; its --help has the shape</sub>\n")
     (folder / "notes.md").write_text(body)
+    (folder / "notes.json").write_text(json.dumps(notes, indent=1))
+    if "--quiet" in sys.argv:
+        return
     subprocess.run([os.environ.get("SHOW_NOTE", str(SCRIPTS / "show-note")), title, body], check=False)
     subprocess.run([os.environ.get("SHOW_REVIEW_COPY", "pbcopy")], input=body, text=True, check=False)
 
