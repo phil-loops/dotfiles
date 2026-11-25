@@ -33,7 +33,7 @@ a deck or a run that concerns a branch arrives *on that branch* — never in a p
 
 ## The target
 
-One window, Canopy, with three levels Phil already navigates: **home → forest → branch.** On a branch page:
+One window, Canopy (with Learn and Machine still on the rail), with three levels Phil already navigates: **home → forest → branch.** On a branch page:
 
 - **What changed** — the diff and review (today's page).
 - **What sessions said** — the messages, decks and evidence a session filed for this branch, newest first,
@@ -53,13 +53,14 @@ by a single quiet mark (no counts).
 
 | Surface | Fate |
 |---|---|
-| Canopy | stays — becomes the whole window |
+| Canopy | stays — becomes the main workspace |
 | Inbox | branch-scoped messages move onto their branch; the rest (no branch) shows on home; the tab goes |
 | Review decks | open in place on their branch; the Review workspace goes |
 | Forest decks | open on the forest page; the Forest workspace goes |
 | Plans, Runs | retire (4 and 1 opens); a run that belongs to a branch shows on it |
-| Learn | Phil's call — it's a separate activity, not branch work; keep as its own window or drop |
-| Machine, Bench | Phil's call — dev-box tools; move behind ⋯ or drop |
+| Learn | stays on the rail for now (Phil, 11-25) |
+| Machine | stays on the rail for now (Phil, 11-25) |
+| Bench | retires (Phil, 11-25) |
 
 ## How it would land
 
@@ -67,11 +68,16 @@ Dark-additive first: (1) messages and decks carry the branch they concern (most 
 (2) the branch page shows them; (3) home shows the branch-less rest; (4) keystone — the rail loses the
 workspaces the branch page replaced. Each step is its own branch; 1–3 change nothing visible until 4.
 
+## Messages with no branch
+
+Phil (11-25): these shouldn't be prominent. Proposal: the Dock icon's badge is their only signal (one quiet
+mark, no count), and they sit at the foot of home, read in place. Nothing interrupts a branch page for them.
+Not settled — revisit once branch-scoped messages have moved and it's clear how many are left.
+
 ## Open questions for Phil
 
-1. Learn, Machine, Bench: keep, move behind ⋯, or drop?
-2. Messages with no branch (machine health, research results): home, or a quiet corner of every page?
-3. Does Canopy stay one window, or should the branch page open as its own window per branch?
+1. Does Canopy stay one window, or should the branch page open as its own window per branch? (Default: one
+   window.)
 
 ## Coordination
 
