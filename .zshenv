@@ -15,4 +15,5 @@ typeset -U path
 # Homebrew too: an app launched from the Dock (Show, canopy) starts tools with `zsh -c` from a
 # bare system PATH, and .zprofile's brew shellenv only runs for login shells — which also load
 # nvm's node 18 over volta's, so those apps must not use `-l`.
-path=("$VOLTA_HOME/bin" "$HOME/.local/bin" "$HOME/.dotfiles/scripts" /opt/homebrew/bin /opt/homebrew/sbin $path)
+# A tool under tools/<name>/ puts its commands in its own bin/.
+path=("$VOLTA_HOME/bin" "$HOME/.local/bin" "$HOME/.dotfiles/scripts" $HOME/.dotfiles/tools/*/bin(N/) /opt/homebrew/bin /opt/homebrew/sbin $path)

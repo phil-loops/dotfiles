@@ -51,8 +51,8 @@ LINKS=(
   "$HOME/.claude/agents"          .claude/agents
   "$HOME/.claude/skills"          .claude/skills
 )
-for plist in "$DOTFILES"/launchd/*.plist(N); do
-  LINKS+=("$HOME/Library/LaunchAgents/${plist:t}" "launchd/${plist:t}")
+for plist in "$DOTFILES"/launchd/*.plist(N) "$DOTFILES"/tools/*/launchd/*.plist(N); do
+  LINKS+=("$HOME/Library/LaunchAgents/${plist:t}" "${plist#$DOTFILES/}")
 done
 fi
 
