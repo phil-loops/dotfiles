@@ -22,7 +22,8 @@ Memory is modeled, not recorded: each level has a **forgetting curve**, recall =
 unaided hit starts or grows the half-life (more when it was harder to retrieve), a miss cuts it, help changes
 nothing. A concept's depth is the deepest level probably still held (recall ≥ ½); it is **held** once a spaced
 retrieval has grown that level's curve. It comes **due** when recall drops below RETAIN, while a re-test is hard
-enough to help, and **fades** below FADED: unknown again, for recall to find. An open miss is due first (a
+enough to help, and **fades** below FADED: not gone, harder to reach. Coming back, recall finds what's left, then each faded
+concept is probed cold from its old depth, a level down per blank; a hit there grows the curve most (savings). An open miss is due first (a
 confident one before any other) until a hit at its level, or until it fades itself.
 
 Evidence rows may carry `confidence` (asked before the reveal), `rung` (predict | invent), on a
@@ -638,10 +639,14 @@ def next_step(g, topic=None, system=None, session="", asked=(), today=None, conc
               an older open miss on the topic comes before anything new
       re-test every INTERLEAVE_EVERY steps (and first, when there's no recall) a due neighbor of the topic
       due     a concept of the topic that's due is re-tested at the level it's held or was missed at
+      return  a concept that faded since (shown before, likely forgotten) is probed cold at the deepest level it
+              reached, one level lower after an unsure miss (forgetting), with a worked run only once even
+              predict is gone; a confident miss is a misconception and gets its contrast
       edge    the first concept in teaching order whose prerequisites are shown, one level above its depth —
               two levels after a run of unaided hits, a prerequisite first when one was never shown, and a
               worked example before a cold prediction on a concept not known now
-    A one-concept session (a re-test) is one step, and a contrast after it when that step missed; no card.
+    A one-concept session (a re-test) is one step, and a contrast after it when that step missed; no card. A faded
+    one is probed from its old depth down, a level per blank.
     """
     asked = _asked(asked)
     st = state(g, today)
@@ -656,6 +661,41 @@ def next_step(g, topic=None, system=None, session="", asked=(), today=None, conc
     support = bool(paced) and paced[-1]["outcome"] == "miss"
     last = asked[-1]["concept"] if asked else ""
     posed = {(a["concept"], a["level"]) for a in asked}
+    # where each concept stood when the session began: a faded one is picked up again from its old depth, not re-taught
+    before = [r for r in g["evidence"] if not (session and r.get("session") == session)]
+    prior = {cid: _mastery([r for r in before if r["concept"] == cid], today) for cid in ids}
+
+    def returning(cid):
+        p = prior.get(cid)
+        return bool(p and p["faded"] and p["shown_level"]) and not any(r["concept"] == cid and r["outcome"] == "hit" for r in rows)
+
+    def forgot(cid):
+        """A miss on a faded concept is forgetting unless it was confident; a confident wrong answer is a misconception."""
+        latest = [r for r in rows if r["concept"] == cid]
+        return returning(cid) and bool(latest) and latest[-1]["outcome"] == "miss" and latest[-1].get("confidence") != "high"
+
+    def probe(cid):
+        """The re-engagement step for a faded concept: cold at the deepest level it reached, one level lower after each
+        blank, and a worked run only once even predict is gone. None when it has nothing left to ask this session."""
+        missed = [LEVELS.index(r["level"]) for r in rows if r["concept"] == cid and r["outcome"] == "miss"]
+        top = LEVELS.index(prior[cid]["shown_level"])
+        at = min(missed) - 1 if missed else top
+        age = _days(prior[cid]["last"], st["today"]) if prior[cid]["last"] else 0
+        if at < 0:
+            if any(a["concept"] == cid and a["form"] == "worked" for a in asked):
+                return None
+            return out("worked", cid, "predict", "forgotten down to predict: one worked run rebuilds it", returning=True)
+        level = LEVELS[at]
+        via = ""
+        if level == "transfer":
+            via = next((a for a in concepts[cid]["analogs"] if concepts.get(a, {}).get("mastery", {}).get("depth", 0) >= 2), "")
+            if not via:
+                level = "explain"
+        if (cid, level) in posed:
+            return None
+        why = (f"blank at {LEVELS[min(missed)]}: one level down" if missed else
+               f"held at {LEVELS[top]} {age} days ago: does it still hold?")
+        return out(LEVEL_FORM[level], cid, level, why, returning=True, **({"via": via} if via else {}))
 
     def out(form, cid="", level="", why="", **extra):
         c = concepts.get(cid) or {}
@@ -677,6 +717,10 @@ def next_step(g, topic=None, system=None, session="", asked=(), today=None, conc
         return out(LEVEL_FORM[level], cid, level, why)
 
     if concept:
+        if returning(concept):
+            # a faded concept: find how much is left, stepping down on each blank, until a hit or nothing to ask
+            if forgot(concept) or n == 0:
+                return probe(concept) or out("done", why="picked up as far as it goes today")
         if n == 0:
             m = concepts[concept]["mastery"]
             if m["due"] or m["known"]:
@@ -695,12 +739,16 @@ def next_step(g, topic=None, system=None, session="", asked=(), today=None, conc
         return out("card", _focus(rows, ids), why=f"{SESSION_STEPS} steps is a session; close while it's fresh")
     unmapped = [i for i in ids if not concepts[i]["mastery"]["known"]]
     if n == 0 and topic and len(unmapped) * 2 > len(ids):
-        return out("recall", why="most of this topic isn't known now (never shown, or faded): say everything you know, and the gaps show")
+        return out("recall", why=("it's been a while on this topic: say what you still know, and the probes start from there"
+                       if any(concepts[i]["mastery"]["faded"] for i in unmapped) else
+                       "most of this topic isn't known now: say everything you know, and the gaps show"))
 
     # a concept whose latest row this session is a miss is owed a contrast (at most CONTRASTS_PER_SESSION), one step later
     deferred = None
     for cid in _uniq(r["concept"] for r in rows if r["outcome"] == "miss"):
         m = concepts.get(cid, {}).get("mastery")
+        if forgot(cid):
+            continue   # forgetting, not a wrong belief: the probe steps down a level instead
         latest = [r for r in rows if r["concept"] == cid][-1]
         posed_contrasts = sum(1 for a in asked if a["concept"] == cid and a["form"] == "contrast")
         if not (m and m["open_miss"] and latest["outcome"] == "miss" and posed_contrasts < CONTRASTS_PER_SESSION):
@@ -728,9 +776,19 @@ def next_step(g, topic=None, system=None, session="", asked=(), today=None, conc
     for cid in ids:
         c = concepts[cid]
         m = c["mastery"]
+        if returning(cid):
+            if m["open_miss"] and not forgot(cid):
+                continue   # a confident wrong answer: its contrast comes first
+            step = probe(cid)
+            if step:
+                return step
+            continue
         if m["open_miss"]:
             continue   # a concept isn't pushed further while a miss on it stands; its contrast comes first
-        blocker = next((b for b in c["blocked_by"] if (b, "predict") not in posed), None)
+        for b in c["blocked_by"]:
+            if b in prior and returning(b) and (step := probe(b)):
+                return step
+        blocker = next((b for b in c["blocked_by"] if (b, "predict") not in posed and not (b in prior and returning(b))), None)
         if c["blocked_by"]:
             if blocker and concepts.get(blocker, {}).get("mastery", {}).get("open_miss"):
                 return retest(blocker, f"{c['name']} builds on it, and a miss on it stands")
@@ -877,7 +935,7 @@ def digest(g, topic=None, today=None, system=None):
     out = ["## The learner's concept graph (~/.dotfiles/learning/graph.json)",
            "Depth = deepest level probably still held UNAIDED (a forgetting curve per level, moved only by the "
            "learner's answers): predict < explain < transfer < critique. “held” = a spaced retrieval grew it; "
-           "“once” = not yet retention; “faded” = shown before, likely forgotten: show it again, don't quiz it.", ""]
+           "“once” = not yet retention; “faded” = shown before, harder to reach now: probe it cold from its old depth, a level down per blank.", ""]
     if st["systems"]:
         out.append("### Systems (mastery target: each standard held)")
         out += [f"- {s['title']} [{sid}] — {s['progress']['held']} held / {s['progress']['met']} met / "

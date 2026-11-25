@@ -121,6 +121,7 @@ extension TutorAgent {
         - contrast: @example and @outcome replay the situation the learner missed, as it really ran; the frames are that situation with the one @change (the contrast given, when there is one), so predict tests exactly the difference.
         - explain: predict the behavior, then explain asks for the mechanism behind it.
         - transfer: the concept's situation set in the analog's world, so the same idea has to be recognized in other clothes.
+        - A step marked returning re-engages a concept the learner showed before and has likely half-forgotten: pose it cold at its level, with nothing in the setup that restates the idea. An unsure or blank answer there is forgetting, not a misconception: say so in @misconception ("forgot: …"), and Show steps down a level.
         - critique: a design with a flaw, or two designs; predict asks where it breaks or which survives, and the reveal plays the failure.
 
         ===== The tutor skill (~/.dotfiles/.claude/skills/tutor/SKILL.md) =====

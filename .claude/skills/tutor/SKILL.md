@@ -172,7 +172,9 @@ Memory is modeled, not kept: each level has a forgetting curve, and only the lea
 (a seed row or a chat capture is a hint for the map, never evidence). Depth is the deepest level probably
 still held; **held** means a spaced retrieval grew that level's curve — one session's hit is not retention.
 A concept comes due as recall drops toward forgetting (confident misses first, then any miss, then
-help-only, then fading), and once it has faded it's unknown again: show it, don't quiz it. Misses fade too.
+help-only, then fading). Once it has faded it isn't gone, it's harder to reach: coming back, it's probed cold at
+the deepest level it reached and stepped down a level per blank (forgetting), while a confident wrong answer
+is a misconception and gets a contrast. Misses fade too.
 The learner's own questions are first-class (`learn question '<text>'
 --concept <id>`); a rare note about how they learn is `learn calibrate '<note>'`. The graph mirrors
 itself into the memory track; never append session logs there. In the viewer's Tutor tab you can't run

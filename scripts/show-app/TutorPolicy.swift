@@ -82,6 +82,7 @@ enum TutorPolicy {
         if showWrittenForms.contains(form) { return "Show writes it itself (\(formNames[form] ?? form)); this answer needs no next step" }
         var parts = ["form \(form)", "concept \(a["concept"] ?? "") — \(a["name"] ?? ""): \(a["statement"] ?? "")", "level \(a["level"] ?? "")"]
         if let via = a["via"] as? String, !via.isEmpty { parts.append("through the analog \(via)") }
+        if a["returning"] as? Bool == true { parts.append("returning after a gap: pose it cold, with no reminder of the idea, to find how much is left") }
         if let contrast = a["contrast"] as? String, !contrast.isEmpty { parts.append("the contrast to pose: \(contrast)") }
         if let missed = a["misconception"] as? String, !missed.isEmpty { parts.append("the misconception it answers: \(missed)") }
         return parts.joined(separator: " · ") + " (why: \(a["why"] ?? ""))"

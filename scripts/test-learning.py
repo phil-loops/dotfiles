@@ -382,12 +382,49 @@ class Policy(unittest.TestCase):
         self.assertEqual((r(one)["form"], r(one)["contrast"]), ("contrast", "holder dies"))
         self.assertEqual(r(one + [{"concept": "lock-ttl", "form": "contrast", "level": "predict"}])["form"], "done")
 
-    def test_a_faded_concept_is_shown_again_not_quizzed(self):
+    def test_coming_back_probes_from_the_old_depth_down(self):
+        g = graph()
+        ev(g, "lock-ttl", level="explain", at="2026-06-01")                  # faded since
+        self.assertEqual(nxt(g)["form"], "recall")                           # a faded topic opens with recall
+        self.assertIn("it's been a while", nxt(g)["why"])
+        asked = [{"form": "recall"}]
+        n = nxt(g, asked=asked)
+        self.assertEqual((n["concept"], n["level"], n["form"], n["returning"]), ("lock-ttl", "explain", "explain", True))
+        asked.append({"concept": "lock-ttl", "form": "explain", "level": "explain"})
+        ev(g, "lock-ttl", level="explain", outcome="miss", confidence="low", at="2026-10-10", session="s")   # a blank
+        n = nxt(g, asked=asked)
+        self.assertEqual((n["concept"], n["level"], n["form"]), ("lock-ttl", "predict", "predict"))   # one level down, no contrast
+        asked.append({"concept": "lock-ttl", "form": "predict", "level": "predict"})
+        ev(g, "lock-ttl", outcome="miss", at="2026-10-10", session="s")
+        n = nxt(g, asked=asked)
+        self.assertEqual((n["concept"], n["form"]), ("lock-ttl", "worked"))                           # gone: rebuild it once
+
+    def test_a_hit_on_return_restores_the_concept_with_a_long_halflife(self):
         g = graph()
         ev(g, "lock-ttl", level="explain", at="2026-06-01")
-        n = learning.next_step(g, concept="lock-ttl", session="s", asked=[], today="2026-10-10")
-        self.assertEqual((n["form"], n["level"]), ("worked", "predict"))
-        self.assertEqual(nxt(g)["form"], "recall")                       # and a faded topic opens with recall
+        ev(g, "lock-ttl", level="explain", at="2026-10-10", session="s")
+        m = learning.mastery(g, "lock-ttl", today="2026-10-10")
+        self.assertEqual((m["depth"], m["held"]), (2, 2))
+        self.assertGreater(m["halflife"], 11)                                  # retrieved from far down the curve: ×~4
+        n = nxt(g, asked=[{"form": "recall"}, {"concept": "lock-ttl", "form": "explain", "level": "explain"}])
+        self.assertNotEqual((n["concept"], n["level"]), ("lock-ttl", "explain"))
+
+    def test_a_confident_wrong_answer_on_return_is_a_misconception(self):
+        g = graph()
+        ev(g, "lock-ttl", level="explain", at="2026-06-01")
+        ev(g, "lease-renewal", at="2026-10-10")
+        asked = [{"form": "recall"}, {"concept": "lock-ttl", "form": "explain", "level": "explain"}]
+        ev(g, "lock-ttl", level="explain", outcome="miss", confidence="high", contrast="c", at="2026-10-10", session="s")
+        n = nxt(g, asked=asked + [{"concept": "x", "form": "x", "level": "x"}])
+        self.assertEqual((n["concept"], n["form"]), ("lock-ttl", "contrast"))
+
+    def test_a_retest_of_a_faded_concept_probes_down_too(self):
+        g = graph()
+        ev(g, "lock-ttl", level="explain", at="2026-06-01")
+        r = lambda asked: learning.next_step(g, concept="lock-ttl", session="s", asked=asked, today="2026-10-10")
+        self.assertEqual((r([])["form"], r([])["level"]), ("explain", "explain"))
+        ev(g, "lock-ttl", level="explain", outcome="miss", at="2026-10-10", session="s")
+        self.assertEqual(r([{"concept": "lock-ttl", "form": "explain", "level": "explain"}])["level"], "predict")
 
     def test_scope_must_exist(self):
         with self.assertRaises(learning.Invalid):
