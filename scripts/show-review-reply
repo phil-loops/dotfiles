@@ -8,6 +8,8 @@ The session that acts on a review writes into its folder, in this shape:
     # notes
     <note id> | <state> | <commits, or -> | <what it heard and will do, or did and why>
 
+A state may name the branch the rest now lives on, `partly → <branch>`, so the open part is pinned there.
+
 and, under `# for phil`, two or three plain sentences: what needs his eyes and why, in words he'd use, no ids or
 commits. Write first plan.txt, before changing anything (states: will do, partly, won't, ask, no ask), so Phil can correct a misreading
 while it's cheap; then answers.txt once the round's tips are final (states: done, partly, declined, no ask, no change
@@ -55,8 +57,9 @@ def parse(path):
         if section == "structure" and len(fields) >= 3:
             structure.append({"branch": fields[0], "parent": fields[1], "kind": fields[2], "why": " | ".join(fields[3:])})
         elif section == "notes" and len(fields) >= 3:
-            answers.append({"id": fields[0], "state": fields[1].lower(), "commits": fields[2] if fields[2] != "-" else "",
-                            "text": " | ".join(fields[3:])})
+            state, moved = (re.split(r"\s*(?:→|->)\s*", fields[1], maxsplit=1) + [""])[:2]
+            answers.append({"id": fields[0], "state": state.strip().lower(), "movedTo": moved.strip() or None,
+                            "commits": fields[2] if fields[2] != "-" else "", "text": " | ".join(fields[3:])})
     return structure, answers, summary
 
 
@@ -126,27 +129,30 @@ def render_note(note, answers, lines):
         lines.append("  - ⚠ _no answer_")
     for a in mine:
         commits = f" · {short_commits(a['commits'])}" if a["commits"] else ""
+        commits += f" · now in [{a['movedTo']}](canopy://v2/b/loops/{a['movedTo']})" if a.get("movedTo") else ""
         lines.append(f"  - **{a['id']} {a['state']}**{commits} — {a['text']}")
 
 
 def item_line(line):
-    """A '# for phil' line shaped as an attention item: (branch, place, ask, sentence), else None (plain prose)."""
+    """A '# for phil' line shaped as an attention item, `<branch> <place> | <ask> | <sentence> [| <note id>]`:
+    (branch, place, ask, sentence, note id or None), else None (plain prose)."""
     fields = [f.strip() for f in line.split("|")]
-    if len(fields) != 3 or fields[1] not in ("look", "decide", "act"):
+    if len(fields) not in (3, 4) or fields[1] not in ("look", "decide", "act"):
         return None
     where = fields[0].split()
-    return (where[0], where[1] if len(where) > 1 else "-", fields[1], fields[2]) if where else None
+    return (where[0], where[1] if len(where) > 1 else "-", fields[1], fields[2], fields[3] if len(fields) == 4 else None) if where else None
 
 
-def pin(repo, forest, items):
+def pin(repo, forest, items, folder):
     """Replaces this session's open items on the forest with `items`, through stack-attention (which refuses what isn't
     pithy and keeps at most five); returns what it said for each one it refused."""
     tool = os.environ.get("SHOW_STACK_ATTENTION", str(SCRIPTS / "stack-attention"))
     env = dict(os.environ, STACK_ATTENTION_REPO=repo)
     subprocess.run([tool, "clear", forest, "--mine"], env=env, capture_output=True, text=True)
     refused = []
-    for branch, place, ask, text in items:
-        result = subprocess.run([tool, "add", branch, place, ask, text], env=env, capture_output=True, text=True)
+    for branch, place, ask, text, note in items:
+        result = subprocess.run([tool, "add", branch, place, ask, text] + (["--note", f"{folder}#{note}"] if note else []),
+                                env=env, capture_output=True, text=True)
         if result.returncode != 0:
             refused.append(f"{branch}: {result.stderr.strip()}")
     return refused
@@ -280,7 +286,7 @@ def main():
                 "kind": kinds.get(branch), "tipThen": then, "tipNow": tips_now[branch], "why": plan.get("why", ""),
                 "was": was.get(branch),
                 "changed": changed, "added": added, "dropped": dropped,
-                "notes": [{"id": n["id"], "file": n.get("file"), "line": n.get("line"), "said": n["text"],
+                "notes": [{"id": n["id"], "file": n.get("file"), "line": n.get("line"), "commit": n.get("commit"), "said": n["text"],
                            "answers": [a for a in answers if base_id(a["id"]) == n["id"]]} for n in branch_notes],
                 "needsEyes": [a for a in mine if a["state"] in NEEDS_LOOK]}
         gone = sorted(b for b in baseline if b not in members and b not in now_named
@@ -296,7 +302,7 @@ def main():
         lines.append("## Needs your eyes")
         prose = [l for l in summary if not item_line(l)]
         pinned = [item_line(l) for l in summary if item_line(l)]
-        shown = prose + [f"**{link(b)}** ({ask}): {text}" for b, _, ask, text in pinned]
+        shown = prose + [f"**{link(b)}** ({ask}): {text}" for b, _, ask, text, _ in pinned]
         lines.extend(f"- {line}" for line in (shown or eyes)) if (shown or eyes) else lines.append("- Nothing.")
         if names("asked"):
             lines.append(f"\n**Done as you asked:** {names('asked')}. Each one's moved files are in the details.")
@@ -325,8 +331,10 @@ def main():
             for a in entry.get("needsEyes", []):
                 note = next((n for n in entry["notes"] if any(x["id"] == a["id"] for x in n["answers"])), {})
                 place = f"{note['file']}:{note['line']}" if note.get("file") and note.get("line") else note.get("file") or "-"
-                items.append((branch, place, "decide", shorten(f"{a['state']}: {a['text']}", 155)))
-        for refusal in pin(repo, forest, items):
+                if a.get("movedTo"):
+                    branch, place = a["movedTo"], "-"
+                items.append((branch, place, "decide", shorten(f"{a['state']}: {a['text']}", 155), note.get("id")))
+        for refusal in pin(repo, forest, items, folder):
             print(f"show-review-reply: not pinned, {refusal}", file=sys.stderr)
     subprocess.run([os.environ.get("SHOW_NOTE", str(SCRIPTS / "show-note")), heading, body], check=False)
 

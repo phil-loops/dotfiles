@@ -143,6 +143,20 @@ def main():
               and data["fixed-name"]["was"] == "fixed" and "fixed" not in data
               and [n["id"] for n in data["fixed-name"]["notes"]] == ["n2"], data)
         check("its reason reads without note ids", data["fixed-name"]["why"] == "renamed from fixed because the name says what it does", data["fixed-name"])
+        text = (folder / "answers.txt").read_text().replace("n2b | declined | - | one file is enough", "n2b | partly → owners | - | the split lives in owners now")
+        text = text.replace("fixed-name fixed.txt:1 | look | The rename landed; check the new name reads right.",
+                            "fixed-name fixed.txt:1 | look | The rename landed; check the new name reads right. | n2")
+        (folder / "answers.txt").write_text(text)
+        subprocess.run([str(SCRIPT), str(folder)], env=env, check=True)
+        listed = json.loads(subprocess.run([str(SCRIPT.parent / "stack-attention"), "ls", "f", "--json"], capture_output=True, text=True,
+                                           env=dict(env, STACK_ATTENTION_REPO=str(repo))).stdout)
+        by_ask = {i["ask"]: i for i in listed}
+        check("a partly answer that names where the rest lives is pinned on that branch", by_ask["decide"]["branch"] == "owners"
+              and by_ask["decide"]["note"] == {"review": str(folder), "id": "n2"}, listed)
+        check("an item line naming its note carries it, for canopy's card", by_ask["look"]["note"] == {"review": str(folder), "id": "n2"}, listed)
+        note = json.loads((folder / "since.json").read_text())["branches"]["fixed-name"]["notes"][0]
+        check("since.json gives each note the commit that was on screen and the answer's new home",
+              note["commit"] == fixed_then and note["answers"][1]["movedTo"] == "owners", note)
         check("--plan still shows the plan once answers exist",
               subprocess.run([str(SCRIPT), "--plan", str(folder)], env=env).returncode == 0 and sent.read_text().startswith("Plan for your review"))
 
