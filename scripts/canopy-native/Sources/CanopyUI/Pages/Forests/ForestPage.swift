@@ -40,12 +40,16 @@ struct ForestPage: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     header(p, f)
+                    if m.face == .branches {
+                        AttentionList(items: Self.attentionItems(app), tips: Dictionary(f.branches.map { ($0.b.name, $0.b.tip) }, uniquingKeysWith: { a, _ in a }))
+                    }
                     if m.face == .story {
                         StoryView(pid: p.id, cursor: cursor, selection: selection)
                     } else {
                         let since = ReviewSinceStore.of(app).since(repo: p.repo, forest: p.name)
+                        let pinned = Attention.of(app).on(repo: p.repo, forest: p.name)
                         ForEach(f.branches, id: \.b.id) { v in
-                            ForestBranchView(v: v, since: since, cursor: cursor == RowKey.branch(v.b.id), selected: selection.contains(RowKey.branch(v.b.id)))
+                            ForestBranchView(v: v, since: since, pinned: pinned.filter { $0.branch == v.b.name }, cursor: cursor == RowKey.branch(v.b.id), selected: selection.contains(RowKey.branch(v.b.id)))
                         }
                         ForestTodoList(items: Self.todoItems(app), forest: f, landed: app.store.list(Landed.self).filter { $0.project == p.id })
                     }
@@ -62,6 +66,7 @@ struct ForestPage: View {
             if m.integratable(p.id) { await m.checkIntegration(p.id) }
         }
         .task(id: p.id) { await ReviewSinceStore.of(app).load(repo: p.repo, forest: p.name) }
+        .task { await Attention.of(app).start() }
     }
 
     private func header(_ p: Project, _ f: ForestView) -> some View {
@@ -92,6 +97,12 @@ struct ForestPage: View {
             }
         }
         .padding(.leading, 52).padding(.trailing, 20).padding(.top, 4).padding(.bottom, 20)
+    }
+
+    /// The items sessions pinned for Phil on the forest, in the order written — empty on the story face.
+    static func attentionItems(_ app: AppModel) -> [AttentionItem] {
+        guard app.forestModel.face == .branches, let pid = app.forestModel.pageProject, let p = app.store.view(Project.self, pid) else { return [] }
+        return Attention.of(app).on(repo: p.repo, forest: p.name)
     }
 
     /// The forest's open todo items in queue order — empty on the story face.
@@ -147,6 +158,8 @@ private struct ForestBranchView: View {
     @Environment(\.theme) private var theme
     let v: BranchView
     let since: ReviewSince?
+    /// the items pinned for Phil on this branch: while there's one, it is what the row says
+    let pinned: [AttentionItem]
     let cursor: Bool
     let selected: Bool
 
@@ -162,9 +175,12 @@ private struct ForestBranchView: View {
                 let mark = since?.mark(b.name, tip: b.tip)
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
                     Text(leaf(b.name)).font(Theme.display(17)).foregroundStyle(cursor ? theme.goldLeaf : theme.ink).lineLimit(1)
-                    if let word = mark?.word {
+                    if !pinned.isEmpty {
+                        Text("needs your eyes").font(Theme.text(11.5)).foregroundStyle(theme.ember)
+                            .explains("branch|pinned|\(b.id)", RowName(word: "needs your eyes", meaning: "a session pinned something here for you (listed above)"))
+                    } else if let word = mark?.word {
                         Text(word).font(Theme.text(11.5))
-                            .foregroundStyle(mark == .eyes ? theme.ember : mark?.loud == true ? theme.goldLeaf : theme.inkFaint)
+                            .foregroundStyle(mark?.loud == true ? theme.goldLeaf : theme.inkFaint)
                             .explains("branch|since|\(b.id)", RowName(word: word, meaning: "how the branch stands against your last spoken review"))
                     }
                 }
@@ -189,7 +205,9 @@ private struct ForestBranchView: View {
                         if edit.unsaved(field, saved: b.description) { UnsavedMark() }
                     }
                 }
-                if let e = since?.trusted(b.name, tip: b.tip), e.kind != "same" || !(e.needsEyes ?? []).isEmpty, let line = ReviewSince.line(e) {
+                if let first = pinned.first {
+                    Text("\(first.ask): \(first.text)").font(Theme.text(12)).foregroundStyle(theme.inkFaint).lineLimit(1)
+                } else if let e = since?.trusted(b.name, tip: b.tip), e.kind != "same", let line = ReviewSince.line(e) {
                     Text(line).font(Theme.text(12)).foregroundStyle(theme.inkFaint).lineLimit(1).help(ReviewSince.detail(e))
                 }
                 if m.wordsOpen.contains(b.id) {
@@ -202,7 +220,7 @@ private struct ForestBranchView: View {
             .padding(.leading, 32)
         }
         .padding(.vertical, 9).padding(.leading, 20).padding(.trailing, 20)
-        .opacity(v.st.ship == .landed ? 0.6 : since?.mark(b.name, tip: b.tip) == .same && !cursor ? 0.7 : 1)
+        .opacity(v.st.ship == .landed ? 0.6 : since?.mark(b.name, tip: b.tip) == .same && pinned.isEmpty && !cursor ? 0.7 : 1)
         .rowChrome(RowKey.branch(b.id), cursor: cursor, selected: selected)
     }
 }

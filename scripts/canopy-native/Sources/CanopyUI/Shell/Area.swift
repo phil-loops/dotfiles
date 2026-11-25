@@ -107,6 +107,8 @@ public enum RowKey {
     /// an open PR awaiting my review, by number
     public static func reviewRequest(_ number: Int) -> String { "r:\(number)" }
     public static func todo(_ id: String) -> String { "t:\(id)" }
+    /// an item a session pinned for Phil on a forest (`stack-attention`)
+    public static func attention(_ id: String) -> String { "a:\(id)" }
     /// one of your open PRs at the top of the home, by its branch id
     public static func openPR(_ branch: String) -> String { "pr:\(branch)" }
     /// one of my open PRs no forest carries, by number

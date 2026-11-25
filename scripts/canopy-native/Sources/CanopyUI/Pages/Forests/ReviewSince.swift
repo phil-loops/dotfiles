@@ -22,6 +22,8 @@ struct ReviewSince: Decodable, Equatable, Sendable {
 
     struct Entry: Decodable, Equatable, Sendable {
         var kind: String
+        /// the name the branch had when reviewed, when it was renamed since
+        var was: String?
         var tipThen: String?
         var tipNow: String?
         var why: String?
@@ -37,7 +39,7 @@ struct ReviewSince: Decodable, Equatable, Sendable {
 
     /// How a branch stands against the review, its tip compared with the one the answer was written for.
     enum Mark: Equatable {
-        case same, asked, unasked, new, eyes
+        case same, asked, unasked, new
         /// the tip moved after the answer was written: what it says is about an older tip
         case moved
 
@@ -47,13 +49,12 @@ struct ReviewSince: Decodable, Equatable, Sendable {
             case .asked: "changed as asked"
             case .unasked: "changed unasked"
             case .new: "new"
-            case .eyes: "needs your eyes"
             case .moved: "moved since the summary"
             }
         }
 
         /// whether it asks to be read before the rest
-        var loud: Bool { self == .eyes || self == .unasked || self == .new }
+        var loud: Bool { self == .unasked || self == .new }
     }
 
     /// The branch's entry, only while its tip is the one the answer was written for; nil when the review didn't name it.
@@ -65,7 +66,6 @@ struct ReviewSince: Decodable, Equatable, Sendable {
     func mark(_ branch: String, tip: String) -> Mark? {
         guard let e = branches[branch] else { return nil }
         guard e.tipNow == tip else { return .moved }
-        if !(e.needsEyes ?? []).isEmpty { return .eyes }
         switch e.kind {
         case "same": return .same
         case "asked": return .asked
@@ -75,10 +75,9 @@ struct ReviewSince: Decodable, Equatable, Sendable {
         }
     }
 
-    /// The one line under the branch: what still wants Phil; else, changed as he asked, what was done (the answers);
-    /// else the answering session's why.
+    /// The one line under the branch: changed as he asked, what was done (the answers); else the answering session's
+    /// why. What still wants Phil is an attention item, not this.
     static func line(_ e: Entry) -> String? {
-        if let a = e.needsEyes?.first { return "\(a.state): \(a.text)" }
         if e.kind == "asked", let first = answers(e).first { return first.answer.text }
         return e.why.flatMap { $0.isEmpty ? nil : $0 }
     }

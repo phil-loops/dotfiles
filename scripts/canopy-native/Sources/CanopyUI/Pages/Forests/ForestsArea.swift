@@ -10,6 +10,7 @@ enum ForestsArea: PageArea {
         app.addSurface(ForestsSurface())
         app.addSurface(ForestSurface())
         ProjectCommands.install(app)
+        Attention.install(app)
         BranchCommands.install(app)
         ForestNav.install(app)
         BenchOpening.install(app)
@@ -72,9 +73,12 @@ struct ForestSurface: SurfaceProvider {
     /// The forest's branches in merge order — or the story's chapters, on that face.
     func rows(_ app: AppModel) -> [String] { app.forestModel.forestRows(app.forestModel.pageProject) }
 
-    /// The branches, and below them the forest's open todo items (its list on the tracker).
+    /// The items pinned for Phil above the branches, the branches, and below them the forest's open todo items (its
+    /// list on the tracker).
     func panes(_ app: AppModel) -> [Pane] {
         var out = [Pane(id: "main", rows: rows(app))]
+        let pinned = ForestPage.attentionItems(app).map { RowKey.attention($0.id) }
+        if !pinned.isEmpty { out.insert(Pane(id: "attention", title: "for you", rows: pinned, row: -1), at: 0) }
         let todo = ForestPage.todoItems(app).map { RowKey.todo($0.id) }
         if !todo.isEmpty { out.append(Pane(id: "todo", title: "todo", rows: todo, row: 1)) }
         return out
@@ -82,12 +86,14 @@ struct ForestSurface: SurfaceProvider {
 
     func primary(for row: String, _ app: AppModel) -> RouteTo? {
         if let id = RowKey.id(row, "t") { return RouteTo("todo.show", arg: id) }
+        if let id = RowKey.id(row, "a") { return RouteTo("attention.open", target: id) }
         if row == RowKey.looseChats { return RouteTo("chats.loose.toggle") }
         return ForestNav.primary(for: row, app)
     }
 
     func scopes(_ app: AppModel) -> [Scope] {
         var out: [Scope] = []
+        if Attention.of(app).item(RowKey.id(app.selected, "a")) != nil { out.append(Attention.scope) }
         if RowKey.id(app.selected, "b") != nil { out += [.branch, .row] }
         out.append(.forest)
         if app.forestModel.pageProject != nil { out.append(.project) }
@@ -95,6 +101,7 @@ struct ForestSurface: SurfaceProvider {
     }
 
     func target(for scope: Scope, _ app: AppModel) -> String? {
+        if scope == Attention.scope { return Attention.of(app).item(RowKey.id(app.selected, "a"))?.id }
         switch scope {
         case .project, .forest: return app.forestModel.pageProject
         default: return nil
@@ -130,6 +137,7 @@ struct ForestSurface: SurfaceProvider {
         if let id = RowKey.id(row, "b"), let b = app.store.view(Branch.self, id) { return "\(leaf(b.name)) \(b.description)" }
         if let id = RowKey.id(row, "d"), let l = app.store.view(Landed.self, id) { return "#\(l.pr) \(OutlineHints.bare(l.title))" }
         if let id = RowKey.id(row, "t"), let t = app.store.trackerItem(id) { return t.title }
+        if let id = RowKey.id(row, "a"), let i = Attention.of(app).item(id) { return "\(i.ask) \(i.place) — \(i.text)" }
         return app.guessTitle(row)
     }
 
