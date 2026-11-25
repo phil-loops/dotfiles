@@ -25,7 +25,8 @@ extension TutorController {
             column.addArrangedSubview(view)
             column.setCustomSpacing(gap, after: view)
         }
-        if let strip = stationStrip(session) { add(strip, after: 28) }
+        let strip = stationStrip(session)
+        if let strip { add(strip, after: 28) }
         guard let step = stagedStep(session) else {
             add(stageQuiet(agent?.isBusy == true ? "The tutor is writing the first step." : "No steps yet."), after: 0)
             refreshAgentRow()
@@ -38,7 +39,7 @@ extension TutorController {
         let problems = looking ? [] : stepProblems(step, answer)
 
         let header = tutorText(renderer.tutorInline(step.title, font: .systemFont(ofSize: 21, weight: .bold)), width: width)
-        focusRungView = header
+        focusRungView = strip ?? header
         add(header, after: 4)
         var tag = [step.station, step.isInvent ? "invent" : "predict"].compactMap { $0 }.joined(separator: " · ")
         if looking, current != nil || phase != .done { tag += " · earlier step — ⌥⌘] comes back" }
@@ -204,6 +205,7 @@ extension TutorController {
 
     private func addInput(_ step: TutorStep, part: String, add: (NSView, CGFloat) -> Void) {
         let field = AnswerField(partID: part, text: drafts[step.id]?[part] ?? "", width: Self.column, editable: true)
+        field.ruled = true
         field.delegate = self
         fields.append(field)
         add(field, 14)
@@ -335,8 +337,11 @@ extension TutorController {
             p.alignment = .right
             items.append((at, tutorText(NSAttributedString(string: message.text, attributes: [.font: inkFont, .foregroundColor: inkColor, .paragraphStyle: p]), width: Self.column)))
         }
+        // the opening map is the tutor's plan, not part of the step: the station strip already says where this goes
+        let firstSaid = sidecar.messages.compactMap { isoDate($0.at) }.min() ?? .distantFuture
+        let map = (session.notes ?? []).first.flatMap { isoDate($0.at) }.flatMap { $0 < firstSaid ? $0 : nil }
         for note in session.notes ?? [] {
-            guard let at = isoDate(note.at), at > start, at <= end else { continue }
+            guard let at = isoDate(note.at), at > start, at <= end, at != map else { continue }
             items.append((at, tutorText(renderer.tutorMarkdown(note.text), width: Self.column)))
         }
         return items.sorted { $0.0 < $1.0 }.map(\.1)
@@ -395,7 +400,7 @@ final class StatePanel: NSView {
     required init?(coder: NSCoder) { fatalError("unused") }
 
     override func draw(_ dirtyRect: NSRect) {
-        NSColor.quaternarySystemFill.setFill()
-        NSBezierPath(roundedRect: bounds, xRadius: 8, yRadius: 8).fill()
+        NSColor.separatorColor.setFill()
+        NSRect(x: 0, y: 12, width: 1, height: max(0, bounds.height - 24)).fill()
     }
 }

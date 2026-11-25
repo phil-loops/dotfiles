@@ -519,6 +519,8 @@ func tutorText(_ text: NSAttributedString, width: CGFloat) -> NSTextView {
 final class AnswerField: NSTextView {
     let partID: String
     var maximumHeight: CGFloat = .greatestFiniteMagnitude
+    /// A hairline under the text instead of a filled box: the stage's quieter pen.
+    var ruled = false
     private var height: NSLayoutConstraint?
 
     init(partID: String, text: String, width: CGFloat, editable: Bool) {
@@ -559,6 +561,11 @@ final class AnswerField: NSTextView {
 
     override func drawBackground(in rect: NSRect) {
         guard isEditable else { return }
+        if ruled {
+            NSColor.separatorColor.setFill()
+            NSRect(x: 0, y: bounds.maxY - 1, width: bounds.width, height: 1).fill()
+            return
+        }
         NSColor.quaternaryLabelColor.setFill()
         NSBezierPath(roundedRect: bounds, xRadius: 6, yRadius: 6).fill()
     }
@@ -692,6 +699,10 @@ final class TutorController: NSObject, NSTextViewDelegate {
     let agentRow = NSStackView()
     var agent: TutorAgent?
     var composerBar: NSView?
+    /// True while a staged session holds the window, so the workspace folds everything else away.
+    var onFocus: ((Bool) -> Void)?
+    lazy var columnLeading = column.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: Self.margin)
+    lazy var columnCentered = column.centerXAnchor.constraint(equalTo: document.centerXAnchor)
     /// The stage (format 2): an earlier step being looked at, reveal frames played so far, shape refusals already sent, the ask bar.
     var stageViewing: String?
     var stagePlayed: [String: Int] = [:]
@@ -735,7 +746,7 @@ final class TutorController: NSObject, NSTextViewDelegate {
             document.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor),
             document.trailingAnchor.constraint(equalTo: scroll.contentView.trailingAnchor),
             document.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
-            column.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: Self.margin),
+            columnLeading,
             column.topAnchor.constraint(equalTo: document.topAnchor, constant: 64),
             column.widthAnchor.constraint(equalToConstant: Self.column),
             agentRow.leadingAnchor.constraint(equalTo: column.leadingAnchor),
@@ -744,6 +755,7 @@ final class TutorController: NSObject, NSTextViewDelegate {
             document.bottomAnchor.constraint(equalTo: agentRow.bottomAnchor, constant: 146),
         ])
         scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 420).isActive = true
+        columnCentered.priority = .defaultHigh
         composer.delegate = self
         composer.maximumHeight = 160
         let composerSend = NSButton(title: "Send", target: self, action: #selector(sendMessage))
@@ -818,6 +830,7 @@ final class TutorController: NSObject, NSTextViewDelegate {
     func showEmpty(_ message: String = "No tutor sessions in `~/.local/share/show/tutor` yet. Claude starts one with `show --tutor <file>`.") {
         saveDrafts()
         timer?.invalidate()
+        onFocus?(false)
         path = nil
         session = nil
         rebuild()
@@ -901,7 +914,13 @@ final class TutorController: NSObject, NSTextViewDelegate {
         fields = []
         focusRungView = nil
         guard let session else { return }
-        if session.isStaged { return rebuildStage(session) }
+        columnLeading.isActive = !session.isStaged
+        columnCentered.isActive = session.isStaged
+        if session.isStaged {
+            onFocus?(true)
+            return rebuildStage(session)
+        }
+        onFocus?(false)
         stagePlayer?.invalidate()
         viewController.splitViewItems.first?.isCollapsed = false
         composerBar?.isHidden = false

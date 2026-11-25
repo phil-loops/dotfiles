@@ -375,6 +375,11 @@ extension AppDelegate {
 
     func updateFocusOutline() {
         guard let outline = shell?.focusOutline else { return }
+        // a staged Learn session is the only thing on screen: nothing to point at
+        if active == .learn, tutor?.session?.isStaged == true {
+            outline.target = nil
+            return
+        }
         let stops = focusStops
         outline.target = currentStop().map { stops[$0].column }
     }

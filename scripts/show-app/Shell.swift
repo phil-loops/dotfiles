@@ -898,6 +898,8 @@ final class WorkspaceController: NSViewController, NSTableViewDataSource, NSTabl
         if let tutor {
             addChild(tutor.viewController)
             pinned(tutor.viewController.view, in: host)
+            // a staged session is the whole window, like a plan canvas: the shelf folds away and ⌃⌘S brings it back
+            tutor.onFocus = { [weak self] on in self?.canvasChanged(on) }
         }
         if current == nil {
             showNothing()
