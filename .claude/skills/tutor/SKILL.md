@@ -102,6 +102,13 @@ help only" rows forever.
 
 ## The loop
 
+**What comes next is computed, not chosen.** The rules below (opener first, prerequisite gaps, a
+worked run on a new concept, a contrast one step after a miss, an old neighbor every fourth step, a
+transfer through a held analog, a level skipped after a run of hits, free recall when a topic is
+mostly new, the learner's card at the close) live in `learn next --topic <id> --session <id> --asked
+'<json>'`, which returns the next situation's concept, level and form. Show applies it for you; a
+terminal session calls it before each rung and builds that rung.
+
 1. **Prep (silently).** Read the learner's **concept graph**: `~/.dotfiles/scripts/learn state`
    (every concept's depth, what's due, open misses with their contrasts, the learner's open
    questions, calibration notes). Learn the material cold — diff, code, docs — so every situation is

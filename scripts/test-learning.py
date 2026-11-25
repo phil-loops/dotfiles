@@ -11,9 +11,9 @@ sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 import learning  # noqa: E402
 
 
-def ev(g, concept, level="predict", credit="unaided", outcome="hit", at="2026-10-01", **extra):
+def ev(g, concept, level="predict", credit="unaided", outcome="hit", at="2026-10-01", session="", **extra):
     return learning.add_evidence(g, {"concept": concept, "level": level, "credit": credit, "outcome": outcome,
-                                     "at": at, **extra})
+                                     "at": at, **extra}, session=session)
 
 
 def graph():
@@ -245,6 +245,132 @@ class Retest(unittest.TestCase):
         with self.assertRaises(learning.Invalid):
             learning.retest(g, system="nope")
 
+def nxt(g, asked=(), session="s", today="2026-10-10", topic="locks"):
+    return learning.next_step(g, topic=topic, session=session, asked=list(asked), today=today)
+
+
+class Policy(unittest.TestCase):
+    def test_a_topic_with_no_evidence_opens_with_recall(self):
+        g = graph()
+        self.assertEqual(nxt(g)["form"], "recall")
+        ev(g, "lock-ttl", at="2026-10-09")                     # half the topic is mapped: no recall
+        self.assertNotEqual(nxt(g)["form"], "recall")
+        g = graph()
+        # after the recall, a concept nobody has seen gets a worked example first
+        n = nxt(g, asked=[{"form": "recall"}])
+        self.assertEqual((n["form"], n["concept"], n["level"]), ("worked", "lock-ttl", "predict"))
+
+    def test_a_prerequisite_never_shown_comes_first(self):
+        g = graph()
+        ev(g, "bookmark-atomic", level="critique", at="2026-10-09")   # the first concept is done
+        n = nxt(g, asked=[{"form": "x"}], topic="cursors")
+        self.assertEqual((n["concept"], n["form"]), ("commit-order", "worked"))
+        self.assertIn("builds on it", n["why"])
+
+    def test_the_edge_is_one_level_above_depth(self):
+        g = graph()
+        ev(g, "lock-ttl", at="2026-10-10", session="s")
+        n = nxt(g, asked=[{"concept": "lock-ttl", "form": "worked", "level": "predict"}])
+        self.assertEqual((n["concept"], n["level"], n["form"]), ("lock-ttl", "explain", "explain"))
+
+    def test_a_run_of_hits_skips_a_level(self):
+        g = graph()
+        for _ in range(4):
+            ev(g, "lock-ttl", at="2026-10-10", session="s")
+        n = nxt(g, asked=[{"concept": "lock-ttl", "form": "predict", "level": "predict"}])
+        self.assertEqual((n["concept"], n["level"]), ("lock-ttl", "critique"))
+        self.assertIn("skipping a level", n["why"])
+
+    def test_a_miss_comes_back_as_a_contrast_one_step_later(self):
+        g = graph()
+        ev(g, "lock-ttl", at="2026-10-10", session="s")
+        ev(g, "lock-ttl", level="explain", outcome="miss", note="thinks it lives forever", contrast="holder dies at t=5",
+           at="2026-10-10", session="s")
+        asked = [{"concept": "lock-ttl", "form": "explain", "level": "explain"}]
+        n = nxt(g, asked=asked)
+        self.assertNotEqual(n["concept"], "lock-ttl")          # one step of space first
+        self.assertEqual(n["form"], "worked")                  # and the step after a miss is supported
+        asked.append({"concept": n["concept"], "form": n["form"], "level": n["level"]})
+        n = nxt(g, asked=asked)
+        self.assertEqual((n["concept"], n["form"], n["level"], n["contrast"]),
+                         ("lock-ttl", "contrast", "explain", "holder dies at t=5"))
+        asked.append({"concept": "lock-ttl", "form": "contrast", "level": "explain"})
+        ev(g, "lock-ttl", level="explain", outcome="miss", at="2026-10-10", session="s")   # the contrast missed too
+        asked.append({"concept": "lease-renewal", "form": "worked", "level": "predict"})
+        self.assertEqual(nxt(g, asked=asked)["form"], "contrast")      # a second one
+        ev(g, "lock-ttl", level="explain", outcome="miss", at="2026-10-10", session="s")
+        asked += [{"concept": "lock-ttl", "form": "contrast", "level": "explain"}, {"form": "x"}]
+        self.assertNotEqual(nxt(g, asked=asked)["form"], "contrast")   # two per session, then it waits for spacing
+
+    def test_a_contrast_that_misses_is_owed_another(self):
+        g = graph()
+        ev(g, "lock-ttl", level="explain", at="2026-08-01")             # shown once, then an old miss
+        ev(g, "lock-ttl", outcome="miss", at="2026-09-01")
+        asked = [{"concept": "lock-ttl", "form": "contrast", "level": "predict"}]
+        ev(g, "lock-ttl", outcome="miss", at="2026-10-10", session="s")   # its contrast missed again
+        n = nxt(g, asked=asked)
+        self.assertNotEqual(n["concept"], "lock-ttl")                    # a step of space
+        asked.append({"concept": n["concept"], "form": n["form"], "level": n["level"]})
+        self.assertEqual(nxt(g, asked=asked)["form"], "contrast")
+
+    def test_a_due_neighbor_is_mixed_in(self):
+        g = graph()
+        ev(g, "lease-renewal", at="2026-09-01")        # due, analog of bookmark-atomic
+        ev(g, "bookmark-atomic", at="2026-10-09")      # cursors has evidence: no recall
+        n = nxt(g, topic="cursors")
+        self.assertEqual((n["concept"], n["form"]), ("lease-renewal", "predict"))
+        self.assertIn("neighbor", n["why"])
+
+    def test_transfer_goes_through_a_held_analog_or_skips_to_critique(self):
+        g = graph()
+        ev(g, "bookmark-atomic", level="explain", at="2026-10-09")
+        ev(g, "commit-order", at="2026-10-09")
+        ev(g, "safety-lag", level="critique", at="2026-10-09")
+        n = nxt(g, topic="cursors", asked=[{"form": "x"}])
+        self.assertEqual((n["concept"], n["level"]), ("bookmark-atomic", "critique"))   # its analog isn't held
+        ev(g, "lease-renewal", level="explain", at="2026-10-09")
+        ev(g, "lock-ttl", at="2026-10-09")
+        n = nxt(g, topic="cursors", asked=[{"form": "x"}])
+        self.assertEqual((n["level"], n["via"]), ("transfer", "lease-renewal"))
+
+    def test_the_session_closes_on_a_card(self):
+        g = graph()
+        ev(g, "lease-renewal", at="2026-10-10", session="s")
+        ev(g, "lease-renewal", at="2026-10-10", session="s")
+        ev(g, "lock-ttl", at="2026-10-10", session="s")
+        asked = [{"form": "x"}] * learning.SESSION_STEPS
+        n = nxt(g, asked=asked)
+        self.assertEqual((n["form"], n["concept"]), ("card", "lease-renewal"))
+        self.assertEqual(nxt(g, asked=asked + [{"form": "card"}])["form"], "done")
+
+    def test_stations_follow_the_stages(self):
+        g = graph()
+        self.assertEqual(nxt(g, asked=[{"form": "recall"}])["stations"], [{"name": "why", "state": "current"}])
+
+    def test_branches_draft_both_outcomes(self):
+        g = graph()
+        ev(g, "lock-ttl", at="2026-10-10", session="s")
+        step = {"concept": "lock-ttl", "form": "explain", "level": "explain"}
+        b = learning.branches(g, step, topic="locks", session="s", asked=[{"form": "recall"}], today="2026-10-10")
+        self.assertEqual((b["hit"]["concept"], b["hit"]["level"]), ("lock-ttl", "critique"))  # no held analog
+        self.assertEqual(b["miss"]["form"], "worked")
+        self.assertEqual(len(g["evidence"]), 1)                                              # the graph is untouched
+
+    def test_a_retest_is_one_step_and_a_contrast_on_a_miss(self):
+        g = graph()
+        ev(g, "lock-ttl", at="2026-09-01")
+        r = lambda asked: learning.next_step(g, concept="lock-ttl", session="s", asked=asked, today="2026-10-10")
+        self.assertEqual((r([])["form"], r([])["level"]), ("predict", "predict"))
+        one = [{"concept": "lock-ttl", "form": "predict", "level": "predict"}]
+        self.assertEqual(r(one)["form"], "done")
+        ev(g, "lock-ttl", outcome="miss", contrast="holder dies", at="2026-10-10", session="s")
+        self.assertEqual((r(one)["form"], r(one)["contrast"]), ("contrast", "holder dies"))
+        self.assertEqual(r(one + [{"concept": "lock-ttl", "form": "contrast", "level": "predict"}])["form"], "done")
+
+    def test_scope_must_exist(self):
+        with self.assertRaises(learning.Invalid):
+            learning.next_step(graph(), topic="nope")
+
 
 class Blocks(unittest.TestCase):
     def test_new_fields_and_blocks(self):
@@ -342,6 +468,10 @@ class CLI(unittest.TestCase):
             std = json.loads(run("standard", "s1"))
             self.assertEqual((std["concepts"], std["evidence"][0]["source"]), (["a", "d"], "chat"))
             self.assertIn("### Active system: Sys [sys]", run("state", "--system", "sys"))
+            n = json.loads(run("next", "--topic", "t", "--session", "x", "--asked", "[]"))
+            self.assertEqual((n["form"], n["concept"]), ("contrast", "a"))   # a's confident miss, re-posed
+            b = json.loads(run("next", "--topic", "t", "--branch", json.dumps({"concept": "a", "level": "predict", "form": "contrast"})))
+            self.assertEqual(set(b), {"hit", "miss"})
             env["LEARNING_OFFERED"] = os.path.join(d, "offered")
             self.assertEqual(json.loads(run("retest", "--all", "--claim"))["concept"], "b")   # a was tested today; b is on no system
             r = subprocess.run([sys.executable, learn, "retest", "--claim"], env=env, capture_output=True, text=True)

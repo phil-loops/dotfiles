@@ -16,6 +16,12 @@
                                    --claim records today's offer and exits 3 if one was already made today
   learn nudge                      SessionStart hook: in an interactive session, when something is due and
                                    no re-test was offered today, tell Claude to offer one at a natural pause
+  learn next (--topic <id> | --system <id> | --concept <id>) [--session <id>] [--asked '<json>'] [--branch '<step json>']
+                                   the session's next step, decided from evidence: {form, concept, level, why,
+                                   stations, …}; form is one of recall worked predict contrast explain transfer
+                                   critique card done. --asked lists what the session posed ({concept, form,
+                                   level}, in order); --branch gives {hit, miss}: the next step either way the
+                                   open step lands
   learn standard <id>              one standard with its mastery, coverage and every evidence row
   learn map '<json>'               add/update a topic map  {"topic": {id,title,source}, "stages": [...]}
   learn system '<json>'            add/update a system  {id, title, summary,
@@ -149,6 +155,15 @@ def main(argv):
             if claim and brief["due"]:
                 _mark_offered()
             print(json.dumps(brief, indent=1))
+        elif cmd == "next":
+            g = learning.load()
+            scope = {"topic": learning.slug(topic) if topic else None, "system": learning.slug(system) if system else None,
+                     "concept": learning.slug(concept) if concept else None, "session": session, "asked": _json(_opt(args, "--asked") or "[]")}
+            branch = _opt(args, "--branch")
+            if branch:
+                print(json.dumps(learning.branches(g, _json(branch), **scope), indent=1))
+            else:
+                print(json.dumps(learning.next_step(g, **scope), indent=1))
         elif cmd == "standard":
             g = learning.load()
             stid = learning.slug(args[0])

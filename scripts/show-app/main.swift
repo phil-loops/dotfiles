@@ -16,11 +16,11 @@ if let flag = arguments.firstIndex(of: "--tutor-start") {
     exit(tutorStart(arguments[flag + 1]))
 }
 if let flag = arguments.firstIndex(of: "--tutor-turn") {
-    guard flag + 2 < arguments.count else {
-        FileHandle.standardError.write("usage: Show --tutor-turn <session.json> <message>\n".data(using: .utf8)!)
+    guard flag + 1 < arguments.count else {
+        FileHandle.standardError.write("usage: Show --tutor-turn <session.json> [<message>]   (no message: the step the session is owed)\n".data(using: .utf8)!)
         exit(64)
     }
-    exit(streamTutorTurn(canonicalPath(arguments[flag + 1]), arguments[flag + 2]))
+    exit(streamTutorTurn(canonicalPath(arguments[flag + 1]), flag + 2 < arguments.count ? arguments[flag + 2] : nil))
 }
 if let flag = arguments.firstIndex(of: "--tutor-check") {
     guard flag + 1 < arguments.count else {

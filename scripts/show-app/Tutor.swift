@@ -692,6 +692,7 @@ final class TutorController: NSObject, NSTextViewDelegate {
     var fields: [AnswerField] = []
     var focusRungView: NSView?
     weak var picker: NSSegmentedControl?
+    weak var confidenceLabel: NSTextField?
     weak var hint: NSTextField?
     let composer = AnswerField(partID: "__composer", text: "", width: TutorController.column, editable: true)
     var sidecar = Sidecar()
@@ -904,6 +905,7 @@ final class TutorController: NSObject, NSTextViewDelegate {
         guard let id = currentRungID else { return }
         confidence[id] = level
         picker?.selectedSegment = level
+        if let label = confidenceLabel { label.attributedStringValue = confidenceLine(level).attributedStringValue }
         hint?.isHidden = true
         saveDrafts()
     }
@@ -1404,8 +1406,8 @@ func tutorAsk(_ raw: String, _ text: String) -> Int32 {
     return streamTutorTurn(path, "learner says: \(text)")
 }
 
-/// Sends one message to the file's tutor and streams the reply's text to stdout until the turn ends; exits with its outcome.
-func streamTutorTurn(_ path: String, _ message: String) -> Int32 {
+/// Streams the tutor's turns for `message`, or for the step the session is owed when it's nil, until the tutor is idle.
+func streamTutorTurn(_ path: String, _ message: String?) -> Int32 {
     let agent = TutorAgent.agent(for: path)
     let began = Date()
     var started = false
@@ -1423,7 +1425,7 @@ func streamTutorTurn(_ path: String, _ message: String) -> Int32 {
             exit(0)
         }
     }
-    agent.send(message)
+    if let message { agent.send(message) } else { agent.advanceStaged() }
     RunLoop.main.run()
     return 0
 }

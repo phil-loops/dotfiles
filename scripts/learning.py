@@ -59,7 +59,7 @@ CREDITS = ["unaided", "scaffolded", "handed"]
 OUTCOMES = ["hit", "miss"]
 KINDS = ["principle", "convention"]
 CONFIDENCES = ["low", "medium", "high"]
-RUNGS = ["predict", "invent"]
+RUNGS = ["predict", "invent", "recall"]
 SOURCES = ["chat"]
 SIM_RESULTS = ["green", "red"]
 BASE_SPACING_DAYS = 4
@@ -561,6 +561,210 @@ def retest(g, today=None, system=None, everything=False):
             "standards": [{"id": sid, "system": s["system"], "can_do": s["can_do"]}
                           for sid, s in st["standards"].items() if c["id"] in s["concepts"]],
             "history": [{k: r[k] for k in ("at", "level", "credit", "outcome", "note")} for r in rows[-4:]]}
+
+
+# ── the session policy ────────────────────────────────────────────────
+
+FORMS = ["recall", "worked", "predict", "contrast", "explain", "transfer", "critique", "card", "done"]
+SESSION_STEPS = 8
+INTERLEAVE_EVERY = 4
+CONTRASTS_PER_SESSION = 2
+LEVEL_FORM = {"predict": "predict", "explain": "explain", "transfer": "transfer", "critique": "critique"}
+
+
+def scope_ids(g, topic=None, system=None, concept=None):
+    """The concepts a session works over, in teaching order: a topic's stages, a system's standards, or one concept."""
+    if concept:
+        if concept not in g["concepts"]:
+            raise Invalid(f"no concept {concept}")
+        return [concept]
+    if topic:
+        if topic not in g["topics"]:
+            raise Invalid(f"no topic {topic}")
+        return _uniq(_topic_ids(g, topic))
+    if system:
+        if system not in g["systems"]:
+            raise Invalid(f"no system {system}")
+        return _uniq([i for stid in g["systems"][system]["standards"] for i in g["standards"].get(stid, {}).get("concepts", [])])
+    raise Invalid("a session works over a topic, a system or a concept")
+
+
+def _asked(asked):
+    return [{"concept": slug(a.get("concept") or ""), "form": a.get("form") or "", "level": a.get("level") or ""}
+            for a in asked or []]
+
+
+def next_step(g, topic=None, system=None, session="", asked=(), today=None, concept=None):
+    """The session's next step, decided from evidence rather than by the tutor's feel.
+
+    `asked` is what the session has already posed, in order ({concept, form, level}); `session` tags this
+    session's evidence rows. In order of precedence:
+      card    after SESSION_STEPS steps, or when nothing is left: the learner writes the sentence they'd keep
+      recall  a topic that's mostly without evidence opens with free recall, which sorts what's known from what's not
+      contrast a miss from this session comes back as the same situation with one thing changed, one step later;
+              an older open miss on the topic comes before anything new
+      re-test every INTERLEAVE_EVERY steps (and first, when there's no recall) a due neighbor of the topic
+      due     a concept of the topic that's due is re-tested at the level it's held or was missed at
+      edge    the first concept in teaching order whose prerequisites are shown, one level above its depth —
+              two levels after a run of unaided hits, a prerequisite first when one was never shown, and a
+              worked example before a cold prediction on a concept with no evidence at all
+    A one-concept session (a re-test) is one step, and a contrast after it when that step missed; no card.
+    """
+    asked = _asked(asked)
+    st = state(g, today)
+    ids = [i for i in scope_ids(g, topic, system, concept) if i in st["concepts"]]
+    if not ids:
+        raise Invalid("the topic has no concepts yet")
+    concepts = st["concepts"]
+    n = len(asked)
+    rows = [r for r in g["evidence"] if session and r.get("session") == session]
+    paced = [r for r in rows if r.get("rung") != "recall"]
+    stretch = len(paced) >= 4 and all(r["outcome"] == "hit" and r["credit"] == "unaided" for r in paced[-4:])
+    support = bool(paced) and paced[-1]["outcome"] == "miss"
+    last = asked[-1]["concept"] if asked else ""
+    posed = {(a["concept"], a["level"]) for a in asked}
+
+    def out(form, cid="", level="", why="", **extra):
+        c = concepts.get(cid) or {}
+        return {"step": n + 1, "form": form, "concept": cid, "name": c.get("name", ""), "statement": c.get("statement", ""),
+                "statement_learner": c.get("statement_learner", ""), "level": level, "why": why,
+                "stations": _stations(g, st, topic, cid), **extra}
+
+    def retest_level(cid):
+        m = concepts[cid]["mastery"]
+        if m["open_miss"]:
+            return next(r["level"] for r in reversed(g["evidence"]) if r["concept"] == cid and r["outcome"] == "miss")
+        return LEVELS[max(m["depth"], m["assisted"], 1) - 1]
+
+    def retest(cid, why):
+        m = concepts[cid]["mastery"]
+        level = retest_level(cid)
+        if m["open_miss"]:
+            return out("contrast", cid, level, why, contrast=m["contrast"], misconception=m["open_miss"])
+        return out(LEVEL_FORM[level], cid, level, why)
+
+    if concept:
+        if n == 0:
+            m = concepts[concept]["mastery"]
+            if m["due"] or m["evidence"]:
+                return retest(concept, f"re-test: {m['reason'] or 'not due, asked for'}")
+            return out("worked", concept, "predict", "new: watch one run, then predict a variant")
+        missed = [r for r in rows if r["concept"] == concept and r["outcome"] == "miss"]
+        contrasts = sum(1 for a in asked if a["form"] == "contrast")
+        if missed and concepts[concept]["mastery"]["open_miss"] and contrasts < len(missed) and n < 3:
+            return out("contrast", concept, retest_level(concept), "missed: the same situation with one thing changed",
+                       contrast=concepts[concept]["mastery"]["contrast"], misconception=concepts[concept]["mastery"]["open_miss"])
+        return out("done", why="a re-test is one situation")
+
+    if any(a["form"] == "card" for a in asked):
+        return out("done", why="the session closed on its card")
+    if n >= SESSION_STEPS:
+        return out("card", _focus(rows, ids), why=f"{SESSION_STEPS} steps is a session; close while it's fresh")
+    unmapped = [i for i in ids if not concepts[i]["mastery"]["evidence"]]
+    if n == 0 and topic and len(unmapped) * 2 > len(ids):
+        return out("recall", why="most of this topic has no evidence yet: say everything you know, and the gaps show")
+
+    # a concept whose latest row this session is a miss is owed a contrast (at most CONTRASTS_PER_SESSION), one step later
+    deferred = None
+    for cid in _uniq(r["concept"] for r in rows if r["outcome"] == "miss"):
+        m = concepts.get(cid, {}).get("mastery")
+        latest = [r for r in rows if r["concept"] == cid][-1]
+        posed_contrasts = sum(1 for a in asked if a["concept"] == cid and a["form"] == "contrast")
+        if not (m and m["open_miss"] and latest["outcome"] == "miss" and posed_contrasts < CONTRASTS_PER_SESSION):
+            continue
+        owed = out("contrast", cid, retest_level(cid), "missed this session: the same situation with one thing changed",
+                   contrast=m["contrast"], misconception=m["open_miss"])
+        if cid != last or n >= SESSION_STEPS - 1:
+            return owed
+        deferred = deferred or owed
+
+    asked_ids = {a["concept"] for a in asked}
+    for cid in st["due"]:
+        if cid in ids and cid not in asked_ids and concepts[cid]["mastery"]["open_miss"]:
+            return retest(cid, f"an open miss on this topic: {concepts[cid]['mastery']['open_miss']}")
+
+    if topic and (n % INTERLEAVE_EVERY == INTERLEAVE_EVERY - 1 or (n == 0)):
+        for o in opener(g, topic, today):
+            if not any(a["concept"] == o["id"] for a in asked):
+                return retest(o["id"], f"due, and a neighbor of this topic ({o['reason']}): mixing it in keeps it alive")
+
+    for cid in st["due"]:
+        if cid in ids and cid not in asked_ids:
+            return retest(cid, f"due: {concepts[cid]['mastery']['reason']}")
+
+    for cid in ids:
+        c = concepts[cid]
+        m = c["mastery"]
+        if m["open_miss"]:
+            continue   # a concept isn't pushed further while a miss on it stands; its contrast comes first
+        blocker = next((b for b in c["blocked_by"] if (b, "predict") not in posed), None)
+        if c["blocked_by"]:
+            if blocker and concepts.get(blocker, {}).get("mastery", {}).get("open_miss"):
+                return retest(blocker, f"{c['name']} builds on it, and a miss on it stands")
+            if blocker:
+                form = "worked" if not concepts.get(blocker, {}).get("mastery", {}).get("evidence") else "predict"
+                return out(form, blocker, "predict", f"{c['name']} builds on it, and it was never shown unaided")
+            continue
+        target = m["depth"] + (2 if stretch and m["depth"] + 2 <= len(LEVELS) else 1)
+        if target > len(LEVELS):
+            continue
+        level = LEVELS[target - 1]
+        via = ""
+        if level == "transfer":
+            via = next((a for a in c["analogs"] if concepts.get(a, {}).get("mastery", {}).get("depth", 0) >= 2), "")
+            if not via:
+                level = "critique"
+        if (cid, level) in posed:
+            continue
+        if level == "predict" and not m["evidence"] and not stretch:
+            form, why = "worked", "new: watch one run, then predict a variant"
+        elif level == "predict" and support:
+            form, why = "worked", "after a miss, a worked run before the next cold prediction"
+        else:
+            form = LEVEL_FORM[level]
+            why = (f"shown at {m['level']}; next is {level}" if m["depth"] else f"next is {level}") + \
+                  (" (skipping a level after a run of hits)" if target == m["depth"] + 2 else "")
+        return out(form, cid, level, why, **({"via": via} if via else {}))
+
+    if deferred:
+        return deferred
+    return out("card", _focus(rows, ids), why="nothing on this topic is left to push today")
+
+
+def _focus(rows, ids):
+    """The concept this session worked most: the card's subject."""
+    counts = {}
+    for r in rows:
+        if r["concept"] in ids:
+            counts[r["concept"]] = counts.get(r["concept"], 0) + 1
+    return max(counts, key=counts.get) if counts else (ids[0] if ids else "")
+
+
+def _stations(g, st, topic, current):
+    """A topic's stages as the session's stations: done once every concept is shown at explain or deeper."""
+    if not topic:
+        return []
+    out = []
+    for s in g["topics"][topic]["stages"]:
+        depths = [st["concepts"][i]["mastery"]["depth"] for i in s["concepts"] if i in st["concepts"]]
+        state_ = ("current" if current in s["concepts"] else
+                  "done" if depths and min(depths) >= 2 else "todo")
+        out.append({"name": s["name"], "state": state_})
+    return out
+
+
+def branches(g, step, topic=None, system=None, session="", asked=(), today=None, concept=None):
+    """What `next_step` will say once the open step lands as a hit, and as a miss — so the next step can be
+    drafted while the learner is still reading this one."""
+    import copy
+    out = {}
+    for outcome in OUTCOMES:
+        h = copy.deepcopy(g)
+        h["evidence"].append({"id": "assumed", "concept": slug(step["concept"]), "level": step.get("level") or "predict",
+                              "credit": "unaided", "outcome": outcome, "note": step.get("misconception") or "",
+                              "at": today or _today(), "topic": topic or "", "session": session or "assumed"})
+        out[outcome] = next_step(h, topic, system, session or "assumed", list(asked) + [step], today, concept)
+    return out
 
 
 def _depth_label(m):

@@ -10,7 +10,8 @@ struct DueConcept {
 
 /// The learner graph's due re-tests, read with `learn json` (read-only, `LEARNING_MEMORY=0`) and cached between refreshes.
 enum LearnDue {
-    static let script = ("~/.dotfiles/scripts/learn" as NSString).expandingTildeInPath
+    /// `SHOW_LEARN` points a test at another checkout's `learn`.
+    static let script = ProcessInfo.processInfo.environment["SHOW_LEARN"] ?? ("~/.dotfiles/scripts/learn" as NSString).expandingTildeInPath
     private(set) static var concepts: [DueConcept] = []
     private(set) static var failure: String?
     private static var loading = false
@@ -141,14 +142,14 @@ func dueShelfView(_ row: ShelfRow) -> NSView? {
 }
 
 /// A new session file from the template: a title, nothing to answer yet, and a fresh `agent.session` for its own tutor.
-func createTutorSession(title: String, slug: String) throws -> String {
+func createTutorSession(title: String, slug: String, scope: [String: String]? = nil) throws -> String {
     try FileManager.default.createDirectory(atPath: tutorDirectory, withIntermediateDirectories: true)
     let format = DateFormatter()
     format.dateFormat = "yyyyMMdd-HHmmss"
     let words = slug.lowercased().map { $0.isLetter || $0.isNumber ? $0 : "-" }
     let stem = String(words).split(separator: "-").joined(separator: "-").prefix(48)
     let path = canonicalPath((tutorDirectory as NSString).appendingPathComponent("\(stem.isEmpty ? "session" : String(stem))-\(format.string(from: Date())).json"))
-    let template: [String: Any] = [
+    var template: [String: Any] = [
         "mode": "tutor",
         "title": title,
         "format": 2,
@@ -157,6 +158,7 @@ func createTutorSession(title: String, slug: String) throws -> String {
         "notes": [],
         "agent": ["session": UUID().uuidString.lowercased()],
     ]
+    if let scope { template["scope"] = scope }
     try JSONSerialization.data(withJSONObject: template, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
         .write(to: URL(fileURLWithPath: path), options: .withoutOverwriting)
     return path
@@ -190,9 +192,17 @@ enum TutorOpening {
 
     /// Creates the session file and queues the boot turn on its tutor. Returns the new file.
     func start() throws -> String {
-        let path = try createTutorSession(title: title, slug: slug)
-        TutorAgent.agent(for: path).send(message)
-        return path
+        switch self {
+        case .retest(let concept):
+            // the graph already scopes a re-test: the policy assigns its one step, and that request boots the tutor
+            let path = try createTutorSession(title: title, slug: slug, scope: ["concept": concept])
+            TutorAgent.agent(for: path).advanceStaged()
+            return path
+        case .topic:
+            let path = try createTutorSession(title: title, slug: slug)
+            TutorAgent.agent(for: path).send(message)
+            return path
+        }
     }
 }
 
@@ -332,12 +342,17 @@ func tutorStart(_ text: String) -> Int32 {
     }
     let path: String
     do {
-        path = try createTutorSession(title: opening.title, slug: opening.slug)
+        if case .retest(let concept) = opening {
+            path = try createTutorSession(title: opening.title, slug: opening.slug, scope: ["concept": concept])
+        } else {
+            path = try createTutorSession(title: opening.title, slug: opening.slug)
+        }
     } catch {
         FileHandle.standardError.write("Show: couldn't create a session: \(error)\n".data(using: .utf8)!)
         return 73
     }
     print("session: \(path)")
     fflush(stdout)
+    if case .retest = opening { return streamTutorTurn(path, nil) }
     return streamTutorTurn(path, opening.message)
 }

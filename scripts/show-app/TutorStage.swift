@@ -27,6 +27,7 @@ extension TutorController {
         }
         let strip = stationStrip(session)
         if let strip { add(strip, after: 28) }
+        let finished = path.map { (TutorPolicy.raw($0)["assigned"] as? [String: Any])?["form"] as? String == "done" } ?? false
         guard let step = stagedStep(session) else {
             add(stageQuiet(agent?.isBusy == true ? "The tutor is writing the first step." : "No steps yet."), after: 0)
             refreshAgentRow()
@@ -41,10 +42,12 @@ extension TutorController {
         let header = tutorText(renderer.tutorInline(step.title, font: .systemFont(ofSize: 21, weight: .bold)), width: width)
         focusRungView = strip ?? header
         add(header, after: 4)
-        var tag = [step.station, step.isInvent ? "invent" : "predict"].compactMap { $0 }.joined(separator: " · ")
+        var tag = [step.conceptName ?? step.concept.flatMap { $0.isEmpty ? nil : LearnDue.name($0) } ?? step.station,
+                   step.form.flatMap { TutorPolicy.formNames[$0] } ?? (step.isInvent ? "invent" : "predict")].compactMap { $0 }.joined(separator: " · ")
         if looking, current != nil || phase != .done { tag += " · earlier step — ⌥⌘] comes back" }
         add(smallCaps(tag), after: 18)
         add(tutorText(renderer.tutorMarkdown(step.setup), width: width), after: 20)
+        if step.isSingle { return rebuildSingle(session, step, looking: looking, finished: finished, add: add) }
 
         let predicted = phase != .predict
         let reveal = predicted ? step.reveal : nil
@@ -100,6 +103,7 @@ extension TutorController {
         if let idea = step.consolidate, phase == .done {
             add(smallCaps("the idea"), after: 6)
             add(tutorText(renderer.tutorMarkdown(idea), width: width), after: 22)
+            if finished, current == nil { add(stageQuiet("That's the session."), after: 16) }
             if looking, current != nil {
                 let next = NSButton(title: "Next step", target: self, action: #selector(stageNext))
                 next.bezelStyle = .rounded
@@ -137,7 +141,7 @@ extension TutorController {
         let text = (drafts[step.id]?[part] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return showHint("Write your answer first.") }
         let level = confidence[step.id]
-        if part == "predict", level == nil {
+        if part == "predict", level == nil, !step.isSingle {
             return showHint("Pick how sure you are first: ⌃1 Guessing · ⌃2 Fairly sure · ⌃3 Certain.")
         }
         var all = loadSidecar(path)
@@ -158,6 +162,11 @@ extension TutorController {
         }
         drafts[step.id]?[part] = nil
         if part == "predict" { confidence[step.id] = nil }
+        if step.isSingle {
+            saveDrafts()
+            reload()
+            return sendSingle(step, text: text, path: path)
+        }
         if part == "explain" { stageViewing = step.id }   // stay on it for the idea, until the learner steps on
         saveDrafts()
         guard part == "explain" else {
@@ -176,6 +185,22 @@ extension TutorController {
         }
         reload()
         deliver(stagedBrief("tutor explained", path: path, step: step.id))
+    }
+
+    /// Recall goes to the tutor to be read against the topic; the card is the learner's own sentence, saved straight to the graph.
+    private func sendSingle(_ step: TutorStep, text: String, path: String) {
+        guard step.form == "card" else {
+            return deliver("tutor recalled: \(path) step \(step.id)\nwhat they know: \(text)")
+        }
+        if let concept = step.concept, !concept.isEmpty {
+            do {
+                _ = try TutorPolicy.learn(["restate", concept, text])
+            } catch {
+                showHint("Couldn't save the card: \(error.localizedDescription)")
+            }
+        }
+        TutorAgent.agent(for: path).advanceStaged()
+        reload()
     }
 
     @objc func stageNext() {
@@ -209,26 +234,55 @@ extension TutorController {
         field.delegate = self
         fields.append(field)
         add(field, 14)
-        if part == "predict" {
-            add(stageQuiet("How sure are you?  ⌃1 · ⌃2 · ⌃3"), 8)
-            let control = NSSegmentedControl(labels: confidenceLevels.map(\.1), trackingMode: .selectOne, target: self, action: #selector(stagePicked))
-            control.selectedSegment = confidence[step.id] ?? -1
-            control.refusesFirstResponder = true
-            picker = control
-            add(control, 18)
+        if part == "predict", !step.isSingle {
+            let line = confidenceLine(confidence[step.id])
+            confidenceLabel = line
+            add(line, 8)
+        } else {
+            add(stageQuiet("⌘↩ sends", color: .tertiaryLabelColor), 8)
         }
-        let send = NSButton(title: part == "predict" ? "Send prediction" : "Send explanation", target: self, action: #selector(stageSend))
-        send.bezelStyle = .rounded
-        send.toolTip = "⌘↩"
-        add(send, 8)
         let note = stageQuiet("")
         note.isHidden = true
         hint = note
         add(note, 0)
     }
 
-    @objc private func stageSend() { sendStep() }
-    @objc private func stagePicked(_ sender: NSSegmentedControl) { choose(confidence: sender.selectedSegment) }
+    /// How sure the learner is, as one quiet line: the chosen level in full weight, the keys beside it.
+    func confidenceLine(_ chosen: Int?) -> NSTextField {
+        let line = NSMutableAttributedString()
+        let quiet: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 12), .foregroundColor: NSColor.tertiaryLabelColor]
+        for (i, level) in confidenceLevels.enumerated() {
+            if i > 0 { line.append(NSAttributedString(string: "   ", attributes: quiet)) }
+            line.append(NSAttributedString(string: "⌃\(i + 1) ", attributes: quiet))
+            line.append(NSAttributedString(string: level.1, attributes: [
+                .font: NSFont.systemFont(ofSize: 12, weight: chosen == i ? .semibold : .regular),
+                .foregroundColor: chosen == i ? NSColor.labelColor : NSColor.secondaryLabelColor]))
+        }
+        line.append(NSAttributedString(string: chosen == nil ? "      how sure, then ⌘↩" : "      ⌘↩ sends", attributes: quiet))
+        return NSTextField(labelWithAttributedString: line)
+    }
+
+    /// A one-answer step: recall at the opening (the tutor's reading of it follows), the card at the close.
+    private func rebuildSingle(_ session: TutorSession, _ step: TutorStep, looking: Bool, finished: Bool, add: (NSView, CGFloat) -> Void) {
+        let answer = answers[step.id]
+        let phase = stepPhase(step, answer)
+        add(tutorText(renderer.tutorInline(step.predict, font: .systemFont(ofSize: 14.5, weight: .semibold)), width: Self.column), 8)
+        if phase == .predict, !looking {
+            addInput(step, part: "predict", add: add)
+        } else {
+            add(lockedAnswer(answer?.parts["predict"], level: nil), 22)
+        }
+        if phase == .awaitingConsolidate, agent?.failure == nil { add(stageQuiet("The tutor is reading what you said."), 16) }
+        if let idea = step.consolidate, step.form == "recall" {
+            add(smallCaps("what you have, what's missing"), 6)
+            add(tutorText(renderer.tutorMarkdown(idea), width: Self.column), 22)
+        }
+        if step.form == "card", phase == .done {
+            add(stageQuiet(finished ? "Saved as your sentence for \(step.conceptName ?? LearnDue.name(step.concept ?? "")). That's the session." : "Saving."), 16)
+        }
+        for view in conversation(session, since: step) { add(view, 18) }
+        refreshAgentRow()
+    }
 
     /// The stations as one quiet line: the current one in full weight, done ones dimmed.
     private func stationStrip(_ session: TutorSession) -> NSView? {
