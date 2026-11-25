@@ -260,7 +260,6 @@ final class Dictate: NSObject, NSApplicationDelegate {
             return
         }
         paste(text, into: target, enter: Settings.send)
-        note("pasted")
         voice.flash("Pasted into \(name)")
     }
 
@@ -344,7 +343,7 @@ func acceptsText(_ app: NSRunningApplication) -> Bool? {
     return AXUIElementIsAttributeSettable(field, kAXValueAttribute as CFString, &settable) == .success && settable.boolValue
 }
 
-/// Puts `text` into `target` as if typed: brought to the front, pasted with ⌘V, then Enter when sending. The text stays
+/// Puts `text` into `target`: brought to the front, inserted by Dictate Input (else pasted with ⌘V), then Enter when sending. The text stays
 /// on the clipboard, so words that landed in the wrong place are one ⌘V from the right one.
 @MainActor
 func paste(_ text: String, into target: NSRunningApplication, enter: Bool) {
@@ -353,8 +352,40 @@ func paste(_ text: String, into target: NSRunningApplication, enter: Bool) {
     let wasFront = target.isActive
     target.activate()
     DispatchQueue.main.asyncAfter(deadline: .now() + (wasFront ? 0.05 : 0.3)) {
-        press(keyCode(typing: "v") ?? 9, flags: .maskCommand)
-        if enter { press(36) }
+        InputMethod.shared.insert(text, into: target.bundleIdentifier ?? "") { inserted in
+            if !inserted { press(keyCode(typing: "v") ?? 9, flags: .maskCommand) }
+            if enter { press(36) }
+            note(inserted ? "inserted" : "pasted")
+        }
+    }
+}
+
+/// Dictate Input, the input source in scripts/dictate-app/Sources/DictateInput: asked to insert words at the cursor of
+/// an app's focused field, it answers with where they went. No answer within half a second (it isn't the input source,
+/// or the field belongs to another app) means it didn't, and the caller pastes instead.
+@MainActor
+final class InputMethod: NSObject {
+    static let shared = InputMethod()
+    private var waiting: [String: (Bool) -> Void] = [:]
+
+    override init() {
+        super.init()
+        DistributedNotificationCenter.default().addObserver(self, selector: #selector(answered(_:)),
+                                                            name: .init("com.philbrockman.dictate.inserted"), object: nil,
+                                                            suspensionBehavior: .deliverImmediately)
+    }
+
+    func insert(_ text: String, into app: String, then done: @escaping (Bool) -> Void) {
+        let request = UUID().uuidString
+        waiting[request] = done
+        DistributedNotificationCenter.default().postNotificationName(.init("com.philbrockman.dictate.insert"), object: request,
+                                                                    userInfo: ["text": text, "app": app], deliverImmediately: true)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.waiting.removeValue(forKey: request)?(false) }
+    }
+
+    @objc private func answered(_ note: Notification) {
+        guard let request = note.object as? String else { return }
+        waiting.removeValue(forKey: request)?(!((note.userInfo?["into"] as? String) ?? "").isEmpty)
     }
 }
 

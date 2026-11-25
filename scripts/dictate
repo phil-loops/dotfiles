@@ -18,6 +18,7 @@ build() {
   [[ -x "$app/Contents/MacOS/Dictate" && "$(cat "$stamp" 2>/dev/null)" == "$sha" ]] && return
   echo "dictate: building…" >&2
   swift build -c release --package-path "$here" --scratch-path "$cache/build" --product Dictate >&2
+  swift build -c release --package-path "$here" --scratch-path "$cache/build" --product DictateInput >&2
   mkdir -p "$app/Contents/MacOS"
   cp "$(swift build -c release --package-path "$here" --scratch-path "$cache/build" --show-bin-path)/Dictate" "$app/Contents/MacOS/Dictate.new"
   mv -f "$app/Contents/MacOS/Dictate.new" "$app/Contents/MacOS/Dictate"
@@ -46,9 +47,51 @@ PLIST
   # identity every build); falls back to ad hoc on a machine without it
   codesign --force --sign "Dictate Local Signing" --identifier com.philbrockman.dictate "$app" >&2 2>/dev/null \
     || codesign --force --sign - --identifier com.philbrockman.dictate "$app" >&2
+  install_input
   echo "$sha" > "$stamp"
   # written last, once the new build is whole and signed: the running Dictate watches it to know when to move over
   echo "$sha" > "$cache/installed"
+}
+
+# Dictate Input, the input source Dictate inserts words through, in ~/Library/Input Methods where macOS looks for them.
+# The first install selects it as the input source (keys still type with your keyboard layout); after that, a rebuild
+# swaps the binary and stops the old process by its exact path, and macOS starts the new one when a text field next asks.
+input="$HOME/Library/Input Methods/Dictate Input.app"
+install_input() {
+  mkdir -p "$input/Contents/MacOS" "$input/Contents/Resources"
+  cp "$(swift build -c release --package-path "$here" --scratch-path "$cache/build" --show-bin-path)/DictateInput" "$input/Contents/MacOS/DictateInput.new"
+  mv -f "$input/Contents/MacOS/DictateInput.new" "$input/Contents/MacOS/DictateInput"
+  "$input/Contents/MacOS/DictateInput" --render-icon "$input/Contents/Resources/mic.tiff"
+  cat > "$input/Contents/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleExecutable</key><string>DictateInput</string>
+  <key>CFBundleIdentifier</key><string>com.philbrockman.inputmethod.Dictate</string>
+  <key>CFBundleName</key><string>Dictate</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>1.0</string>
+  <key>LSMinimumSystemVersion</key><string>14.0</string>
+  <key>LSBackgroundOnly</key><true/>
+  <key>NSPrincipalClass</key><string>NSApplication</string>
+  <key>InputMethodConnectionName</key><string>com.philbrockman.inputmethod.Dictate_Connection</string>
+  <key>InputMethodServerControllerClass</key><string>DictateInputController</string>
+  <key>TISInputSourceID</key><string>com.philbrockman.inputmethod.Dictate</string>
+  <key>TISIntendedLanguage</key><string>en</string>
+  <key>tsInputMethodCharacterRepertoireKey</key><array><string>Latn</string></array>
+  <key>tsInputMethodIconFileKey</key><string>mic.tiff</string>
+</dict>
+</plist>
+PLIST
+  codesign --force --sign "Dictate Local Signing" --identifier com.philbrockman.inputmethod.Dictate "$input" >&2 2>/dev/null \
+    || codesign --force --sign - --identifier com.philbrockman.inputmethod.Dictate "$input" >&2
+  local running
+  running="$(pgrep -fx "$input/Contents/MacOS/DictateInput" || true)"
+  [[ -n "$running" ]] && kill $running
+  if [[ ! -e "$cache/input-installed" ]]; then
+    "$input/Contents/MacOS/DictateInput" --install "$input" && touch "$cache/input-installed"
+  fi
 }
 
 case "${1:-}" in

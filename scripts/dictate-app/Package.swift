@@ -13,6 +13,7 @@ let package = Package(
             dependencies: [.product(name: "FluidAudio", package: "FluidAudio")],
             path: "Sources/Dictate"
         ),
+        .executableTarget(name: "DictateInput", path: "Sources/DictateInput"),
     ],
     swiftLanguageModes: [.v5]
 )
