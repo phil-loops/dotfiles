@@ -7,7 +7,8 @@
    "kind": "principle",
    "builds_on": [],
    "analogs": [
-    "dispatch-coalescing"
+    "dispatch-coalescing",
+    "cut-once-per-window"
    ],
    "code": [],
    "topics": [
@@ -24,7 +25,8 @@
    ],
    "analogs": [
     "frozen-bookmark-pins-retention",
-    "crash-recovery-is-visibility"
+    "crash-recovery-is-visibility",
+    "every-exit-must-settle"
    ],
    "code": [],
    "topics": [
@@ -41,7 +43,9 @@
    ],
    "analogs": [
     "sqs-in-flight-invisible",
-    "crash-recovery-is-visibility"
+    "crash-recovery-is-visibility",
+    "every-exit-must-settle",
+    "drain-before-disconnect"
    ],
    "code": [],
    "topics": [
@@ -95,7 +99,10 @@
     "optimistic-concurrency",
     "correlation-tag",
     "idempotency-key-minted-before-retry-boundary",
-    "fence-the-predecessor"
+    "fence-the-predecessor",
+    "reservation-ledger-refund-once",
+    "judgment-names-what-was-shown",
+    "lease-token-fences-completion"
    ],
    "code": [],
    "topics": [
@@ -110,7 +117,9 @@
    "builds_on": [
     "ownership-token"
    ],
-   "analogs": [],
+   "analogs": [
+    "lease-token-fences-completion"
+   ],
    "code": [],
    "topics": [
     "croon-job-locks"
@@ -323,7 +332,10 @@
    ],
    "analogs": [
     "ownership-token",
-    "atomic-check-and-spend"
+    "atomic-check-and-spend",
+    "reservation-ledger-refund-once",
+    "judgment-names-what-was-shown",
+    "lease-token-fences-completion"
    ],
    "code": [],
    "topics": [
@@ -395,7 +407,10 @@
    "statement": "Reactive priority has a ceiling; protecting a class means holding slack in advance.",
    "kind": "principle",
    "builds_on": [],
-   "analogs": [],
+   "analogs": [
+    "tokens-bound-in-flight",
+    "slow-high-cuts-low"
+   ],
    "code": [],
    "topics": [
     "mail-queue-scheduling"
@@ -409,10 +424,16 @@
    "builds_on": [
     "priority-cant-reclaim"
    ],
-   "analogs": [],
+   "analogs": [
+    "tokens-bound-in-flight",
+    "credit-exceeds-debit-grows",
+    "slow-high-cuts-low",
+    "cut-leaves-capped-allowance"
+   ],
    "code": [],
    "topics": [
-    "mail-queue-scheduling"
+    "mail-queue-scheduling",
+    "mail-queue-bug-arc"
    ],
    "created": "2026-07-01"
   },
@@ -423,7 +444,9 @@
    "builds_on": [
     "aimd-asymmetry"
    ],
-   "analogs": [],
+   "analogs": [
+    "slow-high-cuts-low"
+   ],
    "code": [],
    "topics": [
     "mail-queue-scheduling"
@@ -437,11 +460,14 @@
    "builds_on": [],
    "analogs": [
     "optimistic-concurrency",
-    "counts-and-bookmark-atomic"
+    "counts-and-bookmark-atomic",
+    "cut-once-per-window",
+    "release-then-reactivate-strands"
    ],
    "code": [],
    "topics": [
-    "mail-queue-scheduling"
+    "mail-queue-scheduling",
+    "mail-queue-bug-arc"
    ],
    "created": "2026-07-01"
   },
@@ -453,7 +479,8 @@
    "analogs": [],
    "code": [],
    "topics": [
-    "mail-queue-scheduling"
+    "mail-queue-scheduling",
+    "mail-queue-bug-arc"
    ],
    "created": "2026-07-01"
   },
@@ -469,7 +496,8 @@
    ],
    "code": [],
    "topics": [
-    "mail-queue-scheduling"
+    "mail-queue-scheduling",
+    "mail-queue-bug-arc"
    ],
    "created": "2026-07-01"
   },
@@ -484,7 +512,8 @@
    "analogs": [],
    "code": [],
    "topics": [
-    "mail-queue-scheduling"
+    "mail-queue-scheduling",
+    "mail-queue-bug-arc"
    ],
    "created": "2026-07-01"
   },
@@ -710,7 +739,8 @@
     }
    ],
    "topics": [
-    "ses-metric-projection"
+    "ses-metric-projection",
+    "mail-queue-bug-arc"
    ],
    "created": "2026-10-21"
   },
@@ -722,7 +752,8 @@
     "correlation-tag"
    ],
    "analogs": [
-    "idempotency-key-minted-before-retry-boundary"
+    "idempotency-key-minted-before-retry-boundary",
+    "release-then-reactivate-strands"
    ],
    "code": [
     {
@@ -735,7 +766,8 @@
     }
    ],
    "topics": [
-    "ses-metric-projection"
+    "ses-metric-projection",
+    "mail-queue-bug-arc"
    ],
    "created": "2026-10-21"
   },
@@ -758,7 +790,8 @@
     }
    ],
    "topics": [
-    "ses-metric-projection"
+    "ses-metric-projection",
+    "mail-queue-bug-arc"
    ],
    "created": "2026-10-21"
   },
@@ -802,7 +835,8 @@
    ],
    "analogs": [
     "atomic-check-and-spend",
-    "caller-owned-transaction"
+    "caller-owned-transaction",
+    "release-then-reactivate-strands"
    ],
    "code": [],
    "topics": [
@@ -1067,7 +1101,8 @@
    "analogs": [
     "lock-ttl",
     "ttl-vs-renewal-interval",
-    "dead-holder-blocks-forever"
+    "dead-holder-blocks-forever",
+    "drain-before-disconnect"
    ],
    "code": [
     {
@@ -1198,7 +1233,8 @@
    ],
    "analogs": [
     "lock-guards-holders-not-execution",
-    "visibility-is-not-a-job-timeout"
+    "visibility-is-not-a-job-timeout",
+    "fire-and-forget-loses-settlement"
    ],
    "code": [
     {
@@ -1230,7 +1266,8 @@
    "analogs": [
     "ownership-token",
     "correlation-tag",
-    "durable-row-before-send"
+    "durable-row-before-send",
+    "reservation-ledger-refund-once"
    ],
    "code": [
     {
@@ -1367,7 +1404,8 @@
     "projection-shards"
    ],
    "analogs": [
-    "lock-guards-holders-not-execution"
+    "lock-guards-holders-not-execution",
+    "repair-only-through-checkpoint"
    ],
    "code": [
     {
@@ -1387,7 +1425,8 @@
    ],
    "analogs": [
     "lock-guards-holders-not-execution",
-    "ownership-token"
+    "ownership-token",
+    "repair-only-through-checkpoint"
    ],
    "code": [],
    "topics": [],
@@ -1414,7 +1453,9 @@
     "single-cutoff-start",
     "cursor-redelivery"
    ],
-   "analogs": [],
+   "analogs": [
+    "repair-only-through-checkpoint"
+   ],
    "code": [],
    "topics": [],
    "created": "2026-10-28"
@@ -1431,6 +1472,395 @@
    "code": [],
    "topics": [],
    "created": "2026-10-28"
+  },
+  "tokens-bound-in-flight": {
+   "name": "Tokens bound work in flight",
+   "statement": "Debiting a token when an email is scheduled and crediting it when the send completes makes the pool a cap on low-priority emails in flight, not a rate.",
+   "kind": "principle",
+   "builds_on": [],
+   "analogs": [
+    "aimd-asymmetry",
+    "priority-cant-reclaim"
+   ],
+   "code": [
+    {
+     "path": "lib/valkey-mail-queue.ts",
+     "ref": "PEEK_SCHEDULABLE_MAIL_SCRIPT"
+    },
+    {
+     "path": "lib/mail-send-tokens.ts",
+     "ref": "incrementLowPriorityTokens"
+    }
+   ],
+   "topics": [
+    "mail-token-budget",
+    "mail-queue-bug-arc"
+   ],
+   "created": "2026-11-06"
+  },
+  "credit-exceeds-debit-grows": {
+   "name": "Credit a little more than the debit",
+   "statement": "Each completion returns 1.01 tokens for the 1 it cost, so a healthy pipeline grows its own budget about 1% per turnover; growth is earned only by completions.",
+   "kind": "principle",
+   "builds_on": [
+    "tokens-bound-in-flight"
+   ],
+   "analogs": [
+    "aimd-asymmetry"
+   ],
+   "code": [
+    {
+     "path": "lib/mail-send-tokens.ts",
+     "ref": "LOW_PRIORITY_TOKEN_CREDIT_UNITS"
+    }
+   ],
+   "topics": [
+    "mail-token-budget",
+    "mail-queue-bug-arc"
+   ],
+   "created": "2026-11-06"
+  },
+  "every-exit-must-settle": {
+   "name": "Every exit must settle its debit",
+   "statement": "Any path that takes a scheduled email out of the pipeline without a completion credit loses its token for good; nothing errors, the pool just shrinks.",
+   "kind": "principle",
+   "builds_on": [
+    "tokens-bound-in-flight"
+   ],
+   "analogs": [
+    "dead-holder-blocks-forever",
+    "lock-ttl",
+    "drain-before-disconnect"
+   ],
+   "code": [
+    {
+     "path": "jobs/mail-render.ts",
+     "ref": "refundLowPriorityTokens(erroredStatuses)"
+    }
+   ],
+   "topics": [
+    "mail-token-budget",
+    "mail-queue-bug-arc"
+   ],
+   "created": "2026-11-06"
+  },
+  "recovery-trickle": {
+   "name": "The recovery trickle",
+   "statement": "When the pool is empty and low-priority mail waits, the scheduler adds one token at most once a minute, so the pool can never stay dead but can't refill fast either.",
+   "kind": "convention",
+   "builds_on": [
+    "every-exit-must-settle"
+   ],
+   "analogs": [],
+   "code": [
+    {
+     "path": "lib/valkey-mail-queue.ts",
+     "ref": "LOW_PRIORITY_TOKEN_RECOVERY_KEY"
+    }
+   ],
+   "topics": [
+    "mail-token-budget",
+    "mail-queue-bug-arc"
+   ],
+   "created": "2026-11-06"
+  },
+  "reservation-ledger-refund-once": {
+   "name": "A per-email reservation ledger",
+   "statement": "Record each email's debit under its id and delete that entry when it settles, so a replayed failure or a late completion can't return the same token twice.",
+   "kind": "principle",
+   "builds_on": [
+    "every-exit-must-settle"
+   ],
+   "analogs": [
+    "ownership-token",
+    "optimistic-concurrency",
+    "idempotency-key-minted-before-retry-boundary"
+   ],
+   "code": [
+    {
+     "path": "lib/mail-send-tokens.ts",
+     "ref": "REFUND_LOW_PRIORITY_TOKENS_SCRIPT"
+    }
+   ],
+   "topics": [
+    "mail-token-budget",
+    "mail-queue-bug-arc"
+   ],
+   "created": "2026-11-06"
+  },
+  "slow-high-cuts-low": {
+   "name": "A slow high-priority send cuts the low pool",
+   "statement": "A high-priority send that waited past the SLA multiplies the low pool by 0.9; an on-time one adds a hundredth of a token, so low-priority mail yields when the urgent lane slows.",
+   "kind": "principle",
+   "builds_on": [
+    "tokens-bound-in-flight"
+   ],
+   "analogs": [
+    "aimd-asymmetry",
+    "wait-time-signal",
+    "priority-cant-reclaim"
+   ],
+   "code": [
+    {
+     "path": "lib/mail-send-tokens.ts",
+     "ref": "recordSuccessfulMailSendForTokens"
+    }
+   ],
+   "topics": [
+    "mail-token-budget",
+    "mail-queue-bug-arc"
+   ],
+   "created": "2026-11-06"
+  },
+  "cut-once-per-window": {
+   "name": "One cut per SLA window across workers",
+   "statement": "Every worker sees the same slowness, so N independent cuts compound to 0.9^N; a shared cooldown key lets exactly one cut land per SLA window.",
+   "kind": "principle",
+   "builds_on": [
+    "slow-high-cuts-low"
+   ],
+   "analogs": [
+    "one-runner-per-tick",
+    "atomic-check-and-spend"
+   ],
+   "code": [
+    {
+     "path": "lib/mail-send-tokens.ts",
+     "ref": "DECREASE_LOW_PRIORITY_TOKENS_SCRIPT"
+    }
+   ],
+   "topics": [
+    "mail-token-budget",
+    "mail-queue-bug-arc"
+   ],
+   "created": "2026-11-06"
+  },
+  "render-vs-comparison-identity": {
+   "name": "render vs comparison identity",
+   "statement": "A render is keyed by (tree, frozen recipe, consumed env, renderer contract) and is reusable across branches; a comparison is (before render, after render, frozen expectation) and is what gets judged.",
+   "kind": "principle",
+   "builds_on": [],
+   "analogs": [],
+   "code": [],
+   "topics": [
+    "branch-evidence"
+   ],
+   "created": "2026-11-15"
+  },
+  "before-is-merge-base-resolved-once": {
+   "name": "before is merge base resolved once",
+   "statement": "Before is the merge-base of the parent and the tip, with every ref resolved exactly once, so the review diff and the proof consume the same pair even if main moves mid-run.",
+   "kind": "principle",
+   "builds_on": [],
+   "analogs": [],
+   "code": [],
+   "topics": [
+    "branch-evidence"
+   ],
+   "created": "2026-11-15"
+  },
+  "env-pin-refuses-borrowed-deps": {
+   "name": "env pin refuses borrowed deps",
+   "statement": "Each package the renderer imports must be the exact version the rendered commit lockfile names, checked before execution, else the render is other code wearing this tree name (react 19.3.0 vs 19.3.1 refused).",
+   "kind": "principle",
+   "builds_on": [],
+   "analogs": [],
+   "code": [],
+   "topics": [
+    "branch-evidence"
+   ],
+   "created": "2026-11-15"
+  },
+  "admission-two-uncached-attempts": {
+   "name": "admission two uncached attempts",
+   "statement": "A render identity is trusted only after two independent uncached attempts produce byte-identical scenes; a later fresh mismatch marks it conflicted and nothing reuses it.",
+   "kind": "principle",
+   "builds_on": [
+    "render-vs-comparison-identity"
+   ],
+   "analogs": [],
+   "code": [],
+   "topics": [
+    "branch-evidence"
+   ],
+   "created": "2026-11-15"
+  },
+  "machine-checks-declared-invariance": {
+   "name": "machine checks declared invariance",
+   "statement": "Each scene is predicted same or changes before rendering; the machine checks the bytes, and any scene whose change disagrees with the prediction is a departure, even if invisible to the eye (#FFFFFF to #FCFCFD).",
+   "kind": "principle",
+   "builds_on": [
+    "render-vs-comparison-identity"
+   ],
+   "analogs": [],
+   "code": [],
+   "topics": [
+    "branch-evidence"
+   ],
+   "created": "2026-11-15"
+  },
+  "judgment-carries-on-equal-observation": {
+   "name": "judgment carries on equal observation",
+   "statement": "A judgment carries to another manifest only when expectation, prediction, scene obligations and every before/after artifact hash are equal; equal pixels under different obligations (a scene captured twice) are not the same observation.",
+   "kind": "principle",
+   "builds_on": [
+    "render-vs-comparison-identity"
+   ],
+   "analogs": [],
+   "code": [],
+   "topics": [
+    "branch-evidence"
+   ],
+   "created": "2026-11-15"
+  },
+  "judgment-names-what-was-shown": {
+   "name": "judgment names what was shown",
+   "statement": "A verdict names the exact manifest the judge saw; resolving the target at click time lets a different tree receive a verdict nobody gave it (srv/verdicts.py:130 waive).",
+   "kind": "principle",
+   "builds_on": [],
+   "analogs": [
+    "optimistic-concurrency",
+    "ownership-token"
+   ],
+   "code": [],
+   "topics": [
+    "branch-evidence"
+   ],
+   "created": "2026-11-15"
+  },
+  "fire-and-forget-loses-settlement": {
+   "name": "Fire-and-forget loses the settlement",
+   "statement": "A void-and-catch credit can be dropped when the job finishes or the process exits first, so a settlement that keeps the pool honest must be awaited before the job completes.",
+   "kind": "principle",
+   "builds_on": [
+    "every-exit-must-settle"
+   ],
+   "analogs": [
+    "timeout-doesnt-cancel-remote"
+   ],
+   "code": [
+    {
+     "path": "jobs/mail-send.ts",
+     "ref": "b6cd90aa3a"
+    }
+   ],
+   "topics": [
+    "mail-queue-bug-arc"
+   ],
+   "created": "2026-11-15"
+  },
+  "release-then-reactivate-strands": {
+   "name": "Release-then-reactivate strands work",
+   "statement": "Clearing a lease and re-activating the team as separate calls leaves a window where a crash puts the team in neither the active nor the processing set, so no sweeper ever finds its queued mail.",
+   "kind": "principle",
+   "builds_on": [
+    "claim-lease-sweep"
+   ],
+   "analogs": [
+    "counts-and-bookmark-atomic",
+    "atomic-check-and-spend",
+    "durable-row-before-send"
+   ],
+   "code": [
+    {
+     "path": "lib/valkey-mail-queue.ts",
+     "ref": "05eacf5aef"
+    }
+   ],
+   "topics": [
+    "mail-queue-bug-arc"
+   ],
+   "created": "2026-11-15"
+  },
+  "lease-token-fences-completion": {
+   "name": "A claim token fences completion",
+   "statement": "Each claim stores a unique token and completion acts only if the stored token is still its own, so a late or replayed completion cannot release a newer claim on the same team, even one with the same expiry.",
+   "kind": "principle",
+   "builds_on": [
+    "release-then-reactivate-strands"
+   ],
+   "analogs": [
+    "ownership-token",
+    "zombie-release-cascade",
+    "optimistic-concurrency"
+   ],
+   "code": [
+    {
+     "path": "lib/valkey-mail-queue.ts",
+     "ref": "05eacf5aef"
+    }
+   ],
+   "topics": [
+    "mail-queue-bug-arc"
+   ],
+   "created": "2026-11-15"
+  },
+  "drain-before-disconnect": {
+   "name": "Drain before disconnect",
+   "statement": "Shutdown stops new ticks and waits for in-flight work before disconnecting its store, under a drain deadline shorter than the kill grace period; whatever does not finish is left as an expiring lease for the sweeper.",
+   "kind": "principle",
+   "builds_on": [
+    "claim-lease-sweep"
+   ],
+   "analogs": [
+    "lock-ttl",
+    "every-exit-must-settle",
+    "crash-recovery-is-visibility"
+   ],
+   "code": [
+    {
+     "path": "apps/mail-schedule/src/shutdown.ts",
+     "ref": "b0a7cac5a4"
+    }
+   ],
+   "topics": [
+    "mail-queue-bug-arc"
+   ],
+   "created": "2026-11-15"
+  },
+  "cut-leaves-capped-allowance": {
+   "name": "A cut leaves a capped allowance",
+   "statement": "Each applied cut leaves the smaller of 90% of the pool or a fixed 100-email allowance, so a fleet-sized pool drops to a safe level in one cut instead of decaying 10% per window.",
+   "kind": "principle",
+   "builds_on": [
+    "cut-once-per-window"
+   ],
+   "analogs": [
+    "aimd-asymmetry"
+   ],
+   "code": [
+    {
+     "path": "lib/mail-send-tokens.ts",
+     "ref": "c4c4ac6ecc"
+    }
+   ],
+   "topics": [
+    "mail-queue-bug-arc"
+   ],
+   "created": "2026-11-15"
+  },
+  "repair-only-through-checkpoint": {
+   "name": "Repair only what the projector already passed",
+   "statement": "A repair re-applies only skipped events at or before the live projector checkpoint, read under the projector own lock; events past it are still the projector to count, so including them would double-count.",
+   "kind": "principle",
+   "builds_on": [
+    "raw-ledger-replay"
+   ],
+   "analogs": [
+    "cutoff-after-predecessor",
+    "fence-the-predecessor",
+    "pg-is-the-correctness-layer"
+   ],
+   "code": [
+    {
+     "path": "script-runner/repair-skipped-ses-sends.ts",
+     "ref": "2a674064ec"
+    }
+   ],
+   "topics": [
+    "mail-queue-bug-arc"
+   ],
+   "created": "2026-11-15"
   }
  },
  "topics": {
@@ -1727,6 +2157,158 @@
    ],
    "created": "2026-10-22",
    "updated": "2026-10-28"
+  },
+  "mail-token-budget": {
+   "title": "Mail scheduling: the low-priority token budget and its leak",
+   "source": "lib/mail-send-tokens.ts, lib/valkey-mail-queue.ts (PEEK_SCHEDULABLE_MAIL_SCRIPT), jobs/mail-render.ts, jobs/mail-send.ts; PRs #11355 (refund on render error) and #11404 (one cut per SLA window); the 2026-11-03 missing-merge-tag outage",
+   "stages": [
+    {
+     "name": "The loop: spend at schedule, credit at completion",
+     "concepts": [
+      "tokens-bound-in-flight",
+      "credit-exceeds-debit-grows"
+     ]
+    },
+    {
+     "name": "The leak: an exit that never settles",
+     "concepts": [
+      "every-exit-must-settle",
+      "recovery-trickle"
+     ]
+    },
+    {
+     "name": "Settling exactly once",
+     "concepts": [
+      "reservation-ledger-refund-once"
+     ]
+    },
+    {
+     "name": "High priority steers the low pool",
+     "concepts": [
+      "slow-high-cuts-low",
+      "cut-once-per-window"
+     ]
+    }
+   ],
+   "created": "2026-11-06",
+   "updated": "2026-11-06"
+  },
+  "branch-evidence": {
+   "title": "Branch evidence: rendered before/after proof per branch",
+   "source": "dotfiles 46133e10..086520af; scripts/evidence_core.py, evidence-render.mjs, srv/evidence.py, canopy Evidence.swift; memory project_branch-proof-design",
+   "stages": [
+    {
+     "name": "Identities",
+     "concepts": [
+      "render-vs-comparison-identity"
+     ]
+    },
+    {
+     "name": "One captured basis",
+     "concepts": [
+      "before-is-merge-base-resolved-once"
+     ]
+    },
+    {
+     "name": "Attested environment",
+     "concepts": [
+      "env-pin-refuses-borrowed-deps"
+     ]
+    },
+    {
+     "name": "Admission",
+     "concepts": [
+      "admission-two-uncached-attempts"
+     ]
+    },
+    {
+     "name": "Declared invariance",
+     "concepts": [
+      "machine-checks-declared-invariance"
+     ]
+    },
+    {
+     "name": "Who judges and what a judgment covers",
+     "concepts": [
+      "judgment-carries-on-equal-observation",
+      "judgment-names-what-was-shown"
+     ]
+    }
+   ],
+   "created": "2026-11-15",
+   "updated": "2026-11-15"
+  },
+  "mail-queue-bug-arc": {
+   "title": "Mail queue throughput, and the bugs found along the way",
+   "source": "loops origin/main: #11355 #11379 #11393 #11397 #11404 #11558 (diffs in learning/research/mail-queue-bug-arc.md)",
+   "stages": [
+    {
+     "name": "Cold re-test: congestion control and fair scheduling",
+     "concepts": [
+      "bounded-turn-round-robin",
+      "atomic-check-and-spend",
+      "claim-lease-sweep",
+      "orthogonal-throttles",
+      "aimd-asymmetry"
+     ]
+    },
+    {
+     "name": "Cold re-test: send → SES feedback → projection",
+     "concepts": [
+      "correlation-tag",
+      "durable-row-before-send"
+     ]
+    },
+    {
+     "name": "Tokens that never come back (#11355)",
+     "concepts": [
+      "tokens-bound-in-flight",
+      "credit-exceeds-debit-grows",
+      "every-exit-must-settle",
+      "reservation-ledger-refund-once",
+      "fire-and-forget-loses-settlement"
+     ]
+    },
+    {
+     "name": "Leases complete atomically (#11379)",
+     "concepts": [
+      "claim-lease-sweep",
+      "release-then-reactivate-strands",
+      "lease-token-fences-completion"
+     ]
+    },
+    {
+     "name": "Drain before shutdown (#11393)",
+     "concepts": [
+      "drain-before-disconnect"
+     ]
+    },
+    {
+     "name": "Recovering from zero tokens (#11397)",
+     "concepts": [
+      "recovery-trickle",
+      "atomic-check-and-spend"
+     ]
+    },
+    {
+     "name": "N workers, one cut (#11404)",
+     "concepts": [
+      "slow-high-cuts-low",
+      "cut-once-per-window",
+      "cut-leaves-capped-allowance"
+     ]
+    },
+    {
+     "name": "Missing SES send records (#11558)",
+     "concepts": [
+      "correlation-tag",
+      "raw-ledger-replay",
+      "repair-only-through-checkpoint"
+     ]
+    }
+   ],
+   "created": "2026-11-15",
+   "updated": "2026-11-15"
   }
  },
  "evidence": [
@@ -2587,6 +3169,206 @@
    "topic": "sqs-visibility-timeout",
    "session": "9b994418-4add-4cfc-b75e-247a54668560",
    "rung": "predict"
+  },
+  {
+   "id": "407bd579bc",
+   "concept": "sqs-in-flight-invisible",
+   "level": "predict",
+   "credit": "scaffolded",
+   "outcome": "hit",
+   "note": "'it gets to duplicate the work': got the t=31 redelivery to W2 while W1 still holds M; didn't address t=10 (M hidden, W2 gets nothing)",
+   "at": "2026-10-28",
+   "topic": "sqs-visibility-timeout",
+   "session": "9b994418-4add-4cfc-b75e-247a54668560",
+   "confidence": "low",
+   "rung": "predict"
+  },
+  {
+   "id": "30fbae00a8",
+   "concept": "sqs-at-least-once",
+   "level": "predict",
+   "credit": "scaffolded",
+   "outcome": "hit",
+   "note": "'at t=30 it could go again since it's still there and the visibility window closes': a second delivery after a successful-but-undeleted run; didn't count webhooks out loud",
+   "at": "2026-10-28",
+   "topic": "sqs-visibility-timeout",
+   "session": "9b994418-4add-4cfc-b75e-247a54668560",
+   "confidence": "medium",
+   "rung": "predict"
+  },
+  {
+   "id": "f0fe35481f",
+   "concept": "sqs-at-least-once",
+   "level": "predict",
+   "credit": "scaffolded",
+   "outcome": "hit",
+   "note": "the t=3.9 kill ends with one webhook",
+   "at": "2026-10-28",
+   "topic": "sqs-visibility-timeout",
+   "session": "9b994418-4add-4cfc-b75e-247a54668560",
+   "confidence": "low",
+   "rung": "predict"
+  },
+  {
+   "id": "b618d34ba5",
+   "concept": "sqs-in-flight-invisible",
+   "level": "explain",
+   "credit": "unaided",
+   "outcome": "miss",
+   "note": "'the sqs message was enqueued twice?': read redelivery as a second enqueue",
+   "at": "2026-10-28",
+   "topic": "sqs-visibility-timeout",
+   "session": "9b994418-4add-4cfc-b75e-247a54668560",
+   "confidence": "low",
+   "rung": "predict",
+   "contrast": "W1 receives M at t=0 and dies at t=3.9. At t=31 W2 receives it. How many messages are in the queue, and is W2 holding M or a copy? (One message, M itself, now on its 2nd receive.)"
+  },
+  {
+   "id": "1f465bf495",
+   "concept": "sqs-in-flight-invisible",
+   "level": "explain",
+   "credit": "scaffolded",
+   "outcome": "miss",
+   "note": "'it's \"visible\" when you ping AWS, but not able to be claimed?': has 'visible' and 'in flight' backwards",
+   "at": "2026-10-28",
+   "topic": "sqs-visibility-timeout",
+   "session": "9b994418-4add-4cfc-b75e-247a54668560",
+   "rung": "predict",
+   "contrast": "At t=31 M is visible and you click 'Poll for messages' in the AWS console to peek at it. W2 calls ReceiveMessage at t=32. What does W2 get? (Nothing: peeking is a receive, so M is in flight again and its receive count went up.)"
+  },
+  {
+   "id": "8d39679806",
+   "concept": "sqs-in-flight-invisible",
+   "level": "predict",
+   "credit": "scaffolded",
+   "outcome": "hit",
+   "note": "'fat nothing, because when SQS decided to give me the message it, in a transaction, marked it in flight for 30s': peeking is a receive; didn't name the receive-count bump",
+   "at": "2026-10-28",
+   "topic": "sqs-visibility-timeout",
+   "session": "9b994418-4add-4cfc-b75e-247a54668560",
+   "confidence": "high",
+   "rung": "predict"
+  },
+  {
+   "id": "549654af5b",
+   "concept": "sqs-in-flight-invisible",
+   "level": "predict",
+   "credit": "unaided",
+   "outcome": "hit",
+   "note": "cold re-test of the enqueued-twice contrast: \"at t=20 just one, in flight; at 31 visible again\": one message, not two; did not say what differs on the 2nd receive (new receipt handle, receive count 2)",
+   "at": "2026-10-29",
+   "topic": "sqs-visibility-timeout",
+   "session": "6b832986-0918-4105-a364-70ce58a6ecca",
+   "confidence": "high",
+   "rung": "predict"
+  },
+  {
+   "id": "33ca93a1c4",
+   "concept": "sqs-in-flight-invisible",
+   "level": "predict",
+   "credit": "scaffolded",
+   "outcome": "hit",
+   "note": "\"isnt it M but received count +1?\": M itself, receive count bumps; answered after the terminal reveal, so scaffolded; receipt handle not named",
+   "at": "2026-10-29",
+   "topic": "sqs-visibility-timeout",
+   "session": "6b832986-0918-4105-a364-70ce58a6ecca",
+   "confidence": "medium",
+   "rung": "predict"
+  },
+  {
+   "id": "a94fec1f60",
+   "concept": "sqs-in-flight-invisible",
+   "level": "explain",
+   "credit": "unaided",
+   "outcome": "hit",
+   "note": "\"it changed the visibility\": a receive hides M and the timeout unhides it, nothing added or removed; did not spell out why that rules out enqueued-twice",
+   "at": "2026-10-29",
+   "topic": "sqs-visibility-timeout",
+   "session": "6b832986-0918-4105-a364-70ce58a6ecca",
+   "confidence": "medium",
+   "rung": "predict"
+  },
+  {
+   "id": "2b5edfd20b",
+   "concept": "throw-waits-out-visibility",
+   "level": "predict",
+   "credit": "unaided",
+   "outcome": "hit",
+   "note": "r3: throw at t=25 after a t=20 extension → W2 gets nothing at 26, M visible again at t=50",
+   "at": "2026-10-31",
+   "topic": "sqs-visibility-timeout",
+   "session": "6a27dfc3-63d3-487b-9b04-8a07f2cb7795",
+   "confidence": "high",
+   "rung": "predict"
+  },
+  {
+   "id": "e444df2e0d",
+   "concept": "receive-count-redrive",
+   "level": "predict",
+   "credit": "unaided",
+   "outcome": "miss",
+   "note": "r3: said the next receive of M would show count 3 after one receive + one ChangeMessageVisibility (it is 2); either counted the extension as a receive or carried station 1 M count",
+   "at": "2026-10-31",
+   "topic": "sqs-visibility-timeout",
+   "session": "6a27dfc3-63d3-487b-9b04-8a07f2cb7795",
+   "confidence": "high",
+   "rung": "predict",
+   "contrast": "Same M, received once at t=0; the heartbeat extends it at t=20, 40 and 60, then the worker dies at t=65. Wrong model (each extension bumps the count) says the next receive shows 5; right model says 2, because only ReceiveMessage increments ApproximateReceiveCount."
+  },
+  {
+   "id": "36cdc7aab0",
+   "concept": "crash-recovery-is-visibility",
+   "level": "predict",
+   "credit": "unaided",
+   "outcome": "hit",
+   "note": "r4: SIGKILL at t=45 after extensions at 20 and 40 → nothing at t=60, M back at t=70",
+   "at": "2026-10-31",
+   "topic": "sqs-visibility-timeout",
+   "session": "6a27dfc3-63d3-487b-9b04-8a07f2cb7795",
+   "confidence": "medium",
+   "rung": "predict"
+  },
+  {
+   "id": "3b81905691",
+   "concept": "receive-count-redrive",
+   "level": "predict",
+   "credit": "scaffolded",
+   "outcome": "miss",
+   "note": "r4: said count 4 after one receive + two ChangeMessageVisibility (it is 2), even after r3 reveal told only ReceiveMessage bumps it; model is 1 per extension",
+   "at": "2026-10-31",
+   "topic": "sqs-visibility-timeout",
+   "session": "6a27dfc3-63d3-487b-9b04-8a07f2cb7795",
+   "confidence": "medium",
+   "rung": "predict",
+   "contrast": "maxReceiveCount=3; a healthy job heartbeats at t=20, 40, 60 and deletes at 70. If extensions bumped the count, M would hit 3 at t=40 and be dead-lettered mid-run; in fact count stays 1 and the delete succeeds."
+  },
+  {
+   "id": "cb760b51cb",
+   "concept": "receive-count-redrive",
+   "level": "predict",
+   "credit": "scaffolded",
+   "outcome": "miss",
+   "note": "r5: third miss on the same model: said count 3 at t=41 after one receive + two heartbeats (it is 1), so a healthy slow job would be dead-lettered; b \"it goes away\" (delete succeeds) right but unsure",
+   "at": "2026-11-01",
+   "topic": "sqs-visibility-timeout",
+   "session": "6a27dfc3-63d3-487b-9b04-8a07f2cb7795",
+   "confidence": "low",
+   "rung": "predict",
+   "contrast": "maxReceiveCount=3: W1 receives at 0, extends at 20, throws at 25; W2 receives at 50, extends at 70, crashes at 72; W3 polls at 110. Counting extensions says DLQ before W3; right model: W2 sees 2, W3 gets M with count 3."
+  },
+  {
+   "id": "dfd51b3fc7",
+   "concept": "receive-count-redrive",
+   "level": "predict",
+   "credit": "scaffolded",
+   "outcome": "miss",
+   "note": "r6: W2 sees 2 at t=50 (right, ignored the t=20 extension) but then said the t=70 extension bumped M to 3 and dead-lettered it; W3 actually gets M with count 3. Fourth miss; applies the rule inconsistently. Suspect the name ChangeMessageVisibility reads as make-visible/redeliver",
+   "at": "2026-11-01",
+   "topic": "sqs-visibility-timeout",
+   "session": "6a27dfc3-63d3-487b-9b04-8a07f2cb7795",
+   "confidence": "medium",
+   "rung": "predict",
+   "contrast": "At t=70 W2 is mid-handler and its timer calls ChangeMessageVisibility(30s): does any worker, W2 included, get M handed to it at that moment? (No: M stays hidden until t=100, so no delivery happens and the count stays 2.)"
   }
  ],
  "questions": [
@@ -2604,6 +3386,46 @@
    "concept": "one-checker-two-doors",
    "topic": "ts-language-server",
    "asked": "2026-10-21",
+   "status": "open"
+  },
+  {
+   "id": "19564bea13",
+   "text": "What does 'received twice, not enqueued twice' actually mean: where does M live between receives?",
+   "concept": "sqs-in-flight-invisible",
+   "topic": "sqs-visibility-timeout",
+   "asked": "2026-10-28",
+   "status": "open"
+  },
+  {
+   "id": "d7fc32edfa",
+   "text": "SQS has DeleteMessage as an explicit step: what does that look like in our codebase?",
+   "concept": "sqs-at-least-once",
+   "topic": "sqs-visibility-timeout",
+   "asked": "2026-10-28",
+   "status": "open"
+  },
+  {
+   "id": "2d2d108d46",
+   "text": "What is a NodeJS.Timeout, and how does the interval handle get from poll.ts into process.ts?",
+   "concept": "visibility-heartbeat",
+   "topic": "sqs-visibility-timeout",
+   "asked": "2026-10-28",
+   "status": "open"
+  },
+  {
+   "id": "6b9c3c4680",
+   "text": "How does SQS know how many times a message was received?",
+   "concept": "sqs-in-flight-invisible",
+   "topic": "sqs-visibility-timeout",
+   "asked": "2026-10-29",
+   "status": "open"
+  },
+  {
+   "id": "7bc02931e4",
+   "text": "can you change the timeout on a hidden message? (asked at r7, instead of picking whether an extension redelivers M; may be the root of counting extensions as receives)",
+   "concept": "receive-count-redrive",
+   "topic": "sqs-visibility-timeout",
+   "asked": "2026-11-01",
    "status": "open"
   }
  ],
