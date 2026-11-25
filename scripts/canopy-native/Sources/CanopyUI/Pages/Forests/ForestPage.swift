@@ -43,8 +43,9 @@ struct ForestPage: View {
                     if m.face == .story {
                         StoryView(pid: p.id, cursor: cursor, selection: selection)
                     } else {
+                        let since = ReviewSinceStore.of(app).since(repo: p.repo, forest: p.name)
                         ForEach(f.branches, id: \.b.id) { v in
-                            ForestBranchView(v: v, cursor: cursor == RowKey.branch(v.b.id), selected: selection.contains(RowKey.branch(v.b.id)))
+                            ForestBranchView(v: v, since: since, cursor: cursor == RowKey.branch(v.b.id), selected: selection.contains(RowKey.branch(v.b.id)))
                         }
                         ForestTodoList(items: Self.todoItems(app), forest: f, landed: app.store.list(Landed.self).filter { $0.project == p.id })
                     }
@@ -60,6 +61,7 @@ struct ForestPage: View {
         .task(id: m.integratable(p.id) ? m.stampOf(p.id) : "") {
             if m.integratable(p.id) { await m.checkIntegration(p.id) }
         }
+        .task(id: p.id) { await ReviewSinceStore.of(app).load(repo: p.repo, forest: p.name) }
     }
 
     private func header(_ p: Project, _ f: ForestView) -> some View {
@@ -137,11 +139,14 @@ struct ForestPage: View {
 }
 
 /// One branch on the forest page: name, its keys when the cursor's on it, the description (or the
-/// field typing it), the outline or the full commits, the loop strip and its PR facts.
+/// field typing it), the outline or the full commits, the loop strip and its PR facts; and how it stands against
+/// Phil's last spoken review — a word after the name and a line under the description, a branch the review left
+/// alone receding.
 private struct ForestBranchView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme
     let v: BranchView
+    let since: ReviewSince?
     let cursor: Bool
     let selected: Bool
 
@@ -154,8 +159,16 @@ private struct ForestBranchView: View {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 Text(b.order < 999 ? "\(b.order)" : "").font(Theme.text(11)).foregroundStyle(theme.inkFaint).frame(width: 20, alignment: .trailing)
                     .explains("branch|order|\(b.id)", RowName(word: "1 2 3", meaning: "the branch's place in merge order"))
-                Text(leaf(b.name)).font(Theme.display(17)).foregroundStyle(cursor ? theme.goldLeaf : theme.ink).lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                let mark = since?.mark(b.name, tip: b.tip)
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Text(leaf(b.name)).font(Theme.display(17)).foregroundStyle(cursor ? theme.goldLeaf : theme.ink).lineLimit(1)
+                    if let word = mark?.word {
+                        Text(word).font(Theme.text(11.5))
+                            .foregroundStyle(mark == .eyes ? theme.ember : mark?.loud == true ? theme.goldLeaf : theme.inkFaint)
+                            .explains("branch|since|\(b.id)", RowName(word: word, meaning: "how the branch stands against your last spoken review"))
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 LoopStripView(branchID: b.id, size: 11).fixedSize()
             }
             VStack(alignment: .leading, spacing: 6) {
@@ -176,6 +189,9 @@ private struct ForestBranchView: View {
                         if edit.unsaved(field, saved: b.description) { UnsavedMark() }
                     }
                 }
+                if let e = since?.trusted(b.name, tip: b.tip), e.kind != "same" || !(e.needsEyes ?? []).isEmpty, let line = ReviewSince.line(e) {
+                    Text(line).font(Theme.text(12)).foregroundStyle(theme.inkFaint).lineLimit(1).help(ReviewSince.detail(e))
+                }
                 if m.wordsOpen.contains(b.id) {
                     CommitWords(branchID: b.id).font(Theme.text(12))
                 }
@@ -186,7 +202,7 @@ private struct ForestBranchView: View {
             .padding(.leading, 32)
         }
         .padding(.vertical, 9).padding(.leading, 20).padding(.trailing, 20)
-        .opacity(v.st.ship == .landed ? 0.6 : 1)
+        .opacity(v.st.ship == .landed ? 0.6 : since?.mark(b.name, tip: b.tip) == .same && !cursor ? 0.7 : 1)
         .rowChrome(RowKey.branch(b.id), cursor: cursor, selected: selected)
     }
 }

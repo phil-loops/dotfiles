@@ -192,6 +192,7 @@ private struct ReviewHeader: View {
                 }
             }
             if pg.tab == "files", pg.integration == nil { BranchLine().padding(.top, 4) }
+            if pg.integration == nil, let b { ReviewSinceView(branch: b) }
             if pg.integration == nil, let b { WorkContextView(subject: .branch(project: b.project, name: b.name), compact: true, showsMissing: true) }
             if pg.integration == nil, let b { BenchSummaryView(subject: .branch(repo: b.repo, name: b.name)) }
             if pg.integration == nil, pg.tab == "files", let b { ProdCallersView(branch: b) }
@@ -302,7 +303,8 @@ private struct BranchLine: View {
     }
 }
 
-/// The file column: the diff's files with viewed boxes, the one the cursor is in lit.
+/// The file column: the diff's files with viewed boxes, the one the cursor is in lit, and a mark on each file the
+/// branch changed since Phil's last spoken review (its answers on hover).
 private struct FileTree: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme
@@ -311,6 +313,10 @@ private struct FileTree: View {
         let pg = ReviewPageState.of(app)
         let views = Dictionary(pg.views.map { ($0.file.path, $0) }, uniquingKeysWith: { a, _ in a })
         let current = pg.onScreen.flatMap { views[$0] == nil ? nil : $0 } ?? pg.here?.path
+        let since = pg.branch.flatMap { b in
+            app.store.view(Project.self, b.project).flatMap { ReviewSinceStore.of(app).since(repo: b.repo, forest: $0.name)?.trusted(b.name, tip: b.tip) }
+        }
+        let touched = since.map(ReviewSince.touched) ?? []
         // the files and counts are the read on screen: dimmed with the diff while it's the previous one
         PaneList(pane: reviewTreePane, rows: ReviewPage.treeRows(pg), follow: current.map { "f|\($0)" }) { key, _ in
             let path = String(key.dropFirst(2))
@@ -318,6 +324,7 @@ private struct FileTree: View {
                 HStack(spacing: 6) {
                     Text(v.viewed ? "☑" : v.seen > 0 ? "◪" : "☐").foregroundStyle(v.viewed ? theme.patina : theme.inkFaint)
                     if v.flagged > 0 { Text("⚑\(v.flagged)").foregroundStyle(theme.ember) }
+                    if touched.contains(path) { Text("•").foregroundStyle(theme.goldLeaf) }
                     let tint = current == path ? theme.goldLeaf : v.viewed ? theme.inkFaint : theme.ink
                     ViewThatFits(in: .horizontal) {
                         PathText(path: path, tint: tint).fixedSize()
@@ -329,7 +336,9 @@ private struct FileTree: View {
                     Text("−\(v.file.del)").foregroundStyle(theme.del)
                 }
                 .font(Theme.text(11.5))
-                .help(path)
+                .help(([touched.contains(path) ? "\(path) · changed since your review" : path]
+                       + (since.map(ReviewSince.answers) ?? []).filter { $0.note.file == path }.map { "\($0.answer.state): \($0.answer.text)" })
+                    .joined(separator: "\n"))
             }
         }
         .opacity(pg.diffStale ? 0.5 : 1)
