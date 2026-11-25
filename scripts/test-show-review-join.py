@@ -66,7 +66,7 @@ def main():
         ]}))
         sent, copied = tmp / "sent.txt", tmp / "copied.txt"
         note = tmp / "show-note"
-        note.write_text(f"#!/bin/sh\nprintf '%s\\n%s' \"$1\" \"$2\" > {sent}\n")
+        note.write_text(f"#!/bin/sh\ncase \"$1\" in --forest|--branch) printf '%s %s' \"$1\" \"$2\" > {sent}.about; shift 2;; esac\nprintf '%s\\n%s' \"$1\" \"$2\" > {sent}\n")
         note.chmod(0o755)
         copy = tmp / "copy"
         copy.write_text(f"#!/bin/sh\ncat > {copied}\n")
@@ -85,6 +85,7 @@ def main():
               and f"{folder}/notes.md" in cue, cue)
         check("the Inbox copy says it was sent", "_Sent to the session that owns lock-user-delete" in sent.read_text(), sent.read_text())
         check("posts to the Inbox under the review's name", sent.read_text().startswith("Spoken review · lock-user-delete\n"))
+        check("the Inbox message says it's about the forest", Path(str(sent) + ".about").read_text() == "--forest loops/lock-user-delete")
         check("copies the same notes", copied.read_text() == notes)
         check("the forest's own notes come first", notes.index("## The whole review") < notes.index("## [add-lock]"), notes)
         check("a note said before any branch is forest-wide", "- **n1** overall the forest reads well" in notes.split("## [add-lock]")[0], notes)

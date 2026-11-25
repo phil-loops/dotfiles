@@ -336,7 +336,7 @@ def main():
                 items.append((branch, place, "decide", shorten(f"{a['state']}: {a['text']}", 155), note.get("id")))
         for refusal in pin(repo, forest, items, folder):
             print(f"show-review-reply: not pinned, {refusal}", file=sys.stderr)
-    subprocess.run([os.environ.get("SHOW_NOTE", str(SCRIPTS / "show-note")), heading, body], check=False)
+    subprocess.run([os.environ.get("SHOW_NOTE", str(SCRIPTS / "show-note")), "--forest", f"loops/{forest}", heading, body], check=False)
 
 
 if __name__ == "__main__":

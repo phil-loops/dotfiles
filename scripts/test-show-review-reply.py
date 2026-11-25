@@ -73,7 +73,7 @@ def main():
 
         sent = tmp / "sent.txt"
         note = tmp / "show-note"
-        note.write_text(f"#!/bin/sh\nprintf '%s\\n%s' \"$1\" \"$2\" > {sent}\n")
+        note.write_text(f"#!/bin/sh\ncase \"$1\" in --forest|--branch) printf '%s %s' \"$1\" \"$2\" > {sent}.about; shift 2;; esac\nprintf '%s\\n%s' \"$1\" \"$2\" > {sent}\n")
         note.chmod(0o755)
         env = dict(os.environ, SHOW_NOTE=str(note), CLAUDE_CODE_SESSION_ID="cccccccc-3")
 
@@ -91,6 +91,7 @@ def main():
         subprocess.run([str(SCRIPT), str(folder)], env=env, check=True)
         since = (folder / "since.md").read_text()
         look = since.split("## Look at")[1].split("\n## ")[0]
+        check("the reply says it's about the forest", Path(str(sent) + ".about").read_text() == "--forest loops/f")
         check("with answers, the since view is shown", sent.read_text().startswith("Since your review · f\n"), sent.read_text())
         check("a branch rebased with the same change is the change you read", "Same change you read" in since.split("## [kept]")[1].split("\n## ")[0], since)
         check("a branch whose change you read stays out of Look at", "kept" not in look, look)

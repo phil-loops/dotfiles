@@ -160,7 +160,10 @@ def main():
     elif utterances:
         reason = f"No live session owns {forest}" if forest else "This review isn't of a forest"
         body = f"_{reason}, so nothing picked these up. They're on your clipboard._\n\n" + body
-    subprocess.run([os.environ.get("SHOW_NOTE", str(SCRIPTS / "show-note")), title, body], check=False)
+    parts = [p for p in review.get("scope", "").split("/") if p]
+    about = (["--forest", f"loops/{forest}"] if forest
+             else ["--branch", "loops/" + "/".join(parts[3:])] if parts[:2] == ["v2", "b"] and len(parts) >= 4 else [])
+    subprocess.run([os.environ.get("SHOW_NOTE", str(SCRIPTS / "show-note")), *about, title, body], check=False)
     subprocess.run([os.environ.get("SHOW_REVIEW_COPY", "pbcopy")], input=notes_only, text=True, check=False)
 
 
