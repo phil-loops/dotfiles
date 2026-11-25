@@ -94,54 +94,45 @@ final class Dictate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func idleMenu(_ menu: NSMenu) {
-        func item(_ title: String, _ action: Selector?, on: Bool = false, tag: String? = nil, to parent: NSMenu? = nil) {
+        @discardableResult
+        func item(_ title: String, _ symbol: String?, _ action: Selector?, on: Bool = false, tag: String? = nil, to parent: NSMenu? = nil) -> NSMenuItem {
             let entry = (parent ?? menu).addItem(withTitle: title, action: action, keyEquivalent: "")
             entry.target = self
             entry.state = on ? .on : .off
             entry.representedObject = tag
+            entry.image = symbol.flatMap { NSImage(systemSymbolName: $0, accessibilityDescription: nil) }
+            return entry
         }
         if tap == nil {
-            item("Allow 🎤 in Input Monitoring…", #selector(openInputMonitoring))
+            item("Allow the Mic Key in Input Monitoring…", "exclamationmark.triangle", #selector(openInputMonitoring))
+            menu.addItem(.separator())
         } else if !swallows {
-            item("Allow in Accessibility so 🎤 stops macOS dictation…", #selector(openAccessibility))
-        } else {
-            item("🎤 dictates to whatever has focus", nil)
+            item("Allow in Accessibility to Silence macOS Dictation…", "exclamationmark.triangle", #selector(openAccessibility))
+            menu.addItem(.separator())
         }
-        if lastDictation() != nil { item("Copy last dictation", #selector(copyLast)) }
-        menu.addItem(.separator())
-        item("Leave as a draft", #selector(chooseSend), on: !Settings.send, tag: "draft")
-        item("Send it (press Enter)", #selector(chooseSend), on: Settings.send, tag: "send")
-        menu.addItem(.separator())
-        for (title, current, action) in [("Start sound", Settings.startSound, #selector(chooseStartSound)),
-                                         ("Finish sound", Settings.finishSound, #selector(chooseFinishSound))] {
+        if lastDictation() != nil {
+            item("Copy Last Dictation", "doc.on.doc", #selector(copyLast))
+            menu.addItem(.separator())
+        }
+        for (title, symbol, current, action) in [("Start Sound", "play.circle", Settings.startSound, #selector(chooseStartSound)),
+                                                 ("Finish Sound", "stop.circle", Settings.finishSound, #selector(chooseFinishSound))] {
             let sub = NSMenu()
             sub.delegate = self
-            item("None", action, on: current.isEmpty, tag: "", to: sub)
+            item("None", nil, action, on: current.isEmpty, tag: "", to: sub)
             sub.addItem(.separator())
-            for name in Settings.sounds { item(name, action, on: current == name, tag: name, to: sub) }
-            menu.addItem(withTitle: title, action: nil, keyEquivalent: "").submenu = sub
+            for name in Settings.sounds { item(name, nil, action, on: current == name, tag: name, to: sub) }
+            item(title, symbol, nil).submenu = sub
         }
+        item("Live Preview", "text.bubble", #selector(togglePreview), on: Settings.preview)
+        item("Open at Login", "power", #selector(toggleLogin), on: SMAppService.mainApp.status == .enabled)
         menu.addItem(.separator())
-        item("Live preview", #selector(togglePreview), on: Settings.preview)
-        let places = NSMenu()
-        for (place, title) in [(Settings.Place.bottom, "Bottom of the screen"), (.top, "Top of the screen"), (.dragged, "Where I last dragged it")] {
-            item(title, #selector(choosePlace), on: Settings.place == place, tag: place.rawValue, to: places)
-        }
-        menu.addItem(withTitle: "Preview position", action: nil, keyEquivalent: "").submenu = places
-        menu.addItem(.separator())
-        item("Open at login", #selector(toggleLogin), on: SMAppService.mainApp.status == .enabled)
-        menu.addItem(withTitle: "Quit Dictate", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
+        let quit = menu.addItem(withTitle: "Quit Dictate", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
+        quit.image = NSImage(systemSymbolName: "xmark.rectangle", accessibilityDescription: nil)
     }
 
-    @objc private func chooseSend(_ sender: NSMenuItem) { Settings.send = sender.representedObject as? String == "send"; voice.reset() }
     @objc private func chooseStartSound(_ sender: NSMenuItem) { Settings.startSound = sender.representedObject as? String ?? ""; Voice.chime(Settings.startSound); voice.reset() }
     @objc private func chooseFinishSound(_ sender: NSMenuItem) { Settings.finishSound = sender.representedObject as? String ?? ""; Voice.chime(Settings.finishSound); voice.reset() }
     @objc private func togglePreview() { Settings.preview.toggle(); voice.reset() }
-    @objc private func choosePlace(_ sender: NSMenuItem) {
-        Settings.place = (sender.representedObject as? String).flatMap(Settings.Place.init(rawValue:)) ?? .bottom
-        voice.reset()
-        voice.flash("The preview shows here")
-    }
     @objc private func toggleLogin() {
         if SMAppService.mainApp.status == .enabled { try? SMAppService.mainApp.unregister() } else { try? SMAppService.mainApp.register() }
         voice.reset()
@@ -269,7 +260,7 @@ final class Dictate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             voice.flash("No text box had focus in \(name); the words are on the clipboard")
             return
         }
-        paste(text, into: target, enter: Settings.send)
+        paste(text, into: target)
     }
 
     private func toggle(pane: String) {
@@ -307,7 +298,7 @@ final class Dictate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func deliver(_ text: String, to session: Session) {
         Task.detached {
-            let sent = run([claudeSay, session.session_id] + (Settings.send ? [] : ["--draft"]) + ["--unsigned", text])
+            let sent = run([claudeSay, session.session_id] + ["--draft", "--unsigned", text])
             guard sent.status != 0 else { note("delivered"); return }
             note("not delivered: \(String(decoding: sent.err, as: UTF8.self))")
             let reason = String(decoding: sent.err, as: UTF8.self).split(separator: "\n").first.map(String.init) ?? "claude-say failed"
@@ -352,10 +343,10 @@ func acceptsText(_ app: NSRunningApplication) -> Bool? {
     return AXUIElementIsAttributeSettable(field, kAXValueAttribute as CFString, &settable) == .success && settable.boolValue
 }
 
-/// Puts `text` into `target`: brought to the front, inserted by Dictate Input (else pasted with ⌘V), then Enter when sending. The text stays
+/// Puts `text` into `target`: brought to the front, then inserted by Dictate Input (else pasted with ⌘V). The text stays
 /// on the clipboard, so words that landed in the wrong place are one ⌘V from the right one.
 @MainActor
-func paste(_ text: String, into target: NSRunningApplication, enter: Bool) {
+func paste(_ text: String, into target: NSRunningApplication) {
     NSPasteboard.general.clearContents()
     NSPasteboard.general.setString(text, forType: .string)
     let wasFront = target.isActive
@@ -363,7 +354,6 @@ func paste(_ text: String, into target: NSRunningApplication, enter: Bool) {
     DispatchQueue.main.asyncAfter(deadline: .now() + (wasFront ? 0.05 : 0.3)) {
         InputMethod.shared.insert(text, into: target.bundleIdentifier ?? "") { inserted in
             if !inserted { press(keyCode(typing: "v") ?? 9, flags: .maskCommand) }
-            if enter { press(36) }
             note(inserted ? "inserted" : "pasted")
         }
     }
