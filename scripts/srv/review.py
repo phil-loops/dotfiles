@@ -4,7 +4,8 @@
 #   GET  /node?branch=X     a node's file list (stack-forest --node; whitespace hidden, ?ws=1 shows it)
 #   GET  /file?branch&path  a file's contents on a ref (git show)
 #   GET  /commits?branch=X  branch history: own commits (own:true) + ancestors (own:false)
-#   GET  /commit-diff?sha=X one commit's changed files + patches (git show); &from=<sha> a run, &from=main main...X
+#   GET  /commit-diff?sha=X one commit's changed files + patches (git show); &from=<sha> a run, &from=main main...X,
+#                           &since=<sha> exactly since that commit (git diff since X), &path= one file
 #   POST /squash {branch, expectTip}   collapse outgoing commits into unstaged working-tree changes
 #   POST /prep {branch}          prep-for-push: squash unpushed → one, then oxfmt
 import os
@@ -455,11 +456,19 @@ def commit_diff(req, u):
     # historical commits. Diffed against the commit's first parent.
     # ?from=<older sha> widens it to a contiguous slice: the combined diff from..sha inclusive.
     # ?from=main starts at main instead: main...sha, everything sha adds since it left main.
+    # ?since=<sha> is the change since that commit exactly, the commit's own changes not included (a review's
+    # "what it is now": the tip Phil saw against the tip now); &path= keeps it to one file.
     sha = parse_qs(u.query).get("sha", [""])[0]
     frm = parse_qs(u.query).get("from", [""])[0]
+    since = parse_qs(u.query).get("since", [""])[0]
+    only = parse_qs(u.query).get("path", [""])[0]
     if frm and frm != "main" and not re.fullmatch(r"[0-9a-f]{7,40}", frm):
         return req._send(400, json.dumps({"err": "from must be a commit sha or main"}))
-    if frm == "main":
+    if since and (frm or not re.fullmatch(r"[0-9a-f]{7,40}", since)):
+        return req._send(400, json.dumps({"err": "since is a commit sha, and not with from"}))
+    if since:
+        start = since
+    elif frm == "main":
         # main means the trunk every other lit stretch starts from, origin's copy
         mb = ctx.run(["git", "merge-base", repostate.snapshot().trunk(), sha])
         if mb.returncode != 0:
@@ -468,8 +477,9 @@ def commit_diff(req, u):
     else:
         start = f"{frm}^" if frm else ""
     hide_ws = _hide_ws(u)
-    key = (ctx.repo_cwd(), sha, start, hide_ws)
-    show = (lambda *flags: ["git", "diff", *flags, start, sha]) if start else (lambda *flags: ["git", "show", *flags, "--format=", sha])
+    key = (ctx.repo_cwd(), sha, start, hide_ws, only)
+    limit = ["--", only] if only else []
+    show = (lambda *flags: ["git", "diff", *flags, start, sha, *limit]) if start else (lambda *flags: ["git", "show", *flags, "--format=", sha, *limit])
     pinned = re.fullmatch(r"[0-9a-f]{7,40}", sha) is not None   # a branch name moves; only a sha may be cached
     hit = _CDIFF_CACHE.get(key) if pinned else None
     if hit is not None:

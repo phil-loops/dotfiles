@@ -83,5 +83,20 @@ review.commit_diff(r, urlparse(f"/commit-diff?sha={git('rev-parse', 'feat')}&fro
 paths = sorted(f.get("path") or f.get("new") or "" for f in (r.body.get("files") or []))
 check("a stretch lit from main holds only the branch's own file", r.status == 200 and paths == ["feat.txt"], (r.status, paths))
 
+# what a review's card asks: the change since the tip Phil saw, that tip's own change left out, one file of it
+seen = git("rev-parse", "feat")
+git("checkout", "-q", "feat")
+commit("feat.txt", "mine, revised\n", "revise"); commit("other.txt", "x\n", "another file")
+git("checkout", "-q", "main")
+r = Req()
+review.commit_diff(r, urlparse(f"/commit-diff?sha={git('rev-parse', 'feat')}&since={seen}&path=feat.txt"))
+files = r.body.get("files") or []
+check("since a commit is exactly what came after it, kept to the one file",
+      r.status == 200 and [f["path"] for f in files] == ["feat.txt"] and "+mine, revised" in files[0]["patch"] and "-mine" in files[0]["patch"],
+      (r.status, files))
+r = Req()
+review.commit_diff(r, urlparse(f"/commit-diff?sha={git('rev-parse', 'feat')}&since=main"))
+check("since takes a sha, never a moving name", r.status == 400, r.status)
+
 print(f"\n{'OK' if not failures else 'FAIL'} — {failures} failure(s)")
 sys.exit(1 if failures else 0)
