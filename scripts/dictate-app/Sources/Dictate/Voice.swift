@@ -27,7 +27,8 @@ actor Transcriber {
 @MainActor
 final class Voice: NSObject, AVAudioRecorderDelegate {
     private let transcriber = Transcriber()
-    private let status = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    private let status = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+    private let bubble = Bubble()
     private var recorder: AVAudioRecorder?
     private var file: URL?
     private var preview: Task<Void, Never>?
@@ -43,7 +44,6 @@ final class Voice: NSObject, AVAudioRecorderDelegate {
 
     override init() {
         super.init()
-        status.button?.imagePosition = .imageLeft
         update()
     }
 
@@ -127,13 +127,13 @@ final class Voice: NSObject, AVAudioRecorderDelegate {
     private func startPreview(of file: URL) {
         preview = Task { [weak self, transcriber] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: .milliseconds(1500))
+                try? await Task.sleep(for: .milliseconds(600))
                 guard !Task.isCancelled, let data = try? Data(contentsOf: file) else { return }
-                let samples = Logic.tail(of: data, seconds: 10)
+                let samples = Logic.tail(of: data, seconds: 8)
                 guard samples.count >= 8_000, let text = try? await transcriber.transcript(of: samples), !Task.isCancelled else { continue }
                 await MainActor.run {
                     guard let self, self.recorder != nil else { return }
-                    self.heard = Logic.heard(text)
+                    self.heard = Logic.heard(text, width: 180)
                     self.update()
                 }
             }
@@ -169,7 +169,13 @@ final class Voice: NSObject, AVAudioRecorderDelegate {
         }
         status.button?.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
         status.button?.toolTip = label
-        status.button?.title = recorder != nil && !heard.isEmpty ? " " + heard : ""
+        if recorder != nil {
+            bubble.show(heard.isEmpty ? "Listening to \(target)…" : heard, dim: heard.isEmpty)
+        } else if busy && deliver != nil && file != nil {
+            bubble.show(heard.isEmpty ? "Transcribing…" : heard, dim: true)
+        } else {
+            bubble.hide()
+        }
         status.menu = menu
     }
 
