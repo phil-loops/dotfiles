@@ -262,7 +262,7 @@ def target(all_rows, prefer=(), worked=(), last=None):
     return next((pane for pane in [*prefer, *worked, last] if pane in here), None)
 
 
-SHOW = os.path.expanduser("~/.cache/show/Show.app/Contents/MacOS/Show")
+SHOW = "/Applications/Show.app/Contents/MacOS/Show"
 
 
 def show_takes_bare_links():

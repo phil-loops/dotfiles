@@ -18,7 +18,7 @@ set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cache="${XDG_CACHE_HOME:-$HOME/.cache}/show"
-app="$cache/Show.app"
+app="/Applications/Show.app"   # where Spotlight finds it
 stamp="$cache/source.sha"
 
 # Show builds from its own copy of the sources in $src, never the shared tree other sessions are editing: show-app as
