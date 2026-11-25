@@ -13,6 +13,7 @@ from urllib.parse import parse_qs
 
 from . import rebaseguard
 from . import ctx
+from . import seen
 from . import openprs
 from . import prompts
 from . import stackcfg
@@ -412,13 +413,14 @@ def _scratch_wt():
     return path
 
 
-def _direct_rebase(branch):
+def _direct_rebase(branch, saw=None):
     """Try `git rebase origin/main` for `branch` in an isolated worktree (assumes
     origin/main is already fetched). Returns (status, summary):
       'clean'    — landed; branch ref moved. summary = what replayed.
       'conflict' — hit a conflict; aborted + restored. → caller ejects to Claude.
       'skip'     — no safe in-place worktree (branch in the main checkout, or its
                    worktree is dirty). → caller ejects to Claude.
+      'moved'    — the checkout no longer holds <saw>; nothing rebased.
     """
     main = os.path.realpath(ctx.MAIN_WT)
     wt = _worktree_of(branch)
@@ -432,6 +434,10 @@ def _direct_rebase(branch):
         own = True
     else:
         return "skip", ""
+    if saw and not ctx.run(["git", "-C", target, "rev-parse", "HEAD"]).stdout.strip().startswith(saw):
+        if own:
+            ctx.run(["git", "-C", target, "checkout", "--detach"])
+        return "moved", ""
     from . import repostate
     draft = branch if repostate.snapshot().visibility(branch) == "draft" else None
     reb = rebaseguard.run(target, ["origin/main"], rewrite=draft)   # aborts itself; a death mid-run is healed next time
@@ -550,9 +556,14 @@ def _rebase_tree(branch, onto, cut):
 
 
 def post_sync(req, raw):
-    branch = json.loads(raw or "{}").get("branch", "")
+    d = json.loads(raw or "{}")
+    branch = d.get("branch", "")
     if not branch:
         req._send(400, json.dumps({"ok": False, "err": "no branch"}))
+        return
+    why = seen.moved(branch, d.get("expectTip"))
+    if why:
+        req._send(409, json.dumps({**why, "stale": True}))
         return
     ctx.run(["git", "fetch", "origin", "main"])   # fresh origin/main before gating + rebasing
     st = state(branch, fresh_prs=True)   # re-check server-side: never rebase a published/stacked branch on a stale client view
@@ -562,7 +573,10 @@ def post_sync(req, raw):
             return
         req._send(409, json.dumps({"ok": False, "err": st.get("why", "not syncable")}))
         return
-    status, summary = _direct_rebase(branch)
+    status, summary = _direct_rebase(branch, d["expectTip"])
+    if status == "moved":
+        req._send(409, json.dumps({**(seen.moved(branch, d["expectTip"]) or {"ok": False, "err": f"{branch} moved"}), "stale": True}))
+        return
     if status == "clean":
         req._send(200, json.dumps({"ok": True, "rebased": True, "summary": summary}))
         return

@@ -237,6 +237,8 @@ func shipBranch(_ f: (inout Branch) -> Void = { _ in }) -> Branch {
         #expect(Syncing.rebaseOf(true, ["contract": true]) == .contract)
         #expect(Syncing.rebaseOf(true, ["ejected": true, "conflict": true, "stream": "rebase:f/b"]) == .conflict)
         if case .refused = Syncing.rebaseOf(false, ["err": "has an open PR"]) {} else { Issue.record("not refused") }
+        // a branch that moved since the press stops the motion, never falls through to the shape step
+        #expect(Syncing.rebaseOf(false, ["stale": true, "moved": true, "err": "b moved since you looked: abc1234 fix"]) == .failed(note: "b moved since you looked: abc1234 fix"))
         // 2026-11-18: the answer says what happened — a hand-off that couldn't launch or no answer at all
         // is a failure, never a skip; a hand-off without a conflict is an unsafe worktree, not a conflict
         #expect(Syncing.rebaseOf(false, ["ok": false, "ejected": false, "conflict": true, "err": "could not launch rebase session"])

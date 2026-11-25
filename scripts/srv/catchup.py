@@ -238,7 +238,7 @@ def catch_up(branch, wt=None, snap=None):
             return {"ok": False, "moved": moved, "stopped": {"branch": b, "why": err}, "err": err}
         tips[b] = new
         moved.append({"branch": b, "how": how})
-    return {"ok": True, "moved": moved}
+    return {"ok": True, "moved": moved, "tip": tips.get(branch) or snap.local(branch)}
 
 
 def children(b):

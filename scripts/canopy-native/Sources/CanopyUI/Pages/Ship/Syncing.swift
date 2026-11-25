@@ -131,7 +131,7 @@ public enum Syncing {
     public static func rebaseOf(_ ok: Bool, _ body: JSONObject) -> Rebase {
         if !ok {
             let err = str(body["err"])
-            if body["ejected"] != nil || err == "network" || err.hasPrefix("http-5") {
+            if body["ejected"] != nil || truthy(body["stale"]) || err == "network" || err.hasPrefix("http-5") {
                 return .failed(note: err.shipNonEmpty ?? "the rebase couldn't run")
             }
             return .refused(note: "refused (\(err.shipNonEmpty ?? "stacked, or an open PR")) — the commit shape step handles it")

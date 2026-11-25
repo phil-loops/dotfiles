@@ -55,7 +55,7 @@ enum SyncCommands {
         step("branch.sync.dirt", path: "/dirty-resolve", body: { b, a in ["branch": .string(b.name), "action": a?.extra["action"] ?? .null] },
              failed: "the working tree didn't move", title: "Fold, stash or pop the uncommitted changes of the worktree holding the branch",
              budget: .gitWrite, v1: "dirty-resolve")
-        step("branch.sync.rebase", path: "/sync", body: { b, _ in ["branch": .string(b.name)] },
+        step("branch.sync.rebase", path: "/sync", body: { b, a in ["branch": .string(b.name), "expectTip": a?.extra["expectTip"] ?? .string(b.tip)] },
              failed: "the rebase didn't run", title: "Rebase it onto origin/main (or say its forest needs a restack)", budget: .slowIO, v1: "sync")
         step("branch.sync.restack", path: "/restack", body: { _, a in ["project": a?.extra["project"] ?? .null] },
              failed: "the restack didn't start", title: "Queue its forest's restack onto origin/main", budget: .gitWrite, v1: "restack")
@@ -257,7 +257,8 @@ struct SyncMotionDriver {
         await run(b, via: via, facts: f, dirt: action == "stash" ? "stashed for the run" : "folded into the commit")
     }
 
-    func run(_ b: Branch, via: Via, facts f: SyncFacts, dirt: String?) async {
+    func run(_ observed: Branch, via: Via, facts f: SyncFacts, dirt: String?) async {
+        var b = observed
         let id = b.id
         ship.setStep(id, .dirt, .ok, dirt)
         let has = { (s: StepID) in ship.motionOf(id)?.steps.contains { $0.id == s } == true }
@@ -270,13 +271,15 @@ struct SyncMotionDriver {
                 ship.setStep(id, .reseat, .fail, reseatWhy(r.body))
                 return await finish(id, via: via, .stopped)
             }
+            if let tip = r.body["tip"]?.string { b.tip = tip }
             let moved = (r.body["moved"]?.array ?? []).compactMap { $0["branch"]?.string }.map(shipLeaf)
             ship.setStep(id, .reseat, .ok, moved.isEmpty ? "already on \(b.parent)'s tip" : "caught up \(moved.joined(separator: ", "))")
         }
 
         if has(.rebase) && Syncing.rebases(f) {
             ship.setStep(id, .rebase, .run)
-            let r = await step("branch.sync.rebase", id, via)
+            let r = await step("branch.sync.rebase", id, via, ["expectTip": .string(b.tip)])
+            if r.body["stale"] == true { app.runner.resync?() }
             switch Syncing.rebaseOf(r.ok, r.body) {
             case .restack(let project):
                 let q = await step("branch.sync.restack", id, via, ["project": .string(project)])
