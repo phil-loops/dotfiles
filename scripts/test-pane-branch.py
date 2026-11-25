@@ -126,6 +126,16 @@ check("one pane's ask judges only that pane's moves (⌃a n waits on it)", set(j
       (sorted(set(judged)), out.getvalue()))
 pb.how = real_how
 
+base, tip = git("rev-parse", "main"), git("rev-parse", "wt-1")
+pb.Git().adds_commits(REPO, base, tip)
+asked = pb.Git()
+check("whether a commit builds on another is remembered across asks", asked.adds_commits(REPO, base, tip) and asked.memo == {}, asked.memo)
+check("…both ways", pb.Git().adds_commits(REPO, tip, base) is False and pb.read_ancestry()[(tip, base)] is False)
+pb.Git().adds_commits(REPO, "f" * 40, tip)
+check("a commit git can't find is never remembered", ("f" * 40, tip) not in pb.read_ancestry())
+check("a repo's branches and forest tags are one ask each",
+      pb.Git().exists(REPO, "wt-1") and not pb.Git().exists(REPO, "gone") and pb.Git().in_forest(REPO, "feat") and not pb.Git().in_forest(REPO, "wt-1"))
+
 table = {"9":("8", "tmux"), "8": ("7", "/usr/bin/login"), "7": ("1", "/Applications/Ghostty.app/Contents/MacOS/ghostty"), "1": ("0", "/sbin/launchd")}
 check("the terminal is the app the tmux client runs in", pb.host_of("9", table) == ("7", "/Applications/Ghostty.app"), pb.host_of("9", table))
 check("a client in no app has no terminal", pb.host_of("1", table) is None and pb.host_of("404", table) is None)

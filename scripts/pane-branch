@@ -49,10 +49,12 @@ def read_moves(server, base=None):
 
 
 class Git:
-    """The few facts a move is judged by, asked once each."""
+    """The few facts a move is judged by: a repo's branches and forest tags asked once each, and whether one commit
+    builds on another remembered for good (a pair of commits always answers the same)."""
 
     def __init__(self):
         self.memo = {}
+        self.ancestry = None
 
     def _run(self, repo, *args):
         key = (repo, args)
@@ -62,10 +64,19 @@ class Git:
         return self.memo[key]
 
     def exists(self, repo, branch):
-        return self._run(repo, "rev-parse", "-q", "--verify", f"refs/heads/{branch}")[0] == 0
+        listing = self._run(repo, "for-each-ref", "--format=%(refname)", "refs/heads/")[1]
+        key = (repo, "branches")
+        if key not in self.memo:
+            self.memo[key] = {line.removeprefix("refs/heads/") for line in listing.splitlines()}
+        return branch in self.memo[key]
 
     def in_forest(self, repo, branch):
-        return bool(self._run(repo, "config", "--get", f"branch.{branch}.stack-project")[1])
+        listing = self._run(repo, "config", "--get-regexp", r"^branch\..*\.stack-project$")[1]
+        key = (repo, "forest")
+        if key not in self.memo:
+            self.memo[key] = {name.removeprefix("branch.").removesuffix(".stack-project")
+                              for name, _, value in (line.partition(" ") for line in listing.splitlines()) if value}
+        return branch in self.memo[key]
 
     def default_branch(self, repo):
         key = (repo, "default")
@@ -78,7 +89,43 @@ class Git:
         return self.memo[key]
 
     def adds_commits(self, repo, old, new):
-        return old != new and self._run(repo, "merge-base", "--is-ancestor", old, new)[0] == 0
+        if old == new:
+            return False
+        if self.ancestry is None:
+            self.ancestry = read_ancestry()
+        if (old, new) not in self.ancestry:
+            code = self._run(repo, "merge-base", "--is-ancestor", old, new)[0]
+            if code not in (0, 1):   # a commit git can't find answers nothing worth keeping
+                return False
+            self.ancestry[(old, new)] = code == 0
+            remember_ancestry(old, new, code == 0)
+        return self.ancestry[(old, new)]
+
+
+def ancestry_file():
+    return os.path.join(journal_dir(), "ancestry.tsv")
+
+
+def read_ancestry():
+    """(old, new) → whether new builds on old, as earlier asks found."""
+    out = {}
+    try:
+        with open(ancestry_file()) as f:
+            for line in f:
+                parts = line.rstrip("\n").split("\t")
+                if len(parts) == 3 and parts[2] in ("0", "1"):
+                    out[(parts[0], parts[1])] = parts[2] == "1"
+    except OSError:
+        pass
+    return out
+
+
+def remember_ancestry(old, new, builds_on):
+    try:
+        with open(ancestry_file(), "a") as f:
+            f.write(f"{old}\t{new}\t{int(builds_on)}\n")
+    except OSError:
+        pass
 
 
 def how(move, git):
