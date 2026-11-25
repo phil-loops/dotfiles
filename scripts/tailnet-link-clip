@@ -1,12 +1,30 @@
 #!/bin/zsh
-# Rewrites copied Loops links for the audience you share with (menu bar, or `tailnet-link-clip audience external|internal`).
-# external: tailnet → app.loops.so; internal: app.loops.so → tailnet. /admin always stays on the tailnet.
-set -euo pipefail
+# Rewrites copied admin.your-tailnet.ts.net links outside /admin to app.loops.so, keeping rich-text formatting.
+# Copy the same link again within 2s to keep the tailnet form. `tailnet-link-clip <text>` prints one rewrite.
+# Launchd keeps it alive; a failed build or a crash posts to Show's Inbox once a day.
+set -uo pipefail
 src=${0:A:h}/tailnet-link-clip.swift
-bin=$HOME/.cache/tailnet-link-clip/tailnet-link-clip
+dir=$HOME/.cache/tailnet-link-clip
+bin=$dir/tailnet-link-clip
+mkdir -p $dir
+
+alarm() {
+  local stamp=$dir/alarmed-$(date +%F)
+  [[ -e $stamp ]] && return
+  touch $stamp
+  show-note "Copied links are no longer rewritten" "tailnet-link-clip $1. Tailnet links you copy stay tailnet links until it's fixed. Log: \`$dir/agent.log\`" || true
+}
+
 if [[ ! -x $bin || $src -nt $bin ]]; then
-  mkdir -p ${bin:h}
-  swiftc -O -o $bin.tmp $src
-  mv $bin.tmp $bin
+  if swiftc -O -o $bin.tmp $src; then
+    mv $bin.tmp $bin
+  else
+    alarm "failed to build"
+    [[ -x $bin ]] || exit 1
+  fi
 fi
-exec $bin "$@"
+
+(( $# )) && exec $bin "$@"
+$bin
+alarm "exited with status $?"
+exit 1
