@@ -296,15 +296,12 @@ def main():
         return 0
     if args[:1] == ["tmux"]:
         return to_tmux(args[1:], state, moves, git)
-    if args[:1] == ["from"] and len(args) == 2 and args[1].startswith("%"):
-        moves = [m for m in moves if m["pane"] == args[1]]   # one pane's branch is all this asks git about
-    all_rows = rows(state, moves, git)
     if args == ["--json"]:
-        print(json.dumps(all_rows))
+        print(json.dumps(rows(state, moves, git)))
         return 0
     if not args:
         now = time.time()
-        for r in all_rows:
+        for r in rows(state, moves, git):
             if r["branch"]:
                 print(f"{r['address']:<14} {r['repo']:<12} {r['branch']}  ·  {r['how']} {ago(now - r['at'])}")
         return 0
@@ -312,9 +309,11 @@ def main():
     if len(args) != (2 if want_url or leaving else 1):
         print(__doc__, file=sys.stderr)
         return 2
-    row, why = pick(args[-1], state, all_rows)
+    row, why = pick(args[-1], state, rows(state, [], git))
     if row and leaving:
         remember(state[0], row["pane"])
+    if row:   # one pane's branch is all this asks git about
+        row = next(r for r in rows(state, [m for m in moves if m["pane"] == row["pane"]], git) if r["pane"] == row["pane"])
     if row and not row["branch"]:
         row, why = None, f"pane {row['address']} hasn't committed to a branch or started one"
     if not row:
