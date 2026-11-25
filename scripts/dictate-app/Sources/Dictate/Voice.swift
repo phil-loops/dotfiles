@@ -40,6 +40,7 @@ final class Voice: NSObject, AVAudioRecorderDelegate {
     private var flashing: String?
 
     var active: Bool { deliver != nil }
+    var failed: Bool { failure != nil }
     var onError: ((String) -> Void)?
     var idleMenu: (NSMenu) -> Void = { _ in }
 
@@ -119,6 +120,8 @@ final class Voice: NSObject, AVAudioRecorderDelegate {
         transcribe()
     }
 
+    func retry() { transcribe() }
+
     @objc private func transcribe() {
         guard let file, !busy else { return }
         failure = nil
@@ -132,6 +135,9 @@ final class Voice: NSObject, AVAudioRecorderDelegate {
                 let deliver = self.deliver
                 reset()
                 if text.isEmpty { onError?("Parakeet didn’t hear any speech") } else { rememberDictation(text); deliver?(text) }
+            } catch ASRError.invalidAudioData {
+                reset()
+                flash("Too short to transcribe; nothing sent")
             } catch {
                 busy = false
                 failure = error.localizedDescription

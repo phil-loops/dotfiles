@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 import CoreGraphics
 import ServiceManagement
 
@@ -230,6 +231,7 @@ final class Dictate: NSObject, NSApplicationDelegate {
     /// when a terminal has focus and that pane holds one, else the focused app itself.
     private func toggleFromKeys() {
         note("toggle")
+        if voice.failed { note("retry"); voice.retry(); return }
         if voice.active { voice.finish(); return }
         guard !voice.busy, let front = NSWorkspace.shared.frontmostApplication else { return }
         guard Logic.terminals.contains(front.bundleIdentifier ?? "") else { startPasting(into: front); return }
@@ -263,6 +265,7 @@ final class Dictate: NSObject, NSApplicationDelegate {
     }
 
     private func toggle(pane: String) {
+        if voice.failed { note("retry"); voice.retry(); return }
         if voice.active { note("finish"); voice.finish(); return }
         guard !voice.busy else { note("busy transcribing; ignored"); return }
         startTerminal(pane, pane: pane, fallback: nil, lookup: Task.detached { claudeSession(in: pane) })
@@ -350,7 +353,7 @@ func paste(_ text: String, into target: NSRunningApplication, enter: Bool) {
     let wasFront = target.isActive
     target.activate()
     DispatchQueue.main.asyncAfter(deadline: .now() + (wasFront ? 0.05 : 0.3)) {
-        press(9, flags: .maskCommand)
+        press(keyCode(typing: "v") ?? 9, flags: .maskCommand)
         if enter { press(36) }
     }
 }
@@ -366,7 +369,27 @@ func rememberDictation(_ text: String) {
     try? text.write(toFile: lastFile, atomically: true, encoding: .utf8)
 }
 
-/// One key press and release, posted as if typed (key codes are US-layout positions: 9 is V, 36 is Return).
+/// The key that types `character` in the current keyboard layout: on Dvorak, V sits where QWERTY has the period
+/// and QWERTY's V key types K, so a fixed ⌘V key code opens Chrome's ⌘K menu instead of pasting.
+func keyCode(typing character: String) -> CGKeyCode? {
+    guard let source = TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue(),
+          let pointer = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData) else { return nil }
+    let data = Unmanaged<CFData>.fromOpaque(pointer).takeUnretainedValue() as Data
+    return data.withUnsafeBytes { bytes -> CGKeyCode? in
+        guard let layout = bytes.bindMemory(to: UCKeyboardLayout.self).baseAddress else { return nil }
+        for code in CGKeyCode(0)..<128 {
+            var dead: UInt32 = 0
+            var length = 0
+            var chars = [UniChar](repeating: 0, count: 4)
+            let status = UCKeyTranslate(layout, code, UInt16(kUCKeyActionDown), 0, UInt32(LMGetKbdType()),
+                                        OptionBits(kUCKeyTranslateNoDeadKeysBit), &dead, chars.count, &length, &chars)
+            if status == noErr, String(utf16CodeUnits: chars, count: length) == character { return code }
+        }
+        return nil
+    }
+}
+
+/// One key press and release, posted as if typed (36 is Return in every layout).
 func press(_ code: CGKeyCode, flags: CGEventFlags = []) {
     let source = CGEventSource(stateID: .combinedSessionState)
     for down in [true, false] {
