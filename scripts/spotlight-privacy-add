@@ -1,0 +1,56 @@
+#!/usr/bin/env python3
+# spotlight-privacy-add [--apply] <folder>... — adds folders to the Spotlight Privacy list (the Exclusions array in the
+# Data volume's VolumeConfiguration.plist). Dry run unless --apply. Run as root: sudo scripts/spotlight-privacy-add --apply <folders>.
+# Backs up the plist first, refuses to touch anything that isn't a list of strings, and re-reads the file after writing.
+# Check the result in System Settings → Siri & Spotlight → Spotlight Privacy; that's the list macOS actually honors.
+import os
+import plistlib
+import shutil
+import sys
+import time
+
+CONF = "/System/Volumes/Data/.Spotlight-V100/VolumeConfiguration.plist"
+
+
+def load(path):
+    with open(path, "rb") as fh:
+        raw = fh.read(6)
+    fmt = plistlib.FMT_BINARY if raw == b"bplist" else plistlib.FMT_XML
+    with open(path, "rb") as fh:
+        return plistlib.load(fh), fmt
+
+
+def main(argv):
+    apply = "--apply" in argv
+    folders = [os.path.abspath(a) for a in argv if a != "--apply"]
+    if not folders:
+        sys.exit("usage: sudo scripts/spotlight-privacy-add [--apply] <folder>...")
+    if os.geteuid() != 0:
+        sys.exit("needs root: sudo scripts/spotlight-privacy-add ...")
+    conf, fmt = load(CONF)
+    current = conf.get("Exclusions", [])
+    if not isinstance(current, list) or not all(isinstance(x, str) for x in current):
+        sys.exit("Exclusions is not a list of strings; refusing to edit")
+    new = [f for f in folders if f not in current]
+    print("already listed:", [f for f in folders if f in current] or "none")
+    print("to add:", new or "none")
+    if not new:
+        return
+    if not apply:
+        print("dry run; rerun with --apply to write")
+        return
+    backup = f"{CONF}.bak-{time.strftime('%Y%m%d-%H%M%S')}"
+    shutil.copy2(CONF, backup)
+    conf["Exclusions"] = current + new
+    with open(CONF, "wb") as fh:
+        plistlib.dump(conf, fh, fmt=fmt)
+    check, _ = load(CONF)
+    missing = [f for f in new if f not in check.get("Exclusions", [])]
+    if missing:
+        sys.exit(f"wrote but re-read is missing {missing}; restore with: sudo cp {backup} {CONF}")
+    print("wrote; backup at", backup)
+    print("next: sudo killall mds  (launchd restarts it), then check System Settings → Spotlight Privacy")
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])
