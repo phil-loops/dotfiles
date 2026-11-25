@@ -71,10 +71,19 @@ def main():
         copy = tmp / "copy"
         copy.write_text(f"#!/bin/sh\ncat > {copied}\n")
         copy.chmod(0o755)
-        result = subprocess.run([str(SCRIPT), str(folder)], env=dict(os.environ, SHOW_NOTE=str(note), SHOW_REVIEW_COPY=str(copy)),
-                                capture_output=True, text=True)
+        said = tmp / "said.txt"
+        say = tmp / "claude-say"
+        say.write_text(f"#!/bin/sh\nprintf '%s\\n%s' \"$1\" \"$2\" > {said}\n")
+        say.chmod(0o755)
+        git(repo, "config", "stack-project.lock-user-delete.owner", "abcdef12-3456")
+        result = subprocess.run([str(SCRIPT), str(folder)], env=dict(os.environ, SHOW_NOTE=str(note), SHOW_REVIEW_COPY=str(copy),
+                                SHOW_CLAUDE_SAY=str(say)), capture_output=True, text=True)
         check("runs cleanly", result.returncode == 0, result.stderr)
         notes = (folder / "notes.md").read_text()
+        cue = said.read_text()
+        check("the forest's owning session gets the cue to act", cue.startswith("abcdef12\n[spoken review] Phil just finished a spoken review of lock-user-delete")
+              and f"{folder}/notes.md" in cue, cue)
+        check("the Inbox copy says it was sent", "_Sent to the session that owns lock-user-delete" in sent.read_text(), sent.read_text())
         check("posts to the Inbox under the review's name", sent.read_text().startswith("Spoken review · lock-user-delete\n"))
         check("copies the same notes", copied.read_text() == notes)
         check("the forest's own notes come first", notes.index("## The whole review") < notes.index("## [add-lock]"), notes)
@@ -98,8 +107,13 @@ def main():
               == [("n1", None), ("n2", "add-lock"), ("n3", "add-lock"), ("n4", "use-lock")] and records[2]["commit"] == first, records)
         check("a deleted branch says it's gone", f"The branch is gone now; you reviewed {first[:8]}" in notes, notes)
 
+        git(repo, "config", "--unset", "stack-project.lock-user-delete.owner")
+        subprocess.run([str(SCRIPT), str(folder)], env=dict(os.environ, SHOW_NOTE=str(note), SHOW_REVIEW_COPY=str(copy),
+                       SHOW_CLAUDE_SAY=str(say)), check=True)
+        check("with no owner, the Inbox copy says nothing picked it up", "_No live session owns lock-user-delete, so nothing picked these up" in sent.read_text())
         git(repo, "branch", "-f", "add-lock", second)
-        subprocess.run([str(SCRIPT), str(folder)], env=dict(os.environ, SHOW_NOTE=str(note), SHOW_REVIEW_COPY=str(copy)), check=True)
+        subprocess.run([str(SCRIPT), str(folder)], env=dict(os.environ, SHOW_NOTE=str(note), SHOW_REVIEW_COPY=str(copy),
+                       SHOW_CLAUDE_SAY=str(say)), check=True)
         notes = (folder / "notes.md").read_text()
         check("a branch restacked after the review says what you saw and what's there now",
               f"Moved since you said this: {first[:8]} → {second[:8]}" in notes.split("## [add-lock]")[1].split("##")[0], notes)

@@ -6,8 +6,9 @@ trail.jsonl each time canopy's place changes (uptime-clock ns, the address, the 
 Dictate adds recording.json (when the audio began, same clock) and utterances.json (each stretch between pauses, timed
 from the audio's start). Each utterance goes to the place it overlapped most; each branch's commit is compared with
 the branch's tip now, so a note about code that has since moved says so. Writes notes.md and notes.json (each note
-numbered n1, n2, … so a session can answer it by id), posts the notes to Show's Inbox and copies them to the clipboard.
---quiet writes the files only.
+numbered n1, n2, … so a session can answer it by id), hands them to the session that owns the forest
+(`stack-project.<forest>.owner`) to act on, posts them to Show's Inbox saying whether that worked, and copies them to
+the clipboard. --quiet writes the files only.
 """
 import json
 import os
@@ -108,6 +109,29 @@ def render(review, trail, pairs, tips_now):
     return "\n".join(lines).strip() + "\n", notes
 
 
+def owner(review):
+    """The forest a review covered and the session recorded as its owner, either of which may be missing."""
+    repo, parts = review["repoPath"], [p for p in review.get("scope", "").split("/") if p]
+    name = "/".join(parts[3:]) if len(parts) >= 4 else ""
+    def config(key):
+        return subprocess.run(["git", "-C", repo, "config", "--get", key], capture_output=True, text=True).stdout.strip()
+    forest = name if parts[:2] == ["v2", "p"] else config(f"branch.{name}.stack-project") if parts[:2] == ["v2", "b"] else ""
+    return forest or None, (config(f"stack-project.{forest}.owner") if forest else "") or None
+
+
+def deliver(folder, forest, session):
+    """Sends the owning session its cue; True when claude-say says it was delivered."""
+    if not session:
+        return False
+    cue = (f"[spoken review] Phil just finished a spoken review of {forest}, which you own. His notes, numbered: "
+           f"{folder}/notes.md. Before changing code, write plan.txt in that folder and run "
+           f"~/.dotfiles/scripts/show-review-reply {folder}. Once your tips are final, write answers.txt, with two or three "
+           f"plain sentences for Phil under '# for phil', and run it again. That is how Phil hears back. "
+           f"`show-review-reply --help` has the shape.")
+    say = os.environ.get("SHOW_CLAUDE_SAY", str(SCRIPTS / "claude-say"))
+    return subprocess.run([say, session[:8], cue], capture_output=True, text=True).returncode == 0
+
+
 def main():
     args = [a for a in sys.argv[1:] if a != "--quiet"]
     if len(args) != 1:
@@ -129,8 +153,15 @@ def main():
     (folder / "notes.json").write_text(json.dumps(notes, indent=1))
     if "--quiet" in sys.argv:
         return
+    notes_only = body
+    forest, session = owner(review)
+    if utterances and deliver(folder, forest, session):
+        body = f"_Sent to the session that owns {forest}; you'll get its reply here._\n\n" + body
+    elif utterances:
+        reason = f"No live session owns {forest}" if forest else "This review isn't of a forest"
+        body = f"_{reason}, so nothing picked these up. They're on your clipboard._\n\n" + body
     subprocess.run([os.environ.get("SHOW_NOTE", str(SCRIPTS / "show-note")), title, body], check=False)
-    subprocess.run([os.environ.get("SHOW_REVIEW_COPY", "pbcopy")], input=body, text=True, check=False)
+    subprocess.run([os.environ.get("SHOW_REVIEW_COPY", "pbcopy")], input=notes_only, text=True, check=False)
 
 
 if __name__ == "__main__":

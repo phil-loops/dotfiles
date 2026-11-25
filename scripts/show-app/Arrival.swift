@@ -56,7 +56,28 @@ final class ArrivalNotices: NSObject, UNUserNotificationCenterDelegate {
     var onOpen: ((Target) -> Void)?
     private var started = false
 
-    func post(_ target: Target, title: String, topic: String?, workspace: Workspace) {
+    /// The opening of a message as plain words for a notification: its first line that isn't a heading, a rule or a
+    /// footnote, with links, emphasis and code marks taken off, cut at a word near `width`.
+    static func gist(of markdown: String, width: Int = 220) -> String {
+        let line = markdown.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.first {
+            !$0.isEmpty && !$0.hasPrefix("#") && !$0.hasPrefix("---") && !$0.hasPrefix("<sub>") && !$0.hasPrefix("_A rough plan")
+        } ?? ""
+        var text = line.replacingOccurrences(of: #"^[-•*]\s+"#, with: "", options: .regularExpression)
+        text = text.replacingOccurrences(of: #"\[([^\]]*)\]\([^)]*\)"#, with: "$1", options: .regularExpression)
+        text = text.replacingOccurrences(of: "**", with: "").replacingOccurrences(of: "`", with: "")
+        guard text.count > width else { return text }
+        let cut = text.prefix(width)
+        return (cut.range(of: " ", options: .backwards).map { String(cut[..<$0.lowerBound]) } ?? String(cut)) + "…"
+    }
+
+    /// The newest Inbox message's title and opening: what an Inbox arrival's notification says, instead of "Inbox".
+    static func newestMessage(inInbox data: Data?) -> (title: String, body: String)? {
+        guard let data, let deck = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let first = (deck["sections"] as? [[String: Any]])?.first, let title = first["title"] as? String else { return nil }
+        return (title, gist(of: first["body"] as? String ?? ""))
+    }
+
+    func post(_ target: Target, title: String, topic: String?, workspace: Workspace, body: String? = nil) {
         let center = UNUserNotificationCenter.current()
         if !started {
             started = true
@@ -66,7 +87,7 @@ final class ArrivalNotices: NSObject, UNUserNotificationCenterDelegate {
             guard granted else { return }
             let content = UNMutableNotificationContent()
             content.title = [title, topic].compactMap { $0 }.joined(separator: " · ")
-            content.body = "Waiting in \(workspace.name)"
+            content.body = body.flatMap { $0.isEmpty ? nil : $0 } ?? "Waiting in \(workspace.name)"
             content.userInfo = ["target": target.key]
             center.add(UNNotificationRequest(identifier: target.key, content: content, trigger: nil))
         }
@@ -116,16 +137,20 @@ extension AppDelegate {
             title = "API console"
         }
         session = session.flatMap { $0.isEmpty ? nil : $0 }
+        var noticeTitle = title, noticeBody: String?
+        if case .document(let path) = target, path == inboxPath, let newest = ArrivalNotices.newestMessage(inInbox: FileManager.default.contents(atPath: path)) {
+            (noticeTitle, noticeBody) = (newest.title, newest.body)
+        }
         showEvents.append(ShowEvent(kind: .arrived, target: target, workspace: workspace, title: title, session: session))
         refreshLibrary(force: true)
         guard snapshotPath == nil, selfTest == nil else { return }
         guard let session else {
-            ArrivalNotices.shared.post(target, title: title, topic: nil, workspace: workspace)
+            ArrivalNotices.shared.post(target, title: noticeTitle, topic: nil, workspace: workspace, body: noticeBody)
             return
         }
         Topics.resolve(session) { [weak self] topic in
             self?.refreshLibrary(force: true)
-            ArrivalNotices.shared.post(target, title: title, topic: topic, workspace: workspace)
+            ArrivalNotices.shared.post(target, title: noticeTitle, topic: topic, workspace: workspace, body: noticeBody)
         }
     }
 }

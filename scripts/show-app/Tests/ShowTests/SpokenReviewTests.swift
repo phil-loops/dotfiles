@@ -35,3 +35,15 @@ struct SpokenReviewStateTests {
         #expect(review.state == .done)
     }
 }
+
+/// What an Inbox arrival's notification says: the newest message's title and its opening in plain words.
+struct InboxNoticeTests {
+    @Test func theNoticeCarriesTheVerdictNotTheWordInbox() throws {
+        let deck = ###"{"sections":[{"title":"Since your review · domain-notices","body":"## Needs your eyes\n- Two things: **[notify](canopy://v2/b/loops/notify)** reads top to bottom, and `owners` is new.\n- Everything else is done."}]}"###
+        let newest = try #require(ArrivalNotices.newestMessage(inInbox: Data(deck.utf8)))
+        #expect(newest.title == "Since your review · domain-notices")
+        #expect(newest.body == "Two things: notify reads top to bottom, and owners is new.")
+        #expect(ArrivalNotices.gist(of: String(repeating: "word ", count: 80), width: 20) == "word word word word…")
+        #expect(ArrivalNotices.newestMessage(inInbox: Data("{}".utf8)) == nil)
+    }
+}
