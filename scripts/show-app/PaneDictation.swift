@@ -48,6 +48,7 @@ final class PaneDictation {
     private func start(for session: Session) {
         voice.listening = "Dictating to \(session.topic.isEmpty ? session.pane : session.topic)"
         voice.onError = { Self.tell(session.pane, $0) }
+        Self.tell(session.pane, "Listening, ⌃⌥↩ to finish")
         voice.toggle { text in
             DispatchQueue.global().async {
                 let sent = Self.run([claudeSayPath, session.session_id, "--draft", "--unsigned", text])
