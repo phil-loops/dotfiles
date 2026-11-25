@@ -44,7 +44,7 @@ func rewrittenItems() -> [NSPasteboardItem]? {
   return changed ? copies : nil
 }
 
-Timer.scheduledTimer(withTimeInterval: 0.3, repeats: true) { _ in
+Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { _ in
   guard board.changeCount != seen else { return }
   seen = board.changeCount
   let text = board.string(forType: .string) ?? ""
