@@ -95,7 +95,7 @@ def main():
         check("a branch rebased with the same change is the change you read", "Same change you read" in since.split("## [kept]")[1].split("\n## ")[0], since)
         check("a branch whose change you read stays out of Look at", "kept" not in look, look)
         check("a changed branch says what moved and that you asked", "[fixed](canopy://v2/b/loops/fixed) — changed, you asked: n2a" in look
-              and "changed `fixed.txt`" in since, since)
+              and "changed [`fixed.txt`](canopy://v2/b/loops/fixed?file=fixed.txt)" in since, since)
         check("a declined ask is in Look at", "**n2b declined**: one file is enough" in look, look)
         check("a new branch is in Look at with its reason", "[owners](canopy://v2/b/loops/owners) — new: split out of fixed (n2)" in look, look)
         check("a gone branch is in Look at with its reason", "- gone — gone: folded into fixed" in look, look)

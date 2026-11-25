@@ -22,6 +22,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from urllib.parse import quote
 
 SCRIPTS = Path(__file__).resolve().parent
 NEEDS_LOOK = {"partly", "declined", "won't", "ask"}
@@ -192,8 +193,10 @@ def main():
             elif same:
                 body.append(f"Same change you read ({then[:8]}); nothing to look at.")
             else:
-                parts = [f"changed {', '.join(f'`{f}`' for f in changed)}" if changed else "",
-                         f"added {', '.join(f'`{f}`' for f in added)}" if added else "",
+                def opened(files):
+                    return ", ".join(f"[`{f}`](canopy://v2/b/loops/{branch}?file={quote(f, safe='/')})" for f in files)
+                parts = [f"changed {opened(changed)}" if changed else "",
+                         f"added {opened(added)}" if added else "",
                          f"dropped {', '.join(f'`{f}`' for f in dropped)}" if dropped else ""]
                 body.append(f"**Its own change moved** ({then[:8]} → {tips_now[branch][:8]}): " + "; ".join(p for p in parts if p) + ".")
                 reason = "you asked: " + ", ".join(a["id"] for a in asked) if asked else "nobody asked"
