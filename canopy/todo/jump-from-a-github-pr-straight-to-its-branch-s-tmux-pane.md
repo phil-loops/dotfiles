@@ -1,7 +1,7 @@
 +++
 title = "Jump from a GitHub PR straight to its branch's tmux pane"
 kind = "build"
-state = "open"
+state = "done"
 area = "review"
 size = "S"
 why = "⌘⇧O then Ctrl-Space is two hops to reach the conversation working on a PR; one chord should land there"
