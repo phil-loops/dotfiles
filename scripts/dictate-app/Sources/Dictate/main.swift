@@ -90,8 +90,7 @@ final class Dictate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func menu(_ menu: NSMenu, willHighlight item: NSMenuItem?) {
         auditioning?.stop()
         auditioning = (item?.representedObject as? String).flatMap { $0.isEmpty ? nil : NSSound(named: $0) }
-        let played = auditioning?.play() ?? false
-        if let name = item?.representedObject as? String, !name.isEmpty { note("audition \(name): \(played ? "playing" : "didn't play")") }
+        auditioning?.play()
     }
 
     private func idleMenu(_ menu: NSMenu) {
