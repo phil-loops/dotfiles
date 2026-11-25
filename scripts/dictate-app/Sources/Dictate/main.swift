@@ -75,6 +75,7 @@ final class Dictate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         for url in urls {
             note("link \(url.absoluteString)")
             if let pane = Logic.pane(of: url) { toggle(pane: pane) }
+            if let review = Logic.review(of: url) { self.review(start: review.start, in: review.dir) }
         }
     }
 
@@ -262,6 +263,18 @@ final class Dictate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
         paste(text, into: target)
+    }
+
+    /// Show's spoken review: start records into the review's folder; finish (or 🎤, as for any recording) cuts and transcribes it.
+    private func review(start: Bool, in dir: URL) {
+        if !start {
+            if voice.active { note("finish review"); voice.finish() }
+            return
+        }
+        guard !voice.active, !voice.busy else { note("busy; review not started"); voice.flash("Dictate is busy; finish that recording first"); return }
+        note("start → review in \(dir.path)")
+        voice.onError = { [weak self] in self?.voice.flash($0) }
+        voice.startReview(in: dir)
     }
 
     private func toggle(pane: String) {
@@ -459,6 +472,7 @@ let micKey: Int64 = 176
 let systemDefined: UInt32 = 14
 
 let claudeSay = ("~/.dotfiles/scripts/claude-say" as NSString).expandingTildeInPath
+let showReviewJoin = ("~/.dotfiles/scripts/show-review-join" as NSString).expandingTildeInPath
 
 /// A message on the pane's tmux status line; a beep when the pane is gone.
 func tell(_ pane: String, _ message: String) {
@@ -485,6 +499,25 @@ func run(_ command: [String]) -> (status: Int32, out: Data, err: Data) {
 }
 
 if CommandLine.arguments.contains("--selftest") { exit(selfTest()) }
+// `Dictate --transcribe-review <folder>`: a review's audio.wav transcribed again and handed to show-review-join.
+if let flag = CommandLine.arguments.firstIndex(of: "--transcribe-review"), CommandLine.arguments.count > flag + 1 {
+    let dir = URL(fileURLWithPath: CommandLine.arguments[flag + 1])
+    let done = DispatchSemaphore(value: 0)
+    nonisolated(unsafe) var status: Int32 = 0
+    Task.detached {
+        do {
+            let said = try await Voice.transcribeReview(dir.appendingPathComponent("audio.wav"), into: dir, with: Transcriber())
+            print("\(said.count) utterances")
+            status = run([showReviewJoin, dir.path]).status
+        } catch {
+            print("failed: \(error)")
+            status = 1
+        }
+        done.signal()
+    }
+    done.wait()
+    exit(status)
+}
 let app = NSApplication.shared
 let delegate = MainActor.assumeIsolated { Dictate() }
 app.delegate = delegate

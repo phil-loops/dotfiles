@@ -35,6 +35,8 @@ final class Voice: NSObject, AVAudioRecorderDelegate {
     private var heard = ""
     private var target = ""
     private var deliver: ((String) -> Void)?
+    /// The folder of the spoken review this recording is for: its audio stays there, cut at pauses and transcribed piece by piece.
+    private var reviewDir: URL?
     private var failure: String?
     private(set) var busy = false
     private var flashing: String?
@@ -47,6 +49,14 @@ final class Voice: NSObject, AVAudioRecorderDelegate {
     override init() {
         super.init()
         update()
+    }
+
+    /// Records a spoken review into `dir`: `recording.json` says when the audio began on the uptime clock Show stamps
+    /// its trail with, and finishing writes `utterances.json` and hands the folder to `show-review-join`.
+    func startReview(in dir: URL) {
+        guard !active, !busy else { return }
+        reviewDir = dir
+        start(to: "a spoken review") { _ in }
     }
 
     func start(to target: String, deliver: @escaping (String) -> Void) {
@@ -63,13 +73,18 @@ final class Voice: NSObject, AVAudioRecorderDelegate {
                 return
             }
             do {
-                let file = FileManager.default.temporaryDirectory.appendingPathComponent("dictate-\(UUID().uuidString).wav")
+                let file = reviewDir?.appendingPathComponent("audio.wav")
+                    ?? FileManager.default.temporaryDirectory.appendingPathComponent("dictate-\(UUID().uuidString).wav")
                 let recorder = try AVAudioRecorder(url: file, settings: [
                     AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: 16_000,
                     AVNumberOfChannelsKey: 1, AVLinearPCMBitDepthKey: 16,
                 ])
                 recorder.delegate = self
                 guard recorder.record() else { throw CocoaError(.fileWriteUnknown) }
+                if let reviewDir {
+                    let began = ["startUptimeNs": clock_gettime_nsec_np(CLOCK_UPTIME_RAW)]
+                    try JSONSerialization.data(withJSONObject: began).write(to: reviewDir.appendingPathComponent("recording.json"), options: .atomic)
+                }
                 self.file = file
                 self.recorder = recorder
                 busy = false
@@ -117,10 +132,35 @@ final class Voice: NSObject, AVAudioRecorderDelegate {
         recorder.delegate = nil
         recorder.stop()
         self.recorder = nil
-        transcribe()
+        if reviewDir != nil { transcribeReview() } else { transcribe() }
     }
 
-    func retry() { transcribe() }
+    func retry() { if reviewDir != nil { transcribeReview() } else { transcribe() } }
+
+    /// Each stretch between pauses transcribed on its own and timed from the recording's start, then the folder handed on.
+    private func transcribeReview() {
+        guard let file, let reviewDir, !busy else { return }
+        failure = nil
+        busy = true
+        update()
+        Task {
+            preview?.cancel()
+            await preview?.value
+            do {
+                let said = try await Voice.transcribeReview(file, into: reviewDir, with: transcriber)
+                rememberDictation(said.compactMap { $0["text"] as? String }.joined(separator: " "))
+                self.file = nil
+                reset()
+                Task.detached { _ = run([showReviewJoin, reviewDir.path]) }
+                flash(said.isEmpty ? "Parakeet didn’t hear any speech in the review" : "Review sent to Show’s Inbox")
+            } catch {
+                busy = false
+                failure = error.localizedDescription
+                update()
+                onError?("Transcribing the review failed; retry from the menu-bar mic. The audio stays in \(reviewDir.path). " + error.localizedDescription)
+            }
+        }
+    }
 
     @objc private func transcribe() {
         guard let file, !busy else { return }
@@ -147,6 +187,21 @@ final class Voice: NSObject, AVAudioRecorderDelegate {
         }
     }
 
+    /// Cuts a review's audio at pauses, transcribes each stretch timed from the audio's start, and writes `utterances.json`.
+    nonisolated static func transcribeReview(_ file: URL, into dir: URL, with transcriber: Transcriber) async throws -> [[String: Any]] {
+        let samples = Logic.samples(of: try Data(contentsOf: file))
+        var said: [[String: Any]] = []
+        for range in Logic.utterances(of: samples) {
+            var slice = Array(samples[range])
+            if slice.count < 16_000 { slice += [Float](repeating: 0, count: 16_000 - slice.count) }
+            let text = try await transcriber.transcript(of: slice)
+            if !text.isEmpty { said.append(["start": Double(range.lowerBound) / 16_000, "end": Double(range.upperBound) / 16_000, "text": text]) }
+        }
+        try JSONSerialization.data(withJSONObject: ["utterances": said], options: .prettyPrinted)
+            .write(to: dir.appendingPathComponent("utterances.json"), options: .atomic)
+        return said
+    }
+
     @objc func reset() {
         preview?.cancel()
         preview = nil
@@ -154,8 +209,9 @@ final class Voice: NSObject, AVAudioRecorderDelegate {
         recorder?.delegate = nil
         recorder?.stop()
         recorder = nil
-        if let file { try? FileManager.default.removeItem(at: file) }
+        if let file, reviewDir == nil { try? FileManager.default.removeItem(at: file) }
         file = nil
+        reviewDir = nil
         deliver = nil
         failure = nil
         busy = false
