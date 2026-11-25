@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Rewrites copied admin.your-tailnet.ts.net links outside /admin to app.loops.so, keeping rich-text formatting.
+# When the clipboard is a lone admin.your-tailnet.ts.net URL outside /admin, rewrites it to app.loops.so (formatting kept).
 # Copy the same link again within 2s to keep the tailnet form. `tailnet-link-clip <text>` prints one rewrite.
 # Launchd keeps it alive; a failed build or a crash posts to Show's Inbox once a day.
 set -uo pipefail
