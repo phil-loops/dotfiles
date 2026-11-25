@@ -56,6 +56,14 @@ extension TutorController {
         // a reveal plays once, when it arrives while the learner waits for it; reopening a session shows it whole
         let animate = !looking && stageAwaiting.contains(step.id) && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         let played = reveal == nil ? 0 : animate ? min(stagePlayed[step.id] ?? 0, total) : total
+        // the run it varies, then the one change, then this time: the order the comparison is read in
+        if let example = step.example, !example.frames.isEmpty {
+            add(referenceRun(example, worked: step.form == "worked"), after: 20)
+            if let change = step.change, !change.isEmpty {
+                add(smallCaps("this time, one thing changes", color: .controlAccentColor), after: 4)
+                add(tutorText(renderer.tutorInline(change, font: .systemFont(ofSize: 14.5, weight: .semibold)), width: width), after: 22)
+            }
+        }
         add(stage(step, revealed: Array((reveal?.frames ?? []).prefix(played))), after: 26)
 
         if !problems.isEmpty {
@@ -301,6 +309,36 @@ extension TutorController {
         return tutorText(line, width: Self.column)
     }
 
+    /// The run a worked example or a contrast varies, whole and quiet: what happened then, and how it ended.
+    private func referenceRun(_ run: TutorStep.Reveal, worked: Bool) -> NSView {
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 6
+        stack.addArrangedSubview(smallCaps(worked ? "one run, start to end" : "the run you saw"))
+        let timeFont = NSFont.monospacedDigitSystemFont(ofSize: 11.5, weight: .regular)
+        let gutter = min(140, ceil(run.frames.map { ($0.t as NSString).size(withAttributes: [.font: timeFont]).width }.max() ?? 0) + 14)
+        for frame in run.frames {
+            let time = NSTextField(labelWithString: frame.t)
+            time.font = timeFont
+            time.textColor = .tertiaryLabelColor
+            time.translatesAutoresizingMaskIntoConstraints = false
+            time.widthAnchor.constraint(equalToConstant: gutter).isActive = true
+            let event = tutorText(NSAttributedString(string: frame.event, attributes: [.font: NSFont.systemFont(ofSize: 12.5), .foregroundColor: NSColor.secondaryLabelColor]),
+                                  width: Self.column - gutter - 8)
+            let line = NSStackView(views: [time, event])
+            line.orientation = .horizontal
+            line.alignment = .top
+            line.spacing = 8
+            stack.addArrangedSubview(line)
+        }
+        if !run.result.isEmpty {
+            stack.addArrangedSubview(tutorText(NSAttributedString(string: "How it ended: " + run.result, attributes: [
+                .font: NSFont.systemFont(ofSize: 12.5, weight: .medium), .foregroundColor: NSColor.secondaryLabelColor]), width: Self.column))
+        }
+        return stack
+    }
+
     /// The timeline beside the watched state. The setup's frames run to the playhead; revealed frames follow it in the accent color,
     /// and the state panel marks what the newest frame changed.
     private func stage(_ step: TutorStep, revealed: [StepFrame]) -> NSView {
@@ -333,6 +371,9 @@ extension TutorController {
         guard !rows.isEmpty else { return timeline }
 
         let state = stepState(frames, through: frames.count)
+        // once this run has ended too, each value sits beside how the run it varies ended: ends compared with ends
+        let ended = step.reveal.map { !revealed.isEmpty && revealed.count == $0.frames.count } ?? false
+        let then = ended ? step.example.map { stepState($0.frames, through: $0.frames.count) } ?? [:] : [:]
         let changed = Set(revealed.last?.state.keys.map { $0 } ?? [])
         let panel = NSStackView()
         panel.orientation = .vertical
@@ -348,11 +389,22 @@ extension TutorController {
             value.font = .monospacedSystemFont(ofSize: 12.5, weight: changed.contains(key) ? .semibold : .regular)
             value.textColor = changed.contains(key) ? .controlAccentColor : .labelColor
             value.preferredMaxLayoutWidth = Self.stagePanel - 24
-            let pair = NSStackView(views: [name, value])
+            var views: [NSView] = [name, value]
+            if let was = then[key], was != (state[key] ?? "—") {
+                let note = NSTextField(wrappingLabelWithString: "before: \(was)")
+                note.font = .systemFont(ofSize: 11)
+                note.textColor = .tertiaryLabelColor
+                note.preferredMaxLayoutWidth = Self.stagePanel - 24
+                views.append(note)
+            }
+            let pair = NSStackView(views: views)
             pair.orientation = .vertical
             pair.alignment = .leading
             pair.spacing = 1
             panel.addArrangedSubview(pair)
+        }
+        if !then.isEmpty, rows.allSatisfy({ then[$0] == nil || then[$0] == (state[$0] ?? "—") }) {
+            panel.addArrangedSubview(smallCaps("ended as before"))
         }
         let box = StatePanel()
         panel.translatesAutoresizingMaskIntoConstraints = false

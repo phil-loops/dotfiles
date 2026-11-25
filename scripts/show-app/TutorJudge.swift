@@ -88,6 +88,11 @@ extension TutorAgent {
         @step <title>
         @setup
         markdown: the concrete system and the one action
+        @example <time> | <event> | <key>=<value>  (worked and contrast steps only: the run this step varies, one line per moment, shown whole above the live timeline)
+        @outcome
+        worked and contrast only: how that run ended, in a sentence
+        @change
+        worked and contrast only: the one thing that's different this time, in a sentence
         @frame <time as a person says it, e.g. Tue 02:00> | <event> | <key>=<value>; <key>=<value>
         @frame …  (one line per moment, up to the playhead: just before what the learner predicts; the state part names only the keys that moment changes, and may be left off)
         @predict
@@ -98,7 +103,7 @@ extension TutorAgent {
         @source sim-play <scenario>  (only when a `~/.dotfiles/scripts/sim-play` scenario played the reveal; use one where it covers the situation)
         @explain
         one question: the why
-        A step is sealed: its reveal and explain question come with it, and Show keeps both hidden until the learner has predicted. The reveal is what the system does, which never depends on the guess. Show derives the watched state panel from the keys your frames set, and stamps on the concept, level and form.
+        A step is sealed: its reveal and explain question come with it, and Show keeps both hidden until the learner has predicted. The reveal is what the system does, which never depends on the guess. Show derives the watched state panel from the keys your example, frames and reveal set (use the same keys in all three, so the panel can show what changed), and stamps on the concept, level and form.
 
         Messages, and what to reply:
         - The opening "/tutor <topic>": `@title <the session's name>`, then `@topic <id>` when the graph below already has this topic, else the map: `@map <topic id> | <title> | <source>`, then 2–4 `@stage <name>` sections in teaching order, each followed by 2–4 lines `@concept <id> | <name> | <statement: one line, the idea itself> | needs <ids it builds on> | like <ids of the same idea elsewhere in the graph>` (the needs and like parts are optional). Reuse existing concept ids wherever the idea is the same. Nothing else: the learner is waiting.
@@ -111,9 +116,9 @@ extension TutorAgent {
         - "fix step <id> in <file>: <problems>": `@fix <id> <title>` and the step's sections, rewritten whole.
         - "Show refused your reply …": reply again in full; Show wrote nothing from the refused reply.
         Forms (what the step is, given its concept and level):
-        - worked: a concept the learner has never shown. The setup walks one complete run of the mechanism, start to end, nothing to guess; the frames are the same system with one thing changed, and predict asks about that variant.
+        - worked: a concept the learner has never shown. @example walks one complete run of the mechanism, start to end, nothing to guess, and @outcome says how it ended; the frames are the same system with the one @change, and predict asks about that variant.
         - predict: a cold situation; predict asks what the system does.
-        - contrast: the situation the learner missed, with one thing changed (the contrast given, when there is one); the setup says plainly what differs from before.
+        - contrast: @example and @outcome replay the situation the learner missed, as it really ran; the frames are that situation with the one @change (the contrast given, when there is one), so predict tests exactly the difference.
         - explain: predict the behavior, then explain asks for the mechanism behind it.
         - transfer: the concept's situation set in the analog's world, so the same idea has to be recognized in other clothes.
         - critique: a design with a flaw, or two designs; predict asks where it breaks or which survives, and the reveal plays the failure.

@@ -53,6 +53,10 @@ struct TutorStep: Decodable, Equatable {
     let explain: String?
     let verdict: String?
     let consolidate: String?
+    /// The run this step varies, shown whole above the live timeline (a worked example's run, or the situation a
+    /// contrast changes), and the one thing that's different this time.
+    let example: Reveal?
+    let change: String?
     /// The tutor's drafts of the likely answers, written while the learner reads; never shown. Each draft's
     /// follow-up step stays raw JSON in the file until the tutor takes it.
     let drafts: [StepDraft]?
@@ -79,6 +83,8 @@ struct TutorStep: Decodable, Equatable {
     var isInvent: Bool { kind == "invent" }
     /// One answer and no timeline: free recall at a topic's start, the card at its end. Show writes both.
     var isSingle: Bool { form == "recall" || form == "card" }
+    /// A step that varies one thing about a run shown whole: what's the same and what changed is the lesson.
+    var isVariation: Bool { form == "worked" || form == "contrast" }
     var rows: [String] { watch ?? [] }
 }
 
@@ -106,10 +112,13 @@ func stepProblems(_ step: TutorStep, _ answer: TutorAnswer?) -> [String] {
     var out: [String] = []
     if step.setup.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { out.append("the setup is empty") }
     if step.isSingle { return out }
+    if step.isVariation, step.example?.frames.isEmpty != false || (step.example?.result ?? "").isEmpty || (step.change ?? "").isEmpty {
+        out.append("a \(step.form ?? "") step shows the run it varies: its @example lines, its @outcome and the one @change")
+    }
     if step.frames.isEmpty { out.append("the timeline has no frames to predict from") }
     if step.predict.filter({ $0 == "?" }).count > 1 { out.append("predict asks more than one question") }
     let watched = Set(step.rows)
-    let frames = step.frames + (step.reveal?.frames ?? [])
+    let frames = (step.example?.frames ?? []) + step.frames + (step.reveal?.frames ?? [])
     let unwatched = Set(frames.flatMap(\.state.keys)).subtracting(watched).sorted()
     if !unwatched.isEmpty { out.append("frames set \(unwatched.joined(separator: ", ")), which isn't in watch") }
     if step.reveal == nil || step.explain == nil { out.append("a step arrives sealed: its reveal and its explain question come with it") }
@@ -135,7 +144,7 @@ func stepState(_ frames: [StepFrame], through count: Int) -> [String: String] {
 let tutorSectionNames: Set<String> = [
     "title", "map", "stage", "concept", "topic", "note", "consolidate", "plan", "evidence",
     "prediction", "explanation", "misconception", "contrast",
-    "step", "fix", "setup", "frame", "predict", "reveal", "result", "explain", "source",
+    "step", "fix", "setup", "example", "outcome", "change", "frame", "predict", "reveal", "result", "explain", "source",
     "draft", "idea", "stations", "take",
 ]
 
@@ -246,7 +255,7 @@ func applyStagedReply(_ text: String, path: String, stepID: String?, now: String
 
     // ── the walk: steps, drafts and the map are built from their sections
     enum Owner { case owed, fix(String), draft(Int) }
-    var building: (owner: Owner, fields: [String: Any], frames: [[String: Any]], reveal: [[String: Any]])?
+    var building: (owner: Owner, fields: [String: Any], frames: [[String: Any]], reveal: [[String: Any]], example: [[String: Any]])?
     var drafts: [[String: Any]] = []
     var draftOpen: Int?
     var verdicts: [String: String] = [:]
@@ -260,7 +269,7 @@ func applyStagedReply(_ text: String, path: String, stepID: String?, now: String
         var step = b.fields
         var watch: [String] = []
         // the panel lists keys in the order the frames first set them
-        for frame in b.frames + b.reveal {
+        for frame in b.example + b.frames + b.reveal {
             for key in frame["keys"] as? [String] ?? [] where !watch.contains(key) { watch.append(key) }
         }
         let bare = { (frames: [[String: Any]]) in frames.map { $0.filter { $0.key != "keys" } } }
@@ -268,6 +277,8 @@ func applyStagedReply(_ text: String, path: String, stepID: String?, now: String
         step["frames"] = bare(b.frames)
         let result_ = (step.removeValue(forKey: "result") as? String) ?? ""
         let source = step.removeValue(forKey: "source") as? String
+        let outcome = (step.removeValue(forKey: "outcome") as? String) ?? ""
+        if !b.example.isEmpty || !outcome.isEmpty { step["example"] = ["frames": bare(b.example), "result": outcome] }
         if !b.reveal.isEmpty || !result_.isEmpty {
             var reveal: [String: Any] = ["frames": bare(b.reveal), "result": result_]
             if let source, !source.isEmpty { reveal["source"] = source }
@@ -304,14 +315,18 @@ func applyStagedReply(_ text: String, path: String, stepID: String?, now: String
             return
         }
         switch section.name {
-        case "frame", "reveal":
+        case "frame", "reveal", "example":
             let lines = ([section.argument] + section.body.components(separatedBy: "\n")).filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
             for line in lines {
                 guard let frame = frameLine(line) else {
                     result.refused.append("a @\(section.name) line isn't `<time> | <event> | key=value; …`: \(line)")
                     continue
                 }
-                if section.name == "frame" { building!.frames.append(frame) } else { building!.reveal.append(frame) }
+                switch section.name {
+                case "frame": building!.frames.append(frame)
+                case "example": building!.example.append(frame)
+                default: building!.reveal.append(frame)
+                }
             }
         case "source":
             building!.fields["source"] = section.argument.isEmpty ? section.body : section.argument
@@ -322,18 +337,18 @@ func applyStagedReply(_ text: String, path: String, stepID: String?, now: String
 
     for section in sections {
         switch section.name {
-        case "setup", "frame", "predict", "reveal", "result", "explain", "source":
+        case "setup", "example", "outcome", "change", "frame", "predict", "reveal", "result", "explain", "source":
             stepField(section)
             continue
         case "step":
             finishStep()
-            building = (draftOpen.map { .draft($0) } ?? .owed, ["title": section.argument, "consolidate": NSNull()], [], [])
+            building = (draftOpen.map { .draft($0) } ?? .owed, ["title": section.argument, "consolidate": NSNull()], [], [], [])
             continue
         case "fix":
             finishStep()
             draftOpen = nil
             let words = section.argument.split(separator: " ", maxSplits: 1).map(String.init)
-            building = (.fix(words.first ?? ""), ["title": words.count > 1 ? words[1] : "", "consolidate": NSNull()], [], [])
+            building = (.fix(words.first ?? ""), ["title": words.count > 1 ? words[1] : "", "consolidate": NSNull()], [], [], [])
             continue
         case "draft":
             finishStep()

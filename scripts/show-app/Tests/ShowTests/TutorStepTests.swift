@@ -89,7 +89,7 @@ private func answer(_ parts: [String: String]) -> TutorAnswer {
     #expect(frameLine("just words") == nil)
 }
 
-private let assignment: [String: Any] = ["form": "contrast", "concept": "lock-ttl", "level": "predict", "name": "Lock TTL", "why": "missed"]
+private let assignment: [String: Any] = ["form": "explain", "concept": "lock-ttl", "level": "predict", "name": "Lock TTL", "why": "missed"]
 private let branches: [String: [String: Any]] = ["hit": ["form": "explain", "concept": "lock-ttl", "level": "explain"],
                                                  "miss": ["form": "card", "concept": "lock-ttl", "level": ""]]
 
@@ -133,9 +133,32 @@ Why does nobody get it?
     let posted = try loadTutorSession(path).steps[1]
     #expect(posted.title == "The digest job after a crash" && posted.frames.count == 2 && posted.reveal?.frames.count == 1)
     #expect(posted.rows == ["lock", "digest"])
-    #expect(posted.concept == "lock-ttl" && posted.form == "contrast" && posted.conceptName == "Lock TTL")
+    #expect(posted.concept == "lock-ttl" && posted.form == "explain" && posted.conceptName == "Lock TTL")
     #expect(stepProblems(posted, nil).isEmpty)
     #expect(rawFile(path)["assigned"] == nil)
+}
+
+private let variation = """
+@example Mon 02:00 | A takes the lock | lock=A; digest=running
+@example Mon 02:30 | A finishes and deletes the key | lock=none; digest=done
+@outcome
+B ran on Tuesday as usual.
+@change
+This time A's node dies before it deletes the key.
+"""
+
+@Test func aContrastShowsTheRunItVariesAndTheOneChange() throws {
+    let contrast: [String: Any] = ["form": "contrast", "concept": "lock-ttl", "level": "predict"]
+    #expect(try applyStagedReply(flatStep, path: try sessionFile(assigned: contrast), stepID: nil, now: "t").refused
+        == ["step s2: a contrast step shows the run it varies: its @example lines, its @outcome and the one @change"])
+    let path = try sessionFile(assigned: contrast)
+    let withRun = flatStep.replacingOccurrences(of: "@frame Tue 02:00", with: variation + "\n@frame Tue 02:00")
+    #expect(try applyStagedReply(withRun, path: path, stepID: nil, now: "t").refused.isEmpty)
+    let posted = try loadTutorSession(path).steps[1]
+    #expect(posted.example?.frames.count == 2 && posted.example?.result == "B ran on Tuesday as usual.")
+    #expect(posted.change == "This time A's node dies before it deletes the key.")
+    #expect(posted.rows == ["lock", "digest"])
+    #expect(stepState(posted.example!.frames, through: 2) == ["lock": "none", "digest": "done"])
 }
 
 @Test func aStepIsWrittenOnlyWhenShowAssignedOne() throws {
@@ -258,7 +281,8 @@ private func draftsReply(_ held: String, next: Bool) -> String {
 @Test func aNextStepBothOutcomesShareIsWrittenOnceAndCarriedByEveryDraft() throws {
     let path = try sessionFile()
     let same: [String: Any] = ["form": "worked", "concept": "key-is-convention", "level": "predict"]
-    let reply = draftsReply("held", next: true) + "\n" + draftsReply("missed", next: false)
+    let reply = (draftsReply("held", next: true) + "\n" + draftsReply("missed", next: false))
+        .replacingOccurrences(of: "@frame Tue 02:00", with: variation + "\n@frame Tue 02:00")
     #expect(try applyStagedReply(reply, path: path, stepID: "s1", now: "t", branches: ["hit": same, "miss": same]).refused.isEmpty)
     let step = (rawFile(path)["steps"] as? [[String: Any]])?.first
     #expect(TutorAgent.draftedNext(step, matched: "a2", for: same)?["concept"] as? String == "key-is-convention")
