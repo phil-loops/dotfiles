@@ -14,8 +14,8 @@ step is idempotent; re-running is safe.
 
 ```bash
 # Xcode CLT (git), then Homebrew (https://brew.sh), then:
-brew install git gh jq fzf ripgrep fd tmux helix neovim starship go-task terminal-notifier python@3.13
-brew install --cask orbstack swiftbar
+brew install git gh jq fzf ripgrep fd tmux helix starship go-task terminal-notifier python@3.13
+brew install --cask orbstack
 curl https://get.volta.sh | bash && ~/.volta/bin/volta install node@22
 curl -fsSL https://claude.ai/install.sh | bash        # Claude Code → ~/.local/bin/claude
 ```
@@ -51,9 +51,6 @@ gh auth login                                # GitHub CLI; the viewer uses it
 claude                                       # first run signs in to claude.ai
 ```
 
-SwiftBar: point its plugin directory at `~/.dotfiles/swiftbar` in the SwiftBar
-preferences. Hammerspoon: grant Accessibility when it asks.
-
 ### 5. The loops repo
 
 ```bash
@@ -82,10 +79,9 @@ hx --health typescript         # language server found via volta
 | `scripts/` | every command; on PATH via `.zshenv`. `stack-*` is the forest tooling, `loops-*` the dev-stack tooling |
 | `scripts/srv/`, `scripts/canopy-native/` | the forest viewer: python server + the native canopy app (`stack web`) |
 | `scripts/canopy-native/` | the forest viewer as a native macOS app on the same server (`canopy`) |
-| `helix/`, `nvim/`, `tmux.conf`, `starship.toml` | editor and terminal config |
+| `helix/`, `tmux.conf`, `starship.toml` | editor and terminal config |
 | `hooks/` | git hooks installed into the loops checkout |
 | `launchd/` | background agents (CI mail watch, PR sweep, build notify) |
-| `swiftbar/` | menu bar |
 | `CLAUDE.md`, `claude/` | Claude Code instructions: hard rules in `CLAUDE.md`, mechanics in the `claude/` topic files |
 | `.claude/` | Claude Code `settings.json`, agents, skills (linked to `~/.claude/`) |
 | `OWNERS` | file lanes for concurrent Claude sessions; `own` reads it |

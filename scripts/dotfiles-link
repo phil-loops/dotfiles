@@ -43,7 +43,6 @@ LINKS=(
   "$HOME/.zshrc"                  .zshrc
   "$HOME/.tmux.conf"              tmux.conf
   "$HOME/.config/helix"           helix
-  "$HOME/.config/nvim"            nvim
   "$HOME/.config/starship.toml"   starship.toml
   "$HOME/.claude/CLAUDE.md"       CLAUDE.md
   "$HOME/.claude/settings.json"   .claude/settings.json

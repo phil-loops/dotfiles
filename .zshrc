@@ -17,7 +17,6 @@ alias kcup="kubectl config use-context production"
 alias kcus="kubectl config use-context staging"
 alias zconfig="nvim ~/.zshrc"
 alias zsource='(cd ~/.dotfiles && git add -A && git commit -m "Update dotfiles"; git push); source ~/.zshrc'
-alias dd="$HOME/.dotfiles/scripts/dd-design"  # jump into the current /design doc (see scripts/dd-design)
 alias check="aws-vault exec prod -- ./scripts/check-suppression-list.sh"
 alias refresh="rm -fr .next node_modules && task dev"
 alias tl="$HOME/.dotfiles/scripts/loops-tail"  # tail loops: combined dev-stack log tail; tl -p to fzf-pick sources, defaults in loops-tail.conf
