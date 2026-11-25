@@ -18,7 +18,7 @@ set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cache="${XDG_CACHE_HOME:-$HOME/.cache}/show"
-app="/Applications/Show.app"   # where Spotlight finds it
+app="/Applications/Canopy.app"   # where Spotlight finds it
 stamp="$cache/source.sha"
 
 # Show builds from its own copy of the sources in $src, never the shared tree other sessions are editing: show-app as
@@ -95,7 +95,8 @@ build_held() {
 <dict>
   <key>CFBundleExecutable</key><string>Show</string>
   <key>CFBundleIdentifier</key><string>com.philbrockman.show</string>
-  <key>CFBundleName</key><string>Show</string>
+  <key>CFBundleName</key><string>Canopy</string>
+  <key>CFBundleDisplayName</key><string>Canopy</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>1.0</string>
