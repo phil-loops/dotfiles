@@ -171,6 +171,7 @@ final class Dictate: NSObject, NSApplicationDelegate {
         CGEvent.tapEnable(tap: created, enable: true)
         if trusted { waiting?.invalidate(); waiting = nil }
         note(trusted ? "listening; 🎤 is Dictate's alone" : "listening; macOS dictation also hears 🎤 until Accessibility is allowed")
+        if !CGPreflightPostEventAccess() { note("may not post keys yet; pasting is off until Accessibility is allowed") }
         voice.reset()
     }
 
@@ -240,7 +241,9 @@ final class Dictate: NSObject, NSApplicationDelegate {
     /// Pastes only where a text box has focus; elsewhere ⌘V would drop the words without a trace, so they stay on the clipboard.
     private func pasteOrKeep(_ text: String, into target: NSRunningApplication) {
         let name = target.localizedName ?? "the app"
-        if acceptsText(target) == false {
+        let accepts = acceptsText(target)
+        note("focus in \(target.bundleIdentifier ?? "?"): \(focusedRole(target) ?? "unknown")")
+        if accepts == false {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(text, forType: .string)
             note("no text box in \(target.bundleIdentifier ?? "?"); left on the clipboard")
@@ -305,6 +308,16 @@ func claudeSession(in pane: String) -> Session? {
     return listing.status == 0 ? Logic.session(in: pane, listing: listing.out) : nil
 }
 
+/// The accessibility role of what has focus in `app`, for the log.
+@MainActor
+func focusedRole(_ app: NSRunningApplication) -> String? {
+    var focused: CFTypeRef?, role: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(AXUIElementCreateApplication(app.processIdentifier), kAXFocusedUIElementAttribute as CFString, &focused) == .success,
+          let focused, CFGetTypeID(focused) == AXUIElementGetTypeID() else { return nil }
+    AXUIElementCopyAttributeValue(focused as! AXUIElement, kAXRoleAttribute as CFString, &role)
+    return role as? String
+}
+
 /// Whether the focused element in `app` takes typed text, or nil when the app won't say.
 @MainActor
 func acceptsText(_ app: NSRunningApplication) -> Bool? {
@@ -351,10 +364,11 @@ func paste(_ text: String, into target: NSRunningApplication, enter: Bool) {
 
 /// One key press and release, posted as if typed (key codes are US-layout positions: 9 is V, 36 is Return).
 func press(_ code: CGKeyCode, flags: CGEventFlags = []) {
+    let source = CGEventSource(stateID: .combinedSessionState)
     for down in [true, false] {
-        let event = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: down)
+        let event = CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: down)
         event?.flags = flags
-        event?.post(tap: .cghidEventTap)
+        event?.post(tap: .cgSessionEventTap)
     }
 }
 
