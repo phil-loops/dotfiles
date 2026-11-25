@@ -27,6 +27,9 @@ here=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "cw: not in a git re
 # || true: awk exits at the first worktree, so git worktree list dies on SIGPIPE (141) — pipefail + set -e would abort
 main_top=$(git -C "$here" worktree list --porcelain | awk '/^worktree /{print $2; exit}') || true
 repo=$(basename "$main_top"); parent=$(dirname "$main_top")
+# a checkout that sits directly in $HOME would put its worktrees there too, and Spotlight Privacy needs one entry per folder;
+# ~/coding is already one excluded folder, so new worktrees land there
+[[ "$parent" == "$HOME" ]] && parent="$HOME/coding"
 mainbranch=$(git -C "$main_top" config stack.main-branch 2>/dev/null || echo main)
 
 name="${1:-}"; (( $# > 0 )) && shift
