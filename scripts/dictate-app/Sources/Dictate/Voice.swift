@@ -54,6 +54,7 @@ final class Voice: NSObject, AVAudioRecorderDelegate {
         self.deliver = deliver
         busy = true
         update()
+        Voice.chime(Settings.startSound)
         Task {
             guard await AVCaptureDevice.requestAccess(for: .audio) else {
                 reset()
@@ -68,7 +69,6 @@ final class Voice: NSObject, AVAudioRecorderDelegate {
                 ])
                 recorder.delegate = self
                 guard recorder.record() else { throw CocoaError(.fileWriteUnknown) }
-                Voice.chime(Settings.startSound)
                 self.file = file
                 self.recorder = recorder
                 busy = false
@@ -79,6 +79,12 @@ final class Voice: NSObject, AVAudioRecorderDelegate {
                 onError?("Couldn’t start the microphone. " + error.localizedDescription)
             }
         }
+    }
+
+    /// Names who the words go to once that's known, which for a tmux pane is after the recording has started.
+    func retarget(_ target: String) {
+        self.target = target
+        update()
     }
 
     static func chime(_ name: String) {

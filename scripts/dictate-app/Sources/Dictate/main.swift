@@ -225,58 +225,100 @@ final class Dictate: NSObject, NSApplicationDelegate {
         if voice.active { voice.finish(); return }
         guard !voice.busy, let front = NSWorkspace.shared.frontmostApplication else { return }
         guard Logic.terminals.contains(front.bundleIdentifier ?? "") else { startPasting(into: front); return }
-        Task.detached {
+        startTerminal(front.localizedName ?? "the terminal", pane: nil, fallback: front, lookup: Task.detached {
             let clients = run(["tmux", "list-clients", "-F", "#{client_activity}\t#{pane_id}"])
-            let pane = Logic.activePane(clients: String(decoding: clients.out, as: UTF8.self))
-            let listing = pane == nil ? nil : run([claudeSay, "--json"])
-            let session = pane.flatMap { pane in listing.flatMap { $0.status == 0 ? Logic.session(in: pane, listing: $0.out) : nil } }
-            await MainActor.run { [weak self] in
-                guard let self else { return }
-                if let session { self.startClaude(session) } else { self.startPasting(into: front) }
-            }
-        }
+            return Logic.activePane(clients: String(decoding: clients.out, as: UTF8.self)).flatMap(claudeSession)
+        })
     }
 
     private func startPasting(into target: NSRunningApplication) {
         note("start → paste into \(target.bundleIdentifier ?? "?")")
         voice.onError = { [weak self] in self?.voice.flash($0) }
-        voice.start(to: target.localizedName ?? "this app") { text in
-            paste(text, into: target, enter: Settings.send)
-            note("pasted")
+        voice.start(to: target.localizedName ?? "this app") { [weak self] text in self?.pasteOrKeep(text, into: target) }
+    }
+
+    /// Pastes only where a text box has focus; elsewhere ⌘V would drop the words without a trace, so they stay on the clipboard.
+    private func pasteOrKeep(_ text: String, into target: NSRunningApplication) {
+        let name = target.localizedName ?? "the app"
+        if acceptsText(target) == false {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+            note("no text box in \(target.bundleIdentifier ?? "?"); left on the clipboard")
+            voice.flash("No text box had focus in \(name); the words are on the clipboard")
+            return
         }
+        paste(text, into: target, enter: Settings.send)
+        note("pasted")
+        voice.flash("Pasted into \(name)")
     }
 
     private func toggle(pane: String) {
         if voice.active { note("finish"); voice.finish(); return }
         guard !voice.busy else { note("busy transcribing; ignored"); return }
-        Task.detached {
-            let listing = run([claudeSay, "--json"])
-            let session = listing.status == 0 ? Logic.session(in: pane, listing: listing.out) : nil
-            await MainActor.run { [weak self] in
+        startTerminal(pane, pane: pane, fallback: nil, lookup: Task.detached { claudeSession(in: pane) })
+    }
+
+    /// Records at once and finds the pane's Claude session while you talk, so starting never waits on `claude-say`.
+    /// No session: the words are pasted into `fallback`, or with none the recording is dropped and the pane told why.
+    private func startTerminal(_ label: String, pane: String?, fallback: NSRunningApplication?, lookup: Task<Session?, Never>) {
+        note("start → \(label); finding its Claude session")
+        voice.onError = { [weak self] in self?.voice.flash($0) }
+        voice.start(to: label) { [weak self] text in
+            Task { @MainActor in
                 guard let self else { return }
-                guard let session else { note("no Claude session in \(pane)"); tell(pane, "No Claude session in this pane to dictate to"); return }
-                self.startClaude(session)
+                if let session = await lookup.value { self.deliver(text, to: session) } else if let fallback { self.pasteOrKeep(text, into: fallback) }
+            }
+        }
+        Task { @MainActor [weak self] in
+            let session = await lookup.value
+            guard let self, self.voice.active else { return }
+            if let session {
+                note("→ \(session.session_id.prefix(8)) in \(session.pane)")
+                self.voice.onError = { tell(session.pane, $0) }
+                self.voice.retarget(session.topic.isEmpty ? session.pane : session.topic)
+            } else if fallback == nil, let pane {
+                note("no Claude session in \(pane)")
+                tell(pane, "No Claude session in this pane to dictate to")
+                self.voice.reset()
             }
         }
     }
 
-    private func startClaude(_ session: Session) {
-        note("start → \(session.session_id.prefix(8)) in \(session.pane)")
-        voice.onError = { tell(session.pane, $0) }
-        voice.start(to: session.topic.isEmpty ? session.pane : session.topic) { text in
-            Task.detached {
-                let sent = run([claudeSay, session.session_id] + (Settings.send ? [] : ["--draft"]) + ["--unsigned", text])
-                guard sent.status != 0 else { note("delivered"); return }
-                note("not delivered: \(String(decoding: sent.err, as: UTF8.self))")
-                let reason = String(decoding: sent.err, as: UTF8.self).split(separator: "\n").first.map(String.init) ?? "claude-say failed"
-                await MainActor.run {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(text, forType: .string)
-                    tell(session.pane, "Not delivered (\(reason)); the text is on the clipboard")
-                }
+    private func deliver(_ text: String, to session: Session) {
+        Task.detached {
+            let sent = run([claudeSay, session.session_id] + (Settings.send ? [] : ["--draft"]) + ["--unsigned", text])
+            guard sent.status != 0 else { note("delivered"); return }
+            note("not delivered: \(String(decoding: sent.err, as: UTF8.self))")
+            let reason = String(decoding: sent.err, as: UTF8.self).split(separator: "\n").first.map(String.init) ?? "claude-say failed"
+            await MainActor.run {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(text, forType: .string)
+                tell(session.pane, "Not delivered (\(reason)); the text is on the clipboard")
             }
         }
     }
+}
+
+/// The Claude session `claude-say --json` places in `pane` (about 0.65s, which is why a recording doesn't wait for it).
+func claudeSession(in pane: String) -> Session? {
+    let listing = run([claudeSay, "--json"])
+    return listing.status == 0 ? Logic.session(in: pane, listing: listing.out) : nil
+}
+
+/// Whether the focused element in `app` takes typed text, or nil when the app won't say.
+@MainActor
+func acceptsText(_ app: NSRunningApplication) -> Bool? {
+    let root = AXUIElementCreateApplication(app.processIdentifier)
+    AXUIElementSetAttributeValue(root, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+    var focused: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(root, kAXFocusedUIElementAttribute as CFString, &focused) == .success,
+          let focused, CFGetTypeID(focused) == AXUIElementGetTypeID() else { return nil }
+    let field = focused as! AXUIElement
+    var role: CFTypeRef?
+    AXUIElementCopyAttributeValue(field, kAXRoleAttribute as CFString, &role)
+    if let role = role as? String, [kAXTextFieldRole, kAXTextAreaRole, kAXComboBoxRole, "AXSearchField"].contains(role) { return true }
+    var settable: DarwinBoolean = false
+    return AXUIElementIsAttributeSettable(field, kAXValueAttribute as CFString, &settable) == .success && settable.boolValue
 }
 
 /// Puts `text` into `target` as if typed: brought to the front, pasted with ⌘V, then Enter when sending. The clipboard
