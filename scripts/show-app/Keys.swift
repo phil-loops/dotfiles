@@ -76,7 +76,7 @@ func keyGlyph(_ key: String) -> String {
 /// The one list of keys: the menu bar and the `?` sheet are both generated from it.
 /// Other areas append theirs with `KeyTable.register([...])` (from their controller's init is fine); the menus rebuild themselves.
 enum KeyTable {
-    static let menuOrder = ["Library", "Go", "Section", "Workspace", "Tutor", "Runs", "Help"]
+    static let menuOrder = ["Library", "Go", "Section", "Review", "Workspace", "Tutor", "Runs", "Help"]
     private(set) static var bindings: [KeyBinding] = core
     static var onChange: (() -> Void)?
 
@@ -137,6 +137,9 @@ enum KeyTable {
         KeyBinding(id: "section.accept-proposed", menu: "Section", title: "Pick the Proposed Choice", key: "a", workspaces: KeyTable.labelling, when: .notTyping,
                    isEnabled: { $0.labellingDeck?.selectedSection?.proposed != nil }) { $0.labellingDeck?.acceptProposed() },
         KeyBinding(id: "section.canopy", menu: "Section", title: "Open Branch in Canopy", key: "O", modifiers: [.command, .shift], workspaces: [.forest]) { $0.openInCanopy(nil) },
+
+        KeyBinding(id: "review.spoken", menu: "Review", title: "Start or Finish Spoken Review", key: "r", modifiers: [.command, .shift],
+                   workspaces: [.canopy]) { $0.toggleSpokenReview() },
 
         KeyBinding(id: "workspace.canopy", menu: "Workspace", title: "Canopy", key: Workspace.canopy.key, modifiers: .command, overOverlay: true) { $0.switchTo(.canopy) },
         KeyBinding(id: "workspace.learn", menu: "Workspace", title: "Learn", key: Workspace.learn.key, modifiers: .command, overOverlay: true) { $0.switchTo(.learn) },

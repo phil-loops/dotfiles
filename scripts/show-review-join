@@ -1,0 +1,127 @@
+#!/usr/bin/env python3
+"""show-review-join <review folder> — turn a spoken review into notes filed under what was on screen when each was said.
+
+Show writes the folder when a review starts (review.json: scope, repo, every in-scope branch's tip) and appends to
+trail.jsonl each time canopy's place changes (uptime-clock ns, the address, the branch and the commit on screen).
+Dictate adds recording.json (when the audio began, same clock) and utterances.json (each stretch between pauses, timed
+from the audio's start). Each utterance goes to the place it overlapped most; each branch's commit is compared with
+the branch's tip now, so a note about code that has since moved says so. Writes notes.md, posts it to Show's Inbox
+and copies it to the clipboard.
+"""
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+from urllib.parse import parse_qs, unquote, urlsplit
+
+SCRIPTS = Path(__file__).resolve().parent
+NS = 1_000_000_000
+
+
+def place(address):
+    """What an address names: the branch (None on a forest's own page), the file and line, if any."""
+    parts = urlsplit(address)
+    segments = [unquote(s) for s in parts.path.split("/") if s]
+    query = {k: v[0] for k, v in parse_qs(parts.query).items()}
+    name = "/".join(segments[3:]) if len(segments) >= 4 else None
+    branch = name if segments[:2] == ["v2", "b"] else None
+    forest = name if segments[:2] == ["v2", "p"] else None
+    file, line = query.get("file"), query.get("line")
+    at = query.get("at", "")
+    if not file and at[:2] in ("l|", "g|"):
+        file = at.split("|")[1]
+    return {"branch": branch, "forest": forest, "file": file, "line": int(line) if line and line.isdigit() else None}
+
+
+def assign(trail, start_ns, utterances):
+    """Each utterance with the trail entry it overlapped most (the first entry when it came before them all)."""
+    trail = sorted(trail, key=lambda e: e["uptimeNs"])
+    out = []
+    for u in utterances:
+        lo, hi = start_ns + int(u["start"] * NS), start_ns + int(u["end"] * NS)
+        best, most = trail[0] if trail else None, -1
+        for i, entry in enumerate(trail):
+            begin = entry["uptimeNs"]
+            end = trail[i + 1]["uptimeNs"] if i + 1 < len(trail) else hi
+            overlap = min(hi, end) - max(lo, begin)
+            if overlap > most:
+                best, most = entry, overlap
+        out.append((u, best))
+    return out
+
+
+def tip(repo_path, branch):
+    result = subprocess.run(["git", "-C", repo_path, "rev-parse", "--verify", "-q", f"refs/heads/{branch}"],
+                            capture_output=True, text=True)
+    return result.stdout.strip() or None
+
+
+def render(review, trail, pairs, tips_now):
+    """The notes as markdown: forest-wide notes first, then each branch in the order it was first talked about."""
+    repo = review.get("repo", "loops")
+    sections, order = {}, []
+    for u, entry in pairs:
+        where = place(entry["address"]) if entry else {"branch": None, "forest": None, "file": None, "line": None}
+        key = where["branch"]
+        if key not in sections:
+            sections[key] = []
+            order.append(key)
+        sections[key].append((u, where, entry))
+    if None in order:
+        order.remove(None)
+        order.insert(0, None)
+    started = review.get("tips", {})
+    lines = []
+    for key in order:
+        if key is None:
+            lines.append("## The whole review" if review.get("scope", "").startswith("/v2/p/") else "## Not on a branch")
+        else:
+            lines.append(f"## [{key}](canopy://v2/b/{repo}/{key})")
+            shown = [e["commit"] for e in sorted(trail, key=lambda e: e["uptimeNs"]) if e.get("branch") == key and e.get("commit")]
+            seen = [e["commit"] for _, _, e in sections[key] if e and e.get("commit")]
+            now = tips_now.get(key)
+            if len(set(shown)) > 1:
+                lines.append(f"_The branch changed while you were reviewing it ({shown[0][:8]} → {shown[-1][:8]})._")
+            if seen and now and seen[-1] != now:
+                lines.append(f"_Moved since you said this: {seen[-1][:8]} → {now[:8]}._")
+            elif seen and now is None:
+                lines.append(f"_The branch is gone now; you reviewed {seen[-1][:8]}._")
+            elif not seen and key in started and now and started[key] != now:
+                lines.append(f"_Moved since the review started: {started[key][:8]} → {now[:8]}._")
+        last = None
+        for u, where, _ in sections[key]:
+            anchor = (where["file"], where["line"]) if where["file"] else None
+            text = u["text"].strip()
+            if anchor and anchor == last:
+                lines[-1] += " " + text
+                continue
+            label = f"`{where['file']}:{where['line']}`" if anchor and where["line"] else f"`{where['file']}`" if anchor else None
+            lines.append(f"- {label} — {text}" if label else f"- {text}")
+            last = anchor
+        lines.append("")
+    return "\n".join(lines).strip() + "\n"
+
+
+def main():
+    if len(sys.argv) != 2:
+        sys.exit(__doc__.strip())
+    folder = Path(sys.argv[1])
+    review = json.loads((folder / "review.json").read_text())
+    start_ns = json.loads((folder / "recording.json").read_text())["startUptimeNs"]
+    utterances = json.loads((folder / "utterances.json").read_text())["utterances"]
+    trail_file = folder / "trail.jsonl"
+    trail = [json.loads(l) for l in trail_file.read_text().splitlines() if l.strip()] if trail_file.exists() else []
+    pairs = assign(trail, start_ns, utterances)
+    branches = {place(e["address"])["branch"] for _, e in pairs if e} | set(review.get("tips", {}))
+    tips_now = {b: tip(review["repoPath"], b) for b in branches if b}
+    title = f"Spoken review · {review.get('title', folder.name)}"
+    body = render(review, trail, pairs, tips_now) if utterances else "_Nothing was heard in this review._\n"
+    body += f"\n<sub>{folder}</sub>\n"
+    (folder / "notes.md").write_text(body)
+    subprocess.run([os.environ.get("SHOW_NOTE", str(SCRIPTS / "show-note")), title, body], check=False)
+    subprocess.run([os.environ.get("SHOW_REVIEW_COPY", "pbcopy")], input=body, text=True, check=False)
+
+
+if __name__ == "__main__":
+    main()

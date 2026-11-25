@@ -94,6 +94,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     let launchPaths: [String]
     let snapshotPath: String?
     var watcher: Timer?
+    /// The spoken review in progress (⌘⇧R in canopy), and the timer that writes down where canopy is while it records.
+    var spokenReview: SpokenReview?
+    var reviewSampler: Timer?
     var signature = ""
     let launchedBuild = modificationDate(buildStamp)
     /// Requests that came in before the window existed (a launch by opening a file can do that);
@@ -219,6 +222,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     /// Reloads documents edited on disk, refreshes the rail's waiting badges, and offers Update once the launcher finishes a newer build.
     private func stayCurrent() {
         workspaces.values.forEach { $0.reloadChanged() }
+        settleSpokenReview()
         workspaces[active]?.savePlace()   // a crash or a kill comes back to within a second of where you were, not to the last quit
         shell.runsRunning = workspaces[.runs]?.isRunning ?? false
         refreshLibrary()
@@ -375,7 +379,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     func updateTitle() {
         guard let controller = workspaces[active] else { return }
         shell.runsRunning = workspaces[.runs]?.isRunning ?? false
-        shell.setTitle(controller.documentTitle, subtitle: "", running: controller.isRunning)
+        shell.setTitle(controller.documentTitle, subtitle: spokenReviewStatus ?? "", running: controller.isRunning || spokenReview != nil)
         window.title = controller.documentTitle
     }
 
