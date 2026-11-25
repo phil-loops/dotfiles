@@ -53,6 +53,16 @@ struct TutorStep: Decodable, Equatable {
     let explain: String?
     let verdict: String?
     let consolidate: String?
+    /// The tutor's drafts of the likely answers, written while the learner reads; never shown. Each draft's
+    /// follow-up step stays raw JSON in the file until the tutor takes it.
+    let drafts: [StepDraft]?
+
+    struct StepDraft: Decodable, Equatable {
+        let id: String
+        let answer: String
+        let held: Bool?
+        let misconception: String?
+    }
 
     struct Reveal: Decodable, Equatable {
         let frames: [StepFrame]
@@ -125,10 +135,12 @@ func tutorSections(_ text: String) -> [(name: String, body: String)] {
     return out.map { ($0.name, $0.body.trimmingCharacters(in: .whitespacesAndNewlines)) }
 }
 
-/// What Show did with a staged reply: the evidence rows to record, or why it refused the whole reply (nothing written).
+/// What Show did with a staged reply: the evidence rows to record and the steps it posted, or why it refused the
+/// whole reply (nothing written).
 struct StagedApply {
     var evidence: [String] = []
     var refused: [String] = []
+    var posted: [String] = []
 }
 
 /// Writes a staged reply into the session file — Show is its only writer. `stepID` is the step the message was about.
@@ -143,19 +155,29 @@ func applyStagedReply(_ text: String, path: String, stepID: String?, now: String
     var raw = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: path))) as? [String: Any] ?? [:]
     var steps = raw["steps"] as? [[String: Any]] ?? []
     var notes = raw["notes"] as? [[String: Any]] ?? []
-    func step(_ body: String) -> [String: Any]? {
-        guard let data = body.data(using: .utf8), let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            result.refused.append("a @step or @fix wasn't one JSON object")
-            return nil
-        }
+    func checked(_ object: [String: Any]) {
         do {
-            let typed = try JSONDecoder().decode(TutorStep.self, from: data)
+            let typed = try JSONDecoder().decode(TutorStep.self, from: JSONSerialization.data(withJSONObject: object))
             let problems = stepProblems(typed, nil)
             if !problems.isEmpty { result.refused.append("step \(typed.id): " + problems.joined(separator: "; ")) }
         } catch {
             result.refused.append("a step didn't match the schema: \(error)")
         }
+    }
+    func step(_ body: String) -> [String: Any]? {
+        guard let data = body.data(using: .utf8), let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            result.refused.append("a @step or @fix wasn't one JSON object")
+            return nil
+        }
+        checked(object)
         return object
+    }
+    func post(_ object: [String: Any]) {
+        if steps.contains(where: { $0["id"] as? String == object["id"] as? String }) {
+            result.refused.append("step \(object["id"] ?? "?") already exists; a new step needs a new id")
+        }
+        steps.append(object)
+        if let id = object["id"] as? String { result.posted.append(id) }
     }
     for (name, body) in sections {
         switch name {
@@ -175,10 +197,32 @@ func applyStagedReply(_ text: String, path: String, stepID: String?, now: String
             steps[i]["consolidate"] = body
         case "step":
             guard let object = step(body) else { continue }
-            if steps.contains(where: { $0["id"] as? String == object["id"] as? String }) {
-                result.refused.append("step \(object["id"] ?? "?") already exists; a new step needs a new id")
+            post(object)
+        case "drafts":
+            guard let stepID, let i = steps.firstIndex(where: { $0["id"] as? String == stepID }) else {
+                result.refused.append("@drafts came for no open step")
+                continue
             }
-            steps.append(object)
+            guard let data = body.data(using: .utf8), let list = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]], !list.isEmpty else {
+                result.refused.append("@drafts wasn't a JSON list of drafts")
+                continue
+            }
+            for draft in list {
+                guard draft["id"] is String, draft["answer"] is String, draft["idea"] is String, let next = draft["next"] as? [String: Any] else {
+                    result.refused.append("each draft has id, answer, idea and next")
+                    continue
+                }
+                checked(next)
+            }
+            steps[i]["drafts"] = list
+        case "take":
+            let id = body.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let stepID, let i = steps.firstIndex(where: { $0["id"] as? String == stepID }),
+                  let next = (steps[i]["drafts"] as? [[String: Any]])?.first(where: { $0["id"] as? String == id })?["next"] as? [String: Any] else {
+                result.refused.append("@take \(id) names no draft of this step")
+                continue
+            }
+            post(next)
         case "fix":
             guard let object = step(body) else { continue }
             guard let i = steps.firstIndex(where: { $0["id"] as? String == object["id"] as? String }) else {

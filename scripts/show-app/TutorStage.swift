@@ -166,8 +166,10 @@ extension TutorController {
             TutorJudge.judge(path: path, stepID: step.id) { [weak self] in
                 guard let self else { return }
                 self.reload()
-                // while the learner works out the explanation, the tutor plans what comes next
-                self.deliver(stagedBrief("tutor predicted", path: path, step: step.id) + "\nReply with only @plan.")
+                // a matched draft already holds the plan; otherwise the tutor plans while the learner works out the explanation
+                if loadAnswers(path)[step.id]?.draft == nil {
+                    self.deliver(stagedBrief("tutor predicted", path: path, step: step.id) + "\nReply with only @plan.")
+                }
             }
             return
         }
@@ -370,9 +372,15 @@ extension TutorController {
 /// A staged message with the learner's answers in it, so the tutor can reply without reading a file first.
 func stagedBrief(_ kind: String, path: String, step id: String) -> String {
     let answer = loadAnswers(path)[id]
-    let level = confidenceLevels.first { $0.0 == answer?.confidence }?.1 ?? "no confidence given"
+    let level = answer?.confidence.map { raw in "confidence \(raw): \(confidenceLevels.first { $0.0 == raw }?.1 ?? raw)" } ?? "no confidence given"
     var lines = ["\(kind): \(path) step \(id)", "prediction (\(level)): \(answer?.parts["predict"] ?? "")"]
     if let verdict = answer?.verdict { lines.append("judge: \(verdict) — \(answer?.why ?? "")") }
+    if let draft = answer?.draft {
+        let answered = (try? loadTutorSession(path))?.steps.first { $0.id == id }?.drafts?.first { $0.id == draft }?.answer ?? ""
+        lines.append("matched draft: \(draft) — \(answered)")
+    } else if (try? loadTutorSession(path))?.steps.first(where: { $0.id == id })?.drafts != nil {
+        lines.append("matched draft: none")
+    }
     if let explained = answer?.parts["explain"] { lines.append("explanation: \(explained)") }
     return lines.joined(separator: "\n")
 }

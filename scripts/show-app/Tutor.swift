@@ -120,6 +120,8 @@ struct TutorAnswer: Codable {
     /// A staged step's prediction as the fast judge read it against the sealed reveal: held or revised, and where it went.
     var verdict: String? = nil
     var why: String? = nil
+    /// The drafted likely answer the judge matched the prediction to, when one fit.
+    var draft: String? = nil
 
     init(parts: [String: String], confidence: String?, at: String) {
         self.parts = parts
@@ -134,6 +136,7 @@ struct TutorAnswer: Codable {
         try container.encode(at, forKey: .at)
         try container.encodeIfPresent(verdict, forKey: .verdict)
         try container.encodeIfPresent(why, forKey: .why)
+        try container.encodeIfPresent(draft, forKey: .draft)
     }
 }
 
@@ -325,7 +328,10 @@ final class TutorAgent {
         var arguments = ["-p", "--model", Self.model, "--output-format", "stream-json", "--verbose", "--include-partial-messages",
                          "--permission-mode", "acceptEdits", "--allowedTools", staged ? Self.stagedTools : Self.allowedTools]
         // a staged turn after the opening answers from a plan the tutor already made while the learner was writing
-        if staged, !next.boot { arguments += ["--effort", ProcessInfo.processInfo.environment["SHOW_TUTOR_EFFORT"] ?? "low"] }
+        // drafting likely answers runs in the background while the learner reads, so it can afford to think
+        if staged, !next.boot {
+            arguments += ["--effort", next.message.hasPrefix("tutor anticipate") ? "medium" : ProcessInfo.processInfo.environment["SHOW_TUTOR_EFFORT"] ?? "low"]
+        }
         arguments += next.boot && !Self.hasTranscript(session) ? ["--session-id", session] : ["--resume", session]
         arguments += ["--add-dir", (sessionPath as NSString).deletingLastPathComponent, "--", next.message]
         let process = Process()

@@ -154,9 +154,10 @@ The Learn workspace (⌘2) runs a `/tutor` session as a worksheet: one rung at a
 The loop is built so the learner never waits on a model between answers:
 - **A step arrives sealed**: its reveal and explain question are written with it, and Show keeps them hidden until the prediction is sent. The reveal then plays at once, frame by frame, with changed values marked.
 - **A fast judge** (`TutorJudge`, a tool-less Haiku call, ~4s) reads the prediction against the sealed reveal while it plays; its verdict and one-line why are stored on the answer.
-- **The tutor plans while the learner explains**: after the judge, Show sends `tutor predicted …` and the tutor replies with only `@plan`, which Show never writes.
-- **Show is the only writer of the session file.** The tutor (Opus, named — never the CLI's default model; low effort after the opening) replies in `@sections` — `@note`, `@stations`, `@consolidate`, `@step`, `@fix`, `@plan`, `@evidence` — and Show checks every step (one question per phase, sealed, no verdict, frames only set watched keys) before writing; a refusal writes nothing and goes back to the tutor. `@evidence` rows go to `learn evidence`. On `tutor explained …` (the message carries the prediction, the judge's reading and the explanation) the tutor writes `@consolidate` first, which streams into place while the next `@step` is written.
-- Measured 2026-11-24: idea starts ~5s after the explanation, the next step is ready by ~18s; the opening takes ~50s once per session.
+- **The tutor drafts the likely answers while the learner reads**: each step Show posts is followed by `tutor anticipate …`, and the tutor replies `@drafts` — 2–3 likely answers (the right one and the traps the step springs), each with a draft idea and a complete sealed follow-up step, all checked like any step and never shown. The judge names the draft a prediction amounts to; with a match, the explanation turn tailors that draft's idea and `@take`s its follow-up (measured: idea at ~1.5s, next step posted ~6s). With no match, Show sends `tutor predicted …` and the tutor replies `@plan` while the learner explains.
+- **The opening is quick**: the tutor skill and `learn state` ride in the boot prompt, so the opening needs no research turns, and drafting waits until the first step is up (measured: first step ~38s).
+- **Show is the only writer of the session file.** The tutor (Opus, named — never the CLI's default model; low effort after the opening) replies in `@sections` — `@title`, `@note`, `@stations`, `@consolidate`, `@step`, `@drafts`, `@take`, `@fix`, `@plan`, `@evidence` — and Show checks every step (one question per phase, sealed, no verdict, frames only set watched keys) before writing; a refusal writes nothing and goes back to the tutor. `@evidence` rows go to `learn evidence`. On `tutor explained …` (the message carries the prediction, the judge's reading and the explanation) the tutor writes `@consolidate` first, which streams into place while the next `@step` is written.
+- Measured 2026-11-24 without a matched draft: idea starts ~5s after the explanation, the next step is ready by ~18s.
 
 `show --tutor-check` prints each step's phase and any refusal. The protocol lives in `stagedBootPrompt` (`scripts/show-app/TutorJudge.swift`):
 
@@ -179,7 +180,7 @@ The loop is built so the learner never waits on a model between answers:
 }
 ```
 
-The answers entry per step: `{"parts": {"predict", "explain"}, "confidence", "at", "verdict", "why"}` — Show writes all of it, the judge's reading included.
+The answers entry per step: `{"parts": {"predict", "explain"}, "confidence", "at", "verdict", "why", "draft"}` — Show writes all of it, the judge's reading included.
 
 Format 1, the worksheet (older files, no `format`) — session file `~/.dotfiles/show/tutor/<name>.json` (Claude writes it):
 

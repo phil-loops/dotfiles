@@ -113,8 +113,25 @@ private func sessionFile() throws -> String {
 }
 
 @Test func theJudgeReadingIsTheObjectItPromised() {
-    #expect(TutorJudge.reading("{\"verdict\": \"held\", \"why\": \"Right: the key never expires.\"}")! == ("held", "Right: the key never expires."))
-    #expect(TutorJudge.reading("Sure! {\"verdict\": \"revised\", \"why\": \"B gets it.\"} ")! == ("revised", "B gets it."))
+    let held = TutorJudge.reading("{\"verdict\": \"held\", \"why\": \"Right: the key never expires.\", \"draft\": null}")!
+    #expect(held.verdict == "held" && held.why == "Right: the key never expires." && held.draft == nil)
+    let revised = TutorJudge.reading("Sure! {\"verdict\": \"revised\", \"why\": \"B gets it.\", \"draft\": \"a2\"} ")!
+    #expect(revised.verdict == "revised" && revised.draft == "a2")
     #expect(TutorJudge.reading("{\"verdict\": \"maybe\"}") == nil)
     #expect(TutorJudge.reading("held") == nil)
+}
+
+@Test func draftsAreCheckedAndATakenDraftIsPosted() throws {
+    let path = try sessionFile()
+    let good = ["id": "a1", "answer": "nobody runs it", "held": true, "idea": "the key outlives its holder", "next": stepJSON(["id": "s2"])] as [String: Any]
+    let bad = ["id": "a2", "answer": "B takes over", "held": false, "idea": "x", "next": stepJSON(["id": "s3", "predict": "Who? Why?"])] as [String: Any]
+    let list = { (d: [[String: Any]]) in String(data: try! JSONSerialization.data(withJSONObject: d), encoding: .utf8)! }
+    #expect(try applyStagedReply("@drafts\n\(list([good, bad]))", path: path, stepID: "s1", now: "t").refused == ["step s3: predict asks more than one question"])
+    #expect(try loadTutorSession(path).steps[0].drafts == nil)
+    #expect(try applyStagedReply("@drafts\n\(list([good]))", path: path, stepID: "s1", now: "t").refused.isEmpty)
+    #expect(try loadTutorSession(path).steps[0].drafts?.map(\.id) == ["a1"])
+    let taken = try applyStagedReply("@consolidate\nidea\n@take\na1", path: path, stepID: "s1", now: "t")
+    #expect(taken.refused.isEmpty && taken.posted == ["s2"])
+    #expect(try loadTutorSession(path).steps.map(\.id) == ["s1", "s2"])
+    #expect(try applyStagedReply("@take\na9", path: path, stepID: "s1", now: "t").refused == ["@take a9 names no draft of this step"])
 }
