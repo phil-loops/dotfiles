@@ -12,6 +12,8 @@
                               last worked on the branch, else the pane you left; then bring the terminal forward
                               (--stay: the caller already has)
   pane-branch host            "<pid>\\t<app>" of the app your tmux client runs in (Terminal, Ghostty, …)
+  pane-branch hooked          exit 0 when tmux touches the record's `layout` file on every layout change
+                              (tmux.conf), so a reader of --json may trust it until the next touch
 
 <pane> is a pane id (%342), window:pane (3:1) in the session your tmux client shows, or one digit: that
 pane of the window your client shows.
@@ -194,14 +196,14 @@ def host():
 
 def rows(state, moves, git):
     """Every pane with its address and, where it has one, its branch."""
-    _, session, _, panes = state
+    _, session, shown, panes = state
     found = working_on(moves, git)
     out = []
     for p in panes:
         place = f"{p['window']}:{p['index']}"
         row = {"pane": p["pane"], "address": place if p["session"] == session else f"{p['session']} {place}",
                "session": p["session"], "window": int(p["window"]), "index": int(p["index"]), "window_id": p["window_id"],
-               "repo": None, "repo_path": None, "branch": None, "how": None, "at": None}
+               "shown": p["window_id"] == shown, "repo": None, "repo_path": None, "branch": None, "how": None, "at": None}
         move = found.get(p["pane"])
         if move:
             row.update(repo=os.path.basename(move["repo"]), repo_path=move["repo"], branch=move["branch"], how=move["how"], at=move["at"])
@@ -343,6 +345,8 @@ def main():
         return 0
     if args[:1] == ["tmux"]:
         return to_tmux(args[1:], state, moves, git)
+    if args == ["hooked"]:
+        return 0 if "pane-branch/layout" in (tmux("show-hooks", "-g") or "") else 1
     if args == ["--json"]:
         print(json.dumps(rows(state, moves, git)))
         return 0

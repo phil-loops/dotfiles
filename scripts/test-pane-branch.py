@@ -98,6 +98,7 @@ rows = pb.rows(state, pb.read_moves(SERVER, JOURNAL), pb.Git())
 check("a pane's address is window:pane, with the session when it isn't the client's",
       [r["address"] for r in rows] == ["3:1", "2:1", "agents 3:1"], [r["address"] for r in rows])
 check("a row carries the repo's name and the branch", (rows[0]["repo"], rows[0]["branch"], rows[2]["branch"]) == ("repo", "wt-1", None), rows)
+check("a row says whether it's in the window the client shows", [r["shown"] for r in rows] == [True, False, False], [r["shown"] for r in rows])
 check("a digit is that pane of the window the client shows", pb.pick("1", state, rows)[0]["pane"] == "%1")
 check("window:pane is in the client's session", pb.pick("2:1", state, rows)[0]["pane"] == "%3" and pb.pick("3:1", state, rows)[0]["pane"] == "%1")
 check("a pane id names any pane", pb.pick("%9", state, rows)[0]["address"] == "agents 3:1")
