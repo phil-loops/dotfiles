@@ -260,7 +260,6 @@ final class Dictate: NSObject, NSApplicationDelegate {
             return
         }
         paste(text, into: target, enter: Settings.send)
-        voice.flash("Pasted into \(name)")
     }
 
     private func toggle(pane: String) {
