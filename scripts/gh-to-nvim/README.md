@@ -15,6 +15,8 @@ selected-line hash against the branch's changed files.
 
 - **⌘⇧O — open in Show** (imports the PR if needed, opens its node at the
   selected line — click a line number first, GitHub writes it into the hash).
+- **⌃⇧O — go to the pane**: the tmux pane of the session working on this PR's branch, terminal brought
+  forward (your own PRs; the server asks `pane-branch` which pane is on it). No pane on it → the ⌘⇧O open.
 - **Toolbar popup** — one card naming what will open: the PR's forest, branch,
   review decision, selected line and children (orphans flagged). Off a PR it
   just opens Show. A problem (viewer offline, shortcut unbound, source changed)

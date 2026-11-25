@@ -191,9 +191,25 @@ async function openActiveTab(target, commandTab) {
   }
 }
 
+// The pane working on the PR's branch when there is one; anything else is the ⌘⇧O open.
+async function openPane(tab) {
+  const url = tab?.url || (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.url || "";
+  if (!PR_RE.test(url)) {
+    return openActiveTab("viewer", tab);
+  }
+  const res = await openWithRecovery({ url, open: "tmux" });
+  if (res.status === 200 && res.body?.ok && res.body.pane) {
+    await badge("✓", "#3FB950", 4000);
+    return;
+  }
+  return openActiveTab("viewer", tab);
+}
+
 chrome.commands.onCommand.addListener((cmd, tab) => {
   if (cmd === "open-in-nvim") {
     openActiveTab("viewer", tab);
+  } else if (cmd === "open-pane") {
+    openPane(tab);
   }
 });
 

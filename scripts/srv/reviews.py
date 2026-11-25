@@ -386,6 +386,33 @@ def _viewer_route(branch):
     return f"/v2/b/{quote(ctx.repo_name())}/{quote(branch, safe='/')}"
 
 
+def _common_dir(path):
+    r = ctx.run(["git", "-C", path, "rev-parse", "--path-format=absolute", "--git-common-dir"])
+    return r.stdout.strip() if r.returncode == 0 else None
+
+
+def _open_pr_pane(req, d):   # via open_url {open:"tmux"} — Chrome ext: go to the tmux pane working on the PR's branch
+    # Only your own PR has a pane on it; anything else answers pane:null and the ext opens canopy instead.
+    _name, repo_path = _resolve_repo(d.get("repo"))
+    ctx.set_repo(repo_path)
+    branch = _local_branch_for_pr(str(d["number"]))
+    if not branch:
+        req._send(200, json.dumps({"ok": True, "pane": None, "branch": None}))
+        return
+    tool = os.path.join(ctx.SCRIPTS, "pane-branch")
+    r = ctx.run([tool, "--json"], timeout=10)
+    rows = json.loads(r.stdout) if r.returncode == 0 and r.stdout.strip() else []
+    want = _common_dir(repo_path)
+    hits = [row for row in rows if row.get("branch") == branch and row.get("repo_path") and _common_dir(row["repo_path"]) == want]
+    if not hits:
+        req._send(200, json.dumps({"ok": True, "pane": None, "branch": branch}))
+        return
+    pane = max(hits, key=lambda row: row.get("at") or 0)["pane"]
+    moved = ctx.run([tool, "tmux", "--prefer", pane] + (["--dry-run"] if d.get("dry") else []), timeout=10)
+    req._send(200, json.dumps({"ok": moved.returncode == 0, "pane": pane, "branch": branch, **({"would": moved.stdout.strip()} if d.get("dry") else {}),
+                               **({} if moved.returncode == 0 else {"err": (moved.stderr or "pane-branch failed").strip()[:300]})}))
+
+
 def open_url(req, raw):   # POST /open-url {url, open?} — Chrome ext (URL-only): parse + route a GitHub URL
     # The extension no longer reads the page (activeTab grants the URL string, nothing else) —
     # everything must come from the URL. PR pages: number in the path, a selected line in
@@ -398,6 +425,8 @@ def open_url(req, raw):   # POST /open-url {url, open?} — Chrome ext (URL-only
     m = _GH_PR.match(url)
     if m:
         p = {"repo": m.group(1), "number": m.group(2)}
+        if d.get("open") == "tmux":
+            return _open_pr_pane(req, {**p, "dry": bool(d.get("dry"))})
         if d.get("open") in ("viewer", "prewarm"):
             # Neither opens Helix: import the head + build the worktree, return the route. "viewer"
             # means the ext opens that route in canopy, at the line selected on GitHub if there is
