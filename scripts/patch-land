@@ -2,7 +2,7 @@
 """patch-land — land a patch from ~/.dotfiles/patches and retire it, so the directory only
 ever holds patches that still have somewhere to go.
 
-  patch-land <patch> [-m <msg>]   apply --3way, commit exactly the paths it touches, delete it
+  patch-land <patch> [-m <msg>]…  apply --3way, commit exactly the paths it touches, delete it
   patch-land --sweep              say where every patches/*.patch stands
   patch-land --sweep --prune      ...and delete the ones already done (landed/absorbed/superseded)
 
@@ -144,7 +144,7 @@ def sweep(prune):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("patch", nargs="?")
-    ap.add_argument("-m", dest="msg")
+    ap.add_argument("-m", dest="msg", action="append", help="repeatable: each is a paragraph, as in git commit")
     ap.add_argument("--sweep", action="store_true")
     ap.add_argument("--prune", action="store_true")
     a = ap.parse_args()
@@ -152,7 +152,7 @@ def main():
         return sweep(a.prune)
     if not a.patch:
         ap.error("a patch, or --sweep")
-    land(os.path.abspath(a.patch), a.msg)
+    land(os.path.abspath(a.patch), "\n\n".join(a.msg) if a.msg else None)
 
 
 if __name__ == "__main__":
