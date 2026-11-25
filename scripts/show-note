@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""show-note "<title>" "<markdown body>" — post a message from this Claude session to Show's Inbox.
+"""show-note [--branch <repo>/<branch> | --forest <repo>/<project>] "<title>" "<markdown body>" — post a message from
+this Claude session to Show's Inbox. --branch / --forest record what the message is about as its `about` field, so canopy
+can show it on that page.
 
 Every message is one section of a single deck, ~/.cache/show/inbox.json, newest first and grouped by day; each section
 carries its sender as `replyTo`. In Show the sidebar is the message list. ⌘S signs it off (ack). A reply typed under
@@ -27,9 +29,17 @@ def topic(session):
 
 
 def main():
-    if len(sys.argv) != 3:
+    args = sys.argv[1:]
+    about = None
+    if args[:1] in (["--branch"], ["--forest"]) and len(args) >= 2:
+        repo, _, name = args[1].partition("/")
+        if not repo or not name:
+            sys.exit(f"show-note: {args[0]} takes <repo>/<name>, got {args[1]!r}")
+        about = {"repo": repo, args[0][2:]: name}
+        args = args[2:]
+    if len(args) != 2:
         sys.exit(__doc__.strip())
-    title, body = sys.argv[1], sys.argv[2]
+    title, body = args
     session = os.environ.get("CLAUDE_CODE_SESSION_ID", "")[:8] or None
     sender = " · ".join(x for x in [topic(session), session] if x) or "unknown session"
     INBOX.parent.mkdir(parents=True, exist_ok=True)
@@ -45,6 +55,7 @@ def main():
             "tag": f"{sender} · {time.strftime('%H:%M')}",
             "body": body,
             "replyTo": session,
+            **({"about": about} if about else {}),
         }] + deck["sections"][:KEEP - 1]
         tmp = INBOX.with_suffix(".tmp")
         tmp.write_text(json.dumps(deck, indent=1, ensure_ascii=False))
