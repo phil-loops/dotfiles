@@ -95,40 +95,41 @@ final class Dictate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func idleMenu(_ menu: NSMenu) {
         @discardableResult
-        func item(_ title: String, _ symbol: String?, _ action: Selector?, on: Bool = false, tag: String? = nil, to parent: NSMenu? = nil) -> NSMenuItem {
+        func item(_ title: String, _ action: Selector?, on: Bool = false, tag: String? = nil, to parent: NSMenu? = nil) -> NSMenuItem {
             let entry = (parent ?? menu).addItem(withTitle: title, action: action, keyEquivalent: "")
             entry.target = self
             entry.state = on ? .on : .off
             entry.representedObject = tag
-            entry.image = symbol.flatMap { NSImage(systemSymbolName: $0, accessibilityDescription: nil) }
             return entry
         }
         if tap == nil {
-            item("Allow the Mic Key in Input Monitoring…", "exclamationmark.triangle", #selector(openInputMonitoring))
+            item("Allow the Mic Key in Input Monitoring…", #selector(openInputMonitoring))
             menu.addItem(.separator())
         } else if !swallows {
-            item("Allow in Accessibility to Silence macOS Dictation…", "exclamationmark.triangle", #selector(openAccessibility))
+            item("Allow in Accessibility to Silence macOS Dictation…", #selector(openAccessibility))
             menu.addItem(.separator())
         }
         if lastDictation() != nil {
-            item("Copy Last Dictation", "doc.on.doc", #selector(copyLast))
+            item("Copy Last Dictation", #selector(copyLast))
             menu.addItem(.separator())
         }
-        for (title, symbol, current, action) in [("Start Sound", "play.circle", Settings.startSound, #selector(chooseStartSound)),
-                                                 ("Finish Sound", "stop.circle", Settings.finishSound, #selector(chooseFinishSound))] {
+        for (title, current, action) in [("Start Sound", Settings.startSound, #selector(chooseStartSound)),
+                                         ("Finish Sound", Settings.finishSound, #selector(chooseFinishSound))] {
             let sub = NSMenu()
             sub.delegate = self
-            item("None", nil, action, on: current.isEmpty, tag: "", to: sub)
+            item("None", action, on: current.isEmpty, tag: "", to: sub)
             sub.addItem(.separator())
-            for name in Settings.sounds { item(name, nil, action, on: current == name, tag: name, to: sub) }
-            item(title, symbol, nil).submenu = sub
+            for name in Settings.sounds { item(name, action, on: current == name, tag: name, to: sub) }
+            item(title, nil).submenu = sub
         }
-        item("Live Preview", "text.bubble", #selector(togglePreview), on: Settings.preview)
-        item("Open at Login", "power", #selector(toggleLogin), on: SMAppService.mainApp.status == .enabled)
+        item("Live Preview", #selector(togglePreview), on: Settings.preview)
+        item("Open at Login", #selector(toggleLogin), on: SMAppService.mainApp.status == .enabled)
         menu.addItem(.separator())
-        let quit = menu.addItem(withTitle: "Quit Dictate", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
-        quit.image = NSImage(systemSymbolName: "xmark.rectangle", accessibilityDescription: nil)
+        item("Quit Dictate", #selector(quit))
     }
+
+    /// Its own action rather than NSApplication's terminate, which macOS dresses with an icon that knocks the menu out of line.
+    @objc private func quit() { NSApp.terminate(nil) }
 
     @objc private func chooseStartSound(_ sender: NSMenuItem) { Settings.startSound = sender.representedObject as? String ?? ""; Voice.chime(Settings.startSound); voice.reset() }
     @objc private func chooseFinishSound(_ sender: NSMenuItem) { Settings.finishSound = sender.representedObject as? String ?? ""; Voice.chime(Settings.finishSound); voice.reset() }
