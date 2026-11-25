@@ -1,6 +1,6 @@
 #!/bin/zsh
-# Rewrites copied admin.your-tailnet.ts.net links outside /admin to app.loops.so.
-# `tailnet-link-clip <text>` prints the rewrite once; no args watches the clipboard.
+# Rewrites copied Loops links for the audience you share with (menu bar, or `tailnet-link-clip audience external|internal`).
+# external: tailnet → app.loops.so; internal: app.loops.so → tailnet. /admin always stays on the tailnet.
 set -euo pipefail
 src=${0:A:h}/tailnet-link-clip.swift
 bin=$HOME/.cache/tailnet-link-clip/tailnet-link-clip
