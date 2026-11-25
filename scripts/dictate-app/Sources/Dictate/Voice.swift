@@ -132,7 +132,13 @@ final class Voice: NSObject, AVAudioRecorderDelegate {
         recorder.delegate = nil
         recorder.stop()
         self.recorder = nil
-        if reviewDir != nil { transcribeReview() } else { transcribe() }
+        if let reviewDir {
+            let stopped = ["stoppedUptimeNs": clock_gettime_nsec_np(CLOCK_UPTIME_RAW)]
+            try? JSONSerialization.data(withJSONObject: stopped).write(to: reviewDir.appendingPathComponent("stopped.json"), options: .atomic)
+            transcribeReview()
+        } else {
+            transcribe()
+        }
     }
 
     func retry() { if reviewDir != nil { transcribeReview() } else { transcribe() } }
@@ -187,11 +193,15 @@ final class Voice: NSObject, AVAudioRecorderDelegate {
         }
     }
 
-    /// Cuts a review's audio at pauses, transcribes each stretch timed from the audio's start, and writes `utterances.json`.
+    /// Cuts a review's audio at pauses, transcribes each stretch timed from the audio's start, and writes `utterances.json`;
+    /// `progress.json` says how many stretches are through, for Show to count down.
     nonisolated static func transcribeReview(_ file: URL, into dir: URL, with transcriber: Transcriber) async throws -> [[String: Any]] {
         let samples = Logic.samples(of: try Data(contentsOf: file))
         var said: [[String: Any]] = []
-        for range in Logic.utterances(of: samples) {
+        let ranges = Logic.utterances(of: samples)
+        for (done, range) in ranges.enumerated() {
+            try? JSONSerialization.data(withJSONObject: ["done": done, "total": ranges.count])
+                .write(to: dir.appendingPathComponent("progress.json"), options: .atomic)
             var slice = Array(samples[range])
             if slice.count < 16_000 { slice += [Float](repeating: 0, count: 16_000 - slice.count) }
             let text = try await transcriber.transcript(of: slice)
