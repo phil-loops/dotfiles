@@ -340,31 +340,6 @@ final class SelfTestDriver {
         escape()
         check("⎋ leaves the composer with its text", app.tutor?.composer.string == "draft question" && !app.isTyping, app.tutor?.composer.string ?? "-")
 
-        if let controller = app.tutor, let question = controller.session?.rungs.first {
-            switchKey(.review)
-            controller.acceptDictation("one message", path: tutor, question: question, part: "a")
-            check("background dictation stays on the original part", controller.drafts["r1"]?["a"] == "one message" && app.active == .review)
-            controller.acceptDictation("the same ID", path: tutor, question: question, part: "b")
-            check("a dictated prediction waits for confidence", loadAnswers(tutor).isEmpty)
-            controller.choose(confidence: 1)
-            controller.acceptDictation("after retry", path: tutor, question: question, part: "b")
-            let answer = loadAnswers(tutor)["r1"]
-            check("finishing a voice prediction preserves its parts and confidence",
-                  answer?.parts == ["a": "one message", "b": "the same ID after retry"] && answer?.confidence == "medium")
-            controller.acceptDictation("late transcript", path: tutor, question: question, part: "a")
-            check("an answered question keeps late dictation as a draft", controller.composer.string == "draft question late transcript" && loadAnswers(tutor)["r1"]?.parts == answer?.parts)
-            controller.composer.string = "draft question"
-            controller.saveDrafts()
-        }
-
-        var wav = Data("RIFF\0\0\0\0WAVEfmt ".utf8) + Data(count: 20) + Data("data\0\0\0\0".utf8)
-        for sample: Int16 in [0, 16_384, -16_384, 32_767] { wav += withUnsafeBytes(of: sample.littleEndian) { Data($0) } }
-        check("the live preview reads samples from a WAV still being written",
-              LearnTranscriber.tail(of: wav, seconds: 10) == [0, 0.5, -0.5, Float(32_767) / 32_768]
-              && LearnTranscriber.tail(of: wav, seconds: 2.0 / 16_000) == [-0.5, Float(32_767) / 32_768])
-        check("the menu bar keeps the end of what it heard, on a word boundary",
-              LearnTranscriber.heard("short") == "short" && LearnTranscriber.heard("one two three four", width: 12) == "…three four")
-
         switchKey(.review)
         scrolledPartway()
         app.workspaces[.canopy]?.canopy?.resume(at: Self.canopyPlace)

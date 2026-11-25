@@ -683,7 +683,6 @@ final class TutorController: NSObject, NSTextViewDelegate {
     var subtitle = ""
     var onTitleChange: (() -> Void)?
     let sidebar = TutorSidebar()
-    let voice = LearnVoice()
     /// Starts a re-test session for a concept; the workspace that owns this controller opens it.
     var onStartRetest: ((String) -> Void)?
     let scroll = NSScrollView()
@@ -765,15 +764,7 @@ final class TutorController: NSObject, NSTextViewDelegate {
         let composerHint = NSTextField(labelWithString: "Ask the tutor anything")
         composerHint.font = .systemFont(ofSize: 11)
         composerHint.textColor = .tertiaryLabelColor
-        voice.button.target = self
-        voice.button.action = #selector(dictate)
-        voice.onError = { [weak self] message in
-            let alert = NSAlert()
-            alert.messageText = "Learn dictation"
-            alert.informativeText = message
-            presentAlert(alert, in: self?.window)
-        }
-        let composerRow = NSStackView(views: [composer, voice.button, composerSend])
+        let composerRow = NSStackView(views: [composer, composerSend])
         composerRow.orientation = .horizontal
         composerRow.alignment = .bottom
         composerRow.spacing = 12
@@ -1084,58 +1075,7 @@ final class TutorController: NSObject, NSTextViewDelegate {
         }
     }
 
-    @objc private func dictate() {
-        guard voice.active || (path != nil && session != nil) else { NSSound.beep(); return }
-        let source = path
-        let question = session.flatMap { currentRung($0, answers) }
-        let focused = window?.firstResponder as? AnswerField
-        let field = focused === composer ? nil : fields.first(where: { $0 === focused }) ?? fields.first(where: { $0.string.isEmpty }) ?? fields.first
-        let part = field?.partID
-        voice.toggle { [weak self] text in
-            guard let self, let source else { return }
-            self.acceptDictation(text, path: source, question: question, part: part)
-        }
-    }
 
-    func acceptDictation(_ text: String, path source: String, question: Rung?, part: String?) {
-        func append(_ existing: String) -> String {
-            existing.isEmpty || existing.last?.isWhitespace == true ? existing + text : existing + " " + text
-        }
-        if path == source { reload() }
-        if path == source, session?.isStaged == true, let part, let id = currentRungID {
-            drafts[id, default: [:]][part] = append(drafts[id]?[part] ?? "")
-            saveDrafts()
-            reload()
-            focusFirstField()
-            return sendStep()
-        }
-        let fresh = try? loadTutorSession(source)
-        let saved = try? readSidecar(source)
-        let current = fresh.flatMap { lesson in saved.flatMap { currentRung(lesson, $0.answers) } }
-        if let part, let current, current == question, current.answerParts.contains(where: { $0.id == part }) {
-            let rung = current.id
-            if path == source, currentRungID == rung {
-                drafts[rung, default: [:]][part] = append(drafts[rung]?[part] ?? "")
-                saveDrafts()
-                reload()
-                focusFirstField()
-                sendAnswer()
-            } else {
-                let key = "tutor.drafts." + source
-                var stored = prefs.dictionary(forKey: key) as? [String: [String: String]] ?? [:]
-                stored[rung, default: [:]][part] = append(stored[rung]?[part] ?? "")
-                prefs.set(stored, forKey: key)
-            }
-        } else if path == source {
-            composer.string = append(composer.string)
-            composer.didChangeText()
-            saveDrafts()
-            if part == nil, fresh != nil, saved != nil, current == question { sendMessage() }
-        } else {
-            let key = "tutor.composer." + source
-            prefs.set(append(prefs.string(forKey: key) ?? ""), forKey: key)
-        }
-    }
 
     @objc private func sendMessage() {
         guard let path else { return }
