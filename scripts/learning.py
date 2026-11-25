@@ -11,21 +11,19 @@ over the concepts it draws on. A concept may serve several standards in several 
 standard's own depth comes from evidence rows tagged with it, by the same rule as a concept's; its
 coverage is how many of its concepts are shown.
 
-Depth comes only from **evidence**, never from a verdict typed by hand:
+Depth comes only from **evidence** — the learner's own answers (`observed`); a seed row (Claude's guess) or a
+chat capture is a hint that shapes the map and never schedules anything:
 
     level    predict < explain < transfer < critique
     credit   unaided | scaffolded | handed
     outcome  hit | miss
 
-A concept's depth is the highest level shown *unaided* (a higher level implies the lower ones).
-Assisted hits above that show as "with help". It is **held** once shown unaided on two days at least
-BASE_SPACING_DAYS apart — one session's hit, or Monday's and Tuesday's, is not retention. Due items
-carry how many days overdue they are: an untested concept is unknown, not forgotten, and the longer
-it waits the less the old evidence says. It is due for a re-test when a miss is still open (a
-high-confidence miss first: corrected, it is the best-remembered thing in a session), when it has
-only ever been shown with help, when it was shown once and the base gap has passed, or when its
-last unaided hit is older than its spacing interval (which doubles with each further unaided hit
-once held).
+Memory is modeled, not recorded: each level has a **forgetting curve**, recall = 2^(−days since / half-life). An
+unaided hit starts or grows the half-life (more when it was harder to retrieve), a miss cuts it, help changes
+nothing. A concept's depth is the deepest level probably still held (recall ≥ ½); it is **held** once a spaced
+retrieval has grown that level's curve. It comes **due** when recall drops below RETAIN, while a re-test is hard
+enough to help, and **fades** below FADED: unknown again, for recall to find. An open miss is due first (a
+confident one before any other) until a hit at its level, or until it fades itself.
 
 Evidence rows may carry `confidence` (asked before the reveal), `rung` (predict | invent), on a
 miss a `contrast` (the same situation with one variable changed — the re-test *is* the contrast),
@@ -45,6 +43,7 @@ import datetime
 import fcntl
 import glob
 import json
+import math
 import os
 import re
 import uuid
@@ -62,8 +61,13 @@ CONFIDENCES = ["low", "medium", "high"]
 RUNGS = ["predict", "invent", "recall"]
 SOURCES = ["chat"]
 SIM_RESULTS = ["green", "red"]
-BASE_SPACING_DAYS = 4
-MAX_SPACING_DAYS = 120
+FIRST_HALFLIFE_DAYS = 3
+MIN_HALFLIFE_DAYS = 1
+MAX_HALFLIFE_DAYS = 365
+MISS_FACTOR = 0.25
+RETAIN = 0.8
+FADED = 0.2
+MISS_FADES_DAYS = 60
 
 
 class Invalid(ValueError):
@@ -71,7 +75,8 @@ class Invalid(ValueError):
 
 
 def _today():
-    return datetime.date.today().isoformat()
+    """Today, or LEARNING_TODAY when a test pins the clock."""
+    return os.environ.get("LEARNING_TODAY") or datetime.date.today().isoformat()
 
 
 def _empty():
@@ -360,11 +365,14 @@ def _days(a, b):
     return (datetime.date.fromisoformat(b) - datetime.date.fromisoformat(a)).days
 
 
+def observed(row):
+    """Whether a row is evidence: the learner answering. A seed (Claude's guess at what they knew) or a chat capture
+    (what Claude explained) is a hint that shapes the map, never evidence that moves the curve."""
+    return not row.get("source") and not str(row.get("session") or "").startswith("seed")
+
+
 def mastery(g, cid, today=None):
-    """Depth (max level shown unaided) and held (shown unaided on two separate days) — one session's
-    hit is not retention. An open miss keeps the concept due; a high-confidence miss outranks every
-    other due item, because a confidently wrong prediction, once corrected, is the best-remembered
-    thing in a session (hypercorrection) — as long as it is actually re-tested."""
+    """Where the learner's memory of a concept stands now: a forgetting curve per level, from observed rows only."""
     return _mastery([r for r in g["evidence"] if r["concept"] == cid], today)
 
 
@@ -373,61 +381,86 @@ def standard_mastery(g, stid, today=None):
     return _mastery([r for r in g["evidence"] if r.get("standard") == stid], today)
 
 
+def _curve(events, today):
+    """One level's forgetting curve from its (date, hit) events, oldest first: (half-life, last date, recall now).
+
+    A first unaided hit starts the half-life at FIRST_HALFLIFE_DAYS. A later hit grows it by how much had been
+    forgotten (recall p at that moment): ×(1 + 3(1 − p)), so a same-day repeat adds nothing and a hard-won
+    retrieval after a long gap adds most. A miss cuts it to a quarter and leaves nothing held until the next hit."""
+    halflife, last, holding = None, None, False
+    for day, hit in events:
+        if hit:
+            if halflife is None:
+                halflife = FIRST_HALFLIFE_DAYS
+            elif holding:
+                p = 2 ** (-_days(last, day) / halflife)
+                halflife = min(MAX_HALFLIFE_DAYS, halflife * (1 + 3 * (1 - p)))
+            holding = True
+        else:
+            halflife = max(MIN_HALFLIFE_DAYS, (halflife or FIRST_HALFLIFE_DAYS) * MISS_FACTOR)
+            holding = False
+        last = day
+    recall = 2 ** (-_days(last, today) / halflife) if holding else 0.0
+    return halflife, last, recall
+
+
 def _mastery(rows, today=None):
+    """Depth is the deepest level the learner probably still holds (recall ≥ ½); held is the deepest whose curve a
+    spaced retrieval has grown. A level comes due as its recall drops below RETAIN, while a re-test is hard enough to
+    help, and fades below FADED: unknown again, for recall to find, not a re-test to nag about. A miss stays open
+    until a hit at its level or deeper, or until it is MISS_FADES_DAYS old: a misconception fades too. A confident
+    miss outranks every other due item (hypercorrection), as long as it is actually re-tested."""
     today = today or _today()
-    rows = sorted(rows, key=lambda r: r["at"])
-    depth = assisted = 0
-    last_unaided = ""
-    unaided = []           # (date, level) of every unaided hit
+    seen = sorted((r for r in rows if observed(r)), key=lambda r: r["at"])
+    curves = {}
+    for lvl in range(1, len(LEVELS) + 1):
+        events = [(r["at"], r["outcome"] == "hit") for r in seen if r["credit"] == "unaided" and
+                  ((r["outcome"] == "hit" and LEVELS.index(r["level"]) + 1 >= lvl) or
+                   (r["outcome"] == "miss" and LEVELS.index(r["level"]) + 1 <= lvl))]
+        first_hit = next((i for i, (_, hit) in enumerate(events) if hit), None)
+        if first_hit is not None:              # a level has a curve once it was shown; a miss before that is only a miss
+            curves[lvl] = _curve(events[first_hit:], today)
+    depth = max((l for l, c in curves.items() if c[2] >= 0.5), default=0)
+    held = max((l for l, c in curves.items() if c[2] >= 0.5 and c[0] >= 2 * FIRST_HALFLIFE_DAYS), default=0)
+    assisted = max([LEVELS.index(r["level"]) + 1 for r in seen if r["outcome"] == "hit" and r["credit"] != "unaided"
+                    and _days(r["at"], today) <= MISS_FADES_DAYS] + [depth])
     open_miss = None
-    misses = corrected = overconfident = 0
-    for r in rows:
-        lvl = LEVELS.index(r["level"]) + 1
+    for r in seen:
         if r["outcome"] == "miss":
             open_miss = r
-            misses += 1
-            if r.get("confidence") == "high":
-                overconfident += 1
-            continue
-        if r["credit"] == "unaided":
-            depth = max(depth, lvl)
-            last_unaided = r["at"]
-            unaided.append((r["at"], lvl))
-            if open_miss and lvl >= LEVELS.index(open_miss["level"]) + 1:
-                open_miss = None
-                corrected += 1
-        else:
-            assisted = max(assisted, lvl)
-    held = 0
-    for lvl in range(1, len(LEVELS) + 1):
-        days = sorted({d for d, l in unaided if l >= lvl})
-        if days and _days(days[0], days[-1]) >= BASE_SPACING_DAYS:
-            held = lvl
-    # the first re-test gap is the base spacing (about a tenth of a month-long retention target);
-    # doubling starts only once the concept is held
-    spacing = (min(MAX_SPACING_DAYS, BASE_SPACING_DAYS * 2 ** max(0, len(unaided) - 1) * max(1, depth))
-               if held else BASE_SPACING_DAYS)
+        elif open_miss and r["credit"] == "unaided" and LEVELS.index(r["level"]) >= LEVELS.index(open_miss["level"]):
+            open_miss = None
+    if open_miss and _days(open_miss["at"], today) > MISS_FADES_DAYS:
+        open_miss = None
+    shown = max(curves, default=0)                     # the deepest level ever shown: the one whose fading matters
+    halflife, last, recall = curves.get(shown, (None, "", 0.0))
+    if shown and recall == 0.0 and not open_miss:      # its curve ends in a faded miss: the level below still counts
+        shown = max((l for l, c in curves.items() if c[2] > 0), default=0)
+        halflife, last, recall = curves.get(shown, (None, "", 0.0))
+    due_after = halflife * math.log2(1 / RETAIN) if halflife else 0
+    faded = bool(seen) and not open_miss and recall < FADED and assisted == 0
     if open_miss:
-        due, reason, due_from = True, f"missed: {open_miss['note'] or open_miss['level']}", open_miss["at"]
+        due, reason, overdue = True, f"missed: {open_miss['note'] or open_miss['level']}", _days(open_miss["at"], today)
     elif depth == 0 and assisted:
-        due, reason, due_from = True, "only shown with help", rows[-1]["at"]
-    elif depth and not held and _days(last_unaided, today) >= spacing:
-        due, reason = True, (f"shown unaided, last {_days(last_unaided, today)} days ago — an unaided hit "
-                             f"{BASE_SPACING_DAYS}+ days after the first makes it held")
-        due_from = (datetime.date.fromisoformat(last_unaided) + datetime.timedelta(days=spacing)).isoformat()
-    elif depth and _days(last_unaided, today) > spacing:
-        due, reason = True, f"last shown unaided {_days(last_unaided, today)} days ago"
-        due_from = (datetime.date.fromisoformat(last_unaided) + datetime.timedelta(days=spacing)).isoformat()
+        due, reason, overdue = True, "only shown with help", 0
+    elif shown and FADED <= recall < RETAIN:
+        age = _days(last, today)
+        due, reason = True, f"about {round(recall * 100)}% likely still held at {LEVELS[shown - 1]}, last shown {age} days ago"
+        overdue = max(0, round(age - due_after))
     else:
-        due, reason, due_from = False, "", ""
-    return {"depth": depth, "assisted": max(assisted, depth), "level": LEVELS[depth - 1] if depth else "",
+        due, reason, overdue = False, "", 0
+    return {"depth": depth, "assisted": assisted, "level": LEVELS[depth - 1] if depth else "",
             "held": held, "held_level": LEVELS[held - 1] if held else "",
-            "evidence": len(rows), "last": rows[-1]["at"] if rows else "", "due": due, "reason": reason,
+            "evidence": len(seen), "hints": len(rows) - len(seen), "last": seen[-1]["at"] if seen else "",
+            "known": bool(depth or open_miss or assisted), "faded": faded,
+            "recall": round(recall, 3), "halflife": round(halflife, 1) if halflife else 0,
+            "due": due, "reason": reason,
             "open_miss": (open_miss["note"] or f"missed at {open_miss['level']}") if open_miss else "",
             "miss_confidence": (open_miss or {}).get("confidence", ""),
             "contrast": (open_miss or {}).get("contrast", ""),
-            "misses": misses, "corrected": corrected, "overconfident": overconfident, "spacing": spacing,
-            "overdue": max(0, _days(due_from, today)) if due else 0}
+            "misses": sum(1 for r in seen if r["outcome"] == "miss"),
+            "overconfident": sum(1 for r in seen if r["outcome"] == "miss" and r.get("confidence") == "high"),
+            "shown_level": LEVELS[shown - 1] if shown else "", "spacing": round(due_after), "overdue": overdue}
 
 
 def _priority(m):
@@ -600,14 +633,14 @@ def next_step(g, topic=None, system=None, session="", asked=(), today=None, conc
     `asked` is what the session has already posed, in order ({concept, form, level}); `session` tags this
     session's evidence rows. In order of precedence:
       card    after SESSION_STEPS steps, or when nothing is left: the learner writes the sentence they'd keep
-      recall  a topic that's mostly without evidence opens with free recall, which sorts what's known from what's not
+      recall  a topic that's mostly unknown now (never shown, or faded) opens with free recall, which sorts what's known from what's not
       contrast a miss from this session comes back as the same situation with one thing changed, one step later;
               an older open miss on the topic comes before anything new
       re-test every INTERLEAVE_EVERY steps (and first, when there's no recall) a due neighbor of the topic
       due     a concept of the topic that's due is re-tested at the level it's held or was missed at
       edge    the first concept in teaching order whose prerequisites are shown, one level above its depth —
               two levels after a run of unaided hits, a prerequisite first when one was never shown, and a
-              worked example before a cold prediction on a concept with no evidence at all
+              worked example before a cold prediction on a concept not known now
     A one-concept session (a re-test) is one step, and a contrast after it when that step missed; no card.
     """
     asked = _asked(asked)
@@ -634,7 +667,7 @@ def next_step(g, topic=None, system=None, session="", asked=(), today=None, conc
         m = concepts[cid]["mastery"]
         if m["open_miss"]:
             return next(r["level"] for r in reversed(g["evidence"]) if r["concept"] == cid and r["outcome"] == "miss")
-        return LEVELS[max(m["depth"], m["assisted"], 1) - 1]
+        return m["shown_level"] or LEVELS[max(m["depth"], m["assisted"], 1) - 1]
 
     def retest(cid, why):
         m = concepts[cid]["mastery"]
@@ -646,7 +679,7 @@ def next_step(g, topic=None, system=None, session="", asked=(), today=None, conc
     if concept:
         if n == 0:
             m = concepts[concept]["mastery"]
-            if m["due"] or m["evidence"]:
+            if m["due"] or m["known"]:
                 return retest(concept, f"re-test: {m['reason'] or 'not due, asked for'}")
             return out("worked", concept, "predict", "new: watch one run, then predict a variant")
         missed = [r for r in rows if r["concept"] == concept and r["outcome"] == "miss"]
@@ -660,9 +693,9 @@ def next_step(g, topic=None, system=None, session="", asked=(), today=None, conc
         return out("done", why="the session closed on its card")
     if n >= SESSION_STEPS:
         return out("card", _focus(rows, ids), why=f"{SESSION_STEPS} steps is a session; close while it's fresh")
-    unmapped = [i for i in ids if not concepts[i]["mastery"]["evidence"]]
+    unmapped = [i for i in ids if not concepts[i]["mastery"]["known"]]
     if n == 0 and topic and len(unmapped) * 2 > len(ids):
-        return out("recall", why="most of this topic has no evidence yet: say everything you know, and the gaps show")
+        return out("recall", why="most of this topic isn't known now (never shown, or faded): say everything you know, and the gaps show")
 
     # a concept whose latest row this session is a miss is owed a contrast (at most CONTRASTS_PER_SESSION), one step later
     deferred = None
@@ -702,7 +735,7 @@ def next_step(g, topic=None, system=None, session="", asked=(), today=None, conc
             if blocker and concepts.get(blocker, {}).get("mastery", {}).get("open_miss"):
                 return retest(blocker, f"{c['name']} builds on it, and a miss on it stands")
             if blocker:
-                form = "worked" if not concepts.get(blocker, {}).get("mastery", {}).get("evidence") else "predict"
+                form = "worked" if not concepts.get(blocker, {}).get("mastery", {}).get("known") else "predict"
                 return out(form, blocker, "predict", f"{c['name']} builds on it, and it was never shown unaided")
             continue
         target = m["depth"] + (2 if stretch and m["depth"] + 2 <= len(LEVELS) else 1)
@@ -716,7 +749,7 @@ def next_step(g, topic=None, system=None, session="", asked=(), today=None, conc
                 level = "critique"
         if (cid, level) in posed:
             continue
-        if level == "predict" and not m["evidence"] and not stretch:
+        if level == "predict" and not m["known"] and not stretch:
             form, why = "worked", "new: watch one run, then predict a variant"
         elif level == "predict" and support:
             form, why = "worked", "after a miss, a worked run before the next cold prediction"
@@ -783,7 +816,9 @@ def _depth_label(m):
         if m["overconfident"]:
             s += f" · overconfident miss ×{m['overconfident']}"
         return s
-    return f"{LEVELS[m['assisted'] - 1]} with help only" if m["assisted"] else "not yet shown"
+    if m["assisted"]:
+        return f"{LEVELS[m['assisted'] - 1]} with help only"
+    return "faded" if m["faded"] else "not yet shown"
 
 
 def _concept_line(i, c):
@@ -840,8 +875,9 @@ def digest(g, topic=None, today=None, system=None):
     """Compact text for a tutor's prompt: the whole graph at a glance, the active topic or system in full."""
     st = state(g, today)
     out = ["## The learner's concept graph (~/.dotfiles/learning/graph.json)",
-           "Depth = highest level shown UNAIDED: predict < explain < transfer < critique. "
-           "“held” = shown unaided on two separate days; “once” = one session only, not yet retention.", ""]
+           "Depth = deepest level probably still held UNAIDED (a forgetting curve per level, moved only by the "
+           "learner's answers): predict < explain < transfer < critique. “held” = a spaced retrieval grew it; "
+           "“once” = not yet retention; “faded” = shown before, likely forgotten: show it again, don't quiz it.", ""]
     if st["systems"]:
         out.append("### Systems (mastery target: each standard held)")
         out += [f"- {s['title']} [{sid}] — {s['progress']['held']} held / {s['progress']['met']} met / "
@@ -890,6 +926,24 @@ def digest(g, topic=None, today=None, system=None):
     if st["calibration"]:
         out += ["", "### Calibration notes for this learner", *[f"- {c['note']}" for c in st["calibration"]]]
     return "\n".join(out)
+
+
+def commit(path=None, message="learning: session evidence"):
+    """Commits the graph file alone (a pathspec commit) when it changed, so a session's evidence is kept without
+    anyone tending the file. Returns what happened; a graph outside a git checkout is left alone."""
+    import subprocess
+    path = os.path.realpath(path or GRAPH)
+    repo = subprocess.run(["git", "-C", os.path.dirname(path), "rev-parse", "--show-toplevel"], capture_output=True, text=True)
+    if repo.returncode != 0:
+        return "not in a git checkout"
+    top = repo.stdout.strip()
+    rel = os.path.relpath(path, top)
+    if not subprocess.run(["git", "-C", top, "status", "--porcelain", "--", rel], capture_output=True, text=True).stdout.strip():
+        return "unchanged"
+    done = subprocess.run(["git", "-C", top, "commit", "--only", "-q", "-m", message, "--", rel], capture_output=True, text=True)
+    if done.returncode != 0:
+        raise Invalid(f"git commit failed: {(done.stderr or done.stdout).strip()}")
+    return "committed"
 
 
 # ── the memory mirror ─────────────────────────────────────────────────

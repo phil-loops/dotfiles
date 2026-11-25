@@ -43,6 +43,7 @@
   learn restate <id> '<text>'      the learner's own sentence for a concept (at a summit)
   learn question '<text>' [--concept <id>] [--topic <id>]
   learn calibrate '<note>'
+  learn commit ['<message>']        commit the graph file alone when it changed (Show runs it as a session ends)
   learn sync-memory                regenerate the memory track's "Current state" section
 
 JSON arguments may be '-' to read stdin. See scripts/learning.py for the model.
@@ -206,6 +207,8 @@ def main(argv):
         elif cmd == "calibrate":
             with learning.editing() as g:
                 learning.add_calibration(g, " ".join(args))
+        elif cmd == "commit":
+            print(learning.commit(message=" ".join(args) or "learning: session evidence"))
         elif cmd == "sync-memory":
             learning.write_memory_state(learning.load())
         else:

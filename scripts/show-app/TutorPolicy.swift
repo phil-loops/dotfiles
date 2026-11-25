@@ -144,7 +144,11 @@ extension TutorAgent {
             onChange?()
             return
         }
-        if posted != nil, !showWrittenForms.contains(form) {
+        if form == "done" {
+            // the session's evidence is all in the graph now: keep it, without anyone tending the file
+            let message = "learning: \(TutorPolicy.sessionID(sessionPath))"
+            DispatchQueue.global(qos: .utility).async { _ = try? TutorPolicy.learn(["commit", message]) }
+        } else if posted != nil, !showWrittenForms.contains(form) {
             anticipate(id)
         } else if raw["assigned"] != nil, form != "done" {
             send("tutor step: \(sessionPath)\nWrite the next step: \(TutorPolicy.brief(next)).\nReply with only the @step and its sections.")

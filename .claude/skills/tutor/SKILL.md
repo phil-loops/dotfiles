@@ -168,10 +168,12 @@ one entry per concept: `learn evidence '{"concept": "<id>", "level": "predict", 
   diverge. The re-test of a miss *is* its contrast, never the original situation again.
 - **confidence** (low / medium / high) on every row where you asked. **rung** (predict / invent).
 
-Depth is the highest level shown unaided; **held** means shown unaided on two separate days — one
-session's hit is not retention, so a once-shown concept comes due the next day on purpose. Re-tests are
-derived, never hand-kept: confident misses first, then any miss, help-only, once-only, then overdue
-past a doubling spacing. The learner's own questions are first-class (`learn question '<text>'
+Memory is modeled, not kept: each level has a forgetting curve, and only the learner's own answers move it
+(a seed row or a chat capture is a hint for the map, never evidence). Depth is the deepest level probably
+still held; **held** means a spaced retrieval grew that level's curve — one session's hit is not retention.
+A concept comes due as recall drops toward forgetting (confident misses first, then any miss, then
+help-only, then fading), and once it has faded it's unknown again: show it, don't quiz it. Misses fade too.
+The learner's own questions are first-class (`learn question '<text>'
 --concept <id>`); a rare note about how they learn is `learn calibrate '<note>'`. The graph mirrors
 itself into the memory track; never append session logs there. In the viewer's Tutor tab you can't run
 `learn`: emit the fenced blocks its instructions define instead.

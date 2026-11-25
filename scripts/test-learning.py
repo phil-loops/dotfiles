@@ -28,53 +28,68 @@ def graph():
 
 
 class Mastery(unittest.TestCase):
-    def test_once_is_not_held(self):
+    def m(self, g, today, cid="lock-ttl"):
+        return learning.mastery(g, cid, today=today)
+
+    def test_recall_follows_the_curve_from_a_first_hit(self):
         g = graph()
         ev(g, "lock-ttl", at="2026-10-01")
-        m = learning.mastery(g, "lock-ttl", today="2026-10-01")
-        self.assertEqual((m["depth"], m["held"]), (1, 0))
-        ev(g, "lock-ttl", at="2026-10-01")           # same day again: still once
-        self.assertEqual(learning.mastery(g, "lock-ttl", today="2026-10-01")["held"], 0)
-        ev(g, "lock-ttl", at="2026-10-03")           # a second day, too soon: still not retention
-        self.assertEqual(learning.mastery(g, "lock-ttl", today="2026-10-03")["held"], 0)
-        ev(g, "lock-ttl", at="2026-10-05")           # the base gap after the first: held
-        m = learning.mastery(g, "lock-ttl", today="2026-10-05")
-        self.assertEqual((m["depth"], m["held"]), (1, 1))
+        m = self.m(g, "2026-10-01")
+        self.assertEqual((m["depth"], m["held"], m["recall"], m["halflife"], m["due"]), (1, 0, 1.0, 3, False))
+        m = self.m(g, "2026-10-04")                                   # one half-life on: a coin flip, and due
+        self.assertEqual((m["depth"], m["recall"], m["due"]), (1, 0.5, True))
+        self.assertIn("about 50% likely still held at predict", m["reason"])
+        m = self.m(g, "2026-10-08")                                   # past FADED: unknown again, not nagged
+        self.assertEqual((m["depth"], m["due"], m["faded"], m["known"]), (0, False, True, False))
 
-    def test_overdue_counts_from_when_it_came_due(self):
+    def test_a_spaced_hit_grows_the_halflife_and_a_same_day_one_does_not(self):
         g = graph()
         ev(g, "lock-ttl", at="2026-10-01")
-        self.assertEqual(learning.mastery(g, "lock-ttl", today="2026-10-05")["overdue"], 0)
-        self.assertEqual(learning.mastery(g, "lock-ttl", today="2026-10-15")["overdue"], 10)
-        ev(g, "lease-renewal", outcome="miss", at="2026-10-01")
-        self.assertEqual(learning.mastery(g, "lease-renewal", today="2026-10-08")["overdue"], 7)
+        ev(g, "lock-ttl", at="2026-10-01")
+        self.assertEqual((self.m(g, "2026-10-01")["halflife"], self.m(g, "2026-10-01")["held"]), (3, 0))
+        ev(g, "lock-ttl", at="2026-10-04")                            # retrieved at recall ½: ×2.5
+        m = self.m(g, "2026-10-04")
+        self.assertEqual((m["halflife"], m["held"], m["due"]), (7.5, 1, False))
 
-    def test_held_level_is_two_days_at_that_level(self):
+    def test_a_miss_cuts_the_curve_and_stays_open_until_a_hit_at_its_level(self):
+        g = graph()
+        ev(g, "lock-ttl", at="2026-10-01")
+        ev(g, "lock-ttl", at="2026-10-04")
+        ev(g, "lock-ttl", outcome="miss", note="thinks it lives forever", at="2026-10-05")
+        m = self.m(g, "2026-10-05")
+        self.assertEqual((m["depth"], m["halflife"], m["open_miss"], m["due"]), (0, 1.9, "thinks it lives forever", True))
+        ev(g, "lock-ttl", at="2026-10-06")                            # relearned: open miss closed, no bonus
+        m = self.m(g, "2026-10-06")
+        self.assertEqual((m["depth"], m["halflife"], m["open_miss"]), (1, 1.9, ""))
+
+    def test_a_miss_below_the_level_shown_keeps_the_lower_curve(self):
+        g = graph()
+        ev(g, "lock-ttl", level="explain", outcome="miss", at="2026-10-01")
+        ev(g, "lock-ttl", level="predict", at="2026-10-02")           # below the missed level: still open
+        self.assertTrue(self.m(g, "2026-10-02")["open_miss"])
+        ev(g, "lock-ttl", level="explain", at="2026-10-03")
+        m = self.m(g, "2026-10-03")
+        self.assertEqual((m["open_miss"], m["level"]), ("", "explain"))
+
+    def test_held_level_is_the_level_a_spaced_retrieval_grew(self):
         g = graph()
         ev(g, "lock-ttl", level="explain", at="2026-10-01")
-        ev(g, "lock-ttl", level="predict", at="2026-10-05")
-        m = learning.mastery(g, "lock-ttl", today="2026-10-05")
+        ev(g, "lock-ttl", level="predict", at="2026-10-04")
+        m = self.m(g, "2026-10-04")
         self.assertEqual((m["level"], m["held_level"]), ("explain", "predict"))
 
-    def test_once_becomes_due_after_the_base_gap(self):
+    def test_an_old_miss_fades_like_anything_else(self):
         g = graph()
-        ev(g, "lock-ttl", level="explain", at="2026-10-01")
-        for day in ("2026-10-01", "2026-10-04"):
-            m = learning.mastery(g, "lock-ttl", today=day)
-            self.assertFalse(m["due"], day)
-            self.assertEqual(m["spacing"], learning.BASE_SPACING_DAYS)   # depth doesn't stretch a once-only gap
-        m = learning.mastery(g, "lock-ttl", today="2026-10-05")
-        self.assertTrue(m["due"])
-        self.assertIn("makes it held", m["reason"])
+        ev(g, "lock-ttl", outcome="miss", note="believed the lock stops execution", at="2026-06-01")
+        m = self.m(g, "2026-10-01")
+        self.assertEqual((m["open_miss"], m["due"], m["faded"]), ("", False, True))
 
-    def test_held_doubles_spacing(self):
+    def test_a_seed_or_a_chat_capture_is_a_hint_not_evidence(self):
         g = graph()
-        ev(g, "lock-ttl", at="2026-10-01")
-        ev(g, "lock-ttl", at="2026-10-05")
-        m = learning.mastery(g, "lock-ttl", today="2026-10-12")
-        self.assertFalse(m["due"])
-        self.assertEqual(m["spacing"], 8)
-        self.assertTrue(learning.mastery(g, "lock-ttl", today="2026-10-20")["due"])
+        learning.add_evidence(g, {"concept": "lock-ttl", "level": "explain", "outcome": "miss", "at": "2026-10-01"}, session="seed:learning-track")
+        learning.add_evidence(g, {"concept": "lock-ttl", "level": "explain", "at": "2026-10-01", "source": "chat"})
+        m = self.m(g, "2026-10-01")
+        self.assertEqual((m["evidence"], m["hints"], m["known"], m["due"], m["open_miss"]), (0, 2, False, False, ""))
 
     def test_confident_miss_outranks_everything(self):
         g = graph()
@@ -85,16 +100,6 @@ class Mastery(unittest.TestCase):
         self.assertEqual(st["due"][:3], ["lease-renewal", "lock-ttl", "bookmark-atomic"])
         m = st["concepts"]["lease-renewal"]["mastery"]
         self.assertEqual((m["miss_confidence"], m["contrast"], m["overconfident"]), ("high", "same lease, renew late once", 1))
-
-    def test_miss_clears_on_unaided_hit_at_level(self):
-        g = graph()
-        ev(g, "lock-ttl", level="explain", outcome="miss", at="2026-10-01")
-        ev(g, "lock-ttl", level="predict", at="2026-10-02")        # below the missed level: still open
-        self.assertTrue(learning.mastery(g, "lock-ttl", today="2026-10-02")["open_miss"])
-        ev(g, "lock-ttl", level="explain", at="2026-10-03")
-        m = learning.mastery(g, "lock-ttl", today="2026-10-03")
-        self.assertFalse(m["open_miss"])
-        self.assertEqual(m["corrected"], 1)
 
 
 class Graph(unittest.TestCase):
@@ -109,17 +114,18 @@ class Graph(unittest.TestCase):
 
     def test_opener_is_a_due_neighbor(self):
         g = graph()
-        ev(g, "lease-renewal", at="2026-09-01")       # once, long ago → due; analog of bookmark-atomic
-        ev(g, "lock-ttl", at="2026-09-01")            # due too, but not a neighbor of cursors
+        ev(g, "lease-renewal", at="2026-09-27")       # once, four days ago → fading, due; analog of bookmark-atomic
+        ev(g, "lock-ttl", at="2026-09-27")            # due too, but not a neighbor of cursors
         op = learning.opener(g, "cursors", today="2026-10-01")
         self.assertEqual([o["id"] for o in op], ["lease-renewal"])
         self.assertEqual(op[0]["neighbor_of"], ["bookmark-atomic"])
 
     def test_transfers_need_a_held_analog(self):
         g = graph()
-        self.assertEqual(learning.transfers(g, "cursors"), [])
+        self.assertEqual(learning.transfers(g, "cursors", today="2026-10-01"), [])
         ev(g, "lease-renewal", level="explain", at="2026-10-01")
-        self.assertEqual(learning.transfers(g, "cursors"), [{"concept": "bookmark-atomic", "via": "lease-renewal", "setting": "locks"}])
+        self.assertEqual(learning.transfers(g, "cursors", today="2026-10-01"), [{"concept": "bookmark-atomic", "via": "lease-renewal", "setting": "locks"}])
+        self.assertEqual(learning.transfers(g, "cursors", today="2026-10-20"), [])   # a faded analog carries nothing
 
     def test_unaided_transfer_hit_names_its_analog(self):
         g = graph()
@@ -130,9 +136,9 @@ class Graph(unittest.TestCase):
 
     def test_progress_counts_held_and_shown(self):
         g = graph()
-        ev(g, "lock-ttl", level="explain", at="2026-10-01")
+        ev(g, "lock-ttl", level="explain", at="2026-10-04")
         ev(g, "lease-renewal", level="explain", at="2026-10-01")
-        ev(g, "lease-renewal", level="explain", at="2026-10-05")
+        ev(g, "lease-renewal", level="explain", at="2026-10-04")
         p = learning.state(g, today="2026-10-05")["topics"]["locks"]["progress"]
         self.assertEqual(p, {"held": 1, "shown": 2, "total": 2})
 
@@ -228,7 +234,7 @@ class Retest(unittest.TestCase):
     def test_top_due_skips_what_was_tested_today(self):
         g = system_graph()
         ev(g, "lock-ttl", outcome="miss", note="thought it lives forever", contrast="holder dies at t=5", at="2026-10-01")
-        ev(g, "lease-renewal", at="2026-09-01")
+        ev(g, "lease-renewal", at="2026-10-06")
         b = learning.retest(g, today="2026-10-10")
         self.assertEqual((b["concept"], b["due"], b["contrast"], b["overdue"]), ("lock-ttl", 2, "holder dies at t=5", 9))
         self.assertEqual([s["id"] for s in b["standards"]], ["predict-expiry"])
@@ -262,7 +268,7 @@ class Policy(unittest.TestCase):
 
     def test_a_prerequisite_never_shown_comes_first(self):
         g = graph()
-        ev(g, "bookmark-atomic", level="critique", at="2026-10-09")   # the first concept is done
+        ev(g, "bookmark-atomic", level="critique", at="2026-10-10")   # the first concept is done
         n = nxt(g, asked=[{"form": "x"}], topic="cursors")
         self.assertEqual((n["concept"], n["form"]), ("commit-order", "worked"))
         self.assertIn("builds on it", n["why"])
@@ -304,32 +310,33 @@ class Policy(unittest.TestCase):
 
     def test_a_contrast_that_misses_is_owed_another(self):
         g = graph()
-        ev(g, "lock-ttl", level="explain", at="2026-08-01")             # shown once, then an old miss
-        ev(g, "lock-ttl", outcome="miss", at="2026-09-01")
-        asked = [{"concept": "lock-ttl", "form": "contrast", "level": "predict"}]
-        ev(g, "lock-ttl", outcome="miss", at="2026-10-10", session="s")   # its contrast missed again
-        n = nxt(g, asked=asked)
-        self.assertNotEqual(n["concept"], "lock-ttl")                    # a step of space
+        ev(g, "bookmark-atomic", level="explain", at="2026-10-08")
+        ev(g, "bookmark-atomic", outcome="miss", at="2026-10-09")           # an older miss
+        asked = [{"concept": "bookmark-atomic", "form": "contrast", "level": "predict"}]
+        ev(g, "bookmark-atomic", outcome="miss", at="2026-10-10", session="s")   # its contrast missed again
+        n = nxt(g, asked=asked, topic="cursors")
+        self.assertNotEqual(n["concept"], "bookmark-atomic")             # a step of space
         asked.append({"concept": n["concept"], "form": n["form"], "level": n["level"]})
-        self.assertEqual(nxt(g, asked=asked)["form"], "contrast")
+        self.assertEqual(nxt(g, asked=asked, topic="cursors")["form"], "contrast")
 
     def test_a_due_neighbor_is_mixed_in(self):
         g = graph()
-        ev(g, "lease-renewal", at="2026-09-01")        # due, analog of bookmark-atomic
-        ev(g, "bookmark-atomic", at="2026-10-09")      # cursors has evidence: no recall
+        ev(g, "lease-renewal", at="2026-10-06")        # fading, due, analog of bookmark-atomic
+        ev(g, "bookmark-atomic", at="2026-10-10")      # cursors has evidence: no recall
+        ev(g, "commit-order", at="2026-10-10")
         n = nxt(g, topic="cursors")
         self.assertEqual((n["concept"], n["form"]), ("lease-renewal", "predict"))
         self.assertIn("neighbor", n["why"])
 
     def test_transfer_goes_through_a_held_analog_or_skips_to_critique(self):
         g = graph()
-        ev(g, "bookmark-atomic", level="explain", at="2026-10-09")
-        ev(g, "commit-order", at="2026-10-09")
-        ev(g, "safety-lag", level="critique", at="2026-10-09")
+        ev(g, "bookmark-atomic", level="explain", at="2026-10-10")
+        ev(g, "commit-order", at="2026-10-10")
+        ev(g, "safety-lag", level="critique", at="2026-10-10")
         n = nxt(g, topic="cursors", asked=[{"form": "x"}])
         self.assertEqual((n["concept"], n["level"]), ("bookmark-atomic", "critique"))   # its analog isn't held
-        ev(g, "lease-renewal", level="explain", at="2026-10-09")
-        ev(g, "lock-ttl", at="2026-10-09")
+        ev(g, "lease-renewal", level="explain", at="2026-10-10")
+        ev(g, "lock-ttl", at="2026-10-10")
         n = nxt(g, topic="cursors", asked=[{"form": "x"}])
         self.assertEqual((n["level"], n["via"]), ("transfer", "lease-renewal"))
 
@@ -351,8 +358,9 @@ class Policy(unittest.TestCase):
         g = graph()
         ev(g, "lock-ttl", level="explain", at="2026-10-09")
         ev(g, "lease-renewal", level="explain", at="2026-10-09")
-        self.assertEqual(learning.stations(g, "locks"), [{"name": "why", "state": "done"}])
-        self.assertEqual(learning.stations(g, "locks", "lock-ttl"), [{"name": "why", "state": "current"}])
+        self.assertEqual(learning.stations(g, "locks", today="2026-10-09"), [{"name": "why", "state": "done"}])
+        self.assertEqual(learning.stations(g, "locks", "lock-ttl", today="2026-10-09"), [{"name": "why", "state": "current"}])
+        self.assertEqual(learning.stations(g, "locks", today="2026-10-30"), [{"name": "why", "state": "todo"}])   # faded
 
     def test_branches_draft_both_outcomes(self):
         g = graph()
@@ -365,7 +373,7 @@ class Policy(unittest.TestCase):
 
     def test_a_retest_is_one_step_and_a_contrast_on_a_miss(self):
         g = graph()
-        ev(g, "lock-ttl", at="2026-09-01")
+        ev(g, "lock-ttl", at="2026-10-07")
         r = lambda asked: learning.next_step(g, concept="lock-ttl", session="s", asked=asked, today="2026-10-10")
         self.assertEqual((r([])["form"], r([])["level"]), ("predict", "predict"))
         one = [{"concept": "lock-ttl", "form": "predict", "level": "predict"}]
@@ -373,6 +381,13 @@ class Policy(unittest.TestCase):
         ev(g, "lock-ttl", outcome="miss", contrast="holder dies", at="2026-10-10", session="s")
         self.assertEqual((r(one)["form"], r(one)["contrast"]), ("contrast", "holder dies"))
         self.assertEqual(r(one + [{"concept": "lock-ttl", "form": "contrast", "level": "predict"}])["form"], "done")
+
+    def test_a_faded_concept_is_shown_again_not_quizzed(self):
+        g = graph()
+        ev(g, "lock-ttl", level="explain", at="2026-06-01")
+        n = learning.next_step(g, concept="lock-ttl", session="s", asked=[], today="2026-10-10")
+        self.assertEqual((n["form"], n["level"]), ("worked", "predict"))
+        self.assertEqual(nxt(g)["form"], "recall")                       # and a faded topic opens with recall
 
     def test_scope_must_exist(self):
         with self.assertRaises(learning.Invalid):
@@ -411,7 +426,7 @@ class Blocks(unittest.TestCase):
     def test_old_rows_without_extras_still_read(self):
         g = graph()
         g["evidence"].append({"id": "old", "concept": "lock-ttl", "level": "predict", "credit": "unaided",
-                              "outcome": "hit", "note": "", "at": "2026-09-01", "topic": "", "session": ""})
+                              "outcome": "hit", "note": "", "at": "2026-09-30", "topic": "", "session": ""})
         m = learning.mastery(g, "lock-ttl", today="2026-10-01")
         self.assertEqual((m["depth"], m["miss_confidence"], m["contrast"]), (1, "", ""))
         self.assertIn("lock-ttl", learning.digest(g, topic="locks"))
@@ -444,7 +459,7 @@ class CLI(unittest.TestCase):
         import subprocess
         learn = os.path.join(os.path.dirname(os.path.realpath(__file__)), "learn")
         with tempfile.TemporaryDirectory() as d:
-            env = {**os.environ, "LEARNING_GRAPH": os.path.join(d, "g.json"), "LEARNING_MEMORY": "0"}
+            env = {**os.environ, "LEARNING_GRAPH": os.path.join(d, "g.json"), "LEARNING_MEMORY": "0", "LEARNING_TODAY": "2026-01-05"}
 
             def run(*args):
                 r = subprocess.run([sys.executable, learn, *args], env=env, capture_output=True, text=True)
@@ -453,7 +468,7 @@ class CLI(unittest.TestCase):
 
             run("map", json.dumps({"topic": {"id": "t", "title": "T"}, "stages": [
                 {"name": "s", "concepts": [{"id": "a", "analogs": ["b"]}, {"id": "c", "builds_on": ["a"]}]}]}))
-            run("evidence", json.dumps({"concept": "b", "level": "explain", "at": "2026-01-01"}))
+            run("evidence", json.dumps({"concept": "b", "level": "explain", "at": "2026-01-04"}))
             run("evidence", json.dumps({"concept": "a", "level": "predict", "outcome": "miss",
                                         "confidence": "high", "contrast": "same, but X"}), "--topic", "t")
             run("restate", "b", "b in my words")
@@ -485,6 +500,27 @@ class CLI(unittest.TestCase):
             self.assertEqual(r.returncode, 3)
             nudge = subprocess.run([sys.executable, learn, "nudge"], env=env, input="{}", capture_output=True, text=True)
             self.assertEqual((nudge.returncode, nudge.stdout), (0, ""))   # offered today: silent
+
+
+class Commit(unittest.TestCase):
+    def test_the_graph_commits_itself_and_nothing_else(self):
+        import subprocess
+        with tempfile.TemporaryDirectory() as d:
+            git = lambda *a: subprocess.run(["git", "-C", d, *a], capture_output=True, text=True, check=True).stdout
+            git("init", "-q")
+            git("config", "user.email", "t@example.com"); git("config", "user.name", "t"); git("config", "commit.gpgsign", "false")
+            graph_path, other = os.path.join(d, "g.json"), os.path.join(d, "wip.txt")
+            for p_ in (graph_path, other):
+                open(p_, "w").write("{}\n")
+            git("add", "."); git("commit", "-q", "-m", "init")
+            self.assertEqual(learning.commit(graph_path), "unchanged")
+            open(graph_path, "w").write('{"evidence": []}\n')
+            open(other, "w").write("someone's work in progress\n")
+            git("add", "wip.txt")                                              # staged by someone else
+            self.assertEqual(learning.commit(graph_path, "learning: s1"), "committed")
+            self.assertEqual(git("show", "--name-only", "--format=%s", "HEAD").split(), ["learning:", "s1", "g.json"])
+            self.assertEqual(git("diff", "--cached", "--name-only").split(), ["wip.txt"])   # their staged file untouched
+        self.assertEqual(learning.commit(os.path.join(tempfile.gettempdir(), "nowhere", "g.json")), "not in a git checkout")
 
 
 class Roundtrip(unittest.TestCase):
