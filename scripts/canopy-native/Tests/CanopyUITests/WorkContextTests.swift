@@ -573,9 +573,10 @@ import Testing
         #expect(app.registry.command("review.callers") != nil)
     }
 
-    /// The home lists local work only when its next step is Phil's and something is on it. What an agent or a
-    /// teammate holds, and what is his but idle, shows with the archive, and so does the work in progress.
-    @Test func theHomeListsOnlyYourMoveOnWorkSomethingIsOn() throws {
+    /// The home lists every focus forest, and other local work only when its next step is Phil's and something is on
+    /// it. What an agent or a teammate holds outside the focus lane, and what is his but idle, shows with the archive,
+    /// and so does the work in progress.
+    @Test func theHomeListsFocusAndYourMoveOnWorkSomethingIsOn() throws {
         let app = world()
         let m = app.forestModel
         func listed() -> Set<String> { Set(m.homeSections().sections.flatMap(\.items).map(\.key)) }
@@ -584,12 +585,13 @@ import Testing
         let fs = m.forests()
         for key in everything {
             guard let f = RowKey.id(key, "p").flatMap({ fs[$0] }) else { continue }
-            let on = f.p.state == .focus || !WorkContext.onForest(f.branches).isEmpty
-            #expect(listed().contains(key) == (m.verb(f).isYours && on), "\(f.p.name) is listed exactly when its step is yours and something is on it")
+            let on = !WorkContext.onForest(f.branches).isEmpty
+            #expect(listed().contains(key) == (f.p.state == .focus || m.verb(f).isYours && on),
+                    "\(f.p.name) is listed exactly when it's in focus, or its step is yours and something is on it")
         }
         let panes = PaneBranches.of(app)
         panes.tmux = { _ in }
-        let held = try #require(fs.values.first { !m.verb($0).isYours && !$0.branches.isEmpty && everything.contains(RowKey.project($0.p.id)) })
+        let held = try #require(fs.values.first { $0.p.state != .focus && !m.verb($0).isYours && !$0.branches.isEmpty && everything.contains(RowKey.project($0.p.id)) })
         #expect(m.hasParked(), "which is what gives the archive's key something more to show")
         panes.take([PaneBranches.Row(pane: "%7", address: "3:1", repo: held.branches[0].b.repo, branch: held.branches[0].b.name)])
         #expect(m.paneWork == ["\(held.branches[0].b.repo)\t\(held.branches[0].b.name)"], "the home hears which branches panes work on")
@@ -605,6 +607,21 @@ import Testing
         app.go(.forests)
         app.setCursor(RowKey.project(held.p.id))
         #expect(PaneBranches.wayBack(app).contains("%7"), "from its row, the way to tmux is the pane working on one of its branches")
+    }
+
+    /// A focus forest stays on the home while a chat works on it: someone else's move then, which outside the focus
+    /// lane would leave the home (`theHomeListsFocusAndYourMoveOnWorkSomethingIsOn`).
+    @Test func aFocusForestStaysOnTheHomeWhileAChatHoldsIt() throws {
+        let probe = world().forestModel
+        let now = probe.now.timeIntervalSince1970
+        let f = try #require(probe.forests().values.first { $0.p.state == .focus && probe.verb($0).isYours && !$0.branches.isEmpty })
+        let acted = f.branches.map { ($0.b.id, "commit", now - 20) }
+        let app = world(chats: ["59fa0cc0-1": chat("59fa0cc0-1", activeAt: now - 30, acted: acted)])
+        let m = app.forestModel
+        m.showParked = false
+        let held = try #require(m.forests()[f.p.id])
+        #expect(!m.verb(held).isYours, "a live chat on every branch makes it someone else's move")
+        #expect(m.homeSections().sections.flatMap(\.items).map(\.key).contains(RowKey.project(f.p.id)), "and the focus lane keeps it listed")
     }
 
     /// A forest's line says where its panes sit: a chat's pane, and any pane (Codex, a shell) whose latest work is on

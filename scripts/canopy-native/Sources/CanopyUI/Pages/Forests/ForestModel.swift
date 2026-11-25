@@ -392,7 +392,7 @@ public final class ForestModel {
                 guard let fv = f[p.id] else { continue }
                 let live = fv.branches.filter { !$0.st.done && $0.b.role != "proof" }
                 if !live.isEmpty && live.allSatisfy({ carded.contains($0.b.id) }) { continue }
-                if !showParked && !yours(fv) { continue }
+                if !showParked && !listed(fv) { continue }
                 by[verb(fv), default: []].append(.forest(p))
             }
         }
@@ -401,19 +401,20 @@ public final class ForestModel {
         return (cards, sections)
     }
 
-    /// The only local work the home lists beside the PR cards: a forest whose next step is Phil's and that something
-    /// is on (the focus lane, a chat, a tmux pane). One an agent or a teammate holds, however busy, asks nothing of
-    /// him; one whose step is his but that nothing is on is backlog. Both show with the archive, and come back by
-    /// themselves.
-    func yours(_ f: ForestView) -> Bool {
-        verb(f).isYours && (f.p.state == .focus || !WorkContext.onForest(f.branches).isEmpty
+    /// The only local work the home lists beside the PR cards: every focus forest, whoever's move it is — Phil
+    /// committed to it, so it stays to jump back into while an agent holds it and after its chat closes — and any
+    /// other forest whose next step is his and that a chat or a tmux pane is on. One an agent or a teammate holds,
+    /// however busy, asks nothing of him; one whose step is his but that nothing is on is backlog. Both show with the
+    /// archive, and come back by themselves.
+    func listed(_ f: ForestView) -> Bool {
+        f.p.state == .focus || verb(f).isYours && (!WorkContext.onForest(f.branches).isEmpty
             || f.branches.contains { paneWork.contains("\($0.b.repo)\t\($0.b.name)") })
     }
 
     /// Whether any listed forest is someone else's move: what the archive's key has to show beyond the archive itself.
     func hasParked() -> Bool {
         let f = forests(), p = projects()
-        return (p.focus + p.workbench).compactMap { f[$0.id] }.contains { !$0.closed && !yours($0) }
+        return (p.focus + p.workbench).compactMap { f[$0.id] }.contains { !$0.closed && !listed($0) }
     }
 
     /// The branch a forest's line is about: its first live branch at the forest's move.
