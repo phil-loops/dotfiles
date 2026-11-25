@@ -117,12 +117,23 @@ struct TutorAnswer: Codable {
     var parts: [String: String]
     var confidence: String?
     var at: String
+    /// A staged step's prediction as the fast judge read it against the sealed reveal: held or revised, and where it went.
+    var verdict: String? = nil
+    var why: String? = nil
+
+    init(parts: [String: String], confidence: String?, at: String) {
+        self.parts = parts
+        self.confidence = confidence
+        self.at = at
+    }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(parts, forKey: .parts)
         try container.encode(confidence, forKey: .confidence)
         try container.encode(at, forKey: .at)
+        try container.encodeIfPresent(verdict, forKey: .verdict)
+        try container.encodeIfPresent(why, forKey: .why)
     }
 }
 
@@ -220,6 +231,8 @@ func isoDate(_ text: String) -> Date? {
 final class TutorAgent {
     static var all: [String: TutorAgent] = [:]
     static let allowedTools = "Read,Edit,Write,Grep,Glob,Bash(~/.dotfiles/scripts/learn:*),Bash(~/.dotfiles/scripts/sim-play:*),Bash(~/.dotfiles/scripts/show --tutor-check:*),Bash(date:*)"
+    /// Named, never the CLI's default: the machine's `model` setting is for quick chats, and a tutor on it teaches like one.
+    static let model = ProcessInfo.processInfo.environment["SHOW_TUTOR_MODEL"] ?? "opus"
     static let workingDirectory = ("~/.dotfiles" as NSString).expandingTildeInPath
     /// Passed through to the tutor when set, so a test can point `learn` at a scratch graph.
     static let passedEnvironment = ["LEARNING_GRAPH", "LEARNING_MEMORY"]
@@ -232,10 +245,12 @@ final class TutorAgent {
     }
 
     let sessionPath: String
-    private var queue: [(message: String, boot: Bool)] = []
+    var queue: [(message: String, boot: Bool)] = []
     private(set) var running: Process?
-    private(set) var failure: String?
+    var failure: String?
     private(set) var preview = ""
+    /// Staged replies Show refused in a row; past a few the agent stops and says so instead of looping.
+    var stagedRefusals = 0
     var onChange: (() -> Void)?
     var onDelta: ((String) -> Void)?
 
@@ -306,8 +321,11 @@ final class TutorAgent {
             onChange?()
             return
         }
-        var arguments = ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
-                         "--permission-mode", "acceptEdits", "--allowedTools", Self.allowedTools]
+        let staged = (try? loadTutorSession(sessionPath))?.isStaged == true
+        var arguments = ["-p", "--model", Self.model, "--output-format", "stream-json", "--verbose", "--include-partial-messages",
+                         "--permission-mode", "acceptEdits", "--allowedTools", staged ? Self.stagedTools : Self.allowedTools]
+        // a staged turn after the opening answers from a plan the tutor already made while the learner was writing
+        if staged, !next.boot { arguments += ["--effort", ProcessInfo.processInfo.environment["SHOW_TUTOR_EFFORT"] ?? "low"] }
         arguments += next.boot && !Self.hasTranscript(session) ? ["--session-id", session] : ["--resume", session]
         arguments += ["--add-dir", (sessionPath as NSString).deletingLastPathComponent, "--", next.message]
         let process = Process()
@@ -334,8 +352,10 @@ final class TutorAgent {
         var pending = Data()
         var stderrTail = Data()
         var resultError: String?
+        var resultText: String?
         let handleLine: (Data) -> Void = { [weak self] line in
             guard let event = try? JSONSerialization.jsonObject(with: line) as? [String: Any] else { return }
+            if event["type"] as? String == "result" { resultText = event["result"] as? String }
             if event["type"] as? String == "result", event["is_error"] as? Bool == true {
                 resultError = event["result"] as? String ?? event["subtype"] as? String
             }
@@ -391,7 +411,8 @@ final class TutorAgent {
                 self.preview = ""
                 LearnDue.refresh()
                 if status == 0, resultError == nil {
-                    self.queue.removeFirst()
+                    let done = self.queue.removeFirst()
+                    if staged { self.applyStaged(resultText ?? "", message: done.message) }
                 } else {
                     let lines = tail.split(separator: "\n").suffix(6).joined(separator: "\n")
                     self.failure = [resultError, lines.isEmpty ? nil : lines, "exit \(status)"].compactMap { $0 }.joined(separator: "\n")
@@ -985,7 +1006,9 @@ final class TutorController: NSObject, NSTextViewDelegate {
         } else if agent.isBusy {
             agentRow.addArrangedSubview(TypingDots())
             let text = agent.preview.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !text.isEmpty {
+            if session?.isStaged == true {
+                if let live = stagedPreview(text) { agentRow.addArrangedSubview(live) }
+            } else if !text.isEmpty {
                 agentRow.addArrangedSubview(tutorText(NSAttributedString(string: text, attributes: [.font: renderer.base, .foregroundColor: NSColor.tertiaryLabelColor]), width: Self.column))
             }
         } else {

@@ -93,15 +93,12 @@ func stepProblems(_ step: TutorStep, _ answer: TutorAnswer?) -> [String] {
     let frames = step.frames + (step.reveal?.frames ?? [])
     let unwatched = Set(frames.flatMap(\.state.keys)).subtracting(watched).sorted()
     if !unwatched.isEmpty { out.append("frames set \(unwatched.joined(separator: ", ")), which isn't in watch") }
-    let predicted = answer?.parts["predict"].map { !$0.isEmpty } ?? false
-    if !predicted, step.reveal != nil || step.explain != nil { out.append("the reveal or the explain question arrived before the prediction") }
+    if step.reveal == nil || step.explain == nil { out.append("a step arrives sealed: its reveal and its explain question come with it") }
     if let reveal = step.reveal, reveal.frames.isEmpty, reveal.result.trimmingCharacters(in: .whitespaces).isEmpty {
         out.append("the reveal has neither frames nor a result")
     }
-    if (step.reveal == nil) != (step.explain == nil) { out.append("the reveal and the explain question come together") }
     if step.explain.map({ $0.filter { $0 == "?" }.count > 1 }) == true { out.append("explain asks more than one question") }
-    if step.isInvent, step.verdict != nil { out.append("an invent step gets no verdict") }
-    if let v = step.verdict, v != "held", v != "revised" { out.append("verdict is held or revised, not \(v)") }
+    if step.verdict != nil { out.append("the verdict is Show's judge's to give, after the prediction") }
     let explained = answer?.parts["explain"].map { !$0.isEmpty } ?? false
     if !explained, step.consolidate != nil { out.append("the consolidation arrived before the explanation") }
     return out
@@ -114,28 +111,95 @@ func stepState(_ frames: [StepFrame], through count: Int) -> [String: String] {
     return state
 }
 
-extension TutorAgent {
-    /// The protocol for a format-2 session: the tutor writes typed steps, and each message names the one phase it owes.
-    func stagedBootPrompt(_ answers: String) -> String {
-        """
-        You are the tutor for one Show Learn session, the file \(sessionPath). Teach by ~/.dotfiles/.claude/skills/tutor/SKILL.md; for an opening "re-test <concept>", by ~/.dotfiles/.claude/skills/retest/SKILL.md instead (`learn concept <id>` gives its history), one situation only.
-        Show puts one step on screen at a time and only ever asks the learner the question of the phase they're in, so write only what the message below asks for.
-        - Reply only by editing the session file (Edit, or Write for a whole rewrite). Keep it valid JSON and leave "mode", "format" and "agent" alone. The learner never sees your chat text, so keep it to a line.
-        - The learner's answers and messages arrive in \(answers) (per step: "predict", "explain", "confidence"). Read it; never write it.
-        - Record evidence with `~/.dotfiles/scripts/learn evidence '<json>'`, called by exactly that path, as is `~/.dotfiles/scripts/learn state`. Never touch the graph another way.
-        - Show asks for confidence itself; don't ask for it.
-        - After every edit run `~/.dotfiles/scripts/show --tutor-check \(sessionPath)`. It prints each step's phase, or why Show refuses the file or a step; fix what it names before you stop.
-        - Every entry in "notes" is {"at": <`date -u +%Y-%m-%dT%H:%M:%SZ`>, "text": "<markdown>"}, never a bare string.
-        Messages:
-        - The opening ("/tutor <topic>" or "re-test <concept>"): set "stations" (the map, a few names) and append the first step with "reveal", "explain", "verdict" and "consolidate" all null. Put a short map in "notes" (as a note entry) if it helps.
-        - "tutor predicted: <file> step <id>": read the prediction, then on that step set "reveal" {"frames": [...], "result": "one or two sentences: what happened"}, "explain" (one question: why it happened, or what the learner would now change) and "verdict" ("held" or "revised"; null on an invent step). Record evidence for the prediction. Where a `~/.dotfiles/scripts/sim-play` scenario plays this situation, run it and take the reveal from its log, with "source": "sim-play <scenario>". Add no new step.
-        - "tutor explained: <file> step <id>": record evidence for the explanation, set that step's "consolidate" (2–4 plain sentences assembling the idea, set beside what the learner said), move "stations" on if a station is done, then append the next step built from what they just said, with its later fields null.
-        - "learner says: <text>": append {"at": <`date -u +%Y-%m-%dT%H:%M:%SZ`>, "text": "<reply, markdown>"} to "notes".
-        - "fix step <id> in <file>: <problems>": Show refused that step's shape. Rewrite exactly what the problems name; keep everything the learner has already seen.
-        Schema: {"mode": "tutor", "format": 2, "title", "stations": [{"name", "state": "done|current|todo"}], "steps": [{"id": "s1", "station", "title", "kind": "predict|invent", "setup": "markdown: the concrete system and the one action", "watch": ["key", …], "frames": [{"t": "the time as a person says it, e.g. Tue 02:00 or 02:01:30, never cut short", "event", "state": {"key": "value"}}], "predict": "one question", "reveal": null, "explain": null, "verdict": null, "consolidate": null}], "notes": [], "agent": {…}}
-        - "frames" run up to the playhead: the moment just before what the learner predicts. Each frame's "state" names only the watched keys that moment changes; "watch" lists every key any frame (reveal frames too) sets, in the order the panel shows them.
-        - "predict" asks about one behavior and has one question mark. No "why" before the reveal: why belongs to "explain".
-        - The reveal's frames continue the same timeline and keys from the playhead.
-        """
+/// A staged tutor reply: sections opened by a line `@name`, in the order the tutor wrote them.
+func tutorSections(_ text: String) -> [(name: String, body: String)] {
+    var out: [(name: String, body: String)] = []
+    for line in text.components(separatedBy: "\n") {
+        let bare = line.trimmingCharacters(in: .whitespaces)
+        if bare.hasPrefix("@"), bare.dropFirst().allSatisfy({ $0.isLetter }), bare.count > 1 {
+            out.append((String(bare.dropFirst()), ""))
+        } else if !out.isEmpty {
+            out[out.count - 1].body += (out[out.count - 1].body.isEmpty ? "" : "\n") + line
+        }
     }
+    return out.map { ($0.name, $0.body.trimmingCharacters(in: .whitespacesAndNewlines)) }
+}
+
+/// What Show did with a staged reply: the evidence rows to record, or why it refused the whole reply (nothing written).
+struct StagedApply {
+    var evidence: [String] = []
+    var refused: [String] = []
+}
+
+/// Writes a staged reply into the session file — Show is its only writer. `stepID` is the step the message was about.
+/// Every new or fixed step is checked first; a refusal writes nothing.
+func applyStagedReply(_ text: String, path: String, stepID: String?, now: String) throws -> StagedApply {
+    var result = StagedApply()
+    let sections = tutorSections(text)
+    guard !sections.isEmpty else {
+        result.refused.append("the reply had no @sections")
+        return result
+    }
+    var raw = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: path))) as? [String: Any] ?? [:]
+    var steps = raw["steps"] as? [[String: Any]] ?? []
+    var notes = raw["notes"] as? [[String: Any]] ?? []
+    func step(_ body: String) -> [String: Any]? {
+        guard let data = body.data(using: .utf8), let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            result.refused.append("a @step or @fix wasn't one JSON object")
+            return nil
+        }
+        do {
+            let typed = try JSONDecoder().decode(TutorStep.self, from: data)
+            let problems = stepProblems(typed, nil)
+            if !problems.isEmpty { result.refused.append("step \(typed.id): " + problems.joined(separator: "; ")) }
+        } catch {
+            result.refused.append("a step didn't match the schema: \(error)")
+        }
+        return object
+    }
+    for (name, body) in sections {
+        switch name {
+        case "note":
+            if !body.isEmpty { notes.append(["at": now, "text": body]) }
+        case "stations":
+            guard let data = body.data(using: .utf8), let list = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+                result.refused.append("@stations wasn't a JSON list")
+                continue
+            }
+            raw["stations"] = list
+        case "consolidate":
+            guard let stepID, let i = steps.firstIndex(where: { $0["id"] as? String == stepID }) else {
+                result.refused.append("@consolidate came for no open step")
+                continue
+            }
+            steps[i]["consolidate"] = body
+        case "step":
+            guard let object = step(body) else { continue }
+            if steps.contains(where: { $0["id"] as? String == object["id"] as? String }) {
+                result.refused.append("step \(object["id"] ?? "?") already exists; a new step needs a new id")
+            }
+            steps.append(object)
+        case "fix":
+            guard let object = step(body) else { continue }
+            guard let i = steps.firstIndex(where: { $0["id"] as? String == object["id"] as? String }) else {
+                result.refused.append("@fix names no existing step")
+                continue
+            }
+            steps[i] = object
+        case "plan":
+            continue
+        case "title":
+            if !body.isEmpty { raw["title"] = body.components(separatedBy: "\n")[0] }
+        case "evidence":
+            result.evidence += body.components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        default:
+            result.refused.append("unknown section @\(name)")
+        }
+    }
+    guard result.refused.isEmpty else { return result }
+    raw["steps"] = steps
+    raw["notes"] = notes
+    try JSONSerialization.data(withJSONObject: raw, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
+        .write(to: URL(fileURLWithPath: path), options: .atomic)
+    return result
 }

@@ -149,7 +149,16 @@ The Learn workspace (⌘2) runs a `/tutor` session as a worksheet: one rung at a
 - `show --tutor-check <file>` prints the current rung, the station states and each rung's rail order without opening a window.
 - **Starting from inside the app.** The shelf has a **Due** group (the graph's due re-tests, read with `learn json`, `LEARNING_MEMORY=0`, read-only, refreshed when the window gains focus). ↵ or a double-click on a due row, there or under the open session's "Due re-tests", creates a session from the template (`title`, empty `rungs`, a fresh `agent.session`) and boots its tutor on `re-test <concept>`. ↵ on a station sends `learner wants station <name>`. **⌘N** asks "What do you want to learn?" and boots a new session on `/tutor <text>`. `Show --tutor-start "<re-test <concept> | text>"` and `Show --tutor-turn <file> "<message>"` do the same without a window.
 
-**New sessions are format 2: the stage.** One step fills the screen: a quiet station strip, the setup, a timeline (full times) beside the watched state, then only the input of the phase the learner is in — predict (with confidence), then the reveal plays frame by frame with changed values marked, then explain, then the tutor's consolidation and **Next step** (⌘↩). ⌥⌘[ / ⌥⌘] look at earlier steps; ⌘L asks the tutor. The shelf offers one **Next up** re-test, never the backlog. Show refuses a step that breaks the shape (two questions in predict, a reveal or explain before the prediction, a frame setting an unwatched key) and sends the tutor `fix step <id> in <file>: <problems>`; `show --tutor-check` prints each step's phase and any refusal. The protocol and schema live in `stagedBootPrompt` (`scripts/show-app/TutorStep.swift`):
+**New sessions are format 2: the stage.** One step fills the screen: a quiet station strip, the setup, a timeline (full times) beside the watched state, then only the input of the phase the learner is in. ⌥⌘[ / ⌥⌘] look at earlier steps; ⌘L asks the tutor. The shelf offers one **Next up** re-test, never the backlog.
+
+The loop is built so the learner never waits on a model between answers:
+- **A step arrives sealed**: its reveal and explain question are written with it, and Show keeps them hidden until the prediction is sent. The reveal then plays at once, frame by frame, with changed values marked.
+- **A fast judge** (`TutorJudge`, a tool-less Haiku call, ~4s) reads the prediction against the sealed reveal while it plays; its verdict and one-line why are stored on the answer.
+- **The tutor plans while the learner explains**: after the judge, Show sends `tutor predicted …` and the tutor replies with only `@plan`, which Show never writes.
+- **Show is the only writer of the session file.** The tutor (Opus, named — never the CLI's default model; low effort after the opening) replies in `@sections` — `@note`, `@stations`, `@consolidate`, `@step`, `@fix`, `@plan`, `@evidence` — and Show checks every step (one question per phase, sealed, no verdict, frames only set watched keys) before writing; a refusal writes nothing and goes back to the tutor. `@evidence` rows go to `learn evidence`. On `tutor explained …` (the message carries the prediction, the judge's reading and the explanation) the tutor writes `@consolidate` first, which streams into place while the next `@step` is written.
+- Measured 2026-11-24: idea starts ~5s after the explanation, the next step is ready by ~18s; the opening takes ~50s once per session.
+
+`show --tutor-check` prints each step's phase and any refusal. The protocol lives in `stagedBootPrompt` (`scripts/show-app/TutorJudge.swift`):
 
 ```json
 {
@@ -162,8 +171,7 @@ The Learn workspace (⌘2) runs a `/tutor` session as a worksheet: one rung at a
     "frames": [{ "t": "Tue 02:00", "event": "A takes the lock", "state": { "lock key": "held", "holder": "A" } }],
     "predict": "one question",
     "reveal": { "frames": [ … ], "result": "what happened", "source": "sim-play <scenario> (optional)" },
-    "explain": "one question, written with the reveal",
-    "verdict": "held | revised (none on invent)",
+    "explain": "one question",
     "consolidate": "markdown, written after the explanation"
   }],
   "notes": [{ "at": "ISO-8601", "text": "markdown" }],
@@ -171,7 +179,7 @@ The Learn workspace (⌘2) runs a `/tutor` session as a worksheet: one rung at a
 }
 ```
 
-Phases come from the step and its answers entry (`{"parts": {"predict", "explain"}, "confidence", "at"}`): predict → waiting for the reveal (`tutor predicted: <file> step <id>`) → explain → waiting for the consolidation (`tutor explained: <file> step <id>`, which also appends the next step) → done.
+The answers entry per step: `{"parts": {"predict", "explain"}, "confidence", "at", "verdict", "why"}` — Show writes all of it, the judge's reading included.
 
 Format 1, the worksheet (older files, no `format`) — session file `~/.dotfiles/show/tutor/<name>.json` (Claude writes it):
 

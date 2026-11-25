@@ -79,8 +79,9 @@ extension TutorController {
 
         let playedOut = reveal != nil && played >= total
         if let reveal, playedOut {
-            if let verdict = step.verdict {
+            if let verdict = answer?.verdict ?? step.verdict {
                 add(smallCaps(verdict == "held" ? "your prediction held" : "your prediction was revised", color: verdict == "held" ? .secondaryLabelColor : .controlAccentColor), after: 6)
+                if let why = answer?.why, !why.isEmpty { add(stageQuiet(why), after: 10) }
             }
             add(tutorText(renderer.tutorMarkdown(reveal.result), width: width), after: 24)
             if let explain = step.explain {
@@ -158,8 +159,20 @@ extension TutorController {
         if part == "predict" { confidence[step.id] = nil }
         if part == "explain" { stageViewing = step.id }   // stay on it for the idea, until the learner steps on
         saveDrafts()
+        guard part == "explain" else {
+            // the reveal is sealed in the step: it plays now, and the fast judge reads the prediction while it does
+            stageAwaiting.insert(step.id)
+            reload()
+            TutorJudge.judge(path: path, stepID: step.id) { [weak self] in
+                guard let self else { return }
+                self.reload()
+                // while the learner works out the explanation, the tutor plans what comes next
+                self.deliver(stagedBrief("tutor predicted", path: path, step: step.id) + "\nReply with only @plan.")
+            }
+            return
+        }
         reload()
-        deliver(part == "predict" ? "tutor predicted: \(path) step \(step.id)" : "tutor explained: \(path) step \(step.id)")
+        deliver(stagedBrief("tutor explained", path: path, step: step.id))
     }
 
     @objc func stageNext() {
@@ -281,18 +294,16 @@ extension TutorController {
             pair.spacing = 1
             panel.addArrangedSubview(pair)
         }
-        let box = NSBox()
-        box.boxType = .custom
-        box.borderWidth = 0
-        box.cornerRadius = 8
-        box.fillColor = .quaternarySystemFill
-        box.contentViewMargins = .zero
-        box.contentView = panel
-        box.translatesAutoresizingMaskIntoConstraints = false
-        box.widthAnchor.constraint(equalToConstant: Self.stagePanel).isActive = true
-        box.setContentHuggingPriority(.required, for: .vertical)
-        panel.setContentHuggingPriority(.required, for: .vertical)
-        panel.distribution = .fill
+        let box = StatePanel()
+        panel.translatesAutoresizingMaskIntoConstraints = false
+        box.addSubview(panel)
+        NSLayoutConstraint.activate([
+            panel.leadingAnchor.constraint(equalTo: box.leadingAnchor), panel.trailingAnchor.constraint(equalTo: box.trailingAnchor),
+            panel.topAnchor.constraint(equalTo: box.topAnchor), panel.bottomAnchor.constraint(equalTo: box.bottomAnchor),
+            box.widthAnchor.constraint(equalToConstant: Self.stagePanel),
+        ])
+        // pinned to the rows' own height: beside a taller timeline the stack would otherwise stretch it and spread the rows
+        box.heightAnchor.constraint(equalToConstant: panel.fittingSize.height).isActive = true
         let both = NSStackView(views: [timeline, box])
         both.orientation = .horizontal
         both.alignment = .top
@@ -329,6 +340,18 @@ extension TutorController {
         return items.sorted { $0.0 < $1.0 }.map(\.1)
     }
 
+    /// The tutor's reply as it streams: the idea or the note in place, never the raw sections.
+    func stagedPreview(_ text: String) -> NSView? {
+        guard let live = tutorSections(text).last(where: { $0.name == "consolidate" || $0.name == "note" }), !live.body.isEmpty else { return nil }
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 6
+        if live.name == "consolidate" { stack.addArrangedSubview(smallCaps("the idea")) }
+        stack.addArrangedSubview(tutorText(renderer.tutorMarkdown(live.body), width: Self.column))
+        return stack
+    }
+
     private func smallCaps(_ text: String, color: NSColor = .tertiaryLabelColor) -> NSTextField {
         NSTextField(labelWithAttributedString: NSAttributedString(string: text.uppercased(), attributes: [
             .font: NSFont.systemFont(ofSize: 10.5, weight: .semibold), .foregroundColor: color, .kern: 0.6,
@@ -341,5 +364,30 @@ extension TutorController {
         label.textColor = color
         label.preferredMaxLayoutWidth = Self.column
         return label
+    }
+}
+
+/// A staged message with the learner's answers in it, so the tutor can reply without reading a file first.
+func stagedBrief(_ kind: String, path: String, step id: String) -> String {
+    let answer = loadAnswers(path)[id]
+    let level = confidenceLevels.first { $0.0 == answer?.confidence }?.1 ?? "no confidence given"
+    var lines = ["\(kind): \(path) step \(id)", "prediction (\(level)): \(answer?.parts["predict"] ?? "")"]
+    if let verdict = answer?.verdict { lines.append("judge: \(verdict) — \(answer?.why ?? "")") }
+    if let explained = answer?.parts["explain"] { lines.append("explanation: \(explained)") }
+    return lines.joined(separator: "\n")
+}
+
+/// The state panel's ground: a rounded fill exactly as tall as its rows, drawn so it follows the appearance.
+final class StatePanel: NSView {
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        translatesAutoresizingMaskIntoConstraints = false
+    }
+
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.quaternarySystemFill.setFill()
+        NSBezierPath(roundedRect: bounds, xRadius: 8, yRadius: 8).fill()
     }
 }
