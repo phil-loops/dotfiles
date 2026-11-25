@@ -24,6 +24,7 @@ the tip it was computed against (a branch whose tip has moved since is stale, no
 each note with its answers.
 """
 import json
+import re
 import os
 import subprocess
 import sys
@@ -57,6 +58,19 @@ def parse(path):
             answers.append({"id": fields[0], "state": fields[1].lower(), "commits": fields[2] if fields[2] != "-" else "",
                             "text": " | ".join(fields[3:])})
     return structure, answers, summary
+
+
+def plain(why):
+    """A structure line's reason without note ids, which mean nothing to Phil on canopy's page."""
+    text = re.sub(r"\(?\bn\d+[a-z]?\b\)?", "", why)
+    text = re.sub(r"\s*[,;]\s*(?=[,;]|$)", "", text)
+    return re.sub(r"^[\s,;:]+|[\s,;:]+$", "", re.sub(r"\s{2,}", " ", text))
+
+
+def renamed_from(line):
+    """The old name a structure line says a branch had ('renamed from X' in its kind or reason)."""
+    match = re.search(r"renamed from ([\w./-]+)", f"{line['kind']} {line['why']}")
+    return match.group(1) if match else None
 
 
 def base_id(answer_id):
@@ -175,12 +189,16 @@ def main():
     parents_now = {b: (git(repo, "config", "--get", f"branch.{b}.stack-parent").strip() or "main") for b in members}
     tips_now = {b: git(repo, "rev-parse", "--verify", "-q", f"refs/heads/{b}").strip() for b in members}
     planned = {s["branch"]: s for s in structure}
+    was = {s["branch"]: old for s in structure if (old := renamed_from(s))}
+    for s in structure:
+        s["why"] = plain(s["why"])
     by_branch = {}
+    now_named = {old: new for new, old in was.items()}
     for note in notes:
-        by_branch.setdefault(note["branch"], []).append(note)
+        by_branch.setdefault(now_named.get(note["branch"], note["branch"]), []).append(note)
     said_before = {}
     for note in earlier:
-        said_before.setdefault(note["branch"], []).append(note)
+        said_before.setdefault(now_named.get(note["branch"], note["branch"]), []).append(note)
 
     def link(branch):
         return f"[{branch}](canopy://v2/b/loops/{branch})"
@@ -213,9 +231,9 @@ def main():
             branch_notes = by_branch.get(branch, [])
             mine = [a for a in answers if any(base_id(a["id"]) == n["id"] for n in branch_notes)]
             asked = [a for a in mine if a["state"] in ("done", "partly")]
-            then = baseline.get(branch)
+            then = baseline.get(branch) or baseline.get(was.get(branch, ""))
             if then:
-                parent_then = parents_then.get(branch, "main")
+                parent_then = parents_then.get(branch) or parents_then.get(was.get(branch, ""), "main")
                 before = own_change(repo, baseline.get(parent_then, parent_then), then)
                 after = own_change(repo, tips_now[parent_now] if (parent_now := parents_now[branch]) in tips_now else parent_now, tips_now[branch])
                 changed, added, dropped = compare(before, after)
@@ -227,6 +245,8 @@ def main():
             body = []
             if plan.get("why") or plan.get("kind"):
                 body.append(f"_{plan.get('kind', '')}{' — ' + plan['why'] if plan.get('why') else ''}_")
+            if was.get(branch):
+                body.append(f"Renamed from {was[branch]}.")
             if not then:
                 body.append("**New since your review.**")
                 look.setdefault(branch, []).append("new" + (f": {plan['why']}" if plan.get("why") else ""))
@@ -258,11 +278,13 @@ def main():
             sections.append("\n".join([head] + body) + "\n")
             record[branch] = {
                 "kind": kinds.get(branch), "tipThen": then, "tipNow": tips_now[branch], "why": plan.get("why", ""),
+                "was": was.get(branch),
                 "changed": changed, "added": added, "dropped": dropped,
                 "notes": [{"id": n["id"], "file": n.get("file"), "line": n.get("line"), "said": n["text"],
                            "answers": [a for a in answers if base_id(a["id"]) == n["id"]]} for n in branch_notes],
                 "needsEyes": [a for a in mine if a["state"] in NEEDS_LOOK]}
-        gone = sorted(b for b in baseline if b not in members and (b in by_branch or b in said_before or b in planned))
+        gone = sorted(b for b in baseline if b not in members and b not in now_named
+                      and (b in by_branch or b in said_before or b in planned))
         for branch in gone:
             plan = planned.get(branch, {})
             sections.append(f"## {branch}\n**Gone since your review.**" + (f" {plan['why']}" if plan.get("why") else "") + "\n")

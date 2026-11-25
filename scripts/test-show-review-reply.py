@@ -82,7 +82,7 @@ def main():
         subprocess.run([str(SCRIPT), str(folder)], env=env, check=True)
         plan = (folder / "plan.md").read_text()
         check("with only a plan, the plan is what's shown", sent.read_text().startswith("Plan for your review · f\n"), sent.read_text())
-        check("the plan lists the rough shape", "- **owners** on fixed · new — split out of fixed (n2)" in plan, plan)
+        check("the plan lists the rough shape", "- **owners** on fixed · new — split out of fixed" in plan, plan)
         check("each note shows how it was heard", "**n2a will do** — heard: rename → call it fixed-name" in plan, plan)
         check("a note the plan answers carries no warning", plan.count("⚠ _no answer_") == 0, plan)
 
@@ -97,12 +97,12 @@ def main():
         check("a changed branch says what moved and that you asked", "[fixed](canopy://v2/b/loops/fixed) — changed, you asked: n2a" in look
               and "changed [`fixed.txt`](canopy://v2/b/loops/fixed?file=fixed.txt)" in since, since)
         check("a declined ask is in Look at", "**n2b declined**: one file is enough" in look, look)
-        check("a new branch is in Look at with its reason", "[owners](canopy://v2/b/loops/owners) — new: split out of fixed (n2)" in look, look)
+        check("a new branch is in Look at with its reason", "[owners](canopy://v2/b/loops/owners) — new: split out of fixed" in look, look)
         check("a gone branch is in Look at with its reason", "- gone — gone: folded into fixed" in look, look)
         top = since.split("# Details")[0]
         check("the page leads with what needs your eyes", since.startswith("## Needs your eyes"), since)
         check("without a summary, it names the new branch and the declined ask in plain words",
-              "**[owners](canopy://v2/b/loops/owners)** is new: split out of fixed (n2). Read it whole." in top
+              "**[owners](canopy://v2/b/loops/owners)** is new: split out of fixed. Read it whole." in top
               and "something you asked for was declined: one file is enough" in top, top)
         check("what was done as asked is one line", "**Done as you asked:** [fixed](canopy://v2/b/loops/fixed)." in top, top)
         check("what you already read is one line to skip", "**Same as what you read, skip:** [kept](canopy://v2/b/loops/kept)." in top, top)
@@ -133,6 +133,16 @@ def main():
         check("rendering again replaces the session's items rather than piling up", len(again) == 2, again)
         check("the item line reads as a linked sentence on the page", "**[fixed](canopy://v2/b/loops/fixed)** (look): The rename landed" in
               (folder / "since.md").read_text())
+        git("branch", "-m", "fixed", "fixed-name")
+        git("config", "branch.owners.stack-parent", "fixed-name")
+        text = (folder / "answers.txt").read_text().replace("owners | fixed | new", "fixed-name | kept | rebuilt | n2; renamed from fixed because the name says what it does\nowners | fixed-name | new")
+        (folder / "answers.txt").write_text(text.replace("fixed fixed.txt:1 | look", "fixed-name fixed.txt:1 | look"))
+        subprocess.run([str(SCRIPT), str(folder)], env=env, check=True)
+        data = json.loads((folder / "since.json").read_text())["branches"]
+        check("a renamed branch is the branch you reviewed, not a new one", data["fixed-name"]["kind"] == "asked"
+              and data["fixed-name"]["was"] == "fixed" and "fixed" not in data
+              and [n["id"] for n in data["fixed-name"]["notes"]] == ["n2"], data)
+        check("its reason reads without note ids", data["fixed-name"]["why"] == "renamed from fixed because the name says what it does", data["fixed-name"])
         check("--plan still shows the plan once answers exist",
               subprocess.run([str(SCRIPT), "--plan", str(folder)], env=env).returncode == 0 and sent.read_text().startswith("Plan for your review"))
 
