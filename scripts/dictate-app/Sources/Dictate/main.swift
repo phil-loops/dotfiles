@@ -77,6 +77,12 @@ final class Dictate: NSObject, NSApplicationDelegate {
         }
     }
 
+    @objc private func copyLast() {
+        guard let text = lastDictation() else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+
     private func idleMenu(_ menu: NSMenu) {
         func item(_ title: String, _ action: Selector?, on: Bool = false, tag: String? = nil, to parent: NSMenu? = nil) {
             let entry = (parent ?? menu).addItem(withTitle: title, action: action, keyEquivalent: "")
@@ -91,6 +97,7 @@ final class Dictate: NSObject, NSApplicationDelegate {
         } else {
             item("🎤 dictates to whatever has focus", nil)
         }
+        if lastDictation() != nil { item("Copy last dictation", #selector(copyLast)) }
         menu.addItem(.separator())
         item("Leave as a draft", #selector(chooseSend), on: !Settings.send, tag: "draft")
         item("Send it (press Enter)", #selector(chooseSend), on: Settings.send, tag: "send")
@@ -334,32 +341,29 @@ func acceptsText(_ app: NSRunningApplication) -> Bool? {
     return AXUIElementIsAttributeSettable(field, kAXValueAttribute as CFString, &settable) == .success && settable.boolValue
 }
 
-/// Puts `text` into `target` as if typed: brought to the front, pasted with ⌘V, then Enter when sending. The clipboard
-/// holds the text only for the paste; what was on it comes back after, unless something else has used it since.
+/// Puts `text` into `target` as if typed: brought to the front, pasted with ⌘V, then Enter when sending. The text stays
+/// on the clipboard, so words that landed in the wrong place are one ⌘V from the right one.
 @MainActor
 func paste(_ text: String, into target: NSRunningApplication, enter: Bool) {
-    let board = NSPasteboard.general
-    let saved = (board.pasteboardItems ?? []).map { item in
-        item.types.reduce(into: [NSPasteboard.PasteboardType: Data]()) { kept, type in kept[type] = item.data(forType: type) }
-    }
-    board.clearContents()
-    board.setString(text, forType: .string)
-    let ours = board.changeCount
+    NSPasteboard.general.clearContents()
+    NSPasteboard.general.setString(text, forType: .string)
     let wasFront = target.isActive
     target.activate()
     DispatchQueue.main.asyncAfter(deadline: .now() + (wasFront ? 0.05 : 0.3)) {
         press(9, flags: .maskCommand)
         if enter { press(36) }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-            guard board.changeCount == ours, !saved.isEmpty else { return }
-            board.clearContents()
-            board.writeObjects(saved.map { kept in
-                let item = NSPasteboardItem()
-                kept.forEach { item.setData($1, forType: $0) }
-                return item
-            })
-        }
     }
+}
+
+private let lastFile = ("~/.cache/dictate/last.txt" as NSString).expandingTildeInPath
+
+/// The words of the last finished recording, wherever they were sent.
+func lastDictation() -> String? {
+    (try? String(contentsOfFile: lastFile, encoding: .utf8)).flatMap { $0.isEmpty ? nil : $0 }
+}
+
+func rememberDictation(_ text: String) {
+    try? text.write(toFile: lastFile, atomically: true, encoding: .utf8)
 }
 
 /// One key press and release, posted as if typed (key codes are US-layout positions: 9 is V, 36 is Return).

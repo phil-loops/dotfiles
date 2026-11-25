@@ -131,7 +131,7 @@ final class Voice: NSObject, AVAudioRecorderDelegate {
                 let text = try await transcriber.transcript(of: file)
                 let deliver = self.deliver
                 reset()
-                if text.isEmpty { onError?("Parakeet didn’t hear any speech") } else { deliver?(text) }
+                if text.isEmpty { onError?("Parakeet didn’t hear any speech") } else { rememberDictation(text); deliver?(text) }
             } catch {
                 busy = false
                 failure = error.localizedDescription
