@@ -103,8 +103,10 @@ func comesForward(_ request: ShowRequest) -> Bool {
 }
 
 /// The launchers' drop box: `show` writes one request file here per call and hands it to the app, which reads and deletes it.
+/// The same `$XDG_CACHE_HOME/show/inbox` the launcher writes, wherever the bundle is installed.
 let inboxDirectory = ProcessInfo.processInfo.environment["SHOW_INBOX"]
-    ?? ((Bundle.main.bundlePath as NSString).deletingLastPathComponent as NSString).appendingPathComponent("inbox")
+    ?? ((ProcessInfo.processInfo.environment["XDG_CACHE_HOME"] ?? ("~/.cache" as NSString).expandingTildeInPath) as NSString)
+        .appendingPathComponent("show/inbox")
 
 /// The request an inbox file holds, deleting the file; nil for any other path.
 func takeInboxRequest(_ path: String) -> ShowRequest? {
