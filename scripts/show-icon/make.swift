@@ -1,45 +1,22 @@
 #!/usr/bin/env swift
-// show-icon/make.swift <out.icns> — draws Show's app icon on canopy's night vellum: a fork, one branch
-// splitting into two, in gold leaf and ember. Re-run after changing the drawing; the
-// build copies the committed AppIcon.icns into Show.app.
+// show-icon/make.swift <out.icns> — builds Show's app icon from AppIcon.png beside it: a curved trunk
+// fanning into three tips, gold and ember on the night tile. Replace the PNG (1024², transparent
+// outside the tile) and re-run; the build copies the committed AppIcon.icns into Show.app.
 import AppKit
 
-func color(_ hex: UInt32, _ a: CGFloat = 1) -> CGColor {
-    CGColor(srgbRed: CGFloat(hex >> 16 & 0xFF) / 255, green: CGFloat(hex >> 8 & 0xFF) / 255, blue: CGFloat(hex & 0xFF) / 255, alpha: a)
-}
-let gold = color(0xE6B64E), goldHi = color(0xF2CD72), goldDeep = color(0x6E5A2C), night = color(0x121315), edge = color(0x2A2B30), ember = color(0xD2732A)
-typealias Mark = (CGContext) -> Void
-func tile(_ ctx: CGContext, _ top: CGColor = edge, _ bottom: CGColor = night) {
-    let shape = CGPath(roundedRect: CGRect(x: 100, y: 100, width: 824, height: 824), cornerWidth: 185, cornerHeight: 185, transform: nil)
-    ctx.saveGState(); ctx.setShadow(offset: CGSize(width: 0, height: -10), blur: 28, color: color(0, 0.4))
-    ctx.addPath(shape); ctx.setFillColor(bottom); ctx.fillPath(); ctx.restoreGState()
-    ctx.saveGState(); ctx.addPath(shape); ctx.clip()
-    ctx.drawLinearGradient(CGGradient(colorsSpace: nil, colors: [top, bottom] as CFArray, locations: [0, 1])!, start: CGPoint(x: 512, y: 924), end: CGPoint(x: 512, y: 100), options: [])
-    ctx.restoreGState()
-}
-func fork(_ ctx: CGContext, center c: CGPoint, scale s: CGFloat, ink: CGColor, accent: CGColor) {
-    func P(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: c.x + x * s, y: c.y + y * s) }
-    let a = P(-150, -110), f = P(-30, 0), up = P(150, 110), down = P(150, -80)
-    func line(_ p: CGPoint, _ q: CGPoint, _ col: CGColor) {
-        ctx.move(to: p); ctx.addCurve(to: q, control1: CGPoint(x: p.x + (q.x - p.x) * 0.5, y: p.y), control2: CGPoint(x: q.x - (q.x - p.x) * 0.5, y: q.y))
-        ctx.setLineWidth(44 * s); ctx.setLineCap(.round); ctx.setStrokeColor(col); ctx.strokePath()
-    }
-    func dot(_ p: CGPoint, _ r: CGFloat, _ col: CGColor) { ctx.setFillColor(col); ctx.fillEllipse(in: CGRect(x: p.x - r * s, y: p.y - r * s, width: 2 * r * s, height: 2 * r * s)) }
-    line(a, f, ink); line(f, up, ink); line(f, down, accent)
-    dot(a, 54, ink); dot(up, 60, ink); dot(down, 56, accent)
-}
-/// The icon: the fork alone, large, in gold leaf and ember on the night tile.
-let icon: Mark = { ctx in
-    tile(ctx)
-    fork(ctx, center: CGPoint(x: 512, y: 512), scale: 1.55, ink: gold, accent: ember)
-}
+let here = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent()
+let master = NSImage(contentsOf: here.appendingPathComponent("AppIcon.png"))!
 
 func render(_ px: Int) -> Data {
-    let ctx = CGContext(data: nil, width: px, height: px, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
-                        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
-    ctx.scaleBy(x: CGFloat(px) / 1024, y: CGFloat(px) / 1024)
-    icon(ctx)
-    return NSBitmapImageRep(cgImage: ctx.makeImage()!).representation(using: .png, properties: [:])!
+    let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: px, pixelsHigh: px, bitsPerSample: 8, samplesPerPixel: 4,
+                               hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+    NSGraphicsContext.saveGraphicsState()
+    let ctx = NSGraphicsContext(bitmapImageRep: rep)!
+    ctx.imageInterpolation = .high
+    NSGraphicsContext.current = ctx
+    master.draw(in: NSRect(x: 0, y: 0, width: px, height: px))
+    NSGraphicsContext.restoreGraphicsState()
+    return rep.representation(using: .png, properties: [:])!
 }
 
 let out = CommandLine.arguments.dropFirst().first ?? "AppIcon.icns"
