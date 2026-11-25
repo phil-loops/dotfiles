@@ -69,7 +69,7 @@ Dark-additive first: (1) messages and decks carry the branch they concern (most 
 workspaces the branch page replaced. Each step is its own branch; 1–3 change nothing visible until 4.
 
 Status: (1) landed 11-25 as `show-note --branch <repo>/<branch> | --forest <repo>/<project>` → the message's
-`about` field (fce0f06c); wt-121940 moves spoken review onto it. (2) — canopy's pages reading `about` — is next.
+`about` field (fce0f06c); spoken review posts with it (b72aaa61: notes `--forest`, or `--branch` for a lone branch; replies `--forest`). (2) — canopy's pages reading `about` — is next.
 
 ## Messages with no branch
 
